@@ -138,7 +138,7 @@ to exclusive channels.
 
 ## Copyright and license
 HKMP is a game modification for Hollow Knight that adds multiplayer.  
-Copyright (C) 2025  Extremelyd1
+Copyright (C) 2026  Extremelyd1
 
     This library is free software; you can redistribute it and/or
     modify it under the terms of the GNU Lesser General Public
