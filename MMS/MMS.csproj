@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Nullable>enable</Nullable>
+        <!--Shortens and anonymizes paths in debug symbols relative to the project directory. Breakpoints will not work, however.-->
+        <PathMap Condition="'$(Configuration)' == 'Release'">$(MSBuildProjectDirectory)=source</PathMap>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <PackageReference Include="JetBrains.Annotations" Version="2025.2.4"/>
+    </ItemGroup>
+
+    <ItemGroup>
+        <EmbeddedResource Include="Resources\lobby-name-data.json"/>
+    </ItemGroup>
+</Project>

@@ -1,6 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
 using SSMP.Logging;
+using SSMP.Networking.Transport.UDP;
 
 namespace SSMP.Networking.Server;
 
@@ -17,7 +18,7 @@ internal class ServerDatagramTransport : UdpDatagramTransport {
     /// <summary>
     /// The IP endpoint for the client that this datagram transport belongs to.
     /// </summary>
-    public IPEndPoint? IPEndPoint { get; set; }
+    public IPEndPoint? IPEndPoint { get; init; }
 
     public ServerDatagramTransport(Socket socket) {
         _socket = socket;

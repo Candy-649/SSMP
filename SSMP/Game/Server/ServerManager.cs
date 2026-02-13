@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Net;
 using SSMP.Animation;
 using SSMP.Api.Command.Server;
 using SSMP.Api.Eventing.ServerEvents;
@@ -20,6 +21,8 @@ using SSMP.Networking.Packet;
 using SSMP.Networking.Packet.Data;
 using SSMP.Networking.Packet.Update;
 using SSMP.Networking.Server;
+using SSMP.Networking.Transport.Common;
+// ReSharper disable InconsistentlySynchronizedField
 
 namespace SSMP.Game.Server;
 
@@ -76,6 +79,11 @@ internal abstract class ServerManager : IServerManager {
     /// The server settings.
     /// </summary>
     public readonly ServerSettings InternalServerSettings;
+
+    /// <summary>
+    /// Lock to synchronize Start/Stop operations, ensuring cleanup completes before restart.
+    /// </summary>
+    private readonly object _serverStateLock = new();
 
     /// <summary>
     /// The server command manager instance.
@@ -363,38 +371,53 @@ internal abstract class ServerManager : IServerManager {
     /// </summary>
     /// <param name="port">The port the server should run on.</param>
     /// <param name="fullSynchronisation">Whether full synchronisation should be enabled.</param>
-    public virtual void Start(int port, bool fullSynchronisation) {
-        // Stop existing server
-        if (_netServer.IsStarted) {
-            Logger.Info("Server was running, shutting it down before starting");
-            _netServer.Stop();
+    /// <param name="transportServer">The transport server to use.</param>
+    public virtual void Start(int port, bool fullSynchronisation, IEncryptedTransportServer transportServer) {
+        lock (_serverStateLock) {
+            // Stop existing server (including deregistering commands)
+            if (_netServer.IsStarted) {
+                Logger.Info("Server was running, shutting it down before starting");
+                StopInternal();
+            }
+
+            FullSynchronisation = fullSynchronisation;
+            
+            RegisterCommands();
+            RegisterPacketHandlers();
+
+            // Start server again with given port
+            _netServer.Start(port, transportServer);
         }
-
-        FullSynchronisation = fullSynchronisation;
-        
-        RegisterCommands();
-        RegisterPacketHandlers();
-
-        // Start server again with given port
-        _netServer.Start(port);
     }
 
     /// <summary>
     /// Stops the currently running server.
     /// </summary>
     public void Stop() {
-        if (_netServer.IsStarted) {
-            // Before shutting down, send TCP packets to all clients indicating
-            // that the server is shutting down
-            _netServer.SetDataForAllClients(updateManager => {
-                updateManager.SetDisconnect(DisconnectReason.Shutdown);
-            });
-
-            _netServer.Stop();
-            
-            DeregisterCommands();
-            DeregisterPacketHandlers();
+        lock (_serverStateLock) {
+            StopInternal();
         }
+    }
+
+    /// <summary>
+    /// Internal stop logic without locking (called from Start and Stop).
+    /// </summary>
+    private void StopInternal() {
+        if (!_netServer.IsStarted) return;
+
+        // Before shutting down, send TCP packets to all clients indicating
+        // that the server is shutting down
+        _netServer.SetDataForAllClients(updateManager => {
+            updateManager.SetDisconnect(DisconnectReason.Shutdown);
+        });
+
+        _netServer.Stop();
+
+        DeregisterCommands();
+        DeregisterPacketHandlers();
+
+        _playerData.Clear();
+        _entityData.Clear();
     }
 
     /// <summary>
@@ -1274,10 +1297,24 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="serverInfo">The server info instance to modify based on whether the client should be accepted
     /// or not.</param>
     private void OnConnectionRequest(NetServerClient netServerClient, ClientInfo clientInfo, ServerInfo serverInfo) {
-        Logger.Info($"Received connection request from IP: {netServerClient.EndPoint}, username: {clientInfo.Username}");
+        var clientDisplayString = netServerClient.TransportClient.ToDisplayString();
+        Logger.Info($"Received connection request from {clientDisplayString}, username: {clientInfo.Username}");
 
-        if (_banList.IsIpBanned(netServerClient.EndPoint.Address.ToString()) || _banList.Contains(clientInfo.AuthKey)) {
-            Logger.Debug("  Client is banned from the server, rejected connection");
+        // Get the unique identifier (IP address for UDP, Steam ID for Steam clients)
+        var uniqueIdentifier = netServerClient.TransportClient.GetUniqueIdentifier();
+    
+        // Check if the unique identifier is banned (supports both IPEndPoint and SteamID)
+        if (_banList.IsIpBanned(uniqueIdentifier)) {
+            var displayType = IPAddress.TryParse(uniqueIdentifier, out _) ? "IP" : "Steam ID";
+            Logger.Debug($"  Client is banned from the server ({displayType}), rejected connection");
+
+            serverInfo.ConnectionResult = ServerConnectionResult.RejectedOther;
+            serverInfo.ConnectionRejectedMessage = "Banned from the server";
+            return;
+        }
+
+        if (_banList.Contains(clientInfo.AuthKey)) {
+            Logger.Debug("  Client is banned from the server (AuthKey), rejected connection");
 
             serverInfo.ConnectionResult = ServerConnectionResult.RejectedOther;
             serverInfo.ConnectionRejectedMessage = "Banned from the server";
@@ -1421,7 +1458,7 @@ internal abstract class ServerManager : IServerManager {
         // Create new player data and store it
         var playerData = new ServerPlayerData(
             netServerClient.Id,
-            netServerClient.EndPoint.ToString(),
+            uniqueIdentifier,
             clientInfo.Username,
             clientInfo.AuthKey,
             _authorizedList

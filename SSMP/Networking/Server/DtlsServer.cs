@@ -1,4 +1,5 @@
 using System;
+using System.Buffers;
 using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
@@ -7,6 +8,7 @@ using System.Threading.Tasks;
 using Org.BouncyCastle.Tls;
 using Org.BouncyCastle.Tls.Crypto.Impl.BC;
 using SSMP.Logging;
+using SSMP.Networking.Transport.UDP;
 
 namespace SSMP.Networking.Server;
 
@@ -90,6 +92,13 @@ internal class DtlsServer {
     }
 
     /// <summary>
+    /// Send a raw UDP packet to the given endpoint (for hole punching).
+    /// </summary>
+    public void SendRaw(byte[] data, IPEndPoint endPoint) {
+        _socket?.SendTo(data, endPoint);
+    }
+
+    /// <summary>
     /// Stop the DTLS server by disconnecting all clients and cancelling all running threads.
     /// </summary>
     public void Stop() {
@@ -98,20 +107,27 @@ internal class DtlsServer {
         _socket?.Close();
         _socket = null;
 
-        // Wait for the socket receive thread to exit
-        if (_socketReceiveThread != null && _socketReceiveThread.IsAlive) {
-            _socketReceiveThread.Join(TimeSpan.FromSeconds(5));
+        // Wait for the socket receive thread to exit (short timeout to prevent freezing)
+        if (_socketReceiveThread is { IsAlive: true }) {
+            if (!_socketReceiveThread.Join(500)) {
+                Logger.Warn("Socket receive thread did not exit within timeout, abandoning");
+            }
         }
         _socketReceiveThread = null;
 
         _tlsServer?.Cancel();
 
-        // Disconnect all clients
+        // Disconnect all clients without waiting for threads serially
+        // We just cancel tokens and close transports. The threads are background and will die.
         foreach (var kvp in _connections) {
             var connInfo = kvp.Value;
             lock (connInfo) {
-                if (connInfo.State == ConnectionState.Connected && connInfo.Client != null) {
-                    InternalDisconnectClient(connInfo.Client);
+                if (connInfo is { State: ConnectionState.Connected, Client: not null }) {
+                    // Signal cancellation but don't join
+                    connInfo.Client.ReceiveLoopTokenSource.Cancel();
+                    connInfo.Client.DtlsTransport.Close();
+                    connInfo.Client.DatagramTransport.Dispose();
+                    connInfo.Client.ReceiveLoopTokenSource.Dispose();
                 } else {
                     connInfo.DatagramTransport.Close();
                 }
@@ -167,7 +183,7 @@ internal class DtlsServer {
             }
         }
 
-        if (receiveThread != null && receiveThread.IsAlive) {
+        if (receiveThread is { IsAlive: true }) {
             receiveThread.Join(TimeSpan.FromSeconds(2));
         }
 
@@ -182,7 +198,8 @@ internal class DtlsServer {
     /// <param name="cancellationToken">The cancellation token for checking whether this task is requested to cancel.
     /// </param>
     private void SocketReceiveLoop(CancellationToken cancellationToken) {
-        var buffer = new byte[MaxPacketSize];
+        // Use pooled buffer to reduce GC pressure in hot path
+        var buffer = ArrayPool<byte>.Shared.Rent(MaxPacketSize);
 
         while (!cancellationToken.IsCancellationRequested) {
             if (_socket == null) {
@@ -202,6 +219,10 @@ internal class DtlsServer {
                 break;
             } catch (ObjectDisposedException) {
                 break;
+            } catch (ThreadAbortException) {
+                // Thread is being forcefully terminated during shutdown - exit gracefully
+                Logger.Info("SocketReceiveLoop: Thread aborted during shutdown");
+                break;
             } catch (Exception e) {
                 Logger.Error($"Unexpected exception in SocketReceiveLoop:\n{e}");
                 continue;
@@ -211,14 +232,16 @@ internal class DtlsServer {
             if (numReceived < 0) break;
             if (numReceived == 0 || cancellationToken.IsCancellationRequested) continue;
 
-            var ipEndPoint = (IPEndPoint)endPoint;
+            var ipEndPoint = (IPEndPoint) endPoint;
 
-            // Create a precise copy of the buffer for this packet
+            // Create a precise copy of the buffer for this packet (required for async processing)
             var packetBuffer = new byte[numReceived];
-            Buffer.BlockCopy(buffer, 0, packetBuffer, 0, numReceived);
+            Array.Copy(buffer, 0, packetBuffer, 0, numReceived);
 
             ProcessReceivedPacket(ipEndPoint, packetBuffer, numReceived, cancellationToken);
         }
+
+        ArrayPool<byte>.Shared.Return(buffer);
 
         Logger.Info("SocketReceiveLoop exited");
     }
@@ -270,13 +293,14 @@ internal class DtlsServer {
             
             _connections.TryRemove(ipEndPoint, out _);
             if (clientToDisconnect != null) {
-                Task.Run(() => InternalDisconnectClient(clientToDisconnect));
+                Task.Run(() => InternalDisconnectClient(clientToDisconnect), cancellationToken);
             }
             
             // Fall through: We removed the bad connection, now treat this as a new connection attempt
         }
 
         // 2. Handle new connection attempt
+        Logger.Debug($"DtlsServer: Received packet from new endpoint {ipEndPoint} ({numReceived} bytes). Starting handshake.");
         var newTransport = new ServerDatagramTransport(_socket!) {
             IPEndPoint = ipEndPoint
         };
@@ -350,7 +374,7 @@ internal class DtlsServer {
         Logger.Info($"Starting handshake for {endPoint}");
 
         DtlsTransport? dtlsTransport = null;
-        bool handshakeSucceeded = false;
+        var handshakeSucceeded = false;
 
         try {
             var handshakeTask = Task.Run(
@@ -440,25 +464,30 @@ internal class DtlsServer {
     /// </param>
     private void ClientReceiveLoop(DtlsServerClient dtlsServerClient, CancellationToken cancellationToken) {
         var dtlsTransport = dtlsServerClient.DtlsTransport;
+        var receiveLimit = dtlsTransport.GetReceiveLimit();
+    
+        // Use pooled buffer to reduce GC pressure in hot path
+        var buffer = ArrayPool<byte>.Shared.Rent(receiveLimit);
 
-        while (!cancellationToken.IsCancellationRequested) {
-            var buffer = new byte[dtlsTransport.GetReceiveLimit()];
-            int numReceived;
+        try {
+            while (!cancellationToken.IsCancellationRequested) {
+                var numReceived = dtlsTransport.Receive(buffer, 0, receiveLimit, 100);
 
-            try {
-                numReceived = dtlsTransport.Receive(buffer, 0, buffer.Length, 100);
-            } catch (Exception) {
-                // Silently ignore receive errors during polling
-                numReceived = -1;
+                if (numReceived <= 0) continue;
+
+                // Create a precise copy of the buffer for this packet (required for async processing of the event)
+                var packetBuffer = new byte[numReceived];
+                Array.Copy(buffer, 0, packetBuffer, 0, numReceived);
+
+                DataReceivedEvent?.Invoke(dtlsServerClient, packetBuffer, numReceived);
             }
-
-            if (numReceived <= 0) continue;
-
-            try {
-                DataReceivedEvent?.Invoke(dtlsServerClient, buffer, numReceived);
-            } catch (Exception e) {
-                Logger.Error($"Error in DtlsServer.DataReceivedEvent: {e}");
+        } catch (Exception e) {
+            // Log only unexpected errors (receive timeouts are normal)
+            if (!cancellationToken.IsCancellationRequested) {
+                Logger.Error($"Error in DtlsServer receive loop: {e}");
             }
+        } finally {
+            ArrayPool<byte>.Shared.Return(buffer);
         }
     }
     

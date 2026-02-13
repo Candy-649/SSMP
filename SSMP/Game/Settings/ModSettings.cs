@@ -45,7 +45,7 @@ internal class ModSettings {
     /// <summary>
     /// Whether to display a UI element for the ping.
     /// </summary>
-    public bool DisplayPing { get; set; }
+    public bool DisplayPing { get; set; } = true;
 
     /// <summary>
     /// Set of addon names for addons that are disabled by the user.
@@ -63,6 +63,11 @@ internal class ModSettings {
     /// The last used server settings in a hosted server.
     /// </summary>
     public ServerSettings? ServerSettings { get; set; }
+
+    /// <summary>
+    /// The settings for the MatchMaking Server (MMS).
+    /// </summary>
+    public MmsSettings MmsSettings { get; set; } = new();
     
     /// <summary>
     /// Load the mod settings from file or create a new instance.

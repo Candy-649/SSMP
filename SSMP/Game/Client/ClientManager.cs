@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using GlobalEnums;
+using Steamworks;
 using SSMP.Animation;
 using SSMP.Api.Client;
 using SSMP.Eventing;
@@ -18,6 +19,10 @@ using SSMP.Networking.Client;
 using SSMP.Networking.Packet;
 using SSMP.Networking.Packet.Data;
 using SSMP.Networking.Packet.Update;
+using SSMP.Networking.Transport.Common;
+using SSMP.Networking.Transport.HolePunch;
+using SSMP.Networking.Transport.SteamP2P;
+using SSMP.Networking.Transport.UDP;
 using SSMP.Ui;
 using SSMP.Util;
 using UnityEngine;
@@ -141,7 +146,7 @@ internal class ClientManager : IClientManager {
     /// Keeps track of the last updated scale of the local player object.
     /// </summary>
     private Vector3 _lastScale;
-    
+
     /// <summary>
     /// The last scene that the player was in, to check whether we should be sending that we left a certain scene.
     /// </summary>
@@ -167,12 +172,12 @@ internal class ClientManager : IClientManager {
     /// Event for when the player's team changes after being received from the server.
     /// </summary>
     public event Action<Team>? TeamChangedEvent;
-    
+
     /// <summary>
     /// Event for when the player's skin changes after being received from the server.
     /// </summary>
     public event Action<byte>? SkinChangedEvent;
-    
+
     #endregion
 
     #region IClientManager properties
@@ -181,15 +186,7 @@ internal class ClientManager : IClientManager {
     public IMapManager MapManager => _mapManager;
 
     /// <inheritdoc />
-    public string Username {
-        get {
-            if (!_netClient.IsConnected) {
-                throw new Exception("Client is not connected, username is undefined");
-            }
-
-            return _username!;
-        }
-    }
+    public string Username => !_netClient.IsConnected ? throw new Exception("Client is not connected, username is undefined") : _username!;
 
     /// <inheritdoc />
     public IReadOnlyCollection<IClientPlayer> Players => _playerData.Values;
@@ -237,7 +234,7 @@ internal class ClientManager : IClientManager {
         _mapManager = new MapManager(netClient, serverSettings);
 
         _entityManager = new EntityManager(netClient);
-        
+
         _saveManager = new SaveManager(netClient, _entityManager);
 
         _pauseManager = new PauseManager(netClient);
@@ -268,29 +265,26 @@ internal class ClientManager : IClientManager {
         // _saveManager.Initialize();
 
         RegisterCommands();
-        
+
         _addonManager.LoadAddons();
-        
+
         // Check if there is a valid authentication key and if not, generate a new one
         if (!AuthUtil.IsValidAuthKey(_modSettings.AuthKey)) {
             _modSettings.AuthKey = AuthUtil.GenerateAuthKey();
         }
-        
+
         // Then authorize the key on the locally hosted server
         serverManager.AuthorizeKey(_modSettings.AuthKey!);
 
         // Register handlers for events from UI
-        _uiManager.RequestClientConnectEvent += (address, port, username, _ ,autoConnect) => {
-            _autoConnect = autoConnect;
-            Connect(address, port, username);
-        };
+        _uiManager.RequestClientConnectEvent +=
+            (address, port, username, transportType, autoConnect, fallbackAddress) => {
+                _autoConnect = autoConnect;
+                Connect(address, port, username, transportType, fallbackAddress);
+            };
         _uiManager.RequestClientDisconnectEvent += Disconnect;
-        _uiManager.RequestServerStartHostEvent += (_, _, _, _) => {
-            _saveManager.IsHostingServer = true;
-        };
-        _uiManager.RequestServerStopHostEvent += () => {
-            _saveManager.IsHostingServer = false;
-        };
+        _uiManager.RequestServerStartHostEvent += (_, _, _, _, _) => { _saveManager.IsHostingServer = true; };
+        _uiManager.RequestServerStopHostEvent += () => { _saveManager.IsHostingServer = false; };
 
         UiManager.ChatInputEvent += OnChatInput;
 
@@ -318,13 +312,13 @@ internal class ClientManager : IClientManager {
         //     _entityManager.RegisterHooks();
         //     _saveManager.RegisterHooks();
         // }
-        
+
         // Register handlers for various things
         SceneManager.activeSceneChanged += OnSceneChange;
         CustomHooks.HeroControllerStartAction += OnHeroControllerStart;
-        
+
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
-        
+
         CustomHooks.AfterEnterSceneHeroTransformed += OnEnterScene;
 
         EventHooks.ToolItemManagerSetEquippedCrest += OnSetEquippedCrest;
@@ -346,17 +340,17 @@ internal class ClientManager : IClientManager {
         //     _entityManager.DeregisterHooks();
         //     _saveManager.DeregisterHooks();
         // }
-        
+
         // Deregister handlers for various things
         SceneManager.activeSceneChanged -= OnSceneChange;
         CustomHooks.HeroControllerStartAction -= OnHeroControllerStart;
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
-        
+
         CustomHooks.AfterEnterSceneHeroTransformed -= OnEnterScene;
-        
+
         EventHooks.ToolItemManagerSetEquippedCrest -= OnSetEquippedCrest;
-        
+
         // Deregister application quit handler
         // ModHooks.ApplicationQuitHook -= OnApplicationQuit;
     }
@@ -367,6 +361,7 @@ internal class ClientManager : IClientManager {
     private void RegisterCommands() {
         _commandManager.RegisterCommand(new AddonCommand(_addonManager, _netClient));
         _commandManager.RegisterCommand(new DebugCommand());
+        _commandManager.RegisterCommand(new InviteCommand());
     }
 
     /// <summary>
@@ -474,13 +469,32 @@ internal class ClientManager : IClientManager {
     }
 
     /// <summary>
-    /// Connect the client to the server with the given address, port and username.
+    /// Connect the client to the server with the given address, port, username and TransportType.
     /// </summary>
     /// <param name="address">The address of the server.</param>
     /// <param name="port">The port of the server.</param>
     /// <param name="username">The username of the client.</param>
-    private void Connect(string address, int port, string username) {
-        Logger.Info($"Connecting client to server: {address}:{port} as {username}");
+    /// <param name="transportType">The transport type to use.</param>
+    /// <param name="fallbackAddress">Optional fallback address for hole punching.</param>
+    private void Connect(
+        string address,
+        int port,
+        string username,
+        TransportType transportType,
+        string? fallbackAddress = null
+    ) {
+        // If we are hosting and using Steam, we need to connect to our own Steam ID
+        if (_autoConnect && transportType == TransportType.Steam) {
+            address = SteamUser.GetSteamID().ToString();
+        }
+
+        // Log connection details based on transport type
+        if (transportType == TransportType.Steam) {
+            Logger.Info($"Connecting client via Steam to {address} as {username}");
+        } else {
+            var fallbackString = fallbackAddress == null ? "" : $" (Fallback: {fallbackAddress})";
+            Logger.Info($"Connecting client to server: {address}:{port} as {username}{fallbackString}");
+        }
 
         // Stop existing client
         if (_netClient.IsConnected) {
@@ -491,13 +505,25 @@ internal class ClientManager : IClientManager {
         // Store username, so we know what to send the server if we are connected
         _username = username;
 
+        // Create the appropriate transport
+        // Create the appropriate transport
+        IEncryptedTransport transport = transportType switch {
+            TransportType.Udp => new UdpEncryptedTransport(),
+            TransportType.Steam => new SteamEncryptedTransport(),
+            TransportType.HolePunch => new HolePunchEncryptedTransport { FallbackAddress = fallbackAddress },
+            _ => throw new ArgumentOutOfRangeException(
+                nameof(transportType), transportType, "Unsupported transport type"
+            )
+        };
+
         // Connect the network client
         _netClient.Connect(
             address,
             port,
             username,
             _modSettings.AuthKey!,
-            _addonManager.GetNetworkedAddonData()
+            _addonManager.GetNetworkedAddonData(),
+            transport
         );
     }
 
@@ -519,13 +545,20 @@ internal class ClientManager : IClientManager {
         Logger.Info("Disconnecting from server");
 
         _autoConnect = false;
-        
+
         _netClient.Disconnect();
+
+        // Leave Steam Lobby in case we are connected
+        if (SteamManager.IsInLobby) {
+            Logger.Info("Leaving Steam lobby.");
+            SteamManager.LeaveLobby();
+        }
 
         // Let the player manager know we disconnected
         _playerManager.OnDisconnect();
 
         // Clear the player data dictionary
+        Logger.Info($"Clearing {_playerData.Count} player(s) from store");
         _playerData.Clear();
 
         _uiManager.OnClientDisconnect();
@@ -536,7 +569,7 @@ internal class ClientManager : IClientManager {
         if (UIManager.instance.uiState.Equals(UIState.PAUSED)) {
             PauseManager.SetTimeScale(0);
         }
-        
+
         // Deregister the hooks and handlers
         DeregisterHooks();
         DeregisterPacketHandlers();
@@ -545,7 +578,8 @@ internal class ClientManager : IClientManager {
             DisconnectEvent?.Invoke();
         } catch (Exception e) {
             Logger.Warn(
-                $"Exception thrown while invoking Disconnect event:\n{e}");
+                $"Exception thrown while invoking Disconnect event:\n{e}"
+            );
         }
     }
 
@@ -647,18 +681,19 @@ internal class ClientManager : IClientManager {
                 // This was not an auto-connect and full synchronisation is disabled, so we need to prompt the user
                 // with a local save file that they want to use
                 _uiManager.OpenSaveSlotSelection(saveSelected => {
-                    // If this callback executes, but we have not selected a save (by pressing the back button on the
-                    // save selection screen, we need to disconnect from the server again, because we are not entering
-                    // the world
-                    if (saveSelected) {
-                        _netClient.UpdateManager.AddPlayerSettingUpdate(
-                            crestType: CrestTypeExt.FromInternal(PlayerData.instance.CurrentCrestID)
-                        );
-                        return;
-                    }
+                        // If this callback executes, but we have not selected a save (by pressing the back button on
+                        // the save selection screen, we need to disconnect from the server again, because we are not
+                        // entering the world
+                        if (saveSelected) {
+                            _netClient.UpdateManager.AddPlayerSettingUpdate(
+                                crestType: CrestTypeExt.FromInternal(PlayerData.instance.CurrentCrestID)
+                            );
+                            return;
+                        }
 
-                    Disconnect();
-                });
+                        Disconnect();
+                    }
+                );
             }
         } else {
             _netClient.UpdateManager.AddPlayerSettingUpdate(
@@ -670,7 +705,7 @@ internal class ClientManager : IClientManager {
         foreach (var (id, username) in serverInfo.PlayerInfo) {
             _playerData[id] = new ClientPlayerData(id, username);
         }
-        
+
         // Add the username to the player if we are in-game already
         if (HeroController.instance && HeroController.instance.gameObject) {
             _playerManager.AddNameToPlayer(
@@ -684,19 +719,20 @@ internal class ClientManager : IClientManager {
             ConnectEvent?.Invoke();
         } catch (Exception e) {
             Logger.Warn(
-                $"Exception thrown while invoking Connect event:\n{e}");
+                $"Exception thrown while invoking Connect event:\n{e}"
+            );
         }
     }
-    
+
     /// <summary>
     /// Callback method for when the HeroController is started so we can add the username to the player object.
     /// </summary>
     private void OnHeroControllerStart() {
         Logger.Debug($"OnHeroControllerStart called, netclient connected: {_netClient.IsConnected}");
-        
+
         if (_netClient.IsConnected) {
             _playerManager.AddNameToPlayer(
-                HeroController.instance.gameObject, 
+                HeroController.instance.gameObject,
                 _username!,
                 _playerManager.LocalPlayerTeam
             );
@@ -716,7 +752,7 @@ internal class ClientManager : IClientManager {
         } else if (disconnect.Reason == DisconnectReason.Shutdown) {
             UiManager.InternalChatBox.AddMessage("You are disconnected from the server (server is shutting down)");
         }
-        
+
         _uiManager.ReturnToMainMenuFromGame();
 
         // Disconnect without sending the server that we disconnect, because the server knows that already
@@ -739,7 +775,8 @@ internal class ClientManager : IClientManager {
             PlayerConnectEvent?.Invoke(playerData);
         } catch (Exception e) {
             Logger.Warn(
-                $"Exception thrown while invoking PlayerConnect event:\n{e}");
+                $"Exception thrown while invoking PlayerConnect event:\n{e}"
+            );
         }
     }
 
@@ -765,17 +802,18 @@ internal class ClientManager : IClientManager {
         // Clear the player from the player data mapping
         _playerData.Remove(id);
 
-        if (playerDisconnect.TimedOut) {
-            UiManager.InternalChatBox.AddMessage($"Player '{username}' timed out");
-        } else {
-            UiManager.InternalChatBox.AddMessage($"Player '{username}' disconnected from the server");
-        }
+        UiManager.InternalChatBox.AddMessage(
+            playerDisconnect.TimedOut
+                ? $"Player '{username}' timed out"
+                : $"Player '{username}' disconnected from the server"
+        );
 
         try {
             PlayerDisconnectEvent?.Invoke(playerData);
         } catch (Exception e) {
             Logger.Warn(
-                $"Exception thrown while invoking PlayerDisconnect event:\n{e}");
+                $"Exception thrown while invoking PlayerDisconnect event:\n{e}"
+            );
         }
     }
 
@@ -802,18 +840,21 @@ internal class ClientManager : IClientManager {
 
             foreach (var entitySpawn in alreadyInScene.EntitySpawnList) {
                 Logger.Info(
-                    $"Updating already in scene spawned entity with ID: {entitySpawn.Id}, types: {entitySpawn.SpawningType}, {entitySpawn.SpawnedType}");
+                    $"Updating already in scene spawned entity with ID: {entitySpawn.Id}, types: {entitySpawn.SpawningType}, {entitySpawn.SpawnedType}"
+                );
                 _entityManager.SpawnEntity(entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType);
             }
 
             foreach (var entityUpdate in alreadyInScene.EntityUpdateList) {
                 Logger.Info($"Updating already in scene entity with ID: {entityUpdate.Id}");
                 _entityManager.HandleEntityUpdate(entityUpdate, true);
+                ObjectPool<EntityUpdate>.Return(entityUpdate);
             }
 
             foreach (var entityUpdate in alreadyInScene.ReliableEntityUpdateList) {
                 Logger.Info($"Updating already in scene reliable entity data with ID: {entityUpdate.Id}");
                 _entityManager.HandleReliableEntityUpdate(entityUpdate, true);
+                ObjectPool<ReliableEntityUpdate>.Return(entityUpdate);
             }
 
             // Whether there were players in the scene or not, we have now determined whether
@@ -853,7 +894,8 @@ internal class ClientManager : IClientManager {
             PlayerEnterSceneEvent?.Invoke(playerData);
         } catch (Exception e) {
             Logger.Warn(
-                $"Exception thrown while invoking PlayerEnterScene event:\n{e}");
+                $"Exception thrown while invoking PlayerEnterScene event:\n{e}"
+            );
         }
     }
 
@@ -892,7 +934,8 @@ internal class ClientManager : IClientManager {
             PlayerLeaveSceneEvent?.Invoke(playerData);
         } catch (Exception e) {
             Logger.Warn(
-                $"Exception thrown while invoking PlayerLeaveScene event:\n{e}");
+                $"Exception thrown while invoking PlayerLeaveScene event:\n{e}"
+            );
         }
     }
 
@@ -933,7 +976,7 @@ internal class ClientManager : IClientManager {
     private void OnPlayerMapUpdate(PlayerMapUpdate playerMapUpdate) {
         _mapManager.UpdatePlayerHasIcon(playerMapUpdate.Id, playerMapUpdate.HasIcon);
     }
-    
+
     /// <summary>
     /// Callback method for when an entity spawn is received.
     /// </summary>
@@ -979,7 +1022,7 @@ internal class ClientManager : IClientManager {
 
         _entityManager.HandleReliableEntityUpdate(entityUpdate);
     }
-    
+
     /// <summary>
     /// Callback method for when a host transfer is received.
     /// </summary>
@@ -996,7 +1039,7 @@ internal class ClientManager : IClientManager {
             Logger.Info($"  Current scene ({currentScene}) does not match scene for host transfer, ignoring");
             return;
         }
-        
+
         _entityManager.BecomeSceneHost();
     }
 
@@ -1085,7 +1128,7 @@ internal class ClientManager : IClientManager {
         }
 
         if (alwaysShowMapChanged || onlyCompassChanged) {
-            if (!_serverSettings.AlwaysShowMapIcons && !_serverSettings.OnlyBroadcastMapIconWithCompass) {
+            if (_serverSettings is { AlwaysShowMapIcons: false, OnlyBroadcastMapIconWithCompass: false }) {
                 _mapManager.RemoveAllIcons();
             }
         }
@@ -1095,7 +1138,7 @@ internal class ClientManager : IClientManager {
             // If the team setting was disabled, we reset all teams and call the event
             if (!_serverSettings.TeamsEnabled) {
                 _playerManager.ResetAllTeams();
-                
+
                 TeamChangedEvent?.Invoke(Team.None);
             }
 
@@ -1106,7 +1149,7 @@ internal class ClientManager : IClientManager {
         // event
         if (allowSkinsChanged && !_serverSettings.AllowSkins) {
             _playerManager.ResetAllPlayerSkins();
-            
+
             SkinChangedEvent?.Invoke(0);
         }
     }
@@ -1153,12 +1196,15 @@ internal class ClientManager : IClientManager {
         if (SceneUtil.IsNonGameplayScene(currentSceneName)) {
             return;
         }
-    
+
         // If we are not connected, there is nothing to send to
         if (!_netClient.IsConnected) {
             return;
         }
-    
+
+        // Update all remote player interpolations in one centralized loop
+        _playerManager.UpdateInterpolations(Time.deltaTime);
+
         var heroTransform = HeroController.instance.transform;
 
         // For position updating, we use a stopwatch to check whether the latest update wasn't too soon ago.
@@ -1172,23 +1218,23 @@ internal class ClientManager : IClientManager {
         const int updateRate = 1000 / 60;
         if (_lastPositionStopwatch.ElapsedMilliseconds > updateRate) {
             var newPosition = heroTransform.position;
-            
+
             // If the position changed since last check
             if (newPosition != _lastPosition) {
                 // Update the last position, since it changed
                 _lastPosition = newPosition;
                 // Restart the stopwatch
                 _lastPositionStopwatch.Restart();
-    
+
                 _netClient.UpdateManager.UpdatePlayerPosition(new Vector2(newPosition.x, newPosition.y));
             }
         }
-    
+
         var newScale = heroTransform.localScale;
         // If the scale changed since last check
         if (newScale != _lastScale) {
             _netClient.UpdateManager.UpdatePlayerScale(newScale.x > 0);
-    
+
             // Update the last scale, since it changed
             _lastScale = newScale;
         }
@@ -1247,7 +1293,7 @@ internal class ClientManager : IClientManager {
         if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Team)) {
             if (settingUpdate.Self) {
                 _playerManager.OnPlayerTeamUpdate(true, settingUpdate.Team);
-                
+
                 TeamChangedEvent?.Invoke(settingUpdate.Team);
             } else {
                 _playerManager.OnPlayerTeamUpdate(false, settingUpdate.Team, settingUpdate.Id);
@@ -1257,7 +1303,7 @@ internal class ClientManager : IClientManager {
         if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Skin)) {
             if (settingUpdate.Self) {
                 _playerManager.OnPlayerSkinUpdate(true, settingUpdate.SkinId);
-                
+
                 SkinChangedEvent?.Invoke(settingUpdate.SkinId);
             } else {
                 _playerManager.OnPlayerSkinUpdate(false, settingUpdate.SkinId, settingUpdate.Id);
@@ -1273,7 +1319,7 @@ internal class ClientManager : IClientManager {
             }
         }
     }
-    
+
     /// <summary>
     /// Callback method for when a player death packet is received.
     /// </summary>
@@ -1303,9 +1349,9 @@ internal class ClientManager : IClientManager {
         }
 
         Logger.Info("Connection to server timed out, moving to main menu");
-        
+
         _uiManager.ReturnToMainMenuFromGame();
-        
+
         UiManager.InternalChatBox.AddMessage("You are disconnected from the server (server timed out)");
 
         Disconnect();

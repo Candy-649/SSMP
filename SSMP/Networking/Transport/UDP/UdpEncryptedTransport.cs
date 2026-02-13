@@ -9,12 +9,29 @@ namespace SSMP.Networking.Transport.UDP;
 /// </summary>
 internal class UdpEncryptedTransport : IEncryptedTransport {
     /// <summary>
+    /// Maximum UDP packet size to avoid fragmentation.
+    /// </summary>
+    private const int UdpMaxPacketSize = 1200;
+
+    /// <summary>
     /// The underlying DTLS client.
     /// </summary>
     private readonly DtlsClient _dtlsClient;
 
     /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
+
+    /// <inheritdoc />
+    public bool RequiresCongestionManagement => true;
+
+    /// <inheritdoc />
+    public bool RequiresReliability => true;
+
+    /// <inheritdoc />
+    public bool RequiresSequencing => true;
+
+    /// <inheritdoc />
+    public int MaxPacketSize => UdpMaxPacketSize;
 
     public UdpEncryptedTransport() {
         _dtlsClient = new DtlsClient();
@@ -33,15 +50,6 @@ internal class UdpEncryptedTransport : IEncryptedTransport {
         }
 
         _dtlsClient.DtlsTransport.Send(buffer, offset, length);
-    }
-
-    /// <inheritdoc />
-    public int Receive(byte[] buffer, int offset, int length, int waitMillis) {
-        if (_dtlsClient.DtlsTransport == null) {
-            throw new InvalidOperationException("Not connected");
-        }
-
-        return _dtlsClient.DtlsTransport.Receive(buffer, offset, length, waitMillis);
     }
 
     /// <inheritdoc />

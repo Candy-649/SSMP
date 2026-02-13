@@ -1,24 +1,27 @@
 using System;
-using System.Diagnostics.CodeAnalysis;
+using System.Collections;
+using System.Net;
+using System.Net.Sockets;
+using SSMP.Game;
 using SSMP.Game.Settings;
 using SSMP.Networking.Client;
+using SSMP.Networking.Matchmaking;
 using SSMP.Ui.Component;
 using Steamworks;
 using SSMP.Networking.Transport.Common;
+using SSMP.Networking.Transport.HolePunch;
 using SSMP.Ui.Util;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
+
 // ReSharper disable ObjectCreationAsStatement
-// ReSharper disable HeuristicUnreachableCode
-// ReSharper disable UnusedMember.Local
-#pragma warning disable CS0162 // Unreachable code detected
 
 namespace SSMP.Ui;
 
 /// <summary>
 /// Manages the multiplayer connection interface with tabbed navigation for Matchmaking, Steam, and Direct IP connections.
 /// </summary>
-[SuppressMessage("Compiler", "CS0162:Unreachable code detected")]
 internal class ConnectInterface {
     #region Layout Constants
 
@@ -153,7 +156,7 @@ internal class ConnectInterface {
     /// <summary>
     /// Y-offset for the feedback/error text relative to the content area.
     /// </summary>
-    private const float FeedbackTextOffset = 260f;
+    private const float FeedbackTextOffset = 310f;
 
     #endregion
 
@@ -221,7 +224,12 @@ internal class ConnectInterface {
     /// <summary>
     /// Text for the Connect button in the Matchmaking tab.
     /// </summary>
-    private const string LobbyConnectButtonText = "CONNECT TO LOBBY";
+    private const string LobbyConnectButtonText = "CONNECT";
+
+    /// <summary>
+    /// Text for the Host Lobby button in the Matchmaking tab.
+    /// </summary>
+    private const string HostLobbyButtonText = "HOST LOBBY";
 
     // Steam tab
 
@@ -400,24 +408,44 @@ internal class ConnectInterface {
     /// </summary>
     private readonly IButtonComponent _lobbyConnectButton;
 
+    /// <summary>
+    /// Scrollable panel for browsing public lobbies.
+    /// </summary>
+    private readonly LobbyBrowserPanel _lobbyBrowserPanel;
+
+    /// <summary>
+    /// Configuration panel for hosting a matchmaking lobby.
+    /// </summary>
+    private readonly LobbyConfigPanel _lobbyConfigPanel;
+
     // Steam tab components
     /// <summary>
     /// Button to create a new Steam lobby.
     /// </summary>
     // ReSharper disable once NotAccessedField.Local
-    private readonly IButtonComponent _createLobbyButton;
+    private IButtonComponent? _createLobbyButton;
 
     /// <summary>
     /// Button to open the lobby browser.
     /// </summary>
     // ReSharper disable once NotAccessedField.Local
-    private readonly IButtonComponent _browseLobbyButton;
+    private IButtonComponent? _browseLobbyButton;
+
+    /// <summary>
+    /// Scrollable panel for browsing public lobbies on Steam tab.
+    /// </summary>
+    private readonly LobbyBrowserPanel? _steamLobbyBrowserPanel;
+
+    /// <summary>
+    /// Configuration panel for hosting a Steam lobby.
+    /// </summary>
+    private readonly LobbyConfigPanel? _steamLobbyConfigPanel;
 
     /// <summary>
     /// Button to join a friend via invite.
     /// </summary>
     // ReSharper disable once NotAccessedField.Local
-    private readonly IButtonComponent _joinFriendButton;
+    private IButtonComponent? _joinFriendButton;
 
     // Direct IP tab components
     /// <summary>
@@ -445,21 +473,32 @@ internal class ConnectInterface {
     /// </summary>
     private Coroutine? _feedbackHideCoroutine;
 
+    /// <summary>
+    /// Client for the MatchMaking Service (MMS).
+    /// </summary>
+    private readonly MmsClient _mmsClient;
+
+    /// <summary>
+    /// Public accessor for the MMS client.
+    /// Used by server manager to pass to HolePunch transport for lobby cleanup.
+    /// </summary>
+    public MmsClient MmsClient => _mmsClient;
+
     #endregion
 
     #region Events
 
     /// <summary>
     /// Fired when the user attempts to connect to a server.
-    /// Parameters: address, port, username, transportType
+    /// Parameters: address, port, username, transportType, fallbackAddress
     /// </summary>
-    public event Action<string, int, string, TransportType>? ConnectButtonPressed;
+    public event Action<string, int, string, TransportType, string?>? ConnectButtonPressed;
 
     /// <summary>
     /// Fired when the user attempts to start hosting a server.
-    /// Parameters: address, port, username, transportType
+    /// Parameters: address, port, username, transportType, fallbackAddress
     /// </summary>
-    public event Action<string, int, string, TransportType>? StartHostButtonPressed;
+    public event Action<string, int, string, TransportType, string?>? StartHostButtonPressed;
 
     #endregion
 
@@ -485,6 +524,7 @@ internal class ConnectInterface {
     /// <param name="connectGroup">Parent component group for the interface.</param>
     public ConnectInterface(ModSettings modSettings, ComponentGroup connectGroup) {
         _modSettings = modSettings;
+        _mmsClient = new MmsClient(modSettings.MmsSettings.MmsUrl);
 
         SubscribeToSteamEvents();
 
@@ -509,11 +549,98 @@ internal class ConnectInterface {
         _lobbyIdInput = matchmakingComponents.lobbyIdInput;
         _lobbyConnectButton = matchmakingComponents.connectButton;
 
+        // Create lobby browser panel
+        _lobbyBrowserPanel = new LobbyBrowserPanel(
+            _backgroundGroup,
+            new Vector2(InitialX, currentY),
+            new Vector2(ContentWidth, 280f)
+        );
+        _lobbyBrowserPanel.SetOnLobbySelected(lobby => {
+                _lobbyIdInput.SetInput(lobby.LobbyCode);
+                _lobbyBrowserPanel.Hide();
+                _matchmakingGroup.SetActive(true);
+                ShowFeedback(Color.green, $"Selected lobby: {lobby.LobbyCode}");
+            }
+        );
+        _lobbyBrowserPanel.SetOnBack(() => {
+                _lobbyBrowserPanel.Hide();
+                _matchmakingGroup.SetActive(true);
+            }
+        );
+        _lobbyBrowserPanel.SetOnRefresh(() => { MonoBehaviourUtil.Instance.StartCoroutine(FetchLobbiesCoroutine()); });
+
         var steamComponents = CreateSteamTab(currentY);
         _steamGroup = steamComponents.group;
         _createLobbyButton = steamComponents.createButton;
         _browseLobbyButton = steamComponents.browseButton;
         _joinFriendButton = steamComponents.joinButton;
+
+        // Create Steam lobby browser panel (same layout as matchmaking)
+        if (_steamGroup != null) {
+            _steamLobbyBrowserPanel = new LobbyBrowserPanel(
+                _backgroundGroup,
+                new Vector2(InitialX, currentY),
+                new Vector2(ContentWidth, 280f)
+            );
+            _steamLobbyBrowserPanel.SetOnLobbySelected(lobby => {
+                    _steamLobbyBrowserPanel.Hide();
+                    _steamGroup.SetActive(true);
+
+                    // Steam lobbies join via Steam ID (ConnectionData)
+                    if (lobby.LobbyType == PublicLobbyType.Steam) {
+                        JoinSteamLobbyFromBrowser(lobby.ConnectionData);
+                    } else {
+                        ShowFeedback(Color.red, "Invalid Steam lobby");
+                    }
+                }
+            );
+            _steamLobbyBrowserPanel.SetOnBack(() => {
+                    _steamLobbyBrowserPanel.Hide();
+                    _steamGroup.SetActive(true);
+                }
+            );
+            _steamLobbyBrowserPanel.SetOnRefresh(() => {
+                    MonoBehaviourUtil.Instance.StartCoroutine(FetchSteamLobbiesCoroutine());
+                }
+            );
+
+            // Create Steam lobby config panel
+            _steamLobbyConfigPanel = new LobbyConfigPanel(
+                _backgroundGroup,
+                new Vector2(InitialX, currentY),
+                new Vector2(ContentWidth, 280f),
+                PublicLobbyType.Steam
+            );
+            _steamLobbyConfigPanel.SetOnCreate(visibility => {
+                    _steamLobbyConfigPanel.Hide();
+                    _steamGroup?.SetActive(true);
+                    CreateSteamLobbyWithConfig(visibility);
+                }
+            );
+            _steamLobbyConfigPanel.SetOnCancel(() => {
+                    _steamLobbyConfigPanel.Hide();
+                    _steamGroup?.SetActive(true);
+                }
+            );
+        }
+
+        // Create matchmaking lobby config panel
+        _lobbyConfigPanel = new LobbyConfigPanel(
+            _backgroundGroup,
+            new Vector2(InitialX, currentY),
+            new Vector2(ContentWidth, 280f)
+        );
+        _lobbyConfigPanel.SetOnCreate(visibility => {
+                _lobbyConfigPanel.Hide();
+                _matchmakingGroup.SetActive(true);
+                CreateMatchmakingLobbyWithConfig(visibility);
+            }
+        );
+        _lobbyConfigPanel.SetOnCancel(() => {
+                _lobbyConfigPanel.Hide();
+                _matchmakingGroup.SetActive(true);
+            }
+        );
 
         var directIpComponents = CreateDirectIpTab(currentY);
         _directIpGroup = directIpComponents.group;
@@ -535,10 +662,9 @@ internal class ConnectInterface {
     /// Subscribes to Steam lobby-related events if Steam is available.
     /// </summary>
     private void SubscribeToSteamEvents() {
-        // Uncomment when Steam integration is ready
-        //(UNCOMMENT)SteamManager.LobbyCreatedEvent += OnSteamLobbyCreated;
-        //(UNCOMMENT)SteamManager.LobbyListReceivedEvent += OnLobbyListReceived;
-        //(UNCOMMENT)SteamManager.LobbyJoinedEvent += OnLobbyJoined;
+        SteamManager.LobbyCreatedEvent += OnSteamLobbyCreated;
+        SteamManager.LobbyListReceivedEvent += OnLobbyListReceived;
+        SteamManager.LobbyJoinedEvent += OnLobbyJoined;
     }
 
     /// <summary>
@@ -621,10 +747,8 @@ internal class ConnectInterface {
             () => SwitchTab(Tab.Matchmaking)
         );
 
-        TabButtonComponent? steam;
-        // Check if Steam is initialized (currently stubbed with true)
-        //(UNCOMMENT)if (SteamManager.IsInitialized) {
-        if (true) {
+        TabButtonComponent? steam = null;
+        if (SteamManager.IsInitialized) {
             steam = ConnectInterfaceHelpers.CreateTabButton(
                 _backgroundGroup,
                 InitialX,
@@ -635,9 +759,11 @@ internal class ConnectInterface {
             );
         }
 
+        // Position DirectIp tab next to Steam, or in center if Steam not available
+        var directIpX = SteamManager.IsInitialized ? InitialX + TabButtonWidth : InitialX;
         var directIp = ConnectInterfaceHelpers.CreateTabButton(
             _backgroundGroup,
-            InitialX + TabButtonWidth,
+            directIpX,
             currentY,
             TabButtonWidth,
             DirectIpTabText,
@@ -654,9 +780,10 @@ internal class ConnectInterface {
     #region Tab Content Creation
 
     /// <summary>
-    /// Creates the Matchmaking tab content with lobby ID input and connect button.
+    /// Creates the Matchmaking tab content with lobby ID input and connect/host buttons.
     /// </summary>
-    private (ComponentGroup group, IInputComponent lobbyIdInput, IButtonComponent connectButton)
+    private (ComponentGroup group, IInputComponent lobbyIdInput, IButtonComponent connectButton, IButtonComponent
+        hostButton)
         CreateMatchmakingTab(float startY) {
         var group = new ComponentGroup(parent: _backgroundGroup);
         var y = startY;
@@ -705,11 +832,17 @@ internal class ConnectInterface {
         );
         y -= (UniformHeight + 20f) / UiManager.ScreenHeightRatio;
 
-        // Connect button
+        // Two buttons side-by-side (same layout as Direct IP tab)
+        var buttonGap = 10f;
+        var buttonWidth = (ContentWidth - buttonGap) / 2f;
+        var buttonOffset = ((buttonWidth + buttonGap) / 2f) /
+                           (float) System.Math.Pow(UiManager.ScreenHeightRatio, 2);
+
+        // Connect button (left)
         var connectButton = new ButtonComponent(
             group,
-            new Vector2(InitialX, y),
-            new Vector2(ContentWidth, UniformHeight),
+            new Vector2(InitialX - buttonOffset, y),
+            new Vector2(buttonWidth, UniformHeight),
             LobbyConnectButtonText,
             Resources.TextureManager.ButtonBg,
             Resources.FontManager.UIFontRegular,
@@ -717,16 +850,43 @@ internal class ConnectInterface {
         );
         connectButton.SetOnPress(OnLobbyConnectButtonPressed);
 
-        return (group, lobbyIdInput, connectButton);
+        // Host Lobby button (right)
+        var hostButton = new ButtonComponent(
+            group,
+            new Vector2(InitialX + buttonOffset, y),
+            new Vector2(buttonWidth, UniformHeight),
+            HostLobbyButtonText,
+            Resources.TextureManager.ButtonBg,
+            Resources.FontManager.UIFontRegular,
+            UiManager.NormalFontSize
+        );
+        hostButton.SetOnPress(OnHostLobbyButtonPressed);
+
+        y -= (UniformHeight + 15f) / UiManager.ScreenHeightRatio;
+
+        // Browse Lobbies button (full width)
+        var browseButton = new ButtonComponent(
+            group,
+            new Vector2(InitialX, y),
+            new Vector2(ContentWidth, UniformHeight),
+            "☰ BROWSE PUBLIC LOBBIES",
+            Resources.TextureManager.ButtonBg,
+            Resources.FontManager.UIFontRegular,
+            UiManager.NormalFontSize
+        );
+        browseButton.SetOnPress(OnBrowseMatchmakingLobbiesPressed);
+
+        return (group, lobbyIdInput, connectButton, hostButton);
     }
 
     /// <summary>
     /// Creates the Steam tab content with lobby management buttons.
     /// </summary>
-    private (ComponentGroup? group, IButtonComponent createButton, IButtonComponent browseButton,
-        IButtonComponent joinButton) CreateSteamTab(float startY) {
-        // Check if Steam is available
-        //(UNCOMMENT)if (!SteamManager.IsInitialized) {
+    private (ComponentGroup? group, IButtonComponent? createButton, IButtonComponent? browseButton,
+        IButtonComponent? joinButton) CreateSteamTab(float startY) {
+        if (!SteamManager.IsInitialized) {
+            return (null, null, null, null);
+        }
 
         var group = new ComponentGroup(activeSelf: false, parent: _backgroundGroup);
         var y = startY;
@@ -836,7 +996,8 @@ internal class ConnectInterface {
         // Direct IP button values
         var buttonGap = 10f;
         var buttonWidth = (ContentWidth - buttonGap) / 2f;
-        var buttonOffset = ((buttonWidth + buttonGap) / 2f) / (float) System.Math.Pow(UiManager.ScreenHeightRatio, 2);
+        var buttonOffset = ((buttonWidth + buttonGap) / 2f) /
+                           (float) System.Math.Pow(UiManager.ScreenHeightRatio, 2);
 
         // Connect button (left)
         var connectButton = new ButtonComponent(
@@ -926,6 +1087,11 @@ internal class ConnectInterface {
     /// </summary>
     /// <param name="tab">The tab to activate.</param>
     private void SwitchTab(Tab tab) {
+        // Hide lobby browsers and config panels if visible
+        _lobbyBrowserPanel.Hide();
+        _steamLobbyBrowserPanel?.Hide();
+        _lobbyConfigPanel.Hide();
+        _steamLobbyConfigPanel?.Hide();
         // Update tab button visual states
         _matchmakingTab.SetTabActive(tab == Tab.Matchmaking);
         _steamTab?.SetTabActive(tab == Tab.Steam);
@@ -952,17 +1118,242 @@ internal class ConnectInterface {
 
     /// <summary>
     /// Handles the Matchmaking tab's "Connect to Lobby" button press.
-    /// Initiates a search for Steam lobbies matching the entered Lobby ID.
+    /// Looks up lobby via MMS and connects to the host.
     /// </summary>
     private void OnLobbyConnectButtonPressed() {
-        //(UNCOMMENT)if (!SteamManager.IsInitialized) {
-        if (true) {
-            ShowFeedback(Color.red, "Steam is not available.");
+        if (!ValidateUsername(out var username)) {
             return;
         }
 
-        ShowFeedback(Color.yellow, "Searching for lobbies...");
-        //(UNCOMMENT)SteamManager.RequestLobbyList();
+        var lobbyId = _lobbyIdInput.GetInput();
+        if (string.IsNullOrWhiteSpace(lobbyId)) {
+            ShowFeedback(Color.red, "Enter a lobby ID");
+            return;
+        }
+
+        ShowFeedback(Color.yellow, "Connecting...");
+        MonoBehaviourUtil.Instance.StartCoroutine(JoinLobbyCoroutine(lobbyId, username));
+    }
+
+    /// <summary>
+    /// Coroutine to join a lobby, handling both Matchmaking and Steam types.
+    /// </summary>
+    private IEnumerator JoinLobbyCoroutine(string lobbyId, string username) {
+        ShowFeedback(Color.yellow, "Joining lobby...");
+
+        // Create hole-punch socket for non-Steam lobbies
+        var holePunchSocket = CreateHolePunchSocket();
+        var clientPort = GetSocketPort(holePunchSocket);
+
+        // Join lobby and get connection info
+        var task = _mmsClient.JoinLobbyAsync(lobbyId, clientPort);
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        var lobbyInfo = task.Result;
+        if (lobbyInfo == null) {
+            CleanupHolePunchSocket(holePunchSocket);
+            ShowFeedback(Color.red, "Lobby not found, offline, or join failed");
+            yield break;
+        }
+
+        var (connectionData, lobbyType, lanConnectionData) = lobbyInfo.Value;
+
+        // Handle connection based on lobby type
+        if (lobbyType == PublicLobbyType.Steam) {
+            CleanupHolePunchSocket(holePunchSocket);
+            ConnectToSteamLobby(connectionData, username);
+        } else {
+            ConnectToMatchmakingLobby(connectionData, lanConnectionData, username, holePunchSocket);
+        }
+    }
+
+    /// <summary>
+    /// Handles the Matchmaking tab's "Host Lobby" button press.
+    /// Shows the lobby configuration panel.
+    /// </summary>
+    private void OnHostLobbyButtonPressed() {
+        if (!ValidateUsername(out _)) {
+            return;
+        }
+
+        // Show config panel with default name
+        _matchmakingGroup.SetActive(false);
+        _lobbyConfigPanel.Show();
+    }
+
+    /// <summary>
+    /// Creates a matchmaking lobby with the specified configuration.
+    /// Called from the config panel's Create callback.
+    /// </summary>
+    private void CreateMatchmakingLobbyWithConfig(LobbyVisibility visibility) {
+        if (!ValidateUsername(out var username)) {
+            return;
+        }
+
+        ShowFeedback(Color.yellow, "Creating lobby...");
+        Logger.Info($"Host lobby requested: ({visibility}) - HolePunch transport");
+
+        MonoBehaviourUtil.Instance.StartCoroutine(
+            CreateLobbyWithConfigCoroutine(visibility, PublicLobbyType.Matchmaking, username)
+        );
+    }
+
+    /// <summary>
+    /// Creates a Steam lobby with the specified configuration.
+    /// Called from the Steam config panel's Create callback.
+    /// </summary>
+    private void CreateSteamLobbyWithConfig(LobbyVisibility visibility) {
+        if (!ValidateUsername(out var username)) {
+            return;
+        }
+
+        ShowFeedback(Color.yellow, "Creating Steam lobby...");
+        Logger.Info($"Steam lobby requested: ({visibility})");
+
+        // Convert visibility to Steam lobby type
+        var steamLobbyType = visibility switch {
+            LobbyVisibility.Public => ELobbyType.k_ELobbyTypePublic,
+            LobbyVisibility.FriendsOnly => ELobbyType.k_ELobbyTypeFriendsOnly,
+            LobbyVisibility.Private => ELobbyType.k_ELobbyTypePrivate,
+            _ => ELobbyType.k_ELobbyTypeFriendsOnly
+        };
+
+        // Capture visibility for callback closure
+        var isPublic = visibility == LobbyVisibility.Public;
+
+        SteamManager.LobbyCreatedEvent += OnLobbyCreatedCallback;
+
+        // Create native Steam lobby (uses Steam's default max = 250)
+        SteamManager.CreateLobby(username, lobbyType: steamLobbyType);
+        return;
+
+        // Subscribe to lobby created event (one-time)
+        void OnLobbyCreatedCallback(CSteamID steamLobbyId, string hostName) {
+            // Unsubscribe immediately
+            SteamManager.LobbyCreatedEvent -= OnLobbyCreatedCallback;
+
+            // Only PUBLIC Steam lobbies register with MMS for browser visibility
+            // Private and Friends-Only lobbies use Steam's native discovery only
+            if (isPublic) {
+                MonoBehaviourUtil.Instance.StartCoroutine(
+                    RegisterSteamLobbyForBrowserCoroutine(steamLobbyId.m_SteamID.ToString(), username)
+                );
+            } else {
+                ShowFeedback(Color.green, "Steam lobby created!");
+                StartHostButtonPressed?.Invoke("0.0.0.0", 0, username, TransportType.Steam, null);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers a public Steam lobby with MMS for browser visibility (no invite code).
+    /// </summary>
+    private IEnumerator RegisterSteamLobbyForBrowserCoroutine(
+        string steamLobbyId,
+        string username
+    ) {
+        var task = _mmsClient.RegisterSteamLobbyAsync(
+            steamLobbyId,
+            isPublic: true,
+            gameVersion: Application.version
+        );
+
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        // Don't show invite code for Steam lobbies - they use Steam's native join flow
+        if (task.Result == null) {
+            ShowFeedback(Color.yellow, "Steam lobby created (browser listing failed)");
+        } else {
+            ShowFeedback(Color.green, "Steam lobby created!");
+        }
+
+        StartHostButtonPressed?.Invoke("0.0.0.0", 0, username, TransportType.Steam, null);
+    }
+
+
+    /// <summary>
+    /// Coroutine for async lobby creation with config.
+    /// </summary>
+    private IEnumerator CreateLobbyWithConfigCoroutine(
+        LobbyVisibility visibility,
+        PublicLobbyType lobbyType,
+        string username
+    ) {
+        var isPublic = visibility == LobbyVisibility.Public;
+        var task = _mmsClient.CreateLobbyAsync(
+            hostPort: 26960,
+            isPublic: isPublic,
+            gameVersion: Application.version,
+            lobbyType: lobbyType
+        );
+
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        var (lobbyId, lobbyName) = task.Result;
+        if (lobbyId == null || lobbyName == null) {
+            ShowFeedback(Color.red, "Failed to create lobby. Is MMS running?");
+            yield break;
+        }
+
+        // Start polling for pending clients to punch back
+        _mmsClient.StartPendingClientPolling();
+
+        // For private lobbies, show invite code in ChatBox so it's easily shareable
+        if (visibility == LobbyVisibility.Private) {
+            UiManager.InternalChatBox.AddMessage(
+                $"<color=yellow>[Private Lobby]</color> Invite code: <color=lime>{lobbyId}</color>"
+            );
+            ShowFeedback(Color.green, "Private lobby created!");
+        } else {
+            UiManager.InternalChatBox.AddMessage(
+                $"<color=yellow>[Public Lobby]</color> Lobby name: <color=lime>{lobbyName}</color>, invite code: <color=lime>{lobbyId}</color>"
+            );
+            ShowFeedback(Color.green, $"Lobby: {lobbyId}");
+        }
+
+        StartHostButtonPressed?.Invoke("0.0.0.0", 26960, username, TransportType.HolePunch, null);
+    }
+
+    /// <summary>
+    /// Handles the Matchmaking tab's "Browse Lobbies" button press.
+    /// Fetches and displays public lobbies from the MMS.
+    /// </summary>
+    private void OnBrowseMatchmakingLobbiesPressed() {
+        // Hide matchmaking content and show lobby browser
+        _matchmakingGroup.SetActive(false);
+        _lobbyBrowserPanel.Show();
+
+        ShowFeedback(Color.yellow, "Fetching lobbies...");
+        MonoBehaviourUtil.Instance.StartCoroutine(FetchLobbiesCoroutine());
+    }
+
+    /// <summary>
+    /// Coroutine for async lobby fetching (Matchmaking tab).
+    /// </summary>
+    private IEnumerator FetchLobbiesCoroutine() {
+        var task = _mmsClient.GetPublicLobbiesAsync(PublicLobbyType.Matchmaking);
+
+        // Wait for async operation without blocking main thread
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        var lobbies = task.Result;
+        if (lobbies == null) {
+            ShowFeedback(Color.red, "Failed to fetch lobbies. Is MMS running?");
+            yield break;
+        }
+
+        // Update panel with lobbies and show
+        _lobbyBrowserPanel.SetLobbies(lobbies);
+        _lobbyBrowserPanel.Show();
+
+        if (lobbies.Count == 0) {
+            ShowFeedback(Color.yellow, "No public lobbies found.");
+        } else {
+            var word = lobbies.Count == 1 ? "Lobby" : "Lobbies";
+            ShowFeedback(Color.green, $"Found {lobbies.Count} {word}");
+        }
+
+        Logger.Info($"ConnectInterface: Displaying {lobbies.Count} public lobbies");
     }
 
     #endregion
@@ -971,39 +1362,90 @@ internal class ConnectInterface {
 
     /// <summary>
     /// Handles the Steam tab's "Create Lobby" button press.
-    /// Creates a new Steam lobby and starts hosting.
+    /// Shows the Steam lobby configuration panel.
     /// </summary>
     private void OnCreateLobbyButtonPressed() {
-        //(UNCOMMENT)if (!SteamManager.IsInitialized) {
-        if (true) {
+        if (!SteamManager.IsInitialized) {
             ShowFeedback(Color.red, "Steam is not available. Please ensure Steam is running.");
             Logger.Warn("Cannot create Steam lobby: Steam is not initialized");
             return;
         }
 
-        if (!ValidateUsername(out var username)) {
+        if (!ValidateUsername(out _)) {
             return;
         }
 
-        ShowFeedback(Color.yellow, "Creating Steam lobby...");
-        Logger.Info($"Create lobby requested for user: {username}");
+        if (_steamLobbyConfigPanel == null || _steamGroup == null) return;
 
-        //(UNCOMMENT)SteamManager.CreateLobby(username);
+        // Show config panel with default name
+        _steamGroup.SetActive(false);
+        _steamLobbyConfigPanel.Show();
     }
 
     /// <summary>
     /// Handles the Steam tab's "Browse Public Lobbies" button press.
-    /// Requests a list of available public Steam lobbies.
+    /// Requests a list of available public Steam lobbies from MMS.
     /// </summary>
     private void OnBrowseLobbyButtonPressed() {
-        //(UNCOMMENT)if (!SteamManager.IsInitialized) {
-        if (true) {
+        if (!SteamManager.IsInitialized) {
             ShowFeedback(Color.red, "Steam is not available.");
             return;
         }
 
-        ShowFeedback(Color.yellow, "Refreshing lobby list...");
-        //(UNCOMMENT)SteamManager.RequestLobbyList();
+        if (_steamLobbyBrowserPanel == null || _steamGroup == null) return;
+
+        // Hide Steam content and show lobby browser
+        _steamGroup.SetActive(false);
+        _steamLobbyBrowserPanel.Show();
+
+        ShowFeedback(Color.yellow, "Fetching lobbies...");
+        MonoBehaviourUtil.Instance.StartCoroutine(FetchSteamLobbiesCoroutine());
+    }
+
+    /// <summary>
+    /// Coroutine for async Steam lobby fetching from MMS.
+    /// </summary>
+    private IEnumerator FetchSteamLobbiesCoroutine() {
+        var task = _mmsClient.GetPublicLobbiesAsync(PublicLobbyType.Steam); // Filter by steam type
+
+        yield return new WaitUntil(() => task.IsCompleted);
+
+        var lobbies = task.Result;
+        if (lobbies == null) {
+            ShowFeedback(Color.red, "Failed to fetch lobbies. Is MMS running?");
+            yield break;
+        }
+
+        _steamLobbyBrowserPanel?.SetLobbies(lobbies);
+
+        ShowFeedback(
+            lobbies.Count == 0 ? Color.yellow : Color.green,
+            lobbies.Count == 0
+                ? "No public lobbies found."
+                : $"Found {lobbies.Count} {(lobbies.Count == 1 ? "Lobby" : "Lobbies")}"
+        );
+
+        Logger.Info($"ConnectInterface: Displaying {lobbies.Count} public lobbies (Steam tab)");
+    }
+
+    /// <summary>
+    /// Joins a Steam lobby from the browser using the Steam lobby ID.
+    /// Uses Steam's native join flow, not MMS invite codes.
+    /// </summary>
+    /// <param name="steamLobbyIdString">The Steam lobby ID as a string.</param>
+    private void JoinSteamLobbyFromBrowser(string steamLobbyIdString) {
+        if (!SteamManager.IsInitialized) {
+            ShowFeedback(Color.red, "Steam is not available.");
+            return;
+        }
+
+        if (!ulong.TryParse(steamLobbyIdString, out var steamLobbyId)) {
+            ShowFeedback(Color.red, "Invalid Steam lobby ID.");
+            return;
+        }
+
+        ShowFeedback(Color.yellow, "Joining Steam lobby...");
+        SteamManager.JoinLobby(new CSteamID(steamLobbyId));
     }
 
     /// <summary>
@@ -1011,8 +1453,7 @@ internal class ConnectInterface {
     /// Opens the Steam Friends overlay to allow joining via friend invite.
     /// </summary>
     private void OnJoinFriendButtonPressed() {
-        //(UNCOMMENT)if (!SteamManager.IsInitialized) {
-        if (true) {
+        if (!SteamManager.IsInitialized) {
             ShowFeedback(Color.red, "Steam is not available.");
             return;
         }
@@ -1051,7 +1492,7 @@ internal class ConnectInterface {
         _directConnectButton.SetInteractable(false);
 
         Logger.Debug($"Connecting to {address}:{port} as {username}");
-        ConnectButtonPressed?.Invoke(address, port, username, TransportType.Udp);
+        ConnectButtonPressed?.Invoke(address, port, username, TransportType.Udp, null);
     }
 
     /// <summary>
@@ -1068,7 +1509,7 @@ internal class ConnectInterface {
             return;
         }
 
-        StartHostButtonPressed?.Invoke("", port, username, TransportType.Udp);
+        StartHostButtonPressed?.Invoke("", port, username, TransportType.Udp, null);
     }
 
     #endregion
@@ -1086,7 +1527,7 @@ internal class ConnectInterface {
         ShowFeedback(Color.green, "Lobby created! Friends can join via Steam overlay.");
 
         // Start hosting with Steam transport (port 0 as it's not used for Steam P2P)
-        StartHostButtonPressed?.Invoke("", 0, username, TransportType.Steam);
+        StartHostButtonPressed?.Invoke("", 0, username, TransportType.Steam, null);
     }
 
     /// <summary>
@@ -1103,7 +1544,7 @@ internal class ConnectInterface {
         Logger.Info($"Found {lobbyIds.Length} lobbies. Auto-joining first one.");
         ShowFeedback(Color.yellow, $"Found {lobbyIds.Length} lobbies. Joining first...");
 
-        //(UNCOMMENT)SteamManager.JoinLobby(lobbyIds[0]);
+        SteamManager.JoinLobby(lobbyIds[0]);
     }
 
     /// <summary>
@@ -1115,14 +1556,27 @@ internal class ConnectInterface {
         Logger.Info($"Joined lobby: {lobbyId}");
         ShowFeedback(Color.green, "Joined lobby! Connecting to host...");
 
-        var hostId = 0; //SteamManager.GetLobbyOwner(lobbyId);
+        var hostId = SteamManager.GetLobbyOwner(lobbyId);
 
         if (!ValidateUsername(out var username)) {
             return;
         }
 
         // Connect using Steam ID as address with Steam transport
-        ConnectButtonPressed?.Invoke(hostId.ToString(), 0, username, TransportType.Steam);
+        ConnectButtonPressed?.Invoke(hostId.ToString(), 0, username, TransportType.Steam, null);
+    }
+
+    /// <summary>
+    /// Handles connection to a Steam lobby.
+    /// </summary>
+    private void ConnectToSteamLobby(string connectionData, string username) {
+        if (!SteamManager.IsInitialized) {
+            ShowFeedback(Color.red, "Steam is not initialized");
+            return;
+        }
+
+        ShowFeedback(Color.green, "Joining Steam lobby...");
+        ConnectButtonPressed?.Invoke(connectionData, 0, username, TransportType.Steam, null);
     }
 
     #endregion
@@ -1167,17 +1621,18 @@ internal class ConnectInterface {
     /// <param name="username">Output parameter containing the validated username.</param>
     /// <returns>True if username is valid, false otherwise.</returns>
     private bool ValidateUsername(out string username) {
-        if (!ConnectInterfaceHelpers.ValidateUsername(
+        if (ConnectInterfaceHelpers.ValidateUsername(
                 _usernameInput,
                 _feedbackText,
                 out username,
                 _feedbackHideCoroutine,
-                out var newCoroutine)) {
-            _feedbackHideCoroutine = newCoroutine;
-            return false;
+                out var newCoroutine
+        )) {
+            return true;
         }
 
-        return true;
+        _feedbackHideCoroutine = newCoroutine;
+        return false;
     }
 
     /// <summary>
@@ -1186,7 +1641,7 @@ internal class ConnectInterface {
     /// <param name="portString">The string to parse.</param>
     /// <param name="port">Output parameter containing the parsed port number.</param>
     /// <returns>True if parsing succeeded and port is valid (non-zero), false otherwise.</returns>
-    private bool TryParsePort(string portString, out int port) {
+    private static bool TryParsePort(string portString, out int port) {
         return int.TryParse(portString, out port) && port != 0;
     }
 
@@ -1227,7 +1682,7 @@ internal class ConnectInterface {
     /// </summary>
     /// <param name="result">The connection failure details.</param>
     /// <returns>A formatted error message string.</returns>
-    private string GetFailureMessage(ConnectionFailedResult result) {
+    private static string GetFailureMessage(ConnectionFailedResult result) {
         return result.Reason switch {
             ConnectionFailedReason.InvalidAddons => ErrorInvalidAddons,
             ConnectionFailedReason.SocketException or
@@ -1239,5 +1694,132 @@ internal class ConnectInterface {
         };
     }
 
+    /// <summary>
+    /// Creates and configures a UDP socket for hole-punching.
+    /// </summary>
+    private static Socket CreateHolePunchSocket() {
+        var socket = new Socket(
+            AddressFamily.InterNetwork,
+            SocketType.Dgram,
+            ProtocolType.Udp
+        );
+
+        socket.Bind(new IPEndPoint(IPAddress.Any, 0));
+        HolePunchEncryptedTransport.HolePunchSocket = socket;
+
+        return socket;
+    }
+
+    /// <summary>
+    /// Gets the local port from a bound socket.
+    /// </summary>
+    private static int GetSocketPort(Socket socket) {
+        return ((IPEndPoint) socket.LocalEndPoint!).Port;
+    }
+
+    /// <summary>
+    /// Handles connection to a matchmaking lobby with LAN/public fallback.
+    /// </summary>
+    private void ConnectToMatchmakingLobby(
+        string connectionData,
+        string? lanConnectionData,
+        string username,
+        Socket? holePunchSocket
+    ) {
+        var connectionInfo = DetermineConnectionInfo(connectionData, lanConnectionData);
+
+        if (connectionInfo == null) {
+            ShowFeedback(Color.red, "Invalid connection data");
+            CleanupHolePunchSocket(holePunchSocket);
+            return;
+        }
+
+        ShowFeedback(Color.green, connectionInfo.Value.FeedbackMessage);
+        ConnectButtonPressed?.Invoke(
+            connectionInfo.Value.PrimaryIp,
+            connectionInfo.Value.PrimaryPort,
+            username,
+            TransportType.HolePunch,
+            connectionInfo.Value.FallbackIp
+        );
+    }
+
+    /// <summary>
+    /// Determines the optimal connection strategy (LAN first, then public).
+    /// </summary>
+    private static ConnectionInfo? DetermineConnectionInfo(string publicConnectionData, string? lanConnectionData) {
+        // Try LAN connection first if available
+        if (!string.IsNullOrEmpty(lanConnectionData) &&
+            TryParseConnectionData(lanConnectionData, out var lanIp, out var lanPort)) {
+            var publicIp = publicConnectionData.Split(':')[0];
+            return new ConnectionInfo(
+                lanIp,
+                lanPort,
+                publicIp,
+                $"Connecting to LAN {lanIp}:{lanPort}..."
+            );
+        }
+
+        // Fall back to public connection
+        if (TryParseConnectionData(publicConnectionData, out var publicIpParsed, out var publicPort)) {
+            return new ConnectionInfo(
+                publicIpParsed,
+                publicPort,
+                null,
+                $"Connecting to {publicIpParsed}:{publicPort}..."
+            );
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Parses connection data in format "IP:Port".
+    /// </summary>
+    private static bool TryParseConnectionData(string connectionData, out string ip, out int port) {
+        ip = string.Empty;
+        port = 0;
+
+        var parts = connectionData.Split(':');
+        if (parts.Length != 2)
+            return false;
+
+        ip = parts[0];
+        return int.TryParse(parts[1], out port);
+    }
+
+    /// <summary>
+    /// Safely disposes the hole-punch socket.
+    /// </summary>
+    private static void CleanupHolePunchSocket(Socket? socket) {
+        if (socket == null) {
+            return;
+        }
+
+        socket.Dispose();
+        HolePunchEncryptedTransport.HolePunchSocket = null;
+    }
+
     #endregion
 }
+
+#region Helper Structs
+
+/// <summary>
+/// Contains connection information for matchmaking lobbies.
+/// </summary>
+internal readonly struct ConnectionInfo {
+    public string PrimaryIp { get; }
+    public int PrimaryPort { get; }
+    public string? FallbackIp { get; }
+    public string FeedbackMessage { get; }
+
+    public ConnectionInfo(string primaryIp, int primaryPort, string? fallbackIp, string feedbackMessage) {
+        PrimaryIp = primaryIp;
+        PrimaryPort = primaryPort;
+        FallbackIp = fallbackIp;
+        FeedbackMessage = feedbackMessage;
+    }
+}
+
+#endregion

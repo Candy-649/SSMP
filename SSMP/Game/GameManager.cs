@@ -4,7 +4,6 @@ using SSMP.Game.Settings;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet;
 using SSMP.Networking.Server;
-using SSMP.Networking.Transport.UDP;
 using SSMP.Ui;
 using SSMP.Ui.Resources;
 using SSMP.Util;
@@ -24,6 +23,7 @@ internal class GameManager {
     /// The client manager instance for the mod.
     /// </summary>
     private readonly ClientManager _clientManager;
+
     /// <summary>
     /// The server manager instance for the mod.
     /// </summary>
@@ -37,8 +37,7 @@ internal class GameManager {
 
         var packetManager = new PacketManager();
 
-        var udpTransport = new UdpEncryptedTransport();
-        var netClient = new NetClient(packetManager, udpTransport);
+        var netClient = new NetClient(packetManager);
         var netServer = new NetServer(packetManager);
 
         var clientServerSettings = new ServerSettings();
@@ -77,9 +76,37 @@ internal class GameManager {
 
         TextureManager.LoadTextures();
 
+        // Initialize Steam if available
+        if (SteamManager.Initialize()) {
+            // Hook lobby cleanup to UI's stop request (explicit user action), NOT ServerShutdownEvent
+            // ServerShutdownEvent fires on server restarts too, which would prematurely clean up lobbies
+            _uiManager.RequestServerStopHostEvent += () => {
+                SteamManager.LeaveLobby();
+                // Also close MMS lobby registration if any (for public Steam lobbies)
+                _uiManager.ConnectInterface.MmsClient.CloseLobby();
+            };
+        }
+
         _uiManager.Initialize();
-        
         _serverManager.Initialize();
         _clientManager.Initialize(_serverManager);
+    }
+
+    /// <summary>
+    /// Shuts down the game manager and all its subsystems.
+    /// </summary>
+    public void Shutdown() {
+        Logging.Logger.Info("GameManager: Shutting down...");
+
+        // Stop client first to disconnect from any server
+        _clientManager.Disconnect();
+
+        // Stop server if hosting
+        _serverManager.Stop();
+        
+        // Clean up Steam if initialized
+        if (SteamManager.IsInitialized) {
+            SteamManager.Shutdown();
+        }
     }
 }

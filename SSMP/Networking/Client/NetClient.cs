@@ -62,17 +62,17 @@ internal class NetClient : INetClient {
     /// <summary>
     /// The encrypted transport instance for handling encrypted connections.
     /// </summary>
-    private readonly IEncryptedTransport _transport;
+    private IEncryptedTransport? _transport;
 
     /// <summary>
     /// Chunk sender instance for sending large amounts of data.
     /// </summary>
-    private readonly ClientChunkSender _chunkSender;
+    private readonly ChunkSender _chunkSender;
 
     /// <summary>
     /// Chunk receiver instance for receiving large amounts of data.
     /// </summary>
-    private readonly ClientChunkReceiver _chunkReceiver;
+    private readonly ChunkReceiver _chunkReceiver;
 
     /// <summary>
     /// The client connection manager responsible for handling sending and receiving connection data.
@@ -87,43 +87,42 @@ internal class NetClient : INetClient {
     /// <summary>
     /// Lock object for synchronizing connection state changes.
     /// </summary>
-    private readonly object _connectionLock = new object();
-
-
+    private readonly object _connectionLock = new();
 
     /// <summary>
-    /// Construct the net client with the given packet manager and encrypted transport.
+    /// Construct the net client with the given packet manager.
     /// </summary>
     /// <param name="packetManager">The packet manager instance.</param>
-    /// <param name="transport">The encrypted transport implementation to use for connections.</param>
-    public NetClient(PacketManager packetManager, IEncryptedTransport transport) {
+    public NetClient(PacketManager packetManager) {
         _packetManager = packetManager;
-        _transport = transport;
 
+        // Create initial update manager with default settings (will be recreated if needed in Connect)
         UpdateManager = new ClientUpdateManager();
 
-        _chunkSender = new ClientChunkSender(UpdateManager);
-        _chunkReceiver = new ClientChunkReceiver(UpdateManager);
+        // Create chunk sender/receiver with delegates to the update manager
+        _chunkSender = new ChunkSender(UpdateManager.SetSliceData);
+        _chunkReceiver = new ChunkReceiver(UpdateManager.SetSliceAckData);
         _connectionManager = new ClientConnectionManager(_packetManager, _chunkSender, _chunkReceiver);
 
-        _transport.DataReceivedEvent += OnReceiveData;
         _connectionManager.ServerInfoReceivedEvent += OnServerInfoReceived;
     }
 
     /// <summary>
     /// Starts establishing a connection with the given host on the given port.
     /// </summary>
-    /// <param name="address">The address of the host to connect to.</param>
-    /// <param name="port">The port of the host to connect to.</param>
-    /// <param name="username">The username of the client.</param>
-    /// <param name="authKey">The auth key of the client.</param>
+    /// <param name="address">The address to connect to.</param>
+    /// <param name="port">The port to connect to.</param>
+    /// <param name="username">The username to connect with.</param>
+    /// <param name="authKey">The authentication key to use.</param>
     /// <param name="addonData">A list of addon data that the client has.</param>
+    /// <param name="transport">The transport to use.</param>
     public void Connect(
         string address,
         int port,
         string username,
         string authKey,
-        List<AddonData> addonData
+        List<AddonData> addonData,
+        IEncryptedTransport transport
     ) {
         // Prevent multiple simultaneous connection attempts
         lock (_connectionLock) {
@@ -143,31 +142,39 @@ internal class NetClient : INetClient {
 
         // Start a new thread for establishing the connection, otherwise Unity will hang
         new Thread(() => {
-            try {
-                _transport.Connect(address, port);
+                try {
+                    _transport = transport;
+                    _transport.DataReceivedEvent += OnReceiveData;
+                    _transport.Connect(address, port);
 
-                UpdateManager.Transport = _transport;
-                UpdateManager.TimeoutEvent += OnConnectTimedOut;
-                UpdateManager.StartUpdates();
+                    UpdateManager.Transport = _transport;
+                    UpdateManager.Reset();
+                    UpdateManager.StartUpdates();
+                    _chunkSender.Start();
 
-                _chunkSender.Start();
-                _connectionManager.StartConnection(username, authKey, addonData);
-                
-            } catch (TlsTimeoutException) {
-                Logger.Info("DTLS connection timed out");
-                HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.TimedOut });
-            } catch (SocketException e) {
-                Logger.Error($"Failed to connect due to SocketException:\n{e}");
-                HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.SocketException });
-            } catch (Exception e) when (e is IOException) {
-                Logger.Error($"Failed to connect due to IOException:\n{e}");
-                HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.IOException });
-            } catch (Exception e) {
-                Logger.Error($"Unexpected error during connection:\n{e}");
-                HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.IOException });
+                    // Only UDP/HolePunch need timeout management (Steam has built-in connection tracking)
+                    if (_transport.RequiresCongestionManagement) {
+                        UpdateManager.TimeoutEvent += OnConnectTimedOut;
+                    }
+
+                    _connectionManager.StartConnection(username, authKey, addonData);
+                } catch (TlsTimeoutException) {
+                    Logger.Info("DTLS connection timed out");
+                    HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.TimedOut });
+                } catch (SocketException e) {
+                    Logger.Error($"Failed to connect due to SocketException:\n{e}");
+                    HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.SocketException });
+                } catch (Exception e) when (e is IOException) {
+                    Logger.Error($"Failed to connect due to IOException:\n{e}");
+                    HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.IOException });
+                } catch (Exception e) {
+                    Logger.Error($"Unexpected error during connection:\n{e}");
+                    HandleConnectFailed(new ConnectionFailedResult { Reason = ConnectionFailedReason.IOException });
+                }
             }
-        }) { IsBackground = true }.Start();
+        ) { IsBackground = true }.Start();
     }
+
 
     /// <summary>
     /// Disconnect from the current server.
@@ -181,7 +188,8 @@ internal class NetClient : INetClient {
     /// <summary>
     /// Internal disconnect implementation without locking (assumes caller holds lock).
     /// </summary>
-    /// <param name="shouldFireEvent">Whether to fire DisconnectEvent. Set to false when cleaning up an old connection before immediately starting a new one.</param>
+    /// <param name="shouldFireEvent">Whether to fire DisconnectEvent. Set to false when cleaning up an old connection
+    /// before immediately starting a new one.</param>
     private void InternalDisconnect(bool shouldFireEvent = true) {
         if (ConnectionStatus == ClientConnectionStatus.NotConnected) {
             return;
@@ -195,7 +203,11 @@ internal class NetClient : INetClient {
             UpdateManager.TimeoutEvent -= OnUpdateTimedOut;
             _chunkSender.Stop();
             _chunkReceiver.Reset();
-            _transport.Disconnect();
+
+            if (_transport != null) {
+                _transport.DataReceivedEvent -= OnReceiveData;
+                _transport.Disconnect();
+            }
         } catch (Exception e) {
             Logger.Error($"Error in NetClient.InternalDisconnect: {e}");
         }
@@ -212,12 +224,13 @@ internal class NetClient : INetClient {
         // This provides a consistent notification for observers to clean up resources
         if (shouldFireEvent && wasConnectedOrConnecting) {
             ThreadUtil.RunActionOnMainThread(() => {
-                try {
-                    DisconnectEvent?.Invoke();
-                } catch (Exception e) {
-                    Logger.Error($"Error in DisconnectEvent: {e}");
+                    try {
+                        DisconnectEvent?.Invoke();
+                    } catch (Exception e) {
+                        Logger.Error($"Error in DisconnectEvent: {e}");
+                    }
                 }
-            });
+            );
         }
     }
 
@@ -238,26 +251,25 @@ internal class NetClient : INetClient {
 
         foreach (var packet in packets) {
             try {
-                // Create a ClientUpdatePacket from the raw packet instance,
-                // and read the values into it
                 var clientUpdatePacket = new ClientUpdatePacket();
                 if (!clientUpdatePacket.ReadPacket(packet)) {
                     // If ReadPacket returns false, we received a malformed packet, which we simply ignore for now
                     continue;
                 }
 
+                // Route all transports through UpdateManager for sequence/ACK tracking
+                // UpdateManager will skip UDP-specific logic for Steam transports
                 UpdateManager.OnReceivePacket<ClientUpdatePacket, ClientUpdatePacketId>(clientUpdatePacket);
-
+                
                 // First check for slice or slice ack data and handle it separately by passing it onto either the chunk 
                 // sender or chunk receiver
                 var packetData = clientUpdatePacket.GetPacketData();
-                if (packetData.TryGetValue(ClientUpdatePacketId.Slice, out var sliceData)) {
-                    packetData.Remove(ClientUpdatePacketId.Slice);
+
+                if (packetData.Remove(ClientUpdatePacketId.Slice, out var sliceData)) {
                     _chunkReceiver.ProcessReceivedData((SliceData) sliceData);
                 }
 
-                if (packetData.TryGetValue(ClientUpdatePacketId.SliceAck, out var sliceAckData)) {
-                    packetData.Remove(ClientUpdatePacketId.SliceAck);
+                if (packetData.Remove(ClientUpdatePacketId.SliceAck, out var sliceAckData)) {
                     _chunkSender.ProcessReceivedData((SliceAckData) sliceAckData);
                 }
 
@@ -285,12 +297,13 @@ internal class NetClient : INetClient {
             }
 
             ThreadUtil.RunActionOnMainThread(() => {
-                try {
-                    ConnectEvent?.Invoke(serverInfo);
-                } catch (Exception e) {
-                    Logger.Error($"Error in ConnectEvent: {e}");
+                    try {
+                        ConnectEvent?.Invoke(serverInfo);
+                    } catch (Exception e) {
+                        Logger.Error($"Error in ConnectEvent: {e}");
+                    }
                 }
-            });
+            );
             return;
         }
 
@@ -300,7 +313,7 @@ internal class NetClient : INetClient {
                 Reason = ConnectionFailedReason.InvalidAddons,
                 AddonData = serverInfo.AddonData
             }
-            : (ConnectionFailedResult)new ConnectionFailedMessageResult {
+            : (ConnectionFailedResult) new ConnectionFailedMessageResult {
                 Reason = ConnectionFailedReason.Other,
                 Message = serverInfo.ConnectionRejectedMessage
             };
@@ -311,9 +324,11 @@ internal class NetClient : INetClient {
     /// <summary>
     /// Callback method for when the client connection fails.
     /// </summary>
-    private void OnConnectTimedOut() => HandleConnectFailed(new ConnectionFailedResult {
-        Reason = ConnectionFailedReason.TimedOut
-    });
+    private void OnConnectTimedOut() => HandleConnectFailed(
+        new ConnectionFailedResult {
+            Reason = ConnectionFailedReason.TimedOut
+        }
+    );
 
     /// <summary>
     /// Callback method for when the client times out while connected.
@@ -344,7 +359,8 @@ internal class NetClient : INetClient {
         if (addon.NetworkSender != null) {
             if (!(addon.NetworkSender is IClientAddonNetworkSender<TPacketId> addonNetworkSender)) {
                 throw new InvalidOperationException(
-                    "Cannot request network senders with differing generic parameters");
+                    "Cannot request network senders with differing generic parameters"
+                );
             }
 
             return addonNetworkSender;
@@ -389,7 +405,8 @@ internal class NetClient : INetClient {
             addon.NetworkReceiver = networkReceiver;
         } else if (addon.NetworkReceiver is not IClientAddonNetworkReceiver<TPacketId>) {
             throw new InvalidOperationException(
-                "Cannot request network receivers with differing generic parameters");
+                "Cannot request network receivers with differing generic parameters"
+            );
         }
 
         networkReceiver?.AssignAddonPacketInfo(packetInstantiator);
