@@ -228,7 +228,7 @@ internal class ClientManager : IClientManager {
 
         _playerData = new Dictionary<ushort, ClientPlayerData>();
 
-        _playerManager = new PlayerManager(serverSettings, _playerData);
+        _playerManager = new PlayerManager(serverSettings, netClient, _playerData);
         _animationManager = new AnimationManager(netClient, _playerManager, serverSettings, _playerData);
         _mapManager = new MapManager(netClient, serverSettings);
 
@@ -1209,10 +1209,6 @@ internal class ClientManager : IClientManager {
         if (!_netClient.IsConnected) {
             return;
         }
-
-        // Update all remote player interpolations in one centralized loop.
-        // We also pass the latest measured RTT so the interpolator can adapt to ping.
-        _playerManager.UpdateInterpolations(Time.deltaTime, _netClient.UpdateManager.AverageRtt);
 
         var heroTransform = HeroController.instance.transform;
 
