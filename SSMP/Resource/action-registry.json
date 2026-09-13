@@ -277,6 +277,9 @@
     "type": "FlingObjectsFromGlobalPoolTime"
   },
   {
+    "type": "SpawnObjectFromGlobalPoolOverTime"
+  },
+  {
     "type": "GetHero",
     "transfer_safe_setup": true
   },

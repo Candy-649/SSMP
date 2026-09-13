@@ -84,6 +84,79 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region SpawnObjectFromGlobalPoolOverTime
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SpawnObjectFromGlobalPoolOverTime action) {
+        // The spawns happen in OnUpdate, where no entity spawn is detected, so a prefab that is a registered entity
+        // would be duplicated on clients without being controlled. Leave those alone
+        var prefab = action.gameObject.Value;
+        return prefab != null && !IsObjectInRegistry(prefab);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(
+        EntityNetworkData? data,
+        SpawnObjectFromGlobalPoolOverTime action
+    ) {
+        // Spawning over time is ongoing behaviour rather than set-up, so there is nothing to do when initializing
+        if (data == null) {
+            return;
+        }
+
+        var coroutine = MonoBehaviourUtil.Instance.StartCoroutine(Behaviour());
+
+        new ActionInState {
+            Fsm = action.Fsm,
+            StateName = action.State.Name,
+            Coroutine = coroutine
+        }.Register();
+        return;
+
+        IEnumerator Behaviour() {
+            while (true) {
+                yield return new WaitForSeconds(action.frequency.Value);
+
+                var owner = action.Owner;
+                var prefab = action.gameObject.Value;
+                if (owner == null || prefab == null) {
+                    break;
+                }
+
+                // The action does not update while the FSM's object is inactive
+                if (!owner.activeInHierarchy) {
+                    continue;
+                }
+
+                var position = Vector3.zero;
+                var euler = Vector3.up;
+
+                var spawnPoint = action.spawnPoint.Value;
+                if (spawnPoint != null) {
+                    position = spawnPoint.transform.position;
+                    if (!action.position.IsNone) {
+                        position += action.position.Value;
+                    }
+
+                    euler = !action.rotation.IsNone ? action.rotation.Value : spawnPoint.transform.eulerAngles;
+                } else {
+                    if (!action.position.IsNone) {
+                        position = action.position.Value;
+                    }
+
+                    if (!action.rotation.IsNone) {
+                        euler = action.rotation.Value;
+                    }
+                }
+
+                var spawnedObject = prefab.Spawn(position, Quaternion.Euler(euler));
+                BlackThreadState.HandleDamagerSpawn(owner, spawnedObject);
+            }
+        }
+    }
+
+    #endregion
+
     #region FlingObjectsFromGlobalPool
 
     /// <summary>Builds network data from the FSM action.</summary>
