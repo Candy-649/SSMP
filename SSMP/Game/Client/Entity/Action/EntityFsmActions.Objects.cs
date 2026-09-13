@@ -122,45 +122,40 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, FireAtTarget action) {
-        var target = action.target;
+        // The hook runs after OnEnter, so the velocity including the random spread is already set. Sending that
+        // instead of the target position keeps clients from rolling their own spread
+        var selfGameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (selfGameObject == null || action.target.Value == null) {
+            return false;
+        }
 
-        var position = target.Value.transform.position;
-        data.Packet.Write(position.x);
-        data.Packet.Write(position.y);
+        var rigidBody = selfGameObject.GetComponent<Rigidbody2D>();
+        if (rigidBody == null) {
+            return false;
+        }
+
+        var velocity = rigidBody.velocity;
+        data.Packet.Write(velocity.x);
+        data.Packet.Write(velocity.y);
 
         return true;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, FireAtTarget action) {
-        var posX = data.Packet.ReadFloat();
-        var posY = data.Packet.ReadFloat();
+        var velocity = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
 
         var selfGameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (selfGameObject == null) {
             return;
         }
 
-        var selfPosition = selfGameObject.transform.position;
-
         var rigidBody = selfGameObject.GetComponent<Rigidbody2D>();
         if (rigidBody == null) {
             return;
         }
 
-        var num = Mathf.Atan2(
-            posY + action.position.Value.y - selfPosition.y,
-            posX + action.position.Value.x - selfPosition.x
-        ) * 57.295776f;
-
-        if (!action.spread.IsNone) {
-            num += Random.Range(-action.spread.Value, action.spread.Value);
-        }
-
-        rigidBody.velocity = new Vector2(
-            action.speed.Value * Mathf.Cos(num * ((float) System.Math.PI / 180f)),
-            action.speed.Value * Mathf.Sin(num * ((float) System.Math.PI / 180f))
-        );
+        rigidBody.velocity = velocity;
     }
 
     #endregion
