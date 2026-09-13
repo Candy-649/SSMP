@@ -1,3 +1,4 @@
+using System.Collections;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -291,6 +292,88 @@ internal static partial class EntityFsmActions {
             SetActiveRecursively(gameObject, action.activate.Value);
         } else {
             gameObject.SetActive(action.activate.Value);
+        }
+    }
+
+    #endregion
+
+    #region ActivateGameObjectDelay
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, ActivateGameObjectDelay action) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null || IsObjectInRegistry(gameObject)) {
+            return false;
+        }
+
+        data.Packet.Write(action.delay.Value);
+        data.Packet.Write(action.activate.Value);
+
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, ActivateGameObjectDelay action) {
+        float delay;
+        bool activate;
+        if (data == null) {
+            delay = action.delay.Value;
+            activate = action.activate.Value;
+        } else {
+            delay = data.Packet.ReadFloat();
+            activate = data.Packet.ReadBool();
+        }
+
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null) {
+            return;
+        }
+
+        var activated = false;
+        var initialActiveState = false;
+
+        if (delay > 0f) {
+            new ActionInState {
+                Fsm = action.Fsm,
+                StateName = action.State.Name,
+                Coroutine = MonoBehaviourUtil.Instance.StartCoroutine(Behaviour()),
+                ExitAction = ExitAction
+            }.Register();
+            return;
+        }
+
+        Activate();
+
+        if (action.resetOnExit) {
+            new ActionInState {
+                Fsm = action.Fsm,
+                StateName = action.State.Name,
+                ExitAction = ExitAction
+            }.Register();
+        }
+
+        return;
+
+        void Activate() {
+            if (gameObject == null) {
+                return;
+            }
+
+            initialActiveState = gameObject.activeSelf;
+            gameObject.SetActive(activate);
+            activated = true;
+        }
+
+        void ExitAction() {
+            // Like the action's OnExit, only an object that was actually toggled gets its previous state back
+            if (activated && action.resetOnExit && gameObject != null) {
+                gameObject.SetActive(initialActiveState);
+            }
+        }
+
+        IEnumerator Behaviour() {
+            yield return new WaitForSeconds(delay);
+            Activate();
         }
     }
 
