@@ -337,4 +337,78 @@ internal static partial class EntityFsmActions {
     }
 
     #endregion
+
+    #region PlayAudioEvent
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayAudioEvent action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, PlayAudioEvent action) {
+        // A one-shot sound is not state, so there is nothing to replay when initializing the entity
+        if (data == null) {
+            return;
+        }
+
+        new AudioEvent {
+            Clip = action.audioClip.Value as AudioClip,
+            PitchMin = action.pitchMin.Value,
+            PitchMax = action.pitchMax.Value,
+            Volume = action.volume.Value
+        }.SpawnAndPlayOneShot(GetAudioPlayerPrefab(action), GetAudioEventPosition(action), (System.Action) null);
+    }
+
+    #endregion
+
+    #region PlayAudioEventRandom
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayAudioEventRandom action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, PlayAudioEventRandom action) {
+        if (data == null) {
+            return;
+        }
+
+        var values = action.audioClips.Values;
+        if (values == null) {
+            return;
+        }
+
+        // The clip and pitch are picked locally, like for AudioPlayRandom
+        new AudioEventRandom {
+            Clips = System.Array.ConvertAll(values, value => value as AudioClip),
+            PitchMin = action.pitchMin.Value,
+            PitchMax = action.pitchMax.Value,
+            Volume = action.volume.Value
+        }.SpawnAndPlayOneShot(GetAudioPlayerPrefab(action), GetAudioEventPosition(action), (System.Action) null);
+    }
+
+    #endregion
+
+    /// <summary>
+    /// Gets the audio player prefab of a PlayAudioEvent action, or null for the default prefab the action falls
+    /// back to.
+    /// </summary>
+    private static AudioSource? GetAudioPlayerPrefab(PlayAudioEventBase action) {
+        return action.audioPlayerPrefab.IsNone ? null : action.audioPlayerPrefab.Value as AudioSource;
+    }
+
+    /// <summary>
+    /// Gets the position a PlayAudioEvent action plays at: its spawn position, offset by its spawn point if set.
+    /// </summary>
+    private static Vector3 GetAudioEventPosition(PlayAudioEventBase action) {
+        var position = action.spawnPosition.Value;
+        var spawnPoint = FSMUtility.GetSafe(action.spawnPoint, action);
+        if (spawnPoint != null) {
+            position += spawnPoint.transform.position;
+        }
+
+        return position;
+    }
 }
