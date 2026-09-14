@@ -117,6 +117,11 @@ internal class ClientManager : IClientManager {
     private readonly ArenaCoop _arenaCoop;
 
     /// <summary>
+    /// The boss room co-op instance.
+    /// </summary>
+    private readonly BossRoomCoop _bossRoomCoop;
+
+    /// <summary>
     /// The FSM patcher instance.
     /// </summary>
     private readonly FsmPatcher _fsmPatcher;
@@ -258,6 +263,7 @@ internal class ClientManager : IClientManager {
         _benchCoop = new BenchCoop(netClient, _playerData, _saveManager);
         _enemyHealthCoop = new EnemyHealthCoop(_playerData);
         _arenaCoop = new ArenaCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
+        _bossRoomCoop = new BossRoomCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -330,6 +336,7 @@ internal class ClientManager : IClientManager {
         _benchCoop.RegisterHooks();
         _enemyHealthCoop.RegisterHooks();
         _arenaCoop.RegisterHooks();
+        _bossRoomCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
         if (_fullSynchronisation) {
@@ -361,6 +368,7 @@ internal class ClientManager : IClientManager {
         _benchCoop.DeregisterHooks();
         _enemyHealthCoop.DeregisterHooks();
         _arenaCoop.DeregisterHooks();
+        _bossRoomCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
         if (_fullSynchronisation) {
@@ -447,6 +455,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.BattleSceneUpdate,
             _arenaCoop.OnBattleSceneUpdate
         );
+        _packetManager.RegisterClientUpdatePacketHandler<BossRoomUpdate>(
+            ClientUpdatePacketId.BossRoomUpdate,
+            _bossRoomCoop.OnBossRoomUpdate
+        );
 
         // Register packet handlers related to full synchronisation
         if (_fullSynchronisation) {
@@ -490,6 +502,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerSetting);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BattleSceneUpdate);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BossRoomUpdate);
 
         if (_fullSynchronisation) {
             _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);

@@ -754,7 +754,7 @@ internal class ArenaCoop {
     /// </summary>
     private ArenaState GetState(BattleScene battleScene) {
         if (!_arenas.TryGetValue(battleScene, out var state)) {
-            state = new ArenaState(GetPath(battleScene.transform));
+            state = new ArenaState(ScenePath.Get(battleScene.transform));
             _arenas[battleScene] = state;
         }
 
@@ -779,47 +779,6 @@ internal class ArenaCoop {
         }
 
         return null;
-    }
-
-    /// <summary>
-    /// Gets the path of an object in its scene, which is the same in the games of all players.
-    /// </summary>
-    private static string GetPath(Transform transform) {
-        var names = new List<string>();
-        for (var current = transform; current != null; current = current.parent) {
-            names.Add(GetIndexedName(current));
-        }
-
-        names.Reverse();
-        return string.Join("/", names);
-    }
-
-    /// <summary>
-    /// Gets the name of an object, followed by the number of earlier siblings with the same name if there are any, so
-    /// that paths stay unique.
-    /// </summary>
-    private static string GetIndexedName(Transform transform) {
-        var index = 0;
-        var parent = transform.parent;
-        if (parent != null) {
-            for (var i = 0; i < transform.GetSiblingIndex(); i++) {
-                if (parent.GetChild(i).name == transform.name) {
-                    index++;
-                }
-            }
-        } else {
-            foreach (var root in transform.gameObject.scene.GetRootGameObjects()) {
-                if (root.transform == transform) {
-                    break;
-                }
-
-                if (root.name == transform.name) {
-                    index++;
-                }
-            }
-        }
-
-        return index == 0 ? transform.name : $"{transform.name} [{index}]";
     }
 
     /// <summary>

@@ -382,6 +382,17 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
+    /// Add something that happened in a room whose gates are closed by an FSM to the current packet.
+    /// </summary>
+    /// <param name="update">What happened in the room.</param>
+    public void SetBossRoomUpdate(BossRoomUpdate update) {
+        lock (Lock) {
+            var bossRoomUpdateCollection = GetOrCreateCollection<BossRoomUpdate>(ServerUpdatePacketId.BossRoomUpdate);
+            bossRoomUpdateCollection.DataInstances.Add(update);
+        }
+    }
+
+    /// <summary>
     /// Set a chat message in the current packet.
     /// </summary>
     /// <param name="message">The string message.</param>

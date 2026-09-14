@@ -108,4 +108,9 @@ internal enum ClientUpdatePacketId {
     /// The state of an arena in the current scene changed, or a player asks the scene host to start its battle.
     /// </summary>
     BattleSceneUpdate = 20,
+
+    /// <summary>
+    /// Something happened in a room whose gates are closed by an FSM, such as a boss room.
+    /// </summary>
+    BossRoomUpdate = 21,
 }

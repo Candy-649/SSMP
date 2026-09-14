@@ -488,6 +488,27 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Add something that happened in a room of a player in the same scene to the current packet.
+    /// </summary>
+    /// <param name="update">What happened in the room.</param>
+    public void AddBossRoomUpdateData(BossRoomUpdate update) {
+        lock (Lock) {
+            var bossRoomUpdateCollection = GetOrCreateCollection<BossRoomUpdate>(ClientUpdatePacketId.BossRoomUpdate);
+            bossRoomUpdateCollection.DataInstances.Add(
+                new BossRoomUpdate {
+                    SceneName = update.SceneName,
+                    Kind = update.Kind,
+                    Path = update.Path,
+                    FsmName = update.FsmName,
+                    FromState = update.FromState,
+                    ToState = update.ToState,
+                    EventName = update.EventName
+                }
+            );
+        }
+    }
+
+    /// <summary>
     /// Add a player setting update to the current packet for the receiving player.
     /// </summary>
     /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.

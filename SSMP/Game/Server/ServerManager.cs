@@ -345,6 +345,10 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.BattleSceneUpdate,
             OnBattleSceneUpdate
         );
+        _packetManager.RegisterServerUpdatePacketHandler<BossRoomUpdate>(
+            ServerUpdatePacketId.BossRoomUpdate,
+            OnBossRoomUpdate
+        );
         _packetManager.RegisterServerUpdatePacketHandler<ChatMessage>(
             ServerUpdatePacketId.ChatMessage,
             OnChatMessage
@@ -392,6 +396,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDeath);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BattleSceneUpdate);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ChatMessage);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ServerSettings);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerSetting);
@@ -1333,6 +1338,25 @@ internal abstract class ServerManager : IServerManager {
             id,
             update.SceneName,
             otherId => _netServer.GetUpdateManagerForClient(otherId)?.AddBattleSceneUpdateData(update)
+        );
+    }
+
+    /// <summary>
+    /// Callback method for when a player sends something that happened in a room whose gates are closed by an FSM. It
+    /// goes to the other players in the scene of the room.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="update">The BossRoomUpdate packet data.</param>
+    private void OnBossRoomUpdate(ushort id, BossRoomUpdate update) {
+        if (!_playerData.ContainsKey(id)) {
+            Logger.Warn($"Received BossRoomUpdate data, but player with ID {id} is not in mapping");
+            return;
+        }
+
+        SendDataInSameScene(
+            id,
+            update.SceneName,
+            otherId => _netServer.GetUpdateManagerForClient(otherId)?.AddBossRoomUpdateData(update)
         );
     }
 

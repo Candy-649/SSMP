@@ -179,7 +179,7 @@ internal static partial class EntityFsmActions {
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventByName action) {
         if (action.delay.Value < 1.0 / 1000.0) {
-            action.Fsm.Event(action.eventTarget, action.sendEvent.Value);
+            BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
         } else {
             // We need to delay the event sending ourselves, because the FSM that we are executing in is not enabled
             // The usual implementation of SendEventByName will thus not work
@@ -188,7 +188,7 @@ internal static partial class EntityFsmActions {
             IEnumerator DelayEvent() {
                 yield return new WaitForSeconds(action.delay.Value);
 
-                action.Fsm.Event(action.eventTarget, action.sendEvent.Value);
+                BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
             }
         }
     }
@@ -205,7 +205,7 @@ internal static partial class EntityFsmActions {
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventByNameV2 action) {
         if (action.delay.Value < 1.0 / 1000.0) {
-            action.Fsm.Event(action.eventTarget, action.sendEvent.Value);
+            BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
         } else {
             // We need to delay the event sending ourselves, because the FSM that we are executing in is not enabled
             // The usual implementation of SendEventByNameV2 will thus not work
@@ -214,7 +214,7 @@ internal static partial class EntityFsmActions {
             IEnumerator DelayEvent() {
                 yield return new WaitForSeconds(action.delay.Value);
 
-                action.Fsm.Event(action.eventTarget, action.sendEvent.Value);
+                BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
             }
         }
     }

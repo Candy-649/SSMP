@@ -51,6 +51,8 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new PacketDataCollection<GenericClientData>();
             case ClientUpdatePacketId.BattleSceneUpdate:
                 return new PacketDataCollection<BattleSceneUpdate>();
+            case ClientUpdatePacketId.BossRoomUpdate:
+                return new PacketDataCollection<BossRoomUpdate>();
             default:
                 return new EmptyData();
         }
