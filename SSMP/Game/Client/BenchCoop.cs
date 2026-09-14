@@ -9,6 +9,7 @@ using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client;
@@ -17,8 +18,9 @@ namespace SSMP.Game.Client;
 /// Co-op rules for resting at benches.
 /// When a player rests at a bench or dies, semi-persistent objects such as enemies respawn for every player. A room
 /// that a player is in at that moment keeps its state until it is loaded again, so enemies that are fighting a player
-/// don't respawn around them. Players who sit on the same bench take opposite sides of it: the host sits on the right
-/// and other players on the left.
+/// don't respawn around them. Players who sit on the same bench take opposite sides of it: while other players are
+/// connected, the host sits right of the seat and other players left of it, whether they sit down, sit down without
+/// the tween to the seat, or wake up on the bench.
 /// </summary>
 internal class BenchCoop {
     /// <summary>
@@ -37,10 +39,29 @@ internal class BenchCoop {
     private const string SitStateName = "Start Rest";
 
     /// <summary>
+    /// State of the bench FSM that makes the hero sit down where they stand, which the FSM picks instead of
+    /// <see cref="SitStateName"/> with its NO TWEEN event.
+    /// </summary>
+    private const string SitNoTweenStateName = "Start Rest NoTween";
+
+    /// <summary>
     /// How far, in units, each player sits from the middle of the seat while other players are connected. This is a
     /// guess that keeps two sitting Hornets apart on a normal bench, to be tuned in game.
     /// </summary>
     private const float SeatOffset = 0.75f;
+
+    /// <summary>
+    /// The largest distance, in units, between the hero and the position they were moved to on waking up for the hero
+    /// to count as not placed on the bench again.
+    /// </summary>
+    private const float MovedPositionTolerance = 0.01f;
+
+    /// <summary>
+    /// States of the bench FSM that make the hero wake up sitting on the bench, after the game placed them on it as the
+    /// respawn marker. The first runs when the scene starts with the hero on the bench and the second when the hero
+    /// respawns there, for example after dying, loading a save or connecting to a server.
+    /// </summary>
+    private static readonly string[] WakeUpStateNames = ["Init Resting", "Init Resting 2"];
 
     /// <summary>
     /// Reflected field with the scene data of <see cref="global::GameManager"/>.
@@ -70,14 +91,30 @@ internal class BenchCoop {
     private readonly SaveManager _saveManager;
 
     /// <summary>
+    /// The X position that the hero was moved to on waking up, per bench object instance ID. Both wake-up states can
+    /// run for one wake-up, and the hero is only moved again if the game placed them on the bench again in between.
+    /// </summary>
+    private readonly Dictionary<int, float> _wakeUpPositions = new();
+
+    /// <summary>
     /// Hook for sharing semi-persistent resets with other players.
     /// </summary>
     private Hook? _resetSemiPersistentItemsHook;
 
     /// <summary>
-    /// Hook for moving the hero to their side of the bench.
+    /// Hook for moving the seat that the hero tweens to towards their side of the bench.
     /// </summary>
     private Hook? _moveToEnterHook;
+
+    /// <summary>
+    /// Hook for moving the hero to their side of the bench when they wake up on it.
+    /// </summary>
+    private Hook? _restBenchHelperStateEnterHook;
+
+    /// <summary>
+    /// Hook for moving the hero to their side of the bench when they sit down without the tween.
+    /// </summary>
+    private Hook? _vector3AddEnterHook;
 
     public BenchCoop(NetClient netClient, Dictionary<ushort, ClientPlayerData> playerData, SaveManager saveManager) {
         _netClient = netClient;
@@ -89,14 +126,30 @@ internal class BenchCoop {
     /// Registers the hooks for bench co-op.
     /// </summary>
     public void RegisterHooks() {
-        _resetSemiPersistentItemsHook = CreateHook(
-            typeof(global::GameManager).GetMethod("ResetSemiPersistentItems", InstanceFlags),
-            new Action<Action<global::GameManager>, global::GameManager>(OnResetSemiPersistentItems)
-        );
-        _moveToEnterHook = CreateHook(
-            typeof(iTweenMoveTo).GetMethod("OnEnter", InstanceFlags),
+        var resetMethod = typeof(global::GameManager).GetMethod("ResetSemiPersistentItems", InstanceFlags);
+        if (resetMethod == null) {
+            Logger.Error("Could not find GameManager#ResetSemiPersistentItems; hook was not registered");
+        } else {
+            _resetSemiPersistentItemsHook = new Hook(
+                resetMethod,
+                new Action<Action<global::GameManager>, global::GameManager>(OnResetSemiPersistentItems)
+            );
+        }
+
+        _moveToEnterHook = CreateOnEnterHook(
+            typeof(iTweenMoveTo),
             new Action<Action<iTweenMoveTo>, iTweenMoveTo>(OnMoveToEnter)
         );
+        _restBenchHelperStateEnterHook = CreateOnEnterHook(
+            typeof(RestBenchHelperState),
+            new Action<Action<RestBenchHelperState>, RestBenchHelperState>(OnRestBenchHelperStateEnter)
+        );
+        _vector3AddEnterHook = CreateOnEnterHook(
+            typeof(Vector3Add),
+            new Action<Action<Vector3Add>, Vector3Add>(OnVector3AddEnter)
+        );
+
+        SceneManager.activeSceneChanged += OnActiveSceneChanged;
     }
 
     /// <summary>
@@ -108,6 +161,15 @@ internal class BenchCoop {
 
         _moveToEnterHook?.Dispose();
         _moveToEnterHook = null;
+
+        _restBenchHelperStateEnterHook?.Dispose();
+        _restBenchHelperStateEnterHook = null;
+
+        _vector3AddEnterHook?.Dispose();
+        _vector3AddEnterHook = null;
+
+        SceneManager.activeSceneChanged -= OnActiveSceneChanged;
+        _wakeUpPositions.Clear();
     }
 
     /// <summary>
@@ -129,15 +191,24 @@ internal class BenchCoop {
     }
 
     /// <summary>
-    /// Creates a hook, logging an error instead of throwing if the method does not exist.
+    /// Creates a hook on the OnEnter method of an FSM action type. The action type must declare the method itself,
+    /// otherwise the hook would change the OnEnter of every action that inherits it.
     /// </summary>
-    private static Hook? CreateHook(MethodInfo? method, Delegate detour) {
-        if (method == null) {
-            Logger.Error($"Could not find the method for {detour.Method.Name}; hook was not registered");
+    private static Hook? CreateOnEnterHook(Type actionType, Delegate detour) {
+        var method = actionType.GetMethod("OnEnter", InstanceFlags);
+        if (method == null || method.DeclaringType != actionType) {
+            Logger.Error($"{actionType.Name} does not declare OnEnter; hook was not registered");
             return null;
         }
 
         return new Hook(method, detour);
+    }
+
+    /// <summary>
+    /// Forgets the wake-up positions of the benches in the previous scene.
+    /// </summary>
+    private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
+        _wakeUpPositions.Clear();
     }
 
     /// <summary>
@@ -186,24 +257,102 @@ internal class BenchCoop {
     }
 
     /// <summary>
-    /// Moves the seat that the bench FSM tweens the hero to towards the local player's side of the bench while other
-    /// players are connected. The target is only changed for the call, so the FSM's variables stay untouched.
+    /// Moves the seat that the bench FSM tweens the hero to towards the local player's side of the bench. The target is
+    /// only changed for the call, so the FSM's variables stay untouched.
     /// </summary>
     private void OnMoveToEnter(Action<iTweenMoveTo> orig, iTweenMoveTo self) {
-        if (_playerData.Count == 0 || self.Fsm?.Name != BenchFsmName || self.State?.Name != SitStateName) {
+        if (!ShouldUseSides() || !IsBenchState(self, SitStateName)) {
             orig(self);
             return;
         }
 
-        var offset = _saveManager.IsHostingServer ? SeatOffset : -SeatOffset;
         var originalPosition = self.vectorPosition;
         var basePosition = originalPosition == null || originalPosition.IsNone ? Vector3.zero : originalPosition.Value;
 
-        self.vectorPosition = new FsmVector3 { Value = basePosition + new Vector3(offset, 0f, 0f) };
+        self.vectorPosition = new FsmVector3 { Value = basePosition + new Vector3(GetSeatOffset(), 0f, 0f) };
         try {
             orig(self);
         } finally {
             self.vectorPosition = originalPosition;
+        }
+    }
+
+    /// <summary>
+    /// Moves the hero to their side of the bench when they wake up sitting on it. The game places the hero in the
+    /// middle of the seat as the bench's respawn marker before the wake-up states run.
+    /// </summary>
+    private void OnRestBenchHelperStateEnter(Action<RestBenchHelperState> orig, RestBenchHelperState self) {
+        orig(self);
+
+        var hero = HeroController.instance;
+        var bench = self.Fsm?.GameObject;
+        if (!ShouldUseSides() || hero == null || bench == null || !IsBenchState(self, WakeUpStateNames)) {
+            return;
+        }
+
+        var benchId = bench.GetInstanceID();
+        if (_wakeUpPositions.TryGetValue(benchId, out var movedX) &&
+            Mathf.Abs(hero.transform.position.x - movedX) <= MovedPositionTolerance) {
+            return;
+        }
+
+        MoveHero(hero, GetSeatOffset());
+        _wakeUpPositions[benchId] = hero.transform.position.x;
+    }
+
+    /// <summary>
+    /// Moves the hero towards their side when they sit down without the tween, after the bench FSM snapped them to
+    /// where they stand.
+    /// </summary>
+    private void OnVector3AddEnter(Action<Vector3Add> orig, Vector3Add self) {
+        orig(self);
+
+        var hero = HeroController.instance;
+        if (!ShouldUseSides() || hero == null || !IsBenchState(self, SitNoTweenStateName)) {
+            return;
+        }
+
+        MoveHero(hero, GetSeatOffset());
+    }
+
+    /// <summary>
+    /// Whether players sit on sides of benches, which they do while other players are connected.
+    /// </summary>
+    private bool ShouldUseSides() {
+        return _playerData.Count > 0;
+    }
+
+    /// <summary>
+    /// Gets how far the local player sits from the middle of the seat: to the right for the host and to the left for
+    /// other players.
+    /// </summary>
+    private float GetSeatOffset() {
+        return _saveManager.IsHostingServer ? SeatOffset : -SeatOffset;
+    }
+
+    /// <summary>
+    /// Checks whether an action runs in one of the given states of the bench FSM.
+    /// </summary>
+    private static bool IsBenchState(FsmStateAction action, params string[] stateNames) {
+        if (action.Fsm?.Name != BenchFsmName) {
+            return false;
+        }
+
+        var stateName = action.State?.Name;
+        return stateName != null && Array.IndexOf(stateNames, stateName) >= 0;
+    }
+
+    /// <summary>
+    /// Moves the hero sideways, together with their rigidbody.
+    /// </summary>
+    private static void MoveHero(HeroController hero, float offset) {
+        var position = hero.transform.position;
+        position.x += offset;
+        hero.transform.position = position;
+
+        var body = hero.GetComponent<Rigidbody2D>();
+        if (body != null) {
+            body.position = position;
         }
     }
 }
