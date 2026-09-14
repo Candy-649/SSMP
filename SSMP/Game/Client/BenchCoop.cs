@@ -45,10 +45,12 @@ internal class BenchCoop {
     private const string SitNoTweenStateName = "Start Rest NoTween";
 
     /// <summary>
-    /// How far, in units, each player sits from the middle of the seat while other players are connected. This is a
-    /// guess that keeps two sitting Hornets apart on a normal bench, to be tuned in game.
+    /// How far, in units, each player sits from the middle of the seat while other players are connected. Hornet's
+    /// sitting sprites are drawn on a canvas about 3.2 units wide. Her trimmed needolin sitting sprites are 1.5 to 2.3
+    /// units wide, which gives her real width, so two Hornets whose centres are 2 units apart barely touch. The bench
+    /// lengths are unmeasured, so this still needs checking in game.
     /// </summary>
-    private const float SeatOffset = 0.75f;
+    private const float SeatOffset = 1f;
 
     /// <summary>
     /// The largest distance, in units, between the hero and the position they were moved to on waking up for the hero
