@@ -107,6 +107,11 @@ internal class ClientManager : IClientManager {
     private readonly BenchCoop _benchCoop;
 
     /// <summary>
+    /// The enemy health co-op instance.
+    /// </summary>
+    private readonly EnemyHealthCoop _enemyHealthCoop;
+
+    /// <summary>
     /// The FSM patcher instance.
     /// </summary>
     private readonly FsmPatcher _fsmPatcher;
@@ -246,6 +251,7 @@ internal class ClientManager : IClientManager {
         _pauseManager = new PauseManager(netClient);
         _gamePatcher = new GamePatcher(netClient, _entityManager);
         _benchCoop = new BenchCoop(netClient, _playerData, _saveManager);
+        _enemyHealthCoop = new EnemyHealthCoop(_playerData);
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -316,6 +322,7 @@ internal class ClientManager : IClientManager {
         _pauseManager.RegisterHooks();
         _gamePatcher.RegisterHooks();
         _benchCoop.RegisterHooks();
+        _enemyHealthCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
         if (_fullSynchronisation) {
@@ -345,6 +352,7 @@ internal class ClientManager : IClientManager {
         _pauseManager.DeregisterHooks();
         _gamePatcher.DeregisterHooks();
         _benchCoop.DeregisterHooks();
+        _enemyHealthCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
         if (_fullSynchronisation) {
