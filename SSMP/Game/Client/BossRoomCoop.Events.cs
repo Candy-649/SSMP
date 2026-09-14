@@ -42,6 +42,11 @@ internal partial class BossRoomCoop {
     private const float RoomAnalysisInterval = 1f;
 
     /// <summary>
+    /// How often, in seconds, the same event of a boss room may be passed on to the scene host.
+    /// </summary>
+    private const float ForwardInterval = 0.5f;
+
+    /// <summary>
     /// The event that states send to themselves when their actions finish.
     /// </summary>
     private const string FinishedEventName = "FINISHED";
@@ -50,6 +55,11 @@ internal partial class BossRoomCoop {
     /// The name of the action that shows the title of a boss when its fight starts.
     /// </summary>
     private const string BossTitleActionName = "DisplayBossTitle";
+
+    /// <summary>
+    /// The prefix of the names of actions that run another FSM inside a state, whose events come back to the state.
+    /// </summary>
+    private const string SubFsmActionPrefix = "RunFSM";
 
     /// <summary>
     /// Prefixes of the names of actions that notice where players are, whose events players cause.
@@ -90,6 +100,18 @@ internal partial class BossRoomCoop {
     private Vector2? _forwardedAnchor;
 
     /// <summary>
+    /// When each event of a boss room may be passed on to the scene host again, in unscaled seconds, by the path of the
+    /// room and the name of the event.
+    /// </summary>
+    private readonly Dictionary<string, float> _nextForwardTimes = new();
+
+    /// <summary>
+    /// When the local player may be told again that an event they passed on waits for other players, in unscaled
+    /// seconds.
+    /// </summary>
+    private float _nextForwardNoticeTime;
+
+    /// <summary>
     /// Registers the hooks for boss rooms that start from events.
     /// </summary>
     private void RegisterEventHooks() {
@@ -109,7 +131,7 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Passes events that start a fight on to the scene host, when an object of the local player sends them to other
-    /// objects, since bosses only move for the scene host.
+    /// objects before the fight began, since bosses only move for the scene host.
     /// </summary>
     private void OnFsmEvent(
         Action<Fsm, FsmEventTarget, FsmEvent> orig,
@@ -125,12 +147,29 @@ internal partial class BossRoomCoop {
         }
 
         var room = GetBossRoom(self);
-        if (room == null || !room.FightEvents.Contains(eventName) || GetInfo(self).IsEntity) {
+        if (room == null || room.FightBegan || !room.FightEvents.Contains(eventName) || GetInfo(self).IsEntity) {
             return;
         }
 
+        // Objects may send an event every frame
+        var path = ScenePath.Get(room.Root);
+        var key = path + "\n" + eventName;
+        if (_nextForwardTimes.TryGetValue(key, out var nextForwardTime) && Time.unscaledTime < nextForwardTime) {
+            return;
+        }
+
+        _nextForwardTimes[key] = Time.unscaledTime + ForwardInterval;
         Logger.Info($"Passing event '{eventName}' of '{GetPath(self)}' on to the scene host");
-        Send(BossRoomUpdateKind.RoomEvent, ScenePath.Get(room.Root), "", "", "", eventName);
+        Send(BossRoomUpdateKind.RoomEvent, path, "", "", "", eventName);
+
+        // The scene host holds the event for its bosses, so the local player wouldn't know why nothing happens, unless an
+        // object of the room already waits here
+        if (!room.Started && Time.unscaledTime >= _nextForwardNoticeTime &&
+            !_heldEventStarts.Keys.Any(fsm => GetBossRoom(fsm) == room) &&
+            !AreAllInRoom(GetRoomShape(room, GetLocalAnchor(room, self)))) {
+            _nextForwardNoticeTime = Time.unscaledTime + NoticeInterval;
+            UiManager.InternalChatBox.AddMessage(WaitingMessage);
+        }
     }
 
     /// <summary>
@@ -147,7 +186,7 @@ internal partial class BossRoomCoop {
         }
 
         var room = GetBossRoom(rootObject.transform);
-        if (room.Started) {
+        if (room.FightBegan) {
             return;
         }
 
@@ -183,7 +222,7 @@ internal partial class BossRoomCoop {
         }
 
         var room = GetBossRoom(fsm);
-        if (room == null || room.Started || !room.FightEvents.Contains(eventName)) {
+        if (room == null || room.Started || !room.StartEventNames.Contains(eventName)) {
             return false;
         }
 
@@ -248,13 +287,34 @@ internal partial class BossRoomCoop {
             }
 
             _heldEventStarts.Remove(fsm);
-            if (GetBossRoom(fsm) is { } room) {
-                room.Started = true;
-            }
-
+            MarkRoomStarted(fsm);
             RestoreHero(held);
             Logger.Info($"All players are in the room of '{GetPath(fsm)}', continuing with '{held.EventName}'");
             fsm.Event(held.EventName);
+        }
+    }
+
+    /// <summary>
+    /// Remembers that the fight of the boss room of an FSM began, if the FSM went into a state that closes gates or
+    /// shows the title of a boss. Events don't wait for players anymore after that, and aren't passed on either.
+    /// </summary>
+    private void MarkFightBegan(Fsm fsm, string stateName) {
+        if (GetBossRoom(fsm) is not { FightBegan: false } room ||
+            !room.BaseFightStates.TryGetValue(fsm, out var baseFightStates) || !baseFightStates.Contains(stateName)) {
+            return;
+        }
+
+        room.FightBegan = true;
+        room.Started = true;
+    }
+
+    /// <summary>
+    /// Remembers that the boss room of an FSM started, like when its gates close, after which events don't wait for
+    /// players anymore.
+    /// </summary>
+    private void MarkRoomStarted(Fsm fsm) {
+        if (GetBossRoom(fsm) is { } room) {
+            room.Started = true;
         }
     }
 
@@ -402,7 +462,7 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether an event in a state of an FSM of a boss room starts its fight, while the fight didn't start yet.
+    /// Whether an event in a state of an FSM of a boss room starts its fight, while the FSM waits for its fight.
     /// </summary>
     private static bool IsEventStart(BossRoom room, Fsm fsm, FsmState state, string eventName) {
         if (!room.EventStarts.TryGetValue(fsm, out var starts) || starts.Count == 0) {
@@ -415,11 +475,20 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Whether an event is a reaction to fighting, like taking damage or being stunned, which never waits: a player who
+    /// attacks a boss already started its fight.
+    /// </summary>
+    private static bool IsCombatEvent(string eventName) {
+        return eventName.Contains("DAMAGE") || eventName.Contains("STUN") || eventName.Contains("PARRY") ||
+               eventName == "BLOCKED HIT";
+    }
+
+    /// <summary>
     /// Whether an action in a state that notices where players are sends the given event.
     /// </summary>
     private static bool IsDetectionEvent(FsmState state, string eventName) {
         foreach (var action in state.Actions ?? []) {
-            if (!IsDetectionAction(action)) {
+            if (action == null || !action.Enabled || !IsDetectionAction(action)) {
                 continue;
             }
 
@@ -442,7 +511,16 @@ internal partial class BossRoomCoop {
         }
 
         var name = action.GetType().Name;
-        return DetectionActionPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal));
+        if (!DetectionActionPrefixes.Any(prefix => name.StartsWith(prefix, StringComparison.Ordinal))) {
+            return false;
+        }
+
+        // Position checks of the object itself, like whether it landed, don't notice players
+        return (!name.StartsWith("CheckXPosition", StringComparison.Ordinal) &&
+                !name.StartsWith("CheckYPosition", StringComparison.Ordinal)) ||
+               GetActionField(action, "gameObject") is not FsmOwnerDefault {
+                   OwnerOption: OwnerDefaultOption.UseOwner
+               };
     }
 
     /// <summary>
@@ -574,8 +652,10 @@ internal partial class BossRoomCoop {
         }
 
         room.FightEvents.Clear();
+        room.StartEventNames.Clear();
         room.EventStarts.Clear();
         room.PreFightStates.Clear();
+        room.BaseFightStates.Clear();
 
         // Fights start in states that close gates or show the title of a boss, and in states that send events that
         // start fights in other objects of the room
@@ -583,8 +663,8 @@ internal partial class BossRoomCoop {
             var changed = false;
             foreach (var graph in graphs) {
                 changed |= graph.AddSendersOf(room.FightEvents);
-                graph.UpdateLeadingStates();
-                foreach (var eventName in graph.GetStartEvents()) {
+                graph.UpdateStates();
+                foreach (var eventName in graph.GetFightEvents()) {
                     changed |= room.FightEvents.Add(eventName);
                 }
             }
@@ -595,14 +675,21 @@ internal partial class BossRoomCoop {
         }
 
         foreach (var graph in graphs) {
-            var preFightStates = graph.GetPreFightStates();
-            room.PreFightStates[graph.Fsm] = preFightStates;
-            room.EventStarts[graph.Fsm] = graph.GetEventStarts(preFightStates);
+            graph.AddSendersOf(room.FightEvents);
+            graph.UpdateStates();
+            room.PreFightStates[graph.Fsm] = graph.PreFightStates;
+            room.BaseFightStates[graph.Fsm] = graph.BaseFightStates;
+
+            var starts = graph.GetEventStarts();
+            room.EventStarts[graph.Fsm] = starts;
+            foreach (var key in starts) {
+                room.StartEventNames.Add(key[(key.IndexOf('\n') + 1)..]);
+            }
         }
 
         Logger.Info(
             $"Boss room '{ScenePath.Get(room.Root)}': {room.LockAreas.Count} camera locks, " +
-            $"{room.GateColliders.Count} gate colliders, fights start with: {string.Join(", ", room.FightEvents)}"
+            $"{room.GateColliders.Count} gate colliders, fights start with: {string.Join(", ", room.StartEventNames)}"
         );
     }
 
@@ -615,6 +702,7 @@ internal partial class BossRoomCoop {
         _heldEventStarts.Clear();
         _bossRooms.Clear();
         _fsmBossRooms.Clear();
+        _nextForwardTimes.Clear();
         if (heldEventStarts.Count == 0) {
             return;
         }
@@ -652,9 +740,15 @@ internal partial class BossRoomCoop {
         public readonly List<Collider2D> GateColliders = [];
 
         /// <summary>
-        /// The names of the events that start the fight of the room in one of its objects.
+        /// The names of the events that start the fight when an object of the room receives them while it waits, which
+        /// makes the objects that send them start the fight too.
         /// </summary>
         public readonly HashSet<string> FightEvents = [];
+
+        /// <summary>
+        /// The names of all events that start the fight in one of the objects of the room.
+        /// </summary>
+        public readonly HashSet<string> StartEventNames = [];
 
         /// <summary>
         /// The transitions of each FSM of the room that start its fight.
@@ -662,9 +756,14 @@ internal partial class BossRoomCoop {
         public readonly Dictionary<Fsm, HashSet<string>> EventStarts = new();
 
         /// <summary>
-        /// The states of each FSM of the room before its fight starts.
+        /// The states of each FSM of the room in which it waits for its fight.
         /// </summary>
         public readonly Dictionary<Fsm, HashSet<string>> PreFightStates = new();
+
+        /// <summary>
+        /// The states of each FSM of the room in which its fight began: they close gates or show the title of a boss.
+        /// </summary>
+        public readonly Dictionary<Fsm, HashSet<string>> BaseFightStates = new();
 
         /// <summary>
         /// The FSMs of the room that were awake when it was read.
@@ -677,9 +776,16 @@ internal partial class BossRoomCoop {
         public float NextAnalysisTime;
 
         /// <summary>
-        /// Whether the fight of the room started with every player in it, after which its events don't wait anymore.
+        /// Whether the fight of the room started, with every player in it or because its gates closed, after which its
+        /// events don't wait anymore.
         /// </summary>
         public bool Started;
+
+        /// <summary>
+        /// Whether an object of the room went into a state where the fight began, after which events aren't passed on
+        /// to the scene host anymore.
+        /// </summary>
+        public bool FightBegan;
 
         public BossRoom(Transform root) {
             Root = root;
@@ -772,34 +878,54 @@ internal partial class BossRoomCoop {
         /// </summary>
         public readonly Fsm Fsm;
 
+        /// <summary>
+        /// The states in which the fight began: they close gates or show the title of a boss.
+        /// </summary>
+        public readonly HashSet<string> BaseFightStates = [];
+
+        /// <summary>
+        /// The states in which the FSM waits for its fight, as of the last update.
+        /// </summary>
+        public HashSet<string> PreFightStates { get; private set; } = [];
+
         private readonly FsmState[] _states;
-        private readonly HashSet<string> _stateNames = [];
+        private readonly Dictionary<string, FsmState> _statesByName = new();
         private readonly Dictionary<string, HashSet<string>> _ownEvents = new();
+        private readonly HashSet<string> _subFsmStates = [];
         private readonly Dictionary<string, List<string>> _sentEvents = new();
         private readonly HashSet<string> _fightStates = [];
         private HashSet<string> _leadingStates = [];
+        private HashSet<string> _inevitableStates = [];
+        private HashSet<string> _fightReachableStates = [];
 
         public FightGraph(Fsm fsm, bool isEntity) {
             Fsm = fsm;
             _states = fsm.States ?? [];
             foreach (var state in _states) {
-                _stateNames.Add(state.Name);
+                _statesByName[state.Name] = state;
                 var ownEvents = new HashSet<string> { FinishedEventName };
                 var sentEvents = new List<string>();
                 foreach (var action in state.Actions ?? []) {
-                    if (action == null) {
+                    // Disabled actions never run
+                    if (action == null || !action.Enabled) {
                         continue;
                     }
 
+                    var actionName = action.GetType().Name;
                     if (GetSentEventName(action) is { } sentEvent) {
                         sentEvents.Add(sentEvent);
                         if (CloseEventNames.Contains(sentEvent)) {
-                            _fightStates.Add(state.Name);
+                            BaseFightStates.Add(state.Name);
                         }
                     }
 
-                    if (isEntity && action.GetType().Name == BossTitleActionName) {
-                        _fightStates.Add(state.Name);
+                    if (isEntity && actionName == BossTitleActionName) {
+                        BaseFightStates.Add(state.Name);
+                    }
+
+                    // Whatever another FSM run by the state sends back happens by itself too
+                    if (actionName.StartsWith(SubFsmActionPrefix, StringComparison.Ordinal)) {
+                        _subFsmStates.Add(state.Name);
                     }
 
                     // Events of actions that notice players are caused by players, not by the state itself
@@ -811,6 +937,8 @@ internal partial class BossRoomCoop {
                 _ownEvents[state.Name] = ownEvents;
                 _sentEvents[state.Name] = sentEvents;
             }
+
+            _fightStates.UnionWith(BaseFightStates);
         }
 
         /// <summary>
@@ -829,9 +957,19 @@ internal partial class BossRoomCoop {
         }
 
         /// <summary>
+        /// Finds the states from which the fight starts by itself, and the states in which the FSM waits for its fight.
+        /// </summary>
+        public void UpdateStates() {
+            UpdateLeadingStates();
+            UpdateInevitableStates();
+            UpdateFightReachableStates();
+            PreFightStates = FindPreFightStates();
+        }
+
+        /// <summary>
         /// Finds the states from which the fight starts by steps that happen by themselves.
         /// </summary>
-        public void UpdateLeadingStates() {
+        private void UpdateLeadingStates() {
             var sources = new Dictionary<string, List<string>>();
             foreach (var state in _states) {
                 foreach (var transition in state.Transitions ?? []) {
@@ -873,42 +1011,86 @@ internal partial class BossRoomCoop {
         }
 
         /// <summary>
-        /// Gets the events that start the fight in this FSM, from any state.
+        /// Finds the states from which the fight starts no matter what: every step that happens by itself goes there. A
+        /// state that only might start the fight, like one that tests whether it was won before, can still be one in
+        /// which the FSM waits for its fight.
         /// </summary>
-        public IEnumerable<string> GetStartEvents() {
-            foreach (var state in _states) {
+        private void UpdateInevitableStates() {
+            var inevitableStates = new HashSet<string>(_fightStates);
+            for (var round = 0; round < MaxEventStartSteps; round++) {
+                var added = false;
+                foreach (var state in _states) {
+                    if (inevitableStates.Contains(state.Name) || !_leadingStates.Contains(state.Name)) {
+                        continue;
+                    }
+
+                    var hasOwnTransition = false;
+                    var allLeadToFight = true;
+                    foreach (var transition in state.Transitions ?? []) {
+                        if (!IsOwnEvent(state.Name, transition.EventName)) {
+                            continue;
+                        }
+
+                        hasOwnTransition = true;
+                        if (transition.ToState == null || !inevitableStates.Contains(transition.ToState)) {
+                            allLeadToFight = false;
+                            break;
+                        }
+                    }
+
+                    if (hasOwnTransition && allLeadToFight) {
+                        added |= inevitableStates.Add(state.Name);
+                    }
+                }
+
+                if (!added) {
+                    break;
+                }
+            }
+
+            _inevitableStates = inevitableStates;
+        }
+
+        /// <summary>
+        /// Finds the states that the FSM can go to once its fight began.
+        /// </summary>
+        private void UpdateFightReachableStates() {
+            var reachableStates = new HashSet<string>(_fightStates);
+            var queue = new Queue<string>(reachableStates);
+            while (queue.Count > 0) {
+                if (!_statesByName.TryGetValue(queue.Dequeue(), out var state)) {
+                    continue;
+                }
+
                 foreach (var transition in state.Transitions ?? []) {
-                    if (IsStartTransition(state.Name, transition)) {
-                        yield return transition.EventName;
+                    if (transition.ToState is { } toState && _statesByName.ContainsKey(toState) &&
+                        reachableStates.Add(toState)) {
+                        queue.Enqueue(toState);
                     }
                 }
             }
 
-            foreach (var transition in Fsm.GlobalTransitions ?? []) {
-                if (IsStartTransition(null, transition)) {
-                    yield return transition.EventName;
-                }
-            }
+            _fightReachableStates = reachableStates;
         }
 
         /// <summary>
-        /// Gets the states that the FSM reaches from its start state before its fight starts.
+        /// Finds the states in which the FSM waits for its fight: reached from its start state through states in which
+        /// it can wait. States of the fight itself lie beyond those.
         /// </summary>
-        public HashSet<string> GetPreFightStates() {
+        private HashSet<string> FindPreFightStates() {
             var preFightStates = new HashSet<string>();
-            if (Fsm.StartState is not { Length: > 0 } startState || !_stateNames.Contains(startState) ||
-                _fightStates.Contains(startState)) {
+            if (Fsm.StartState is not { Length: > 0 } startState || !_statesByName.ContainsKey(startState) ||
+                !CanWaitIn(startState)) {
                 return preFightStates;
             }
 
-            var statesByName = _states.GroupBy(state => state.Name).ToDictionary(group => group.Key, group => group.First());
             var queue = new Queue<string>();
             preFightStates.Add(startState);
             queue.Enqueue(startState);
             while (queue.Count > 0) {
-                foreach (var transition in statesByName[queue.Dequeue()].Transitions ?? []) {
-                    if (transition.ToState is { } toState && _stateNames.Contains(toState) &&
-                        !_fightStates.Contains(toState) && preFightStates.Add(toState)) {
+                foreach (var transition in _statesByName[queue.Dequeue()].Transitions ?? []) {
+                    if (transition.ToState is { } toState && _statesByName.ContainsKey(toState) &&
+                        CanWaitIn(toState) && preFightStates.Add(toState)) {
                         queue.Enqueue(toState);
                     }
                 }
@@ -918,13 +1100,39 @@ internal partial class BossRoomCoop {
         }
 
         /// <summary>
-        /// Gets the transitions that start the fight from a state before it, with an empty state name for global
-        /// transitions.
+        /// Whether the FSM can wait for its fight in a state: the fight doesn't start from it no matter what, and if it
+        /// might start from it, the fight doesn't come back to it, like to the state that chooses the next attack.
         /// </summary>
-        public HashSet<string> GetEventStarts(HashSet<string> preFightStates) {
+        private bool CanWaitIn(string stateName) {
+            return !_inevitableStates.Contains(stateName) &&
+                   (!_leadingStates.Contains(stateName) || !_fightReachableStates.Contains(stateName));
+        }
+
+        /// <summary>
+        /// Gets the events that start the fight when this FSM receives them while it waits for its fight.
+        /// </summary>
+        public IEnumerable<string> GetFightEvents() {
+            foreach (var state in _states) {
+                if (!PreFightStates.Contains(state.Name)) {
+                    continue;
+                }
+
+                foreach (var transition in state.Transitions ?? []) {
+                    if (IsStartTransition(state.Name, transition)) {
+                        yield return transition.EventName;
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets the transitions that start the fight from a state in which the FSM waits for it, with an empty state name
+        /// for global transitions.
+        /// </summary>
+        public HashSet<string> GetEventStarts() {
             var starts = new HashSet<string>();
             foreach (var state in _states) {
-                if (!preFightStates.Contains(state.Name)) {
+                if (!PreFightStates.Contains(state.Name)) {
                     continue;
                 }
 
@@ -950,7 +1158,8 @@ internal partial class BossRoomCoop {
         /// </summary>
         private bool IsStartTransition(string? stateName, FsmTransition transition) {
             return transition.EventName is { Length: > 0 } eventName && eventName != FinishedEventName &&
-                   transition.ToState != null && _leadingStates.Contains(transition.ToState) &&
+                   !IsCombatEvent(eventName) && transition.ToState != null &&
+                   _leadingStates.Contains(transition.ToState) &&
                    (stateName == null || !IsOwnEvent(stateName, eventName));
         }
 
@@ -958,7 +1167,9 @@ internal partial class BossRoomCoop {
         /// Whether a state sends an event to itself, like when its actions finish or test something.
         /// </summary>
         private bool IsOwnEvent(string stateName, string? eventName) {
-            return eventName != null && _ownEvents.TryGetValue(stateName, out var events) && events.Contains(eventName);
+            return eventName != null && (_subFsmStates.Contains(stateName) ||
+                                         (_ownEvents.TryGetValue(stateName, out var events) &&
+                                          events.Contains(eventName)));
         }
     }
 }

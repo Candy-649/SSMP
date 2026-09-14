@@ -424,6 +424,7 @@ internal partial class BossRoomCoop {
         if (!IsCoopActive() || sender == null || sender == self || IsLocalHeroInRoom(sender)) {
             _closedGates[self] = sender;
             RemovePendingClose(self);
+            MarkRoomStarted(self);
             orig(self, fsmEvent, eventData);
             return;
         }
@@ -560,6 +561,11 @@ internal partial class BossRoomCoop {
     private void OnSwitchState(Action<Fsm, FsmState> orig, Fsm self, FsmState toState) {
         var fromState = self.ActiveState;
         orig(self, toState);
+
+        // A boss fight that began doesn't wait for players anymore
+        if (toState != null && _netClient.IsConnected) {
+            MarkFightBegan(self, toState.Name);
+        }
 
         if (fromState == null || toState == null || fromState == toState || !IsFollower()) {
             return;
@@ -878,6 +884,7 @@ internal partial class BossRoomCoop {
 
             _pendingCloses.Remove(pendingClose);
             _closedGates[pendingClose.Gate] = pendingClose.Sender;
+            MarkRoomStarted(pendingClose.Gate);
 
             Logger.Info(
                 $"The local player walked into the room of '{pendingClose.Sender.Name}', closing gate '{GetPath(pendingClose.Gate)}'"
