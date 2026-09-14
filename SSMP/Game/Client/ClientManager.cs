@@ -949,6 +949,7 @@ internal class ClientManager : IClientManager {
         _animationManager.UpdatePlayerAnimation(id, enterSceneData.AnimationClipId, 0, playerData.CrestType);
 
         _arenaCoop.OnPlayerEnterScene();
+        _bossRoomCoop.OnPlayerEnterScene();
 
         try {
             PlayerEnterSceneEvent?.Invoke(playerData);

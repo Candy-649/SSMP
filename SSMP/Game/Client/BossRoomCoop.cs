@@ -9,9 +9,11 @@ using SSMP.Game.Client.Entity;
 using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
+using SSMP.Ui;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
+using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client;
 
@@ -19,15 +21,14 @@ namespace SSMP.Game.Client;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Co-op rules for rooms whose gates are closed by PlayMaker FSMs, which includes most boss rooms. Gates of arenas with
-/// a <see cref="BattleScene"/> are left to <see cref="ArenaCoop"/>.
-/// Gates only close for the players in the room. When an FSM closes gates while the local player is outside the
-/// triggers that lead to it, for example because another player walked in, the gates stay open for the local player
-/// and close once they walk into one of those triggers.
-/// The scene host controls the bosses, so when another player walks into the trigger of a room, the scene host moves
-/// its FSM of the room the same way. If the fight can't start for the scene host, for example because it already won
-/// it, the gates that the room closed for the other players open again. When a gate of the scene host opens after it
-/// had closed, it opens for the other players too.
+/// Co-op rules for rooms whose gates are closed by PlayMaker FSMs and for boss scenes, which includes most boss rooms.
+/// Arenas with a <see cref="BattleScene"/> are left to <see cref="ArenaCoop"/>.
+/// A room only starts once every connected player has reached it: the event of the trigger that starts the room is held
+/// back until all players have been inside one of its triggers, and the players hear that someone waits for them.
+/// Gates only close for the players in the room, so a player who comes back into a running fight can still walk in.
+/// When a gate of the scene host opens after it had closed, it opens for the other players too, and when a room starts
+/// for another player but not for the scene host, its gates open again for that player.
+/// Defeat and encounter records that a room writes for one player are written for the other players in the scene too.
 /// </summary>
 internal class BossRoomCoop {
     /// <summary>
@@ -46,19 +47,49 @@ internal class BossRoomCoop {
     private const int MaxCloseSteps = 4;
 
     /// <summary>
-    /// How long, in seconds, the scene host waits for its FSM to reach the state that another player's FSM left.
+    /// How long, in seconds, the scene host gives its room to start after the room started for another player.
     /// </summary>
-    private const float TransitionWaitTime = 5f;
+    private const float StartCheckTime = 15f;
 
     /// <summary>
-    /// How long, in seconds, a room may take to close its gates after the scene host followed another player into it.
+    /// How often, in seconds, the scene is searched for FSMs that start rooms.
     /// </summary>
-    private const float FightStartTime = 10f;
+    private const float ScanInterval = 5f;
+
+    /// <summary>
+    /// How often, in seconds, the triggers of a room are searched again while none were found.
+    /// </summary>
+    private const float RegionResolveInterval = 1f;
+
+    /// <summary>
+    /// The distance between the points that are checked along the path of a player during a frame.
+    /// </summary>
+    private const float SampleSpacing = 0.25f;
+
+    /// <summary>
+    /// The distance that a player can move in a frame before it counts as a teleport.
+    /// </summary>
+    private const float MaxSampledDistance = 10f;
+
+    /// <summary>
+    /// How long, in seconds, a message about waiting players isn't repeated.
+    /// </summary>
+    private const float NoticeInterval = 30f;
 
     /// <summary>
     /// The event that opens a gate for a player whose room can't start.
     /// </summary>
     private const string OpenGateEventName = "BG OPEN";
+
+    /// <summary>
+    /// The message for a player who waits in a room for the other players.
+    /// </summary>
+    private const string WaitingMessage = "Waiting for your teammate to catch up...";
+
+    /// <summary>
+    /// The message for a player whose teammate waits in a room.
+    /// </summary>
+    private const string TeammateWaitingMessage = "Your teammate is waiting for you.";
 
     /// <summary>
     /// Events that close gates.
@@ -111,34 +142,64 @@ internal class BossRoomCoop {
     private readonly Dictionary<Fsm, FsmInfo> _fsmInfos = new();
 
     /// <summary>
+    /// The FSMs of the current scene that were searched for triggers that start rooms.
+    /// </summary>
+    private readonly HashSet<Fsm> _scannedFsms = [];
+
+    /// <summary>
+    /// The FSMs of the current scene with triggers that start rooms.
+    /// </summary>
+    private readonly HashSet<Fsm> _startFsms = [];
+
+    /// <summary>
+    /// The players who reached each room of the current scene, by the FSM that starts the room.
+    /// </summary>
+    private readonly Dictionary<Fsm, RoomArrivals> _arrivals = new();
+
+    /// <summary>
+    /// The starts of rooms that are held back until all players reached them, by the FSM that starts the room.
+    /// </summary>
+    private readonly Dictionary<Fsm, HeldStart> _heldStarts = new();
+
+    /// <summary>
     /// The gates that are closed for the local player, with the FSM that closed each of them if it is known.
     /// </summary>
     private readonly Dictionary<Fsm, Fsm?> _closedGates = new();
 
     /// <summary>
-    /// The gates that another player's room closed, which close for the local player once they walk in.
+    /// The gates that a room closed while the local player was outside, which close once they walk in.
     /// </summary>
     private readonly List<PendingClose> _pendingCloses = [];
 
     /// <summary>
-    /// Transitions of other players that the scene host waits to follow.
+    /// Rooms that started for another player, which the scene host checks started for it too.
     /// </summary>
-    private readonly List<QueuedTransition> _queuedTransitions = [];
+    private readonly List<StartCheck> _startChecks = [];
 
     /// <summary>
-    /// Rooms that the scene host followed another player into, to check whether their fight started.
+    /// The positions of the other players in the local scene in the previous frame, by player ID.
     /// </summary>
-    private readonly List<FollowCheck> _followChecks = [];
+    private readonly Dictionary<ushort, Vector2> _remotePositions = new();
 
     /// <summary>
-    /// Hook for keeping gates open for players outside their room.
+    /// Hook for holding back starts of rooms and keeping gates open for players outside their room.
     /// </summary>
     private Hook? _processEventHook;
 
     /// <summary>
-    /// Hook for telling the scene host when the local player walks into a room.
+    /// Hook for telling the scene host when a room started for the local player.
     /// </summary>
     private Hook? _switchStateHook;
+
+    /// <summary>
+    /// Hook for sharing records that are written as booleans of the player data.
+    /// </summary>
+    private Hook? _setBoolHook;
+
+    /// <summary>
+    /// Hook for sharing records that FSMs write as variables of the player data.
+    /// </summary>
+    private Hook? _setVariableHook;
 
     /// <summary>
     /// Whether this class sends an event to a gate itself, which the hooks let through.
@@ -146,14 +207,24 @@ internal class BossRoomCoop {
     private bool _bypassGates;
 
     /// <summary>
-    /// The FSM that this class moves for another player, or null.
+    /// Whether this class writes a record that another player shared, so that it isn't shared back.
     /// </summary>
-    private Fsm? _followingFsm;
+    private bool _applyingRecord;
 
     /// <summary>
     /// The position of the local player in the previous frame, or null.
     /// </summary>
     private Vector2? _lastHeroPosition;
+
+    /// <summary>
+    /// When the scene is searched for FSMs that start rooms next, in unscaled seconds.
+    /// </summary>
+    private float _nextScanTime;
+
+    /// <summary>
+    /// When the local player can hear again that a teammate waits for them, in unscaled seconds.
+    /// </summary>
+    private float _nextTeammateNoticeTime;
 
     public BossRoomCoop(
         NetClient netClient,
@@ -179,6 +250,14 @@ internal class BossRoomCoop {
             typeof(Fsm).GetMethod("SwitchState", InstanceFlags, null, [typeof(FsmState)], null),
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnSwitchState)
         );
+        _setBoolHook = CreateHook(
+            typeof(PlayerData).GetMethod("SetBool", InstanceFlags, null, [typeof(string), typeof(bool)], null),
+            new Action<Action<PlayerData, string, bool>, PlayerData, string, bool>(OnSetPlayerDataBool)
+        );
+        _setVariableHook = CreateHook(
+            typeof(SetPlayerDataVariable).GetMethod("OnEnter", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null),
+            new Action<Action<SetPlayerDataVariable>, SetPlayerDataVariable>(OnSetPlayerDataVariableEnter)
+        );
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -193,6 +272,12 @@ internal class BossRoomCoop {
 
         _switchStateHook?.Dispose();
         _switchStateHook = null;
+
+        _setBoolHook?.Dispose();
+        _setBoolHook = null;
+
+        _setVariableHook?.Dispose();
+        _setVariableHook = null;
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
@@ -233,20 +318,30 @@ internal class BossRoomCoop {
     }
 
     /// <summary>
-    /// Callback method for when another player in the scene sends something that happened in a room.
+    /// Callback method for when another player sends something that happened in a room.
     /// </summary>
     /// <param name="update">The BossRoomUpdate packet data.</param>
     public void OnBossRoomUpdate(BossRoomUpdate update) {
-        if (!_isFullSynchronisation() || SceneManager.GetActiveScene().name != update.SceneName) {
+        if (!_isFullSynchronisation()) {
+            return;
+        }
+
+        // Players hear that a teammate waits for them wherever they are
+        if (update.Kind == BossRoomUpdateKind.Waiting) {
+            OnTeammateWaiting();
+            return;
+        }
+
+        if (SceneManager.GetActiveScene().name != update.SceneName) {
             return;
         }
 
         switch (update.Kind) {
-            case BossRoomUpdateKind.Transition:
-                if (!TryFollowTransition(update, false)) {
-                    _queuedTransitions.Add(new QueuedTransition(update, Time.unscaledTime));
-                }
-
+            case BossRoomUpdateKind.Arrived:
+                OnArrived(update);
+                break;
+            case BossRoomUpdateKind.Started:
+                _startChecks.Add(new StartCheck(update, Time.unscaledTime));
                 break;
             case BossRoomUpdateKind.RoomDone:
                 OnRoomDone(update);
@@ -254,12 +349,26 @@ internal class BossRoomCoop {
             case BossRoomUpdateKind.GateOpened:
                 OnGateOpened(update);
                 break;
+            case BossRoomUpdateKind.RecordSet:
+                OnRecordSet(update);
+                break;
         }
     }
 
     /// <summary>
-    /// Keeps a gate open while the local player is outside the room that closes it, and tells other players when a gate
-    /// of the scene host opens.
+    /// Tells a player who entered the local scene which rooms the local player already reached.
+    /// </summary>
+    public void OnPlayerEnterScene() {
+        foreach (var pair in _arrivals) {
+            if (pair.Value.Local && pair.Key.GameObject != null) {
+                Send(BossRoomUpdateKind.Arrived, pair.Key, "", "", "");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Holds back the start of a room until all players reached it, keeps a gate open while the local player is outside
+    /// the room that closes it, and tells other players when a gate of the scene host opens.
     /// </summary>
     private void OnProcessEvent(
         Action<Fsm, FsmEvent, FsmEventData> orig,
@@ -267,37 +376,137 @@ internal class BossRoomCoop {
         FsmEvent fsmEvent,
         FsmEventData eventData
     ) {
-        var eventName = fsmEvent?.Name;
-        if (_bypassGates || eventName == null) {
+        if (_bypassGates || fsmEvent?.Name is not { } eventName) {
             orig(self, fsmEvent!, eventData);
+            return;
+        }
+
+        if (IsHoldActive() && self.ActiveState is { } activeState && TryHoldStart(self, activeState, eventName)) {
             return;
         }
 
         var isClose = CloseEventNames.Contains(eventName);
         if ((!isClose && !OpenEventNames.Contains(eventName)) || !GetInfo(self).IsGate) {
-            orig(self, fsmEvent!, eventData);
+            orig(self, fsmEvent, eventData);
             return;
         }
 
         if (!isClose) {
             OnGateOpening(self, eventName);
-            orig(self, fsmEvent!, eventData);
+            orig(self, fsmEvent, eventData);
             return;
         }
 
-        // No FSM is on the execution stack while SSMP sends the events of the scene host's entities, or while this class
-        // moves an FSM for another player
-        var sender = _networkSender ?? FsmExecutionStack.ExecutingFsm ?? _followingFsm;
+        // No FSM is on the execution stack while SSMP sends the events of the scene host's entities
+        var sender = _networkSender ?? FsmExecutionStack.ExecutingFsm;
         if (!IsCoopActive() || sender == null || sender == self || IsLocalHeroInRoom(sender)) {
             _closedGates[self] = sender;
             RemovePendingClose(self);
-            orig(self, fsmEvent!, eventData);
+            orig(self, fsmEvent, eventData);
             return;
         }
 
         if (AddPendingClose(self, sender, eventName)) {
             Logger.Info($"Gate '{GetPath(self)}' stays open until the local player walks into the room of '{sender.Name}'");
         }
+    }
+
+    /// <summary>
+    /// Holds back the event of a trigger that starts a room until all players have reached the room.
+    /// </summary>
+    /// <returns>Whether the event is held back.</returns>
+    private bool TryHoldStart(Fsm fsm, FsmState state, string eventName) {
+        var trigger = GetStartTrigger(fsm, state, eventName);
+        if (trigger == null) {
+            return false;
+        }
+
+        // Without triggers to check, the room starts like it does alone
+        var regions = GetRegions(fsm);
+        if (regions.Count == 0) {
+            return false;
+        }
+
+        // Only the local player sets off collider triggers, while alert ranges also see the other players
+        var arrivals = GetArrivals(fsm);
+        var heroController = HeroController.instance;
+        if (trigger.Kind == TriggerKind.Collider ||
+            heroController != null && IsInRegions(regions, heroController.transform.position)) {
+            MarkLocalArrival(fsm, arrivals);
+        }
+
+        if (HaveAllArrived(fsm, arrivals)) {
+            _heldStarts.Remove(fsm);
+            return false;
+        }
+
+        if (!_heldStarts.TryGetValue(fsm, out var held) || held.StateName != state.Name || held.EventName != eventName) {
+            _heldStarts[fsm] = new HeldStart(state.Name, eventName);
+            Logger.Info($"Holding back the start of '{GetPath(fsm)}' until all players reached it");
+            NotifyWaiting(fsm);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Remembers that the local player reached the room of an FSM, and tells the other players.
+    /// </summary>
+    private void MarkLocalArrival(Fsm fsm, RoomArrivals arrivals) {
+        if (arrivals.Local) {
+            return;
+        }
+
+        arrivals.Local = true;
+        Send(BossRoomUpdateKind.Arrived, fsm, "", "", "");
+        NotifyWaiting(fsm);
+    }
+
+    /// <summary>
+    /// Tells the local player and the other players that the local player waits in a room, if they do.
+    /// </summary>
+    private void NotifyWaiting(Fsm fsm) {
+        var arrivals = GetArrivals(fsm);
+        if (!_heldStarts.ContainsKey(fsm) || !arrivals.Local || Time.unscaledTime < arrivals.NextNoticeTime) {
+            return;
+        }
+
+        arrivals.NextNoticeTime = Time.unscaledTime + NoticeInterval;
+        UiManager.InternalChatBox.AddMessage(WaitingMessage);
+        Send(BossRoomUpdateKind.Waiting, "", "", "", "", "");
+    }
+
+    /// <summary>
+    /// Whether the local player and every other connected player have reached the room of an FSM. Players in other
+    /// scenes haven't.
+    /// </summary>
+    private bool HaveAllArrived(Fsm fsm, RoomArrivals arrivals) {
+        if (!arrivals.Local) {
+            return false;
+        }
+
+        if (!IsHoldActive()) {
+            return true;
+        }
+
+        foreach (var playerData in _playerData.Values) {
+            if (!playerData.IsInLocalScene) {
+                return false;
+            }
+
+            if (arrivals.Remote.Contains(playerData.Id)) {
+                continue;
+            }
+
+            var container = playerData.PlayerContainer;
+            if (container == null || !IsInRegions(GetRegions(fsm), container.transform.position)) {
+                return false;
+            }
+
+            arrivals.Remote.Add(playerData.Id);
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -315,101 +524,125 @@ internal class BossRoomCoop {
     }
 
     /// <summary>
-    /// Tells the scene host when the local player walks into the trigger of a room, if another player is the scene
-    /// host.
+    /// Tells the scene host when a room started for the local player, if another player is the scene host.
     /// </summary>
     private void OnSwitchState(Action<Fsm, FsmState> orig, Fsm self, FsmState toState) {
         var fromState = self.ActiveState;
         orig(self, toState);
 
-        if (fromState == null || toState == null || fromState == toState || self == _followingFsm || !IsFollower()) {
+        if (fromState == null || toState == null || fromState == toState || !IsFollower()) {
             return;
         }
 
-        // Only a transition on the event of a trigger means that the local player walked into it. Triggers that check
-        // alert ranges are left alone, because alert ranges of the scene host already see the other players
         var transition = self.LastTransition;
         if (transition == null || transition.ToState != toState.Name ||
-            !IsColliderTriggerEvent(fromState, transition.EventName) || !GetInfo(self).IsController) {
+            GetStartTrigger(self, fromState, transition.EventName) == null || !GetInfo(self).IsController) {
             return;
         }
 
-        Logger.Info(
-            $"Asking the scene host to move '{self.Name}' of '{GetPath(self)}' from '{fromState.Name}' to '{toState.Name}'"
-        );
-        Send(BossRoomUpdateKind.Transition, self, fromState.Name, toState.Name, transition.EventName);
+        Send(BossRoomUpdateKind.Started, self, fromState.Name, toState.Name, transition.EventName);
     }
 
     /// <summary>
-    /// Moves the scene host's FSM of a room the way another player's FSM moved when they walked in.
+    /// Shares a defeat or encounter record that a room writes as a boolean with the other players in the scene.
     /// </summary>
-    /// <param name="update">The transition of the other player's FSM.</param>
-    /// <param name="giveUp">Whether the FSM had time to reach the state, so that waiting longer won't help.</param>
-    /// <returns>Whether the transition is done with, or false to try again later.</returns>
-    private bool TryFollowTransition(BossRoomUpdate update, bool giveUp) {
-        if (SceneManager.GetActiveScene().name != update.SceneName) {
-            return true;
-        }
+    private void OnSetPlayerDataBool(Action<PlayerData, string, bool> orig, PlayerData self, string boolName, bool value) {
+        orig(self, boolName, value);
 
-        // Keep the transition until it is known whether the local player is the scene host
-        if (!_entityManager.IsSceneRoleDetermined) {
-            return giveUp;
+        if (value && !_applyingRecord) {
+            ShareRecord(boolName, FsmExecutionStack.ExecutingFsm);
         }
-
-        if (!_entityManager.IsSceneHost) {
-            return true;
-        }
-
-        var fsm = FindFsm(update.Path, update.FsmName);
-        if (fsm != null && (fsm.Owner is not Behaviour { isActiveAndEnabled: true } || !GetInfo(fsm).IsController)) {
-            fsm = null;
-        }
-
-        var activeState = fsm?.ActiveState;
-        if (fsm != null && activeState != null && activeState.Name == update.FromState) {
-            Logger.Info($"Another player walked into '{update.Path}', moving '{fsm.Name}' to '{update.ToState}'");
-            FollowTransition(fsm, update, followed => followed.SetState(update.ToState));
-            return true;
-        }
-
-        if (!giveUp) {
-            return false;
-        }
-
-        // The FSM may wait for the same trigger in another state, for example because the save of the scene host took
-        // another branch
-        if (fsm != null && activeState != null && IsColliderTriggerEvent(activeState, update.EventName)) {
-            Logger.Info($"Another player walked into '{update.Path}', sending '{update.EventName}' to '{fsm.Name}'");
-            FollowTransition(fsm, update, followed => followed.Event(update.EventName));
-            return true;
-        }
-
-        if (fsm == null || !IsFightRunning(fsm)) {
-            Logger.Info($"Another player walked into '{update.Path}', but its fight can't start for the scene host");
-            Send(BossRoomUpdateKind.RoomDone, update.Path, update.FsmName, "", "", "");
-        }
-
-        return true;
     }
 
     /// <summary>
-    /// Moves an FSM for another player, and remembers to check whether its fight started.
+    /// Shares a defeat or encounter record that a room writes as a variable with the other players in the scene.
     /// </summary>
-    private void FollowTransition(Fsm fsm, BossRoomUpdate update, Action<Fsm> move) {
-        _followingFsm = fsm;
+    private void OnSetPlayerDataVariableEnter(Action<SetPlayerDataVariable> orig, SetPlayerDataVariable self) {
+        orig(self);
+
+        if (_applyingRecord || GetActionField(self, "VariableName") is not FsmString { Value: { } variableName } ||
+            GetActionField(self, "SetValue") is not FsmVar setValue || setValue.RealType != typeof(bool) ||
+            setValue.GetValue() is not true) {
+            return;
+        }
+
+        ShareRecord(variableName, self.Fsm);
+    }
+
+    /// <summary>
+    /// Shares a record that an FSM of a room or a boss wrote with the other players in the scene.
+    /// </summary>
+    private void ShareRecord(string name, Fsm? fsm) {
+        if (fsm == null || !IsSharedRecordName(name) || !IsCoopActive()) {
+            return;
+        }
+
+        var info = GetInfo(fsm);
+        if (!info.IsEntity && !info.IsInBossScene && !info.IsController && info.StartTriggers.Count == 0) {
+            return;
+        }
+
+        Logger.Info($"Sharing record '{name}' with the other players in the scene");
+        Send(BossRoomUpdateKind.RecordSet, "", "", "", "", "", name);
+    }
+
+    /// <summary>
+    /// Writes a record that another player in the scene shared.
+    /// </summary>
+    private void OnRecordSet(BossRoomUpdate update) {
+        var playerData = PlayerData.instance;
+        if (playerData == null || !IsSharedRecordName(update.VariableName)) {
+            return;
+        }
+
+        Logger.Info($"Another player shared record '{update.VariableName}'");
+        _applyingRecord = true;
         try {
-            move(fsm);
-        } catch (Exception e) {
-            Logger.Error($"Could not move '{fsm.Name}' for another player:\n{e}");
+            playerData.SetBool(update.VariableName, true);
         } finally {
-            _followingFsm = null;
+            _applyingRecord = false;
         }
-
-        _followChecks.Add(new FollowCheck(fsm, update, Time.unscaledTime));
     }
 
     /// <summary>
-    /// Opens the gates of a room that the scene host can't start.
+    /// Whether a record of the player data is a defeat or encounter record, which all players in a room share.
+    /// </summary>
+    private static bool IsSharedRecordName(string name) {
+        return name.StartsWith("defeated", StringComparison.OrdinalIgnoreCase) ||
+               name.StartsWith("encountered", StringComparison.OrdinalIgnoreCase) ||
+               name.EndsWith("Defeated", StringComparison.Ordinal) ||
+               name.EndsWith("Encountered", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Remembers that another player reached a room.
+    /// </summary>
+    private void OnArrived(BossRoomUpdate update) {
+        var fsm = FindFsm(update.Path, update.FsmName);
+        if (fsm == null) {
+            return;
+        }
+
+        GetArrivals(fsm).Remote.Add(update.PlayerId);
+        if (GetInfo(fsm).StartTriggers.Count > 0) {
+            _startFsms.Add(fsm);
+        }
+    }
+
+    /// <summary>
+    /// Tells the local player that a teammate waits for them in a room.
+    /// </summary>
+    private void OnTeammateWaiting() {
+        if (Time.unscaledTime < _nextTeammateNoticeTime) {
+            return;
+        }
+
+        _nextTeammateNoticeTime = Time.unscaledTime + NoticeInterval;
+        UiManager.InternalChatBox.AddMessage(TeammateWaitingMessage);
+    }
+
+    /// <summary>
+    /// Opens the gates of a room that started for the local player but not for the scene host.
     /// </summary>
     private void OnRoomDone(BossRoomUpdate update) {
         if (_entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
@@ -425,7 +658,7 @@ internal class BossRoomCoop {
 
         var gates = _closedGates.Where(pair => pair.Value == controller).Select(pair => pair.Key).ToList();
         foreach (var gate in gates) {
-            Logger.Info($"The fight of '{update.Path}' can't start for the scene host, opening gate '{GetPath(gate)}'");
+            Logger.Info($"'{update.Path}' didn't start for the scene host, opening gate '{GetPath(gate)}'");
             gate.Event(OpenGateEventName);
         }
     }
@@ -448,47 +681,162 @@ internal class BossRoomCoop {
     }
 
     /// <summary>
-    /// Follows queued transitions, checks rooms that the scene host followed, and closes the gates of rooms that the
-    /// local player walked into.
+    /// Keeps track of which players reached rooms, starts rooms that all players reached, checks rooms that started for
+    /// other players, and closes the gates of rooms that the local player walked into.
     /// </summary>
     private void OnHeroControllerUpdate(HeroController heroController) {
         var position = (Vector2) heroController.transform.position;
         var previousPosition = _lastHeroPosition ?? position;
         _lastHeroPosition = position;
 
-        for (var i = _queuedTransitions.Count - 1; i >= 0; i--) {
-            var queued = _queuedTransitions[i];
-            var giveUp = Time.unscaledTime - queued.ReceivedTime > TransitionWaitTime;
-            if (TryFollowTransition(queued.Update, giveUp)) {
-                _queuedTransitions.RemoveAt(i);
-            }
+        if (IsHoldActive()) {
+            ScanScene();
+            UpdateArrivals(previousPosition, position);
         }
 
-        for (var i = _followChecks.Count - 1; i >= 0; i--) {
-            var check = _followChecks[i];
-            if (Time.unscaledTime - check.StartTime < FightStartTime) {
+        ReleaseHeldStarts();
+        CheckStartedRooms();
+        ClosePendingGates(previousPosition, position);
+    }
+
+    /// <summary>
+    /// Searches the scene for FSMs with triggers that start rooms, every so often.
+    /// </summary>
+    private void ScanScene() {
+        if (Time.unscaledTime < _nextScanTime) {
+            return;
+        }
+
+        _nextScanTime = Time.unscaledTime + ScanInterval;
+        foreach (var playMakerFsm in Object.FindObjectsByType<PlayMakerFSM>(
+                     FindObjectsInactive.Include,
+                     FindObjectsSortMode.None
+                 )) {
+            // FSMs that never woke up haven't loaded their actions yet
+            var fsm = playMakerFsm.Fsm;
+            if (fsm == null || fsm.Owner == null || !_scannedFsms.Add(fsm)) {
                 continue;
             }
 
-            _followChecks.RemoveAt(i);
-            if (check.Fsm.GameObject != null && (!GetInfo(check.Fsm).ClosesGates || IsFightRunning(check.Fsm))) {
+            if (GetInfo(fsm).StartTriggers.Count > 0) {
+                _startFsms.Add(fsm);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Remembers which players went through the triggers of rooms since the previous frame.
+    /// </summary>
+    private void UpdateArrivals(Vector2 previousPosition, Vector2 position) {
+        foreach (var fsm in _startFsms) {
+            if (fsm.GameObject == null) {
                 continue;
             }
 
-            Logger.Info($"The fight of '{check.Update.Path}' did not start for the scene host");
-            Send(BossRoomUpdateKind.RoomDone, check.Update.Path, check.Update.FsmName, "", "", "");
+            var regions = GetRegions(fsm);
+            if (regions.Count == 0) {
+                continue;
+            }
+
+            var arrivals = GetArrivals(fsm);
+            if (!arrivals.Local && IsSegmentInRegions(regions, previousPosition, position)) {
+                MarkLocalArrival(fsm, arrivals);
+            }
+
+            foreach (var playerData in _playerData.Values) {
+                if (!playerData.IsInLocalScene) {
+                    arrivals.Remote.Remove(playerData.Id);
+                    continue;
+                }
+
+                var container = playerData.PlayerContainer;
+                if (container == null || arrivals.Remote.Contains(playerData.Id)) {
+                    continue;
+                }
+
+                var current = (Vector2) container.transform.position;
+                var previous = _remotePositions.TryGetValue(playerData.Id, out var last) ? last : current;
+                if (IsSegmentInRegions(regions, previous, current)) {
+                    arrivals.Remote.Add(playerData.Id);
+                }
+            }
         }
 
+        foreach (var playerData in _playerData.Values) {
+            var container = playerData.PlayerContainer;
+            if (playerData.IsInLocalScene && container != null) {
+                _remotePositions[playerData.Id] = container.transform.position;
+            } else {
+                _remotePositions.Remove(playerData.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Starts the rooms that were held back once all players reached them.
+    /// </summary>
+    private void ReleaseHeldStarts() {
+        if (_heldStarts.Count == 0) {
+            return;
+        }
+
+        foreach (var pair in _heldStarts.ToList()) {
+            var fsm = pair.Key;
+            var held = pair.Value;
+            if (fsm.GameObject == null || fsm.ActiveState?.Name != held.StateName) {
+                _heldStarts.Remove(fsm);
+                continue;
+            }
+
+            if (!HaveAllArrived(fsm, GetArrivals(fsm))) {
+                continue;
+            }
+
+            _heldStarts.Remove(fsm);
+            Logger.Info($"All players reached '{GetPath(fsm)}', starting it");
+            fsm.Event(held.EventName);
+        }
+    }
+
+    /// <summary>
+    /// Opens the gates of other players whose room started while it didn't start for the scene host, for example because
+    /// the scene host already won its fight.
+    /// </summary>
+    private void CheckStartedRooms() {
+        for (var i = _startChecks.Count - 1; i >= 0; i--) {
+            var check = _startChecks[i];
+            if (Time.unscaledTime - check.ReceivedTime < StartCheckTime) {
+                continue;
+            }
+
+            _startChecks.RemoveAt(i);
+            if (!_entityManager.IsSceneRoleDetermined || !_entityManager.IsSceneHost) {
+                continue;
+            }
+
+            var update = check.Update;
+            var fsm = FindFsm(update.Path, update.FsmName);
+            if (fsm != null && fsm.Owner is Behaviour { isActiveAndEnabled: true } &&
+                fsm.ActiveState?.Name != update.FromState && (!GetInfo(fsm).ClosesGates || IsFightRunning(fsm))) {
+                continue;
+            }
+
+            Logger.Info($"'{update.Path}' started for another player, but not for the scene host");
+            Send(BossRoomUpdateKind.RoomDone, update.Path, update.FsmName, "", "", "");
+        }
+    }
+
+    /// <summary>
+    /// Closes the gates that wait for the local player once they walk into the room that closed them.
+    /// </summary>
+    private void ClosePendingGates(Vector2 previousPosition, Vector2 position) {
         foreach (var pendingClose in _pendingCloses.ToList()) {
             if (pendingClose.Gate.GameObject == null) {
                 _pendingCloses.Remove(pendingClose);
                 continue;
             }
 
-            // Check where the player was during the frame too, so that dashing through a thin trigger still counts
-            var middle = (previousPosition + position) / 2f;
-            if (!IsInRegions(pendingClose.Sender, position) && !IsInRegions(pendingClose.Sender, middle) &&
-                !IsInRegions(pendingClose.Sender, previousPosition)) {
+            if (!IsSegmentInRegions(GetRegions(pendingClose.Sender), previousPosition, position)) {
                 continue;
             }
 
@@ -512,22 +860,76 @@ internal class BossRoomCoop {
     /// like they do alone.
     /// </summary>
     private bool IsLocalHeroInRoom(Fsm sender) {
+        var regions = GetRegions(sender);
         var heroController = HeroController.instance;
-        return GetInfo(sender).Regions.Count == 0 || heroController == null ||
-               IsInRegions(sender, heroController.transform.position);
+        return regions.Count == 0 || heroController == null || IsInRegions(regions, heroController.transform.position);
     }
 
     /// <summary>
-    /// Whether a point is in one of the triggers that make an FSM close gates.
+    /// Whether a point is in one of the given triggers.
     /// </summary>
-    private bool IsInRegions(Fsm fsm, Vector2 point) {
-        foreach (var region in GetInfo(fsm).Regions) {
+    private static bool IsInRegions(List<Collider2D> regions, Vector2 point) {
+        foreach (var region in regions) {
             if (region != null && ContainsPoint(region, point)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether a player who moved between two points during a frame went through one of the given triggers. A move that
+    /// is too far to walk counts as a teleport, of which only the end counts.
+    /// </summary>
+    private static bool IsSegmentInRegions(List<Collider2D> regions, Vector2 from, Vector2 to) {
+        if (regions.Count == 0) {
+            return false;
+        }
+
+        var distance = Vector2.Distance(from, to);
+        if (distance > MaxSampledDistance) {
+            return IsInRegions(regions, to);
+        }
+
+        var steps = Mathf.Max(1, Mathf.CeilToInt(distance / SampleSpacing));
+        for (var i = 0; i <= steps; i++) {
+            if (IsInRegions(regions, Vector2.Lerp(from, to, (float) i / steps))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the colliders of the triggers that start the room of an FSM, searching them again every so often while
+    /// none were found, since some FSMs only find their alert ranges once they run.
+    /// </summary>
+    private List<Collider2D> GetRegions(Fsm fsm) {
+        var info = GetInfo(fsm);
+        if (info.StartTriggers.Count == 0 || info.Regions.Count > 0 || Time.unscaledTime < info.NextRegionResolveTime) {
+            return info.Regions;
+        }
+
+        info.NextRegionResolveTime = Time.unscaledTime + RegionResolveInterval;
+        foreach (var trigger in info.StartTriggers) {
+            AddRegionColliders(fsm, trigger.Action, trigger.Kind, info.Regions);
+        }
+
+        return info.Regions;
+    }
+
+    /// <summary>
+    /// Gets which players reached the room of an FSM.
+    /// </summary>
+    private RoomArrivals GetArrivals(Fsm fsm) {
+        if (!_arrivals.TryGetValue(fsm, out var arrivals)) {
+            arrivals = new RoomArrivals();
+            _arrivals[fsm] = arrivals;
+        }
+
+        return arrivals;
     }
 
     /// <summary>
@@ -574,7 +976,7 @@ internal class BossRoomCoop {
     }
 
     /// <summary>
-    /// Sends something that happened in a room to the other players in the scene.
+    /// Sends something that happened in a room to the other players.
     /// </summary>
     private void Send(
         BossRoomUpdateKind kind,
@@ -582,7 +984,8 @@ internal class BossRoomCoop {
         string fsmName,
         string fromState,
         string toState,
-        string eventName
+        string eventName,
+        string variableName = ""
     ) {
         if (!_netClient.IsConnected) {
             return;
@@ -596,9 +999,18 @@ internal class BossRoomCoop {
                 FsmName = fsmName,
                 FromState = fromState,
                 ToState = toState,
-                EventName = eventName
+                EventName = eventName,
+                VariableName = variableName
             }
         );
+    }
+
+    /// <summary>
+    /// Whether rooms wait for other players, because other players are connected and the server synchronises
+    /// entities.
+    /// </summary>
+    private bool IsHoldActive() {
+        return _playerData.Count > 0 && _netClient.IsConnected && _isFullSynchronisation();
     }
 
     /// <summary>
@@ -632,20 +1044,31 @@ internal class BossRoomCoop {
     /// Gets what this class knows about an FSM, finding it out the first time.
     /// </summary>
     private FsmInfo GetInfo(Fsm fsm) {
-        if (!_fsmInfos.TryGetValue(fsm, out var info)) {
-            info = BuildInfo(fsm);
-            _fsmInfos[fsm] = info;
+        if (_fsmInfos.TryGetValue(fsm, out var info)) {
+            return info;
         }
 
+        try {
+            info = BuildInfo(fsm);
+        } catch (Exception e) {
+            Logger.Warn($"Could not read FSM '{fsm.Name}' for boss room co-op:\n{e}");
+            info = new FsmInfo();
+        }
+
+        _fsmInfos[fsm] = info;
         return info;
     }
 
     /// <summary>
-    /// Finds out whether an FSM is a gate or controls a room, and which triggers make it close gates.
+    /// Finds out whether an FSM is a gate or controls a room, and which of its triggers start the room.
     /// </summary>
     private static FsmInfo BuildInfo(Fsm fsm) {
         var info = new FsmInfo();
         var gameObject = fsm.GameObject;
+        if (gameObject == null) {
+            return info;
+        }
+
         var states = fsm.States ?? [];
         var globalTransitions = fsm.GlobalTransitions ?? [];
 
@@ -656,8 +1079,8 @@ internal class BossRoomCoop {
             hasOpenTransition |= OpenEventNames.Contains(transition.EventName ?? "");
         }
 
-        var closingStates = new HashSet<string>();
         var statesByName = new Dictionary<string, FsmState>();
+        var closingStates = new HashSet<string>();
         foreach (var state in states) {
             statesByName[state.Name] = state;
             foreach (var action in state.Actions ?? []) {
@@ -668,33 +1091,83 @@ internal class BossRoomCoop {
             }
         }
 
+        var isInArena = gameObject.GetComponentInParent<BattleScene>(true) != null;
+        var isBossScene = gameObject.name.StartsWith(BossSceneNamePrefix, StringComparison.Ordinal);
+        info.IsEntity = EntityRegistry.TryGetEntry(gameObject, out _);
+        info.IsInBossScene = IsInBossScene(gameObject.transform);
         info.ClosesGates = closingStates.Count > 0;
-        if (info.ClosesGates) {
-            foreach (var state in states) {
-                foreach (var action in state.Actions ?? []) {
-                    var kind = GetTriggerKind(action);
-                    if (kind == TriggerKind.None) {
-                        continue;
-                    }
+        info.IsGate = !isInArena && hasCloseTransition && hasOpenTransition;
+        info.IsController = !isInArena && !info.IsEntity && (info.ClosesGates || isBossScene);
+        if (isInArena) {
+            return info;
+        }
 
-                    var eventName = GetEventName(
-                        GetActionField(action, kind == TriggerKind.AlertRange ? "InRangeEvent" : "sendEvent")
-                    );
-                    if (eventName != null &&
-                        LeadsToStates(state, eventName, globalTransitions, statesByName, closingStates)) {
-                        AddRegionColliders(fsm, action, kind, info.Regions);
-                    }
+        // Boss scenes without gates start their room with the first trigger that a player walks into
+        var preFightStates = isBossScene && !info.IsEntity ? GetPreFightStates(fsm, statesByName) : [];
+        foreach (var state in states) {
+            foreach (var action in state.Actions ?? []) {
+                var kind = GetTriggerKind(action);
+                if (kind == TriggerKind.None || GetTriggerEventName(action, kind) is not { } eventName) {
+                    continue;
+                }
+
+                if (kind == TriggerKind.Collider && preFightStates.Contains(state.Name) ||
+                    info.ClosesGates &&
+                    LeadsToStates(state, eventName, globalTransitions, statesByName, closingStates)) {
+                    info.StartTriggers.Add(new StartTrigger(state.Name, eventName, action, kind));
                 }
             }
         }
 
-        var isInArena = gameObject != null && gameObject.GetComponentInParent<BattleScene>(true) != null;
-        info.IsGate = gameObject != null && !isInArena && hasCloseTransition && hasOpenTransition;
-        info.IsController = gameObject != null && !isInArena &&
-                            (info.ClosesGates ||
-                             gameObject.name.StartsWith(BossSceneNamePrefix, StringComparison.Ordinal)) &&
-                            !EntityRegistry.TryGetEntry(gameObject, out _);
         return info;
+    }
+
+    /// <summary>
+    /// Whether an object or one of its parents is a boss scene.
+    /// </summary>
+    private static bool IsInBossScene(Transform transform) {
+        for (var current = transform; current != null; current = current.parent) {
+            if (current.name.StartsWith(BossSceneNamePrefix, StringComparison.Ordinal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the states that an FSM reaches from its start state before a player walks into one of its triggers.
+    /// </summary>
+    private static HashSet<string> GetPreFightStates(Fsm fsm, Dictionary<string, FsmState> statesByName) {
+        var preFightStates = new HashSet<string>();
+        if (fsm.StartState is not { Length: > 0 } startState || !statesByName.ContainsKey(startState)) {
+            return preFightStates;
+        }
+
+        var queue = new Queue<string>();
+        preFightStates.Add(startState);
+        queue.Enqueue(startState);
+        while (queue.Count > 0) {
+            var state = statesByName[queue.Dequeue()];
+            var triggerEvents = new HashSet<string>();
+            foreach (var action in state.Actions ?? []) {
+                var kind = GetTriggerKind(action);
+                if (kind != TriggerKind.None && GetTriggerEventName(action, kind) is { } eventName) {
+                    triggerEvents.Add(eventName);
+                }
+            }
+
+            foreach (var transition in state.Transitions ?? []) {
+                if (transition.ToState is not { } toState || triggerEvents.Contains(transition.EventName ?? "") ||
+                    !statesByName.ContainsKey(toState) || !preFightStates.Add(toState)) {
+                    continue;
+                }
+
+                queue.Enqueue(toState);
+            }
+        }
+
+        return preFightStates;
     }
 
     /// <summary>
@@ -736,7 +1209,39 @@ internal class BossRoomCoop {
     }
 
     /// <summary>
-    /// Adds the colliders of the trigger of an action to the regions of an FSM.
+    /// Gets the trigger of an FSM that starts its room when it sends the given event in the given state, or null.
+    /// </summary>
+    private StartTrigger? GetStartTrigger(Fsm fsm, FsmState state, string? eventName) {
+        // Most events of most FSMs don't come from triggers, which is cheaper to check than the whole FSM
+        if (eventName is not { Length: > 0 } || !HasTriggerEvent(state, eventName)) {
+            return null;
+        }
+
+        foreach (var trigger in GetInfo(fsm).StartTriggers) {
+            if (trigger.StateName == state.Name && trigger.EventName == eventName) {
+                return trigger;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a state has an action that sends the given event when a player reaches its trigger.
+    /// </summary>
+    private static bool HasTriggerEvent(FsmState state, string eventName) {
+        foreach (var action in state.Actions ?? []) {
+            var kind = GetTriggerKind(action);
+            if (kind != TriggerKind.None && GetTriggerEventName(action, kind) == eventName) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Adds the colliders of the trigger of an action to the given regions.
     /// </summary>
     private static void AddRegionColliders(Fsm fsm, FsmStateAction action, TriggerKind kind, List<Collider2D> regions) {
         var regionObject = kind switch {
@@ -783,21 +1288,10 @@ internal class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether a state has an action that sends the given event when a player walks into its collider.
+    /// Gets the event that a trigger action sends when a player reaches its trigger.
     /// </summary>
-    private static bool IsColliderTriggerEvent(FsmState state, string? eventName) {
-        if (string.IsNullOrEmpty(eventName)) {
-            return false;
-        }
-
-        foreach (var action in state.Actions ?? []) {
-            if (GetTriggerKind(action) == TriggerKind.Collider &&
-                GetEventName(GetActionField(action, "sendEvent")) == eventName) {
-                return true;
-            }
-        }
-
-        return false;
+    private static string? GetTriggerEventName(FsmStateAction action, TriggerKind kind) {
+        return GetEventName(GetActionField(action, kind == TriggerKind.AlertRange ? "InRangeEvent" : "sendEvent"));
     }
 
     /// <summary>
@@ -946,21 +1440,58 @@ internal class BossRoomCoop {
     /// </summary>
     private void ClearScene() {
         _fsmInfos.Clear();
+        _scannedFsms.Clear();
+        _startFsms.Clear();
+        _arrivals.Clear();
+        _heldStarts.Clear();
         _closedGates.Clear();
         _pendingCloses.Clear();
-        _queuedTransitions.Clear();
-        _followChecks.Clear();
+        _startChecks.Clear();
+        _remotePositions.Clear();
         _lastHeroPosition = null;
+        _nextScanTime = 0f;
     }
 
     /// <summary>
-    /// The kinds of triggers that make FSMs close gates.
+    /// The kinds of triggers that start rooms.
     /// </summary>
     private enum TriggerKind {
         None,
         Collider,
         AlertRangeByName,
         AlertRange
+    }
+
+    /// <summary>
+    /// A trigger action of an FSM that starts its room.
+    /// </summary>
+    private class StartTrigger {
+        /// <summary>
+        /// The name of the state that the action is in.
+        /// </summary>
+        public readonly string StateName;
+
+        /// <summary>
+        /// The event that the action sends when a player reaches its trigger.
+        /// </summary>
+        public readonly string EventName;
+
+        /// <summary>
+        /// The trigger action.
+        /// </summary>
+        public readonly FsmStateAction Action;
+
+        /// <summary>
+        /// The kind of trigger that the action checks.
+        /// </summary>
+        public readonly TriggerKind Kind;
+
+        public StartTrigger(string stateName, string eventName, FsmStateAction action, TriggerKind kind) {
+            StateName = stateName;
+            EventName = eventName;
+            Action = action;
+            Kind = kind;
+        }
     }
 
     /// <summary>
@@ -973,6 +1504,16 @@ internal class BossRoomCoop {
         public bool IsGate;
 
         /// <summary>
+        /// Whether the FSM belongs to an entity, which only runs for the scene host.
+        /// </summary>
+        public bool IsEntity;
+
+        /// <summary>
+        /// Whether the object of the FSM is a boss scene or part of one.
+        /// </summary>
+        public bool IsInBossScene;
+
+        /// <summary>
         /// Whether the FSM sends events that close gates.
         /// </summary>
         public bool ClosesGates;
@@ -983,9 +1524,59 @@ internal class BossRoomCoop {
         public bool IsController;
 
         /// <summary>
-        /// The colliders of the triggers that make the FSM close gates.
+        /// The trigger actions of the FSM that start its room.
+        /// </summary>
+        public readonly List<StartTrigger> StartTriggers = [];
+
+        /// <summary>
+        /// The colliders of the triggers that start the room of the FSM, once they are found.
         /// </summary>
         public readonly List<Collider2D> Regions = [];
+
+        /// <summary>
+        /// When the colliders of the triggers are searched again if none were found, in unscaled seconds.
+        /// </summary>
+        public float NextRegionResolveTime;
+    }
+
+    /// <summary>
+    /// The players who reached a room.
+    /// </summary>
+    private class RoomArrivals {
+        /// <summary>
+        /// Whether the local player reached the room.
+        /// </summary>
+        public bool Local;
+
+        /// <summary>
+        /// The IDs of the other players who reached the room.
+        /// </summary>
+        public readonly HashSet<ushort> Remote = [];
+
+        /// <summary>
+        /// When the players can hear again that the local player waits in the room, in unscaled seconds.
+        /// </summary>
+        public float NextNoticeTime;
+    }
+
+    /// <summary>
+    /// The start of a room that is held back until all players reached it.
+    /// </summary>
+    private class HeldStart {
+        /// <summary>
+        /// The state of the FSM that waits for the event.
+        /// </summary>
+        public readonly string StateName;
+
+        /// <summary>
+        /// The event that starts the room.
+        /// </summary>
+        public readonly string EventName;
+
+        public HeldStart(string stateName, string eventName) {
+            StateName = stateName;
+            EventName = eventName;
+        }
     }
 
     /// <summary>
@@ -1015,48 +1606,22 @@ internal class BossRoomCoop {
     }
 
     /// <summary>
-    /// A transition of another player's FSM that the scene host waits to follow.
+    /// A room that started for another player, which the scene host checks started for it too.
     /// </summary>
-    private class QueuedTransition {
+    private class StartCheck {
         /// <summary>
-        /// The transition.
+        /// The update about the room that started.
         /// </summary>
         public readonly BossRoomUpdate Update;
 
         /// <summary>
-        /// When the transition arrived, in unscaled seconds.
+        /// When the update arrived, in unscaled seconds.
         /// </summary>
         public readonly float ReceivedTime;
 
-        public QueuedTransition(BossRoomUpdate update, float receivedTime) {
+        public StartCheck(BossRoomUpdate update, float receivedTime) {
             Update = update;
             ReceivedTime = receivedTime;
-        }
-    }
-
-    /// <summary>
-    /// A room that the scene host followed another player into.
-    /// </summary>
-    private class FollowCheck {
-        /// <summary>
-        /// The FSM of the room that the scene host moved.
-        /// </summary>
-        public readonly Fsm Fsm;
-
-        /// <summary>
-        /// The transition that the scene host followed.
-        /// </summary>
-        public readonly BossRoomUpdate Update;
-
-        /// <summary>
-        /// When the scene host followed the transition, in unscaled seconds.
-        /// </summary>
-        public readonly float StartTime;
-
-        public FollowCheck(Fsm fsm, BossRoomUpdate update, float startTime) {
-            Fsm = fsm;
-            Update = update;
-            StartTime = startTime;
         }
     }
 }

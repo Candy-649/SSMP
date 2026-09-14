@@ -496,13 +496,15 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
             var bossRoomUpdateCollection = GetOrCreateCollection<BossRoomUpdate>(ClientUpdatePacketId.BossRoomUpdate);
             bossRoomUpdateCollection.DataInstances.Add(
                 new BossRoomUpdate {
+                    PlayerId = update.PlayerId,
                     SceneName = update.SceneName,
                     Kind = update.Kind,
                     Path = update.Path,
                     FsmName = update.FsmName,
                     FromState = update.FromState,
                     ToState = update.ToState,
-                    EventName = update.EventName
+                    EventName = update.EventName,
+                    VariableName = update.VariableName
                 }
             );
         }
