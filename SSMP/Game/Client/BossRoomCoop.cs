@@ -30,7 +30,7 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// for another player but not for the scene host, its gates open again for that player.
 /// Defeat and encounter records that a room writes for one player are written for the other players in the scene too.
 /// </summary>
-internal class BossRoomCoop {
+internal partial class BossRoomCoop {
     /// <summary>
     /// Binding flags for the private members of the game.
     /// </summary>
@@ -258,6 +258,7 @@ internal class BossRoomCoop {
             typeof(SetPlayerDataVariable).GetMethod("OnEnter", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null),
             new Action<Action<SetPlayerDataVariable>, SetPlayerDataVariable>(OnSetPlayerDataVariableEnter)
         );
+        RegisterDialogueHooks();
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -278,6 +279,8 @@ internal class BossRoomCoop {
 
         _setVariableHook?.Dispose();
         _setVariableHook = null;
+
+        DeregisterDialogueHooks();
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
@@ -352,11 +355,21 @@ internal class BossRoomCoop {
             case BossRoomUpdateKind.RecordSet:
                 OnRecordSet(update);
                 break;
+            case BossRoomUpdateKind.DialogueStarted:
+                OnDialogueStarted(update);
+                break;
+            case BossRoomUpdateKind.DialogueDone:
+                OnDialogueDone(update);
+                break;
+            case BossRoomUpdateKind.Ready:
+                OnReady(update);
+                break;
         }
     }
 
     /// <summary>
-    /// Tells a player who entered the local scene which rooms the local player already reached.
+    /// Tells a player who entered the local scene which rooms the local player already reached, and shares the dialogue
+    /// that is still being read.
     /// </summary>
     public void OnPlayerEnterScene() {
         foreach (var pair in _arrivals) {
@@ -364,6 +377,8 @@ internal class BossRoomCoop {
                 Send(BossRoomUpdateKind.Arrived, pair.Key, "", "", "");
             }
         }
+
+        ShareDialoguesWithNewPlayers();
     }
 
     /// <summary>
@@ -381,7 +396,9 @@ internal class BossRoomCoop {
             return;
         }
 
-        if (IsHoldActive() && self.ActiveState is { } activeState && TryHoldStart(self, activeState, eventName)) {
+        if (IsHoldActive() && self.ActiveState is { } activeState &&
+            (TryHoldDialogueEnd(self, activeState, eventName) || TryHoldFightGate(self, activeState, eventName) ||
+             TryHoldStart(self, activeState, eventName))) {
             return;
         }
 
@@ -466,12 +483,21 @@ internal class BossRoomCoop {
     /// Tells the local player and the other players that the local player waits in a room, if they do.
     /// </summary>
     private void NotifyWaiting(Fsm fsm) {
-        var arrivals = GetArrivals(fsm);
-        if (!_heldStarts.ContainsKey(fsm) || !arrivals.Local || Time.unscaledTime < arrivals.NextNoticeTime) {
+        if (_heldStarts.ContainsKey(fsm)) {
+            NotifyWaiting(GetArrivals(fsm));
+        }
+    }
+
+    /// <summary>
+    /// Tells the local player and the other players that the local player waits somewhere, if the local player got
+    /// there and they weren't told recently.
+    /// </summary>
+    private void NotifyWaiting(RoomArrivals progress) {
+        if (!progress.Local || Time.unscaledTime < progress.NextNoticeTime) {
             return;
         }
 
-        arrivals.NextNoticeTime = Time.unscaledTime + NoticeInterval;
+        progress.NextNoticeTime = Time.unscaledTime + NoticeInterval;
         UiManager.InternalChatBox.AddMessage(WaitingMessage);
         Send(BossRoomUpdateKind.Waiting, "", "", "", "", "");
     }
@@ -695,6 +721,7 @@ internal class BossRoomCoop {
         }
 
         ReleaseHeldStarts();
+        UpdateDialogues();
         CheckStartedRooms();
         ClosePendingGates(previousPosition, position);
     }
@@ -1448,6 +1475,7 @@ internal class BossRoomCoop {
         _pendingCloses.Clear();
         _startChecks.Clear();
         _remotePositions.Clear();
+        ClearDialogues();
         _lastHeroPosition = null;
         _nextScanTime = 0f;
     }

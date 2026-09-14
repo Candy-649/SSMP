@@ -504,7 +504,14 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     FromState = update.FromState,
                     ToState = update.ToState,
                     EventName = update.EventName,
-                    VariableName = update.VariableName
+                    VariableName = update.VariableName,
+                    DialogueSheet = update.DialogueSheet,
+                    DialogueKey = update.DialogueKey,
+                    DialogueText = update.DialogueText,
+                    HideDecorators = update.HideDecorators,
+                    OverrideContinue = update.OverrideContinue,
+                    TextAlignment = update.TextAlignment,
+                    OffsetY = update.OffsetY
                 }
             );
         }

@@ -36,7 +36,7 @@ internal class BossRoomUpdate : IPacketData {
     public string FsmName { get; set; } = "";
 
     /// <summary>
-    /// The state that the FSM left, for a room that started.
+    /// The state that the FSM left, for a room that started, or the state that runs shared dialogue.
     /// </summary>
     public string FromState { get; set; } = "";
 
@@ -55,6 +55,41 @@ internal class BossRoomUpdate : IPacketData {
     /// </summary>
     public string VariableName { get; set; } = "";
 
+    /// <summary>
+    /// The sheet of the localised text of shared dialogue, or empty if the dialogue isn't localised.
+    /// </summary>
+    public string DialogueSheet { get; set; } = "";
+
+    /// <summary>
+    /// The key of the localised text of shared dialogue, or empty if the dialogue isn't localised.
+    /// </summary>
+    public string DialogueKey { get; set; } = "";
+
+    /// <summary>
+    /// The text of shared dialogue that isn't localised.
+    /// </summary>
+    public string DialogueText { get; set; } = "";
+
+    /// <summary>
+    /// Whether shared dialogue hides the decorations of the dialogue box.
+    /// </summary>
+    public bool HideDecorators { get; set; }
+
+    /// <summary>
+    /// Whether shared dialogue overrides how the dialogue box continues.
+    /// </summary>
+    public bool OverrideContinue { get; set; }
+
+    /// <summary>
+    /// The text alignment of shared dialogue, or -1 for the default alignment.
+    /// </summary>
+    public int TextAlignment { get; set; } = -1;
+
+    /// <summary>
+    /// The vertical offset of the dialogue box of shared dialogue.
+    /// </summary>
+    public float OffsetY { get; set; }
+
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
         packet.Write(PlayerId);
@@ -66,6 +101,13 @@ internal class BossRoomUpdate : IPacketData {
         packet.Write(ToState);
         packet.Write(EventName);
         packet.Write(VariableName);
+        packet.Write(DialogueSheet);
+        packet.Write(DialogueKey);
+        packet.Write(DialogueText);
+        packet.Write(HideDecorators);
+        packet.Write(OverrideContinue);
+        packet.Write(TextAlignment);
+        packet.Write(OffsetY);
     }
 
     /// <inheritdoc />
@@ -79,6 +121,13 @@ internal class BossRoomUpdate : IPacketData {
         ToState = packet.ReadString();
         EventName = packet.ReadString();
         VariableName = packet.ReadString();
+        DialogueSheet = packet.ReadString();
+        DialogueKey = packet.ReadString();
+        DialogueText = packet.ReadString();
+        HideDecorators = packet.ReadBool();
+        OverrideContinue = packet.ReadBool();
+        TextAlignment = packet.ReadInt();
+        OffsetY = packet.ReadFloat();
     }
 }
 
@@ -115,5 +164,20 @@ internal enum BossRoomUpdateKind : byte {
     /// <summary>
     /// A room or a boss wrote a defeat or encounter record, which the other players in the scene write too.
     /// </summary>
-    RecordSet
+    RecordSet,
+
+    /// <summary>
+    /// A boss of the scene host started dialogue, which the other players in the scene read too before it continues.
+    /// </summary>
+    DialogueStarted,
+
+    /// <summary>
+    /// A player read dialogue that the scene host shared.
+    /// </summary>
+    DialogueDone,
+
+    /// <summary>
+    /// A player got to the fight of a room with dialogue, which only starts once every player got there.
+    /// </summary>
+    Ready
 }
