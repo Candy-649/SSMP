@@ -689,6 +689,16 @@ internal class AnimationManager {
         { AnimationClip.ParryClash, new CrossStitch() },
         { AnimationClip.SilkBombAntic, new RuneRage { IsAntic = true } },
         { AnimationClip.SilkBossNeedleCast, new PaleNails { IsAntic = true } },
+
+        // Needolin play clips, which send whether the Musician Charm is equipped (see NeedolinCoop)
+        { AnimationClip.NeedolinPlay, NeedolinEffect.Instance },
+        { AnimationClip.NeedolinSitPlay, NeedolinEffect.Instance },
+        { AnimationClip.NeedolinTurn, NeedolinEffect.Instance },
+        { AnimationClip.NeedolinSitTurn, NeedolinEffect.Instance },
+        { AnimationClip.NeedolinPlayHigh, NeedolinEffect.Instance },
+        { AnimationClip.NeedolinPlayHighTransition, NeedolinEffect.Instance },
+        { AnimationClip.NeedolinPlayLow, NeedolinEffect.Instance },
+        { AnimationClip.NeedolinPlayLowTransition, NeedolinEffect.Instance },
     };
 
     private static readonly Dictionary<AnimationClip, IAnimationEffect> SubAnimationEffects = new() {
@@ -973,6 +983,9 @@ internal class AnimationManager {
             if (_debugLogAnimations) Logger.Info($"PlayerAnimationUpdate was sub-effect: {animationClip}");
             return;
         }
+
+        // Track whether the player is playing the needolin, so needolin range checks count them
+        NeedolinCoop.OnRemoteAnimation(playerObject!, animationClip);
 
         if (!ClipEnumNames.ContainsSecond(animationClip)) {
             // This happens when we send custom clips, that can't be played by the sprite animator, so for now we

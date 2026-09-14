@@ -153,6 +153,7 @@ internal partial class GamePatcher {
         );
 
         RegisterDetectionHooks();
+        RegisterNeedolinHooks();
 
         _crawlerStopCrawlingHook = TryCreateHook(
             typeof(Crawler),
@@ -287,6 +288,7 @@ internal partial class GamePatcher {
         _chaseObjectV2DoChaseHook = null;
 
         DisposeDetectionHooks();
+        DisposeNeedolinHooks();
         DisposeAggressionHooks();
 
         _crawlerStopCrawlingHook?.Dispose();

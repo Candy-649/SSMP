@@ -140,7 +140,7 @@ internal partial class GamePatcher {
 
         var requester = self.Fsm?.GameObject;
         if (requester != null && requester.GetComponentInParent<HealthManager>() != null) {
-            var approvedTarget = GetApprovedEnemyTarget(requester);
+            var approvedTarget = GetFsmActionTarget(requester);
             if (approvedTarget == null) {
                 orig(self);
                 return;

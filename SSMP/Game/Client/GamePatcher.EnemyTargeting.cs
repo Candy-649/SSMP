@@ -217,6 +217,7 @@ internal partial class GamePatcher {
     private static void ClearTargetCaches() {
         EnemyApprovedTargets.Clear();
         TargetOwnerCache.Clear();
+        ClearNeedolinTargets();
     }
 
     /// <summary>
@@ -399,7 +400,7 @@ internal partial class GamePatcher {
             return;
         }
 
-        var approvedTarget = GetApprovedEnemyTarget(requester);
+        var approvedTarget = GetFsmActionTarget(requester);
         if (approvedTarget == null) {
             return;
         }
@@ -449,7 +450,7 @@ internal partial class GamePatcher {
             return;
         }
 
-        var approvedTarget = GetApprovedEnemyTarget(fsm.gameObject);
+        var approvedTarget = GetFsmActionTarget(fsm.gameObject);
         if (approvedTarget == null) {
             return;
         }
@@ -779,5 +780,7 @@ internal partial class GamePatcher {
         var instanceId = obj.GetInstanceID();
         EnemyApprovedTargets.Remove(instanceId);
         TargetOwnerCache.Remove(instanceId);
+        SongTargets.Remove(instanceId);
+        PendingSongTargets.Remove(instanceId);
     }
 }

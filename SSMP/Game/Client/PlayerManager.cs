@@ -361,6 +361,7 @@ internal class PlayerManager : IPlayerManager {
         LocalPlayerTeam = Team.None;
 
         PlayerTargetRegistry.ClearRemotePlayers();
+        NeedolinCoop.ClearRemotePerformers();
 
         // Clear all players
         RecycleAllPlayers();
@@ -391,6 +392,7 @@ internal class PlayerManager : IPlayerManager {
     /// <param name="playerData">The player data of the player.</param>
     private void RecyclePlayerByData(ClientPlayerData playerData) {
         PlayerTargetRegistry.UnregisterRemotePlayer(playerData.PlayerObject);
+        NeedolinCoop.RemoveRemotePerformer(playerData.PlayerObject);
 
         // First reset the player
         ResetPlayer(playerData);

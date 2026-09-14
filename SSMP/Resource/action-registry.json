@@ -323,5 +323,8 @@
   {
     "type": "FireAtTarget",
     "targeted_fsm": true
+  },
+  {
+    "type": "EnemySingControl"
   }
 ]
