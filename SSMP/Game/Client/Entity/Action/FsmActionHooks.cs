@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using MonoMod.RuntimeDetour;
-using SSMP.Logging;
 using UnityEngine.SceneManagement;
 // ReSharper disable ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
 #pragma warning disable CS8625 // Cannot convert null literal to non-nullable reference type.
@@ -25,9 +24,15 @@ internal static class FsmActionHooks {
     // ReSharper disable once CollectionNeverQueried.Local
     private static readonly List<Hook> Hooks;
 
+    /// <summary>
+    /// The "OnEnter" methods that are hooked. Types that inherit the method share its hook.
+    /// </summary>
+    private static readonly HashSet<System.Reflection.MethodInfo> HookedMethods;
+
     static FsmActionHooks() {
         TypeEvents = new Dictionary<Type, FsmActionHook>();
         Hooks = new List<Hook>();
+        HookedMethods = [];
     }
 
     /// <summary>
@@ -56,12 +61,14 @@ internal static class FsmActionHooks {
         if (!TypeEvents.TryGetValue(type, out var fsmActionHook)) {
             fsmActionHook = new FsmActionHook();
 
+            // Types that inherit "OnEnter" share one hook on the class that declares it
             var onEnterMethodInfo = type.GetMethod("OnEnter");
-
-            Hooks.Add(new Hook(
-                onEnterMethodInfo,
-                OnActionEntered
-            ));
+            if (onEnterMethodInfo != null && HookedMethods.Add(onEnterMethodInfo)) {
+                Hooks.Add(new Hook(
+                    onEnterMethodInfo,
+                    OnActionEntered
+                ));
+            }
 
             TypeEvents.Add(type, fsmActionHook);
         }
@@ -76,9 +83,9 @@ internal static class FsmActionHooks {
     /// <param name="self">The instance on which it was called.</param>
     private static void OnActionEntered(Action<FsmStateAction> orig, FsmStateAction self) {
         orig(self);
-        
+
+        // Types that inherit a hooked "OnEnter" without being registered themselves come through here too
         if (!TypeEvents.TryGetValue(self.GetType(), out var fsmActionHook)) {
-            Logger.Warn("Hook was fired but no associated hook class was found");
             return;
         }
 

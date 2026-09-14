@@ -607,15 +607,19 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Shares a record that an FSM of a room or a boss wrote with the other players in the scene.
+    /// Shares a record that an FSM of a room or a boss wrote with the other players in the scene, and any other progress
+    /// that a boss writes, like an ability it gives. Bosses only run for the scene host, so the other players would never
+    /// get that progress otherwise.
     /// </summary>
     private void ShareRecord(string name, Fsm? fsm) {
-        if (fsm == null || !IsSharedRecordName(name) || !IsCoopActive()) {
+        if (fsm == null || !IsCoopActive()) {
             return;
         }
 
         var info = GetInfo(fsm);
-        if (!info.IsEntity && !info.IsInBossScene && !info.IsController && info.StartTriggers.Count == 0) {
+        var isRecord = IsSharedRecordName(name) &&
+                       (info.IsEntity || info.IsInBossScene || info.IsController || info.StartTriggers.Count > 0);
+        if (!isRecord && (!info.IsEntity || IsHeroStateName(name) || !IsBoss(fsm))) {
             return;
         }
 
@@ -624,11 +628,11 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Writes a record that another player in the scene shared.
+    /// Writes a record or other progress that another player in the scene shared.
     /// </summary>
     private void OnRecordSet(BossRoomUpdate update) {
         var playerData = PlayerData.instance;
-        if (playerData == null || !IsSharedRecordName(update.VariableName)) {
+        if (playerData == null || IsHeroStateName(update.VariableName)) {
             return;
         }
 
@@ -649,6 +653,42 @@ internal partial class BossRoomCoop {
                name.StartsWith("encountered", StringComparison.OrdinalIgnoreCase) ||
                name.EndsWith("Defeated", StringComparison.Ordinal) ||
                name.EndsWith("Encountered", StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Whether a boolean of the player data holds the state of the hero while a boss plays out, like whether they can
+    /// pause or take damage, instead of progress. That state belongs to the player whose game set it.
+    /// </summary>
+    private static bool IsHeroStateName(string name) {
+        return name.StartsWith("disable", StringComparison.Ordinal) ||
+               name.StartsWith("respawn", StringComparison.Ordinal) ||
+               name.StartsWith("hazard", StringComparison.Ordinal) ||
+               name.EndsWith("Cooldown", StringComparison.Ordinal) ||
+               name is "isInvincible" or "atBench";
+    }
+
+    /// <summary>
+    /// Whether the object of an FSM is a boss: it is part of a boss scene, or one of its FSMs shows the title of a boss.
+    /// </summary>
+    private static bool IsBoss(Fsm fsm) {
+        var gameObject = fsm.GameObject;
+        if (gameObject == null) {
+            return false;
+        }
+
+        if (IsInBossScene(gameObject.transform)) {
+            return true;
+        }
+
+        foreach (var playMakerFsm in gameObject.GetComponents<PlayMakerFSM>()) {
+            foreach (var state in playMakerFsm.FsmStates ?? []) {
+                if ((state.Actions ?? []).Any(action => action?.GetType().Name == BossTitleActionName)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
