@@ -7,6 +7,7 @@ using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Save;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -115,13 +116,16 @@ internal class BenchCoop {
     /// </summary>
     /// <param name="data">The data with the ID of the player who rested or died.</param>
     public void OnSemiPersistentReset(GenericClientData data) {
-        var gameManager = global::GameManager.instance;
-        if (gameManager == null) {
-            return;
-        }
+        // Packets can arrive on the network receive thread, and the scene data belongs to the game's main thread
+        ThreadUtil.RunActionOnMainThread(() => {
+            var gameManager = global::GameManager.instance;
+            if (gameManager == null) {
+                return;
+            }
 
-        Logger.Info($"Player {data.Id} rested or died, respawning semi-persistent objects outside the current room");
-        ResetSceneData(gameManager);
+            Logger.Info($"Player {data.Id} rested or died, respawning semi-persistent objects outside the current room");
+            ResetSceneData(gameManager);
+        });
     }
 
     /// <summary>
