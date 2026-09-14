@@ -149,16 +149,10 @@ internal class EnemyHealthCoop {
     }
 
     /// <summary>
-    /// Gets the health multiplier for the number of players in the local player's scene.
+    /// Gets the health multiplier for the number of connected players. It doesn't matter who is in the scene: an enemy
+    /// is as tough for a player who fights it alone as for players who fight it together.
     /// </summary>
     private float GetHealthMultiplier() {
-        var otherPlayers = 0;
-        foreach (var playerData in _playerData.Values) {
-            if (playerData.IsInLocalScene) {
-                otherPlayers++;
-            }
-        }
-
-        return 1f + HealthPerExtraPlayer * otherPlayers;
+        return 1f + HealthPerExtraPlayer * _playerData.Count;
     }
 }
