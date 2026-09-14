@@ -358,6 +358,18 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
+    /// Set that the player rested at a bench or died, which respawns semi-persistent objects, in the current packet.
+    /// </summary>
+    public void SetSemiPersistentReset() {
+        lock (Lock) {
+            CurrentUpdatePacket.SetSendingPacketData(
+                ServerUpdatePacketId.SemiPersistentReset,
+                new ReliableEmptyData()
+            );
+        }
+    }
+
+    /// <summary>
     /// Set a chat message in the current packet.
     /// </summary>
     /// <param name="message">The string message.</param>

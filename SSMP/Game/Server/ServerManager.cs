@@ -337,6 +337,10 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.PlayerDeath,
             OnPlayerDeath
         );
+        _packetManager.RegisterServerUpdatePacketHandler(
+            ServerUpdatePacketId.SemiPersistentReset,
+            OnSemiPersistentReset
+        );
         _packetManager.RegisterServerUpdatePacketHandler<ChatMessage>(
             ServerUpdatePacketId.ChatMessage,
             OnChatMessage
@@ -382,6 +386,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerMapUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDisconnect);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDeath);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ChatMessage);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ServerSettings);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerSetting);
@@ -1285,6 +1290,26 @@ internal abstract class ServerManager : IServerManager {
             playerData.CurrentScene,
             otherId => { _netServer.GetUpdateManagerForClient(otherId)?.AddPlayerDeathData(id); }
         );
+    }
+
+    /// <summary>
+    /// Callback method for when a player rests at a bench or dies, which respawns semi-persistent objects such as
+    /// enemies. Every other player respawns them too, wherever they are, so that all players keep the same world.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    private void OnSemiPersistentReset(ushort id) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
+            Logger.Warn($"Received SemiPersistentReset data, but player with ID {id} is not in mapping");
+            return;
+        }
+
+        Logger.Info($"Received SemiPersistentReset data from ({id}, {playerData.Username})");
+
+        foreach (var otherId in _playerData.Keys) {
+            if (otherId != id) {
+                _netServer.GetUpdateManagerForClient(otherId)?.AddSemiPersistentResetData(id);
+            }
+        }
     }
 
     /// <summary>

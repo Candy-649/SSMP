@@ -102,6 +102,11 @@ internal class ClientManager : IClientManager {
     private readonly GamePatcher _gamePatcher;
 
     /// <summary>
+    /// The bench co-op instance.
+    /// </summary>
+    private readonly BenchCoop _benchCoop;
+
+    /// <summary>
     /// The FSM patcher instance.
     /// </summary>
     private readonly FsmPatcher _fsmPatcher;
@@ -240,6 +245,7 @@ internal class ClientManager : IClientManager {
 
         _pauseManager = new PauseManager(netClient);
         _gamePatcher = new GamePatcher(netClient, _entityManager);
+        _benchCoop = new BenchCoop(netClient, _playerData, _saveManager);
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -309,6 +315,7 @@ internal class ClientManager : IClientManager {
         _mapManager.RegisterHooks();
         _pauseManager.RegisterHooks();
         _gamePatcher.RegisterHooks();
+        _benchCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
         if (_fullSynchronisation) {
@@ -337,6 +344,7 @@ internal class ClientManager : IClientManager {
         _mapManager.DeregisterHooks();
         _pauseManager.DeregisterHooks();
         _gamePatcher.DeregisterHooks();
+        _benchCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
         if (_fullSynchronisation) {
@@ -415,6 +423,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.PlayerSetting,
             OnPlayerSettingUpdate
         );
+        _packetManager.RegisterClientUpdatePacketHandler<GenericClientData>(
+            ClientUpdatePacketId.SemiPersistentReset,
+            _benchCoop.OnSemiPersistentReset
+        );
 
         // Register packet handlers related to full synchronisation
         if (_fullSynchronisation) {
@@ -456,6 +468,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.ServerSettingsUpdated);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.ChatMessage);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerSetting);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SemiPersistentReset);
 
         if (_fullSynchronisation) {
             _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);

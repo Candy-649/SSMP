@@ -47,6 +47,8 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new PacketDataCollection<ChatMessage>();
             case ClientUpdatePacketId.SaveUpdate:
                 return new PacketDataCollection<SaveUpdate>();
+            case ClientUpdatePacketId.SemiPersistentReset:
+                return new PacketDataCollection<GenericClientData>();
             default:
                 return new EmptyData();
         }

@@ -98,4 +98,9 @@ internal enum ClientUpdatePacketId {
     /// Value in the save file has updated.
     /// </summary>
     SaveUpdate = 18,
+
+    /// <summary>
+    /// Notify that a player rested at a bench or died, which respawns semi-persistent objects such as enemies.
+    /// </summary>
+    SemiPersistentReset = 19,
 }

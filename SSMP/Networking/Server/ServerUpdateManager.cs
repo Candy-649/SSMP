@@ -458,6 +458,16 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Add data that a player rested at a bench or died, which respawns semi-persistent objects, to the current packet.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    public void AddSemiPersistentResetData(ushort id) {
+        lock (Lock) {
+            FindOrCreatePacketData<GenericClientData>(id, ClientUpdatePacketId.SemiPersistentReset);
+        }
+    }
+
+    /// <summary>
     /// Add a player setting update to the current packet for the receiving player.
     /// </summary>
     /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.

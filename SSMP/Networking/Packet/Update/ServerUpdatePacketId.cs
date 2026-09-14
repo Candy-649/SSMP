@@ -77,5 +77,10 @@ public enum ServerUpdatePacketId {
     /// <summary>
     /// Player settings are update for the local player.
     /// </summary>
-    PlayerSetting = 14
+    PlayerSetting = 14,
+
+    /// <summary>
+    /// Notify that the player rested at a bench or died, which respawns semi-persistent objects such as enemies.
+    /// </summary>
+    SemiPersistentReset = 15
 }
