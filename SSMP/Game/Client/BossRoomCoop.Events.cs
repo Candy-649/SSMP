@@ -257,7 +257,13 @@ internal partial class BossRoomCoop {
         if (held == null) {
             held = new HeldEventStart(state.Name, eventName, shape);
             _heldEventStarts[fsm] = held;
-            FreeHero(held);
+
+            // An event that another player passed on didn't take control from the local player, who may be busy
+            // elsewhere, like sitting on a bench
+            if (_forwardedAnchor == null) {
+                FreeHero(held);
+            }
+
             Logger.Info($"Holding back '{eventName}' of '{GetPath(fsm)}' until all players are in the room");
         }
 
