@@ -10,14 +10,15 @@ using UnityEngine;
 namespace SSMP.Game.Client;
 
 /// <summary>
-/// Needolin co-op patches. Needolin range checks count every performing player, an enemy that reacts to a song faces
-/// the player it reacts to until its song ends, and songs started by a remote player last as long as that player's
-/// Musician Charm allows.
+/// Needolin co-op patches. Needolin range checks count every performing player, an enemy or NPC that reacts to a song
+/// faces the player it reacts to until its song ends, and songs started by a remote player last as long as that
+/// player's Musician Charm allows.
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
     /// How long, in seconds, the performer that set off a needolin check stays the enemy's target if no song starts.
-    /// This covers the state change between the check sending its event and the next state facing the target.
+    /// This covers the state change between the check sending its event and the next state facing the target. Checks
+    /// that keep finding a performer while the enemy waits to sing keep the target for longer.
     /// </summary>
     private const float PendingSongTargetSeconds = 1f;
 
@@ -34,6 +35,33 @@ internal partial class GamePatcher {
         typeof(NeedolinTextOwner).GetField("isPlaying", InstanceNonPublicFlags | InstancePublicFlags);
 
     /// <summary>
+    /// Reflected private field with the affected state that a <see cref="HeroPerformanceSingReaction"/> read last.
+    /// </summary>
+    private static readonly FieldInfo? SingReactionAffectedStateField =
+        typeof(HeroPerformanceSingReaction).GetField("affectedState", InstanceNonPublicFlags | InstancePublicFlags);
+
+    /// <summary>
+    /// Reflected private field that is set while a <see cref="HeroPerformanceSingReaction"/> should sing.
+    /// </summary>
+    private static readonly FieldInfo? SingReactionIsInsideField =
+        typeof(HeroPerformanceSingReaction).GetField("isInside", InstanceNonPublicFlags | InstancePublicFlags);
+
+    /// <summary>
+    /// Reflected private field with the <see cref="LookAnimNPC"/> that turns a <see cref="HeroPerformanceSingReaction"/>
+    /// NPC.
+    /// </summary>
+    private static readonly FieldInfo? SingReactionLookAnimNpcField =
+        typeof(HeroPerformanceSingReaction).GetField("lookAnimNPC", InstanceNonPublicFlags | InstancePublicFlags);
+
+    /// <summary>
+    /// Reflected private field that makes a <see cref="HeroPerformanceSingReaction"/> ignore the needolin range.
+    /// </summary>
+    private static readonly FieldInfo? SingReactionIgnoreRangeField = typeof(HeroPerformanceSingReaction).GetField(
+        "ignoreNeedolinRange",
+        InstanceNonPublicFlags | InstancePublicFlags
+    );
+
+    /// <summary>
     /// The performer that each singing enemy faces until its song ends, per enemy owner instance ID.
     /// </summary>
     private static readonly Dictionary<int, SongTarget> SongTargets = new();
@@ -47,6 +75,28 @@ internal partial class GamePatcher {
     /// Whether a transform checked by needolin checks belongs to an enemy, per transform instance ID.
     /// </summary>
     private static readonly Dictionary<int, bool> NeedolinEnemyTargets = new();
+
+    /// <summary>
+    /// Look target overrides that turn NPCs towards the remote performer they react to, per owner instance ID: the
+    /// enemy owner of an FSM song, or the <see cref="HeroPerformanceSingReaction"/> component.
+    /// </summary>
+    private static readonly Dictionary<int, LookTargetOverride> LookTargetOverrides = new();
+
+    /// <summary>
+    /// The <see cref="LookAnimNPC"/> of each enemy owner that ran a needolin check, or null if it has none, per owner
+    /// instance ID.
+    /// </summary>
+    private static readonly Dictionary<int, LookAnimNPC?> LookAnimNpcs = new();
+
+    /// <summary>
+    /// <see cref="HeroPerformanceSingReaction"/> components that react to a performer, per instance ID.
+    /// </summary>
+    private static readonly Dictionary<int, HeroPerformanceSingReaction> ActiveSingReactions = new();
+
+    /// <summary>
+    /// Reused list of instance IDs to remove from a dictionary after iterating it.
+    /// </summary>
+    private static readonly List<int> NeedolinIdsToRemove = new();
 
     /// <summary>
     /// Hook for counting remote performers in <see cref="HeroPerformanceRegion.GetAffectedState"/>.
@@ -89,6 +139,21 @@ internal partial class GamePatcher {
     private Hook? _needolinTextOwnerUpdateHook;
 
     /// <summary>
+    /// Hook for turning NPCs with a <see cref="HeroPerformanceSingReaction"/> towards a remote performer.
+    /// </summary>
+    private Hook? _singReactionUpdateHook;
+
+    /// <summary>
+    /// Hook for letting NPCs pick the side of their sing animation from their performer when they start singing.
+    /// </summary>
+    private Hook? _checkPassedTargetEnterHook;
+
+    /// <summary>
+    /// Hook for letting NPCs pick the side of their sing animation from their performer while they sing.
+    /// </summary>
+    private Hook? _checkPassedTargetUpdateHook;
+
+    /// <summary>
     /// Registers the needolin co-op hooks.
     /// </summary>
     private void RegisterNeedolinHooks() {
@@ -117,7 +182,15 @@ internal partial class GamePatcher {
 
         _needolinTextOwnerUpdateHook = TryCreateHook(typeof(NeedolinTextOwner), "Update", OnNeedolinTextOwnerUpdate);
 
-        MonoBehaviourUtil.Instance.OnUpdateEvent += NeedolinCoop.UpdateLocalPerformer;
+        _singReactionUpdateHook = TryCreateHook(
+            typeof(HeroPerformanceSingReaction), "OnUpdate", OnHeroPerformanceSingReactionUpdate
+        );
+        _checkPassedTargetEnterHook = TryCreateHook(typeof(CheckPassedTarget), "OnEnter", OnCheckPassedTargetEnter);
+        _checkPassedTargetUpdateHook = TryCreateHook(typeof(CheckPassedTarget), "OnUpdate", OnCheckPassedTargetUpdate);
+
+        RegisterNeedolinListenerHooks();
+
+        MonoBehaviourUtil.Instance.OnUpdateEvent += OnNeedolinUpdate;
     }
 
     /// <summary>
@@ -148,8 +221,19 @@ internal partial class GamePatcher {
         _needolinTextOwnerUpdateHook?.Dispose();
         _needolinTextOwnerUpdateHook = null;
 
+        _singReactionUpdateHook?.Dispose();
+        _singReactionUpdateHook = null;
+
+        _checkPassedTargetEnterHook?.Dispose();
+        _checkPassedTargetEnterHook = null;
+
+        _checkPassedTargetUpdateHook?.Dispose();
+        _checkPassedTargetUpdateHook = null;
+
+        DisposeNeedolinListenerHooks();
+
         if (MonoBehaviourUtil.Instance != null) {
-            MonoBehaviourUtil.Instance.OnUpdateEvent -= NeedolinCoop.UpdateLocalPerformer;
+            MonoBehaviourUtil.Instance.OnUpdateEvent -= OnNeedolinUpdate;
         }
 
         ClearNeedolinTargets();
@@ -164,6 +248,26 @@ internal partial class GamePatcher {
         SongTargets.Clear();
         PendingSongTargets.Clear();
         NeedolinEnemyTargets.Clear();
+
+        NeedolinIdsToRemove.Clear();
+        NeedolinIdsToRemove.AddRange(LookTargetOverrides.Keys);
+        foreach (var ownerId in NeedolinIdsToRemove) {
+            RestoreLookTargetOverride(ownerId);
+        }
+
+        LookAnimNpcs.Clear();
+        ActiveSingReactions.Clear();
+
+        ClearNeedolinListeners();
+    }
+
+    /// <summary>
+    /// Runs the per-frame needolin co-op upkeep.
+    /// </summary>
+    private static void OnNeedolinUpdate() {
+        NeedolinCoop.UpdateLocalPerformer();
+        UpdateLookTargetOverrides();
+        UpdateNeedolinListeners();
     }
 
     /// <summary>
@@ -296,6 +400,8 @@ internal partial class GamePatcher {
     ) {
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
             RememberPendingSongTarget(self.Fsm, self.Target, self.IgnoreNeedolinRange.Value, 0f);
+        } else if (state != HeroPerformanceRegion.AffectedState.None) {
+            RefreshPendingSongTarget(self.Fsm);
         }
 
         orig(self, state);
@@ -311,6 +417,8 @@ internal partial class GamePatcher {
     ) {
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
             RememberPendingSongTarget(self.Fsm, self.Target, self.IgnoreNeedolinRange.Value, self.Radius.Value);
+        } else if (state != HeroPerformanceRegion.AffectedState.None) {
+            RefreshPendingSongTarget(self.Fsm);
         }
 
         orig(self, state);
@@ -341,7 +449,7 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Stores the performer that affects a needolin check's target the most as the pending song target of the enemy,
-    /// unless the enemy is already singing to someone.
+    /// unless the enemy is already singing to someone. An NPC that reacts to a remote performer turns towards them.
     /// </summary>
     /// <param name="fsm">The FSM of the check.</param>
     /// <param name="targetOwner">The check's target.</param>
@@ -389,6 +497,30 @@ internal partial class GamePatcher {
             HasMusicianCharm = performer.HasMusicianCharm,
             FoundTime = Time.time
         };
+
+        if (performer.IsLocal) {
+            RestoreLookTargetOverride(ownerId);
+        } else {
+            SetLookTargetOverride(ownerId, GetLookAnimNpc(owner), performer.Object.transform, false);
+        }
+    }
+
+    /// <summary>
+    /// Keeps the pending song target of an enemy while its checks still find a performer without sending a reaction
+    /// event, as they do in the states where an enemy waits before it starts singing.
+    /// </summary>
+    /// <param name="fsm">The FSM of the check.</param>
+    private static void RefreshPendingSongTarget(HutongGames.PlayMaker.Fsm? fsm) {
+        var requester = fsm?.GameObject;
+        if (requester == null || PendingSongTargets.Count == 0) {
+            return;
+        }
+
+        var owner = GetEnemyTargetOwner(requester);
+        if (owner != null && PendingSongTargets.TryGetValue(owner.GetInstanceID(), out var pending) &&
+            IsPendingSongTargetValid(pending)) {
+            pending.FoundTime = Time.time;
+        }
     }
 
     /// <summary>
@@ -458,6 +590,210 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Turns an NPC with a <see cref="HeroPerformanceSingReaction"/> towards the remote performer that it reacts to.
+    /// It picks its performer when it first notices a song, keeps facing them until it stops reacting, and sings to the
+    /// side it faces when its song starts.
+    /// </summary>
+    private static void OnHeroPerformanceSingReactionUpdate(
+        Action<HeroPerformanceSingReaction> orig,
+        HeroPerformanceSingReaction self
+    ) {
+        orig(self);
+
+        var isAffected = SingReactionAffectedStateField?.GetValue(self) is HeroPerformanceRegion.AffectedState state &&
+                         state != HeroPerformanceRegion.AffectedState.None;
+        var isReacting = isAffected || SingReactionIsInsideField?.GetValue(self) is true;
+
+        var id = self.GetInstanceID();
+        if (isReacting == ActiveSingReactions.ContainsKey(id)) {
+            return;
+        }
+
+        if (!isReacting) {
+            ActiveSingReactions.Remove(id);
+            RestoreLookTargetOverride(id);
+            return;
+        }
+
+        ActiveSingReactions[id] = self;
+
+        var ignoreRange = SingReactionIgnoreRangeField?.GetValue(self) is true;
+        var target = self.transform;
+        NeedolinCoop.Evaluate(
+            target,
+            ignoreRange,
+            0f,
+            true,
+            CountsRemotePerformers(target, ignoreRange),
+            out var performer
+        );
+        if (performer is { IsLocal: false }) {
+            SetLookTargetOverride(
+                id,
+                SingReactionLookAnimNpcField?.GetValue(self) as LookAnimNPC,
+                performer.Object.transform,
+                true
+            );
+        }
+    }
+
+    /// <summary>
+    /// Lets <see cref="CheckPassedTarget"/> check against the performer an NPC sings to when it starts.
+    /// </summary>
+    private static void OnCheckPassedTargetEnter(Action<CheckPassedTarget> orig, CheckPassedTarget self) {
+        RunWithSongTarget(orig, self);
+    }
+
+    /// <summary>
+    /// Lets <see cref="CheckPassedTarget"/> check against the performer an NPC sings to every frame.
+    /// </summary>
+    private static void OnCheckPassedTargetUpdate(Action<CheckPassedTarget> orig, CheckPassedTarget self) {
+        RunWithSongTarget(orig, self);
+    }
+
+    /// <summary>
+    /// Runs a <see cref="CheckPassedTarget"/> method with its hero target swapped for the remote performer that its
+    /// NPC sings to or just reacted to. NPCs use it to pick which side their sing animation faces. The target is only
+    /// swapped for the call, so the FSM's hero variable stays untouched for the NPC's other states.
+    /// </summary>
+    private static void RunWithSongTarget(Action<CheckPassedTarget> orig, CheckPassedTarget self) {
+        var hero = HeroController.instance;
+        var requester = self.Fsm?.GameObject;
+        var originalTarget = self.Target;
+        if (hero == null || requester == null || originalTarget == null || originalTarget.Value != hero.gameObject ||
+            SongTargets.Count == 0 && PendingSongTargets.Count == 0) {
+            orig(self);
+            return;
+        }
+
+        var owner = GetEnemyTargetOwner(requester);
+        if (owner == null || !TryGetSongTarget(owner.GetInstanceID(), out var songTarget) || songTarget == null ||
+            songTarget == hero.gameObject) {
+            orig(self);
+            return;
+        }
+
+        self.Target = new FsmGameObject { Value = songTarget };
+        try {
+            orig(self);
+        } finally {
+            self.Target = originalTarget;
+        }
+    }
+
+    /// <summary>
+    /// Gets the <see cref="LookAnimNPC"/> that turns an NPC, found on the owner, a parent or a child.
+    /// </summary>
+    /// <param name="owner">The enemy owner of the NPC's FSM.</param>
+    /// <returns>The component, or null if the NPC has none.</returns>
+    private static LookAnimNPC? GetLookAnimNpc(GameObject owner) {
+        var ownerId = owner.GetInstanceID();
+        if (LookAnimNpcs.TryGetValue(ownerId, out var look)) {
+            return look;
+        }
+
+        look = owner.GetComponentInParent<LookAnimNPC>();
+        if (look == null) {
+            look = owner.GetComponentInChildren<LookAnimNPC>();
+        }
+
+        LookAnimNpcs[ownerId] = look;
+        return look;
+    }
+
+    /// <summary>
+    /// Turns an NPC towards a remote performer by overriding its look target, remembering the override it had before.
+    /// </summary>
+    /// <param name="ownerId">The instance ID that owns the override.</param>
+    /// <param name="look">The component that turns the NPC.</param>
+    /// <param name="target">The performer to face.</param>
+    /// <param name="isSingReaction">Whether the owner is a <see cref="HeroPerformanceSingReaction"/>.</param>
+    private static void SetLookTargetOverride(int ownerId, LookAnimNPC? look, Transform target, bool isSingReaction) {
+        if (look == null) {
+            return;
+        }
+
+        if (!LookTargetOverrides.TryGetValue(ownerId, out var lookOverride)) {
+            lookOverride = new LookTargetOverride {
+                Look = look,
+                Previous = look.TargetOverride,
+                IsSingReaction = isSingReaction
+            };
+            LookTargetOverrides[ownerId] = lookOverride;
+        }
+
+        lookOverride.Target = target;
+        look.TargetOverride = target;
+    }
+
+    /// <summary>
+    /// Gives an NPC back the look target override it had before it reacted to a remote performer.
+    /// </summary>
+    /// <param name="ownerId">The instance ID that owns the override.</param>
+    private static void RestoreLookTargetOverride(int ownerId) {
+        if (!LookTargetOverrides.TryGetValue(ownerId, out var lookOverride)) {
+            return;
+        }
+
+        LookTargetOverrides.Remove(ownerId);
+        if (lookOverride.Look != null && lookOverride.Look.TargetOverride == lookOverride.Target) {
+            lookOverride.Look.TargetOverride = lookOverride.Previous;
+        }
+    }
+
+    /// <summary>
+    /// Turns NPCs back once they no longer react to their remote performer: their song ended, their reaction was
+    /// cancelled or disabled, or the performer left.
+    /// </summary>
+    private static void UpdateLookTargetOverrides() {
+        if (ActiveSingReactions.Count > 0) {
+            NeedolinIdsToRemove.Clear();
+            foreach (var pair in ActiveSingReactions) {
+                if (pair.Value == null || !pair.Value.isActiveAndEnabled) {
+                    NeedolinIdsToRemove.Add(pair.Key);
+                }
+            }
+
+            foreach (var id in NeedolinIdsToRemove) {
+                ActiveSingReactions.Remove(id);
+                RestoreLookTargetOverride(id);
+            }
+        }
+
+        if (LookTargetOverrides.Count == 0) {
+            return;
+        }
+
+        NeedolinIdsToRemove.Clear();
+        foreach (var pair in LookTargetOverrides) {
+            if (!IsLookTargetOverrideActive(pair.Key, pair.Value)) {
+                NeedolinIdsToRemove.Add(pair.Key);
+            }
+        }
+
+        foreach (var id in NeedolinIdsToRemove) {
+            RestoreLookTargetOverride(id);
+        }
+    }
+
+    /// <summary>
+    /// Checks whether an NPC should still face the remote performer of a look target override.
+    /// </summary>
+    private static bool IsLookTargetOverrideActive(int ownerId, LookTargetOverride lookOverride) {
+        if (lookOverride.Look == null || lookOverride.Target == null ||
+            !lookOverride.Target.gameObject.activeInHierarchy) {
+            return false;
+        }
+
+        if (lookOverride.IsSingReaction) {
+            return ActiveSingReactions.ContainsKey(ownerId);
+        }
+
+        return SongTargets.ContainsKey(ownerId) ||
+               PendingSongTargets.TryGetValue(ownerId, out var pending) && IsPendingSongTargetValid(pending);
+    }
+
+    /// <summary>
     /// A performer that an enemy faces because of their song.
     /// </summary>
     private sealed class SongTarget {
@@ -480,5 +816,30 @@ internal partial class GamePatcher {
         /// The time at which the performer was found.
         /// </summary>
         public float FoundTime;
+    }
+
+    /// <summary>
+    /// A look target override that turns an NPC towards a remote performer.
+    /// </summary>
+    private sealed class LookTargetOverride {
+        /// <summary>
+        /// The component that turns the NPC.
+        /// </summary>
+        public LookAnimNPC Look = null!;
+
+        /// <summary>
+        /// The override the NPC had before, given back when it stops reacting.
+        /// </summary>
+        public Transform? Previous;
+
+        /// <summary>
+        /// The performer the NPC faces.
+        /// </summary>
+        public Transform Target = null!;
+
+        /// <summary>
+        /// Whether the override belongs to a <see cref="HeroPerformanceSingReaction"/> instead of an FSM song.
+        /// </summary>
+        public bool IsSingReaction;
     }
 }

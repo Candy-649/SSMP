@@ -109,6 +109,11 @@ internal static class NeedolinCoop {
     public static bool HasRemotePerformers => RemotePerformers.Count > 0;
 
     /// <summary>
+    /// The remote players in the local scene that are performing.
+    /// </summary>
+    public static IEnumerable<NeedolinPerformer> RemotePerformerValues => RemotePerformers.Values;
+
+    /// <summary>
     /// Whether the local player has the Musician Charm (Spider Strings) equipped, which enlarges the needolin ranges and
     /// makes enemies sing longer.
     /// </summary>
@@ -136,6 +141,8 @@ internal static class NeedolinCoop {
     /// <param name="playerObject">The player object of the remote player.</param>
     /// <param name="clip">The animation clip that the remote player plays.</param>
     public static void OnRemoteAnimation(GameObject playerObject, AnimationClip clip) {
+        NeedolinRemoteAudio.OnRemoteAnimation(playerObject, clip);
+
         if (!PerformingClips.Contains(clip)) {
             RemotePerformers.Remove(playerObject);
             return;
@@ -167,14 +174,16 @@ internal static class NeedolinCoop {
     public static void RemoveRemotePerformer(GameObject? playerObject) {
         if (playerObject is not null) {
             RemotePerformers.Remove(playerObject);
+            NeedolinRemoteAudio.Stop(playerObject);
         }
     }
 
     /// <summary>
-    /// Stops counting all remote players as performers.
+    /// Stops counting all remote players as performers and stops their songs.
     /// </summary>
     public static void ClearRemotePerformers() {
         RemotePerformers.Clear();
+        NeedolinRemoteAudio.StopAll();
     }
 
     /// <summary>
