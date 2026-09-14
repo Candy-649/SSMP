@@ -179,5 +179,11 @@ internal enum BossRoomUpdateKind : byte {
     /// <summary>
     /// A player got to the fight of a room with dialogue, which only starts once every player got there.
     /// </summary>
-    Ready
+    Ready,
+
+    /// <summary>
+    /// An object of a player who isn't the scene host sent an event that starts the fight of a boss room, which the
+    /// scene host sends to its bosses too.
+    /// </summary>
+    RoomEvent
 }

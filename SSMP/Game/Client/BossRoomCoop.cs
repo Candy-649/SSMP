@@ -259,6 +259,7 @@ internal partial class BossRoomCoop {
             new Action<Action<SetPlayerDataVariable>, SetPlayerDataVariable>(OnSetPlayerDataVariableEnter)
         );
         RegisterDialogueHooks();
+        RegisterEventHooks();
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -281,6 +282,7 @@ internal partial class BossRoomCoop {
         _setVariableHook = null;
 
         DeregisterDialogueHooks();
+        DeregisterEventHooks();
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
@@ -364,6 +366,9 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.Ready:
                 OnReady(update);
                 break;
+            case BossRoomUpdateKind.RoomEvent:
+                OnRoomEvent(update);
+                break;
         }
     }
 
@@ -398,7 +403,7 @@ internal partial class BossRoomCoop {
 
         if (IsHoldActive() && self.ActiveState is { } activeState &&
             (TryHoldDialogueEnd(self, activeState, eventName) || TryHoldFightGate(self, activeState, eventName) ||
-             TryHoldStart(self, activeState, eventName))) {
+             TryHoldStart(self, activeState, eventName) || TryHoldEventStart(self, activeState, eventName))) {
             return;
         }
 
@@ -722,6 +727,7 @@ internal partial class BossRoomCoop {
 
         ReleaseHeldStarts();
         UpdateDialogues();
+        UpdateEventStarts();
         CheckStartedRooms();
         ClosePendingGates(previousPosition, position);
     }
@@ -748,6 +754,9 @@ internal partial class BossRoomCoop {
             if (GetInfo(fsm).StartTriggers.Count > 0) {
                 _startFsms.Add(fsm);
             }
+
+            // Reads boss rooms before their fights start, instead of when the first event arrives
+            GetBossRoom(fsm);
         }
     }
 
@@ -1476,6 +1485,7 @@ internal partial class BossRoomCoop {
         _startChecks.Clear();
         _remotePositions.Clear();
         ClearDialogues();
+        ClearEventStarts();
         _lastHeroPosition = null;
         _nextScanTime = 0f;
     }

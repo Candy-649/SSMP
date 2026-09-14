@@ -513,12 +513,26 @@ internal partial class BossRoomCoop {
     /// </summary>
     /// <returns>Whether the transition is held back.</returns>
     private bool TryHoldFightGate(Fsm fsm, FsmState state, string eventName) {
+        // A fight that started isn't held back again, so that a player who died doesn't stop it
+        if (_startedFights.Contains(fsm)) {
+            return false;
+        }
+
         // The end of dialogue and the steps of the room itself happen for one player at a time, while events from
-        // elsewhere, like a lever, start the fight for every player at once. A fight that started isn't held back
-        // again, so that a player who died doesn't stop it
-        if ((eventName != ConversationEndEventName && FsmExecutionStack.ExecutingFsm != fsm) ||
-            _startedFights.Contains(fsm) ||
-            !IsFightTransition(GetFightTransitions(fsm), state.Name, eventName)) {
+        // elsewhere, like a lever, start the fight for every player at once. Events from the dialogue of another object
+        // of the boss room, like a character to talk to, happen for one player at a time too
+        var sender = FsmExecutionStack.ExecutingFsm;
+        bool isAfterDialogue;
+        if (eventName == ConversationEndEventName || sender == fsm) {
+            if (!IsFightTransition(GetFightTransitions(fsm), state.Name, eventName)) {
+                return false;
+            }
+
+            isAfterDialogue = _dialogueFsms.Contains(fsm);
+        } else if (sender != null && _dialogueFsms.Contains(sender) && GetBossRoom(fsm) is { } room &&
+                   IsEventStart(room, fsm, state, eventName)) {
+            isAfterDialogue = true;
+        } else {
             return false;
         }
 
@@ -531,7 +545,7 @@ internal partial class BossRoomCoop {
         // Only a room whose dialogue the local player went through waits. Without dialogue, like in a room that was won
         // before, the room goes on like it does alone, and only tells the other players that it got there
         _heldFights.TryGetValue(fsm, out var held);
-        if (!_dialogueFsms.Contains(fsm) || HaveAllReached(readiness)) {
+        if (!isAfterDialogue || HaveAllReached(readiness)) {
             if (held != null) {
                 _heldFights.Remove(fsm);
                 RestoreHero(held);
@@ -645,6 +659,22 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Gets the transitions of an FSM that wait for every player: into the fight of a room with dialogue, and the events
+    /// that start the fight of its boss room.
+    /// </summary>
+    private HashSet<string> GetGatedTransitions(Fsm fsm) {
+        var transitions = GetFightTransitions(fsm);
+        if (GetBossRoom(fsm) is not { } room || !room.EventStarts.TryGetValue(fsm, out var starts) ||
+            starts.Count == 0) {
+            return transitions;
+        }
+
+        var gated = new HashSet<string>(transitions);
+        gated.UnionWith(starts);
+        return gated;
+    }
+
+    /// <summary>
     /// Whether an event in a state is one of the transitions into the fight of a room.
     /// </summary>
     private static bool IsFightTransition(HashSet<string> transitions, string stateName, string eventName) {
@@ -719,7 +749,7 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        var transitions = GetFightTransitions(fsm);
+        var transitions = GetGatedTransitions(fsm);
         if (transitions.Count > 0 && CanReachFight(fsm, transitions)) {
             return;
         }
