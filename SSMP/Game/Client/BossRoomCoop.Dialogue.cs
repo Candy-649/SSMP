@@ -103,6 +103,11 @@ internal partial class BossRoomCoop {
     private readonly Dictionary<Fsm, HashSet<string>> _fightTransitions = new();
 
     /// <summary>
+    /// The FSMs that started dialogue for the local player in the current scene.
+    /// </summary>
+    private readonly HashSet<Fsm> _dialogueFsms = [];
+
+    /// <summary>
     /// How many starts of dialogue are running, as newer dialogue actions may start their dialogue through older ones.
     /// </summary>
     private int _startDialogueDepth;
@@ -193,6 +198,10 @@ internal partial class BossRoomCoop {
 
         var fsm = action.Fsm;
         var state = action.State;
+        if (fsm != null) {
+            _dialogueFsms.Add(fsm);
+        }
+
         if (_startDialogueDepth > 0 || fsm == null || state == null || !IsCoopActive() ||
             !_entityManager.IsSceneHost) {
             return;
@@ -519,8 +528,10 @@ internal partial class BossRoomCoop {
             Send(BossRoomUpdateKind.Ready, fsm, "", "", "");
         }
 
+        // Only a room whose dialogue the local player went through waits. Without dialogue, like in a room that was won
+        // before, the room goes on like it does alone, and only tells the other players that it got there
         _heldFights.TryGetValue(fsm, out var held);
-        if (HaveAllReached(readiness)) {
+        if (!_dialogueFsms.Contains(fsm) || HaveAllReached(readiness)) {
             if (held != null) {
                 _heldFights.Remove(fsm);
                 RestoreHero(held);
@@ -862,6 +873,7 @@ internal partial class BossRoomCoop {
         _heldFights.Clear();
         _startedFights.Clear();
         _fightTransitions.Clear();
+        _dialogueFsms.Clear();
 
         if (heldDialogues.Count == 0 && heldFights.Count == 0) {
             return;
