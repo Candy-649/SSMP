@@ -468,6 +468,26 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Add the state of an arena that a player in the same scene sent to the current packet.
+    /// </summary>
+    /// <param name="update">The state of the arena.</param>
+    public void AddBattleSceneUpdateData(BattleSceneUpdate update) {
+        lock (Lock) {
+            var battleSceneUpdateCollection =
+                GetOrCreateCollection<BattleSceneUpdate>(ClientUpdatePacketId.BattleSceneUpdate);
+            battleSceneUpdateCollection.DataInstances.Add(
+                new BattleSceneUpdate {
+                    SceneName = update.SceneName,
+                    Path = update.Path,
+                    Status = update.Status,
+                    Wave = update.Wave,
+                    Enemies = update.Enemies
+                }
+            );
+        }
+    }
+
+    /// <summary>
     /// Add a player setting update to the current packet for the receiving player.
     /// </summary>
     /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.

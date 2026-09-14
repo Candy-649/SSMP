@@ -370,6 +370,18 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
+    /// Add the state of an arena in the current scene to the current packet.
+    /// </summary>
+    /// <param name="update">The state of the arena.</param>
+    public void SetBattleSceneUpdate(BattleSceneUpdate update) {
+        lock (Lock) {
+            var battleSceneUpdateCollection =
+                GetOrCreateCollection<BattleSceneUpdate>(ServerUpdatePacketId.BattleSceneUpdate);
+            battleSceneUpdateCollection.DataInstances.Add(update);
+        }
+    }
+
+    /// <summary>
     /// Set a chat message in the current packet.
     /// </summary>
     /// <param name="message">The string message.</param>

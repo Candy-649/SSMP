@@ -53,6 +53,11 @@ internal class EntityManager {
     private bool _sceneRoleDetermined;
 
     /// <summary>
+    /// Whether the server told the client if it is the scene host of the current scene.
+    /// </summary>
+    public bool IsSceneRoleDetermined => _sceneRoleDetermined;
+
+    /// <summary>
     /// Gets all currently registered active entities.
     /// </summary>
     public Dictionary<ushort, Entity>.ValueCollection ActiveEntities => _entities.Values;

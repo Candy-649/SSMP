@@ -341,6 +341,10 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.SemiPersistentReset,
             OnSemiPersistentReset
         );
+        _packetManager.RegisterServerUpdatePacketHandler<BattleSceneUpdate>(
+            ServerUpdatePacketId.BattleSceneUpdate,
+            OnBattleSceneUpdate
+        );
         _packetManager.RegisterServerUpdatePacketHandler<ChatMessage>(
             ServerUpdatePacketId.ChatMessage,
             OnChatMessage
@@ -387,6 +391,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDisconnect);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDeath);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ChatMessage);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ServerSettings);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerSetting);
@@ -1310,6 +1315,25 @@ internal abstract class ServerManager : IServerManager {
                 _netServer.GetUpdateManagerForClient(otherId)?.AddSemiPersistentResetData(id);
             }
         }
+    }
+
+    /// <summary>
+    /// Callback method for when a player sends the state of an arena, or asks the scene host to start its battle. It
+    /// goes to the other players in the scene of the arena.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="update">The BattleSceneUpdate packet data.</param>
+    private void OnBattleSceneUpdate(ushort id, BattleSceneUpdate update) {
+        if (!_playerData.ContainsKey(id)) {
+            Logger.Warn($"Received BattleSceneUpdate data, but player with ID {id} is not in mapping");
+            return;
+        }
+
+        SendDataInSameScene(
+            id,
+            update.SceneName,
+            otherId => _netServer.GetUpdateManagerForClient(otherId)?.AddBattleSceneUpdateData(update)
+        );
     }
 
     /// <summary>

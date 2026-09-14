@@ -103,4 +103,9 @@ internal enum ClientUpdatePacketId {
     /// Notify that a player rested at a bench or died, which respawns semi-persistent objects such as enemies.
     /// </summary>
     SemiPersistentReset = 19,
+
+    /// <summary>
+    /// The state of an arena in the current scene changed, or a player asks the scene host to start its battle.
+    /// </summary>
+    BattleSceneUpdate = 20,
 }

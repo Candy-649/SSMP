@@ -35,6 +35,8 @@ internal class ServerUpdatePacket : UpdatePacket<ServerUpdatePacketId> {
                 return new ServerSettingsUpdate();
             case ServerUpdatePacketId.PlayerSetting:
                 return new ServerPlayerSettingUpdate();
+            case ServerUpdatePacketId.BattleSceneUpdate:
+                return new PacketDataCollection<BattleSceneUpdate>();
             default:
                 return new EmptyData();
         }

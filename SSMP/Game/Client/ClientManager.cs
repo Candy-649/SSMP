@@ -112,6 +112,11 @@ internal class ClientManager : IClientManager {
     private readonly EnemyHealthCoop _enemyHealthCoop;
 
     /// <summary>
+    /// The arena co-op instance.
+    /// </summary>
+    private readonly ArenaCoop _arenaCoop;
+
+    /// <summary>
     /// The FSM patcher instance.
     /// </summary>
     private readonly FsmPatcher _fsmPatcher;
@@ -252,6 +257,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher = new GamePatcher(netClient, _entityManager);
         _benchCoop = new BenchCoop(netClient, _playerData, _saveManager);
         _enemyHealthCoop = new EnemyHealthCoop(_playerData);
+        _arenaCoop = new ArenaCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -323,6 +329,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher.RegisterHooks();
         _benchCoop.RegisterHooks();
         _enemyHealthCoop.RegisterHooks();
+        _arenaCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
         if (_fullSynchronisation) {
@@ -353,6 +360,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher.DeregisterHooks();
         _benchCoop.DeregisterHooks();
         _enemyHealthCoop.DeregisterHooks();
+        _arenaCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
         if (_fullSynchronisation) {
@@ -435,6 +443,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.SemiPersistentReset,
             _benchCoop.OnSemiPersistentReset
         );
+        _packetManager.RegisterClientUpdatePacketHandler<BattleSceneUpdate>(
+            ClientUpdatePacketId.BattleSceneUpdate,
+            _arenaCoop.OnBattleSceneUpdate
+        );
 
         // Register packet handlers related to full synchronisation
         if (_fullSynchronisation) {
@@ -477,6 +489,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.ChatMessage);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerSetting);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SemiPersistentReset);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BattleSceneUpdate);
 
         if (_fullSynchronisation) {
             _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);
@@ -922,6 +935,8 @@ internal class ClientManager : IClientManager {
         );
         _animationManager.UpdatePlayerAnimation(id, enterSceneData.AnimationClipId, 0, playerData.CrestType);
 
+        _arenaCoop.OnPlayerEnterScene();
+
         try {
             PlayerEnterSceneEvent?.Invoke(playerData);
         } catch (Exception e) {
@@ -1085,6 +1100,7 @@ internal class ClientManager : IClientManager {
             _entityManager.InitializeSceneClient(hostTransfer.SceneHostEpoch);
         } else {
             _entityManager.BecomeSceneHost(hostTransfer.SceneHostEpoch);
+            _arenaCoop.OnBecomeSceneHost();
         }
     }
 

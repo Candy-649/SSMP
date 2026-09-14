@@ -49,6 +49,8 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new PacketDataCollection<SaveUpdate>();
             case ClientUpdatePacketId.SemiPersistentReset:
                 return new PacketDataCollection<GenericClientData>();
+            case ClientUpdatePacketId.BattleSceneUpdate:
+                return new PacketDataCollection<BattleSceneUpdate>();
             default:
                 return new EmptyData();
         }

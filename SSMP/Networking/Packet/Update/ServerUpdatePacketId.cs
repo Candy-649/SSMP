@@ -82,5 +82,10 @@ public enum ServerUpdatePacketId {
     /// <summary>
     /// Notify that the player rested at a bench or died, which respawns semi-persistent objects such as enemies.
     /// </summary>
-    SemiPersistentReset = 15
+    SemiPersistentReset = 15,
+
+    /// <summary>
+    /// The state of an arena in the current scene changed, or the player asks the scene host to start its battle.
+    /// </summary>
+    BattleSceneUpdate = 16
 }
