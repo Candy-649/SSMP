@@ -282,6 +282,7 @@ internal partial class CoopSave {
     private void FinishCheck(CoopSaveMarker marker, ClientPlayerData partner) {
         _checkedWith = partner.Id;
         _everChecked = true;
+        ResetWorldChanges();
 
         marker.PartnerName = partner.Username;
         if (partner.SaveKey.Length > 0) {
@@ -373,8 +374,6 @@ internal partial class CoopSave {
             );
         }
 
-        var worldBools = GetWorldBools();
-        var boolNames = GetPlayerDataBoolNames();
         var loadedScenes = GetLoadedSceneNames();
         var loadedItems = new HashSet<string>(StringComparer.Ordinal);
         var items = 0;
@@ -382,33 +381,8 @@ internal partial class CoopSave {
 
         foreach (var part in parts) {
             for (var i = 0; i < part.ItemIds.Count && i < part.ItemScenes.Count; i++) {
-                var scene = part.ItemScenes[i];
-                var id = part.ItemIds[i];
-                var key = GetItemKey(scene, id);
-                if (!worldBools.Contains(key) ||
-                    (sceneData.PersistentBools.TryGetValue(scene, id, out var existing) && existing.Value)) {
-                    continue;
-                }
-
-                sceneData.PersistentBools.SetValue(new PersistentItemData<bool> {
-                    ID = id,
-                    SceneName = scene,
-                    Value = true,
-                    IsSemiPersistent = false
-                });
-                items++;
-
-                if (loadedScenes.Contains(scene.ToLowerInvariant())) {
-                    loadedItems.Add(key);
-                }
-
-                if (_worldPlayerData!.TryGetValue(key, out var names)) {
-                    foreach (var name in names) {
-                        if (boolNames.Contains(name) && !BossRoomCoop.IsHeroStateName(name) && !playerData.GetBool(name)) {
-                            playerData.SetBool(name, true);
-                            flags++;
-                        }
-                    }
+                if (AddWorldItem(part.ItemScenes[i], part.ItemIds[i], loadedScenes, loadedItems, ref flags)) {
+                    items++;
                 }
             }
         }
@@ -417,6 +391,55 @@ internal partial class CoopSave {
 
         _addedChanges = items;
         Logger.Info($"Added world progress of {partner.Username}: {items} saved objects and {flags} player data flags");
+    }
+
+    /// <summary>
+    /// Adds a saved object of the world that the partner set to the local save, if the local save lacks it and also
+    /// counts it as the world, with the player data that the object sets together with its own state.
+    /// </summary>
+    /// <param name="scene">The scene of the object.</param>
+    /// <param name="id">The ID of the object.</param>
+    /// <param name="loadedScenes">The names of the loaded scenes in lower case.</param>
+    /// <param name="loadedItems">The keys of the added objects in loaded scenes, which this adds to.</param>
+    /// <param name="flags">The number of player data flags that were set, which this adds to.</param>
+    /// <returns>Whether the object was added.</returns>
+    private bool AddWorldItem(
+        string scene,
+        string id,
+        HashSet<string> loadedScenes,
+        HashSet<string> loadedItems,
+        ref int flags
+    ) {
+        var playerData = PlayerData.instance;
+        var sceneData = SceneData.instance;
+        var key = GetItemKey(scene, id);
+        if (!GetWorldBools().Contains(key) ||
+            (sceneData.PersistentBools.TryGetValue(scene, id, out var existing) && existing.Value)) {
+            return false;
+        }
+
+        sceneData.PersistentBools.SetValue(new PersistentItemData<bool> {
+            ID = id,
+            SceneName = scene,
+            Value = true,
+            IsSemiPersistent = false
+        });
+
+        if (loadedScenes.Contains(scene.ToLowerInvariant())) {
+            loadedItems.Add(key);
+        }
+
+        if (_worldPlayerData!.TryGetValue(key, out var names)) {
+            var boolNames = GetPlayerDataBoolNames();
+            foreach (var name in names) {
+                if (boolNames.Contains(name) && !BossRoomCoop.IsHeroStateName(name) && !playerData.GetBool(name)) {
+                    playerData.SetBool(name, true);
+                    flags++;
+                }
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -543,13 +566,20 @@ internal partial class CoopSave {
         foreach (var item in UnityEngine.Object.FindObjectsByType<PersistentBoolItem>(
                      UnityEngine.FindObjectsInactive.Include, UnityEngine.FindObjectsSortMode.None
                  )) {
-            var data = item.ItemData;
-            var id = string.IsNullOrEmpty(data?.ID) ? item.gameObject.name : data!.ID;
-            var scene = string.IsNullOrEmpty(data?.SceneName) ? item.gameObject.scene.name : data!.SceneName;
+            GetItemSceneAndId(item, out var scene, out var id);
             if (keys.Contains(GetItemKey(scene, id))) {
                 item.SetValueOverride(true);
             }
         }
+    }
+
+    /// <summary>
+    /// Gets the scene and the ID that a saved object is saved under.
+    /// </summary>
+    private static void GetItemSceneAndId(PersistentBoolItem item, out string scene, out string id) {
+        var data = item.ItemData;
+        id = string.IsNullOrEmpty(data?.ID) ? item.gameObject.name : data!.ID;
+        scene = string.IsNullOrEmpty(data?.SceneName) ? item.gameObject.scene.name : data!.SceneName;
     }
 
     #endregion

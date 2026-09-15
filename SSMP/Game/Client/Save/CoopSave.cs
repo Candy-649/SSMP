@@ -339,6 +339,8 @@ internal partial class CoopSave {
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
         EventHooks.UIManagerReturnToMainMenu += OnReturnToMainMenu;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
+        SceneManager.sceneLoaded += OnWorldSceneLoaded;
+        SceneManager.sceneUnloaded += OnWorldSceneUnloaded;
         _uiManager.HostBeforeSaveStoppedEvent += OnHostBeforeSaveStopped;
         _uiManager.HostSaveSelectionClosedEvent += OnHostSaveSelectionClosed;
     }
@@ -386,6 +388,8 @@ internal partial class CoopSave {
             return;
         }
 
+        WatchLevelSaves(gameManager);
+
         var slot = gameManager.profileID;
         if (slot != _sessionSlot) {
             ResetSession(true);
@@ -423,6 +427,7 @@ internal partial class CoopSave {
         }
 
         if (partner != null && _checkedWith == partner.Id) {
+            UpdateWorldChanges(partner);
             ReleaseHold(hero);
             return;
         }
@@ -512,6 +517,7 @@ internal partial class CoopSave {
         _checkedWith = null;
         ResetCheck();
         ResetCheckpointSession();
+        ResetWorldChanges();
     }
 
     /// <summary>
@@ -667,6 +673,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.BossFight:
                 OnBossFight(player, update);
+                break;
+            case CoopSaveUpdateKind.WorldChange:
+                OnWorldChange(player, update);
                 break;
         }
     }

@@ -180,5 +180,11 @@ internal enum CoopSaveUpdateKind : byte {
     /// A boss fight started with both players in the scene that the update lists, so the game of the other player gives
     /// it a checkpoint too.
     /// </summary>
-    BossFight
+    BossFight,
+
+    /// <summary>
+    /// Saved objects of the world that got set in the game of the sender during the two-player save, which the other
+    /// game adds to its save at once.
+    /// </summary>
+    WorldChange
 }
