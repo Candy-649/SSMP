@@ -279,9 +279,12 @@ internal class ClientManager : IClientManager {
             _entityManager,
             () => _fullSynchronisation,
             () => _coopSave.IsPartnerMissing(),
-            fsm => _coopSave.IsSharedTalk(fsm)
+            fsm => _coopSave.IsSharedTalk(fsm),
+            fsm => _coopSave.HoldsSharedTalkEnd(fsm)
         );
-        _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager);
+        _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager) {
+            IsHeroLockedInArena = _arenaCoop.IsLocalHeroLockedIn
+        };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _coopHits = new CoopHits(
             netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedPartnerId

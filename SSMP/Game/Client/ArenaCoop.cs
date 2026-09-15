@@ -646,6 +646,19 @@ internal class ArenaCoop {
     }
 
     /// <summary>
+    /// Whether the gates of an arena that isn't won yet are closed for the local player.
+    /// </summary>
+    public bool IsLocalHeroLockedIn() {
+        foreach (var pair in _arenas) {
+            if (pair.Value.LockedIn && pair.Key != null && !IsCompleted(pair.Key)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Closes the gates of an arena for the local player, if they are not closed yet.
     /// </summary>
     private static void LockIn(BattleScene battleScene, ArenaState state) {

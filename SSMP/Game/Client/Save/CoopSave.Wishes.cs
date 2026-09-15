@@ -390,8 +390,11 @@ internal partial class CoopSave {
                 continue;
             }
 
+            // A delivery whose item the local player doesn't carry, like after it broke, isn't accepted for them,
+            // because its character takes in an accepted delivery without looking at the item
             var wish = playerData.QuestCompletionData.GetData(name);
-            if (!localDone && (partnerValue & WishAccepted) != 0 && !wish.IsAccepted && !wish.IsCompleted) {
+            if (!localDone && (partnerValue & WishAccepted) != 0 && !wish.IsAccepted && !wish.IsCompleted &&
+                !IsUncarriedDelivery(name)) {
                 wish.IsAccepted = true;
                 wish.HasBeenSeen = false;
                 playerData.QuestCompletionData.SetData(name, wish);

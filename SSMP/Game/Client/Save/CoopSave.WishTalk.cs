@@ -294,6 +294,17 @@ internal partial class CoopSave {
         public bool IsKey { get; set; }
 
         /// <summary>
+        /// Whether it turns in a delivery, which needs nobody else, and whose lines the partner reads too without the
+        /// dialogue waiting for them.
+        /// </summary>
+        public bool IsDelivery { get; set; }
+
+        /// <summary>
+        /// What the dialogue gives later that went to the partner already, like the reward of a delivery.
+        /// </summary>
+        public HashSet<string> CreditedGains { get; } = [];
+
+        /// <summary>
         /// The scene of the character.
         /// </summary>
         public string Scene { get; }
@@ -352,6 +363,19 @@ internal partial class CoopSave {
         /// When the dialogue last changed a wish, an item or the player data.
         /// </summary>
         public float LastChangeTime { get; set; } = Time.unscaledTime;
+
+        /// <summary>
+        /// Forgets what the dialogue changed so far, once it went to the partner.
+        /// </summary>
+        public void ClearChanges() {
+            Wishes.Clear();
+            Changes.Clear();
+            ChangeValues.Clear();
+            Items.Clear();
+            Flags.Clear();
+            IntChanges.Clear();
+            Quests.Clear();
+        }
 
         /// <summary>
         /// Whether an FSM runs the dialogue of the character.
@@ -726,9 +750,17 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether an FSM runs key dialogue of the local player, which the partner reads too.
+    /// Whether an FSM runs key dialogue of the local player or turns in a delivery, which the partner reads too.
     /// </summary>
     public bool IsSharedTalk(Fsm fsm) {
+        return _wishTalk is { } talk && (talk.IsKey || talk.IsDelivery) && talk.IsTalkFsm(fsm);
+    }
+
+    /// <summary>
+    /// Whether the end of dialogue that the partner reads too waits for them: only key dialogue does, since a delivery
+    /// never waits.
+    /// </summary>
+    public bool HoldsSharedTalkEnd(Fsm fsm) {
         return _wishTalk is { IsKey: true } talk && talk.IsTalkFsm(fsm);
     }
 
@@ -864,7 +896,13 @@ internal partial class CoopSave {
     /// <returns>Whether the character may talk.</returns>
     private bool TryStartWishTalk(PlayMakerNPC npc, CoopSaveMarker marker) {
         var fsms = GetTalkFsms(npc);
-        if (GetTalkKind(npc, fsms) != TalkKind.Key) {
+        var kind = GetTalkKind(npc, fsms);
+        if (kind == TalkKind.Delivery) {
+            StartDeliveryTalk(npc, fsms);
+            return true;
+        }
+
+        if (kind != TalkKind.Key) {
             // Other dialogue with a character who deals in wishes is recorded once it starts
             return true;
         }
@@ -1007,31 +1045,21 @@ internal partial class CoopSave {
                     if (!quest.IsAccepted && !quest.IsCompleted && quest.IsAvailable) {
                         kind = TalkKind.Key;
                     }
-                } else if (quest.IsAccepted && !quest.IsCompleted && quest.CanComplete) {
-                    // A delivery goes first, since whoever gets there first turns it in without waiting
-                    if (IsDelivery(quest)) {
+                } else if (quest.IsAccepted && !quest.IsCompleted) {
+                    // A delivery goes first, since whoever gets there first turns it in without waiting. Its character
+                    // takes it in also when the item got damaged on the way
+                    if (IsCarriedDelivery(quest)) {
                         return TalkKind.Delivery;
                     }
 
-                    kind = TalkKind.Key;
+                    if (quest.CanComplete) {
+                        kind = TalkKind.Key;
+                    }
                 }
             }
         }
 
         return kind;
-    }
-
-    /// <summary>
-    /// Whether a wish is a delivery, which runs against time.
-    /// </summary>
-    private static bool IsDelivery(FullQuestBase quest) {
-        foreach (var target in quest.Targets) {
-            if (target.Counter is DeliveryQuestItem) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -1212,6 +1240,14 @@ internal partial class CoopSave {
             Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkEnded));
         }
 
+        SendTalkChanges(talk, partner);
+    }
+
+    /// <summary>
+    /// Sends the wishes that dialogue accepted or completed to the partner, with what it took and gave, if it changed
+    /// any.
+    /// </summary>
+    private void SendTalkChanges(WishTalk talk, ClientPlayerData? partner) {
         if (talk.Changes.Count == 0) {
             return;
         }
@@ -1363,6 +1399,8 @@ internal partial class CoopSave {
             AddTalkWish(self);
             if (_boardCompletionDepth > 0) {
                 RecordBoardReward(self);
+            } else if (_wishTalk is { IsDelivery: true } talk) {
+                SendDelivery(talk, self);
             }
         }
 
@@ -1407,8 +1445,9 @@ internal partial class CoopSave {
     /// Records what an FSM of dialogue of the local player gives.
     /// </summary>
     private void RecordTalkGainChange(Fsm? fsm, string change, int amount) {
+        // A reward that went to the partner with a delivery isn't recorded again
         if (_wishTalk is { } talk && !_applyingPartnerTalk && _talkGainDepth == 0 && amount > 0 &&
-            talk.IsTalkFsm(fsm)) {
+            talk.IsTalkFsm(fsm) && !talk.CreditedGains.Remove(change)) {
             talk.AddItem(change, amount, false);
         }
     }
@@ -1550,8 +1589,13 @@ internal partial class CoopSave {
                 // A wish that the local player turns in at a board at the same time is paid and rewarded there
                 var isTurnedInHere = isCompletion && !before.IsCompleted && IsTurningInAtBoard(name);
                 turnedInHere |= isTurnedInHere;
+
+                // A delivery whose item broke for the local player while the partner carried theirs is rewarded, also
+                // when the break completed it without a reward
+                var isHeldBroken = isCompletion && _heldBrokenDeliveries.Remove(name);
                 applies[i] = !_differentWishNames.Contains(name) && !isTurnedInHere &&
-                             (isCompletion ? !before.IsCompleted : !before.IsAccepted || before.IsCompleted);
+                             (isHeldBroken ||
+                              (isCompletion ? !before.IsCompleted : !before.IsAccepted || before.IsCompleted));
                 anyApplies |= applies[i];
                 anyCompleted |= isCompletion;
                 completionApplies |= isCompletion && applies[i];

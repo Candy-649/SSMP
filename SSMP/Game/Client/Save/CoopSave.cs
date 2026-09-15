@@ -336,6 +336,7 @@ internal partial class CoopSave {
         RegisterInteractionHooks();
         RegisterWishTalkHooks();
         RegisterWishBoardHooks();
+        RegisterDeliveryHooks();
         RegisterLiftHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
@@ -431,6 +432,7 @@ internal partial class CoopSave {
         }
 
         UpdateWishTalk(partner);
+        UpdateDeliverySummon(hero, partner != null && _checkedWith == partner.Id ? partner : null);
 
         if (partner != null && _checkedWith == partner.Id) {
             UpdateCheckedPlayTime(marker);
@@ -539,6 +541,7 @@ internal partial class CoopSave {
         ResetStoryFlags();
         ResetWishTalk();
         ResetLifts();
+        ResetDeliveries();
     }
 
     /// <summary>
@@ -563,6 +566,7 @@ internal partial class CoopSave {
         ResetInteractions();
         OnWishTalkSceneChanged();
         OnLiftSceneChanged();
+        OnDeliverySceneChanged();
     }
 
     /// <summary>
@@ -734,6 +738,12 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.LiftDrive:
                 OnLiftDrive(player, update);
+                break;
+            case CoopSaveUpdateKind.DeliveryBreak:
+                OnDeliveryBreak(player, update);
+                break;
+            case CoopSaveUpdateKind.DeliverySummon:
+                OnDeliverySummon(player, update);
                 break;
         }
     }
@@ -1525,7 +1535,8 @@ internal partial class CoopSave {
     /// </summary>
     private void Send(CoopSaveUpdate update) {
         if (update.Kind is CoopSaveUpdateKind.WorldChange or CoopSaveUpdateKind.WishChange or
-            CoopSaveUpdateKind.Interaction or CoopSaveUpdateKind.WishTurnIn) {
+                CoopSaveUpdateKind.Interaction or CoopSaveUpdateKind.WishTurnIn ||
+            update is { Kind: CoopSaveUpdateKind.DeliveryBreak, PartCount: DeliveryBreakReport }) {
             update.Sequence = NextChangeSequence();
             StampLocalChanges(update);
         }

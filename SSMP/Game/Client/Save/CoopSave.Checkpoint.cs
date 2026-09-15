@@ -387,18 +387,24 @@ internal partial class CoopSave {
     /// </summary>
     /// <returns>Whether the move started.</returns>
     private bool MoveTo(HeroController hero, global::GameManager.SceneLoadInfo info) {
-        var gameManager = global::GameManager.instance;
-        hero.RecordLeaveSceneCState();
-        gameManager.BeginSceneTransition(info);
-
-        // The move starts right away unless the game dropped it
-        if (!gameManager.IsInSceneTransition) {
+        if (!BeginMove(hero, info)) {
             Logger.Warn($"The game didn't start the move to '{info.SceneName}' for the boss checkpoint");
             return false;
         }
 
         _checkpointMoveTime = Time.unscaledTime;
         return true;
+    }
+
+    /// <summary>
+    /// Takes the local player to a scene the way a door does.
+    /// </summary>
+    /// <returns>Whether the move started, which it does right away unless the game dropped it.</returns>
+    private static bool BeginMove(HeroController hero, global::GameManager.SceneLoadInfo info) {
+        var gameManager = global::GameManager.instance;
+        hero.RecordLeaveSceneCState();
+        gameManager.BeginSceneTransition(info);
+        return gameManager.IsInSceneTransition;
     }
 
     /// <summary>

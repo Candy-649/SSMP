@@ -238,13 +238,19 @@ internal partial class BossRoomCoop {
     /// </summary>
     private readonly Func<Fsm, bool> _isSharedTalk;
 
+    /// <summary>
+    /// Whether the end of such dialogue waits for the partner to read it, which dialogue that turns in a delivery doesn't.
+    /// </summary>
+    private readonly Func<Fsm, bool> _holdsSharedTalkEnd;
+
     public BossRoomCoop(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
         Func<bool> isFullSynchronisation,
         Func<bool> isPartnerMissing,
-        Func<Fsm, bool> isSharedTalk
+        Func<Fsm, bool> isSharedTalk,
+        Func<Fsm, bool> holdsSharedTalkEnd
     ) {
         _netClient = netClient;
         _playerData = playerData;
@@ -252,6 +258,7 @@ internal partial class BossRoomCoop {
         _isFullSynchronisation = isFullSynchronisation;
         _isPartnerMissing = isPartnerMissing;
         _isSharedTalk = isSharedTalk;
+        _holdsSharedTalkEnd = holdsSharedTalkEnd;
     }
 
     /// <summary>

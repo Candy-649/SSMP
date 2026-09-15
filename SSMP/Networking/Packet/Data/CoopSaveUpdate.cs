@@ -51,12 +51,14 @@ internal class CoopSaveUpdate : IPacketData {
     /// one that answers. For an interaction, 1 if the use of the other player had arrived before the sender used it.
     /// For key dialogue, 1 when it starts, 0 when it ends and 2 when it couldn't start without the other player. For a
     /// call of a lift, 1 if the sender is inside it. For the state of a lift, 1 while it moves. For driving a carriage,
-    /// 1 while the sender holds its button.
+    /// 1 while the sender holds its button. For a delivery that broke, 0 when it broke for the sender, 1 when the sender
+    /// still carries theirs and 2 when the sender doesn't either.
     /// </summary>
     public ushort PartCount { get; set; }
 
     /// <summary>
-    /// For world progress and pairing, the records of beaten bosses in the save of the sender.
+    /// For world progress and pairing, the records of beaten bosses in the save of the sender. For bringing the other
+    /// player to a delivery, the door of its scene to come in through.
     /// </summary>
     public List<string> Records { get; set; } = [];
 
@@ -118,7 +120,8 @@ internal class CoopSaveUpdate : IPacketData {
     public List<int> Amounts { get; set; } = [];
 
     /// <summary>
-    /// For an interaction, the scene of the object that the sender used. For a lift, the scene of the lift.
+    /// For an interaction, the scene of the object that the sender used. For a lift, the scene of the lift. For a
+    /// delivery, the scene of the character that takes it in.
     /// </summary>
     public string Scene { get; set; } = "";
 
@@ -141,7 +144,8 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For a lift, where it was when the update was sent: its height, or for a carriage the part of its way, its
-    /// speed and the direction that it speeds up to.
+    /// speed and the direction that it speeds up to. For bringing the other player to a delivery, where the sender
+    /// stands.
     /// </summary>
     public List<float> Values { get; set; } = [];
 
@@ -379,5 +383,16 @@ internal enum CoopSaveUpdateKind : byte {
     /// <summary>
     /// The sender drives a carriage with its buttons, or let go of them, with where the carriage is.
     /// </summary>
-    LiftDrive
+    LiftDrive,
+
+    /// <summary>
+    /// The item of a delivery broke for the sender, with the new state of its wish, or the sender answers whether they
+    /// still carry theirs.
+    /// </summary>
+    DeliveryBreak,
+
+    /// <summary>
+    /// The sender turns in a delivery at a character, so the game of the other player brings them there.
+    /// </summary>
+    DeliverySummon
 }
