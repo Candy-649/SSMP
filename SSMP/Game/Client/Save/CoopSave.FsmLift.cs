@@ -300,7 +300,7 @@ internal partial class CoopSave {
                 } else if (GetFsmLift(self) is FsmLift found) {
                     lift = found;
                     fromY = lift.Transform.position.y;
-                    if (to == LiftBobState && lift.IsStanding && HoldFsmLiftRide(lift, from == null ||
+                    if (to == LiftBobState && lift.IsStanding && HoldFsmLiftRide(lift, fsmEvent.Name, from == null ||
                             !LiftStandingStates.TryGetValue(from, out var standing) || standing == 0 ? 1 : 0)) {
                         return;
                     }
@@ -343,17 +343,28 @@ internal partial class CoopSave {
     /// Decides about a ride of a platform lift that the local player starts: returns false to let it start at once, or
     /// holds it back, sending it to the game that decides or letting it wait for its turn.
     /// </summary>
-    private bool HoldFsmLiftRide(FsmLift lift, int stop) {
-        if (GetLiftPartner() is not { } partner) {
+    private bool HoldFsmLiftRide(FsmLift lift, string eventName, int stop) {
+        // Only the hero touching the lift or waiting at the other end is a player's call; other events are scripted
+        if (GetLiftPartner() is not { } partner || eventName is not ("TOUCHED" or "CANCEL") ||
+            lift.Fsm.Variables.FindFsmBool("Force Up") is { Value: true } ||
+            lift.Fsm.Variables.FindFsmBool("Funeral Happening") is { Value: true }) {
             return false;
+        }
+
+        var hero = HeroController.instance;
+        var inside = hero != null && lift.ContainsHero(hero);
+
+        // Alone, the lift comes for a hero anywhere at the other end. With two players that only counts close to its
+        // shaft, or a partner far away would send it away from the other player again and again
+        if (!inside && (hero == null || !lift.IsAtStop(stop, hero.transform.position))) {
+            return true;
         }
 
         if (DecidesLifts(partner) && !IsLiftHeldForOther(lift, false, partner)) {
             return false;
         }
 
-        var hero = HeroController.instance;
-        RequestLiftRide(lift, stop, hero != null && lift.ContainsHero(hero), true, partner);
+        RequestLiftRide(lift, stop, inside, true, partner);
         return true;
     }
 
