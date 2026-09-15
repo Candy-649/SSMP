@@ -770,6 +770,9 @@ internal class ClientManager : IClientManager {
             };
         }
 
+        // A two-player save that waits in the menu loads if its partner was on the server already
+        _coopSave.OnLocalConnect();
+
         // Add the username to the player if we are in-game already
         if (HeroController.instance && HeroController.instance.gameObject) {
             _playerManager.AddNameToPlayer(

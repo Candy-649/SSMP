@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -48,7 +49,7 @@ internal partial class CoopSave {
     private const string MarkersFileName = "coop-saves.json";
 
     /// <summary>
-    /// How long, in seconds, a request to pair saves stays open.
+    /// How long, in seconds, a request about pairing saves stays open.
     /// </summary>
     private const float PairRequestTime = 120f;
 
@@ -74,12 +75,22 @@ internal partial class CoopSave {
     private const string EmptyStateName = "Empty";
 
     /// <summary>
+    /// The name of the scene of the main menu.
+    /// </summary>
+    private const string MenuSceneName = "Menu_Title";
+
+    /// <summary>
+    /// How many frames an action in the menu waits after the message box closes, so the menu takes input again first.
+    /// </summary>
+    private const int MenuDelayFrames = 2;
+
+    /// <summary>
     /// The name of the FSM of benches that seats the hero.
     /// </summary>
     private const string BenchFsmName = "Bench Control";
 
     /// <summary>
-    /// The state of the bench FSM while the hero sits.
+    /// The state of the bench FSM while the hero sits, which is the only state that lets the hero get up.
     /// </summary>
     private const string BenchRestingStateName = "Resting";
 
@@ -87,6 +98,11 @@ internal partial class CoopSave {
     /// The events that make the hero get up from a bench, which wait while the save waits for the partner.
     /// </summary>
     private static readonly HashSet<string> GetUpEventNames = ["GET UP", "GET LEFT", "GET RIGHT"];
+
+    /// <summary>
+    /// Random numbers for the IDs of requests.
+    /// </summary>
+    private static readonly System.Random Random = new();
 
     /// <summary>
     /// The net client for sending updates.
@@ -154,6 +170,12 @@ internal partial class CoopSave {
     private CoopSaveMarker? _waitingMarker;
 
     /// <summary>
+    /// Changes whenever the wait in the menu ends another way, which cancels the actions in the menu that wait for a
+    /// few frames.
+    /// </summary>
+    private int _menuActionToken;
+
+    /// <summary>
     /// Whether this class submits a save slot button itself, which the hook lets through.
     /// </summary>
     private bool _bypassSubmit;
@@ -180,30 +202,50 @@ internal partial class CoopSave {
     private bool _everChecked;
 
     /// <summary>
-    /// The ID of the partner that the saves were last checked with while they stay connected, or null.
+    /// The ID of the partner that the saves were last checked with while they stay in the save, or null.
     /// </summary>
     private ushort? _checkedWith;
 
     /// <summary>
-    /// Whether updating the two-player save threw, which is only logged once.
+    /// Whether updating the session threw, which is only logged once.
     /// </summary>
     private bool _updateFailed;
 
     /// <summary>
-    /// The player that the local player asked to pair saves with, and when.
+    /// Whether moving the check along threw, which is only logged once.
     /// </summary>
-    private ushort? _pairRequestTo;
-
-    private float _pairRequestToTime;
+    private bool _checkFailed;
 
     /// <summary>
-    /// The player that asked the local player to pair saves, when, and the bosses that their save has beaten.
+    /// The request of the local player to pair saves, until the other player answers.
     /// </summary>
-    private ushort? _pairRequestFrom;
+    private PairingRequest? _sentPairRequest;
 
-    private float _pairRequestFromTime;
+    /// <summary>
+    /// A request of another player to pair saves, until the local player answers.
+    /// </summary>
+    private PairingRequest? _receivedPairRequest;
 
-    private List<string> _pairRequestFromDefeats = [];
+    /// <summary>
+    /// A request to pair saves that the local player agreed to, until the game of the player who asked confirms it.
+    /// </summary>
+    private PairingRequest? _acceptedPairRequest;
+
+    /// <summary>
+    /// The last request that paired a local save before the other player's game paired theirs, which their game can
+    /// still cancel.
+    /// </summary>
+    private PairingRequest? _confirmedPairRequest;
+
+    /// <summary>
+    /// The request of the local player to make a two-player save a normal save again, until the partner agrees.
+    /// </summary>
+    private PairingRequest? _sentUnpairRequest;
+
+    /// <summary>
+    /// A request of the partner to make a two-player save a normal save again, until the local player agrees.
+    /// </summary>
+    private PairingRequest? _receivedUnpairRequest;
 
     public CoopSave(
         NetClient netClient,
@@ -215,6 +257,47 @@ internal partial class CoopSave {
         _playerData = playerData;
         _modSettings = modSettings;
         _uiManager = uiManager;
+    }
+
+    /// <summary>
+    /// A request between the local player and another player about pairing saves, which stays open for
+    /// <see cref="PairRequestTime"/> seconds.
+    /// </summary>
+    private sealed class PairingRequest {
+        /// <summary>
+        /// The other player.
+        /// </summary>
+        public ushort PlayerId { get; init; }
+
+        /// <summary>
+        /// The ID of the request, which the answers repeat.
+        /// </summary>
+        public ulong Id { get; init; }
+
+        /// <summary>
+        /// The slot of the local save that the request is for.
+        /// </summary>
+        public int Slot { get; init; }
+
+        /// <summary>
+        /// The bosses that the save of the other player has beaten, for a request of theirs.
+        /// </summary>
+        public List<string> Defeats { get; init; } = [];
+
+        /// <summary>
+        /// The save key of the other player, for undoing a pairing.
+        /// </summary>
+        public string PartnerKey { get; init; } = "";
+
+        /// <summary>
+        /// When the request was made or answered.
+        /// </summary>
+        public float Started { get; } = Time.unscaledTime;
+
+        /// <summary>
+        /// Whether the request is still open.
+        /// </summary>
+        public bool IsOpen => Time.unscaledTime - Started < PairRequestTime;
     }
 
     /// <summary>
@@ -249,8 +332,10 @@ internal partial class CoopSave {
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
+        EventHooks.UIManagerReturnToMainMenu += OnReturnToMainMenu;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
         _uiManager.HostBeforeSaveStoppedEvent += OnHostBeforeSaveStopped;
+        _uiManager.HostSaveSelectionClosedEvent += OnHostSaveSelectionClosed;
     }
 
     /// <summary>
@@ -298,7 +383,7 @@ internal partial class CoopSave {
 
         var slot = gameManager.profileID;
         if (slot != _sessionSlot) {
-            ResetSession();
+            ResetSession(true);
             _sessionSlot = slot;
         }
 
@@ -310,7 +395,15 @@ internal partial class CoopSave {
 
         var partner = FindPartner(marker);
         if (partner != null && _checkedWith != partner.Id) {
-            UpdateCheck(marker, partner);
+            // A check that throws must not keep the hold below from working
+            try {
+                UpdateCheck(marker, partner);
+            } catch (Exception e) {
+                if (!_checkFailed) {
+                    _checkFailed = true;
+                    Logger.Error($"Could not check the two-player save:\n{e}");
+                }
+            }
         }
 
         if (partner != null && _checkedWith == partner.Id) {
@@ -373,7 +466,12 @@ internal partial class CoopSave {
     /// <summary>
     /// Keeps a waiting hero seated by holding back the events that make them get up from the bench.
     /// </summary>
-    private void OnProcessEvent(Action<Fsm, FsmEvent, FsmEventData> orig, Fsm self, FsmEvent fsmEvent, FsmEventData eventData) {
+    private void OnProcessEvent(
+        Action<Fsm, FsmEvent, FsmEventData> orig,
+        Fsm self,
+        FsmEvent fsmEvent,
+        FsmEventData eventData
+    ) {
         if (_held && fsmEvent != null && GetUpEventNames.Contains(fsmEvent.Name) && self.Name == BenchFsmName &&
             self.ActiveStateName == BenchRestingStateName) {
             return;
@@ -385,7 +483,13 @@ internal partial class CoopSave {
     /// <summary>
     /// Forgets everything about the loaded save, for when another save loads or the player goes to the menu.
     /// </summary>
-    private void ResetSession() {
+    /// <param name="notifyPartner">Whether to tell the partner that the local player left the save.</param>
+    private void ResetSession(bool notifyPartner) {
+        var partnerId = _checkedWith ?? _checkPartnerId;
+        if (notifyPartner && partnerId is { } id && _playerData.ContainsKey(id)) {
+            Send(new CoopSaveUpdate { TargetId = id, Kind = CoopSaveUpdateKind.Left, Key = _highestCheckKey });
+        }
+
         _held = false;
         _tookControl = false;
         _everChecked = false;
@@ -394,12 +498,30 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the state of the session when the game goes to the menu.
+    /// Leaves the loaded save when the game goes to the main menu.
+    /// </summary>
+    private void OnReturnToMainMenu() {
+        ResetSession(true);
+        _sessionSlot = -1;
+    }
+
+    /// <summary>
+    /// Leaves the loaded save when the scene of the main menu loads.
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
-        if (SceneUtil.IsNonGameplayScene(newScene.name)) {
-            ResetSession();
-            _sessionSlot = -1;
+        if (newScene.name == MenuSceneName) {
+            OnReturnToMainMenu();
+        }
+    }
+
+    /// <summary>
+    /// Called when the local player connected and knows the players that were on the server already. A partner among
+    /// them makes the save that waits in the menu load.
+    /// </summary>
+    public void OnLocalConnect() {
+        _highestCheckKey = 0;
+        if (_waitingMarker != null && FindPartner(_waitingMarker) != null) {
+            LoadWaitingSave();
         }
     }
 
@@ -418,7 +540,10 @@ internal partial class CoopSave {
             return;
         }
 
+        // The game of the partner starts counting checks anew
+        _checkedWith = null;
         ResetCheck();
+        _highestCheckKey = 0;
         Chat($"{player.Username} is here. Your two-player save continues once they have loaded theirs.");
     }
 
@@ -426,14 +551,20 @@ internal partial class CoopSave {
     /// Called when a player disconnects, after which the loaded save waits for them again if they are its partner.
     /// </summary>
     public void OnPlayerDisconnect(ushort id) {
-        if (_pairRequestTo == id) {
-            _pairRequestTo = null;
-        }
+        ForgetRequestsOf(id);
 
-        if (_pairRequestFrom == id) {
-            _pairRequestFrom = null;
+        if (_checkPartnerId == id || _checkedWith == id) {
+            PartnerLeft(id, "left");
+            _highestCheckKey = 0;
         }
+    }
 
+    /// <summary>
+    /// The partner is no longer in the save, so the check with them ends and the save waits for them again.
+    /// </summary>
+    /// <param name="id">The ID of the partner.</param>
+    /// <param name="how">How they left, for the message, or null for no message.</param>
+    private void PartnerLeft(ushort id, string? how) {
         if (_checkPartnerId != id && _checkedWith != id) {
             return;
         }
@@ -442,9 +573,8 @@ internal partial class CoopSave {
         _checkedWith = null;
         ResetCheck();
 
-        var marker = GetCurrentMarker();
-        if (wasChecked && marker != null) {
-            Chat($"{marker.PartnerName} left. Your two-player save waits for them at the next bench you sit on.");
+        if (wasChecked && how != null && GetCurrentMarker() is { } marker) {
+            Chat($"{marker.PartnerName} {how}. Your two-player save waits for them at the next bench you sit on.");
         }
     }
 
@@ -452,14 +582,21 @@ internal partial class CoopSave {
     /// Called when the local player disconnects from the server.
     /// </summary>
     public void OnLocalDisconnect() {
-        _pairRequestTo = null;
-        _pairRequestFrom = null;
+        _sentPairRequest = null;
+        _receivedPairRequest = null;
+        _acceptedPairRequest = null;
+        _confirmedPairRequest = null;
+        _sentUnpairRequest = null;
+        _receivedUnpairRequest = null;
         _checkedWith = null;
         ResetCheck();
+        _highestCheckKey = 0;
 
         if (_waitingMarker != null) {
             OnHostBeforeSaveStopped();
             _uiManager.StopHostBeforeSave();
+        } else {
+            _menuActionToken++;
         }
     }
 
@@ -476,10 +613,19 @@ internal partial class CoopSave {
                 OnPairRequest(player, update);
                 break;
             case CoopSaveUpdateKind.PairAccept:
-                OnPairAccept(player);
+                OnPairAccept(player, update);
                 break;
             case CoopSaveUpdateKind.PairRefused:
                 OnPairRefused(player, update);
+                break;
+            case CoopSaveUpdateKind.PairConfirm:
+                OnPairConfirm(player, update);
+                break;
+            case CoopSaveUpdateKind.PairCancel:
+                OnPairCancel(player, update);
+                break;
+            case CoopSaveUpdateKind.UnpairRequest:
+                OnUnpairRequest(player, update);
                 break;
             case CoopSaveUpdateKind.Unpaired:
                 OnUnpaired(player);
@@ -490,6 +636,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.WorldState:
                 OnWorldState(player, update);
                 break;
+            case CoopSaveUpdateKind.Left:
+                OnLeft(player, update);
+                break;
         }
     }
 
@@ -498,8 +647,8 @@ internal partial class CoopSave {
     #region Pairing
 
     /// <summary>
-    /// Runs /coopsave: asks the other player to pair the current saves, agrees to their request, or with "off" makes the
-    /// two-player save a normal save again.
+    /// Runs /coopsave: asks the other player to pair the current saves or agrees to their request, or with "off" makes
+    /// the two-player save a normal save again.
     /// </summary>
     public void OnCommand(string[] arguments) {
         if (!IsInGame()) {
@@ -531,11 +680,16 @@ internal partial class CoopSave {
             return;
         }
 
+        if (_acceptedPairRequest is { IsOpen: true } accepted && accepted.PlayerId == other.Id) {
+            Chat($"Waiting for the game of {other.Username} to confirm the pairing.");
+            return;
+        }
+
         // A request is answered even if the local save is already paired with the other player, because their save may
         // have lost its pairing, like after they moved to another computer
-        if (_pairRequestFrom == other.Id && Time.unscaledTime - _pairRequestFromTime < PairRequestTime) {
-            _pairRequestFrom = null;
-            TryPair(slot, other, _pairRequestFromDefeats);
+        if (_receivedPairRequest is { IsOpen: true } received && received.PlayerId == other.Id) {
+            _receivedPairRequest = null;
+            AcceptPairRequest(slot, other, received);
             return;
         }
 
@@ -544,11 +698,11 @@ internal partial class CoopSave {
             return;
         }
 
-        _pairRequestTo = other.Id;
-        _pairRequestToTime = Time.unscaledTime;
+        _sentPairRequest = new PairingRequest { PlayerId = other.Id, Id = NewRequestId(), Slot = slot };
         Send(new CoopSaveUpdate {
             TargetId = other.Id,
             Kind = CoopSaveUpdateKind.PairRequest,
+            Key = _sentPairRequest.Id,
             Records = GetDefeatRecords()
         });
         Chat(
@@ -558,20 +712,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Another player asks to pair saves. If the local player asked them too, the saves are paired right away.
+    /// Another player asks to pair saves. If the local player asked them at the same time, one of the two requests is
+    /// accepted right away.
     /// </summary>
     private void OnPairRequest(ClientPlayerData player, CoopSaveUpdate update) {
-        _pairRequestFrom = player.Id;
-        _pairRequestFromTime = Time.unscaledTime;
-        _pairRequestFromDefeats = update.Records;
+        var request = new PairingRequest { PlayerId = player.Id, Id = update.Key, Defeats = update.Records };
 
-        if (_pairRequestTo == player.Id && Time.unscaledTime - _pairRequestToTime < PairRequestTime && IsInGame()) {
-            _pairRequestTo = null;
-            _pairRequestFrom = null;
-            TryPair(global::GameManager.instance.profileID, player, update.Records);
+        if (_sentPairRequest is { IsOpen: true } sent && sent.PlayerId == player.Id && IsInGame() &&
+            global::GameManager.instance.profileID == sent.Slot) {
+            // The request with the larger ID goes ahead, so the other player accepts the request of the local player
+            if (update.Key < sent.Id) {
+                return;
+            }
+
+            _sentPairRequest = null;
+            AcceptPairRequest(sent.Slot, player, request);
             return;
         }
 
+        _receivedPairRequest = request;
         Chat(
             $"{player.Username} wants to pair your current saves as a two-player save, which neither of you can play " +
             "alone. Type /coopsave to agree."
@@ -579,64 +738,163 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Pairs the save in a slot with the save of another player if both saves have beaten the same bosses. Otherwise the
-    /// saves would differ in which bosses are still there, and one player would miss a boss and its reward.
+    /// Agrees to a request to pair saves if both saves have beaten the same bosses. Otherwise the saves would differ in
+    /// which bosses are still there, and one player would miss a boss and its reward. Nothing is paired until the game
+    /// of the player who asked confirms.
     /// </summary>
-    private void TryPair(int slot, ClientPlayerData player, List<string> partnerDefeats) {
+    private void AcceptPairRequest(int slot, ClientPlayerData player, PairingRequest request) {
         var localDefeats = GetDefeatRecords();
-        var onlyPartner = partnerDefeats.Except(localDefeats).ToList();
-        var onlyLocal = localDefeats.Except(partnerDefeats).ToList();
-        if (onlyPartner.Count > 0 || onlyLocal.Count > 0) {
-            Logger.Info(
-                $"Not pairing with {player.Username}, beaten bosses differ. Only theirs: {string.Join(", ", onlyPartner)}; " +
-                $"only local: {string.Join(", ", onlyLocal)}"
-            );
-            Chat(GetRefusedMessage(player.Username, onlyPartner.Count, onlyLocal.Count));
+        if (!HaveSameDefeats(player, request.Defeats, localDefeats)) {
             Send(new CoopSaveUpdate {
                 TargetId = player.Id,
                 Kind = CoopSaveUpdateKind.PairRefused,
+                Key = request.Id,
                 Records = localDefeats
             });
             return;
         }
 
-        Pair(slot, player);
-        Send(new CoopSaveUpdate { TargetId = player.Id, Kind = CoopSaveUpdateKind.PairAccept });
+        _acceptedPairRequest = new PairingRequest { PlayerId = player.Id, Id = request.Id, Slot = slot };
+        Send(new CoopSaveUpdate {
+            TargetId = player.Id,
+            Kind = CoopSaveUpdateKind.PairAccept,
+            Key = request.Id,
+            Records = localDefeats
+        });
+        Chat($"Agreed to pair your current save with the save of {player.Username}. Waiting for their game to confirm.");
     }
 
     /// <summary>
-    /// Another player agreed to the request of the local player and paired their save, so the local save is paired too.
+    /// The other player agreed to the request of the local player. If the request still stands for the loaded save and
+    /// the beaten bosses still match, the local save is paired and the other player's game is asked to pair theirs.
     /// </summary>
-    private void OnPairAccept(ClientPlayerData player) {
-        if (_pairRequestTo != player.Id || Time.unscaledTime - _pairRequestToTime >= PairRequestTime || !IsInGame()) {
+    private void OnPairAccept(ClientPlayerData player, CoopSaveUpdate update) {
+        var sent = _sentPairRequest;
+        if (sent == null || sent.PlayerId != player.Id || sent.Id != update.Key) {
+            SendPairCancel(player, update.Key);
             return;
         }
 
-        _pairRequestTo = null;
-        Pair(global::GameManager.instance.profileID, player);
+        _sentPairRequest = null;
+        if (!sent.IsOpen || !IsInGame() || global::GameManager.instance.profileID != sent.Slot) {
+            SendPairCancel(player, update.Key);
+            Chat(
+                $"{player.Username} agreed too late, because your request ran out or you changed saves. Type /coopsave " +
+                "to ask again."
+            );
+            return;
+        }
+
+        // A boss may have been beaten since the request
+        if (!HaveSameDefeats(player, update.Records, GetDefeatRecords())) {
+            SendPairCancel(player, update.Key);
+            return;
+        }
+
+        Pair(sent.Slot, player);
+        _confirmedPairRequest = new PairingRequest {
+            PlayerId = player.Id,
+            Id = update.Key,
+            Slot = sent.Slot,
+            PartnerKey = player.SaveKey
+        };
+        Send(new CoopSaveUpdate { TargetId = player.Id, Kind = CoopSaveUpdateKind.PairConfirm, Key = update.Key });
     }
 
     /// <summary>
-    /// Another player couldn't pair saves with the local player, because their saves have beaten different bosses.
+    /// The game of the player who asked paired their save, so the local save is paired too if it is still the save that
+    /// agreed. Otherwise the other player's game undoes its pairing.
+    /// </summary>
+    private void OnPairConfirm(ClientPlayerData player, CoopSaveUpdate update) {
+        var accepted = _acceptedPairRequest;
+        if (accepted == null || accepted.PlayerId != player.Id || accepted.Id != update.Key) {
+            SendPairCancel(player, update.Key);
+            return;
+        }
+
+        _acceptedPairRequest = null;
+        if (!accepted.IsOpen || !IsInGame() || global::GameManager.instance.profileID != accepted.Slot) {
+            SendPairCancel(player, update.Key);
+            Chat(
+                $"The pairing with {player.Username} didn't go through, because you changed saves. Type /coopsave to " +
+                "try again."
+            );
+            return;
+        }
+
+        Pair(accepted.Slot, player);
+    }
+
+    /// <summary>
+    /// A request to pair saves didn't go through. A local save that was already paired for it is unpaired again.
+    /// </summary>
+    private void OnPairCancel(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_acceptedPairRequest is { } accepted && accepted.PlayerId == player.Id && accepted.Id == update.Key) {
+            _acceptedPairRequest = null;
+            Chat($"The pairing with {player.Username} didn't go through. Type /coopsave to try again.");
+        }
+
+        if (_sentPairRequest is { } sent && sent.PlayerId == player.Id && sent.Id == update.Key) {
+            _sentPairRequest = null;
+        }
+
+        if (_confirmedPairRequest is not { } confirmed || confirmed.PlayerId != player.Id ||
+            confirmed.Id != update.Key) {
+            return;
+        }
+
+        _confirmedPairRequest = null;
+        if (GetMarker(confirmed.Slot) is { } marker && marker.PartnerKey == confirmed.PartnerKey) {
+            RemoveLocalPairing(confirmed.Slot);
+            Chat(
+                $"The pairing with {player.Username} was undone, because their game changed saves before it finished. " +
+                "Type /coopsave to try again."
+            );
+        }
+    }
+
+    /// <summary>
+    /// The other player couldn't agree to the request of the local player, because their save has beaten different
+    /// bosses.
     /// </summary>
     private void OnPairRefused(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_pairRequestTo != player.Id) {
+        if (_sentPairRequest is not { } sent || sent.PlayerId != player.Id || sent.Id != update.Key) {
             return;
         }
 
-        _pairRequestTo = null;
-        var localDefeats = GetDefeatRecords();
-        Chat(GetRefusedMessage(
-            player.Username,
-            update.Records.Except(localDefeats).Count(),
-            localDefeats.Except(update.Records).Count()
-        ));
+        _sentPairRequest = null;
+        if (HaveSameDefeats(player, update.Records, GetDefeatRecords())) {
+            Chat($"{player.Username} couldn't agree, because their save had beaten different bosses. Type /coopsave to ask again.");
+        }
     }
 
-    private static string GetRefusedMessage(string partnerName, int onlyPartner, int onlyLocal) {
-        return $"These saves can't become a two-player save, because they have beaten different bosses: {partnerName} " +
-               $"beat {onlyPartner} that you haven't, and you beat {onlyLocal} that they haven't. A two-player save " +
-               "needs the same bosses beaten in both saves, like two new games.";
+    /// <summary>
+    /// Tells the other player's game that a request to pair saves didn't go through.
+    /// </summary>
+    private void SendPairCancel(ClientPlayerData player, ulong requestId) {
+        Send(new CoopSaveUpdate { TargetId = player.Id, Kind = CoopSaveUpdateKind.PairCancel, Key = requestId });
+    }
+
+    /// <summary>
+    /// Whether two saves have beaten the same bosses. If not, the local player hears how many differ.
+    /// </summary>
+    private static bool HaveSameDefeats(ClientPlayerData player, List<string> partnerDefeats, List<string> localDefeats) {
+        var onlyPartner = partnerDefeats.Except(localDefeats).ToList();
+        var onlyLocal = localDefeats.Except(partnerDefeats).ToList();
+        if (onlyPartner.Count == 0 && onlyLocal.Count == 0) {
+            return true;
+        }
+
+        Logger.Info(
+            $"Not pairing with {player.Username}, beaten bosses differ. Only theirs: {string.Join(", ", onlyPartner)}; " +
+            $"only local: {string.Join(", ", onlyLocal)}"
+        );
+        Chat(
+            $"These saves can't become a two-player save, because they have beaten different bosses: {player.Username} " +
+            $"beat {onlyPartner.Count} that you haven't, and you beat {onlyLocal.Count} that they haven't. A two-player " +
+            "save needs the same bosses beaten in both saves, like two new games."
+        );
+        return false;
     }
 
     /// <summary>
@@ -651,6 +909,7 @@ internal partial class CoopSave {
         };
         SaveMarkers();
 
+        _receivedPairRequest = null;
         _checkedWith = null;
         ResetCheck();
 
@@ -665,48 +924,148 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Makes the two-player save in a slot a normal save again, for both players. Both need to be in it, so that it
-    /// can't be used to play the save alone.
+    /// Makes the two-player save in a slot a normal save again, for both players. Both need to be on the server, so
+    /// that it can't be used to play the save alone. If the partner hasn't loaded the save, which their game may have
+    /// lost, they need to agree with /coopsave off too.
     /// </summary>
     private void Unpair(int slot, CoopSaveMarker? marker) {
+        if (_receivedUnpairRequest is { IsOpen: true } received &&
+            _playerData.TryGetValue(received.PlayerId, out var requester)) {
+            _receivedUnpairRequest = null;
+            AgreeToUnpair(slot, marker, requester);
+            return;
+        }
+
         if (marker == null) {
             Chat("Your current save isn't a two-player save.");
             return;
         }
 
         var partner = FindPartner(marker);
-        if (partner == null || _checkedWith != partner.Id) {
-            Chat(
-                $"A two-player save only becomes a normal save again while {marker.PartnerName} is here and has " +
-                "loaded it too."
-            );
+        if (partner == null) {
+            Chat($"A two-player save only becomes a normal save again while {marker.PartnerName} is here.");
             return;
         }
 
-        RemoveMarker(slot);
-        ReleaseHold(HeroController.instance);
-        ResetSession();
+        if (_checkedWith == partner.Id) {
+            RemoveLocalPairing(slot);
+            Chat($"Your two-player save with {partner.Username} is a normal save again, for both of you.");
+            Send(new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.Unpaired });
+            return;
+        }
 
-        Logger.Info($"Save slot {slot} isn't paired anymore");
-        Chat($"Your two-player save with {partner.Username} is a normal save again, for both of you.");
-        Send(new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.Unpaired });
+        _sentUnpairRequest = new PairingRequest { PlayerId = partner.Id, Id = NewRequestId(), Slot = slot };
+        Send(new CoopSaveUpdate {
+            TargetId = partner.Id,
+            Kind = CoopSaveUpdateKind.UnpairRequest,
+            Key = _sentUnpairRequest.Id
+        });
+        Chat(
+            $"Asked {partner.Username} to agree to make this two-player save a normal save again. They need to type " +
+            "/coopsave off too."
+        );
+    }
+
+    /// <summary>
+    /// The partner asks to make the two-player save a normal save again. If the local player asked too, both agree.
+    /// </summary>
+    private void OnUnpairRequest(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_sentUnpairRequest is { IsOpen: true } sent && sent.PlayerId == player.Id && IsInGame() &&
+            global::GameManager.instance.profileID == sent.Slot) {
+            _sentUnpairRequest = null;
+            AgreeToUnpair(sent.Slot, GetMarker(sent.Slot), player);
+            return;
+        }
+
+        _receivedUnpairRequest = new PairingRequest { PlayerId = player.Id, Id = update.Key };
+        Chat(
+            $"{player.Username} wants to make your two-player save a normal save again, for both of you. Type " +
+            "/coopsave off to agree."
+        );
+    }
+
+    /// <summary>
+    /// Agrees to make the two-player save with another player a normal save again: the current save is unpaired if it
+    /// is paired with them, and their save is unpaired.
+    /// </summary>
+    private void AgreeToUnpair(int slot, CoopSaveMarker? marker, ClientPlayerData requester) {
+        if (marker != null && IsPartner(requester, marker)) {
+            RemoveLocalPairing(slot);
+        }
+
+        Send(new CoopSaveUpdate { TargetId = requester.Id, Kind = CoopSaveUpdateKind.Unpaired });
+        Chat($"Your two-player save with {requester.Username} is a normal save again, for both of you.");
     }
 
     /// <summary>
     /// The partner made the two-player save a normal save again, which goes for the local save too.
     /// </summary>
     private void OnUnpaired(ClientPlayerData player) {
-        var marker = GetCurrentMarker();
+        var slot = _sentUnpairRequest is { } sent && sent.PlayerId == player.Id
+            ? sent.Slot
+            : IsInGame()
+                ? global::GameManager.instance.profileID
+                : -1;
+        if (_sentUnpairRequest?.PlayerId == player.Id) {
+            _sentUnpairRequest = null;
+        }
+
+        var marker = GetMarker(slot);
         if (marker == null || !IsPartner(player, marker)) {
             return;
         }
 
-        RemoveMarker(global::GameManager.instance.profileID);
-        ReleaseHold(HeroController.instance);
-        ResetSession();
-
+        RemoveLocalPairing(slot);
         Logger.Info($"{player.Username} unpaired the two-player save");
         Chat($"{player.Username} made your two-player save a normal save again, for both of you.");
+    }
+
+    /// <summary>
+    /// Removes the pairing of a local save, and lets the player move if it is the loaded save.
+    /// </summary>
+    private void RemoveLocalPairing(int slot) {
+        RemoveMarker(slot);
+        if (slot == _sessionSlot) {
+            ReleaseHold(HeroController.instance);
+            ResetSession(false);
+        }
+
+        Logger.Info($"Save slot {slot} isn't paired anymore");
+    }
+
+    /// <summary>
+    /// Forgets the requests about pairing saves with a player who left.
+    /// </summary>
+    private void ForgetRequestsOf(ushort id) {
+        if (_sentPairRequest?.PlayerId == id) {
+            _sentPairRequest = null;
+        }
+
+        if (_receivedPairRequest?.PlayerId == id) {
+            _receivedPairRequest = null;
+        }
+
+        if (_acceptedPairRequest?.PlayerId == id) {
+            _acceptedPairRequest = null;
+        }
+
+        if (_sentUnpairRequest?.PlayerId == id) {
+            _sentUnpairRequest = null;
+        }
+
+        if (_receivedUnpairRequest?.PlayerId == id) {
+            _receivedUnpairRequest = null;
+        }
+    }
+
+    /// <summary>
+    /// A random ID for a request that isn't 0.
+    /// </summary>
+    private static ulong NewRequestId() {
+        var bytes = new byte[8];
+        Random.NextBytes(bytes);
+        var id = BitConverter.ToUInt64(bytes, 0);
+        return id == 0 ? 1 : id;
     }
 
     #endregion
@@ -754,10 +1113,13 @@ internal partial class CoopSave {
                 return false;
             }
 
+            _menuActionToken++;
             _waitingButton = button;
             _waitingEventData = eventData;
             _waitingMarker = marker;
-            Logger.Info($"Hosting before two-player save in slot {button.SaveSlotIndex} loads, waiting for {marker.PartnerName}");
+            Logger.Info(
+                $"Hosting before two-player save in slot {button.SaveSlotIndex} loads, waiting for {marker.PartnerName}"
+            );
             ShowMessage(
                 $"Your game is open. Your two-player save with {marker.PartnerName} loads once they have joined. " +
                 "Closing this message stops hosting.",
@@ -790,9 +1152,10 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hosting for the save that waits in the menu stopped before the partner joined, because the connection failed or
-    /// was lost, so the save stops waiting.
+    /// was lost, so the save stops waiting and the host hears why.
     /// </summary>
     private void OnHostBeforeSaveStopped() {
+        _menuActionToken++;
         var marker = _waitingMarker;
         if (marker == null) {
             return;
@@ -801,35 +1164,87 @@ internal partial class CoopSave {
         ClearWait();
         CloseMessage();
         Logger.Info("Hosting stopped before the partner of the two-player save joined");
-        ShowMessage($"Your game closed before {marker.PartnerName} joined. Choose the save again to host again.");
+
+        var token = _menuActionToken;
+        RunInMenuLater(() => {
+            if (token == _menuActionToken) {
+                ShowMessage($"Your game closed before {marker.PartnerName} joined. Choose the save again to host again.");
+            }
+        });
     }
 
     /// <summary>
-    /// The partner joined the host, so the save that waited in the menu loads.
+    /// The save menu of hosting closed without a save, like when Back was pressed, so a save that waits there stops
+    /// waiting.
+    /// </summary>
+    private void OnHostSaveSelectionClosed() {
+        _menuActionToken++;
+        if (_waitingMarker == null) {
+            return;
+        }
+
+        ClearWait();
+        CloseMessage();
+    }
+
+    /// <summary>
+    /// The partner is on the server, so the save that waited in the menu loads, a few frames after its message closed.
     /// </summary>
     private void LoadWaitingSave() {
         var button = _waitingButton;
         var eventData = _waitingEventData;
         ClearWait();
-        CloseMessage();
-
-        if (button == null) {
+        if (button == null || !_uiManager.IsSelectingHostSave) {
             return;
         }
 
+        CloseMessage();
         Logger.Info("The partner joined, loading the two-player save");
-        _bypassSubmit = true;
-        try {
-            button.OnSubmit(eventData!);
-        } finally {
-            _bypassSubmit = false;
-        }
+
+        var token = ++_menuActionToken;
+        RunInMenuLater(() => {
+            if (token != _menuActionToken || !_uiManager.IsSelectingHostSave || button == null) {
+                return;
+            }
+
+            _bypassSubmit = true;
+            try {
+                button.OnSubmit(eventData!);
+            } finally {
+                _bypassSubmit = false;
+            }
+        });
     }
 
     private void ClearWait() {
         _waitingButton = null;
         _waitingEventData = null;
         _waitingMarker = null;
+    }
+
+    /// <summary>
+    /// Runs an action in the menu after a few frames, so the menu takes input again after a message box closed.
+    /// </summary>
+    private static void RunInMenuLater(Action action) {
+        var gameManager = global::GameManager.instance;
+        if (gameManager == null) {
+            action();
+            return;
+        }
+
+        gameManager.StartCoroutine(RunAfterFrames(action));
+    }
+
+    private static IEnumerator RunAfterFrames(Action action) {
+        for (var i = 0; i < MenuDelayFrames; i++) {
+            yield return null;
+        }
+
+        try {
+            action();
+        } catch (Exception e) {
+            Logger.Error($"Could not finish an action of the two-player save in the menu:\n{e}");
+        }
     }
 
     /// <summary>
@@ -945,7 +1360,7 @@ internal partial class CoopSave {
     }
 
     private bool RemoveMarker(int slot) {
-        if (!GetMarkers().Slots.Remove(GetSlotKey(slot))) {
+        if (slot <= 0 || !GetMarkers().Slots.Remove(GetSlotKey(slot))) {
             return false;
         }
 

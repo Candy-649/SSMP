@@ -26,8 +26,8 @@ internal class CoopSaveCommand : IClientCommand, ICommandWithDescription {
 
     /// <inheritdoc />
     public string Description =>
-        "Pair your current save with your teammate's as a two-player save, or use 'off' while both of you are in it " +
-        "to make it a normal save again.";
+        "Pair your current save with your teammate's as a two-player save, or use 'off' with your teammate on the " +
+        "server to make it a normal save again.";
 
     /// <inheritdoc />
     public void Execute(string[] arguments) {

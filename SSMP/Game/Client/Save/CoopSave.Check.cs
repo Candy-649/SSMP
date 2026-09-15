@@ -13,6 +13,12 @@ namespace SSMP.Game.Client.Save;
 /// Checking two-player saves: once both players have loaded their paired saves, each backs up its save file and sends
 /// the bosses it has beaten and the saved objects of the world that it changed. Each save gets the changed objects that
 /// it lacks and hears whether the beaten bosses differ, which are never copied because they come with rewards.
+///
+/// Every check has a key. A player who starts a check picks a key larger than every key they have seen from the
+/// partner, so a newer check always has a larger key, and the hellos, world progress and leaves of older checks can be
+/// told apart and dropped even when they arrive late. When both players start a check at once, the larger key goes
+/// ahead: the player with the smaller key takes the other key, and a player who gets a start with a smaller key than
+/// their unfinished check sends their start again.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -77,12 +83,18 @@ internal partial class CoopSave {
     private ushort? _checkPartnerId;
 
     /// <summary>
-    /// Whether the local player said hello to the partner in this check.
+    /// The key of the current check, or 0 if no check started.
     /// </summary>
-    private bool _helloSent;
+    private ulong _checkKey;
 
     /// <summary>
-    /// Whether the partner said hello, so they have loaded the save that is paired with the local one.
+    /// The largest check key that the local player picked or got from the partner since the partner connected.
+    /// </summary>
+    private ulong _highestCheckKey;
+
+    /// <summary>
+    /// Whether the partner said hello for the current check, so they have loaded the save that is paired with the local
+    /// one.
     /// </summary>
     private bool _partnerHello;
 
@@ -97,12 +109,12 @@ internal partial class CoopSave {
     private bool _stateReceived;
 
     /// <summary>
-    /// The parts of the world progress of the partner that arrived, by part.
+    /// The parts of the world progress of the partner that arrived for the current check, by part.
     /// </summary>
     private readonly Dictionary<ushort, CoopSaveUpdate> _stateParts = new();
 
     /// <summary>
-    /// How many saved objects and their player data the last check added.
+    /// How many saved objects the last check added.
     /// </summary>
     private int _addedChanges;
 
@@ -114,11 +126,11 @@ internal partial class CoopSave {
     private int _onlyLocalDefeats;
 
     /// <summary>
-    /// Forgets the progress of the current check.
+    /// Forgets the current check. The largest key stays, so the next check gets a larger one.
     /// </summary>
     private void ResetCheck() {
         _checkPartnerId = null;
-        _helloSent = false;
+        _checkKey = 0;
         _partnerHello = false;
         _stateSent = false;
         _stateReceived = false;
@@ -129,8 +141,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Moves the check with a connected partner along: say hello, then back up and send the world progress once the
-    /// partner said hello, and finish once their progress was added.
+    /// Moves the check with a connected partner along: start a check, then back up and send the world progress once
+    /// the partner said hello for it, and finish once their progress was added.
     /// </summary>
     private void UpdateCheck(CoopSaveMarker marker, ClientPlayerData partner) {
         if (_checkPartnerId != partner.Id) {
@@ -138,7 +150,8 @@ internal partial class CoopSave {
             _checkPartnerId = partner.Id;
         }
 
-        if (!_helloSent) {
+        if (_checkKey == 0) {
+            _checkKey = NewCheckKey();
             SendHello(partner, marker, HelloStart);
         }
 
@@ -153,19 +166,29 @@ internal partial class CoopSave {
         }
     }
 
+    /// <summary>
+    /// A key for a new check that is larger than every key seen so far. The lower bits are random, so two checks that
+    /// start at once almost never get the same key; if they do, both players take them as the same check, which works
+    /// too.
+    /// </summary>
+    private ulong NewCheckKey() {
+        var key = (((_highestCheckKey >> 16) + 1) << 16) | (ulong) UnityEngine.Random.Range(1, 0x10000);
+        _highestCheckKey = key;
+        return key;
+    }
+
     private void SendHello(ClientPlayerData partner, CoopSaveMarker marker, ushort kind) {
-        _helloSent = true;
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.Hello,
+            Key = _checkKey,
             PartnerKey = marker.PartnerKey,
             PartCount = kind
         });
     }
 
     /// <summary>
-    /// The partner loaded a save. A hello that starts a check starts the check over, because the partner loaded their
-    /// save again, and gets an answer.
+    /// The partner said hello for a check of the loaded save.
     /// </summary>
     private void OnHello(ClientPlayerData player, CoopSaveUpdate update) {
         var marker = GetCurrentMarker();
@@ -175,6 +198,7 @@ internal partial class CoopSave {
 
         if (update.PartnerKey != LocalKey) {
             if (update.PartCount == HelloStart) {
+                PartnerLeft(player.Id, null);
                 Chat(
                     $"{player.Username} loaded a save that isn't paired with yours. Your two-player save waits for " +
                     "them to load the paired save, or to pair again with /coopsave."
@@ -184,30 +208,51 @@ internal partial class CoopSave {
             return;
         }
 
-        if (update.PartCount == HelloStart) {
-            if (_checkedWith == player.Id) {
-                _checkedWith = null;
+        _highestCheckKey = System.Math.Max(_highestCheckKey, update.Key);
+
+        if (update.PartCount == HelloAnswer) {
+            if (update.Key == _checkKey && _checkPartnerId == player.Id) {
+                _partnerHello = true;
             }
 
-            ResetCheck();
-            _checkPartnerId = player.Id;
+            return;
+        }
+
+        if (update.Key == _checkKey && _checkPartnerId == player.Id) {
+            // The same check, like when both players started one with the same key
             _partnerHello = true;
             SendHello(player, marker, HelloAnswer);
             return;
         }
 
-        if (_checkPartnerId == player.Id || _checkPartnerId == null) {
-            _checkPartnerId = player.Id;
-            _partnerHello = true;
+        if (update.Key < _checkKey && _checkPartnerId == player.Id) {
+            // An older check. If the check of the local player hasn't finished, the partner may not know it yet.
+            if (_checkedWith != player.Id) {
+                SendHello(player, marker, HelloStart);
+            }
+
+            return;
         }
+
+        // A newer check of the partner, like after they loaded their save again
+        if (_checkedWith == player.Id) {
+            _checkedWith = null;
+        }
+
+        ResetCheck();
+        _checkPartnerId = player.Id;
+        _checkKey = update.Key;
+        _partnerHello = true;
+        SendHello(player, marker, HelloAnswer);
     }
 
     /// <summary>
-    /// A part of the world progress of the partner arrived. Once all parts are in, the progress is added.
+    /// A part of the world progress of the partner arrived. Once all parts of the current check are in, the progress is
+    /// added.
     /// </summary>
     private void OnWorldState(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkPartnerId != player.Id || _stateReceived || GetCurrentMarker() is not { } marker ||
-            !IsPartner(player, marker)) {
+        if (_checkKey == 0 || update.Key != _checkKey || _checkPartnerId != player.Id || _stateReceived ||
+            GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
             return;
         }
 
@@ -218,6 +263,17 @@ internal partial class CoopSave {
 
         _stateReceived = true;
         AddWorldState(player);
+    }
+
+    /// <summary>
+    /// The partner left the two-player save, unless the leave is older than the current check.
+    /// </summary>
+    private void OnLeft(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_checkPartnerId == player.Id && _checkKey > update.Key) {
+            return;
+        }
+
+        PartnerLeft(player.Id, "left your two-player save");
     }
 
     /// <summary>
@@ -265,6 +321,7 @@ internal partial class CoopSave {
             var update = new CoopSaveUpdate {
                 TargetId = partner.Id,
                 Kind = CoopSaveUpdateKind.WorldState,
+                Key = _checkKey,
                 Part = (ushort) part,
                 PartCount = (ushort) partCount
             };

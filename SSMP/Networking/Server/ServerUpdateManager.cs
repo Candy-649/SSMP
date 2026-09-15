@@ -531,6 +531,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     PlayerId = update.PlayerId,
                     TargetId = update.TargetId,
                     Kind = update.Kind,
+                    Key = update.Key,
                     PartnerKey = update.PartnerKey,
                     Part = update.Part,
                     PartCount = update.PartCount,

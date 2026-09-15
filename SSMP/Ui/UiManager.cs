@@ -154,6 +154,11 @@ internal class UiManager : IUiManager {
     /// </summary>
     public event Action? HostBeforeSaveStoppedEvent;
 
+    /// <summary>
+    /// Event raised when the save menu of hosting closes without a save, like when Back is pressed.
+    /// </summary>
+    public event Action? HostSaveSelectionClosedEvent;
+
     /// <inheritdoc />
     public event Action? MultiplayerButtonPressed;
 
@@ -555,6 +560,7 @@ internal class UiManager : IUiManager {
             _startPendingHost = null;
 
             if (!saveSelected) {
+                HostSaveSelectionClosedEvent?.Invoke();
                 StopHostBeforeSave();
                 return;
             }
