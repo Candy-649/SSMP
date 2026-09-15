@@ -26,7 +26,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
-    /// How long a replay of a mechanism may take, in seconds, before the actions that it skipped are turned back on.
+    /// How long a replay of a mechanism may take, in seconds, before the actions that it skipped are turned back on,
+    /// unless it waits for the local hero to go through the mechanism.
     /// </summary>
     private const float MaxReplayTime = 60f;
 
@@ -201,9 +202,14 @@ internal partial class CoopSave {
     /// A replay of the partner's use of a mechanism on the local copy.
     /// </summary>
     private sealed class MechanismReplay {
-        public MechanismReplay(HashSet<string> states, List<FsmStateAction> skipped) {
+        public MechanismReplay(
+            HashSet<string> states,
+            List<FsmStateAction> skipped,
+            List<HutongGames.PlayMaker.Actions.CheckTrackTriggerCount> presence
+        ) {
             States = states;
             Skipped = skipped;
+            Presence = presence;
         }
 
         /// <summary>
@@ -212,9 +218,20 @@ internal partial class CoopSave {
         public HashSet<string> States { get; }
 
         /// <summary>
-        /// The actions of those states that belong to the hero of the partner, which are turned off during the replay.
+        /// The actions of those states that belong to the hero of the partner or check who is inside the mechanism,
+        /// which are turned off during the replay.
         /// </summary>
         public List<FsmStateAction> Skipped { get; }
+
+        /// <summary>
+        /// The actions of those states that check who is inside the mechanism, which the replay stands in for.
+        /// </summary>
+        public List<HutongGames.PlayMaker.Actions.CheckTrackTriggerCount> Presence { get; }
+
+        /// <summary>
+        /// Whether something, like the local hero, was inside the mechanism while its check waited.
+        /// </summary>
+        public bool WasEntered { get; set; }
 
         /// <summary>
         /// When the replay started.
@@ -321,8 +338,15 @@ internal partial class CoopSave {
                 Logger.Info($"Sent {update.FlagNames.Count} flags of used mechanisms to {partner.Username}");
             }
 
-            foreach (var pair in _replays.Where(pair => Time.unscaledTime - pair.Value.Started > MaxReplayTime).ToList()) {
-                EndReplay(pair.Key, pair.Value);
+            foreach (var pair in _replays.ToList()) {
+                if (!UpdateReplayPresence(pair.Key, pair.Value) &&
+                    Time.unscaledTime - pair.Value.Started > MaxReplayTime) {
+                    EndReplay(pair.Key, pair.Value);
+                }
+            }
+
+            foreach (var fsm in _capturedMechanisms.Keys.Where(fsm => fsm.Owner == null).ToList()) {
+                _capturedMechanisms.Remove(fsm);
             }
 
             StartPendingReplays();
@@ -332,7 +356,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the mechanisms of the scene and ends their replays, for a new scene.
+    /// Forgets the mechanisms of the scene and ends their replays, for a new scene. A change of the world that the local
+    /// player started stays recorded for as long as it still runs.
     /// </summary>
     private void ResetInteractions() {
         foreach (var pair in _replays.ToList()) {
@@ -341,7 +366,6 @@ internal partial class CoopSave {
 
         _mechanisms.Clear();
         _pendingReplays.Clear();
-        _capturedMechanisms.Clear();
         _localInteractions.Clear();
         _remoteInteractions.Clear();
         _pendingReceptacles.Clear();
@@ -349,10 +373,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the mechanisms of the scene and the flags that weren't sent yet, for a new session.
+    /// Forgets the mechanisms, the changes of the world that still run and the flags that weren't sent yet, for a new
+    /// session.
     /// </summary>
     private void ResetInteractionSession() {
         ResetInteractions();
+        _capturedMechanisms.Clear();
         _interactionFlags.Clear();
     }
 
@@ -463,17 +489,13 @@ internal partial class CoopSave {
     ) {
         _localInteractions[fsm] = interaction;
         _pendingReplays.Remove(fsm);
-        foreach (var pair in interaction.Flags) {
-            _interactionFlags[pair.Key] = pair.Value;
-        }
-
         if (!isEnd) {
             _capturedMechanisms[fsm] = worldStates;
         }
 
         var afterPartner = _remoteInteractions.ContainsKey(fsm);
         if (_checkedWith is { } partnerId && fsm.GameObject is { } gameObject) {
-            Send(new CoopSaveUpdate {
+            var update = new CoopSaveUpdate {
                 TargetId = partnerId,
                 Kind = CoopSaveUpdateKind.Interaction,
                 Key = interaction.Key,
@@ -482,8 +504,20 @@ internal partial class CoopSave {
                 ObjectPath = ScenePath.Get(gameObject.transform),
                 FsmName = fsm.Name ?? "",
                 StateName = start
-            });
+            };
+
+            // The flags that the prompt set go with the use, so the change of the world of the partner starts with them
+            foreach (var pair in interaction.Flags) {
+                update.FlagNames.Add(pair.Key);
+                update.FlagValues.Add(pair.Value);
+            }
+
+            Send(update);
             Logger.Info($"Sent the use of mechanism '{fsm.Name}' on {gameObject.name} to the partner");
+        } else {
+            foreach (var pair in interaction.Flags) {
+                _interactionFlags[pair.Key] = pair.Value;
+            }
         }
 
         if (afterPartner) {
@@ -496,14 +530,18 @@ internal partial class CoopSave {
     /// during its prompt and its change of the world, or the sub-FSM that runs its prompt.
     /// </summary>
     private Fsm? GetCaptureFsm(Fsm fsm, CoopMechanism? mechanism) {
-        if (mechanism != null) {
-            return !_replays.ContainsKey(fsm) &&
-                   (_promptInteraction?.Target == fsm || _capturedMechanisms.ContainsKey(fsm))
-                ? fsm
-                : null;
+        if (_replays.ContainsKey(fsm)) {
+            return null;
         }
 
-        return _promptInteraction?.Target is Fsm root && GetRunningSubFsms(root).Contains(fsm) ? root : null;
+        // A change of the world that runs on while the scene changes counts after its mechanism was forgotten
+        if (_capturedMechanisms.ContainsKey(fsm) || (mechanism != null && _promptInteraction?.Target == fsm)) {
+            return fsm;
+        }
+
+        return mechanism == null && _promptInteraction?.Target is Fsm root && GetRunningSubFsms(root).Contains(fsm)
+            ? root
+            : null;
     }
 
     /// <summary>
@@ -598,6 +636,8 @@ internal partial class CoopSave {
                 OnReceptacleUsed(player, update, target);
             } else if (target != null) {
                 OnMechanismUsed(player, update, target);
+            } else {
+                ApplyInteractionFlags(update);
             }
         } catch (Exception e) {
             LogInteractionError(e);
@@ -614,10 +654,14 @@ internal partial class CoopSave {
         var fsm = component == null ? null : component.Fsm;
         if (fsm == null || GetMechanism(fsm) is not { } mechanism ||
             !mechanism.WorldStarts.TryGetValue(update.StateName, out var states)) {
+            ApplyInteractionFlags(update);
             Logger.Warn($"Could not find the mechanism '{update.FsmName}' of {player.Username} on {update.ObjectPath}");
             return;
         }
 
+        // Whether the local save had the mechanism done already only shows before the flags of the partner are in
+        var done = IsMechanismDone(fsm, mechanism);
+        ApplyInteractionFlags(update);
         _remoteInteractions[fsm] = update.Key;
         if (_localInteractions.TryGetValue(fsm, out var local)) {
             // Both players used it. A player who used it after the use of the other had arrived gets the payment back
@@ -633,6 +677,11 @@ internal partial class CoopSave {
             return;
         }
 
+        if (done) {
+            Logger.Info($"Mechanism '{fsm.Name}' that {player.Username} used was done in the local save already");
+            return;
+        }
+
         if (CanReplay(fsm, mechanism)) {
             Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by {player.Username} on {target.name}");
             StartReplay(fsm, update.StateName, states);
@@ -642,10 +691,7 @@ internal partial class CoopSave {
         // The replay waits for the local copy. It is queued before the prompt closes, because closing it can take the
         // mechanism back to its idle state at once
         _pendingReplays[fsm] = update.StateName;
-        if (_promptInteraction is { } interaction && interaction.Target == fsm && interaction.Currency.Count == 0 &&
-            interaction.Items.Count == 0 && CancelPrompt(fsm)) {
-            Logger.Info($"Closed the prompt of mechanism '{fsm.Name}', which {player.Username} used first");
-        } else {
+        if (!TryClosePrompt(fsm)) {
             Logger.Info($"The use of mechanism '{fsm.Name}' by {player.Username} waits for the local copy");
         }
     }
@@ -663,6 +709,9 @@ internal partial class CoopSave {
                 _pendingReplays.Remove(fsm);
                 Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by the partner, which waited");
                 StartReplay(fsm, pair.Value, states);
+            } else {
+                // A prompt whose text was still showing closes once it waits for an answer
+                TryClosePrompt(fsm);
             }
         }
 
@@ -683,6 +732,110 @@ internal partial class CoopSave {
         var active = fsm.ActiveStateName ?? "";
         return fsm.Owner != null && fsm.Owner.isActiveAndEnabled && !IsHeroUsing(fsm, mechanism) &&
                !mechanism.WorldStarts.Values.Any(states => states.Contains(active));
+    }
+
+    /// <summary>
+    /// Whether the local save has what a mechanism saves already: the saved object of the mechanism if it has one, or
+    /// otherwise every flag of the player data that its prompt and its change of the world set to true. A mechanism
+    /// that saves neither counts as not done.
+    /// </summary>
+    private static bool IsMechanismDone(Fsm fsm, CoopMechanism mechanism) {
+        var playerData = PlayerData.instance;
+        var sceneData = SceneData.instance;
+        if (playerData == null || sceneData == null) {
+            return false;
+        }
+
+        var persistent = fsm.GameObject != null ? fsm.GameObject.GetComponent<PersistentBoolItem>() : null;
+        if (persistent != null) {
+            GetItemSceneAndId(persistent, out var scene, out var id);
+            return sceneData.PersistentBools.TryGetValue(scene, id, out var saved) && saved.Value;
+        }
+
+        var found = false;
+        foreach (var state in fsm.States ?? []) {
+            if (state == null || (!mechanism.PromptStates.Contains(state.Name) &&
+                                  !mechanism.WorldStarts.Values.Any(states => states.Contains(state.Name)))) {
+                continue;
+            }
+
+            foreach (var action in state.Actions ?? []) {
+                var name = action switch {
+                    HutongGames.PlayMaker.Actions.SetPlayerDataBool { Enabled: true } setBool
+                        when setBool.value.Value => setBool.boolName.Value,
+                    HutongGames.PlayMaker.Actions.SetPlayerDataVariable { Enabled: true } setVariable
+                        when setVariable.SetValue.GetValue() is true => setVariable.VariableName.Value,
+                    _ => null
+                };
+                if (string.IsNullOrEmpty(name) || BossRoomCoop.IsHeroStateName(name!)) {
+                    continue;
+                }
+
+                if (GetPlayerDataField(name!)?.GetValue(playerData) is not true) {
+                    return false;
+                }
+
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Closes the prompt of a mechanism that the partner used, if the local hero has it open, hasn't paid in it yet,
+    /// and it waits for an answer.
+    /// </summary>
+    /// <returns>Whether the prompt was closed.</returns>
+    private bool TryClosePrompt(Fsm fsm) {
+        if (_promptInteraction is not { } interaction || interaction.Target != fsm ||
+            interaction.Currency.Count > 0 || interaction.Items.Count > 0 || !CancelPrompt(fsm)) {
+            return false;
+        }
+
+        var partnerName = GetPartnerName();
+        Chat($"{partnerName} already paid for this, so it opens for you too.");
+        Logger.Info($"Closed the prompt of mechanism '{fsm.Name}', which {partnerName} used first");
+        return true;
+    }
+
+    /// <summary>
+    /// Stands in for the check of a replayed mechanism that ends its change of the world once nothing is inside it,
+    /// like a door that closes behind the hero who went through. Such a check only sees the local hero, who didn't
+    /// use the mechanism, so the local copy runs it only once something was inside, which lets the partner follow the
+    /// player who paid.
+    /// </summary>
+    /// <returns>Whether the replay waits in such a check.</returns>
+    private static bool UpdateReplayPresence(Fsm fsm, MechanismReplay replay) {
+        var actions = fsm.ActiveState?.Actions;
+        if (replay.Presence.Count == 0 || actions == null) {
+            return false;
+        }
+
+        foreach (var presence in replay.Presence) {
+            if (Array.IndexOf(actions, presence) < 0) {
+                continue;
+            }
+
+            var target = fsm.GetOwnerDefaultTarget(presence.target);
+            var track = target != null ? target.GetComponent<TrackTriggerObjects>() : null;
+            if (track == null) {
+                return false;
+            }
+
+            if (track.InsideCount > 0) {
+                replay.WasEntered = true;
+            }
+
+            // The check fires its event itself when what it waits for is true
+            if (replay.WasEntered) {
+                presence.OnEnter();
+            }
+
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -730,20 +883,29 @@ internal partial class CoopSave {
 
         var hero = HeroController.instance != null ? HeroController.instance.gameObject : null;
         var skipped = new List<FsmStateAction>();
+        var presence = new List<HutongGames.PlayMaker.Actions.CheckTrackTriggerCount>();
         foreach (var state in fsm.States ?? []) {
             if (state == null || !states.Contains(state.Name)) {
                 continue;
             }
 
             foreach (var action in state.Actions ?? []) {
-                if (action != null && action.Enabled && IsHeroAction(fsm, action, hero)) {
-                    action.Enabled = false;
-                    skipped.Add(action);
+                if (action == null || !action.Enabled) {
+                    continue;
                 }
+
+                if (action is HutongGames.PlayMaker.Actions.CheckTrackTriggerCount check) {
+                    presence.Add(check);
+                } else if (!IsHeroAction(fsm, action, hero)) {
+                    continue;
+                }
+
+                action.Enabled = false;
+                skipped.Add(action);
             }
         }
 
-        _replays[fsm] = new MechanismReplay(states, skipped);
+        _replays[fsm] = new MechanismReplay(states, skipped, presence);
     }
 
     /// <summary>
@@ -900,11 +1062,15 @@ internal partial class CoopSave {
             }
         }
 
-        var partnerName = _checkedWith is { } id && _playerData.TryGetValue(id, out var partner)
-            ? partner.Username
-            : "Your partner";
-        Chat($"{partnerName} {how}, so you got your payment back.");
+        Chat($"{GetPartnerName()} {how}, so you got your payment back.");
         Logger.Info($"Gave back the payment for a mechanism that the partner {how}");
+    }
+
+    /// <summary>
+    /// The name of the checked partner, for messages.
+    /// </summary>
+    private string GetPartnerName() {
+        return _checkedWith is { } id && _playerData.TryGetValue(id, out var partner) ? partner.Username : "Your partner";
     }
 
     /// <summary>
@@ -967,12 +1133,13 @@ internal partial class CoopSave {
             }
 
             _localInteractions[self] = interaction;
-            if (ReceptacleFlagField?.GetValue(self) is string flag && flag.Length > 0) {
-                _interactionFlags[flag] = 1;
-            }
-
+            var flag = ReceptacleFlagField?.GetValue(self) as string ?? "";
             var afterPartner = _remoteInteractions.ContainsKey(self);
-            if (_checkedWith is { } partnerId) {
+            if (_checkedWith is not { } partnerId) {
+                if (flag.Length > 0) {
+                    _interactionFlags[flag] = 1;
+                }
+            } else {
                 var update = new CoopSaveUpdate {
                     TargetId = partnerId,
                     Kind = CoopSaveUpdateKind.Interaction,
@@ -981,6 +1148,12 @@ internal partial class CoopSave {
                     Scene = self.gameObject.scene.name,
                     ObjectPath = ScenePath.Get(self.transform)
                 };
+
+                // The flag goes with the use, so a partner in another room gets it together with the saved object
+                if (flag.Length > 0) {
+                    update.FlagNames.Add(flag);
+                    update.FlagValues.Add(1);
+                }
 
                 // A saved object that resets at benches isn't added to the save of a partner in another room
                 if (ReceptaclePersistentField?.GetValue(self) is PersistentBoolItem persistent && persistent != null &&
@@ -1024,6 +1197,7 @@ internal partial class CoopSave {
     /// loaded.
     /// </summary>
     private void OnReceptacleUsed(ClientPlayerData player, CoopSaveUpdate update, GameObject? target) {
+        ApplyInteractionFlags(update);
         var receptacle = target == null ? null : target.GetComponent<ItemReceptacle>();
         if (receptacle == null) {
             AddInteractionItems(update);
