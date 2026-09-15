@@ -116,7 +116,7 @@ internal partial class CoopSave {
         }
 
         // Other updates list wishes for other reasons
-        if (update.Kind != CoopSaveUpdateKind.WishChange) {
+        if (update.Kind is not (CoopSaveUpdateKind.WishChange or CoopSaveUpdateKind.WishTurnIn)) {
             return;
         }
 

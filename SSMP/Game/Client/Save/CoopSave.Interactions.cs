@@ -259,8 +259,14 @@ internal partial class CoopSave {
             AddInteractionHook(
                 typeof(PlayerData).GetMethod(methodName, InstanceFlags, null, [typeof(string), typeof(int)], null),
                 new Action<Action<PlayerData, string, int>, PlayerData, string, int>((orig, self, name, value) => {
-                    orig(self, name, value);
-                    RecordInteractionFlag(name);
+                    var before = BeginPlayerDataWrite(self, name);
+                    try {
+                        orig(self, name, value);
+                    } finally {
+                        _playerDataWriteDepth--;
+                    }
+
+                    RecordInteractionFlag(name, before);
                 })
             );
         }
@@ -269,8 +275,14 @@ internal partial class CoopSave {
             AddInteractionHook(
                 typeof(PlayerData).GetMethod(methodName, InstanceFlags, null, [typeof(string)], null),
                 new Action<Action<PlayerData, string>, PlayerData, string>((orig, self, name) => {
-                    orig(self, name);
-                    RecordInteractionFlag(name);
+                    var before = BeginPlayerDataWrite(self, name);
+                    try {
+                        orig(self, name);
+                    } finally {
+                        _playerDataWriteDepth--;
+                    }
+
+                    RecordInteractionFlag(name, before);
                 })
             );
         }
@@ -282,9 +294,16 @@ internal partial class CoopSave {
             ),
             new Action<Action<HutongGames.PlayMaker.Actions.SetPlayerDataVariable>,
                 HutongGames.PlayMaker.Actions.SetPlayerDataVariable>((orig, self) => {
-                orig(self);
-                if (self.VariableName != null && !self.VariableName.IsNone) {
-                    RecordInteractionFlag(self.VariableName.Value);
+                var name = self.VariableName != null && !self.VariableName.IsNone ? self.VariableName.Value : null;
+                var before = BeginPlayerDataWrite(PlayerData.instance, name);
+                try {
+                    orig(self);
+                } finally {
+                    _playerDataWriteDepth--;
+                }
+
+                if (name != null) {
+                    RecordInteractionFlag(name, before);
                 }
             })
         );
@@ -589,12 +608,12 @@ internal partial class CoopSave {
     /// <summary>
     /// Records a write of the player data by a mechanism of the local player.
     /// </summary>
-    private void RecordInteractionFlag(string name) {
+    private void RecordInteractionFlag(string name, int? intBefore = null) {
         if (!_everChecked || string.IsNullOrEmpty(name) || PlayerData.instance == null) {
             return;
         }
 
-        RecordTalkFlag(name);
+        RecordTalkFlag(name, intBefore);
         var owner = _captureFsm ?? GetExecutingCaptureFsm();
         if (owner == null || BossRoomCoop.IsHeroStateName(name) || ReadPlayerDataFlag(name) is not { } value) {
             return;
@@ -644,7 +663,7 @@ internal partial class CoopSave {
         }
 
         _promptInteraction?.Currency.Add((type, -amount));
-        RecordTalkItem(null, CurrencyChange + "\n" + (int) type, amount);
+        RecordTalkTake(null, type, CurrencyChange + "\n" + (int) type, amount);
     }
 
     /// <summary>
@@ -663,7 +682,7 @@ internal partial class CoopSave {
         }
 
         _promptInteraction?.Items.Add((self, amount));
-        RecordTalkItem(null, GetItemChangeKey(TakeItemChange, self), amount);
+        RecordTalkTake(self, null, GetItemChangeKey(TakeItemChange, self), amount);
     }
 
     /// <summary>

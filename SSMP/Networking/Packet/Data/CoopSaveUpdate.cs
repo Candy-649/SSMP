@@ -65,8 +65,8 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For world progress, the IDs of the saved objects of the world that are set, in the order of
-    /// <see cref="ItemScenes"/>. For key dialogue that accepted or completed wishes, what it took and gave, in the order
-    /// of <see cref="Amounts"/>.
+    /// <see cref="ItemScenes"/>. For dialogue that accepted or completed wishes, what it took and gave, each after the
+    /// index of its wish in <see cref="WishNames"/> or -1 for all of them, in the order of <see cref="Amounts"/>.
     /// </summary>
     public List<string> ItemIds { get; set; } = [];
 
@@ -84,14 +84,14 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For changes of the wish log and world progress, the names of wishes and rumours, in the order of
-    /// <see cref="WishValues"/>. For key dialogue, the wishes that it accepted or completed, and for the progress of
+    /// <see cref="WishValues"/>. For dialogue, the wishes that it accepted or completed, and for the progress of
     /// wishes, a wish for each of its targets.
     /// </summary>
     public List<string> WishNames { get; set; } = [];
 
     /// <summary>
-    /// The packed states of the wishes and rumours in <see cref="WishNames"/>. For key dialogue, whether each wish was
-    /// accepted or completed, and for the progress of wishes, the index of each target.
+    /// The packed states of the wishes and rumours in <see cref="WishNames"/>. For the progress of wishes, the index of
+    /// each target.
     /// </summary>
     public List<int> WishValues { get; set; } = [];
 
@@ -320,13 +320,14 @@ internal enum CoopSaveUpdateKind : byte {
     WishTalk,
 
     /// <summary>
-    /// Key dialogue of the sender accepted or completed wishes, with what it took from the sender and gave them, which
-    /// the game of the other player takes and gives too.
+    /// Dialogue of the sender accepted or completed wishes, with their new states and what it took from the sender and
+    /// gave them, which the game of the other player takes and gives too.
     /// </summary>
     WishTurnIn,
 
     /// <summary>
-    /// The progress of the targets of the accepted wishes in the save of the sender.
+    /// The progress of the targets of the accepted wishes, and of the wishes that take something, in the save of the
+    /// sender.
     /// </summary>
     WishProgress
 }

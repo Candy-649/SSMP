@@ -226,7 +226,8 @@ internal partial class CoopSave {
         var playTime = PlayerData.instance != null ? PlayerData.instance.playTime : 0f;
         var checkedPlayTime = GetMarker(_sessionSlot)?.CheckedPlayTime;
         _checkPlayTimeSinceTogether = checkedPlayTime != null;
-        _checkPlayTime = checkedPlayTime is { } together ? Mathf.Max(0f, playTime - together) : playTime;
+        // A save that went back to an older state, like after a crash, counts as played less than none
+        _checkPlayTime = checkedPlayTime is { } together ? playTime - together : playTime;
         return _checkPlayTime.Value;
     }
 

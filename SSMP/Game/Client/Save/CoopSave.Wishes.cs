@@ -166,7 +166,10 @@ internal partial class CoopSave {
         try {
             CoopSaveUpdate? update = null;
             foreach (var pair in playerData.QuestCompletionData.Enumerate()) {
-                AddWishChange(ref update, partner, _knownWishes, pair.Key, PackCompletion(pair.Value));
+                // A wish that dialogue changes goes to the partner with what the dialogue took and gave
+                if (!IsHeldByWishTalk(pair.Key)) {
+                    AddWishChange(ref update, partner, _knownWishes, pair.Key, PackCompletion(pair.Value));
+                }
             }
 
             foreach (var pair in playerData.QuestRumourData.Enumerate()) {
@@ -242,38 +245,7 @@ internal partial class CoopSave {
                     continue;
                 }
 
-                var wish = playerData.QuestCompletionData.GetData(name);
-                var next = UnpackCompletion(value, wish.HasBeenSeen);
-                if (_differentWishNames.Contains(name)) {
-                    // The check left this wish completed in only one of the saves, so only whether it is accepted is
-                    // shared, and the completion of one save isn't copied
-                    next = wish;
-                    next.IsAccepted = (value & WishAccepted) != 0;
-                }
-
-                // The known state is the local one, which may keep what the partner's doesn't share
-                if (PackCompletion(next) == PackCompletion(wish)) {
-                    _knownWishes[name] = PackCompletion(wish);
-                    continue;
-                }
-
-                _knownWishes[name] = PackCompletion(next);
-                if (next.IsAccepted && !wish.IsAccepted) {
-                    next.HasBeenSeen = false;
-                    _partnerAcceptedWishes.Add(name);
-                    if (!next.IsCompleted) {
-                        accepted++;
-                    }
-                }
-
-                // Key dialogue of the partner that completed it makes the local player pay and get the reward
-                if (next.IsCompleted && !wish.IsCompleted) {
-                    _partnerCompletedWishes.Add(name);
-                    completed++;
-                }
-
-                playerData.QuestCompletionData.SetData(name, next);
-                changed++;
+                ApplyPartnerWish(playerData, name, value, ref changed, ref accepted, ref completed);
             }
 
             if (changed == 0) {
@@ -294,6 +266,48 @@ internal partial class CoopSave {
         } catch (Exception e) {
             LogWishError(e);
         }
+    }
+
+    /// <summary>
+    /// Applies the packed state of a wish from the partner to the local wish log. What the local player has seen stays,
+    /// except that a wish that the partner accepted shows as new. A wish that the check left completed in only one of
+    /// the saves only takes whether it is accepted, so the completion of one save isn't copied.
+    /// </summary>
+    private void ApplyPartnerWish(
+        PlayerData playerData,
+        string name,
+        int value,
+        ref int changed,
+        ref int accepted,
+        ref int completed
+    ) {
+        var wish = playerData.QuestCompletionData.GetData(name);
+        var next = UnpackCompletion(value, wish.HasBeenSeen);
+        if (_differentWishNames.Contains(name)) {
+            next = wish;
+            next.IsAccepted = (value & WishAccepted) != 0;
+        }
+
+        // The known state is the local one, which may keep what the partner's doesn't share
+        if (PackCompletion(next) == PackCompletion(wish)) {
+            _knownWishes[name] = PackCompletion(wish);
+            return;
+        }
+
+        _knownWishes[name] = PackCompletion(next);
+        if (next.IsAccepted && !wish.IsAccepted) {
+            next.HasBeenSeen = false;
+            if (!next.IsCompleted) {
+                accepted++;
+            }
+        }
+
+        if (next.IsCompleted && !wish.IsCompleted) {
+            completed++;
+        }
+
+        playerData.QuestCompletionData.SetData(name, next);
+        changed++;
     }
 
     /// <summary>

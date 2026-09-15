@@ -15,12 +15,14 @@ namespace SSMP.Game.Client.Save;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Key dialogue in a checked two-player save: talking to a character who offers a wish or takes one in. It only starts
-/// while the partner is close by, the partner reads the same lines, and what the talk takes from the local player and
-/// gives them happens in the save of the partner too, so both pay a full copy and both get the reward. Turning in a wish
-/// needs a full copy of what it takes in both inventories, while progress that isn't taken, like kills, counts from
-/// either player. A wish that only the save of the partner completed before is turned in with the local copy alone, and
-/// the partner pays and gets nothing for it. Other talk stays with the player who talks.
+/// Dialogue about wishes in a checked two-player save. Talking to a character who can offer a wish right now or take
+/// one in is key dialogue: it only starts while the partner is close by, the partner reads the same lines, and the
+/// character doesn't talk to the partner meanwhile. Whenever dialogue with a character who deals in wishes accepts or
+/// completes a wish, the save of the partner gets that change of the wish together with what the dialogue took from the
+/// local player and gave them, so both pay a full copy and both get the reward. Turning in a wish needs a full copy of
+/// what it takes in both inventories, while progress that isn't taken, like kills, counts from either player. A wish
+/// that only one save completed before is turned in by the other player with their own copy alone. A delivery that runs
+/// against time is turned in by whoever gets there first. Other talk stays with the player who talks.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -34,10 +36,16 @@ internal partial class CoopSave {
     private const float WishTalkRangeY = 10f;
 
     /// <summary>
-    /// How long, in seconds, key dialogue still records after its character stopped talking, for what the character
-    /// gives right after.
+    /// How long, in seconds, dialogue about wishes still records after its character stopped talking and nothing
+    /// changed, for what the character gives after a pause.
     /// </summary>
-    private const float WishTalkEndDelay = 2f;
+    private const float WishTalkEndDelay = 6f;
+
+    /// <summary>
+    /// How long, in seconds, dialogue about wishes records at most, so that a character that doesn't stop talking
+    /// doesn't hold back its wishes for good.
+    /// </summary>
+    private const float WishTalkMaxTime = 600f;
 
     /// <summary>
     /// How long, in seconds, the character that the partner talks to stays locked for the local player at most.
@@ -45,9 +53,14 @@ internal partial class CoopSave {
     private const float PartnerTalkTimeout = 300f;
 
     /// <summary>
-    /// How often, in seconds, the progress of the accepted wishes is compared with what the partner last got.
+    /// How often, in seconds, the progress of the wishes is compared with what the partner last got.
     /// </summary>
     private const float WishProgressInterval = 1f;
+
+    /// <summary>
+    /// How many targets of wishes one update with progress holds at most.
+    /// </summary>
+    private const int WishProgressEntriesPerUpdate = 64;
 
     /// <summary>
     /// How long, in seconds, until the local player hears again that the partner lacks a full copy for a wish.
@@ -76,28 +89,51 @@ internal partial class CoopSave {
     private const ushort WishTalkRefused = 2;
 
     /// <summary>
-    /// An item that key dialogue took: the type and name of the item follow.
+    /// An item that dialogue took: the type and name of the item follow.
     /// </summary>
     private const string TakeItemChange = "take";
 
     /// <summary>
-    /// A saved item that key dialogue gave: the type and name of the item follow.
+    /// A saved item that dialogue gave: the type and name of the item follow.
     /// </summary>
     private const string GetItemChange = "get";
 
     /// <summary>
-    /// An item that key dialogue added to the collection: the type and name of the item follow.
+    /// An item that dialogue added to the collection: the type and name of the item follow.
     /// </summary>
     private const string CollectItemChange = "collect";
 
     /// <summary>
-    /// Money that key dialogue took or gave, with its amount negative when taken: the number of the currency follows.
+    /// Money that dialogue took or gave, with its amount negative when taken: the number of the currency follows.
     /// </summary>
     private const string CurrencyChange = "currency";
 
+    /// <summary>
+    /// A counter of the player data that dialogue changed, by the amount of the change: the name of the counter follows.
+    /// </summary>
+    private const string IntChange = "int";
+
+    /// <summary>
+    /// The index of the wish of a change of dialogue that belongs to all of its wishes, like a counter.
+    /// </summary>
+    private const int AllWishesIndex = -1;
+
+    /// <summary>
+    /// The event that characters send to their dialogue FSM when the hero talks to them, unless they name another.
+    /// </summary>
+    private const string DefaultInteractEvent = "INTERACT";
+
     private static readonly FieldInfo? DialogueFsmField = typeof(PlayMakerNPC).GetField("dialogueFsm", InstanceFlags);
     private static readonly FieldInfo? SecondaryFsmsField = typeof(PlayMakerNPC).GetField("secondaryFsms", InstanceFlags);
+    private static readonly FieldInfo? InteractEventField = typeof(PlayMakerNPC).GetField("interactEvent", InstanceFlags);
     private static readonly FieldInfo? WaitingToBeginField = typeof(NPCControlBase).GetField("isWaitingToBegin", InstanceFlags);
+    private static readonly FieldInfo? TemplateTargetField = typeof(FsmTemplateControl).GetField("target", InstanceFlags);
+    private static readonly FieldInfo? TemplateFsmField = typeof(FsmTemplate).GetField("fsm", InstanceFlags);
+
+    /// <summary>
+    /// The field of FSM actions that run a template FSM which holds how they run it, by type of action, or null.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo?> TemplateControlFields = new();
 
     /// <summary>
     /// The saved items of the game by their type and name, found when first needed.
@@ -105,27 +141,33 @@ internal partial class CoopSave {
     private static readonly Dictionary<string, SavedItem> SavedItems = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The hooks for key dialogue, which stay for as long as the game runs.
+    /// The hooks for dialogue about wishes, which stay for as long as the game runs.
     /// </summary>
     private readonly List<Hook> _wishTalkHooks = [];
 
     /// <summary>
-    /// The key dialogue that the local player is in, or null.
+    /// The dialogue with a character who deals in wishes that the local player is in, or null.
     /// </summary>
     private WishTalk? _wishTalk;
 
     /// <summary>
-    /// The key dialogue that the partner is in, whose character the local player can't talk to meanwhile, or null.
+    /// The key dialogue that the partner is in, whose character doesn't talk to the local player meanwhile, or null.
     /// </summary>
     private PartnerTalk? _partnerTalk;
 
     /// <summary>
-    /// The quests that the actions of dialogue FSMs offer and take in, by FSM, found the first time.
+    /// The actions of dialogue FSMs that offer wishes and take them in, by FSM, found the first time.
     /// </summary>
-    private readonly Dictionary<Fsm, WishActions> _wishActions = new();
+    private readonly Dictionary<Fsm, List<WishAction>> _wishActions = new();
 
     /// <summary>
-    /// The progress of each target of the accepted wishes in the save of the partner, by wish.
+    /// The states of dialogue FSMs that a talk with their character goes through, by FSM, with the event that starts
+    /// the talk.
+    /// </summary>
+    private readonly Dictionary<Fsm, (string Event, HashSet<string> States)> _talkStates = new();
+
+    /// <summary>
+    /// The progress of each target of the wishes in the save of the partner, by wish.
     /// </summary>
     private readonly Dictionary<string, int[]> _partnerWishProgress = new(StringComparer.Ordinal);
 
@@ -135,7 +177,7 @@ internal partial class CoopSave {
     private readonly Dictionary<string, ulong> _partnerWishProgressKeys = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The progress of each target of the accepted wishes that the partner last got, by wish.
+    /// The progress of each target of the wishes that the partner last got, by wish.
     /// </summary>
     private readonly Dictionary<string, int[]> _sentWishProgress = new(StringComparer.Ordinal);
 
@@ -145,21 +187,9 @@ internal partial class CoopSave {
     private ulong _wishProgressCounter;
 
     /// <summary>
-    /// When the progress of the accepted wishes is compared next.
+    /// When the progress of the wishes is compared next.
     /// </summary>
     private float _nextWishProgressTime;
-
-    /// <summary>
-    /// Wishes that the partner completed in the local wish log, whose key dialogue makes the local player pay and get the
-    /// reward. A wish that the local save completed itself isn't paid or rewarded again.
-    /// </summary>
-    private readonly HashSet<string> _partnerCompletedWishes = new(StringComparer.Ordinal);
-
-    /// <summary>
-    /// Wishes that the partner accepted in the local wish log, whose key dialogue gives the local player what came with
-    /// them.
-    /// </summary>
-    private readonly HashSet<string> _partnerAcceptedWishes = new(StringComparer.Ordinal);
 
     /// <summary>
     /// When the local player can hear again that the partner lacks a full copy for a wish, by wish.
@@ -167,22 +197,54 @@ internal partial class CoopSave {
     private readonly Dictionary<string, float> _nextMissingCopyNotices = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// Whether the local game plays key dialogue of the partner, whose changes aren't recorded for the partner again.
+    /// Whether the local game plays dialogue of the partner, whose changes aren't recorded for the partner again.
     /// </summary>
     private bool _applyingPartnerTalk;
 
     /// <summary>
-    /// Whether key dialogue threw, which is only logged once.
+    /// How many completions of wishes run right now, during which what a wish takes counts for dialogue.
+    /// </summary>
+    private int _endingWishDepth;
+
+    /// <summary>
+    /// How many writes of the player data run right now, of which only the outermost is recorded, since some writes of
+    /// counters make others.
+    /// </summary>
+    private int _playerDataWriteDepth;
+
+    /// <summary>
+    /// Whether dialogue about wishes threw, which is only logged once.
     /// </summary>
     private bool _wishTalkFailed;
 
     /// <summary>
-    /// Key dialogue of the local player with a character.
+    /// What dialogue with a character is about right now.
+    /// </summary>
+    private enum TalkKind {
+        /// <summary>
+        /// The character can't offer or take in a wish right now.
+        /// </summary>
+        Casual,
+
+        /// <summary>
+        /// The character can offer a wish or take one in, which needs both players.
+        /// </summary>
+        Key,
+
+        /// <summary>
+        /// The character can take in a delivery that runs against time, which whoever gets there first turns in.
+        /// </summary>
+        Delivery
+    }
+
+    /// <summary>
+    /// Dialogue of the local player with a character who deals in wishes.
     /// </summary>
     private sealed class WishTalk {
-        public WishTalk(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms) {
+        public WishTalk(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms, bool isKey) {
             Npc = npc;
             Fsms = fsms;
+            IsKey = isKey;
             Scene = npc.gameObject.scene.name;
             Path = ScenePath.Get(npc.transform);
         }
@@ -198,6 +260,11 @@ internal partial class CoopSave {
         public HashSet<PlayMakerFSM> Fsms { get; }
 
         /// <summary>
+        /// Whether it is key dialogue, which the partner reads too.
+        /// </summary>
+        public bool IsKey { get; }
+
+        /// <summary>
         /// The scene of the character.
         /// </summary>
         public string Scene { get; }
@@ -208,25 +275,49 @@ internal partial class CoopSave {
         public string Path { get; }
 
         /// <summary>
-        /// The wishes that the dialogue accepted or completed, with <see cref="WishAccepted"/> and
-        /// <see cref="WishCompleted"/>.
+        /// When the dialogue started.
         /// </summary>
-        public List<(string Name, int Change)> Wishes { get; } = [];
+        public float Started { get; } = Time.unscaledTime;
 
         /// <summary>
-        /// What the dialogue took from the local player and gave them, with their amounts.
+        /// The wishes that the dialogue accepted or completed, in the order they first changed.
         /// </summary>
-        public List<(string Change, int Amount)> Items { get; } = [];
+        public List<string> Wishes { get; } = [];
 
         /// <summary>
-        /// The flags of the player data that the dialogue set.
+        /// The wish of each change in order, with a wish that changed twice in it twice.
+        /// </summary>
+        public List<string> Changes { get; } = [];
+
+        /// <summary>
+        /// What the dialogue took from the local player and gave them.
+        /// </summary>
+        public List<TalkItem> Items { get; } = [];
+
+        /// <summary>
+        /// The booleans and enums of the player data that the dialogue set.
         /// </summary>
         public HashSet<string> Flags { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// How much the dialogue changed each counter of the player data.
+        /// </summary>
+        public Dictionary<string, int> IntChanges { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The wishes in <see cref="Wishes"/> by name.
+        /// </summary>
+        public Dictionary<string, FullQuestBase> Quests { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// When the character stopped talking, or -1 while it talks.
         /// </summary>
         public float EndedTime { get; set; } = -1f;
+
+        /// <summary>
+        /// When the dialogue last changed a wish, an item or the player data.
+        /// </summary>
+        public float LastChangeTime { get; set; } = Time.unscaledTime;
 
         /// <summary>
         /// Whether an FSM runs the dialogue of the character.
@@ -238,28 +329,148 @@ internal partial class CoopSave {
         /// <summary>
         /// Remembers that the dialogue accepted or completed a wish.
         /// </summary>
-        public void AddWish(string name, int change) {
-            var index = Wishes.FindIndex(entry => entry.Name == name);
-            if (index < 0) {
-                Wishes.Add((name, change));
-            } else {
-                Wishes[index] = (name, Wishes[index].Change | change);
+        public void AddWish(FullQuestBase quest) {
+            var name = quest.name;
+            Changes.Add(name);
+            if (!Wishes.Contains(name)) {
+                Wishes.Add(name);
             }
+
+            Quests[name] = quest;
+            LastChangeTime = Time.unscaledTime;
         }
+
+        /// <summary>
+        /// Remembers what the dialogue took or gave.
+        /// </summary>
+        public void AddItem(string change, int amount, bool isTake) {
+            Items.Add(new TalkItem(change, amount, Changes.Count, isTake, false, null, null));
+            LastChangeTime = Time.unscaledTime;
+        }
+
+        /// <summary>
+        /// Remembers a payment during the dialogue that only counts if the wish that it belongs to takes what was paid,
+        /// like one in a prompt, which may be for something else, like a shop of the character.
+        /// </summary>
+        public void AddTargetPayment(string change, int amount, SavedItem? item, CurrencyType? currency) {
+            Items.Add(new TalkItem(change, amount, Changes.Count, true, true, item, currency));
+            LastChangeTime = Time.unscaledTime;
+        }
+
+        /// <summary>
+        /// Whether what the dialogue took or gave goes to the partner with the wish at an index of
+        /// <see cref="Wishes"/>: a payment that only counts for a wish that takes it needs that wish to take what was
+        /// paid.
+        /// </summary>
+        public bool Counts(TalkItem item, int index) {
+            if (!item.OnlyForTarget) {
+                return true;
+            }
+
+            if (index < 0 || index >= Wishes.Count || !Quests.TryGetValue(Wishes[index], out var quest) ||
+                quest == null) {
+                return false;
+            }
+
+            foreach (var target in quest.Targets) {
+                if (item.PaidItem != null
+                        ? ReferenceEquals(target.Counter, item.PaidItem)
+                        : target.Counter is QuestTargetCurrency currency && currency != null &&
+                          currency.CurrencyType == item.PaidCurrency) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// The index of the wish in <see cref="Wishes"/> that what the dialogue took or gave belongs to. A payment
+        /// belongs to the change of a wish after it, which it paid for, and a gain to the change before it, which it
+        /// rewarded.
+        /// </summary>
+        public int GetWishIndex(TalkItem item) {
+            if (Changes.Count == 0) {
+                return AllWishesIndex;
+            }
+
+            var wish = item.IsTake
+                ? Changes[Mathf.Min(item.ChangeCount, Changes.Count - 1)]
+                : Changes[Mathf.Max(item.ChangeCount - 1, 0)];
+            return Wishes.IndexOf(wish);
+        }
+    }
+
+    /// <summary>
+    /// Something that dialogue took from the local player or gave them.
+    /// </summary>
+    private readonly struct TalkItem {
+        public TalkItem(
+            string change,
+            int amount,
+            int changeCount,
+            bool isTake,
+            bool onlyForTarget,
+            SavedItem? paidItem,
+            CurrencyType? paidCurrency
+        ) {
+            Change = change;
+            Amount = amount;
+            ChangeCount = changeCount;
+            IsTake = isTake;
+            OnlyForTarget = onlyForTarget;
+            PaidItem = paidItem;
+            PaidCurrency = paidCurrency;
+        }
+
+        /// <summary>
+        /// What changed: its kind, followed by what it changed.
+        /// </summary>
+        public string Change { get; }
+
+        /// <summary>
+        /// How much changed.
+        /// </summary>
+        public int Amount { get; }
+
+        /// <summary>
+        /// How many changes of wishes the dialogue had made before.
+        /// </summary>
+        public int ChangeCount { get; }
+
+        /// <summary>
+        /// Whether it was taken rather than given.
+        /// </summary>
+        public bool IsTake { get; }
+
+        /// <summary>
+        /// Whether it is a payment that only counts if the wish that it belongs to takes what was paid.
+        /// </summary>
+        public bool OnlyForTarget { get; }
+
+        /// <summary>
+        /// For a payment that only counts for a wish that takes it, the item that was paid, or null for money.
+        /// </summary>
+        public SavedItem? PaidItem { get; }
+
+        /// <summary>
+        /// For a payment of money that only counts for a wish that takes it, the currency that was paid.
+        /// </summary>
+        public CurrencyType? PaidCurrency { get; }
     }
 
     /// <summary>
     /// Key dialogue of the partner with a character in the local scene.
     /// </summary>
     private sealed class PartnerTalk {
-        public PartnerTalk(InteractableBase? interactable) {
-            Interactable = interactable;
+        public PartnerTalk(NPCControlBase? npc) {
+            Npc = npc;
         }
 
         /// <summary>
-        /// The character, whom the local player can't talk to until the partner is done, or null.
+        /// The character, who doesn't talk to the local player until the partner is done, or null.
         /// </summary>
-        public InteractableBase? Interactable { get; }
+        public NPCControlBase? Npc { get; }
 
         /// <summary>
         /// When the dialogue started.
@@ -268,16 +479,33 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The quests that a dialogue FSM offers and takes in, as the variables that hold them.
+    /// An action of a dialogue FSM that offers a wish or takes one in.
     /// </summary>
-    private sealed class WishActions {
-        public List<FsmObject> Offers { get; } = [];
+    private readonly struct WishAction {
+        public WishAction(string state, FsmObject quest, bool isTurnIn) {
+            State = state;
+            Quest = quest;
+            IsTurnIn = isTurnIn;
+        }
 
-        public List<FsmObject> TurnIns { get; } = [];
+        /// <summary>
+        /// The state that runs the action, or that runs the template FSM with it.
+        /// </summary>
+        public string State { get; }
+
+        /// <summary>
+        /// The variable with the wish.
+        /// </summary>
+        public FsmObject Quest { get; }
+
+        /// <summary>
+        /// Whether the action takes the wish in rather than offers it.
+        /// </summary>
+        public bool IsTurnIn { get; }
     }
 
     /// <summary>
-    /// Registers the hooks for key dialogue.
+    /// Registers the hooks for dialogue about wishes.
     /// </summary>
     private void RegisterWishTalkHooks() {
         AddWishTalkHook(
@@ -285,6 +513,12 @@ internal partial class CoopSave {
                 "Interact", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null
             ),
             new Action<Action<NPCControlBase>, NPCControlBase>(OnNpcInteract)
+        );
+        AddWishTalkHook(
+            typeof(PlayMakerNPC).GetMethod(
+                "OnStartDialogue", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null
+            ),
+            new Action<Action<PlayMakerNPC>, PlayMakerNPC>(OnNpcStartDialogue)
         );
         AddWishTalkHook(
             typeof(FullQuestBase).GetProperty("Counters", InstanceFlags | BindingFlags.DeclaredOnly)?.GetGetMethod(true),
@@ -346,7 +580,8 @@ internal partial class CoopSave {
             new Action<Action<HutongGames.PlayMaker.Actions.CollectableItemCollect, CollectableItem>,
                 HutongGames.PlayMaker.Actions.CollectableItemCollect, CollectableItem>((orig, self, item) => {
                 if (item != null) {
-                    RecordTalkItem(self.Fsm, GetItemChangeKey(CollectItemChange, item), self.Amount?.Value ?? 1);
+                    var amount = self.Amount is { IsNone: false } fsmAmount ? fsmAmount.Value : 1;
+                    RecordTalkGainChange(self.Fsm, GetItemChangeKey(CollectItemChange, item), amount);
                 }
 
                 orig(self, item!);
@@ -359,7 +594,7 @@ internal partial class CoopSave {
             new Action<Action<HutongGames.PlayMaker.Actions.AddCurrency>, HutongGames.PlayMaker.Actions.AddCurrency>(
                 (orig, self) => {
                     if (self.CurrencyType is { IsNone: false, Value: { } type } && self.Amount != null) {
-                        RecordTalkItem(self.Fsm, CurrencyChange + "\n" + Convert.ToInt32(type), self.Amount.Value);
+                        RecordTalkGainChange(self.Fsm, CurrencyChange + "\n" + Convert.ToInt32(type), self.Amount.Value);
                     }
 
                     orig(self);
@@ -369,7 +604,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Creates a hook for key dialogue, logging instead of throwing when the method is missing.
+    /// Creates a hook for dialogue about wishes, logging instead of throwing when the method is missing.
     /// </summary>
     private void AddWishTalkHook(MethodInfo? method, Delegate detour) {
         if (CreateHook(method, detour) is { } hook) {
@@ -381,28 +616,32 @@ internal partial class CoopSave {
     /// Whether an FSM runs key dialogue of the local player, which the partner reads too.
     /// </summary>
     public bool IsSharedTalk(Fsm fsm) {
-        return _wishTalk is { } talk && talk.IsTalkFsm(fsm);
+        return _wishTalk is { IsKey: true } talk && talk.IsTalkFsm(fsm);
     }
 
     /// <summary>
-    /// Ends key dialogue whose character stopped talking, frees the character that the partner talked to, and sends the
-    /// progress of the accepted wishes.
+    /// Ends dialogue whose character stopped talking, frees the character that the partner talked to, and sends the
+    /// progress of the wishes.
     /// </summary>
     private void UpdateWishTalk(ClientPlayerData? partner) {
         try {
             if (_wishTalk is { } talk) {
+                var now = Time.unscaledTime;
                 if (IsTalking(talk.Npc)) {
                     talk.EndedTime = -1f;
                 } else if (talk.EndedTime < 0f) {
-                    talk.EndedTime = Time.unscaledTime;
-                } else if (Time.unscaledTime - talk.EndedTime > WishTalkEndDelay) {
+                    talk.EndedTime = now;
+                }
+
+                if ((talk.EndedTime >= 0f && now - Mathf.Max(talk.EndedTime, talk.LastChangeTime) > WishTalkEndDelay) ||
+                    now - talk.Started > WishTalkMaxTime) {
                     EndWishTalk();
                 }
             }
 
-            if (_partnerTalk is { } partnerTalk &&
-                (partner == null || !partner.IsInLocalScene || Time.unscaledTime - partnerTalk.Started > PartnerTalkTimeout)) {
-                EndPartnerTalk();
+            if (_partnerTalk is { } partnerTalk && (partner == null || !partner.IsInLocalScene ||
+                                                    Time.unscaledTime - partnerTalk.Started > PartnerTalkTimeout)) {
+                _partnerTalk = null;
             }
 
             if (partner != null && _checkedWith == partner.Id) {
@@ -421,7 +660,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Ends key dialogue and frees the character of the partner when the scene changes.
+    /// Whether a wish of the local wish log waits for dialogue that changed it to end, which sends it to the partner.
+    /// </summary>
+    private bool IsHeldByWishTalk(string name) {
+        return _wishTalk != null && _wishTalk.Wishes.Contains(name);
+    }
+
+    /// <summary>
+    /// Ends dialogue and frees the character of the partner when the scene changes.
     /// </summary>
     private void OnWishTalkSceneChanged() {
         try {
@@ -432,19 +678,20 @@ internal partial class CoopSave {
 
         _partnerTalk = null;
         _wishActions.Clear();
+        _talkStates.Clear();
     }
 
     /// <summary>
-    /// Forgets key dialogue and the progress of the partner, for a new session.
+    /// Forgets dialogue and the progress of the partner, for a new session.
     /// </summary>
     private void ResetWishTalk() {
         _wishTalk = null;
-        EndPartnerTalk();
+        _partnerTalk = null;
         _wishActions.Clear();
-        ResetWishProgress();
-        _partnerCompletedWishes.Clear();
-        _partnerAcceptedWishes.Clear();
+        _talkStates.Clear();
+        _endingWishDepth = 0;
         _nextMissingCopyNotices.Clear();
+        ResetWishProgress();
     }
 
     /// <summary>
@@ -461,13 +708,18 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="NPCControlBase.Interact"/>: key dialogue only starts while the partner is close by, and
-    /// otherwise the local player hears who is missing.
+    /// otherwise the local player hears who is missing. The character that the partner talks to doesn't talk.
     /// </summary>
     private void OnNpcInteract(Action<NPCControlBase> orig, NPCControlBase self) {
         var allowed = true;
         try {
-            if (self is PlayMakerNPC npc && _wishTalk == null && _everChecked && GetCurrentMarker() is { } marker) {
-                allowed = TryStartWishTalk(npc, marker);
+            if (_everChecked && GetCurrentMarker() is { } marker) {
+                if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == self) {
+                    Chat($"{GetPartnerName()} is talking to them right now.");
+                    allowed = false;
+                } else if (self is PlayMakerNPC npc) {
+                    allowed = TryStartWishTalk(npc, marker);
+                }
             }
         } catch (Exception e) {
             LogWishTalkError(e);
@@ -479,19 +731,21 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts key dialogue with a character if the talk is key, which needs the partner close by.
+    /// Starts key dialogue with a character if it can offer or take in a wish right now, which needs the partner close
+    /// by.
     /// </summary>
     /// <returns>Whether the character may talk.</returns>
     private bool TryStartWishTalk(PlayMakerNPC npc, CoopSaveMarker marker) {
         var fsms = GetTalkFsms(npc);
-        if (!IsKeyTalk(fsms)) {
+        if (GetTalkKind(npc, fsms) != TalkKind.Key) {
+            // Other dialogue with a character who deals in wishes is recorded once it starts
             return true;
         }
 
         var partner = _checkedWith is { } partnerId && _playerData.TryGetValue(partnerId, out var checkedPartner)
             ? checkedPartner
             : null;
-        var absence = GetWishTalkAbsence(partner, marker);
+        var absence = partner == null ? $"This wish needs {marker.PartnerName} here too." : GetWishTalkAbsence(partner);
         if (absence != null || partner == null) {
             Chat(absence ?? $"This wish needs {marker.PartnerName} here too.");
             if (partner != null) {
@@ -502,7 +756,8 @@ internal partial class CoopSave {
             return false;
         }
 
-        var talk = new WishTalk(npc, fsms);
+        EndWishTalk();
+        var talk = new WishTalk(npc, fsms, true);
         _wishTalk = talk;
         Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
         Logger.Info($"Key dialogue with '{npc.name}' starts with {partner.Username} close by");
@@ -510,13 +765,39 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Why the partner can't join key dialogue now, for the message to the local player, or null if they can.
+    /// Hook for PlayMakerNPC.OnStartDialogue: dialogue with a character who deals in wishes is recorded, also when an
+    /// FSM starts it, so that a wish that it changes reaches the partner with what it took and gave.
     /// </summary>
-    private static string? GetWishTalkAbsence(ClientPlayerData? partner, CoopSaveMarker marker) {
-        if (partner == null) {
-            return $"This wish needs {marker.PartnerName} here too.";
+    private void OnNpcStartDialogue(Action<PlayMakerNPC> orig, PlayMakerNPC self) {
+        try {
+            if (_everChecked && GetCurrentMarker() != null && (_wishTalk == null || !IsSameTalk(_wishTalk, self))) {
+                var fsms = GetTalkFsms(self);
+                if (HasWishActions(fsms)) {
+                    EndWishTalk();
+                    _wishTalk = new WishTalk(self, fsms, false);
+                }
+            }
+        } catch (Exception e) {
+            LogWishTalkError(e);
         }
 
+        orig(self);
+    }
+
+    /// <summary>
+    /// Whether a character talks as part of dialogue that is recorded already, like a stand-in that an FSM of the
+    /// dialogue talks through.
+    /// </summary>
+    private static bool IsSameTalk(WishTalk talk, PlayMakerNPC npc) {
+        return talk.Npc == npc || (npc.CustomEventTarget != null && talk.Fsms.Contains(npc.CustomEventTarget)) ||
+               (DialogueFsmField?.GetValue(npc) is PlayMakerFSM dialogueFsm && dialogueFsm != null &&
+                talk.Fsms.Contains(dialogueFsm));
+    }
+
+    /// <summary>
+    /// Why the partner can't join key dialogue now, for the message to the local player, or null if they can.
+    /// </summary>
+    private static string? GetWishTalkAbsence(ClientPlayerData partner) {
         var hero = HeroController.instance;
         var avatar = partner.PlayerObject;
         if (!partner.IsInLocalScene || avatar == null || hero == null) {
@@ -570,28 +851,56 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the dialogue of a character is key right now: it can offer a wish that is available and not accepted, or
-    /// take in an accepted wish that can be completed.
+    /// What talking to a character is about right now: whether a state that the talk goes through can offer a wish that
+    /// is available and not accepted, or take in an accepted wish that can be completed.
     /// </summary>
-    private bool IsKeyTalk(HashSet<PlayMakerFSM> fsms) {
+    private TalkKind GetTalkKind(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms) {
+        var interactEvent = InteractEventField?.GetValue(npc) as string;
+        if (string.IsNullOrEmpty(interactEvent)) {
+            interactEvent = DefaultInteractEvent;
+        }
+
+        var kind = TalkKind.Casual;
         foreach (var component in fsms) {
             if (component.Fsm is not { } fsm) {
                 continue;
             }
 
-            var actions = GetWishActions(fsm);
-            foreach (var variable in actions.TurnIns) {
-                if (variable.Value is FullQuestBase quest && quest != null && quest.IsAccepted && !quest.IsCompleted &&
-                    quest.CanComplete) {
-                    return true;
-                }
+            var states = GetTalkStates(fsm, interactEvent!);
+            if (states.Count == 0) {
+                continue;
             }
 
-            foreach (var variable in actions.Offers) {
-                if (variable.Value is FullQuestBase quest && quest != null && !quest.IsAccepted && !quest.IsCompleted &&
-                    quest.IsAvailable) {
-                    return true;
+            foreach (var action in GetWishActions(fsm)) {
+                if (!states.Contains(action.State) || action.Quest.Value is not FullQuestBase quest || quest == null) {
+                    continue;
                 }
+
+                if (!action.IsTurnIn) {
+                    if (!quest.IsAccepted && !quest.IsCompleted && quest.IsAvailable) {
+                        kind = TalkKind.Key;
+                    }
+                } else if (quest.IsAccepted && !quest.IsCompleted && quest.CanComplete) {
+                    // A delivery goes first, since whoever gets there first turns it in without waiting
+                    if (IsDelivery(quest)) {
+                        return TalkKind.Delivery;
+                    }
+
+                    kind = TalkKind.Key;
+                }
+            }
+        }
+
+        return kind;
+    }
+
+    /// <summary>
+    /// Whether a wish is a delivery, which runs against time.
+    /// </summary>
+    private static bool IsDelivery(FullQuestBase quest) {
+        foreach (var target in quest.Targets) {
+            if (target.Counter is DeliveryQuestItem) {
+                return true;
             }
         }
 
@@ -599,55 +908,171 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Gets the quests that the actions of a dialogue FSM offer and take in, finding them the first time.
+    /// Gets the states of a dialogue FSM that a talk goes through: from the states that the event of the talk leads to,
+    /// up to the states that wait for the next talk.
     /// </summary>
-    private WishActions GetWishActions(Fsm fsm) {
-        if (_wishActions.TryGetValue(fsm, out var actions)) {
-            return actions;
+    private HashSet<string> GetTalkStates(Fsm fsm, string interactEvent) {
+        if (_talkStates.TryGetValue(fsm, out var cached) && cached.Event == interactEvent) {
+            return cached.States;
         }
 
-        actions = new WishActions();
+        var statesByName = new Dictionary<string, FsmState>(StringComparer.Ordinal);
         foreach (var state in fsm.States ?? []) {
-            foreach (var action in state?.Actions ?? []) {
-                switch (action) {
-                    case QuestPlaymakerActions.BeginQuest or QuestPlaymakerActions.BeginQuestV2 or
-                        QuestPlaymakerActions.CanBeginQuest:
-                        AddQuestVariable(actions.Offers, ((QuestPlaymakerActions.QuestFsmAction) action).Quest);
-                        break;
-                    case QuestPlaymakerActions.CanEndQuest or QuestPlaymakerActions.CanEndQuestV2 or
-                        QuestPlaymakerActions.EndQuest or QuestPlaymakerActions.EndQuestV2 or
-                        QuestPlaymakerActions.TryEndQuest or QuestPlaymakerActions.TryEndQuestV2:
-                        AddQuestVariable(actions.TurnIns, ((QuestPlaymakerActions.QuestFsmAction) action).Quest);
-                        break;
-                    case QuestYesNo questYesNo:
-                        AddQuestVariable(actions.Offers, questYesNo.Quest);
-                        break;
-                    case QuestYesNoV2 questYesNo:
-                        AddQuestVariable(actions.Offers, questYesNo.Quest);
-                        break;
-                    case HutongGames.PlayMaker.Actions.QuestCompleteYesNo completeYesNo:
-                        AddQuestVariable(actions.TurnIns, completeYesNo.Quest);
-                        break;
-                    case QuestPlaymakerActions.QuestConsumeTargetTake consumeTake:
-                        AddQuestVariable(actions.TurnIns, consumeTake.Quest);
-                        break;
+            if (state != null) {
+                statesByName[state.Name] = state;
+            }
+        }
+
+        var queue = new Queue<string>();
+        foreach (var transition in fsm.GlobalTransitions ?? []) {
+            if (transition?.EventName == interactEvent && transition.ToState != null) {
+                queue.Enqueue(transition.ToState);
+            }
+        }
+
+        foreach (var state in statesByName.Values) {
+            foreach (var transition in state.Transitions ?? []) {
+                if (transition?.EventName == interactEvent && transition.ToState != null) {
+                    queue.Enqueue(transition.ToState);
                 }
             }
         }
 
+        var states = new HashSet<string>(StringComparer.Ordinal);
+        while (queue.Count > 0) {
+            var name = queue.Dequeue();
+            if (!statesByName.TryGetValue(name, out var state) || !states.Add(name)) {
+                continue;
+            }
+
+            foreach (var transition in state.Transitions ?? []) {
+                if (transition?.ToState is { } next && !states.Contains(next) &&
+                    statesByName.TryGetValue(next, out var nextState) && !ListensFor(nextState, interactEvent)) {
+                    queue.Enqueue(next);
+                }
+            }
+        }
+
+        _talkStates[fsm] = (interactEvent, states);
+        return states;
+    }
+
+    private static bool ListensFor(FsmState state, string eventName) {
+        return (state.Transitions ?? []).Any(transition => transition?.EventName == eventName);
+    }
+
+    /// <summary>
+    /// Whether any FSM of a character offers wishes or takes them in.
+    /// </summary>
+    private bool HasWishActions(HashSet<PlayMakerFSM> fsms) {
+        foreach (var component in fsms) {
+            if (component.Fsm is { } fsm && GetWishActions(fsm).Count > 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the actions of a dialogue FSM that offer wishes and take them in, with those of the template FSMs that it
+    /// runs, finding them the first time.
+    /// </summary>
+    private List<WishAction> GetWishActions(Fsm fsm) {
+        if (_wishActions.TryGetValue(fsm, out var actions)) {
+            return actions;
+        }
+
+        actions = [];
         _wishActions[fsm] = actions;
+        foreach (var state in fsm.States ?? []) {
+            if (state == null) {
+                continue;
+            }
+
+            foreach (var action in state.Actions ?? []) {
+                AddWishAction(actions, state.Name, action, 0);
+            }
+        }
+
         return actions;
     }
 
-    private static void AddQuestVariable(List<FsmObject> variables, FsmObject? variable) {
-        if (variable != null && !variables.Contains(variable)) {
-            variables.Add(variable);
+    /// <summary>
+    /// Adds an action to the actions that offer wishes and take them in if it is one, or the ones of the template FSM
+    /// that it runs.
+    /// </summary>
+    private static void AddWishAction(List<WishAction> actions, string stateName, FsmStateAction? action, int depth) {
+        switch (action) {
+            case QuestPlaymakerActions.BeginQuest or QuestPlaymakerActions.BeginQuestV2 or
+                QuestPlaymakerActions.CanBeginQuest:
+                AddQuestAction(actions, stateName, ((QuestPlaymakerActions.QuestFsmAction) action).Quest, false);
+                break;
+            case QuestPlaymakerActions.CanEndQuest or QuestPlaymakerActions.CanEndQuestV2 or
+                QuestPlaymakerActions.EndQuest or QuestPlaymakerActions.EndQuestV2 or
+                QuestPlaymakerActions.TryEndQuest or QuestPlaymakerActions.TryEndQuestV2:
+                AddQuestAction(actions, stateName, ((QuestPlaymakerActions.QuestFsmAction) action).Quest, true);
+                break;
+            case QuestYesNo questYesNo:
+                AddQuestAction(actions, stateName, questYesNo.Quest, false);
+                break;
+            case QuestYesNoV2 questYesNo:
+                AddQuestAction(actions, stateName, questYesNo.Quest, false);
+                break;
+            case HutongGames.PlayMaker.Actions.QuestCompleteYesNo completeYesNo:
+                AddQuestAction(actions, stateName, completeYesNo.Quest, true);
+                break;
+            case QuestPlaymakerActions.QuestConsumeTargetTake consumeTake:
+                AddQuestAction(actions, stateName, consumeTake.Quest, true);
+                break;
+            default:
+                // The actions of a template FSM count for the state that runs it
+                if (action != null && depth < 2 && GetTemplateFsm(action) is { } template) {
+                    foreach (var templateState in template.States ?? []) {
+                        foreach (var templateAction in templateState?.Actions ?? []) {
+                            AddWishAction(actions, stateName, templateAction, depth + 1);
+                        }
+                    }
+                }
+
+                break;
+        }
+    }
+
+    private static void AddQuestAction(List<WishAction> actions, string stateName, FsmObject? quest, bool isTurnIn) {
+        if (quest != null) {
+            actions.Add(new WishAction(stateName, quest, isTurnIn));
         }
     }
 
     /// <summary>
-    /// Ends the key dialogue of the local player. The partner can talk to the character again, and if the dialogue
-    /// accepted or completed wishes, the partner's game takes and gives what the dialogue took and gave.
+    /// Gets the template FSM that an action runs, or null.
+    /// </summary>
+    private static Fsm? GetTemplateFsm(FsmStateAction action) {
+        var type = action.GetType();
+        if (!TemplateControlFields.TryGetValue(type, out var field)) {
+            field = type.GetField("fsmTemplateControl", InstanceFlags);
+            if (field != null && field.FieldType != typeof(FsmTemplateControl)) {
+                field = null;
+            }
+
+            TemplateControlFields[type] = field;
+        }
+
+        if (field?.GetValue(action) is not FsmTemplateControl control) {
+            return null;
+        }
+
+        return TemplateTargetField?.GetValue(control) switch {
+            FsmTemplate template => TemplateFsmField?.GetValue(template) as Fsm,
+            PlayMakerFSM component => component.Fsm,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Ends the dialogue of the local player. The partner can talk to the character again, and if the dialogue accepted
+    /// or completed wishes, the save of the partner gets them with what the dialogue took and gave.
     /// </summary>
     private void EndWishTalk() {
         if (_wishTalk is not { } talk) {
@@ -655,33 +1080,44 @@ internal partial class CoopSave {
         }
 
         _wishTalk = null;
-        if (_checkedWith is not { } partnerId || !_playerData.TryGetValue(partnerId, out var partner)) {
-            if (talk.Wishes.Count > 0) {
-                Logger.Warn("The partner left during key dialogue, so what it took and gave stays with the local save");
-            }
-
-            return;
+        var partner = GetCurrentMarker() is { } marker ? FindPartner(marker) : null;
+        if (talk.IsKey && partner != null) {
+            Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkEnded));
         }
 
-        Send(CreateWishTalkUpdate(partnerId, talk.Scene, talk.Path, WishTalkEnded));
         if (talk.Wishes.Count == 0) {
             return;
         }
 
+        var playerData = PlayerData.instance;
+        if (partner == null || _checkedWith != partner.Id || playerData == null) {
+            // The next check finds the wishes changed in one save only
+            Logger.Warn("Dialogue about wishes ended without the checked partner, so its wishes stay with the local save");
+            return;
+        }
+
         var update = new CoopSaveUpdate {
-            TargetId = partnerId,
+            TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.WishTurnIn,
             Scene = talk.Scene,
             ObjectPath = talk.Path
         };
-        foreach (var (name, change) in talk.Wishes) {
+        foreach (var name in talk.Wishes) {
             update.WishNames.Add(name);
-            update.WishValues.Add(change);
+            update.WishValues.Add(PackCompletion(playerData.QuestCompletionData.GetData(name)));
         }
 
-        foreach (var (change, amount) in talk.Items) {
-            update.ItemIds.Add(change);
-            update.Amounts.Add(amount);
+        foreach (var item in talk.Items) {
+            var index = talk.GetWishIndex(item);
+            if (talk.Counts(item, index)) {
+                update.ItemIds.Add(index + "\n" + item.Change);
+                update.Amounts.Add(item.Amount);
+            }
+        }
+
+        foreach (var pair in talk.IntChanges) {
+            update.ItemIds.Add(AllWishesIndex + "\n" + IntChange + "\n" + pair.Key);
+            update.Amounts.Add(pair.Value);
         }
 
         foreach (var name in talk.Flags) {
@@ -692,9 +1128,15 @@ internal partial class CoopSave {
         }
 
         Send(update);
+
+        // The partner gets the wishes with the dialogue, so the wish log doesn't send them again
+        for (var i = 0; i < update.WishNames.Count; i++) {
+            _knownWishes[update.WishNames[i]] = update.WishValues[i];
+        }
+
         Logger.Info(
-            $"Sent key dialogue to {partner.Username}: {talk.Wishes.Count} wishes, {talk.Items.Count} item changes and " +
-            $"{update.FlagNames.Count} flags"
+            $"Sent dialogue about {talk.Wishes.Count} wishes to {partner.Username}, with {talk.Items.Count} item " +
+            $"changes, {talk.IntChanges.Count} counters and {update.FlagNames.Count} flags"
         );
     }
 
@@ -712,21 +1154,11 @@ internal partial class CoopSave {
                     Chat($"{player.Username} wants to talk about a wish, which needs you close by.");
                     break;
                 case WishTalkEnded:
-                    EndPartnerTalk();
+                    _partnerTalk = null;
                     break;
                 case WishTalkStarted:
-                    EndPartnerTalk();
                     var target = ScenePath.Find(update.ObjectPath, update.Scene);
-                    var interactable = target != null ? target.GetComponent<InteractableBase>() : null;
-
-                    // A local hero who talks to the same character already goes on
-                    if (interactable != null && InteractManager.BlockingInteractable != interactable) {
-                        interactable.Deactivate(false);
-                        _partnerTalk = new PartnerTalk(interactable);
-                    } else {
-                        _partnerTalk = new PartnerTalk(null);
-                    }
-
+                    _partnerTalk = new PartnerTalk(target != null ? target.GetComponent<NPCControlBase>() : null);
                     break;
             }
         } catch (Exception e) {
@@ -734,37 +1166,25 @@ internal partial class CoopSave {
         }
     }
 
-    /// <summary>
-    /// Lets the local player talk to the character of the partner's key dialogue again.
-    /// </summary>
-    private void EndPartnerTalk() {
-        var interactable = _partnerTalk?.Interactable;
-        _partnerTalk = null;
-        if (interactable != null) {
-            interactable.Activate();
-        }
-    }
-
     #endregion
 
-    #region What key dialogue takes and gives
+    #region What dialogue takes and gives
 
     /// <summary>
-    /// Hook for <see cref="FullQuestBase.BeginQuest"/>, which remembers a wish that key dialogue accepted.
+    /// Hook for <see cref="FullQuestBase.BeginQuest"/>, which remembers a wish that dialogue accepted, also again after
+    /// it was completed.
     /// </summary>
     private void OnBeginWish(Action<FullQuestBase, Action?, bool> orig, FullQuestBase self, Action? afterPrompt, bool showPrompt) {
-        var wasAccepted = self.IsAccepted;
+        var wasActive = self.IsAccepted && !self.IsCompleted;
         orig(self, afterPrompt, showPrompt);
-        if (_applyingPartnerTalk || wasAccepted || !self.IsAccepted) {
-            return;
+        if (!_applyingPartnerTalk && !wasActive && self.IsAccepted && !self.IsCompleted) {
+            _wishTalk?.AddWish(self);
         }
-
-        _partnerAcceptedWishes.Remove(self.name);
-        _wishTalk?.AddWish(self.name, WishAccepted);
     }
 
     /// <summary>
-    /// Hook for <see cref="FullQuestBase.TryEndQuest"/>, which remembers a wish that key dialogue completed.
+    /// Hook for <see cref="FullQuestBase.TryEndQuest"/>, which remembers a wish that dialogue completed. What the wish
+    /// takes while it ends counts for the dialogue.
     /// </summary>
     private bool OnTryEndWish(
         Func<FullQuestBase, Action?, bool, bool, bool, bool> orig,
@@ -774,44 +1194,100 @@ internal partial class CoopSave {
         bool forceEnd,
         bool showPrompt
     ) {
-        var ended = orig(self, afterPrompt, consumeCurrency, forceEnd, showPrompt);
-        if (ended && !_applyingPartnerTalk) {
-            _partnerCompletedWishes.Remove(self.name);
-            _wishTalk?.AddWish(self.name, WishCompleted);
+        var wasCompleted = self.IsCompleted;
+        bool ended;
+        _endingWishDepth++;
+        try {
+            ended = orig(self, afterPrompt, consumeCurrency, forceEnd, showPrompt);
+        } finally {
+            _endingWishDepth--;
+        }
+
+        if (ended && !wasCompleted && self.IsCompleted && !_applyingPartnerTalk) {
+            _wishTalk?.AddWish(self);
         }
 
         return ended;
     }
 
     /// <summary>
-    /// Records a saved item that an FSM of key dialogue gives. Wishes and rumours go to the partner with the wish log.
+    /// Records a saved item that an FSM of dialogue gives. Wishes and rumours go to the partner with the wish log.
     /// </summary>
     private void RecordTalkGain(Fsm? fsm, SavedItem? item, int amount) {
-        if (item != null && item is not BasicQuestBase && fsm != null) {
-            RecordTalkItem(fsm, GetItemChangeKey(GetItemChange, item), amount);
+        if (item != null && item is not BasicQuestBase) {
+            RecordTalkGainChange(fsm, GetItemChangeKey(GetItemChange, item), amount);
         }
     }
 
     /// <summary>
-    /// Records what key dialogue of the local player took or gave. Without an FSM, like for a payment in a prompt of the
-    /// dialogue, it counts for the dialogue as a whole.
+    /// Records what an FSM of dialogue of the local player gives.
     /// </summary>
-    private void RecordTalkItem(Fsm? fsm, string change, int amount) {
-        if (_wishTalk is not { } talk || _applyingPartnerTalk || amount == 0 || (fsm != null && !talk.IsTalkFsm(fsm))) {
+    private void RecordTalkGainChange(Fsm? fsm, string change, int amount) {
+        if (_wishTalk is { } talk && !_applyingPartnerTalk && amount > 0 && talk.IsTalkFsm(fsm)) {
+            talk.AddItem(change, amount, false);
+        }
+    }
+
+    /// <summary>
+    /// Records what dialogue of the local player takes. What its FSMs take and what a wish takes while it ends count for
+    /// the dialogue. Other payments during it, like in a prompt, only count if the wish that they belong to takes what
+    /// was paid, so that a purchase in a shop of the character stays with the local player.
+    /// </summary>
+    private void RecordTalkTake(SavedItem? item, CurrencyType? currency, string change, int amount) {
+        if (_wishTalk is not { } talk || _applyingPartnerTalk || amount == 0) {
             return;
         }
 
-        talk.Items.Add((change, amount));
+        if (talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) || _endingWishDepth > 0) {
+            talk.AddItem(change, amount, true);
+        } else {
+            talk.AddTargetPayment(change, amount, item, currency);
+        }
     }
 
     /// <summary>
-    /// Records a flag of the player data that an FSM of key dialogue of the local player set.
+    /// Starts a write of the player data, which the hook ends by lowering <see cref="_playerDataWriteDepth"/>. Returns
+    /// the value of a counter before the outermost write while dialogue records, or null, so that a write that makes
+    /// another one isn't counted twice.
     /// </summary>
-    private void RecordTalkFlag(string name) {
-        if (_wishTalk is { } talk && !_applyingPartnerTalk && talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) &&
-            !BossRoomCoop.IsHeroStateName(name)) {
-            talk.Flags.Add(name);
+    private int? BeginPlayerDataWrite(PlayerData? playerData, string? name) {
+        _playerDataWriteDepth++;
+        return _playerDataWriteDepth == 1 && _wishTalk != null && playerData != null && !string.IsNullOrEmpty(name) &&
+               GetPlayerDataField(name!)?.FieldType == typeof(int)
+            ? playerData.GetInt(name)
+            : null;
+    }
+
+    /// <summary>
+    /// Records a write of the player data by an FSM of dialogue of the local player: a boolean or enum with its value,
+    /// and a counter with how much it changed, since the count of the partner may differ. The story flags share the
+    /// story state already.
+    /// </summary>
+    private void RecordTalkFlag(string name, int? intBefore) {
+        if (_wishTalk is not { } talk || _applyingPartnerTalk || !talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) ||
+            BossRoomCoop.IsHeroStateName(name) || PlayerData.instance is not { } playerData) {
+            return;
         }
+
+        GetStoryFields();
+        if (StoryFieldIndices.ContainsKey(name) || GetPlayerDataField(name) is not { } field) {
+            return;
+        }
+
+        if (field.FieldType == typeof(int)) {
+            var change = intBefore is { } before ? playerData.GetInt(name) - before : 0;
+            if (change == 0) {
+                return;
+            }
+
+            talk.IntChanges[name] = (talk.IntChanges.TryGetValue(name, out var sum) ? sum : 0) + change;
+        } else if (field.FieldType == typeof(bool) || field.FieldType.IsEnum) {
+            talk.Flags.Add(name);
+        } else {
+            return;
+        }
+
+        talk.LastChangeTime = Time.unscaledTime;
     }
 
     /// <summary>
@@ -822,8 +1298,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes and gives in the local save what key dialogue of the partner took from them and gave them, unless the local
-    /// save had accepted or completed its wishes itself.
+    /// Adds the wishes that dialogue of the partner accepted or completed to the local wish log, and takes and gives in
+    /// the local save what the dialogue took from the partner and gave them. A wish that the local save had accepted or
+    /// completed itself, or that the check left completed in only one save, isn't paid or rewarded again.
     /// </summary>
     private void OnWishTurnIn(ClientPlayerData player, CoopSaveUpdate update) {
         var playerData = PlayerData.instance;
@@ -833,54 +1310,74 @@ internal partial class CoopSave {
         }
 
         try {
-            var completed = false;
-            var applies = false;
-            for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
+            var count = Mathf.Min(update.WishNames.Count, update.WishValues.Count);
+            var applies = new bool[count];
+            var anyApplies = false;
+            var anyCompleted = false;
+            var completionApplies = false;
+            var changed = 0;
+            var accepted = 0;
+            var completed = 0;
+            for (var i = 0; i < count; i++) {
                 var name = update.WishNames[i];
-                var wish = playerData.QuestCompletionData.GetData(name);
-                if ((update.WishValues[i] & WishCompleted) != 0) {
-                    completed = true;
-                    var byPartner = _partnerCompletedWishes.Remove(name);
-                    applies |= byPartner || !wish.IsCompleted;
-                } else if ((update.WishValues[i] & WishAccepted) != 0) {
-                    var byPartner = _partnerAcceptedWishes.Remove(name);
-                    applies |= byPartner || !wish.IsAccepted;
+                var value = update.WishValues[i];
+                if (!IsNewerChange(_wishSequences, update, GetWishChangeKey(name, value))) {
+                    continue;
                 }
+
+                var before = playerData.QuestCompletionData.GetData(name);
+                var isCompletion = (value & WishCompleted) != 0;
+                applies[i] = !_differentWishNames.Contains(name) &&
+                             (isCompletion ? !before.IsCompleted : !before.IsAccepted || before.IsCompleted);
+                anyApplies |= applies[i];
+                anyCompleted |= isCompletion;
+                completionApplies |= isCompletion && applies[i];
+                ApplyPartnerWish(playerData, name, value, ref changed, ref accepted, ref completed);
             }
 
-            if (!applies) {
-                if (completed) {
-                    Chat(
-                        $"{player.Username} turned in a wish that your save had completed already, so you didn't pay or " +
-                        "get the reward again."
-                    );
-                }
-
-                Logger.Info($"Key dialogue of {player.Username} was for wishes that the local save had done itself");
-                return;
+            if (changed > 0) {
+                QuestManager.IncrementVersion();
             }
 
             var items = 0;
-            _applyingPartnerTalk = true;
-            try {
-                for (var i = 0; i < update.ItemIds.Count && i < update.Amounts.Count; i++) {
-                    if (ApplyTalkItem(update.ItemIds[i], update.Amounts[i])) {
-                        items++;
+            if (anyApplies) {
+                _applyingPartnerTalk = true;
+                try {
+                    for (var i = 0; i < update.ItemIds.Count && i < update.Amounts.Count; i++) {
+                        var entry = update.ItemIds[i];
+                        var split = entry.IndexOf('\n');
+                        if (split <= 0 || !int.TryParse(entry.Substring(0, split), out var index) ||
+                            (index >= 0 ? index >= count || !applies[index] : index != AllWishesIndex)) {
+                            continue;
+                        }
+
+                        if (ApplyTalkItem(entry.Substring(split + 1), update.Amounts[i])) {
+                            items++;
+                        }
                     }
+
+                    ApplyInteractionFlags(update);
+                } finally {
+                    _applyingPartnerTalk = false;
                 }
-
-                ApplyInteractionFlags(update);
-            } finally {
-                _applyingPartnerTalk = false;
             }
 
-            if (completed) {
+            if (completionApplies) {
                 Chat($"{player.Username} turned in a wish with you. You paid your own copy and got the reward too.");
-            } else if (items > 0) {
+            } else if (anyCompleted) {
+                Chat(
+                    $"{player.Username} turned in a wish that your save had completed already, so you didn't pay or " +
+                    "get the reward again."
+                );
+            } else if (anyApplies && items > 0) {
                 Chat($"{player.Username} accepted a wish with you, and you got what came with it too.");
+            } else if (accepted > 0) {
+                Chat($"{player.Username} accepted {CountWishes(accepted)}. Your wish log has the same now.");
             }
 
-            Logger.Info($"Played key dialogue of {player.Username} in the local save with {items} item changes");
+            Logger.Info(
+                $"Added dialogue about {count} wishes from {player.Username}, {changed} changed and {items} item changes"
+            );
         } catch (Exception e) {
             LogWishTalkError(e);
         }
@@ -896,7 +1393,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes or gives one change of key dialogue of the partner in the local save. What the local player doesn't have is
+    /// Takes or gives one change of dialogue of the partner in the local save. What the local player doesn't have is
     /// taken as far as they have it.
     /// </summary>
     /// <returns>Whether something changed.</returns>
@@ -946,8 +1443,13 @@ internal partial class CoopSave {
 
                 return taken > 0;
             }
+            case IntChange when parts.Length == 2 && PlayerData.instance is { } playerData &&
+                                GetPlayerDataField(parts[1])?.FieldType == typeof(int): {
+                playerData.SetInt(parts[1], playerData.GetInt(parts[1]) + amount);
+                return true;
+            }
             default:
-                Logger.Warn($"Could not apply the item change '{change.Replace('\n', ' ')}' of key dialogue");
+                Logger.Warn($"Could not apply the change '{change.Replace('\n', ' ')}' of dialogue about wishes");
                 return false;
         }
     }
@@ -976,7 +1478,9 @@ internal partial class CoopSave {
     #region Progress
 
     /// <summary>
-    /// Sends the progress of the targets of the accepted wishes that changed since the partner last got it.
+    /// Sends the progress of the targets of wishes that changed since the partner last got it: of the accepted wishes,
+    /// and of the wishes that take something, whose copies the partner checks before a turn-in, also before they are
+    /// accepted.
     /// </summary>
     private void UpdateWishProgress(ClientPlayerData partner) {
         var playerData = PlayerData.instance;
@@ -988,18 +1492,36 @@ internal partial class CoopSave {
 
         CoopSaveUpdate? update = null;
         foreach (var basicQuest in QuestManager.GetAllQuests()) {
-            if (basicQuest is not FullQuestBase quest || quest == null || !quest.IsAccepted || quest.IsCompleted) {
+            if (basicQuest is not FullQuestBase quest || quest == null) {
                 continue;
             }
 
             var name = quest.name;
-            var amounts = GetLocalWishProgress(quest, playerData.QuestCompletionData.GetData(name));
+            int[] amounts;
+            try {
+                if (quest.IsCompleted || (!quest.IsAccepted && !HasConsumableTarget(quest))) {
+                    continue;
+                }
+
+                amounts = GetLocalWishProgress(quest, playerData.QuestCompletionData.GetData(name));
+            } catch (Exception e) {
+                // A wish whose progress can't be read doesn't hold back the others
+                LogWishTalkError(e);
+                continue;
+            }
             if (amounts.Length == 0 ||
                 (_sentWishProgress.TryGetValue(name, out var sent) && sent.SequenceEqual(amounts))) {
                 continue;
             }
 
             _sentWishProgress[name] = amounts;
+
+            // The targets of a wish stay together in one update, so newer progress of a wish never mixes with older
+            if (update != null && update.WishNames.Count + amounts.Length > WishProgressEntriesPerUpdate) {
+                Send(update);
+                update = null;
+            }
+
             update ??= new CoopSaveUpdate {
                 TargetId = partner.Id,
                 Kind = CoopSaveUpdateKind.WishProgress,
@@ -1015,6 +1537,19 @@ internal partial class CoopSave {
         if (update != null) {
             Send(update);
         }
+    }
+
+    /// <summary>
+    /// Whether a wish takes something to turn it in.
+    /// </summary>
+    private static bool HasConsumableTarget(FullQuestBase quest) {
+        foreach (var target in quest.Targets) {
+            if (target.Counter != null && target.Count > 0 && target.Counter.CanConsume) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1095,29 +1630,36 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="FullQuestBase.CanComplete"/>: a wish that takes something can only be completed while the
-    /// partner has a full copy of it too, since both pay. A wish that only the save of the partner completed before
-    /// needs the local copy alone.
+    /// partner has a full copy of it too, since both pay. A wish that the check left completed in only one save needs
+    /// the local copy alone, and a delivery runs against time for each carrier on their own.
     /// </summary>
     private bool OnGetWishCanComplete(Func<FullQuestBase, bool> orig, FullQuestBase self) {
         var canComplete = orig(self);
-        if (!canComplete || _checkedWith == null || _partnerWishProgress.Count == 0 || self == null) {
+        if (!canComplete || _checkedWith == null || self == null) {
             return canComplete;
         }
 
         var name = self.name;
-        if (_differentWishNames.Contains(name) || !_partnerWishProgress.TryGetValue(name, out var partnerAmounts)) {
+        if (_differentWishNames.Contains(name)) {
             return true;
         }
 
+        _partnerWishProgress.TryGetValue(name, out var partnerAmounts);
         var targets = self.Targets;
-        for (var i = 0; i < targets.Count && i < partnerAmounts.Length; i++) {
+        for (var i = 0; i < targets.Count; i++) {
             var target = targets[i];
-            if (target.Counter == null || !target.Counter.CanConsume || target.Count <= 0 ||
-                partnerAmounts[i] >= target.Count) {
+            if (target.Counter == null || target.Count <= 0 || target.Counter is DeliveryQuestItem ||
+                !target.Counter.CanConsume) {
                 continue;
             }
 
-            NoticeMissingCopy(name, partnerAmounts[i], target.Count);
+            // Progress that the partner's game didn't send yet doesn't count as a copy
+            var amount = partnerAmounts != null && i < partnerAmounts.Length ? partnerAmounts[i] : -1;
+            if (amount >= target.Count) {
+                continue;
+            }
+
+            NoticeMissingCopy(name, amount, target.Count);
             return false;
         }
 
@@ -1125,30 +1667,33 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the local player that the partner lacks a full copy for a wish, when a character checks it.
+    /// Tells the local player that the partner lacks a full copy for a wish, when a character that the local player
+    /// talks to checks it.
     /// </summary>
     private void NoticeMissingCopy(string wish, int amount, int needed) {
-        if (FsmExecutionStack.ExecutingFsm == null ||
+        if (_wishTalk is not { } talk || !talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) ||
             (_nextMissingCopyNotices.TryGetValue(wish, out var next) && Time.unscaledTime < next)) {
             return;
         }
 
         _nextMissingCopyNotices[wish] = Time.unscaledTime + MissingCopyNoticeInterval;
         Chat(
-            $"{GetPartnerName()} doesn't have a full copy of what this wish takes yet ({amount} of {needed}). Both of " +
-            "you pay one to turn it in."
+            amount < 0
+                ? $"Your game doesn't know yet what {GetPartnerName()} carries for this wish. Try again in a moment."
+                : $"{GetPartnerName()} doesn't have a full copy of what this wish takes yet ({amount} of {needed}). " +
+                  "Both of you pay one to turn it in."
         );
     }
 
     #endregion
 
     /// <summary>
-    /// Logs the first error of key dialogue.
+    /// Logs the first error of dialogue about wishes.
     /// </summary>
     private void LogWishTalkError(Exception e) {
         if (!_wishTalkFailed) {
             _wishTalkFailed = true;
-            Logger.Error($"Could not sync key dialogue of the two-player save:\n{e}");
+            Logger.Error($"Could not sync dialogue about wishes of the two-player save:\n{e}");
         }
     }
 }
