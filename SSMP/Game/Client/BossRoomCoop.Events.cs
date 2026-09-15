@@ -162,11 +162,19 @@ internal partial class BossRoomCoop {
         Logger.Info($"Passing event '{eventName}' of '{GetPath(self)}' on to the scene host");
         Send(BossRoomUpdateKind.RoomEvent, path, "", "", "", eventName);
 
-        // The scene host holds the event for its bosses, so the local player wouldn't know why nothing happens, unless an
-        // object of the room already waits here
-        if (!room.Started && Time.unscaledTime >= _nextForwardNoticeTime &&
-            !_heldEventStarts.Keys.Any(fsm => GetBossRoom(fsm) == room) &&
-            !AreAllInRoom(GetRoomShape(room, GetLocalAnchor(room, self)))) {
+        var shape = room.Wait?.Shape ?? GetRoomShape(room, GetLocalAnchor(room, self));
+        if (room.Started || AreAllInRoom(shape)) {
+            return;
+        }
+
+        // The scene host holds the event for its bosses, so the local player waits in the room until everyone is in,
+        // while the intro of the room plays on for a while first
+        room.ForwardPending = true;
+        BeginRoomWait(room, shape, null, false);
+
+        // The local player wouldn't know why nothing happens, unless an object of the room already waits here
+        if (Time.unscaledTime >= _nextForwardNoticeTime &&
+            !_heldEventStarts.Keys.Any(fsm => GetBossRoom(fsm) == room)) {
             _nextForwardNoticeTime = Time.unscaledTime + NoticeInterval;
             UiManager.InternalChatBox.AddMessage(WaitingMessage);
         }
@@ -232,6 +240,12 @@ internal partial class BossRoomCoop {
             return false;
         }
 
+        // When the boss of the room waits for every player, the room's own objects play their part of the intro for
+        // each player as they come in
+        if (room.HasBossStarts && !GetInfo(fsm).IsEntity) {
+            return false;
+        }
+
         // Of the events that an object sends itself, only those of noticing players are caused by players
         if (FsmExecutionStack.ExecutingFsm == fsm && !IsDetectionEvent(state, eventName)) {
             return false;
@@ -248,6 +262,7 @@ internal partial class BossRoomCoop {
             if (held != null) {
                 _heldEventStarts.Remove(fsm);
                 RestoreHero(held);
+                EndRoomWaitFor(fsm);
             }
 
             room.Started = true;
@@ -257,14 +272,13 @@ internal partial class BossRoomCoop {
         if (held == null) {
             held = new HeldEventStart(state.Name, eventName, shape);
             _heldEventStarts[fsm] = held;
-
-            // An event that another player passed on didn't take control from the local player, who may be busy
-            // elsewhere, like sitting on a bench
-            if (_forwardedAnchor == null) {
-                FreeHero(held);
-            }
-
             Logger.Info($"Holding back '{eventName}' of '{GetPath(fsm)}' until all players are in the room");
+
+            // An interaction that took control from the local player, like talking, gives it back right away, while an
+            // intro that sent the event plays on for a while first. An event that another player passed on didn't take
+            // control from the local player, who may be busy elsewhere, like sitting on a bench
+            var sender = FsmExecutionStack.ExecutingFsm;
+            BeginRoomWait(room, shape, fsm, _forwardedAnchor == null && (sender == null || sender == fsm));
         }
 
         NotifyWaitingInRoom(held);
@@ -295,6 +309,7 @@ internal partial class BossRoomCoop {
             _heldEventStarts.Remove(fsm);
             MarkRoomStarted(fsm);
             RestoreHero(held);
+            EndRoomWaitFor(fsm);
             Logger.Info($"All players are in the room of '{GetPath(fsm)}', continuing with '{held.EventName}'");
             fsm.Event(held.EventName);
         }
@@ -307,6 +322,11 @@ internal partial class BossRoomCoop {
     private void MarkFightBegan(Fsm fsm, string stateName) {
         if (GetBossRoom(fsm) is not { FightBegan: false } room ||
             !room.BaseFightStates.TryGetValue(fsm, out var baseFightStates) || !baseFightStates.Contains(stateName)) {
+            return;
+        }
+
+        // The room's own objects close gates in each player's intro, before the boss that waits for every player starts
+        if (room.HasBossStarts && !GetInfo(fsm).IsEntity) {
             return;
         }
 
@@ -614,6 +634,7 @@ internal partial class BossRoomCoop {
         room.NextAnalysisTime = Time.unscaledTime + RoomAnalysisInterval;
         room.LockAreas.Clear();
         room.GateColliders.Clear();
+        room.Gates.Clear();
         room.AwakeFsms.Clear();
         if (room.Root == null) {
             return;
@@ -641,6 +662,7 @@ internal partial class BossRoomCoop {
 
             var info = GetInfo(fsm);
             if (info.IsGate) {
+                room.Gates.Add(fsm);
                 foreach (var collider in fsm.GameObject.GetComponentsInChildren<Collider2D>(true)) {
                     if (!collider.isTrigger && !room.GateColliders.Contains(collider)) {
                         room.GateColliders.Add(collider);
@@ -693,9 +715,15 @@ internal partial class BossRoomCoop {
             }
         }
 
+        // A boss that starts from its own events or triggers can wait for every player by itself
+        room.HasBossStarts = graphs.Any(graph =>
+            graph.IsEntity && (room.EventStarts[graph.Fsm].Count > 0 || GetInfo(graph.Fsm).StartTriggers.Count > 0)
+        );
+
         Logger.Info(
             $"Boss room '{ScenePath.Get(room.Root)}': {room.LockAreas.Count} camera locks, " +
-            $"{room.GateColliders.Count} gate colliders, fights start with: {string.Join(", ", room.StartEventNames)}"
+            $"{room.GateColliders.Count} gate colliders, boss waits: {room.HasBossStarts}, " +
+            $"fights start with: {string.Join(", ", room.StartEventNames)}"
         );
     }
 
@@ -793,6 +821,27 @@ internal partial class BossRoomCoop {
         /// </summary>
         public bool FightBegan;
 
+        /// <summary>
+        /// The FSMs of the gates of the room.
+        /// </summary>
+        public readonly List<Fsm> Gates = [];
+
+        /// <summary>
+        /// Whether a boss of the room starts from its own events or triggers, which wait for every player. The room's
+        /// own objects then play their part of the intro for each player as they come in.
+        /// </summary>
+        public bool HasBossStarts;
+
+        /// <summary>
+        /// Whether the local player passed on an event that waits at the scene host until everyone is in the room.
+        /// </summary>
+        public bool ForwardPending;
+
+        /// <summary>
+        /// The wait of the room for the other players, or null while it doesn't wait.
+        /// </summary>
+        public RoomWait? Wait;
+
         public BossRoom(Transform root) {
             Root = root;
         }
@@ -885,6 +934,11 @@ internal partial class BossRoomCoop {
         public readonly Fsm Fsm;
 
         /// <summary>
+        /// Whether the FSM belongs to an entity, which only runs for the scene host.
+        /// </summary>
+        public readonly bool IsEntity;
+
+        /// <summary>
         /// The states in which the fight began: they close gates or show the title of a boss.
         /// </summary>
         public readonly HashSet<string> BaseFightStates = [];
@@ -906,6 +960,7 @@ internal partial class BossRoomCoop {
 
         public FightGraph(Fsm fsm, bool isEntity) {
             Fsm = fsm;
+            IsEntity = isEntity;
             _states = fsm.States ?? [];
             foreach (var state in _states) {
                 _statesByName[state.Name] = state;

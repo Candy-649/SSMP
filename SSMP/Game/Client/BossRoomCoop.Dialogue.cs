@@ -488,7 +488,13 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        heroController.RelinquishControl();
+        _changingHero = true;
+        try {
+            heroController.RelinquishControl();
+        } finally {
+            _changingHero = false;
+        }
+
         _tookHeroControl = true;
     }
 
@@ -502,8 +508,16 @@ internal partial class BossRoomCoop {
 
         _tookHeroControl = false;
         var heroController = HeroController.instance;
-        if (heroController != null) {
+        if (heroController == null) {
+            return;
+        }
+
+        // Giving back the control that shared dialogue took doesn't count as the game giving control back to a room
+        _changingHero = true;
+        try {
             heroController.RegainControl();
+        } finally {
+            _changingHero = false;
         }
     }
 
@@ -549,6 +563,7 @@ internal partial class BossRoomCoop {
             if (held != null) {
                 _heldFights.Remove(fsm);
                 RestoreHero(held);
+                EndRoomWaitFor(fsm);
             }
 
             _startedFights.Add(fsm);
@@ -560,6 +575,10 @@ internal partial class BossRoomCoop {
             _heldFights[fsm] = held;
             FreeHero(held);
             Logger.Info($"Holding back the fight of '{GetPath(fsm)}' until every player finished its dialogue");
+
+            if (GetBossRoom(fsm) is { } bossRoom) {
+                BeginRoomWait(bossRoom, null, fsm, false);
+            }
         }
 
         NotifyWaiting(readiness);
@@ -570,45 +589,59 @@ internal partial class BossRoomCoop {
     /// Gives control back to the local player while their room waits for the other players, so that they can move and
     /// pause instead of standing still for as long as that takes. What was changed is remembered to restore it.
     /// </summary>
-    private static void FreeHero(HeldFight held) {
-        var heroController = HeroController.instance;
-        if (heroController != null) {
-            if (heroController.controlReqlinquished) {
-                heroController.RegainControl();
-                held.RegainedControl = true;
+    private static void FreeHero(FreedHero freed) {
+        _changingHero = true;
+        try {
+            var heroController = HeroController.instance;
+            if (heroController != null) {
+                if (heroController.controlReqlinquished) {
+                    heroController.RegainControl();
+                    freed.RegainedControl = true;
+                }
+
+                if (heroController.AnimCtrl != null && !heroController.AnimCtrl.controlEnabled) {
+                    heroController.StartAnimationControl();
+                    freed.StartedAnimation = true;
+                }
             }
 
-            if (heroController.AnimCtrl != null && !heroController.AnimCtrl.controlEnabled) {
-                heroController.StartAnimationControl();
-                held.StartedAnimation = true;
+            var playerData = PlayerData.instance;
+            if (playerData != null && playerData.disablePause) {
+                playerData.disablePause = false;
+                freed.EnabledPause = true;
             }
-        }
-
-        var playerData = PlayerData.instance;
-        if (playerData != null && playerData.disablePause) {
-            playerData.disablePause = false;
-            held.EnabledPause = true;
+        } finally {
+            _changingHero = false;
         }
     }
 
     /// <summary>
     /// Takes control from the local player again as their room took it, before the room continues to its fight.
     /// </summary>
-    private static void RestoreHero(HeldFight held) {
-        var heroController = HeroController.instance;
-        if (heroController != null) {
-            if (held.RegainedControl) {
-                heroController.RelinquishControl();
+    private static void RestoreHero(FreedHero freed) {
+        _changingHero = true;
+        try {
+            var heroController = HeroController.instance;
+            if (heroController != null) {
+                if (freed.RegainedControl) {
+                    heroController.RelinquishControl();
+                }
+
+                if (freed.StartedAnimation) {
+                    heroController.StopAnimationControl();
+                }
             }
 
-            if (held.StartedAnimation) {
-                heroController.StopAnimationControl();
+            if (freed.EnabledPause && PlayerData.instance != null) {
+                PlayerData.instance.disablePause = true;
             }
+        } finally {
+            _changingHero = false;
         }
 
-        if (held.EnabledPause && PlayerData.instance != null) {
-            PlayerData.instance.disablePause = true;
-        }
+        freed.RegainedControl = false;
+        freed.StartedAnimation = false;
+        freed.EnabledPause = false;
     }
 
     /// <summary>
@@ -870,6 +903,7 @@ internal partial class BossRoomCoop {
             _heldFights.Remove(fsm);
             _startedFights.Add(fsm);
             RestoreHero(held);
+            EndRoomWaitFor(fsm);
             Logger.Info($"Every player finished the dialogue of '{GetPath(fsm)}', starting its fight");
             fsm.Event(held.EventName);
         }
@@ -970,19 +1004,10 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// The fight of a room with dialogue that is held back until every player got to it.
+    /// What was given back to the local player while something waits for the other players, which is taken again once
+    /// it goes on.
     /// </summary>
-    private class HeldFight {
-        /// <summary>
-        /// The state of the room that waits for the other players.
-        /// </summary>
-        public readonly string StateName;
-
-        /// <summary>
-        /// The event that continues the room to its fight.
-        /// </summary>
-        public readonly string EventName;
-
+    private class FreedHero {
         /// <summary>
         /// Whether control was given back to the local player while waiting.
         /// </summary>
@@ -997,6 +1022,21 @@ internal partial class BossRoomCoop {
         /// Whether pausing was allowed again while waiting.
         /// </summary>
         public bool EnabledPause;
+    }
+
+    /// <summary>
+    /// The fight of a room with dialogue that is held back until every player got to it.
+    /// </summary>
+    private class HeldFight : FreedHero {
+        /// <summary>
+        /// The state of the room that waits for the other players.
+        /// </summary>
+        public readonly string StateName;
+
+        /// <summary>
+        /// The event that continues the room to its fight.
+        /// </summary>
+        public readonly string EventName;
 
         public HeldFight(string stateName, string eventName) {
             StateName = stateName;

@@ -260,6 +260,7 @@ internal partial class BossRoomCoop {
         );
         RegisterDialogueHooks();
         RegisterEventHooks();
+        RegisterWaitHooks();
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -283,6 +284,7 @@ internal partial class BossRoomCoop {
 
         DeregisterDialogueHooks();
         DeregisterEventHooks();
+        DeregisterWaitHooks();
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
@@ -424,7 +426,7 @@ internal partial class BossRoomCoop {
         if (!IsCoopActive() || sender == null || sender == self || IsLocalHeroInRoom(sender)) {
             _closedGates[self] = sender;
             RemovePendingClose(self);
-            MarkRoomStarted(self);
+            MarkRoomStartedByGate(self);
             orig(self, fsmEvent, eventData);
             return;
         }
@@ -441,6 +443,12 @@ internal partial class BossRoomCoop {
     private bool TryHoldStart(Fsm fsm, FsmState state, string eventName) {
         var trigger = GetStartTrigger(fsm, state, eventName);
         if (trigger == null) {
+            return false;
+        }
+
+        // When the boss of the room waits for every player, the room's own objects play their part of the intro for
+        // each player as they come in
+        if (!GetInfo(fsm).IsEntity && GetBossRoom(fsm) is { HasBossStarts: true }) {
             return false;
         }
 
@@ -467,6 +475,10 @@ internal partial class BossRoomCoop {
             _heldStarts[fsm] = new HeldStart(state.Name, eventName);
             Logger.Info($"Holding back the start of '{GetPath(fsm)}' until all players reached it");
             NotifyWaiting(fsm);
+
+            if (GetBossRoom(fsm) is { } bossRoom) {
+                BeginRoomWait(bossRoom, null, fsm, true);
+            }
         }
 
         return true;
@@ -588,6 +600,11 @@ internal partial class BossRoomCoop {
 
         if (value && !_applyingRecord) {
             ShareRecord(boolName, FsmExecutionStack.ExecutingFsm);
+        }
+
+        // Pausing that the game allowed again itself isn't disallowed again when a waiting room starts
+        if (!value && boolName == DisablePauseName && !_changingHero) {
+            ForgetDisabledPause();
         }
     }
 
@@ -774,6 +791,7 @@ internal partial class BossRoomCoop {
         ReleaseHeldStarts();
         UpdateDialogues();
         UpdateEventStarts();
+        UpdateRoomWaits();
         CheckStartedRooms();
         ClosePendingGates(previousPosition, position);
     }
@@ -876,6 +894,7 @@ internal partial class BossRoomCoop {
 
             _heldStarts.Remove(fsm);
             Logger.Info($"All players reached '{GetPath(fsm)}', starting it");
+            EndRoomWaitFor(fsm);
             fsm.Event(held.EventName);
         }
     }
@@ -903,6 +922,13 @@ internal partial class BossRoomCoop {
                 continue;
             }
 
+            // A room that started for another player while the scene host isn't in it yet waits for the scene host
+            if (fsm != null && fsm.Owner is Behaviour { isActiveAndEnabled: true } &&
+                fsm.ActiveState?.Name == update.FromState && !IsLocalHeroInBossRoom(fsm)) {
+                _startChecks.Add(new StartCheck(update, Time.unscaledTime));
+                continue;
+            }
+
             Logger.Info($"'{update.Path}' started for another player, but not for the scene host");
             Send(BossRoomUpdateKind.RoomDone, update.Path, update.FsmName, "", "", "");
         }
@@ -924,7 +950,7 @@ internal partial class BossRoomCoop {
 
             _pendingCloses.Remove(pendingClose);
             _closedGates[pendingClose.Gate] = pendingClose.Sender;
-            MarkRoomStarted(pendingClose.Gate);
+            MarkRoomStartedByGate(pendingClose.Gate);
 
             Logger.Info(
                 $"The local player walked into the room of '{pendingClose.Sender.Name}', closing gate '{GetPath(pendingClose.Gate)}'"
@@ -1522,6 +1548,7 @@ internal partial class BossRoomCoop {
     /// Forgets everything about the rooms of the current scene.
     /// </summary>
     private void ClearScene() {
+        ClearRoomWaits();
         _fsmInfos.Clear();
         _scannedFsms.Clear();
         _startFsms.Clear();
