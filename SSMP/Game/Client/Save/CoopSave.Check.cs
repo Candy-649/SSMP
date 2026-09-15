@@ -153,6 +153,7 @@ internal partial class CoopSave {
         _mergedWishKeys.Clear();
         _differentWishNames.Clear();
         _agreedStoryValues = null;
+        ResetWishProgress();
         _addedChanges = 0;
         _onlyPartnerDefeats = 0;
         _onlyLocalDefeats = 0;

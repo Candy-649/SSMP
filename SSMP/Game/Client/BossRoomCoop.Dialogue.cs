@@ -202,15 +202,23 @@ internal partial class BossRoomCoop {
             _dialogueFsms.Add(fsm);
         }
 
-        if (_startDialogueDepth > 0 || fsm == null || state == null || !IsCoopActive() ||
-            !_entityManager.IsSceneHost) {
+        if (_startDialogueDepth > 0 || fsm == null || state == null) {
             return;
         }
 
-        // Entities that aren't bosses, like characters to talk to, keep their dialogue to the player who talks to them
-        var info = GetInfo(fsm);
-        if (!info.IsEntity || (!info.ClosesGates && !info.IsInBossScene)) {
-            return;
+        // Key dialogue of a two-player save, like about a wish, goes to the partner whoever hosts the scene
+        var isSharedTalk = _netClient.IsConnected && IsOtherPlayerInScene() && _isSharedTalk(fsm);
+        if (!isSharedTalk) {
+            if (!IsCoopActive() || !_entityManager.IsSceneHost) {
+                return;
+            }
+
+            // Entities that aren't bosses, like characters to talk to, keep their dialogue to the player who talks to
+            // them
+            var info = GetInfo(fsm);
+            if (!info.IsEntity || (!info.ClosesGates && !info.IsInBossScene)) {
+                return;
+            }
         }
 
         BossRoomUpdate update;
@@ -221,6 +229,7 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        update.IsSharedTalk = isSharedTalk;
         Logger.Info($"Sharing the dialogue of '{GetPath(fsm)}' with the other players in the scene");
         var dialogue = new SharedDialogue(state.Name, update, Time.unscaledTime);
         _sharedDialogues[fsm] = dialogue;
@@ -371,7 +380,8 @@ internal partial class BossRoomCoop {
     /// Shows dialogue that a boss of the scene host started to the local player.
     /// </summary>
     private void OnDialogueStarted(BossRoomUpdate update) {
-        if (_entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
+        // Key dialogue of a two-player save comes from the partner, who may not host the scene
+        if (!update.IsSharedTalk && _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
             return;
         }
 

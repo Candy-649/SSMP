@@ -90,6 +90,12 @@ internal class BossRoomUpdate : IPacketData {
     /// </summary>
     public float OffsetY { get; set; }
 
+    /// <summary>
+    /// For shared dialogue, whether it is key dialogue of a two-player save, which comes from the partner rather than
+    /// the scene host.
+    /// </summary>
+    public bool IsSharedTalk { get; set; }
+
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
         packet.Write(PlayerId);
@@ -108,6 +114,7 @@ internal class BossRoomUpdate : IPacketData {
         packet.Write(OverrideContinue);
         packet.Write(TextAlignment);
         packet.Write(OffsetY);
+        packet.Write(IsSharedTalk);
     }
 
     /// <inheritdoc />
@@ -128,6 +135,7 @@ internal class BossRoomUpdate : IPacketData {
         OverrideContinue = packet.ReadBool();
         TextAlignment = packet.ReadInt();
         OffsetY = packet.ReadFloat();
+        IsSharedTalk = packet.ReadBool();
     }
 }
 

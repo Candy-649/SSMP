@@ -115,6 +115,11 @@ internal partial class CoopSave {
             _flagSequences[name] = stamp;
         }
 
+        // Other updates list wishes for other reasons
+        if (update.Kind != CoopSaveUpdateKind.WishChange) {
+            return;
+        }
+
         for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
             _wishSequences[GetWishChangeKey(update.WishNames[i], update.WishValues[i])] = stamp;
         }

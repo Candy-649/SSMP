@@ -334,6 +334,7 @@ internal partial class CoopSave {
             new Action<Action<Fsm, FsmEvent, FsmEventData>, Fsm, FsmEvent, FsmEventData>(OnProcessEvent)
         );
         RegisterInteractionHooks();
+        RegisterWishTalkHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -426,6 +427,8 @@ internal partial class CoopSave {
                 Logger.Error($"Could not update the boss checkpoint of the two-player save:\n{e}");
             }
         }
+
+        UpdateWishTalk(partner);
 
         if (partner != null && _checkedWith == partner.Id) {
             UpdateCheckedPlayTime(marker);
@@ -531,6 +534,7 @@ internal partial class CoopSave {
         ResetInteractionSession();
         ResetWishes();
         ResetStoryFlags();
+        ResetWishTalk();
     }
 
     /// <summary>
@@ -553,6 +557,7 @@ internal partial class CoopSave {
 
         OnCheckpointSceneChanged(newScene.name);
         ResetInteractions();
+        OnWishTalkSceneChanged();
     }
 
     /// <summary>
@@ -700,6 +705,15 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WishChange:
                 OnWishChange(player, update);
+                break;
+            case CoopSaveUpdateKind.WishTalk:
+                OnWishTalk(player, update);
+                break;
+            case CoopSaveUpdateKind.WishTurnIn:
+                OnWishTurnIn(player, update);
+                break;
+            case CoopSaveUpdateKind.WishProgress:
+                OnWishProgress(player, update);
                 break;
         }
     }
@@ -1491,7 +1505,7 @@ internal partial class CoopSave {
     /// </summary>
     private void Send(CoopSaveUpdate update) {
         if (update.Kind is CoopSaveUpdateKind.WorldChange or CoopSaveUpdateKind.WishChange or
-            CoopSaveUpdateKind.Interaction) {
+            CoopSaveUpdateKind.Interaction or CoopSaveUpdateKind.WishTurnIn) {
             update.Sequence = NextChangeSequence();
             StampLocalChanges(update);
         }

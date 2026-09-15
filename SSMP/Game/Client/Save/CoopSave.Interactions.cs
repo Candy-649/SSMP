@@ -594,6 +594,7 @@ internal partial class CoopSave {
             return;
         }
 
+        RecordTalkFlag(name);
         var owner = _captureFsm ?? GetExecutingCaptureFsm();
         if (owner == null || BossRoomCoop.IsHeroStateName(name) || ReadPlayerDataFlag(name) is not { } value) {
             return;
@@ -629,7 +630,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="CurrencyManager.ChangeCurrency"/>, which remembers what the local player paid in the prompt
-    /// of a mechanism.
+    /// of a mechanism or in key dialogue.
     /// </summary>
     private void OnInteractionChangeCurrency(
         Action<int, CurrencyType, bool> orig,
@@ -638,14 +639,17 @@ internal partial class CoopSave {
         bool showCounter
     ) {
         orig(amount, type, showCounter);
-        if (_promptInteraction != null && amount < 0) {
-            _promptInteraction.Currency.Add((type, -amount));
+        if (amount >= 0 || _applyingPartnerTalk) {
+            return;
         }
+
+        _promptInteraction?.Currency.Add((type, -amount));
+        RecordTalkItem(null, CurrencyChange + "\n" + (int) type, amount);
     }
 
     /// <summary>
     /// Hook for <see cref="CollectableItem.Take"/>, which remembers what the local player gave in the prompt of a
-    /// mechanism.
+    /// mechanism or in key dialogue.
     /// </summary>
     private void OnInteractionTakeItem(
         Action<CollectableItem, int, bool> orig,
@@ -654,9 +658,12 @@ internal partial class CoopSave {
         bool showCounter
     ) {
         orig(self, amount, showCounter);
-        if (_promptInteraction != null && amount > 0) {
-            _promptInteraction.Items.Add((self, amount));
+        if (amount <= 0 || _applyingPartnerTalk) {
+            return;
         }
+
+        _promptInteraction?.Items.Add((self, amount));
+        RecordTalkItem(null, GetItemChangeKey(TakeItemChange, self), amount);
     }
 
     /// <summary>

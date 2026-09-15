@@ -274,7 +274,12 @@ internal class ClientManager : IClientManager {
         _enemyHealthCoop = new EnemyHealthCoop(_playerData);
         _arenaCoop = new ArenaCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
         _bossRoomCoop = new BossRoomCoop(
-            netClient, _playerData, _entityManager, () => _fullSynchronisation, () => _coopSave.IsPartnerMissing()
+            netClient,
+            _playerData,
+            _entityManager,
+            () => _fullSynchronisation,
+            () => _coopSave.IsPartnerMissing(),
+            fsm => _coopSave.IsSharedTalk(fsm)
         );
         _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager);
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;

@@ -260,12 +260,15 @@ internal partial class CoopSave {
                 _knownWishes[name] = PackCompletion(next);
                 if (next.IsAccepted && !wish.IsAccepted) {
                     next.HasBeenSeen = false;
+                    _partnerAcceptedWishes.Add(name);
                     if (!next.IsCompleted) {
                         accepted++;
                     }
                 }
 
+                // Key dialogue of the partner that completed it makes the local player pay and get the reward
                 if (next.IsCompleted && !wish.IsCompleted) {
+                    _partnerCompletedWishes.Add(name);
                     completed++;
                 }
 

@@ -513,7 +513,8 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     HideDecorators = update.HideDecorators,
                     OverrideContinue = update.OverrideContinue,
                     TextAlignment = update.TextAlignment,
-                    OffsetY = update.OffsetY
+                    OffsetY = update.OffsetY,
+                    IsSharedTalk = update.IsSharedTalk
                 }
             );
         }
@@ -547,7 +548,8 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     WishNames = update.WishNames,
                     WishValues = update.WishValues,
                     PlayTime = update.PlayTime,
-                    Sequence = update.Sequence
+                    Sequence = update.Sequence,
+                    Amounts = update.Amounts
                 }
             );
         }

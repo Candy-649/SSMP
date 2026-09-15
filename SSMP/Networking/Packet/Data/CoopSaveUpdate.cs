@@ -48,6 +48,7 @@ internal class CoopSaveUpdate : IPacketData {
     /// <summary>
     /// For world progress, how many parts the progress is sent in. For a hello, 0 for one that starts a check and 1 for
     /// one that answers. For an interaction, 1 if the use of the other player had arrived before the sender used it.
+    /// For key dialogue, 1 when it starts, 0 when it ends and 2 when it couldn't start without the other player.
     /// </summary>
     public ushort PartCount { get; set; }
 
@@ -64,7 +65,8 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For world progress, the IDs of the saved objects of the world that are set, in the order of
-    /// <see cref="ItemScenes"/>.
+    /// <see cref="ItemScenes"/>. For key dialogue that accepted or completed wishes, what it took and gave, in the order
+    /// of <see cref="Amounts"/>.
     /// </summary>
     public List<string> ItemIds { get; set; } = [];
 
@@ -82,12 +84,14 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For changes of the wish log and world progress, the names of wishes and rumours, in the order of
-    /// <see cref="WishValues"/>.
+    /// <see cref="WishValues"/>. For key dialogue, the wishes that it accepted or completed, and for the progress of
+    /// wishes, a wish for each of its targets.
     /// </summary>
     public List<string> WishNames { get; set; } = [];
 
     /// <summary>
-    /// The packed states of the wishes and rumours in <see cref="WishNames"/>.
+    /// The packed states of the wishes and rumours in <see cref="WishNames"/>. For key dialogue, whether each wish was
+    /// accepted or completed, and for the progress of wishes, the index of each target.
     /// </summary>
     public List<int> WishValues { get; set; } = [];
 
@@ -102,6 +106,12 @@ internal class CoopSaveUpdate : IPacketData {
     /// deliver an update that it sent again after a newer one, which this tells apart.
     /// </summary>
     public ulong Sequence { get; set; }
+
+    /// <summary>
+    /// For key dialogue, the amounts of what it took and gave in <see cref="ItemIds"/>, and for the progress of wishes,
+    /// the progress of the targets in <see cref="WishNames"/>.
+    /// </summary>
+    public List<int> Amounts { get; set; } = [];
 
     /// <summary>
     /// For an interaction, the scene of the object that the sender used.
@@ -153,6 +163,10 @@ internal class CoopSaveUpdate : IPacketData {
 
         packet.Write(PlayTime);
         packet.Write(Sequence);
+        packet.Write((ushort) Amounts.Count);
+        foreach (var amount in Amounts) {
+            packet.Write(amount);
+        }
     }
 
     /// <inheritdoc />
@@ -187,6 +201,11 @@ internal class CoopSaveUpdate : IPacketData {
 
         PlayTime = packet.ReadFloat();
         Sequence = packet.ReadULong();
+        var amountCount = packet.ReadUShort();
+        Amounts = new List<int>(amountCount);
+        for (var i = 0; i < amountCount; i++) {
+            Amounts.Add(packet.ReadInt());
+        }
     }
 
     /// <summary>
@@ -292,5 +311,22 @@ internal enum CoopSaveUpdateKind : byte {
     /// Wishes and rumours whose state changed in the wish log of the sender during the two-player save, which the other
     /// game adds to its wish log at once.
     /// </summary>
-    WishChange
+    WishChange,
+
+    /// <summary>
+    /// The sender started or ended key dialogue with a character, like about a wish, whom the other player can't talk
+    /// to meanwhile, or couldn't start it because the other player isn't close by.
+    /// </summary>
+    WishTalk,
+
+    /// <summary>
+    /// Key dialogue of the sender accepted or completed wishes, with what it took from the sender and gave them, which
+    /// the game of the other player takes and gives too.
+    /// </summary>
+    WishTurnIn,
+
+    /// <summary>
+    /// The progress of the targets of the accepted wishes in the save of the sender.
+    /// </summary>
+    WishProgress
 }
