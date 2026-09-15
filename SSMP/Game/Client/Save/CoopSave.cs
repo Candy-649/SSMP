@@ -590,7 +590,7 @@ internal partial class CoopSave {
         ResetCheck();
 
         // A boss fight that the partner was in ends for the local player too
-        if (wasChecked && GetCurrentMarker() is { BossScene: not null }) {
+        if (wasChecked && IsInBossFight()) {
             _interruptPending = true;
         }
 

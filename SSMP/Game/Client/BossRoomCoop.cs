@@ -247,7 +247,8 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Event raised once for each visit of a boss room, when its fight starts with every player there.
+    /// Event raised when the fight of a boss room starts with every player there, which may happen more than once for
+    /// a visit of the room.
     /// </summary>
     public event Action? BossFightStartedEvent;
 
@@ -929,15 +930,11 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Tells a two-player save that the fight of a boss room starts with every player there, once for each visit of the
-    /// room.
+    /// Tells a two-player save that the fight of a boss room starts with every player there. A room may report its start
+    /// more than once, because the save ignores reports that come too early, like before the partner is in the scene,
+    /// and only counts the first one that it accepts for each visit.
     /// </summary>
     private void OnBossFightStarting(BossRoom room) {
-        if (room.FightStartReported) {
-            return;
-        }
-
-        room.FightStartReported = true;
         try {
             BossFightStartedEvent?.Invoke();
         } catch (Exception e) {

@@ -656,7 +656,22 @@ internal class UiManager : IUiManager {
     /// </summary>
     /// <param name="save">Whether to save the game before returning to menu</param>
     public void ReturnToMainMenuFromGame(bool save = true) =>
-        GM.StartCoroutine(GM.ReturnToMainMenu(save));
+        GM.StartCoroutine(ReturnToMainMenuAfterSceneLoad(save));
+
+    /// <summary>
+    /// Returns to the main menu once a scene that is still loading has loaded, because the game doesn't wait for it and
+    /// would load both at once, like when the connection is lost while the hero goes through a door.
+    /// </summary>
+    /// <param name="save">Whether to save the game before returning to menu</param>
+    private IEnumerator ReturnToMainMenuAfterSceneLoad(bool save) {
+        const float maxWaitTime = 10f;
+        var waitEnd = Time.unscaledTime + maxWaitTime;
+        while (GM.IsInSceneTransition && Time.unscaledTime < waitEnd) {
+            yield return null;
+        }
+
+        yield return GM.ReturnToMainMenu(save);
+    }
 
     /// <summary>
     /// Callback invoked when client successfully connects to a server.

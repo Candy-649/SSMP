@@ -850,11 +850,6 @@ internal partial class BossRoomCoop {
         /// </summary>
         public RoomWait? Wait;
 
-        /// <summary>
-        /// Whether the start of the fight of the room with every player there was reported to the two-player save.
-        /// </summary>
-        public bool FightStartReported;
-
         public BossRoom(Transform root) {
             Root = root;
         }
