@@ -118,4 +118,9 @@ internal enum ClientUpdatePacketId {
     /// An update of a two-player save from another player.
     /// </summary>
     CoopSaveUpdate = 22,
+
+    /// <summary>
+    /// A hit of another player in a two-player save, which the game replays.
+    /// </summary>
+    CoopHitUpdate = 23,
 }

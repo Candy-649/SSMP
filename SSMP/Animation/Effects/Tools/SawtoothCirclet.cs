@@ -92,6 +92,7 @@ internal static class SawtoothCirclet {
         }
 
         circlet.name = SpikedCircletName;
+        circlet.AddComponentIfNotPresent<RemoteAttackComponent>();
         circlet.transform.localPosition = new Vector3(0, 0, -0.02f);
         circlet.transform.localScale = new Vector3(-1, -1, 1);
         circlet.DestroyComponent<PlayMakerFSM>();

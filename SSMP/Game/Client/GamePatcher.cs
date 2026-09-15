@@ -292,6 +292,21 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Runs the given action as a hit of a remote player, so that what it hits doesn't knock back the local player.
+    /// </summary>
+    /// <param name="action">The action that hits something for a remote player.</param>
+    public void RunAsRemoteHit(Action action) {
+        var lastSuppress = _suppressHeroKnockback;
+        _suppressHeroKnockback = true;
+
+        try {
+            action();
+        } finally {
+            _suppressHeroKnockback = lastSuppress;
+        }
+    }
+
+    /// <summary>
     /// Deregisters and disposes all gameplay hooks owned by this patcher.
     /// </summary>
     public void DeregisterHooks() {

@@ -46,6 +46,7 @@ internal class StraightPin : BaseAttackTool {
 
         // Set damage settings
         SetDamageHeroState(pin, ServerSettings.StraightPinDamage);
+        pin.AddComponentIfNotPresent<RemoteAttackComponent>();
 
         // Set initial velocity
         if (pin.TryGetComponent<Rigidbody2D>(out var body)) {

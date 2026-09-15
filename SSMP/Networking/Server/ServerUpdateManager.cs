@@ -544,6 +544,27 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Add a hit in a two-player save from another player to the current packet.
+    /// </summary>
+    /// <param name="update">The hit.</param>
+    public void AddCoopHitUpdateData(CoopHitUpdate update) {
+        lock (Lock) {
+            var coopHitUpdateCollection = GetOrCreateCollection<CoopHitUpdate>(ClientUpdatePacketId.CoopHitUpdate);
+            coopHitUpdateCollection.DataInstances.Add(
+                new CoopHitUpdate {
+                    PlayerId = update.PlayerId,
+                    TargetId = update.TargetId,
+                    Scene = update.Scene,
+                    Path = update.Path,
+                    Responder = update.Responder,
+                    Index = update.Index,
+                    Hit = update.Hit
+                }
+            );
+        }
+    }
+
+    /// <summary>
     /// Add a player setting update to the current packet for the receiving player.
     /// </summary>
     /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.

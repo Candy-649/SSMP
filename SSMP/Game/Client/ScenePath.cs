@@ -26,13 +26,15 @@ internal static class ScenePath {
     /// <summary>
     /// Finds the object with the given path in the loaded scenes, including inactive objects.
     /// </summary>
+    /// <param name="path">The path of the object in its scene.</param>
+    /// <param name="sceneName">The name of the scene to look in, or null to look in all loaded scenes.</param>
     /// <returns>The object, or null if no loaded scene has it.</returns>
-    public static GameObject? Find(string path) {
+    public static GameObject? Find(string path, string? sceneName = null) {
         var segments = path.Split('/');
 
         for (var sceneIndex = 0; sceneIndex < SceneManager.sceneCount; sceneIndex++) {
             var scene = SceneManager.GetSceneAt(sceneIndex);
-            if (!scene.isLoaded) {
+            if (!scene.isLoaded || sceneName != null && scene.name != sceneName) {
                 continue;
             }
 

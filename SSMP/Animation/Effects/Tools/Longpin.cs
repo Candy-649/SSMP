@@ -141,6 +141,7 @@ internal class Longpin : BaseAttackTool {
 
         // Set damage settings
         SetDamageHeroState(pin, ServerSettings.LongpinDamage);
+        pin.AddComponentIfNotPresent<RemoteAttackComponent>();
 
         // Set poison settings and deflection
         if (pin.TryGetComponent<ToolPin>(out var controller)) {

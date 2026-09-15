@@ -73,6 +73,7 @@ internal class Tacks : BaseAttackTool {
 
             // Set damage settings
             SetDamageHeroState(tack, ServerSettings.TacksDamage);
+            tack.AddComponentIfNotPresent<RemoteAttackComponent>();
 
             // Set spawn position
             var variationX = Random.Range(-0.1f, 0.1f);

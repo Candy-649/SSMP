@@ -97,5 +97,10 @@ public enum ServerUpdatePacketId {
     /// <summary>
     /// An update of a two-player save for another player.
     /// </summary>
-    CoopSaveUpdate = 18
+    CoopSaveUpdate = 18,
+
+    /// <summary>
+    /// A hit of the player in a two-player save, which the game of the other player replays.
+    /// </summary>
+    CoopHitUpdate = 19
 }

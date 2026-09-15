@@ -127,6 +127,11 @@ internal class ClientManager : IClientManager {
     private readonly CoopSave _coopSave;
 
     /// <summary>
+    /// Replays the hits of the partner in a two-player save.
+    /// </summary>
+    private readonly CoopHits _coopHits;
+
+    /// <summary>
     /// The FSM patcher instance.
     /// </summary>
     private readonly FsmPatcher _fsmPatcher;
@@ -273,6 +278,7 @@ internal class ClientManager : IClientManager {
         );
         _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager);
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
+        _coopHits = new CoopHits(netClient, _playerData, _gamePatcher, () => _coopSave.CheckedPartnerId);
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -348,6 +354,7 @@ internal class ClientManager : IClientManager {
         _enemyHealthCoop.RegisterHooks();
         _arenaCoop.RegisterHooks();
         _bossRoomCoop.RegisterHooks();
+        _coopHits.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
         if (_fullSynchronisation) {
@@ -380,6 +387,7 @@ internal class ClientManager : IClientManager {
         _enemyHealthCoop.DeregisterHooks();
         _arenaCoop.DeregisterHooks();
         _bossRoomCoop.DeregisterHooks();
+        _coopHits.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
         if (_fullSynchronisation) {
@@ -476,6 +484,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.CoopSaveUpdate,
             _coopSave.OnCoopSaveUpdate
         );
+        _packetManager.RegisterClientUpdatePacketHandler<CoopHitUpdate>(
+            ClientUpdatePacketId.CoopHitUpdate,
+            _coopHits.OnCoopHitUpdate
+        );
 
         // Register packet handlers related to full synchronisation
         if (_fullSynchronisation) {
@@ -521,6 +533,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopSaveUpdate);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopHitUpdate);
 
         if (_fullSynchronisation) {
             _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);

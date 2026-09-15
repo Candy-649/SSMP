@@ -306,6 +306,11 @@ internal partial class CoopSave {
     private string LocalKey => AuthUtil.GetSaveKey(_modSettings.AuthKey);
 
     /// <summary>
+    /// The ID of the partner that the saves were checked with while both players are in the save, or null.
+    /// </summary>
+    public ushort? CheckedPartnerId => _checkedWith;
+
+    /// <summary>
     /// Registers the hooks, which stay for as long as the game runs because the save menu is used before connecting.
     /// </summary>
     public void Initialize() {

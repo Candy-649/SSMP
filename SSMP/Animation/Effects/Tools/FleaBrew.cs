@@ -166,6 +166,7 @@ internal class FleaBrew : BaseAttackTool {
 
             _modifiedPoisonTrail.SetActive(false);
             _modifiedPoisonTrail.name = "Hornet Poison Trail Modified";
+            _modifiedPoisonTrail.AddComponentIfNotPresent<RemoteAttackComponent>();
 
             // Re-add recycler so that it de-spawns
             // Since this is a new object, it won't override the other pool

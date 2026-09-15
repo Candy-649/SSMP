@@ -404,6 +404,17 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
+    /// Add a hit in a two-player save for another player to the current packet.
+    /// </summary>
+    /// <param name="update">The hit.</param>
+    public void SetCoopHitUpdate(CoopHitUpdate update) {
+        lock (Lock) {
+            var coopHitUpdateCollection = GetOrCreateCollection<CoopHitUpdate>(ServerUpdatePacketId.CoopHitUpdate);
+            coopHitUpdateCollection.DataInstances.Add(update);
+        }
+    }
+
+    /// <summary>
     /// Set a chat message in the current packet.
     /// </summary>
     /// <param name="message">The string message.</param>
