@@ -69,13 +69,14 @@ internal class CoopSaveUpdate : IPacketData {
     public List<string> ItemIds { get; set; } = [];
 
     /// <summary>
-    /// For changes of the world, the names of the booleans and integers of the player data that got set, in the order
-    /// of <see cref="FlagValues"/>.
+    /// For changes of the world, the names of the booleans and integers of the player data that got set. For world
+    /// progress and changes of the wish log, the names of wishes and rumours. In the order of <see cref="FlagValues"/>.
     /// </summary>
     public List<string> FlagNames { get; set; } = [];
 
     /// <summary>
     /// For changes of the world, the values of the player data in <see cref="FlagNames"/>, with 1 and 0 for booleans.
+    /// For wishes and rumours, their packed states.
     /// </summary>
     public List<int> FlagValues { get; set; } = [];
 
@@ -245,5 +246,11 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender paid for or confirmed a mechanism, which now changes the world, so the game of the other player
     /// replays that change on its copy of the mechanism.
     /// </summary>
-    Interaction
+    Interaction,
+
+    /// <summary>
+    /// Wishes and rumours whose state changed in the wish log of the sender during the two-player save, which the other
+    /// game adds to its wish log at once.
+    /// </summary>
+    WishChange
 }

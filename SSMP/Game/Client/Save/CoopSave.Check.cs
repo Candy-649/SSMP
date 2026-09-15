@@ -11,8 +11,9 @@ namespace SSMP.Game.Client.Save;
 
 /// <summary>
 /// Checking two-player saves: once both players have loaded their paired saves, each backs up its save file and sends
-/// the bosses it has beaten and the saved objects of the world that it changed. Each save gets the changed objects that
-/// it lacks and hears whether the beaten bosses differ, which are never copied because they come with rewards.
+/// the bosses it has beaten, the saved objects of the world that it changed and its wish log. Each save gets the changed
+/// objects and accepted wishes that it lacks, and hears whether the beaten bosses and completed wishes differ, which are
+/// never copied because they come with rewards.
 ///
 /// Every check has a key. A player who starts a check picks a key larger than every key they have seen from the
 /// partner, so a newer check always has a larger key, and the hellos, world progress and leaves of older checks can be
@@ -144,6 +145,7 @@ internal partial class CoopSave {
         _addedChanges = 0;
         _onlyPartnerDefeats = 0;
         _onlyLocalDefeats = 0;
+        _differentWishes = 0;
     }
 
     /// <summary>
@@ -290,6 +292,7 @@ internal partial class CoopSave {
         _everChecked = true;
         ResetWorldChanges();
         AddKnownWorldItems();
+        RememberWishes();
 
         marker.PartnerName = partner.Username;
         if (partner.SaveKey.Length > 0) {
@@ -310,22 +313,33 @@ internal partial class CoopSave {
                        "copied, so nobody misses a reward.";
         }
 
+        if (_differentWishes > 0) {
+            var wishes = _differentWishes == 1 ? "1 wish is" : $"{_differentWishes} wishes are";
+            message += $" {wishes} completed in only one of your saves. Completed wishes aren't copied, so nobody " +
+                       "misses a reward.";
+        }
+
         Chat(message);
     }
 
     #region World progress
 
     /// <summary>
-    /// Sends the bosses that the local save has beaten and the saved objects of the world that are set in it.
+    /// Sends the bosses that the local save has beaten, the saved objects of the world that are set in it and its wish
+    /// log.
     /// </summary>
     private void SendWorldState(ClientPlayerData partner) {
         var defeats = GetDefeatRecords();
         var items = GetWorldItems();
+        var wishes = GetWishEntries();
         _sentWorldItems = items;
-        var partCount = System.Math.Max(1, (defeats.Count + items.Count + EntriesPerPart - 1) / EntriesPerPart);
+        var partCount = System.Math.Max(
+            1, (defeats.Count + items.Count + wishes.Count + EntriesPerPart - 1) / EntriesPerPart
+        );
 
         var defeatIndex = 0;
         var itemIndex = 0;
+        var wishIndex = 0;
         for (var part = 0; part < partCount; part++) {
             var update = new CoopSaveUpdate {
                 TargetId = partner.Id,
@@ -342,6 +356,10 @@ internal partial class CoopSave {
                     update.ItemScenes.Add(items[itemIndex].Scene);
                     update.ItemIds.Add(items[itemIndex].Id);
                     itemIndex++;
+                } else if (wishIndex < wishes.Count) {
+                    update.FlagNames.Add(wishes[wishIndex].Name);
+                    update.FlagValues.Add(wishes[wishIndex].Value);
+                    wishIndex++;
                 } else {
                     break;
                 }
@@ -351,14 +369,15 @@ internal partial class CoopSave {
         }
 
         Logger.Info(
-            $"Sent world progress to {partner.Username}: {defeats.Count} beaten bosses and {items.Count} saved " +
-            $"objects in {partCount} parts"
+            $"Sent world progress to {partner.Username}: {defeats.Count} beaten bosses, {items.Count} saved objects " +
+            $"and {wishes.Count} entries of the wish log in {partCount} parts"
         );
     }
 
     /// <summary>
     /// Adds the saved objects of the world from the partner that the local save lacks, with the player data that they
-    /// set, and compares the beaten bosses. Only what the local player also counts as the world is added.
+    /// set, and the wishes that the partner accepted, and compares the beaten bosses and completed wishes. Only what the
+    /// local player also counts as the world is added.
     /// </summary>
     private void AddWorldState(ClientPlayerData partner) {
         var playerData = PlayerData.instance;
@@ -396,9 +415,15 @@ internal partial class CoopSave {
         }
 
         OverrideLoadedItems(loadedItems);
+        var wishes = AddWishes(
+            parts.SelectMany(part => part.FlagNames.Zip(part.FlagValues, (name, value) => (name, value)))
+        );
 
-        _addedChanges = items;
-        Logger.Info($"Added world progress of {partner.Username}: {items} saved objects and {flags} player data flags");
+        _addedChanges = items + wishes;
+        Logger.Info(
+            $"Added world progress of {partner.Username}: {items} saved objects, {flags} player data flags and " +
+            $"{wishes} entries of the wish log, with {_differentWishes} wishes completed in only one save"
+        );
     }
 
     /// <summary>

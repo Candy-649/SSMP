@@ -430,6 +430,7 @@ internal partial class CoopSave {
         if (partner != null && _checkedWith == partner.Id) {
             UpdateInteractions(partner);
             UpdateWorldChanges(partner);
+            UpdateWishes(partner);
             ReleaseHold(hero);
             return;
         }
@@ -521,6 +522,7 @@ internal partial class CoopSave {
         ResetCheckpointSession();
         ResetWorldChanges();
         ResetInteractionSession();
+        ResetWishes();
     }
 
     /// <summary>
@@ -683,6 +685,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.Interaction:
                 OnInteraction(player, update);
+                break;
+            case CoopSaveUpdateKind.WishChange:
+                OnWishChange(player, update);
                 break;
         }
     }
