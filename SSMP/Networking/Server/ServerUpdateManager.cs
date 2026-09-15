@@ -537,7 +537,13 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     PartCount = update.PartCount,
                     Records = update.Records,
                     ItemScenes = update.ItemScenes,
-                    ItemIds = update.ItemIds
+                    ItemIds = update.ItemIds,
+                    FlagNames = update.FlagNames,
+                    FlagValues = update.FlagValues,
+                    Scene = update.Scene,
+                    ObjectPath = update.ObjectPath,
+                    FsmName = update.FsmName,
+                    StateName = update.StateName
                 }
             );
         }

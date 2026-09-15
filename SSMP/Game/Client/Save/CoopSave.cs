@@ -333,6 +333,7 @@ internal partial class CoopSave {
             typeof(Fsm).GetMethod("ProcessEvent", InstanceFlags, null, [typeof(FsmEvent), typeof(FsmEventData)], null),
             new Action<Action<Fsm, FsmEvent, FsmEventData>, Fsm, FsmEvent, FsmEventData>(OnProcessEvent)
         );
+        RegisterInteractionHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -427,6 +428,7 @@ internal partial class CoopSave {
         }
 
         if (partner != null && _checkedWith == partner.Id) {
+            UpdateInteractions(partner);
             UpdateWorldChanges(partner);
             ReleaseHold(hero);
             return;
@@ -518,6 +520,7 @@ internal partial class CoopSave {
         ResetCheck();
         ResetCheckpointSession();
         ResetWorldChanges();
+        ResetInteractions();
     }
 
     /// <summary>
@@ -539,6 +542,7 @@ internal partial class CoopSave {
         }
 
         OnCheckpointSceneChanged(newScene.name);
+        ResetInteractions();
     }
 
     /// <summary>
@@ -676,6 +680,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WorldChange:
                 OnWorldChange(player, update);
+                break;
+            case CoopSaveUpdateKind.Interaction:
+                OnInteraction(player, update);
                 break;
         }
     }

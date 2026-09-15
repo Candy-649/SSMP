@@ -215,9 +215,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Adds saved objects of the world that got set in the game of the partner to the local save. They are added as soon
-    /// as the loaded save is paired with the partner, also while its check is still running, because the game of the
-    /// partner may have finished its check already and doesn't send them again.
+    /// Adds saved objects of the world and flags of the player data that got set in the game of the partner to the local
+    /// save. They are added as soon as the loaded save is paired with the partner, also while its check is still running,
+    /// because the game of the partner may have finished its check already and doesn't send them again.
     /// </summary>
     private void OnWorldChange(ClientPlayerData player, CoopSaveUpdate update) {
         if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || PlayerData.instance == null ||
@@ -242,8 +242,9 @@ internal partial class CoopSave {
         }
 
         OverrideLoadedItems(loadedItems);
+        flags += ApplyInteractionFlags(update);
 
-        if (items > 0) {
+        if (items > 0 || flags > 0) {
             Logger.Info($"Added {items} changes of the world from {player.Username}, with {flags} player data flags");
         }
     }

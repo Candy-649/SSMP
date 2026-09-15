@@ -4,7 +4,8 @@ namespace SSMP.Networking.Packet.Data;
 
 /// <summary>
 /// Packet data for two-player saves: pairing the saves of two players, checking both saves while both players are in
-/// them, and the world progress of a save that the other player adds to theirs. It goes to one other player.
+/// them, the world progress of a save that the other player adds to theirs, and mechanisms that a player used, which
+/// the game of the other player replays. It goes to one other player.
 /// </summary>
 internal class CoopSaveUpdate : IPacketData {
     /// <inheritdoc />
@@ -67,6 +68,37 @@ internal class CoopSaveUpdate : IPacketData {
     /// </summary>
     public List<string> ItemIds { get; set; } = [];
 
+    /// <summary>
+    /// For changes of the world, the names of the booleans and integers of the player data that got set, in the order
+    /// of <see cref="FlagValues"/>.
+    /// </summary>
+    public List<string> FlagNames { get; set; } = [];
+
+    /// <summary>
+    /// For changes of the world, the values of the player data in <see cref="FlagNames"/>, with 1 and 0 for booleans.
+    /// </summary>
+    public List<int> FlagValues { get; set; } = [];
+
+    /// <summary>
+    /// For an interaction, the scene of the object that the sender used.
+    /// </summary>
+    public string Scene { get; set; } = "";
+
+    /// <summary>
+    /// For an interaction, the path of the object in its scene.
+    /// </summary>
+    public string ObjectPath { get; set; } = "";
+
+    /// <summary>
+    /// For an interaction, the name of the FSM of the object that runs it, or empty for an item receptacle.
+    /// </summary>
+    public string FsmName { get; set; } = "";
+
+    /// <summary>
+    /// For an interaction, the state of the FSM in which its change to the world starts.
+    /// </summary>
+    public string StateName { get; set; } = "";
+
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
         packet.Write(PlayerId);
@@ -79,6 +111,16 @@ internal class CoopSaveUpdate : IPacketData {
         WriteStrings(packet, Records);
         WriteStrings(packet, ItemScenes);
         WriteStrings(packet, ItemIds);
+        WriteStrings(packet, FlagNames);
+        packet.Write((ushort) FlagValues.Count);
+        foreach (var value in FlagValues) {
+            packet.Write(value);
+        }
+
+        packet.Write(Scene);
+        packet.Write(ObjectPath);
+        packet.Write(FsmName);
+        packet.Write(StateName);
     }
 
     /// <inheritdoc />
@@ -93,6 +135,17 @@ internal class CoopSaveUpdate : IPacketData {
         Records = ReadStrings(packet);
         ItemScenes = ReadStrings(packet);
         ItemIds = ReadStrings(packet);
+        FlagNames = ReadStrings(packet);
+        var valueCount = packet.ReadUShort();
+        FlagValues = new List<int>(valueCount);
+        for (var i = 0; i < valueCount; i++) {
+            FlagValues.Add(packet.ReadInt());
+        }
+
+        Scene = packet.ReadString();
+        ObjectPath = packet.ReadString();
+        FsmName = packet.ReadString();
+        StateName = packet.ReadString();
     }
 
     /// <summary>
@@ -183,8 +236,14 @@ internal enum CoopSaveUpdateKind : byte {
     BossFight,
 
     /// <summary>
-    /// Saved objects of the world that got set in the game of the sender during the two-player save, which the other
-    /// game adds to its save at once.
+    /// Saved objects of the world and flags of the player data that got set in the game of the sender during the
+    /// two-player save, which the other game adds to its save at once.
     /// </summary>
-    WorldChange
+    WorldChange,
+
+    /// <summary>
+    /// The sender paid for or confirmed a mechanism, which now changes the world, so the game of the other player
+    /// replays that change on its copy of the mechanism.
+    /// </summary>
+    Interaction
 }
