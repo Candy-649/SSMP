@@ -256,17 +256,18 @@ internal partial class CoopSave {
             })
         );
         foreach (var methodName in (string[]) ["SetInt", "IntAdd"]) {
+            var changesCounter = methodName == "IntAdd";
             AddInteractionHook(
                 typeof(PlayerData).GetMethod(methodName, InstanceFlags, null, [typeof(string), typeof(int)], null),
                 new Action<Action<PlayerData, string, int>, PlayerData, string, int>((orig, self, name, value) => {
-                    var before = BeginPlayerDataWrite(self, name);
+                    var write = BeginPlayerDataWrite(self, name, changesCounter);
                     try {
                         orig(self, name, value);
                     } finally {
                         _playerDataWriteDepth--;
                     }
 
-                    RecordInteractionFlag(name, before);
+                    RecordInteractionFlag(name, write);
                 })
             );
         }
@@ -275,14 +276,14 @@ internal partial class CoopSave {
             AddInteractionHook(
                 typeof(PlayerData).GetMethod(methodName, InstanceFlags, null, [typeof(string)], null),
                 new Action<Action<PlayerData, string>, PlayerData, string>((orig, self, name) => {
-                    var before = BeginPlayerDataWrite(self, name);
+                    var write = BeginPlayerDataWrite(self, name, true);
                     try {
                         orig(self, name);
                     } finally {
                         _playerDataWriteDepth--;
                     }
 
-                    RecordInteractionFlag(name, before);
+                    RecordInteractionFlag(name, write);
                 })
             );
         }
@@ -295,7 +296,7 @@ internal partial class CoopSave {
             new Action<Action<HutongGames.PlayMaker.Actions.SetPlayerDataVariable>,
                 HutongGames.PlayMaker.Actions.SetPlayerDataVariable>((orig, self) => {
                 var name = self.VariableName != null && !self.VariableName.IsNone ? self.VariableName.Value : null;
-                var before = BeginPlayerDataWrite(PlayerData.instance, name);
+                var write = BeginPlayerDataWrite(PlayerData.instance, name, false);
                 try {
                     orig(self);
                 } finally {
@@ -303,7 +304,7 @@ internal partial class CoopSave {
                 }
 
                 if (name != null) {
-                    RecordInteractionFlag(name, before);
+                    RecordInteractionFlag(name, write);
                 }
             })
         );
@@ -606,14 +607,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Records a write of the player data by a mechanism of the local player.
+    /// Records a write of the player data by a mechanism or dialogue about wishes of the local player.
     /// </summary>
-    private void RecordInteractionFlag(string name, int? intBefore = null) {
+    private void RecordInteractionFlag(string name, PlayerDataWrite write = default) {
         if (!_everChecked || string.IsNullOrEmpty(name) || PlayerData.instance == null) {
             return;
         }
 
-        RecordTalkFlag(name, intBefore);
+        RecordTalkFlag(name, write);
         var owner = _captureFsm ?? GetExecutingCaptureFsm();
         if (owner == null || BossRoomCoop.IsHeroStateName(name) || ReadPlayerDataFlag(name) is not { } value) {
             return;
@@ -649,7 +650,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="CurrencyManager.ChangeCurrency"/>, which remembers what the local player paid in the prompt
-    /// of a mechanism or in key dialogue.
+    /// of a mechanism or in dialogue about wishes, and the money that such dialogue gave.
     /// </summary>
     private void OnInteractionChangeCurrency(
         Action<int, CurrencyType, bool> orig,
@@ -658,7 +659,13 @@ internal partial class CoopSave {
         bool showCounter
     ) {
         orig(amount, type, showCounter);
-        if (amount >= 0 || _applyingPartnerTalk) {
+        if (amount == 0 || _applyingPartnerTalk) {
+            return;
+        }
+
+        // Money that dialogue gives, like as a reward, whichever action or call of its FSM gives it
+        if (amount > 0) {
+            RecordTalkGainChange(FsmExecutionStack.ExecutingFsm, CurrencyChange + "\n" + (int) type, amount);
             return;
         }
 

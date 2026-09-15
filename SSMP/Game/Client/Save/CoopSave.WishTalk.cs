@@ -114,7 +114,18 @@ internal partial class CoopSave {
     private const string IntChange = "int";
 
     /// <summary>
-    /// The index of the wish of a change of dialogue that belongs to all of its wishes, like a counter.
+    /// A tool that dialogue unlocked, like as a reward: the type and name of the tool follow.
+    /// </summary>
+    private const string ToolUnlockChange = "toolunlock";
+
+    /// <summary>
+    /// A tool that dialogue locked, like one that a wish took: the type and name of the tool follow.
+    /// </summary>
+    private const string ToolLockChange = "toollock";
+
+    /// <summary>
+    /// The index of the change of a wish that something of dialogue belongs to when it belongs to all of them, like a
+    /// counter.
     /// </summary>
     private const int AllWishesIndex = -1;
 
@@ -213,6 +224,18 @@ internal partial class CoopSave {
     private int _playerDataWriteDepth;
 
     /// <summary>
+    /// How many gains of dialogue that are recorded run right now. What such a gain makes itself, like the money of an
+    /// item or a tool that an item unlocks, isn't recorded again.
+    /// </summary>
+    private int _talkGainDepth;
+
+    /// <summary>
+    /// Dialogue about wishes that ended while the game checked the save with the partner again, which goes to the partner
+    /// once that check is done.
+    /// </summary>
+    private readonly List<CoopSaveUpdate> _pendingWishTurnIns = [];
+
+    /// <summary>
     /// Whether dialogue about wishes threw, which is only logged once.
     /// </summary>
     private bool _wishTalkFailed;
@@ -290,6 +313,11 @@ internal partial class CoopSave {
         public List<string> Changes { get; } = [];
 
         /// <summary>
+        /// The packed state of the wish of each change in <see cref="Changes"/> right after that change.
+        /// </summary>
+        public List<int> ChangeValues { get; } = [];
+
+        /// <summary>
         /// What the dialogue took from the local player and gave them.
         /// </summary>
         public List<TalkItem> Items { get; } = [];
@@ -329,9 +357,10 @@ internal partial class CoopSave {
         /// <summary>
         /// Remembers that the dialogue accepted or completed a wish.
         /// </summary>
-        public void AddWish(FullQuestBase quest) {
+        public void AddWish(FullQuestBase quest, int value) {
             var name = quest.name;
             Changes.Add(name);
+            ChangeValues.Add(value);
             if (!Wishes.Contains(name)) {
                 Wishes.Add(name);
             }
@@ -353,13 +382,13 @@ internal partial class CoopSave {
         /// like one in a prompt, which may be for something else, like a shop of the character.
         /// </summary>
         public void AddTargetPayment(string change, int amount, SavedItem? item, CurrencyType? currency) {
+            // A payment that may be for something else doesn't keep the dialogue open
             Items.Add(new TalkItem(change, amount, Changes.Count, true, true, item, currency));
-            LastChangeTime = Time.unscaledTime;
         }
 
         /// <summary>
-        /// Whether what the dialogue took or gave goes to the partner with the wish at an index of
-        /// <see cref="Wishes"/>: a payment that only counts for a wish that takes it needs that wish to take what was
+        /// Whether what the dialogue took or gave goes to the partner with the change at an index of
+        /// <see cref="Changes"/>: a payment that only counts for a wish that takes it needs that wish to take what was
         /// paid.
         /// </summary>
         public bool Counts(TalkItem item, int index) {
@@ -367,7 +396,7 @@ internal partial class CoopSave {
                 return true;
             }
 
-            if (index < 0 || index >= Wishes.Count || !Quests.TryGetValue(Wishes[index], out var quest) ||
+            if (index < 0 || index >= Changes.Count || !Quests.TryGetValue(Changes[index], out var quest) ||
                 quest == null) {
                 return false;
             }
@@ -385,19 +414,15 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// The index of the wish in <see cref="Wishes"/> that what the dialogue took or gave belongs to. A payment
-        /// belongs to the change of a wish after it, which it paid for, and a gain to the change before it, which it
-        /// rewarded.
+        /// The index of the change in <see cref="Changes"/> that what the dialogue took or gave belongs to. A payment
+        /// belongs to the change after it, which it paid for, and a gain to the change before it, which it rewarded.
         /// </summary>
-        public int GetWishIndex(TalkItem item) {
+        public int GetChangeIndex(TalkItem item) {
             if (Changes.Count == 0) {
                 return AllWishesIndex;
             }
 
-            var wish = item.IsTake
-                ? Changes[Mathf.Min(item.ChangeCount, Changes.Count - 1)]
-                : Changes[Mathf.Max(item.ChangeCount - 1, 0)];
-            return Wishes.IndexOf(wish);
+            return item.IsTake ? Mathf.Min(item.ChangeCount, Changes.Count - 1) : Mathf.Max(item.ChangeCount - 1, 0);
         }
     }
 
@@ -457,6 +482,27 @@ internal partial class CoopSave {
         /// For a payment of money that only counts for a wish that takes it, the currency that was paid.
         /// </summary>
         public CurrencyType? PaidCurrency { get; }
+    }
+
+    /// <summary>
+    /// A write of the player data that a hook runs, for dialogue that records it.
+    /// </summary>
+    private readonly struct PlayerDataWrite {
+        public PlayerDataWrite(bool isNested, int? countBefore) {
+            IsNested = isNested;
+            CountBefore = countBefore;
+        }
+
+        /// <summary>
+        /// Whether another write of the player data makes this one.
+        /// </summary>
+        public bool IsNested { get; }
+
+        /// <summary>
+        /// For a write that changes a counter by an amount, the value of the counter before it, or null for a write of a
+        /// value.
+        /// </summary>
+        public int? CountBefore { get; }
     }
 
     /// <summary>
@@ -541,7 +587,7 @@ internal partial class CoopSave {
                 bool>(OnTryEndWish)
         );
 
-        // What a character gives in its dialogue
+        // What a character gives in its dialogue. Money that it gives goes through the hook for changes of currency
         AddWishTalkHook(
             typeof(HutongGames.PlayMaker.Actions.SavedItemGet).GetMethod(
                 "OnEnter", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null
@@ -549,7 +595,7 @@ internal partial class CoopSave {
             new Action<Action<HutongGames.PlayMaker.Actions.SavedItemGet>, HutongGames.PlayMaker.Actions.SavedItemGet>(
                 (orig, self) => {
                     RecordTalkGain(self.Fsm, self.Item?.Value as SavedItem, 1);
-                    orig(self);
+                    RunTalkGain(() => orig(self));
                 }
             )
         );
@@ -560,7 +606,7 @@ internal partial class CoopSave {
             new Action<Action<HutongGames.PlayMaker.Actions.SavedItemGetV2>,
                 HutongGames.PlayMaker.Actions.SavedItemGetV2>((orig, self) => {
                 RecordTalkGain(self.Fsm, self.Item?.Value as SavedItem, self.Amount?.Value ?? 1);
-                orig(self);
+                RunTalkGain(() => orig(self));
             })
         );
         AddWishTalkHook(
@@ -570,7 +616,7 @@ internal partial class CoopSave {
             new Action<Action<HutongGames.PlayMaker.Actions.SavedItemGetDelayed>,
                 HutongGames.PlayMaker.Actions.SavedItemGetDelayed>((orig, self) => {
                 RecordTalkGain(self.Fsm, self.Item?.Value as SavedItem, 1);
-                orig(self);
+                RunTalkGain(() => orig(self));
             })
         );
         AddWishTalkHook(
@@ -584,23 +630,53 @@ internal partial class CoopSave {
                     RecordTalkGainChange(self.Fsm, GetItemChangeKey(CollectItemChange, item), amount);
                 }
 
-                orig(self, item!);
+                RunTalkGain(() => orig(self, item!));
             })
         );
-        AddWishTalkHook(
-            typeof(HutongGames.PlayMaker.Actions.AddCurrency).GetMethod(
-                "OnEnter", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null
-            ),
-            new Action<Action<HutongGames.PlayMaker.Actions.AddCurrency>, HutongGames.PlayMaker.Actions.AddCurrency>(
-                (orig, self) => {
-                    if (self.CurrencyType is { IsNone: false, Value: { } type } && self.Amount != null) {
-                        RecordTalkGainChange(self.Fsm, CurrencyChange + "\n" + Convert.ToInt32(type), self.Amount.Value);
-                    }
 
-                    orig(self);
+        // Tools that dialogue unlocks as a reward, or locks as a payment
+        AddWishTalkHook(
+            typeof(ToolItem).GetMethod(
+                "Unlock",
+                InstanceFlags | BindingFlags.DeclaredOnly,
+                null,
+                [typeof(Action), typeof(ToolItem.PopupFlags)],
+                null
+            ),
+            new Action<Action<ToolItem, Action?, ToolItem.PopupFlags>, ToolItem, Action?, ToolItem.PopupFlags>(
+                (orig, self, afterTutorialMsg, popupFlags) => {
+                    var wasUnlocked = self.IsUnlocked;
+                    orig(self, afterTutorialMsg, popupFlags);
+                    if (!wasUnlocked && self.IsUnlocked) {
+                        RecordTalkGainChange(
+                            FsmExecutionStack.ExecutingFsm, GetItemChangeKey(ToolUnlockChange, self), 1
+                        );
+                    }
                 }
             )
         );
+        AddWishTalkHook(
+            typeof(ToolItem).GetMethod("Lock", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null),
+            new Action<Action<ToolItem>, ToolItem>((orig, self) => {
+                var wasUnlocked = self.IsUnlocked;
+                orig(self);
+                if (wasUnlocked && !self.IsUnlocked) {
+                    RecordTalkTake(self, null, GetItemChangeKey(ToolLockChange, self), 1);
+                }
+            })
+        );
+    }
+
+    /// <summary>
+    /// Runs a gain of dialogue that is recorded, during which what the gain makes itself isn't recorded again.
+    /// </summary>
+    private void RunTalkGain(Action gain) {
+        _talkGainDepth++;
+        try {
+            gain();
+        } finally {
+            _talkGainDepth--;
+        }
     }
 
     /// <summary>
@@ -660,10 +736,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a wish of the local wish log waits for dialogue that changed it to end, which sends it to the partner.
+    /// Whether a wish of the local wish log waits for dialogue that changed it to end, or for the check that such
+    /// dialogue waits for, which send it to the partner.
     /// </summary>
     private bool IsHeldByWishTalk(string name) {
-        return _wishTalk != null && _wishTalk.Wishes.Contains(name);
+        return (_wishTalk != null && _wishTalk.Wishes.Contains(name)) ||
+               _pendingWishTurnIns.Exists(update => update.WishNames.Contains(name));
     }
 
     /// <summary>
@@ -689,7 +767,7 @@ internal partial class CoopSave {
         _partnerTalk = null;
         _wishActions.Clear();
         _talkStates.Clear();
-        _endingWishDepth = 0;
+        _pendingWishTurnIns.Clear();
         _nextMissingCopyNotices.Clear();
         ResetWishProgress();
     }
@@ -1085,30 +1163,29 @@ internal partial class CoopSave {
             Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkEnded));
         }
 
-        if (talk.Wishes.Count == 0) {
+        if (talk.Changes.Count == 0) {
             return;
         }
 
-        var playerData = PlayerData.instance;
-        if (partner == null || _checkedWith != partner.Id || playerData == null) {
+        if (partner == null) {
             // The next check finds the wishes changed in one save only
-            Logger.Warn("Dialogue about wishes ended without the checked partner, so its wishes stay with the local save");
+            Logger.Warn("Dialogue about wishes ended without the partner, so its wishes stay with the local save");
             return;
         }
 
+        // A wish that changed twice, like one that was completed and accepted again, has an entry for each change
         var update = new CoopSaveUpdate {
-            TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.WishTurnIn,
             Scene = talk.Scene,
             ObjectPath = talk.Path
         };
-        foreach (var name in talk.Wishes) {
-            update.WishNames.Add(name);
-            update.WishValues.Add(PackCompletion(playerData.QuestCompletionData.GetData(name)));
+        for (var i = 0; i < talk.Changes.Count; i++) {
+            update.WishNames.Add(talk.Changes[i]);
+            update.WishValues.Add(talk.ChangeValues[i]);
         }
 
         foreach (var item in talk.Items) {
-            var index = talk.GetWishIndex(item);
+            var index = talk.GetChangeIndex(item);
             if (talk.Counts(item, index)) {
                 update.ItemIds.Add(index + "\n" + item.Change);
                 update.Amounts.Add(item.Amount);
@@ -1127,17 +1204,42 @@ internal partial class CoopSave {
             }
         }
 
-        Send(update);
+        if (_checkedWith != partner.Id) {
+            // The game checks the save with the partner again, which sends these wishes as they were before, so the
+            // dialogue goes to the partner once the check is done
+            _pendingWishTurnIns.Add(update);
+            Logger.Info($"Dialogue about {talk.Wishes.Count} wishes waits for the check with {partner.Username}");
+            return;
+        }
 
-        // The partner gets the wishes with the dialogue, so the wish log doesn't send them again
-        for (var i = 0; i < update.WishNames.Count; i++) {
+        SendWishTurnIn(update, partner);
+    }
+
+    /// <summary>
+    /// Sends dialogue about wishes to the partner, who gets its wishes with it, so the wish log doesn't send them again.
+    /// </summary>
+    private void SendWishTurnIn(CoopSaveUpdate update, ClientPlayerData partner) {
+        update.TargetId = partner.Id;
+        Send(update);
+        for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
             _knownWishes[update.WishNames[i]] = update.WishValues[i];
         }
 
         Logger.Info(
-            $"Sent dialogue about {talk.Wishes.Count} wishes to {partner.Username}, with {talk.Items.Count} item " +
-            $"changes, {talk.IntChanges.Count} counters and {update.FlagNames.Count} flags"
+            $"Sent dialogue with {update.WishNames.Count} changes of wishes to {partner.Username}, with " +
+            $"{update.ItemIds.Count} item changes and {update.FlagNames.Count} flags"
         );
+    }
+
+    /// <summary>
+    /// Sends the dialogue about wishes that ended during the check with the partner, once the check is done.
+    /// </summary>
+    private void SendPendingWishTurnIns(ClientPlayerData partner) {
+        foreach (var update in _pendingWishTurnIns) {
+            SendWishTurnIn(update, partner);
+        }
+
+        _pendingWishTurnIns.Clear();
     }
 
     /// <summary>
@@ -1178,7 +1280,7 @@ internal partial class CoopSave {
         var wasActive = self.IsAccepted && !self.IsCompleted;
         orig(self, afterPrompt, showPrompt);
         if (!_applyingPartnerTalk && !wasActive && self.IsAccepted && !self.IsCompleted) {
-            _wishTalk?.AddWish(self);
+            AddTalkWish(self);
         }
     }
 
@@ -1204,10 +1306,21 @@ internal partial class CoopSave {
         }
 
         if (ended && !wasCompleted && self.IsCompleted && !_applyingPartnerTalk) {
-            _wishTalk?.AddWish(self);
+            AddTalkWish(self);
         }
 
         return ended;
+    }
+
+    /// <summary>
+    /// Remembers a wish that dialogue of the local player accepted or completed, with its state right after. Once the
+    /// character stopped talking, only the FSMs of the dialogue change wishes for it.
+    /// </summary>
+    private void AddTalkWish(FullQuestBase quest) {
+        if (_wishTalk is { } talk && PlayerData.instance is { } playerData &&
+            (IsTalking(talk.Npc) || talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm))) {
+            talk.AddWish(quest, PackCompletion(playerData.QuestCompletionData.GetData(quest.name)));
+        }
     }
 
     /// <summary>
@@ -1223,22 +1336,34 @@ internal partial class CoopSave {
     /// Records what an FSM of dialogue of the local player gives.
     /// </summary>
     private void RecordTalkGainChange(Fsm? fsm, string change, int amount) {
-        if (_wishTalk is { } talk && !_applyingPartnerTalk && amount > 0 && talk.IsTalkFsm(fsm)) {
+        if (_wishTalk is { } talk && !_applyingPartnerTalk && _talkGainDepth == 0 && amount > 0 &&
+            talk.IsTalkFsm(fsm)) {
             talk.AddItem(change, amount, false);
         }
     }
 
     /// <summary>
-    /// Records what dialogue of the local player takes. What its FSMs take and what a wish takes while it ends count for
-    /// the dialogue. Other payments during it, like in a prompt, only count if the wish that they belong to takes what
-    /// was paid, so that a purchase in a shop of the character stays with the local player.
+    /// Records what dialogue of the local player takes. What its FSMs take counts for the dialogue, and so does what a
+    /// wish takes while it ends as long as the character talks. Other payments while it talks, like in a prompt, only
+    /// count if the wish that they belong to takes what was paid, so that a purchase in a shop of the character stays
+    /// with the local player.
     /// </summary>
     private void RecordTalkTake(SavedItem? item, CurrencyType? currency, string change, int amount) {
         if (_wishTalk is not { } talk || _applyingPartnerTalk || amount == 0) {
             return;
         }
 
-        if (talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) || _endingWishDepth > 0) {
+        if (talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm)) {
+            talk.AddItem(change, amount, true);
+            return;
+        }
+
+        // Once the character stopped talking, or in the prompt of a mechanism, a payment is for something else
+        if (!IsTalking(talk.Npc) || _promptInteraction != null) {
+            return;
+        }
+
+        if (_endingWishDepth > 0) {
             talk.AddItem(change, amount, true);
         } else {
             talk.AddTargetPayment(change, amount, item, currency);
@@ -1246,26 +1371,36 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts a write of the player data, which the hook ends by lowering <see cref="_playerDataWriteDepth"/>. Returns
-    /// the value of a counter before the outermost write while dialogue records, or null, so that a write that makes
-    /// another one isn't counted twice.
+    /// Starts a write of the player data, which the hook ends by lowering <see cref="_playerDataWriteDepth"/>. A write
+    /// that another write makes is nested, and isn't recorded for dialogue on its own. For the outermost write that
+    /// changes a counter by an amount while dialogue records, the value before it is kept, so that the partner gets the
+    /// change.
     /// </summary>
-    private int? BeginPlayerDataWrite(PlayerData? playerData, string? name) {
+    private PlayerDataWrite BeginPlayerDataWrite(PlayerData? playerData, string? name, bool changesCounter) {
         _playerDataWriteDepth++;
-        return _playerDataWriteDepth == 1 && _wishTalk != null && playerData != null && !string.IsNullOrEmpty(name) &&
-               GetPlayerDataField(name!)?.FieldType == typeof(int)
-            ? playerData.GetInt(name)
-            : null;
+        if (_playerDataWriteDepth > 1) {
+            return new PlayerDataWrite(true, null);
+        }
+
+        return new PlayerDataWrite(
+            false,
+            changesCounter && _wishTalk != null && playerData != null && !string.IsNullOrEmpty(name) &&
+            GetPlayerDataField(name!)?.FieldType == typeof(int)
+                ? playerData.GetInt(name)
+                : null
+        );
     }
 
     /// <summary>
-    /// Records a write of the player data by an FSM of dialogue of the local player: a boolean or enum with its value,
-    /// and a counter with how much it changed, since the count of the partner may differ. The story flags share the
-    /// story state already.
+    /// Records a write of the player data by an FSM of dialogue of the local player. Booleans, enums and counters that the
+    /// dialogue sets to a value go with their values, and a counter that it changes by an amount goes with how much it
+    /// changed, since the count of the partner may differ. What a recorded gain writes is left to the gain, and the story
+    /// flags share the story state already.
     /// </summary>
-    private void RecordTalkFlag(string name, int? intBefore) {
-        if (_wishTalk is not { } talk || _applyingPartnerTalk || !talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) ||
-            BossRoomCoop.IsHeroStateName(name) || PlayerData.instance is not { } playerData) {
+    private void RecordTalkFlag(string name, PlayerDataWrite write) {
+        if (_wishTalk is not { } talk || _applyingPartnerTalk || write.IsNested || _talkGainDepth > 0 ||
+            !talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) || BossRoomCoop.IsHeroStateName(name) ||
+            PlayerData.instance is not { } playerData) {
             return;
         }
 
@@ -1274,14 +1409,17 @@ internal partial class CoopSave {
             return;
         }
 
-        if (field.FieldType == typeof(int)) {
-            var change = intBefore is { } before ? playerData.GetInt(name) - before : 0;
-            if (change == 0) {
+        if (field.FieldType == typeof(int) && write.CountBefore is { } before) {
+            var change = playerData.GetInt(name) - before;
+
+            // A counter that the dialogue set to a value goes with its last value, which has this change in it
+            if (change == 0 || talk.Flags.Contains(name)) {
                 return;
             }
 
             talk.IntChanges[name] = (talk.IntChanges.TryGetValue(name, out var sum) ? sum : 0) + change;
-        } else if (field.FieldType == typeof(bool) || field.FieldType.IsEnum) {
+        } else if (field.FieldType == typeof(int) || field.FieldType == typeof(bool) || field.FieldType.IsEnum) {
+            talk.IntChanges.Remove(name);
             talk.Flags.Add(name);
         } else {
             return;
@@ -1312,6 +1450,7 @@ internal partial class CoopSave {
         try {
             var count = Mathf.Min(update.WishNames.Count, update.WishValues.Count);
             var applies = new bool[count];
+            var newer = new Dictionary<string, bool>(StringComparer.Ordinal);
             var anyApplies = false;
             var anyCompleted = false;
             var completionApplies = false;
@@ -1321,7 +1460,14 @@ internal partial class CoopSave {
             for (var i = 0; i < count; i++) {
                 var name = update.WishNames[i];
                 var value = update.WishValues[i];
-                if (!IsNewerChange(_wishSequences, update, GetWishChangeKey(name, value))) {
+
+                // A wish that changed more than once in the dialogue has an entry for each change, in order
+                if (!newer.TryGetValue(name, out var isNewer)) {
+                    isNewer = IsNewerChange(_wishSequences, update, GetWishChangeKey(name, value));
+                    newer[name] = isNewer;
+                }
+
+                if (!isNewer) {
                     continue;
                 }
 
@@ -1376,7 +1522,8 @@ internal partial class CoopSave {
             }
 
             Logger.Info(
-                $"Added dialogue about {count} wishes from {player.Username}, {changed} changed and {items} item changes"
+                $"Added dialogue with {count} changes of wishes from {player.Username}, {changed} changed and {items} " +
+                "item changes"
             );
         } catch (Exception e) {
             LogWishTalkError(e);
@@ -1446,6 +1593,22 @@ internal partial class CoopSave {
             case IntChange when parts.Length == 2 && PlayerData.instance is { } playerData &&
                                 GetPlayerDataField(parts[1])?.FieldType == typeof(int): {
                 playerData.SetInt(parts[1], playerData.GetInt(parts[1]) + amount);
+                return true;
+            }
+            case ToolUnlockChange when parts.Length == 3: {
+                if (FindSavedItem(parts[1], parts[2]) is not ToolItem tool || tool.IsUnlocked) {
+                    return false;
+                }
+
+                tool.Unlock(null, ToolItem.PopupFlags.ItemGet);
+                return true;
+            }
+            case ToolLockChange when parts.Length == 3: {
+                if (FindSavedItem(parts[1], parts[2]) is not ToolItem tool || !tool.IsUnlocked) {
+                    return false;
+                }
+
+                tool.Lock();
                 return true;
             }
             default:
@@ -1525,7 +1688,8 @@ internal partial class CoopSave {
             update ??= new CoopSaveUpdate {
                 TargetId = partner.Id,
                 Kind = CoopSaveUpdateKind.WishProgress,
-                Key = ++_wishProgressCounter
+                Key = ++_wishProgressCounter,
+                Sequence = (_checkKey >> 16) << 32
             };
             for (var i = 0; i < amounts.Length; i++) {
                 update.WishNames.Add(name);
@@ -1575,7 +1739,9 @@ internal partial class CoopSave {
     /// doesn't undo newer progress.
     /// </summary>
     private void OnWishProgress(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+        // Progress from an earlier check can be older than what the current check agreed on
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkKey == 0 ||
+            update.Sequence >> 32 != _checkKey >> 16) {
             return;
         }
 
