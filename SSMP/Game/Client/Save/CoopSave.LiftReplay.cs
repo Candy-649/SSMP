@@ -2,43 +2,20 @@ using System;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// What the game of the partner sends about the lifts of a room that both players are in (see
-/// <see cref="CoopSave"/>.Lifts): rides that it started, calls for the game that decides, and the state of the lifts
-/// for a player who entered the room. Also moves the avatar of the partner with a lift that it rides.
+/// What the game of the partner sends about the lifts of a room that both players are in (see CoopSave.Lifts): rides
+/// that it started, calls for the game that decides, and the state of the lifts for a player who entered the room. Also
+/// moves the avatar of the partner with a lift that it rides.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
-    /// The difference in the time that both players have been in a room, in seconds, below which the save key decides
-    /// whose lifts both games take.
+    /// How long a lift has to stand still, in seconds, before the positions that the partner sends give the height of
+    /// their avatar on it again.
     /// </summary>
-    private const float LiftRoomTimeTie = 0.25f;
-
-    /// <summary>
-    /// Whether a room of the update is loaded in the local game.
-    /// </summary>
-    private static bool IsLiftRoom(string scene) => scene.Length > 0 && SceneManager.GetSceneByName(scene).isLoaded;
-
-    /// <summary>
-    /// Whether the current room has lifts that the sync keeps the same in both games.
-    /// </summary>
-    private static bool RoomHasLifts() {
-        return Object.FindObjectsByType<LiftControl>(FindObjectsInactive.Exclude, FindObjectsSortMode.None).Length > 0;
-    }
-
-    /// <summary>
-    /// Finds the cage lift of an update in the local game.
-    /// </summary>
-    private CageLift? FindCage(CoopSaveUpdate update) {
-        return ScenePath.Find(update.ObjectPath, update.Scene) is { } target &&
-               target.TryGetComponent<LiftControl>(out var control)
-            ? GetCage(control)
-            : null;
-    }
+    private const float LiftAvatarSettleTime = 0.3f;
 
     /// <summary>
     /// Plays a ride that the game of the partner started on the same lift.
@@ -49,41 +26,33 @@ internal partial class CoopSave {
         }
 
         try {
-            if (FindCage(update) is not { } lift || update.Key <= lift.PartnerRide) {
+            if (FindLift(update) is not { } lift || update.Key <= lift.PartnerRide) {
                 return;
             }
 
             lift.PartnerRide = update.Key;
-            var control = lift.Control;
             int stop = update.Part;
-            if (GetStopHeight(control, stop) == null) {
+            if (!lift.HasStop(stop)) {
                 return;
             }
 
             lift.Calls.RemoveAll(call => call.Stop == stop);
+            if (lift.Stop == stop) {
+                return;
+            }
+
+            var hero = HeroController.instance;
+            var inside = hero != null && lift.ContainsHero(hero);
             _liftReplaying = true;
             try {
-                if (!IsLiftUnlocked(control)) {
-                    control.SetUnlocked(true);
-                }
-
-                var moving = IsLiftMoving(control);
-                if (GetLiftStop(control) == stop && (moving || !lift.WasMoving)) {
-                    // It already goes there, or stands there
-                    if (!moving) {
-                        control.MoveToStop(stop, false);
-                    }
-
-                    return;
-                }
-
-                var inside = IsLocalHeroInside(lift);
-                if (!moving && !inside && update.Values.Count > 0) {
-                    SetLiftHeight(control, update.Values[0]);
+                lift.Unlock();
+                if (!lift.IsMoving && !inside && update.Values.Count > 0) {
+                    lift.SetHeight(update.Values[0]);
                 }
 
                 // The ride of the partner started a moment ago, which the wait before the lift moves makes up for
-                PlayLiftMove(lift, stop, inside, (float) _netClient.UpdateManager.AverageRtt / 2000f);
+                lift.Move(stop, inside, (float) _netClient.UpdateManager.AverageRtt / 2000f);
+                lift.WasMoving = lift.IsMoving;
             } finally {
                 _liftReplaying = false;
             }
@@ -101,33 +70,27 @@ internal partial class CoopSave {
         }
 
         try {
-            if (FindCage(update) is not { } lift) {
-                return;
-            }
-
-            var control = lift.Control;
             int stop = update.Part;
-            if (GetStopHeight(control, stop) == null || !IsLiftUnlocked(control)) {
+            if (FindLift(update) is not { } lift || !lift.HasStop(stop) || !lift.IsUnlocked) {
                 return;
             }
 
-            var partner = player.IsInLocalScene ? player : null;
-            if (GetLiftStop(control) == stop) {
-                // The lift goes to that stop or stands there already, which the game of the partner may not show yet
-                if (!IsLiftMoving(control)) {
-                    SendLiftState(lift, player.Id);
+            if (lift.Stop == stop) {
+                // The lift goes to that stop or stands there already, which the game of the partner may not show
+                if (!lift.IsMoving) {
+                    SendLiftState(lift, player.Id, true);
                 }
 
                 return;
             }
 
+            var partner = player.IsInLocalScene ? player : null;
             var inside = update.PartCount == 1;
-            if (IsLiftMoving(control) || IsLiftHeldForOther(lift, true, partner)) {
+            var hero = HeroController.instance;
+            if (lift.IsMoving || IsLiftHeldForOther(lift, true, partner) ||
+                !StartLiftRide(lift, stop, hero != null && lift.ContainsHero(hero), player)) {
                 QueueLiftCall(lift, stop, true, inside);
-                return;
             }
-
-            StartLiftRide(lift, stop, IsLocalHeroInside(lift), player);
         } catch (Exception e) {
             LogLiftError(e);
         }
@@ -142,9 +105,8 @@ internal partial class CoopSave {
         }
 
         try {
-            var controls = Object.FindObjectsByType<LiftControl>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-            foreach (var control in controls) {
-                SendLiftState(GetCage(control), player.Id);
+            foreach (var lift in FindRoomLifts()) {
+                SendLiftState(lift, player.Id, false);
             }
         } catch (Exception e) {
             LogLiftError(e);
@@ -152,25 +114,29 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends where a cage lift is and whether it moves.
+    /// Sends where a lift is and whether it moves.
     /// </summary>
-    private void SendLiftState(CageLift lift, ushort targetId) {
-        var control = lift.Control;
+    /// <param name="lift">The lift.</param>
+    /// <param name="targetId">The ID of the partner.</param>
+    /// <param name="correction">Whether the state corrects the lift of the partner, which it takes even when the
+    /// partner has been in the room longer.</param>
+    private void SendLiftState(SyncedLift lift, ushort targetId, bool correction) {
         Send(new CoopSaveUpdate {
             TargetId = targetId,
             Kind = CoopSaveUpdateKind.LiftState,
-            Scene = control.gameObject.scene.name,
+            Scene = lift.Owner.gameObject.scene.name,
             ObjectPath = lift.Path,
-            Part = (ushort) Mathf.Max(0, GetLiftStop(control)),
-            PartCount = (ushort) (IsLiftMoving(control) ? 1 : 0),
+            FsmName = lift.FsmName,
+            Part = (ushort) Mathf.Max(0, lift.Stop),
+            PartCount = (ushort) (lift.IsMoving ? 1 : 0),
             Key = _liftRideCount,
-            PlayTime = Time.unscaledTime - _liftRoomStart,
-            Values = [control.transform.position.y]
+            PlayTime = correction ? float.MaxValue : Time.unscaledTime - _liftRoomStart,
+            Values = [lift.Transform.position.y]
         });
     }
 
     /// <summary>
-    /// Takes the state of a lift from a partner who has been in the room longer, unless the local hero is inside it,
+    /// Takes the state of a lift from a partner who has been in the room longer, unless the local hero is on the lift,
     /// in which case the lift of the partner comes to the hero instead.
     /// </summary>
     private void OnLiftState(ClientPlayerData player, CoopSaveUpdate update) {
@@ -186,67 +152,43 @@ internal partial class CoopSave {
                 return;
             }
 
-            if (FindCage(update) is not { } lift) {
+            int stop = update.Part;
+            if (FindLift(update) is not { } lift || !lift.HasStop(stop)) {
                 return;
             }
 
             lift.PartnerRide = System.Math.Max(lift.PartnerRide, update.Key);
             lift.Calls.Clear();
-            var control = lift.Control;
-            int stop = update.Part;
-            if (GetStopHeight(control, stop) is not { } stopHeight) {
-                return;
-            }
-
             var moving = update.PartCount == 1;
-            if (IsLocalHeroInside(lift)) {
-                if ((moving || stop != GetLiftStop(control)) && !IsLiftMoving(control)) {
+            var hero = HeroController.instance;
+            if (hero != null && lift.ContainsHero(hero)) {
+                if ((moving || stop != lift.Stop) && !lift.IsMoving) {
                     Send(new CoopSaveUpdate {
                         TargetId = player.Id,
                         Kind = CoopSaveUpdateKind.LiftCall,
                         Scene = update.Scene,
                         ObjectPath = lift.Path,
-                        Part = (ushort) GetLiftStop(control)
+                        FsmName = lift.FsmName,
+                        Part = (ushort) lift.Stop
                     });
                 }
 
                 return;
             }
 
-            var height = update.Values.Count > 0 ? update.Values[0] : stopHeight;
             _liftReplaying = true;
             try {
                 if (moving) {
-                    if (IsLiftMoving(control) && GetLiftStop(control) == stop) {
-                        return;
+                    if (!lift.IsMoving || lift.Stop != stop) {
+                        lift.JoinRide(stop, update.Values.Count > 0 ? update.Values[0] : lift.Transform.position.y);
                     }
-
-                    if (IsLiftMoving(control)) {
-                        control.StopMoving();
-                    }
-
-                    SetLiftHeight(control, height);
-                    if (GetLiftStop(control) == stop) {
-                        LiftCurrentStopField?.SetValue(control, stop == 0 ? 1 : 0);
-                    }
-
-                    PlayLiftMove(lift, stop, false, float.MaxValue);
-                    return;
+                } else if (lift.IsMoving || lift.Stop != stop ||
+                           update.Values.Count > 0 &&
+                           Mathf.Abs(lift.Transform.position.y - update.Values[0]) > LiftSameHeight) {
+                    lift.PlaceAt(stop);
                 }
 
-                if (!IsLiftMoving(control) && GetLiftStop(control) == stop &&
-                    Mathf.Abs(control.transform.position.y - stopHeight) < LiftSameHeight) {
-                    return;
-                }
-
-                if (IsLiftMoving(control)) {
-                    control.StopMoving();
-                }
-
-                LiftCurrentStopField?.SetValue(control, stop);
-                LiftSetInitialPosMethod?.Invoke(control, null);
-                lift.WasMoving = false;
-                lift.StandingY = control.transform.position.y;
+                lift.WasMoving = lift.IsMoving;
             } finally {
                 _liftReplaying = false;
             }
@@ -256,56 +198,18 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Moves a lift to a stop with a shorter wait before it moves, for a ride that started earlier in the other game.
-    /// </summary>
-    private static void PlayLiftMove(CageLift lift, int stop, bool camera, float skippedDelay) {
-        var control = lift.Control;
-        var delay = LiftMoveDelayField?.GetValue(control) is float value ? value : 0f;
-        LiftMoveDelayField?.SetValue(control, Mathf.Max(0f, delay - skippedDelay));
-        try {
-            control.MoveToStop(stop, camera);
-        } finally {
-            LiftMoveDelayField?.SetValue(control, delay);
-        }
-
-        lift.WasMoving = IsLiftMoving(control);
-    }
-
-    /// <summary>
-    /// Gets the height of a stop of a lift, or null if the lift has no such stop.
-    /// </summary>
-    private static float? GetStopHeight(LiftControl control, int stop) {
-        return LiftStopsField?.GetValue(control) is Array stops && stop >= 0 && stop < stops.Length &&
-               LiftStopPosField?.GetValue(stops.GetValue(stop)) is float height
-            ? height
-            : null;
-    }
-
-    /// <summary>
-    /// Puts a lift at a height.
-    /// </summary>
-    private static void SetLiftHeight(LiftControl control, float height) {
-        var transform = control.transform;
-        var position = transform.position;
-        if (Mathf.Abs(position.y - height) > LiftSameHeight) {
-            position.y = height;
-            transform.position = position;
-        }
-    }
-
-    /// <summary>
     /// Moves the avatar of the partner with the lifts it rides right before the frame is drawn, after the positions that
-    /// the partner sent, which lag behind the lift, moved it.
+    /// the partner sent, which lag behind a moving lift, moved it.
     /// </summary>
     private void OnLiftBeforeRender() {
-        if (_cages.Count == 0) {
+        if (_lifts.Count == 0) {
             return;
         }
 
         try {
             var partner = GetLiftPartner();
-            foreach (var lift in _cages.Values) {
-                if (lift.Control != null) {
+            foreach (var lift in _lifts.Values) {
+                if (lift.Owner != null) {
                     UpdateAvatarRide(lift, partner);
                 }
             }
@@ -315,20 +219,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts, keeps or ends the ride of the avatar of the partner on a moving cage lift.
+    /// Starts, keeps or ends the ride of the avatar of the partner on a lift.
     /// </summary>
-    private static void UpdateAvatarRide(CageLift lift, ClientPlayerData? partner) {
+    private static void UpdateAvatarRide(SyncedLift lift, ClientPlayerData? partner) {
+        var liftPosition = lift.Transform.position;
+        if ((liftPosition - lift.LastPosition).sqrMagnitude > 0.000001f) {
+            lift.LastPosition = liftPosition;
+            lift.MovedAt = Time.unscaledTime;
+        }
+
         var container = partner?.PlayerContainer;
-        if (container == null || !container.activeInHierarchy || !IsLiftMoving(lift.Control) ||
+        if (container == null || !container.activeInHierarchy || !lift.IsMoving ||
             lift.AvatarRiding && lift.AvatarContainer != container) {
             EndAvatarRide(lift);
             return;
         }
 
-        var liftPosition = lift.Control.transform.position;
         var position = container.transform.position;
         if (!lift.AvatarRiding) {
-            if (!IsInsideCage(lift, position)) {
+            if (!lift.Contains(position)) {
                 return;
             }
 
@@ -339,9 +248,11 @@ internal partial class CoopSave {
                 interpolation.SetPredictionEnabled(false);
             }
         } else if ((position - lift.AvatarPlaced).sqrMagnitude > 0.0001f) {
-            // A position from the partner moved the avatar, which can walk in the lift but lags behind its height
+            // A position from the partner moved the avatar, which lags behind the height of a moving lift
             var offset = position - liftPosition;
-            lift.AvatarOffset = new Vector3(offset.x, lift.AvatarOffset.y, offset.z);
+            lift.AvatarOffset = Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime
+                ? offset
+                : new Vector3(offset.x, lift.AvatarOffset.y, offset.z);
         }
 
         var placed = liftPosition + lift.AvatarOffset;
@@ -353,7 +264,7 @@ internal partial class CoopSave {
     /// Ends the ride of the avatar of the partner on a lift, which gives the avatar back to the positions that the
     /// partner sends.
     /// </summary>
-    private static void EndAvatarRide(CageLift lift) {
+    private static void EndAvatarRide(SyncedLift lift) {
         if (!lift.AvatarRiding) {
             return;
         }
@@ -371,7 +282,7 @@ internal partial class CoopSave {
     /// Ends the rides of the avatar of the partner on all lifts.
     /// </summary>
     private void EndAvatarRides() {
-        foreach (var lift in _cages.Values) {
+        foreach (var lift in _lifts.Values) {
             EndAvatarRide(lift);
         }
     }

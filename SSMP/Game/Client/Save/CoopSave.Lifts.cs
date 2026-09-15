@@ -1,12 +1,11 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using MonoMod.RuntimeDetour;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
-using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client.Save;
 
@@ -15,25 +14,26 @@ namespace SSMP.Game.Client.Save;
 /// game of the player with the larger save key decides about its lifts: it plays the rides that its player starts and
 /// serves the calls that the other game sends instead of starting a ride itself, and the other game plays the same
 /// rides. A started ride goes at once, and a call from the other stop waits until the lift arrived. A lift waits at a
-/// stop for a short time while the other player is in it or at that stop, then serves a call if the caller still waits.
-/// A player who enters a room takes the lifts from the game of a partner who is in it. Nobody is moved: the avatar of a
-/// partner who rides a lift moves with the lift.
+/// stop for a short time while the other player is on it or at that stop, then serves a call if the caller still waits.
+/// A player who enters a room takes the lifts from the game of a partner who has been in it longer. Nobody is moved: the
+/// avatar of a partner who rides a lift moves with the lift. The kinds of lifts are in CoopSave.CageLift and
+/// CoopSave.FsmLift.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
-    /// How long a lift waits at a stop after it arrived, in seconds, while the other player is in it or at that stop.
+    /// How long a lift waits at a stop after it arrived, in seconds, while the other player is on it or at that stop.
     /// </summary>
     private const float LiftWaitTime = 2.5f;
-
-    /// <summary>
-    /// How far a caller may be from a call plate of a stop, sideways and up or down, and still wait there.
-    /// </summary>
-    private static readonly Vector2 LiftCallReach = new(8f, 4f);
 
     /// <summary>
     /// How long a call of a lift that waits for its turn lives, in seconds.
     /// </summary>
     private const float LiftCallLifetime = 30f;
+
+    /// <summary>
+    /// How often a game that doesn't decide about a lift sends the same call again, in seconds.
+    /// </summary>
+    private const float LiftCallResendTime = 1f;
 
     /// <summary>
     /// How long after entering a room the game asks for the state of its lifts, in seconds, so the lifts started.
@@ -51,24 +51,16 @@ internal partial class CoopSave {
     /// </summary>
     private const float LiftSameHeight = 0.5f;
 
-    private static readonly FieldInfo? LiftMoveRoutineField = typeof(LiftControl).GetField("moveRoutine", InstanceFlags);
-    private static readonly FieldInfo? LiftCurrentStopField = typeof(LiftControl).GetField("currentStop", InstanceFlags);
-    private static readonly FieldInfo? LiftUnlockedField = typeof(LiftControl).GetField("isUnlocked", InstanceFlags);
-    private static readonly FieldInfo? LiftStopsField = typeof(LiftControl).GetField("stops", InstanceFlags);
-    private static readonly FieldInfo? LiftMoveDelayField = typeof(LiftControl).GetField("moveDelay", InstanceFlags);
+    /// <summary>
+    /// The difference in the time that both players have been in a room, in seconds, below which the save key decides
+    /// whose lifts both games take.
+    /// </summary>
+    private const float LiftRoomTimeTie = 0.25f;
 
-    private static readonly FieldInfo? LiftDoorTriggerField =
-        typeof(LiftControl).GetField("doorCloseTrigger", InstanceFlags);
-
-    private static readonly MethodInfo? LiftSetInitialPosMethod =
-        typeof(LiftControl).GetMethod("SetInitialPos", InstanceFlags, null, Type.EmptyTypes, null);
-
-    private static readonly Type? LiftStopType = typeof(LiftControl).GetNestedType("LiftStop", BindingFlags.NonPublic);
-    private static readonly FieldInfo? LiftStopPosField = LiftStopType?.GetField("PosY", InstanceFlags);
-    private static readonly FieldInfo? LiftStopPlatesField = LiftStopType?.GetField("CallPlates", InstanceFlags);
-
-    private static readonly FieldInfo? StickInsideTrackerField =
-        typeof(HeroPlatformStick).GetField("insideTracker", InstanceFlags);
+    /// <summary>
+    /// How far a caller may be from a stop of a lift, sideways and up or down, and still wait there.
+    /// </summary>
+    private static readonly Vector2 LiftCallReach = new(8f, 4f);
 
     /// <summary>
     /// The hooks of lifts.
@@ -76,9 +68,9 @@ internal partial class CoopSave {
     private readonly List<Hook> _liftHooks = [];
 
     /// <summary>
-    /// The cage lifts of the current room that the sync looked at.
+    /// The lifts of the current room that the sync looked at, by the component or FSM that runs them.
     /// </summary>
-    private readonly Dictionary<LiftControl, CageLift> _cages = new();
+    private readonly Dictionary<object, SyncedLift> _lifts = new();
 
     /// <summary>
     /// Whether the sync itself moves a lift, which its hooks let through.
@@ -111,23 +103,119 @@ internal partial class CoopSave {
     private bool _liftFailed;
 
     /// <summary>
-    /// A cage lift that moves between stops.
+    /// A lift that the sync keeps in the same place in both games. Its stops count from 0.
     /// </summary>
-    private class CageLift {
+    private abstract class SyncedLift {
         /// <summary>
-        /// The lift.
-        /// </summary>
-        public required LiftControl Control { get; init; }
-
-        /// <summary>
-        /// The path of the lift in its scene.
+        /// The path of the object of the lift in its scene.
         /// </summary>
         public required string Path { get; init; }
 
         /// <summary>
-        /// The space inside the cage, relative to the position of the lift.
+        /// The component that runs the lift.
         /// </summary>
-        public Rect Inside { get; init; }
+        public abstract MonoBehaviour Owner { get; }
+
+        /// <summary>
+        /// The name of the FSM that runs the lift, or empty for a lift that a component runs.
+        /// </summary>
+        public abstract string FsmName { get; }
+
+        /// <summary>
+        /// The object that moves.
+        /// </summary>
+        public virtual Transform Transform => Owner.transform;
+
+        /// <summary>
+        /// Whether the lift is on a ride.
+        /// </summary>
+        public abstract bool IsMoving { get; }
+
+        /// <summary>
+        /// Whether players can use the lift.
+        /// </summary>
+        public virtual bool IsUnlocked => true;
+
+        /// <summary>
+        /// The stop that the lift stands at, or goes to while it moves.
+        /// </summary>
+        public abstract int Stop { get; }
+
+        /// <summary>
+        /// Whether the lift has a stop.
+        /// </summary>
+        public abstract bool HasStop(int stop);
+
+        /// <summary>
+        /// Whether a position is in or on the lift where it is now.
+        /// </summary>
+        public abstract bool Contains(Vector3 position);
+
+        /// <summary>
+        /// Whether a position is where a player waits for the lift at a stop.
+        /// </summary>
+        public abstract bool IsAtStop(int stop, Vector3 position);
+
+        /// <summary>
+        /// Starts a ride to a stop, or turns a ride around, returning whether the lift now goes there.
+        /// </summary>
+        /// <param name="stop">The stop.</param>
+        /// <param name="camera">Whether the ride may move the camera, for when the local hero rides it.</param>
+        /// <param name="skippedDelay">How much of the wait before the lift moves to skip, in seconds.</param>
+        public abstract bool Move(int stop, bool camera, float skippedDelay);
+
+        /// <summary>
+        /// Puts the lift standing at a stop at once.
+        /// </summary>
+        public abstract void PlaceAt(int stop);
+
+        /// <summary>
+        /// Continues a ride to a stop from a height at once, for a ride that is under way in the other game.
+        /// </summary>
+        public abstract void JoinRide(int stop, float height);
+
+        /// <summary>
+        /// Whether the local hero is in or on the lift.
+        /// </summary>
+        public bool ContainsHero(HeroController hero) {
+            return hero.transform.IsChildOf(Transform) || Contains(hero.transform.position);
+        }
+
+        /// <summary>
+        /// Unlocks the lift for a ride of the partner, whose game unlocked it first.
+        /// </summary>
+        public virtual void Unlock() {
+        }
+
+        /// <summary>
+        /// Called every frame before the calls that wait are served.
+        /// </summary>
+        public virtual void Update() {
+        }
+
+        /// <summary>
+        /// Called when a call of the local player doesn't start a ride at once, to undo what the call already did.
+        /// </summary>
+        public virtual void OnCallHeld() {
+        }
+
+        /// <summary>
+        /// Called before a ride of the local player starts at once.
+        /// </summary>
+        /// <param name="partnerInside">Whether the avatar of the partner is in or on the lift.</param>
+        public virtual void BeforeLocalRide(bool partnerInside) {
+        }
+
+        /// <summary>
+        /// Puts the lift at a height where it stands.
+        /// </summary>
+        public void SetHeight(float height) {
+            var position = Transform.position;
+            if (Mathf.Abs(position.y - height) > LiftSameHeight) {
+                position.y = height;
+                Transform.position = position;
+            }
+        }
 
         /// <summary>
         /// Whether the lift moved in the last frame.
@@ -140,11 +228,6 @@ internal partial class CoopSave {
         public float ArrivedAt { get; set; } = float.NegativeInfinity;
 
         /// <summary>
-        /// The height of the lift in the last frame in which it stood, from which a call plate moved it.
-        /// </summary>
-        public float StandingY { get; set; }
-
-        /// <summary>
         /// The count of the newest ride of the partner that the lift played.
         /// </summary>
         public ulong PartnerRide { get; set; }
@@ -153,6 +236,16 @@ internal partial class CoopSave {
         /// The calls that wait for the lift, oldest first.
         /// </summary>
         public List<LiftCall> Calls { get; } = [];
+
+        /// <summary>
+        /// The stop of the last call that the local game sent to the game that decides, or -1.
+        /// </summary>
+        public int SentCallStop { get; set; } = -1;
+
+        /// <summary>
+        /// When the local game last sent a call to the game that decides.
+        /// </summary>
+        public float SentCallTime { get; set; } = float.NegativeInfinity;
 
         /// <summary>
         /// Whether the avatar of the partner rides the lift.
@@ -173,6 +266,16 @@ internal partial class CoopSave {
         /// The container of the avatar that rides the lift, whose prediction the ride turned off.
         /// </summary>
         public GameObject? AvatarContainer { get; set; }
+
+        /// <summary>
+        /// Where the lift was when the sync last looked at it for the avatar.
+        /// </summary>
+        public Vector3 LastPosition { get; set; }
+
+        /// <summary>
+        /// When the lift last changed its position.
+        /// </summary>
+        public float MovedAt { get; set; } = float.NegativeInfinity;
     }
 
     /// <summary>
@@ -190,7 +293,7 @@ internal partial class CoopSave {
         public required bool ByPartner { get; init; }
 
         /// <summary>
-        /// Whether the caller is inside the lift and rides it, rather than waiting at the stop.
+        /// Whether the caller is in or on the lift and rides it, rather than waiting at the stop.
         /// </summary>
         public bool Inside { get; set; }
 
@@ -204,11 +307,8 @@ internal partial class CoopSave {
     /// Registers the hooks of lifts.
     /// </summary>
     private void RegisterLiftHooks() {
-        AddLiftHook(
-            typeof(LiftControl).GetMethod("MoveToStop", InstanceFlags, null, [typeof(int), typeof(bool)], null),
-            new Action<Action<LiftControl, int, bool>, LiftControl, int, bool>(OnLiftMoveToStop)
-        );
-
+        RegisterCageLiftHooks();
+        RegisterFsmLiftHooks();
         Application.onBeforeRender += OnLiftBeforeRender;
     }
 
@@ -257,22 +357,56 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the lifts of the room that the local player left.
+    /// Whether a room of an update is loaded in the local game.
     /// </summary>
-    private void OnLiftSceneChanged() {
-        EndAvatarRides();
-        _cages.Clear();
-        _liftRoomStart = Time.unscaledTime;
-        _liftStateRequested = false;
-        _liftStateReceived = false;
+    private static bool IsLiftRoom(string scene) => scene.Length > 0 && SceneManager.GetSceneByName(scene).isLoaded;
+
+    /// <summary>
+    /// Finds the lifts of the current room.
+    /// </summary>
+    private List<SyncedLift> FindRoomLifts() {
+        var lifts = new List<SyncedLift>();
+        AddRoomCageLifts(lifts);
+        AddRoomFsmLifts(lifts);
+        return lifts;
     }
 
     /// <summary>
-    /// Forgets the lifts, for when the session ends.
+    /// Finds the lift of an update in the local game.
+    /// </summary>
+    private SyncedLift? FindLift(CoopSaveUpdate update) {
+        if (ScenePath.Find(update.ObjectPath, update.Scene) is not { } target) {
+            return null;
+        }
+
+        if (update.FsmName.Length == 0) {
+            return target.TryGetComponent<LiftControl>(out var control) ? GetCageLift(control) : null;
+        }
+
+        foreach (var component in target.GetComponents<PlayMakerFSM>()) {
+            if (component.FsmName == update.FsmName) {
+                return GetFsmLift(component.Fsm);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Forgets the lifts of the room that the local player left.
+    /// </summary>
+    private void OnLiftSceneChanged() {
+        ResetLifts();
+        _liftRoomStart = Time.unscaledTime;
+    }
+
+    /// <summary>
+    /// Forgets the lifts, for when the room or the session ends.
     /// </summary>
     private void ResetLifts() {
         EndAvatarRides();
-        _cages.Clear();
+        _lifts.Clear();
+        ResetFsmLifts();
         _liftStateRequested = false;
         _liftStateReceived = false;
     }
@@ -285,11 +419,11 @@ internal partial class CoopSave {
         try {
             if (!_liftStateRequested && Time.unscaledTime - _liftRoomStart >= LiftStateRequestDelay) {
                 _liftStateRequested = true;
-                if (RoomHasLifts()) {
+                if (FindRoomLifts().Count > 0) {
                     Send(new CoopSaveUpdate {
                         TargetId = partner.Id,
                         Kind = CoopSaveUpdateKind.LiftStateRequest,
-                        Scene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name
+                        Scene = SceneManager.GetActiveScene().name
                     });
                 } else {
                     _liftStateReceived = true;
@@ -298,41 +432,39 @@ internal partial class CoopSave {
 
             var liftPartner = partner.IsInLocalScene ? partner : null;
             var decides = DecidesLifts(liftPartner);
-            List<LiftControl>? gone = null;
-            foreach (var lift in _cages.Values) {
-                if (lift.Control == null) {
-                    (gone ??= []).Add(lift.Control!);
+            List<object>? gone = null;
+            foreach (var entry in _lifts) {
+                if (entry.Value.Owner == null) {
+                    (gone ??= []).Add(entry.Key);
                     continue;
                 }
 
-                UpdateCage(lift, liftPartner, decides);
+                UpdateLift(entry.Value, liftPartner, decides);
             }
 
             if (gone != null) {
-                foreach (var control in gone) {
-                    _cages.Remove(control);
+                foreach (var key in gone) {
+                    _lifts.Remove(key);
                 }
             }
+
+            UpdateStoryLifts(partner);
         } catch (Exception e) {
             LogLiftError(e);
         }
     }
 
     /// <summary>
-    /// Notices when a cage lift arrives and serves its calls that wait when the local game decides about it.
+    /// Notices when a lift arrives and serves its calls that wait when the local game decides about it.
     /// </summary>
-    private void UpdateCage(CageLift lift, ClientPlayerData? partner, bool decides) {
-        var control = lift.Control;
-        var moving = IsLiftMoving(control);
+    private void UpdateLift(SyncedLift lift, ClientPlayerData? partner, bool decides) {
+        lift.Update();
+        var moving = lift.IsMoving;
         if (lift.WasMoving && !moving) {
             lift.ArrivedAt = Time.unscaledTime;
         }
 
         lift.WasMoving = moving;
-        if (!moving) {
-            lift.StandingY = control.transform.position.y;
-        }
-
         if (!decides) {
             lift.Calls.Clear();
             return;
@@ -342,91 +474,64 @@ internal partial class CoopSave {
             return;
         }
 
-        var currentStop = GetLiftStop(control);
+        var currentStop = lift.Stop;
         lift.Calls.RemoveAll(call =>
             call.Stop == currentStop || Time.unscaledTime - call.Time > LiftCallLifetime ||
             !IsCallerWaiting(lift, call, partner)
         );
-        if (lift.Calls.Count == 0) {
+        if (lift.Calls.Count == 0 || IsLiftHeldForOther(lift, lift.Calls[0].ByPartner, partner)) {
             return;
         }
 
-        var next = lift.Calls[0];
-        if (IsLiftHeldForOther(lift, next.ByPartner, partner)) {
-            return;
-        }
-
-        StartLiftRide(lift, next.Stop, IsLocalHeroInside(lift), partner);
+        var hero = HeroController.instance;
+        StartLiftRide(lift, lift.Calls[0].Stop, hero != null && lift.ContainsHero(hero), partner);
     }
 
     /// <summary>
-    /// Hook for <see cref="LiftControl.MoveToStop"/>, which every ride and call of a cage lift goes through. When the
-    /// local game decides, it starts the ride at once or lets it wait for its turn; otherwise it sends the call to the
-    /// game that decides.
+    /// Handles a ride or a call that the local player started: the game that decides starts it at once or lets it wait
+    /// for its turn, and the other game sends it to the game that decides.
     /// </summary>
-    private void OnLiftMoveToStop(Action<LiftControl, int, bool> orig, LiftControl self, int stopIndex, bool camera) {
-        ClientPlayerData? partner;
-        if (_liftReplaying || (partner = GetLiftPartner()) == null) {
-            orig(self, stopIndex, camera);
-            return;
-        }
-
-        try {
-            var lift = GetCage(self);
-            if (!IsLiftUnlocked(self) || stopIndex == GetLiftStop(self)) {
-                orig(self, stopIndex, camera);
-                return;
-            }
-
-            var inside = IsLocalHeroInside(lift);
-            var moving = IsLiftMoving(self);
-            if (!DecidesLifts(partner)) {
-                RestoreStandingHeight(lift, moving);
+    /// <param name="lift">The lift.</param>
+    /// <param name="stop">The stop that the player wants the lift to go to.</param>
+    /// <param name="inside">Whether the local hero is in or on the lift.</param>
+    /// <param name="camera">Whether the ride may move the camera.</param>
+    /// <param name="partner">The partner in the room.</param>
+    private void RequestLiftRide(SyncedLift lift, int stop, bool inside, bool camera, ClientPlayerData partner) {
+        if (!DecidesLifts(partner)) {
+            lift.OnCallHeld();
+            if (lift.SentCallStop != stop || Time.unscaledTime - lift.SentCallTime >= LiftCallResendTime) {
+                lift.SentCallStop = stop;
+                lift.SentCallTime = Time.unscaledTime;
                 Send(new CoopSaveUpdate {
                     TargetId = partner.Id,
                     Kind = CoopSaveUpdateKind.LiftCall,
-                    Scene = self.gameObject.scene.name,
+                    Scene = lift.Owner.gameObject.scene.name,
                     ObjectPath = lift.Path,
-                    Part = (ushort) stopIndex,
+                    FsmName = lift.FsmName,
+                    Part = (ushort) stop,
                     PartCount = (ushort) (inside ? 1 : 0)
                 });
-                return;
             }
 
-            if (moving || IsLiftHeldForOther(lift, false, partner)) {
-                RestoreStandingHeight(lift, moving);
-                QueueLiftCall(lift, stopIndex, false, inside);
-                return;
-            }
-
-            // A call plate that moved the lift closer can't move it away from under the partner
-            if (IsAvatarInside(lift, partner)) {
-                RestoreStandingHeight(lift, false);
-            }
-
-            StartLiftRide(lift, stopIndex, camera, partner);
-        } catch (Exception e) {
-            LogLiftError(e);
-            orig(self, stopIndex, camera);
+            return;
         }
-    }
 
-    /// <summary>
-    /// Puts a standing lift back to its height from before a call plate moved it closer to its stop.
-    /// </summary>
-    private static void RestoreStandingHeight(CageLift lift, bool moving) {
-        var transform = lift.Control.transform;
-        var position = transform.position;
-        if (!moving && Mathf.Abs(position.y - lift.StandingY) > 0.01f) {
-            position.y = lift.StandingY;
-            transform.position = position;
+        if (lift.IsMoving || IsLiftHeldForOther(lift, false, partner)) {
+            lift.OnCallHeld();
+            QueueLiftCall(lift, stop, false, inside);
+            return;
+        }
+
+        lift.BeforeLocalRide(IsAvatarOn(lift, partner));
+        if (!StartLiftRide(lift, stop, camera, partner)) {
+            QueueLiftCall(lift, stop, false, inside);
         }
     }
 
     /// <summary>
     /// Lets a call wait for the lift, replacing an earlier call of the same player to the same stop.
     /// </summary>
-    private static void QueueLiftCall(CageLift lift, int stop, bool byPartner, bool inside) {
+    private static void QueueLiftCall(SyncedLift lift, int stop, bool byPartner, bool inside) {
         var call = lift.Calls.Find(other => other.Stop == stop && other.ByPartner == byPartner);
         if (call == null) {
             call = new LiftCall { Stop = stop, ByPartner = byPartner };
@@ -440,31 +545,40 @@ internal partial class CoopSave {
     /// <summary>
     /// Starts a ride of a lift in the local game and sends it to the partner.
     /// </summary>
-    private void StartLiftRide(CageLift lift, int stop, bool camera, ClientPlayerData? partner) {
-        var control = lift.Control;
-        var fromY = control.transform.position.y;
+    /// <returns>Whether the ride started.</returns>
+    private bool StartLiftRide(SyncedLift lift, int stop, bool camera, ClientPlayerData? partner) {
+        var fromY = lift.Transform.position.y;
+        bool started;
         _liftReplaying = true;
         try {
-            control.MoveToStop(stop, camera);
+            started = lift.Move(stop, camera, 0f);
         } finally {
             _liftReplaying = false;
         }
 
-        if (!IsLiftMoving(control) || GetLiftStop(control) != stop) {
-            return;
+        if (!started) {
+            return false;
         }
 
         lift.WasMoving = true;
         lift.Calls.RemoveAll(call => call.Stop == stop);
-        if (partner == null) {
-            return;
+        if (partner != null) {
+            SendLiftMove(lift, stop, fromY, partner.Id);
         }
 
+        return true;
+    }
+
+    /// <summary>
+    /// Sends a ride that started in the local game, or turned around, to the partner.
+    /// </summary>
+    private void SendLiftMove(SyncedLift lift, int stop, float fromY, ushort partnerId) {
         Send(new CoopSaveUpdate {
-            TargetId = partner.Id,
+            TargetId = partnerId,
             Kind = CoopSaveUpdateKind.LiftMove,
-            Scene = control.gameObject.scene.name,
+            Scene = lift.Owner.gameObject.scene.name,
             ObjectPath = lift.Path,
+            FsmName = lift.FsmName,
             Part = (ushort) stop,
             Key = ++_liftRideCount,
             Values = [fromY]
@@ -472,29 +586,27 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a lift that arrived a moment ago still waits for the player other than the one who wants it, who is in it
+    /// Whether a lift that arrived a moment ago still waits for the player other than the one who wants it, who is on it
     /// or at its stop.
     /// </summary>
-    private bool IsLiftHeldForOther(CageLift lift, bool byPartner, ClientPlayerData? partner) {
+    private static bool IsLiftHeldForOther(SyncedLift lift, bool byPartner, ClientPlayerData? partner) {
         if (Time.unscaledTime - lift.ArrivedAt >= LiftWaitTime) {
             return false;
         }
 
         if (byPartner) {
-            return IsLocalHeroInside(lift) ||
-                   HeroController.instance is { } hero && IsNearLiftStop(lift, GetLiftStop(lift.Control),
-                       hero.transform.position);
+            var hero = HeroController.instance;
+            return hero != null && (lift.ContainsHero(hero) || lift.IsAtStop(lift.Stop, hero.transform.position));
         }
 
-        return partner != null && (IsAvatarInside(lift, partner) ||
-                                   partner.PlayerContainer is { } container &&
-                                   IsNearLiftStop(lift, GetLiftStop(lift.Control), container.transform.position));
+        return partner?.PlayerContainer is { } container &&
+               (IsAvatarOn(lift, partner) || lift.IsAtStop(lift.Stop, container.transform.position));
     }
 
     /// <summary>
-    /// Whether the player of a call still waits for the lift: inside it for a ride, or at the stop for a call.
+    /// Whether the player of a call still waits for the lift: on it for a ride, or at the stop for a call.
     /// </summary>
-    private bool IsCallerWaiting(CageLift lift, LiftCall call, ClientPlayerData? partner) {
+    private static bool IsCallerWaiting(SyncedLift lift, LiftCall call, ClientPlayerData? partner) {
         Vector3 position;
         bool inside;
         if (call.ByPartner) {
@@ -503,155 +615,31 @@ internal partial class CoopSave {
             }
 
             position = container.transform.position;
-            inside = IsAvatarInside(lift, partner);
+            inside = IsAvatarOn(lift, partner);
         } else {
             if (HeroController.instance is not { } hero) {
                 return false;
             }
 
             position = hero.transform.position;
-            inside = IsLocalHeroInside(lift);
+            inside = lift.ContainsHero(hero);
         }
 
-        return call.Inside ? inside : !inside && IsNearLiftStop(lift, call.Stop, position);
+        return call.Inside ? inside : !inside && lift.IsAtStop(call.Stop, position);
     }
 
     /// <summary>
-    /// Whether a position is close to a call plate of a stop of a lift, or to the stop itself if it has no plates.
+    /// Whether the avatar of the partner is in or on a lift, or rides it.
     /// </summary>
-    private static bool IsNearLiftStop(CageLift lift, int stop, Vector3 position) {
-        if (LiftStopsField?.GetValue(lift.Control) is not Array stops || stop < 0 || stop >= stops.Length) {
-            return false;
-        }
-
-        var stopData = stops.GetValue(stop);
-        if (LiftStopPlatesField?.GetValue(stopData) is IList plates && plates.Count > 0) {
-            foreach (var plate in plates) {
-                if (plate is Component component && component != null &&
-                    IsWithinReach(component.transform.position, position)) {
-                    return true;
-                }
-            }
-
-            return false;
-        }
-
-        var stopY = LiftStopPosField?.GetValue(stopData) is float y ? y : lift.Control.transform.position.y;
-        return IsWithinReach(new Vector3(lift.Control.transform.position.x, stopY), position);
+    private static bool IsAvatarOn(SyncedLift lift, ClientPlayerData? partner) {
+        return lift.AvatarRiding ||
+               partner?.PlayerContainer is { } container && lift.Contains(container.transform.position);
     }
 
     /// <summary>
     /// Whether a position is within the reach of a caller around a point.
     /// </summary>
-    private static bool IsWithinReach(Vector3 point, Vector3 position) {
+    private static bool IsWithinCallReach(Vector3 point, Vector3 position) {
         return Mathf.Abs(point.x - position.x) <= LiftCallReach.x && Mathf.Abs(point.y - position.y) <= LiftCallReach.y;
     }
-
-    /// <summary>
-    /// Whether the local hero is inside a cage lift.
-    /// </summary>
-    private static bool IsLocalHeroInside(CageLift lift) {
-        var hero = HeroController.instance;
-        if (hero == null) {
-            return false;
-        }
-
-        return hero.transform.IsChildOf(lift.Control.transform) || IsInsideCage(lift, hero.transform.position);
-    }
-
-    /// <summary>
-    /// Whether the avatar of the partner is inside a cage lift, or rides it.
-    /// </summary>
-    private static bool IsAvatarInside(CageLift lift, ClientPlayerData partner) {
-        return lift.AvatarRiding ||
-               partner.PlayerContainer is { } container && IsInsideCage(lift, container.transform.position);
-    }
-
-    /// <summary>
-    /// Whether a position is inside the space of a cage lift where it is now.
-    /// </summary>
-    private static bool IsInsideCage(CageLift lift, Vector3 position) {
-        var origin = lift.Control.transform.position;
-        return lift.Inside.Contains(new Vector2(position.x - origin.x, position.y - origin.y));
-    }
-
-    /// <summary>
-    /// Gets the sync of a cage lift, looking at it the first time.
-    /// </summary>
-    private CageLift GetCage(LiftControl control) {
-        if (_cages.TryGetValue(control, out var lift)) {
-            return lift;
-        }
-
-        lift = new CageLift {
-            Control = control,
-            Path = ScenePath.Get(control.transform),
-            Inside = GetCageSpace(control),
-            WasMoving = IsLiftMoving(control),
-            StandingY = control.transform.position.y
-        };
-        _cages[control] = lift;
-        return lift;
-    }
-
-    /// <summary>
-    /// Finds the space inside a cage lift, relative to its position: the trigger that tracks the hero on its floor, or
-    /// the trigger that closes its doors, or all its colliders.
-    /// </summary>
-    private static Rect GetCageSpace(LiftControl control) {
-        Bounds? bounds = null;
-        foreach (var stick in control.GetComponentsInChildren<HeroPlatformStick>()) {
-            if (StickInsideTrackerField?.GetValue(stick) is Component tracker && tracker != null &&
-                tracker.GetComponent<Collider2D>() is { } collider) {
-                bounds = Encapsulate(bounds, collider.bounds);
-            }
-        }
-
-        if (bounds == null && LiftDoorTriggerField?.GetValue(control) is Component trigger && trigger != null) {
-            foreach (var collider in trigger.GetComponents<Collider2D>()) {
-                bounds = Encapsulate(bounds, collider.bounds);
-            }
-        }
-
-        if (bounds == null) {
-            foreach (var collider in control.GetComponentsInChildren<Collider2D>()) {
-                bounds = Encapsulate(bounds, collider.bounds);
-            }
-        }
-
-        var origin = control.transform.position;
-        if (bounds is not { } found || found.size.x < 0.5f || found.size.y < 0.5f) {
-            Logger.Warn($"Could not find the inside of the lift {control.name}, using a guess");
-            return new Rect(-2.5f, -1f, 5f, 6f);
-        }
-
-        // The hero stands on the floor, so its position can be a bit above the trigger
-        return new Rect(
-            found.min.x - origin.x - 0.5f, found.min.y - origin.y - 0.5f, found.size.x + 1f, found.size.y + 2f
-        );
-    }
-
-    /// <summary>
-    /// Grows bounds that may not exist yet to include other bounds.
-    /// </summary>
-    private static Bounds? Encapsulate(Bounds? bounds, Bounds other) {
-        if (other.size == Vector3.zero) {
-            return bounds;
-        }
-
-        if (bounds is not { } existing) {
-            return other;
-        }
-
-        existing.Encapsulate(other);
-        return existing;
-    }
-
-    private static bool IsLiftMoving(LiftControl control) => LiftMoveRoutineField?.GetValue(control) != null;
-
-    private static int GetLiftStop(LiftControl control) =>
-        LiftCurrentStopField?.GetValue(control) is int stop ? stop : -1;
-
-    private static bool IsLiftUnlocked(LiftControl control) =>
-        LiftUnlockedField?.GetValue(control) is true;
 }
