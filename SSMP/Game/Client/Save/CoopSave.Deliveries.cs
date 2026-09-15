@@ -88,22 +88,28 @@ internal partial class CoopSave {
     public Action<HeroController>? GiveBackHeroControl { get; set; }
 
     /// <summary>
-    /// The deliveries whose item broke for the local player since the check, by wish. The partner delivering such a
+    /// Takes over the control that shared dialogue took from the local player when the screen fades to bring them to a
+    /// delivery, so that closing the dialogue meanwhile doesn't give it back, or null.
+    /// </summary>
+    public Action? TakeControlFromSharedDialogue { get; set; }
+
+    /// <summary>
+    /// The deliveries whose item broke for the local player during this session, by wish. The partner delivering such a
     /// delivery rewards the local player too, also when the break completed the wish without a reward, as long as the
     /// wish stayed as the break left it.
     /// </summary>
     private readonly Dictionary<string, BrokenDelivery> _brokenDeliveries = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The deliveries that the local player turned in since the check, with the packed state of the wish right after,
-    /// which a break of the partner that crossed the turn-in doesn't undo.
+    /// The deliveries that the local player turned in during this session, with the packed state of the wish right
+    /// after, which a break of the partner that crossed the turn-in doesn't undo.
     /// </summary>
     private readonly Dictionary<string, int> _deliveredWishes = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The completions from dialogue of the partner that the local save took since the check, with the packed state of
-    /// each wish that came with them. What the same dialogue changes afterwards comes with that state again, and counts
-    /// if it matches.
+    /// The completions from dialogue of the partner that the local save took during this session, with the packed state
+    /// of each wish that came with them. What the same dialogue changes afterwards comes with that state again, and
+    /// counts if it matches.
     /// </summary>
     private readonly Dictionary<string, int> _appliedPartnerCompletions = new(StringComparer.Ordinal);
 
@@ -606,6 +612,37 @@ internal partial class CoopSave {
         return FindQuest(name) is { } quest && IsBreakableDelivery(quest) && !IsCarriedDelivery(quest);
     }
 
+    /// <summary>
+    /// Whether dialogue of the partner gives the local player the item of a delivery, with the change of a wish at an
+    /// index or with all of its changes.
+    /// </summary>
+    private static bool GivesDeliveryItem(CoopSaveUpdate update, int index, FullQuestBase quest) {
+        foreach (var target in quest.Targets) {
+            if (target.Counter is not DeliveryQuestItem item || item == null) {
+                continue;
+            }
+
+            var get = GetItemChangeKey(GetItemChange, item);
+            var collect = GetItemChangeKey(CollectItemChange, item);
+            for (var i = 0; i < update.ItemIds.Count && i < update.Amounts.Count; i++) {
+                var entry = update.ItemIds[i];
+                var split = entry.IndexOf('\n');
+                if (split <= 0 || update.Amounts[i] <= 0 ||
+                    !int.TryParse(entry.Substring(0, split), out var entryIndex) ||
+                    (entryIndex != index && entryIndex != AllWishesIndex)) {
+                    continue;
+                }
+
+                var change = entry.Substring(split + 1);
+                if (change == get || change == collect) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
     #endregion
 
     #region Bringing the partner
@@ -816,9 +853,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Fades the screen out before the hero is moved, while the hero takes no input and no damage.
+    /// Fades the screen out before the hero is moved, while the hero takes no input and no damage. Control that shared
+    /// dialogue took from the hero stays taken until the move is done, also when the dialogue closes meanwhile.
     /// </summary>
-    private static void StartSummonFade(HeroController hero, PendingSummon summon, float now) {
+    private void StartSummonFade(HeroController hero, PendingSummon summon, float now) {
+        TakeControlFromSharedDialogue?.Invoke();
         hero.RelinquishControl();
         hero.AddInvulnerabilitySource(SummonInvulnerability);
         summon.TookHero = true;
@@ -833,10 +872,18 @@ internal partial class CoopSave {
     /// </summary>
     private static bool CanPlaceSummonedHero(HeroController hero, ClientPlayerData partner, PendingSummon summon) {
         var gameManager = global::GameManager.instance;
-        return gameManager != null && gameManager.GameState == GameState.PLAYING && !gameManager.IsInSceneTransition &&
-               !hero.cState.dead && !hero.cState.hazardDeath && !hero.cState.hazardRespawning &&
-               !hero.cState.transitioning &&
+        return gameManager != null && gameManager.GameState == GameState.PLAYING && !IsHeroTakenByGame(hero) &&
                (SceneUtil.GetCurrentSceneName() == summon.Scene || partner.IsInLocalScene);
+    }
+
+    /// <summary>
+    /// Whether the game has the hero to itself right now, like during a death, a hazard or a scene change, after which
+    /// it gives control back itself.
+    /// </summary>
+    private static bool IsHeroTakenByGame(HeroController hero) {
+        return hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning ||
+               hero.cState.transitioning ||
+               (global::GameManager.instance != null && global::GameManager.instance.IsInSceneTransition);
     }
 
     /// <summary>
@@ -889,7 +936,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Ends bringing the local player to a delivery, giving the hero back and fading the screen in if it was dark.
-    /// Shared dialogue that the local player still reads keeps control until it is read.
+    /// Shared dialogue that the local player still reads keeps control until it is read, and after a death, a hazard or
+    /// a scene change the game gives control back itself.
     /// </summary>
     private void FinishSummon(HeroController? hero) {
         if (_summon is not { } summon) {
@@ -903,10 +951,12 @@ internal partial class CoopSave {
 
         if (hero != null) {
             hero.RemoveInvulnerabilitySource(SummonInvulnerability);
-            if (GiveBackHeroControl != null) {
-                GiveBackHeroControl(hero);
-            } else {
-                hero.RegainControl();
+            if (!IsHeroTakenByGame(hero)) {
+                if (GiveBackHeroControl != null) {
+                    GiveBackHeroControl(hero);
+                } else {
+                    hero.RegainControl();
+                }
             }
         }
 
@@ -955,20 +1005,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the deliveries that broke, were turned in or came from the partner, for a new check.
-    /// </summary>
-    private void ResetDeliveryCheck() {
-        _brokenDeliveries.Clear();
-        _deliveredWishes.Clear();
-        _appliedPartnerCompletions.Clear();
-    }
-
-    /// <summary>
-    /// Forgets deliveries and gives the hero back, for a new session.
+    /// Forgets deliveries and gives the hero back, for a new session. What broke, was turned in or came from the partner
+    /// outlasts a new check, since the packed state that each of them keeps tells whether it still holds.
     /// </summary>
     private void ResetDeliveries() {
         FinishSummon(HeroController.instance);
-        ResetDeliveryCheck();
+        _brokenDeliveries.Clear();
+        _deliveredWishes.Clear();
+        _appliedPartnerCompletions.Clear();
         _questsByName.Clear();
     }
 

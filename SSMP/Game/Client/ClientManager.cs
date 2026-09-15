@@ -286,6 +286,7 @@ internal class ClientManager : IClientManager {
             IsHeroLockedInArena = _arenaCoop.IsLocalHeroLockedIn,
             IsHeroInWaitingBossRoom = _bossRoomCoop.IsLocalHeroInWaitingRoom,
             IsReadingSharedDialogue = () => _bossRoomCoop.HasSharedDialogueControl,
+            TakeControlFromSharedDialogue = _bossRoomCoop.TakeOverDialogueControl,
             GiveBackHeroControl = _bossRoomCoop.GiveBackTakenControl
         };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;

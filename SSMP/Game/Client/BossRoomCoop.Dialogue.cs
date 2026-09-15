@@ -539,6 +539,15 @@ internal partial class BossRoomCoop {
     public bool HasSharedDialogueControl => _shownDialogue != null && _tookHeroControl;
 
     /// <summary>
+    /// Takes over the control that shared dialogue took from the local player, for something that keeps them without
+    /// control for a moment, like bringing them to a delivery of a two-player save. Closing the dialogue then doesn't
+    /// give control back, which <see cref="GiveBackTakenControl"/> does instead.
+    /// </summary>
+    public void TakeOverDialogueControl() {
+        _tookHeroControl = false;
+    }
+
+    /// <summary>
     /// Gives control back to the local player after something else took it for a moment, like bringing them to a
     /// delivery of a two-player save. Shared dialogue that is shown keeps control until it is read instead. Giving
     /// control back this way doesn't count as the game giving it back to a room that waits.
