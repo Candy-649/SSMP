@@ -549,7 +549,8 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     WishValues = update.WishValues,
                     PlayTime = update.PlayTime,
                     Sequence = update.Sequence,
-                    Amounts = update.Amounts
+                    Amounts = update.Amounts,
+                    Values = update.Values
                 }
             );
         }

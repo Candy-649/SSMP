@@ -31,7 +31,7 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For pairing, the ID of the request. For a hello, world progress and leaving, the key of the check, which tells
-    /// newer checks from older ones.
+    /// newer checks from older ones. For a lift, a count that grows with every ride that the sender starts.
     /// </summary>
     public ulong Key { get; set; }
 
@@ -41,14 +41,17 @@ internal class CoopSaveUpdate : IPacketData {
     public string PartnerKey { get; set; } = "";
 
     /// <summary>
-    /// For world progress, which part of the progress this is, counting from 0.
+    /// For world progress, which part of the progress this is, counting from 0. For a lift that stops at stops, the
+    /// stop.
     /// </summary>
     public ushort Part { get; set; }
 
     /// <summary>
     /// For world progress, how many parts the progress is sent in. For a hello, 0 for one that starts a check and 1 for
     /// one that answers. For an interaction, 1 if the use of the other player had arrived before the sender used it.
-    /// For key dialogue, 1 when it starts, 0 when it ends and 2 when it couldn't start without the other player.
+    /// For key dialogue, 1 when it starts, 0 when it ends and 2 when it couldn't start without the other player. For a
+    /// call of a lift, 1 if the sender is inside it. For the state of a lift, 1 while it moves. For driving a carriage,
+    /// 1 while the sender holds its button.
     /// </summary>
     public ushort PartCount { get; set; }
 
@@ -96,7 +99,8 @@ internal class CoopSaveUpdate : IPacketData {
     public List<int> WishValues { get; set; } = [];
 
     /// <summary>
-    /// For world progress, the play time of the save of the sender in seconds.
+    /// For world progress, the play time of the save of the sender in seconds. For the state of a lift, how long the
+    /// sender has been in its room.
     /// </summary>
     public float PlayTime { get; set; }
 
@@ -114,12 +118,12 @@ internal class CoopSaveUpdate : IPacketData {
     public List<int> Amounts { get; set; } = [];
 
     /// <summary>
-    /// For an interaction, the scene of the object that the sender used.
+    /// For an interaction, the scene of the object that the sender used. For a lift, the scene of the lift.
     /// </summary>
     public string Scene { get; set; } = "";
 
     /// <summary>
-    /// For an interaction, the path of the object in its scene.
+    /// For an interaction or a lift, the path of the object in its scene.
     /// </summary>
     public string ObjectPath { get; set; } = "";
 
@@ -129,9 +133,16 @@ internal class CoopSaveUpdate : IPacketData {
     public string FsmName { get; set; } = "";
 
     /// <summary>
-    /// For an interaction, the state of the FSM in which its change to the world starts.
+    /// For an interaction, the state of the FSM in which its change to the world starts. For a lift that an FSM runs,
+    /// the state that its ride goes to.
     /// </summary>
     public string StateName { get; set; } = "";
+
+    /// <summary>
+    /// For a lift, where it was when the update was sent: its height, or for a carriage the part of its way, its
+    /// speed and the direction that it speeds up to.
+    /// </summary>
+    public List<float> Values { get; set; } = [];
 
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
@@ -166,6 +177,11 @@ internal class CoopSaveUpdate : IPacketData {
         packet.Write((ushort) Amounts.Count);
         foreach (var amount in Amounts) {
             packet.Write(amount);
+        }
+
+        packet.Write((ushort) Values.Count);
+        foreach (var value in Values) {
+            packet.Write(value);
         }
     }
 
@@ -205,6 +221,12 @@ internal class CoopSaveUpdate : IPacketData {
         Amounts = new List<int>(amountCount);
         for (var i = 0; i < amountCount; i++) {
             Amounts.Add(packet.ReadInt());
+        }
+
+        var floatCount = packet.ReadUShort();
+        Values = new List<float>(floatCount);
+        for (var i = 0; i < floatCount; i++) {
+            Values.Add(packet.ReadFloat());
         }
     }
 
@@ -329,5 +351,32 @@ internal enum CoopSaveUpdateKind : byte {
     /// The progress of the targets of the accepted wishes, and of the wishes that take something, in the save of the
     /// sender.
     /// </summary>
-    WishProgress
+    WishProgress,
+
+    /// <summary>
+    /// A lift started a ride in the game that decides about the lift, so the game of the other player starts the same
+    /// ride.
+    /// </summary>
+    LiftMove,
+
+    /// <summary>
+    /// The local player called a lift or started a ride from inside it in a game that doesn't decide about the lift, so
+    /// the game that decides serves the call.
+    /// </summary>
+    LiftCall,
+
+    /// <summary>
+    /// The sender entered a room and asks for the state of its lifts, which the game of a player in that room sends.
+    /// </summary>
+    LiftStateRequest,
+
+    /// <summary>
+    /// Where a lift in the room of the sender is and whether it moves, for a player who entered that room.
+    /// </summary>
+    LiftState,
+
+    /// <summary>
+    /// The sender drives a carriage with its buttons, or let go of them, with where the carriage is.
+    /// </summary>
+    LiftDrive
 }

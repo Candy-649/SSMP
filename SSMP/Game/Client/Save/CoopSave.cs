@@ -335,6 +335,7 @@ internal partial class CoopSave {
         );
         RegisterInteractionHooks();
         RegisterWishTalkHooks();
+        RegisterLiftHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -436,6 +437,7 @@ internal partial class CoopSave {
             UpdateWorldChanges(partner);
             UpdateWishes(partner);
             UpdateStoryFlags(partner);
+            UpdateLifts(partner);
             ReleaseHold(hero);
             return;
         }
@@ -535,6 +537,7 @@ internal partial class CoopSave {
         ResetWishes();
         ResetStoryFlags();
         ResetWishTalk();
+        ResetLifts();
     }
 
     /// <summary>
@@ -558,6 +561,7 @@ internal partial class CoopSave {
         OnCheckpointSceneChanged(newScene.name);
         ResetInteractions();
         OnWishTalkSceneChanged();
+        OnLiftSceneChanged();
     }
 
     /// <summary>
@@ -714,6 +718,18 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WishProgress:
                 OnWishProgress(player, update);
+                break;
+            case CoopSaveUpdateKind.LiftMove:
+                OnLiftMove(player, update);
+                break;
+            case CoopSaveUpdateKind.LiftCall:
+                OnLiftCall(player, update);
+                break;
+            case CoopSaveUpdateKind.LiftStateRequest:
+                OnLiftStateRequest(player, update);
+                break;
+            case CoopSaveUpdateKind.LiftState:
+                OnLiftState(player, update);
                 break;
         }
     }
