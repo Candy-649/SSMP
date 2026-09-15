@@ -394,10 +394,16 @@ internal partial class CoopSave {
 
         /// <summary>
         /// Whether what the dialogue took or gave goes to the partner with the change at an index of
-        /// <see cref="Changes"/>: a payment that only counts for a wish that takes it needs that wish to take what was
-        /// paid.
+        /// <see cref="Changes"/>: a payment for a known wish needs a change of that wish, and a payment that only counts
+        /// for a wish that takes it needs that wish to take what was paid.
         /// </summary>
         public bool Counts(TalkItem item, int index) {
+            // A payment for a wish whose change the dialogue didn't record, like one that was completed already, pays for
+            // no other wish
+            if (item.ForWish != null && (index < 0 || index >= Changes.Count || Changes[index] != item.ForWish)) {
+                return false;
+            }
+
             if (!item.OnlyForTarget) {
                 return true;
             }
@@ -1520,6 +1526,7 @@ internal partial class CoopSave {
             var anyApplies = false;
             var anyCompleted = false;
             var completionApplies = false;
+            var turnedInHere = false;
             var changed = 0;
             var accepted = 0;
             var completed = 0;
@@ -1539,7 +1546,11 @@ internal partial class CoopSave {
 
                 var before = playerData.QuestCompletionData.GetData(name);
                 var isCompletion = (value & WishCompleted) != 0;
-                applies[i] = !_differentWishNames.Contains(name) &&
+
+                // A wish that the local player turns in at a board at the same time is paid and rewarded there
+                var isTurnedInHere = isCompletion && !before.IsCompleted && IsTurningInAtBoard(name);
+                turnedInHere |= isTurnedInHere;
+                applies[i] = !_differentWishNames.Contains(name) && !isTurnedInHere &&
                              (isCompletion ? !before.IsCompleted : !before.IsAccepted || before.IsCompleted);
                 anyApplies |= applies[i];
                 anyCompleted |= isCompletion;
@@ -1576,6 +1587,11 @@ internal partial class CoopSave {
 
             if (completionApplies) {
                 Chat($"{player.Username} turned in a wish with you. You paid your own copy and got the reward too.");
+            } else if (turnedInHere) {
+                Chat(
+                    $"{player.Username} turned in the same wish at the same time. You pay your copy and get the reward " +
+                    "once, at your board."
+                );
             } else if (anyCompleted) {
                 Chat(
                     $"{player.Username} turned in a wish that your save had completed already, so you didn't pay or " +

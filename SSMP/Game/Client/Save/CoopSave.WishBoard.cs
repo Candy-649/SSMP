@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
@@ -13,8 +14,23 @@ namespace SSMP.Game.Client.Save;
 /// its wishes that are ready to turn in stay on it. Nobody else uses a board while a player turns in or donates there.
 /// </summary>
 internal partial class CoopSave {
+    /// <summary>
+    /// How long, in seconds, until opening a board without the partner tells both players again why its wishes stay on
+    /// it.
+    /// </summary>
+    private const float BoardHoldNoticeInterval = 30f;
+
     private static readonly FieldInfo? BoardHandInFsmField =
         typeof(QuestBoardInteractable).GetField("handInSequenceFsm", InstanceFlags);
+
+    private static readonly FieldInfo? BoardItemBoardField =
+        typeof(QuestBoardInteractable).GetField("questBoard", InstanceFlags);
+
+    private static readonly FieldInfo? BoardQueuedCompletionsField =
+        typeof(QuestBoardInteractable).GetField("queuedCompletions", InstanceFlags);
+
+    private static readonly FieldInfo? BoardDonateQuestField =
+        typeof(QuestBoardInteractable).GetField("donateQuest", InstanceFlags);
 
     private static readonly FieldInfo? BoardYesNoQuestField =
         typeof(QuestItemBoard).GetField("yesNoQuest", InstanceFlags);
@@ -34,6 +50,11 @@ internal partial class CoopSave {
     /// Whether only the local copies count for whether a wish can be completed, to tell what only the partner lacks.
     /// </summary>
     private bool _localCopiesOnly;
+
+    /// <summary>
+    /// When opening a board without the partner tells both players again why its wishes stay on it.
+    /// </summary>
+    private float _nextBoardHoldNoticeTime;
 
     /// <summary>
     /// Registers the hooks for wish boards.
@@ -69,7 +90,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for QuestBoardInteractable.OnStartDialogue: the use of a board is recorded like dialogue about wishes, and its
-    /// wishes that are ready to turn in stay on it while the partner isn't close by.
+    /// wishes that are ready to turn in stay on it while the partner isn't close by or uses the board.
     /// </summary>
     private void OnBoardStartDialogue(Action<QuestBoardInteractable> orig, QuestBoardInteractable self) {
         var holdTurnIns = false;
@@ -99,7 +120,7 @@ internal partial class CoopSave {
     /// Starts recording the use of a board. A board with wishes that are ready to turn in is used like key dialogue,
     /// which needs the partner close by.
     /// </summary>
-    /// <returns>Whether the wishes that are ready to turn in stay on the board, because the partner isn't close by.</returns>
+    /// <returns>Whether the wishes that are ready to turn in stay on the board.</returns>
     private bool StartBoardTalk(QuestBoardInteractable board, CoopSaveMarker marker) {
         var fsms = GetBoardFsms(board);
         EndWishTalk();
@@ -118,14 +139,25 @@ internal partial class CoopSave {
             return false;
         }
 
+        // The partner started to turn in or donate here while the local hero walked up to the board
+        if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
+            Chat($"{GetPartnerName()} is using this board right now, so it opens without turning in wishes.");
+            _wishTalk = new WishTalk(board, fsms, false);
+            return true;
+        }
+
         var partner = GetCheckedPartner();
         var absence = GetBoardAbsence(partner, marker, "turn in wishes at this board");
         if (partner == null || absence != null) {
-            Chat($"{absence} Until then, the board opens without turning them in.");
-            if (partner != null) {
-                Send(CreateWishTalkUpdate(
-                    partner.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
-                ));
+            // Looking at the board again soon doesn't repeat why its wishes stay
+            if (Time.unscaledTime >= _nextBoardHoldNoticeTime) {
+                _nextBoardHoldNoticeTime = Time.unscaledTime + BoardHoldNoticeInterval;
+                Chat($"{absence} Until then, the board opens without turning them in.");
+                if (partner != null) {
+                    Send(CreateWishTalkUpdate(
+                        partner.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
+                    ));
+                }
             }
 
             _wishTalk = new WishTalk(board, fsms, false);
@@ -202,8 +234,33 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Hook for <see cref="FullQuestBase.GetIsReadyToTurnIn"/>: while a board opens without the partner close by, no wish
-    /// is ready to turn in at a board.
+    /// Whether the board that the local player uses takes in a wish right now, from queueing it or accepting its
+    /// donation until it is completed. The local player pays for it and gets its reward there.
+    /// </summary>
+    private bool IsTurningInAtBoard(string name) {
+        if (_wishTalk?.Npc is not QuestBoardInteractable board || board == null) {
+            return false;
+        }
+
+        if (BoardDonateQuestField?.GetValue(board) is FullQuestBase donation && donation != null &&
+            donation.name == name) {
+            return true;
+        }
+
+        if (BoardQueuedCompletionsField?.GetValue(board) is IEnumerable queued) {
+            foreach (var entry in queued) {
+                if (entry is FullQuestBase quest && quest != null && quest.name == name) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Hook for <see cref="FullQuestBase.GetIsReadyToTurnIn"/>: while a board opens without turning in wishes, no wish is
+    /// ready to turn in at a board.
     /// </summary>
     private bool OnGetIsReadyToTurnIn(Func<FullQuestBase, bool, bool> orig, FullQuestBase self, bool atQuestBoard) {
         return (!atQuestBoard || _boardTurnInBlockDepth == 0) && orig(self, atQuestBoard);
@@ -234,13 +291,13 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for QuestItemBoard.AcceptDonation: a donation needs the partner close by and able to pay too, since both
-    /// players pay it. Otherwise the board goes back to its list.
+    /// players pay it, and not using the board themselves. Otherwise the board goes back to its list.
     /// </summary>
     private void OnBoardAcceptDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
         try {
             if (_everChecked && GetCurrentMarker() is { } marker &&
                 BoardYesNoQuestField?.GetValue(self) is FullQuestBase quest && quest != null &&
-                !TryStartDonation(quest, marker)) {
+                !TryStartDonation(self, quest, marker)) {
                 self.DeclineDonation();
                 return;
             }
@@ -252,17 +309,30 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Checks that a donation at the board that the local player uses can go through, and keeps the board for the local
-    /// player until it did.
+    /// Checks that a donation at a board can go through, and records it with the use of that board, which the partner
+    /// can't use until it went through.
     /// </summary>
     /// <returns>Whether the donation may go through.</returns>
-    private bool TryStartDonation(FullQuestBase quest, CoopSaveMarker marker) {
+    private bool TryStartDonation(QuestItemBoard itemBoard, FullQuestBase quest, CoopSaveMarker marker) {
+        var board = FindBoard(itemBoard);
+        if (board == null) {
+            Logger.Warn($"Could not find the board of the donation '{quest.name}', so the partner doesn't pay it");
+            return true;
+        }
+
+        if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
+            Chat($"{GetPartnerName()} is using this board right now.");
+            return false;
+        }
+
         var partner = GetCheckedPartner();
         var absence = GetBoardAbsence(partner, marker, "donate, since both of you pay");
         if (partner == null || absence != null) {
             Chat(absence!);
-            if (partner != null && _wishTalk is { } refusedTalk) {
-                Send(CreateWishTalkUpdate(partner.Id, refusedTalk.Scene, refusedTalk.Path, WishTalkRefused));
+            if (partner != null) {
+                Send(CreateWishTalkUpdate(
+                    partner.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
+                ));
             }
 
             return false;
@@ -274,13 +344,40 @@ internal partial class CoopSave {
             return false;
         }
 
-        if (_wishTalk is { Npc: QuestBoardInteractable, IsKey: false } talk) {
+        // The use of the board may have stopped recording while its list stayed open for long
+        var talk = _wishTalk;
+        if (talk == null || talk.Npc != board) {
+            EndWishTalk();
+            talk = new WishTalk(board, GetBoardFsms(board), true);
+            _wishTalk = talk;
+            Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
+        } else if (!talk.IsKey) {
             talk.IsKey = true;
             Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
         }
 
         Logger.Info($"Donation '{quest.name}' goes through with {partner.Username} close by");
         return true;
+    }
+
+    /// <summary>
+    /// Finds the board that shows a board list, which isn't a child of the board.
+    /// </summary>
+    private QuestBoardInteractable? FindBoard(QuestItemBoard itemBoard) {
+        if (_wishTalk?.Npc is QuestBoardInteractable talkBoard && talkBoard != null &&
+            (BoardItemBoardField?.GetValue(talkBoard) as QuestItemBoard) == itemBoard) {
+            return talkBoard;
+        }
+
+        foreach (var board in UnityEngine.Object.FindObjectsByType<QuestBoardInteractable>(
+                     FindObjectsInactive.Exclude, FindObjectsSortMode.None
+                 )) {
+            if (board != null && (BoardItemBoardField?.GetValue(board) as QuestItemBoard) == itemBoard) {
+                return board;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
