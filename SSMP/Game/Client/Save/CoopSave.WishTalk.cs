@@ -218,6 +218,11 @@ internal partial class CoopSave {
     private int _endingWishDepth;
 
     /// <summary>
+    /// The wish whose targets are taken right now, which what is taken meanwhile pays for, or null.
+    /// </summary>
+    private FullQuestBase? _consumingWish;
+
+    /// <summary>
     /// How many writes of the player data run right now, of which only the outermost is recorded, since some writes of
     /// counters make others.
     /// </summary>
@@ -261,10 +266,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Dialogue of the local player with a character who deals in wishes.
+    /// Dialogue of the local player with a character who deals in wishes, or their use of a wish board.
     /// </summary>
     private sealed class WishTalk {
-        public WishTalk(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms, bool isKey) {
+        public WishTalk(NPCControlBase npc, HashSet<PlayMakerFSM> fsms, bool isKey) {
             Npc = npc;
             Fsms = fsms;
             IsKey = isKey;
@@ -273,9 +278,9 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// The character.
+        /// The character, or the wish board.
         /// </summary>
-        public PlayMakerNPC Npc { get; }
+        public NPCControlBase Npc { get; }
 
         /// <summary>
         /// The FSMs that run the dialogue of the character.
@@ -283,9 +288,10 @@ internal partial class CoopSave {
         public HashSet<PlayMakerFSM> Fsms { get; }
 
         /// <summary>
-        /// Whether it is key dialogue, which the partner reads too.
+        /// Whether it is key dialogue, which the partner reads too, or a use of a board that needs the partner, like a
+        /// donation, which starts as the list of the board.
         /// </summary>
-        public bool IsKey { get; }
+        public bool IsKey { get; set; }
 
         /// <summary>
         /// The scene of the character.
@@ -370,10 +376,10 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// Remembers what the dialogue took or gave.
+        /// Remembers what the dialogue took or gave, with the wish that took it if known.
         /// </summary>
-        public void AddItem(string change, int amount, bool isTake) {
-            Items.Add(new TalkItem(change, amount, Changes.Count, isTake, false, null, null));
+        public void AddItem(string change, int amount, bool isTake, string? forWish = null) {
+            Items.Add(new TalkItem(change, amount, Changes.Count, isTake, false, null, null, forWish));
             LastChangeTime = Time.unscaledTime;
         }
 
@@ -383,7 +389,7 @@ internal partial class CoopSave {
         /// </summary>
         public void AddTargetPayment(string change, int amount, SavedItem? item, CurrencyType? currency) {
             // A payment that may be for something else doesn't keep the dialogue open
-            Items.Add(new TalkItem(change, amount, Changes.Count, true, true, item, currency));
+            Items.Add(new TalkItem(change, amount, Changes.Count, true, true, item, currency, null));
         }
 
         /// <summary>
@@ -415,14 +421,28 @@ internal partial class CoopSave {
 
         /// <summary>
         /// The index of the change in <see cref="Changes"/> that what the dialogue took or gave belongs to. A payment
-        /// belongs to the change after it, which it paid for, and a gain to the change before it, which it rewarded.
+        /// belongs to the next change of the wish that took it, or else to the change after it, which it paid for. A
+        /// gain belongs to the change before it, which it rewarded.
         /// </summary>
         public int GetChangeIndex(TalkItem item) {
             if (Changes.Count == 0) {
                 return AllWishesIndex;
             }
 
-            return item.IsTake ? Mathf.Min(item.ChangeCount, Changes.Count - 1) : Mathf.Max(item.ChangeCount - 1, 0);
+            if (!item.IsTake) {
+                return Mathf.Max(item.ChangeCount - 1, 0);
+            }
+
+            // A board takes what all its wishes take before it completes them one after another
+            if (item.ForWish != null) {
+                for (var i = item.ChangeCount; i < Changes.Count; i++) {
+                    if (Changes[i] == item.ForWish) {
+                        return i;
+                    }
+                }
+            }
+
+            return Mathf.Min(item.ChangeCount, Changes.Count - 1);
         }
     }
 
@@ -437,7 +457,8 @@ internal partial class CoopSave {
             bool isTake,
             bool onlyForTarget,
             SavedItem? paidItem,
-            CurrencyType? paidCurrency
+            CurrencyType? paidCurrency,
+            string? forWish
         ) {
             Change = change;
             Amount = amount;
@@ -446,6 +467,7 @@ internal partial class CoopSave {
             OnlyForTarget = onlyForTarget;
             PaidItem = paidItem;
             PaidCurrency = paidCurrency;
+            ForWish = forWish;
         }
 
         /// <summary>
@@ -482,6 +504,11 @@ internal partial class CoopSave {
         /// For a payment of money that only counts for a wish that takes it, the currency that was paid.
         /// </summary>
         public CurrencyType? PaidCurrency { get; }
+
+        /// <summary>
+        /// For a payment, the name of the wish that took it, or null if unknown.
+        /// </summary>
+        public string? ForWish { get; }
     }
 
     /// <summary>
@@ -585,6 +612,10 @@ internal partial class CoopSave {
             ),
             new Func<Func<FullQuestBase, Action?, bool, bool, bool, bool>, FullQuestBase, Action?, bool, bool, bool,
                 bool>(OnTryEndWish)
+        );
+        AddWishTalkHook(
+            typeof(FullQuestBase).GetMethod("ConsumeTarget", InstanceFlags, null, Type.EmptyTypes, null),
+            new Func<Func<FullQuestBase, bool>, FullQuestBase, bool>(OnConsumeWishTarget)
         );
 
         // What a character gives in its dialogue. Money that it gives goes through the hook for changes of currency
@@ -729,10 +760,18 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a character talks to the local hero or is about to, while the hero walks up to it.
+    /// Whether a character talks to the local hero or is about to, while the hero walks up to it. A wish board is in use
+    /// until it gives the hero control back, after its last reward or donation.
     /// </summary>
-    private static bool IsTalking(PlayMakerNPC? npc) {
-        return npc != null && (npc.IsRunningDialogue || WaitingToBeginField?.GetValue(npc) is true);
+    private static bool IsTalking(NPCControlBase? npc) {
+        if (npc == null) {
+            return false;
+        }
+
+        return WaitingToBeginField?.GetValue(npc) is true ||
+               (npc is PlayMakerNPC playMakerNpc
+                   ? playMakerNpc.IsRunningDialogue
+                   : InteractManager.BlockingInteractable == npc);
     }
 
     /// <summary>
@@ -793,7 +832,11 @@ internal partial class CoopSave {
         try {
             if (_everChecked && GetCurrentMarker() is { } marker) {
                 if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == self) {
-                    Chat($"{GetPartnerName()} is talking to them right now.");
+                    Chat(
+                        self is QuestBoardInteractable
+                            ? $"{GetPartnerName()} is using this board right now."
+                            : $"{GetPartnerName()} is talking to them right now."
+                    );
                     allowed = false;
                 } else if (self is PlayMakerNPC npc) {
                     allowed = TryStartWishTalk(npc, marker);
@@ -1253,7 +1296,12 @@ internal partial class CoopSave {
         try {
             switch (update.PartCount) {
                 case WishTalkRefused:
-                    Chat($"{player.Username} wants to talk about a wish, which needs you close by.");
+                    var refusedAt = ScenePath.Find(update.ObjectPath, update.Scene);
+                    Chat(
+                        refusedAt != null && refusedAt.GetComponent<QuestBoardInteractable>() != null
+                            ? $"{player.Username} wants to use a wish board with you, which needs you close by."
+                            : $"{player.Username} wants to talk about a wish, which needs you close by."
+                    );
                     break;
                 case WishTalkEnded:
                     _partnerTalk = null;
@@ -1307,9 +1355,26 @@ internal partial class CoopSave {
 
         if (ended && !wasCompleted && self.IsCompleted && !_applyingPartnerTalk) {
             AddTalkWish(self);
+            if (_boardCompletionDepth > 0) {
+                RecordBoardReward(self);
+            }
         }
 
         return ended;
+    }
+
+    /// <summary>
+    /// Hook for <see cref="FullQuestBase.ConsumeTarget"/>: what a wish takes pays for that wish, also when the dialogue
+    /// completes it only later, like a board.
+    /// </summary>
+    private bool OnConsumeWishTarget(Func<FullQuestBase, bool> orig, FullQuestBase self) {
+        var outer = _consumingWish;
+        _consumingWish = self;
+        try {
+            return orig(self);
+        } finally {
+            _consumingWish = outer;
+        }
     }
 
     /// <summary>
@@ -1353,8 +1418,9 @@ internal partial class CoopSave {
             return;
         }
 
+        var forWish = _consumingWish != null ? _consumingWish.name : null;
         if (talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm)) {
-            talk.AddItem(change, amount, true);
+            talk.AddItem(change, amount, true, forWish);
             return;
         }
 
@@ -1363,8 +1429,8 @@ internal partial class CoopSave {
             return;
         }
 
-        if (_endingWishDepth > 0) {
-            talk.AddItem(change, amount, true);
+        if (_endingWishDepth > 0 || forWish != null) {
+            talk.AddItem(change, amount, true, forWish);
         } else {
             talk.AddTargetPayment(change, amount, item, currency);
         }
@@ -1801,7 +1867,7 @@ internal partial class CoopSave {
     /// </summary>
     private bool OnGetWishCanComplete(Func<FullQuestBase, bool> orig, FullQuestBase self) {
         var canComplete = orig(self);
-        if (!canComplete || _checkedWith == null || self == null) {
+        if (!canComplete || _checkedWith == null || self == null || _localCopiesOnly) {
             return canComplete;
         }
 

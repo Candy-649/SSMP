@@ -335,6 +335,7 @@ internal partial class CoopSave {
         );
         RegisterInteractionHooks();
         RegisterWishTalkHooks();
+        RegisterWishBoardHooks();
         RegisterLiftHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
