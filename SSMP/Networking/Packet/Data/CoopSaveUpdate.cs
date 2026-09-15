@@ -47,7 +47,7 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For world progress, how many parts the progress is sent in. For a hello, 0 for one that starts a check and 1 for
-    /// one that answers.
+    /// one that answers. For an interaction, 1 if the use of the other player had arrived before the sender used it.
     /// </summary>
     public ushort PartCount { get; set; }
 

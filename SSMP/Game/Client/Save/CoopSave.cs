@@ -520,7 +520,7 @@ internal partial class CoopSave {
         ResetCheck();
         ResetCheckpointSession();
         ResetWorldChanges();
-        ResetInteractions();
+        ResetInteractionSession();
     }
 
     /// <summary>
