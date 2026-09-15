@@ -283,7 +283,10 @@ internal class ClientManager : IClientManager {
             fsm => _coopSave.HoldsSharedTalkEnd(fsm)
         );
         _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager) {
-            IsHeroLockedInArena = _arenaCoop.IsLocalHeroLockedIn
+            IsHeroLockedInArena = _arenaCoop.IsLocalHeroLockedIn,
+            IsHeroInWaitingBossRoom = _bossRoomCoop.IsLocalHeroInWaitingRoom,
+            IsReadingSharedDialogue = () => _bossRoomCoop.HasSharedDialogueControl,
+            GiveBackHeroControl = _bossRoomCoop.GiveBackTakenControl
         };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _coopHits = new CoopHits(

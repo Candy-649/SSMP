@@ -8,14 +8,17 @@ using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
 
+// SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
+using Fsm = HutongGames.PlayMaker.Fsm;
+
 /// <summary>
 /// Deliveries in a checked two-player save: wishes whose item the player carries to a character, and which breaks on
 /// the way. Both players carry the item of a delivery that they accepted, since the partner gets what the dialogue gave
-/// (see CoopSave.WishTalk). Whoever gets to the character first turns it in without waiting: the partner gets the turn-in
-/// at once, pays their copy and gets the reward too, and is brought to the character with a short fade where that is
-/// safe. A delivery that breaks for one player still counts for both while the partner carries theirs, and fails once no
-/// player carries it anymore. The player whose item broke doesn't get the delivery back as accepted, because its
-/// character takes in an accepted delivery without looking at the item.
+/// (see CoopSave.WishTalk). Whoever gets to the character first turns it in without waiting, while the character doesn't
+/// talk to the partner: the partner gets the turn-in at once, pays their copy and gets the reward too, and is brought to
+/// the character with a short fade where that is safe. A delivery that breaks for one player still counts for both when
+/// the partner delivers theirs, and fails once no player carries it anymore. The player whose item broke doesn't get the
+/// delivery back as accepted, because its character takes in an accepted delivery without looking at the item.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -67,10 +70,42 @@ internal partial class CoopSave {
     public Func<bool>? IsHeroLockedInArena { get; set; }
 
     /// <summary>
-    /// The deliveries whose item broke for the local player while the partner still carries theirs, whose reward the
-    /// local player gets when the partner delivers, also after the break completed the wish without one.
+    /// Whether the local player is in a boss room that waits for the other players, which they aren't taken out of for a
+    /// delivery either.
     /// </summary>
-    private readonly HashSet<string> _heldBrokenDeliveries = new(StringComparer.Ordinal);
+    public Func<bool>? IsHeroInWaitingBossRoom { get; set; }
+
+    /// <summary>
+    /// Whether shared dialogue, like the lines of a delivery that the partner turns in, is shown to the local player and
+    /// took control from them.
+    /// </summary>
+    public Func<bool>? IsReadingSharedDialogue { get; set; }
+
+    /// <summary>
+    /// Gives control back to the local player after they were brought to a delivery, or leaves it to shared dialogue
+    /// that they still read, or null to give it back directly.
+    /// </summary>
+    public Action<HeroController>? GiveBackHeroControl { get; set; }
+
+    /// <summary>
+    /// The deliveries whose item broke for the local player since the check, by wish. The partner delivering such a
+    /// delivery rewards the local player too, also when the break completed the wish without a reward, as long as the
+    /// wish stayed as the break left it.
+    /// </summary>
+    private readonly Dictionary<string, BrokenDelivery> _brokenDeliveries = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The deliveries that the local player turned in since the check, with the packed state of the wish right after,
+    /// which a break of the partner that crossed the turn-in doesn't undo.
+    /// </summary>
+    private readonly Dictionary<string, int> _deliveredWishes = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The completions from dialogue of the partner that the local save took since the check, with the packed state of
+    /// each wish that came with them. What the same dialogue changes afterwards comes with that state again, and counts
+    /// if it matches.
+    /// </summary>
+    private readonly Dictionary<string, int> _appliedPartnerCompletions = new(StringComparer.Ordinal);
 
     /// <summary>
     /// The full wishes of the game by name, found when first needed.
@@ -113,6 +148,31 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// A delivery whose item broke for the local player.
+    /// </summary>
+    private sealed class BrokenDelivery {
+        public BrokenDelivery(int value, ulong report) {
+            Value = value;
+            Report = report;
+        }
+
+        /// <summary>
+        /// The packed state of the wish right after the break.
+        /// </summary>
+        public int Value { get; }
+
+        /// <summary>
+        /// The sequence of the report of the break to the partner, which the answer of the partner names.
+        /// </summary>
+        public ulong Report { get; }
+
+        /// <summary>
+        /// Whether the partner answered that they still carry theirs.
+        /// </summary>
+        public bool StillCarried { get; set; }
+    }
+
+    /// <summary>
     /// Bringing the local player to a delivery that the partner turns in.
     /// </summary>
     private sealed class PendingSummon {
@@ -145,7 +205,7 @@ internal partial class CoopSave {
         public string Gate { get; }
 
         /// <summary>
-        /// Where the partner stood when they started turning in the delivery.
+        /// Where the partner stood when they turned in the delivery.
         /// </summary>
         public Vector2 Position { get; }
 
@@ -256,14 +316,15 @@ internal partial class CoopSave {
         }
 
         _knownWishes[name] = after;
-        _heldBrokenDeliveries.Remove(name);
-        Send(new CoopSaveUpdate {
+        var report = new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.DeliveryBreak,
             PartCount = DeliveryBreakReport,
             WishNames = [name],
             WishValues = [after]
-        });
+        };
+        Send(report);
+        _brokenDeliveries[name] = new BrokenDelivery(after, report.Sequence);
         Logger.Info($"The item of the delivery '{name}' broke, telling {partner.Username}");
     }
 
@@ -280,21 +341,25 @@ internal partial class CoopSave {
         try {
             for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
                 var name = update.WishNames[i];
-                switch (update.PartCount) {
-                    case DeliveryStillCarried:
-                        _heldBrokenDeliveries.Add(name);
-                        Chat(
-                            $"Your delivery broke, but {player.Username} still carries theirs. If they deliver it, you " +
-                            "get the reward too."
-                        );
-                        break;
-                    case DeliveryFailed:
-                        _heldBrokenDeliveries.Remove(name);
-                        Chat($"{player.Username} doesn't carry this delivery either, so it failed.");
-                        break;
-                    default:
-                        OnPartnerDeliveryBroke(player, playerData, update, name, update.WishValues[i]);
-                        break;
+                if (update.PartCount == DeliveryBreakReport) {
+                    OnPartnerDeliveryBroke(player, playerData, update, name, update.WishValues[i]);
+                    continue;
+                }
+
+                // An answer to an earlier break, like one that the network delivered late, changes nothing
+                if (!_brokenDeliveries.TryGetValue(name, out var broken) || broken.Report != update.Key) {
+                    continue;
+                }
+
+                if (update.PartCount == DeliveryStillCarried && !broken.StillCarried) {
+                    broken.StillCarried = true;
+                    Chat(
+                        $"Your delivery broke, but {player.Username} still carries theirs. If they deliver it, you " +
+                        "get the reward too."
+                    );
+                } else if (update.PartCount == DeliveryFailed) {
+                    _brokenDeliveries.Remove(name);
+                    Chat($"{player.Username} doesn't carry this delivery either, so it failed.");
                 }
             }
         } catch (Exception e) {
@@ -304,29 +369,35 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The item of a delivery broke for the partner. While the local player still carries theirs, the delivery stays
-    /// accepted in the local save and still counts for both. Otherwise it failed, and the local wish log takes the state
-    /// of the partner.
+    /// accepted in the local save and still counts for both, and a delivery that the local player turned in meanwhile
+    /// counts for the partner through that turn-in. Otherwise it failed, and the local wish log takes the state of the
+    /// partner.
     /// </summary>
     private void OnPartnerDeliveryBroke(
         ClientPlayerData player,
         PlayerData playerData,
-        CoopSaveUpdate update,
+        CoopSaveUpdate report,
         string name,
         int value
     ) {
-        if (!IsNewerChange(_wishSequences, update, GetWishChangeKey(name, value))) {
+        if (!IsNewerChange(_wishSequences, report, GetWishChangeKey(name, value))) {
+            return;
+        }
+
+        var local = playerData.QuestCompletionData.GetData(name);
+        if (_deliveredWishes.TryGetValue(name, out var delivered) && delivered == PackCompletion(local)) {
+            Logger.Info($"The delivery '{name}' broke for {player.Username} after the local player turned it in");
             return;
         }
 
         // A delivery that the local player turned in already goes to the partner with the dialogue
-        var local = playerData.QuestCompletionData.GetData(name);
         if (local.IsCompleted && (value & WishCompleted) == 0) {
             return;
         }
 
         if (local.IsAccepted && !local.IsCompleted && IsCarriedDelivery(FindQuest(name))) {
-            _heldBrokenDeliveries.Remove(name);
-            SendDeliveryAnswer(player, name, value, DeliveryStillCarried);
+            _brokenDeliveries.Remove(name);
+            SendDeliveryAnswer(player, report, name, value, DeliveryStillCarried);
             Chat(
                 $"{player.Username}'s delivery broke, but yours is still intact. If you deliver it, you both get the " +
                 "reward."
@@ -335,8 +406,7 @@ internal partial class CoopSave {
             return;
         }
 
-        var wasHeld = _heldBrokenDeliveries.Remove(name);
-        var wasActive = wasHeld || (local.IsAccepted && !local.IsCompleted);
+        var wasActive = _brokenDeliveries.Remove(name) || (local.IsAccepted && !local.IsCompleted);
         var changed = 0;
         var accepted = 0;
         var completed = 0;
@@ -345,7 +415,7 @@ internal partial class CoopSave {
             QuestManager.IncrementVersion();
         }
 
-        SendDeliveryAnswer(player, name, value, DeliveryFailed);
+        SendDeliveryAnswer(player, report, name, value, DeliveryFailed);
         if (wasActive) {
             Chat($"{player.Username}'s delivery broke too, so the delivery failed.");
         }
@@ -353,14 +423,49 @@ internal partial class CoopSave {
         Logger.Info($"The delivery '{name}' broke for {player.Username}, and no player carries it anymore");
     }
 
-    private void SendDeliveryAnswer(ClientPlayerData player, string name, int value, ushort answer) {
+    /// <summary>
+    /// Answers the partner whether the local player still carries a delivery whose item broke for the partner.
+    /// </summary>
+    private void SendDeliveryAnswer(
+        ClientPlayerData player,
+        CoopSaveUpdate report,
+        string name,
+        int value,
+        ushort answer
+    ) {
         Send(new CoopSaveUpdate {
             TargetId = player.Id,
             Kind = CoopSaveUpdateKind.DeliveryBreak,
+            Key = report.Sequence,
             PartCount = answer,
             WishNames = [name],
             WishValues = [value]
         });
+    }
+
+    /// <summary>
+    /// Undoes an accept of a delivery from the partner in the local wish log while the local player doesn't carry its
+    /// item, because its character takes in an accepted delivery without looking at the item. The wish goes back to the
+    /// state that it had before, which the local game keeps as known.
+    /// </summary>
+    /// <param name="playerData">The player data of the local save.</param>
+    /// <param name="name">The name of the wish.</param>
+    /// <param name="before">The state of the wish before the change of the partner.</param>
+    /// <returns>Whether the accept was undone.</returns>
+    private bool RefuseUncarriedDelivery(PlayerData playerData, string name, QuestCompletionData.Completion before) {
+        if (before.IsAccepted && !before.IsCompleted) {
+            return false;
+        }
+
+        var wish = playerData.QuestCompletionData.GetData(name);
+        if (!wish.IsAccepted || wish.IsCompleted || !IsUncarriedDelivery(name)) {
+            return false;
+        }
+
+        playerData.QuestCompletionData.SetData(name, before);
+        _knownWishes[name] = PackCompletion(before);
+        Logger.Info($"The delivery '{name}' isn't accepted in the local save, whose player doesn't carry its item");
+        return true;
     }
 
     #endregion
@@ -368,14 +473,56 @@ internal partial class CoopSave {
     #region Turning in
 
     /// <summary>
-    /// Starts recording dialogue that turns in a delivery, which needs nobody else, and asks the game of the partner to
-    /// bring the partner to the character.
+    /// Starts recording dialogue that can turn in a delivery, which needs nobody else. The character doesn't talk to the
+    /// partner meanwhile, so that they don't turn in the same delivery a second time.
     /// </summary>
     private void StartDeliveryTalk(PlayMakerNPC npc, HashSet<PlayMakerFSM> fsms) {
         EndWishTalk();
         var talk = new WishTalk(npc, fsms, false) { IsDelivery = true };
         _wishTalk = talk;
+        if (GetCheckedPartner() is { } partner) {
+            Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
+        }
 
+        Logger.Info($"Dialogue with '{npc.name}' can turn in a delivery");
+    }
+
+    /// <summary>
+    /// Sends dialogue that just completed a delivery to the partner at once, so that the copy of the partner can't break
+    /// while the dialogue goes on, and brings the partner to the character. The reward that the dialogue gives
+    /// afterwards goes along, and isn't recorded again. What else the dialogue changes afterwards goes to the partner
+    /// when it ends, together with the delivery that it belongs to.
+    /// </summary>
+    private void SendDelivery(WishTalk talk, FullQuestBase quest) {
+        var name = quest.name;
+        var index = talk.Changes.LastIndexOf(name);
+        if (index < 0) {
+            return;
+        }
+
+        var value = talk.ChangeValues[index];
+        var reward = quest.RewardItem;
+        var count = quest.RewardCount;
+        if (reward != null && reward is not BasicQuestBase && count > 0 && GivesQuestReward(talk, quest)) {
+            var change = GetItemChangeKey(GetItemChange, reward);
+            talk.AddItem(change, count, false);
+            talk.CreditedGains.Add(change);
+        }
+
+        _deliveredWishes[name] = value;
+        SendTalkChanges(talk, GetCurrentMarker() is { } marker ? FindPartner(marker) : null);
+        talk.ClearChanges();
+        talk.AddWish(quest, value);
+        talk.SentChanges = talk.Changes.Count;
+        Logger.Info($"The delivery '{name}' was turned in, sent to the partner at once");
+
+        SendDeliverySummon(talk);
+    }
+
+    /// <summary>
+    /// Asks the game of the partner to bring the partner to the character that took in a delivery.
+    /// </summary>
+    private void SendDeliverySummon(WishTalk talk) {
         var hero = HeroController.instance;
         if (GetCheckedPartner() is not { } partner || hero == null) {
             return;
@@ -390,30 +537,7 @@ internal partial class CoopSave {
             Records = [GetSummonGate(talk.Scene, position)],
             Values = [position.x, position.y]
         });
-        Logger.Info($"Turning in a delivery at '{npc.name}', bringing {partner.Username} along");
-    }
-
-    /// <summary>
-    /// Sends dialogue that just completed a delivery to the partner at once, so that the copy of the partner can't break
-    /// while the dialogue goes on. The reward that the dialogue gives afterwards goes along, and isn't recorded again.
-    /// </summary>
-    private void SendDelivery(WishTalk talk, FullQuestBase quest) {
-        var name = quest.name;
-        if (!talk.Wishes.Contains(name)) {
-            return;
-        }
-
-        var reward = quest.RewardItem;
-        var count = quest.RewardCount;
-        if (reward != null && reward is not BasicQuestBase && count > 0 && GivesQuestReward(talk, quest)) {
-            var change = GetItemChangeKey(GetItemChange, reward);
-            talk.AddItem(change, count, false);
-            talk.CreditedGains.Add(change);
-        }
-
-        SendTalkChanges(talk, GetCurrentMarker() is { } marker ? FindPartner(marker) : null);
-        talk.ClearChanges();
-        Logger.Info($"The delivery '{name}' was turned in, sent to the partner at once");
+        Logger.Info($"Bringing {partner.Username} to the delivery at '{talk.Path}'");
     }
 
     /// <summary>
@@ -421,16 +545,27 @@ internal partial class CoopSave {
     /// </summary>
     private static bool GivesQuestReward(WishTalk talk, FullQuestBase quest) {
         foreach (var component in talk.Fsms) {
-            if (component == null || component.Fsm is not { } fsm) {
-                continue;
+            if (component != null && component.Fsm is { } fsm && HasQuestReward(fsm, quest, 0)) {
+                return true;
             }
+        }
 
-            foreach (var state in fsm.States ?? []) {
-                foreach (var action in state?.Actions ?? []) {
-                    if (action is QuestPlaymakerActions.GetQuestReward or QuestPlaymakerActions.GetQuestRewardV2 &&
-                        ((QuestPlaymakerActions.QuestFsmAction) action).Quest?.Value == quest) {
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an FSM, or a template FSM that it runs, gets the reward of a wish.
+    /// </summary>
+    private static bool HasQuestReward(Fsm fsm, FullQuestBase quest, int depth) {
+        foreach (var state in fsm.States ?? []) {
+            foreach (var action in state?.Actions ?? []) {
+                if (action is QuestPlaymakerActions.GetQuestReward or QuestPlaymakerActions.GetQuestRewardV2) {
+                    if (((QuestPlaymakerActions.QuestFsmAction) action).Quest?.Value == quest) {
                         return true;
                     }
+                } else if (action != null && depth < 2 && GetTemplateFsm(action) is { } template &&
+                           HasQuestReward(template, quest, depth + 1)) {
+                    return true;
                 }
             }
         }
@@ -465,7 +600,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a wish is a delivery whose item the local player doesn't carry, which the check doesn't accept for them.
+    /// Whether a wish is a delivery whose item the local player doesn't carry, which isn't accepted for them.
     /// </summary>
     private bool IsUncarriedDelivery(string name) {
         return FindQuest(name) is { } quest && IsBreakableDelivery(quest) && !IsCarriedDelivery(quest);
@@ -505,7 +640,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The partner turns in a delivery, so the local player is brought to its character once that is safe.
+    /// The partner turned in a delivery, so the local player is brought to its character once that is safe.
     /// </summary>
     private void OnDeliverySummon(ClientPlayerData player, CoopSaveUpdate update) {
         if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id ||
@@ -546,13 +681,20 @@ internal partial class CoopSave {
                     UpdateSummonArrival(hero, partner, summon, now);
                     break;
                 case SummonStage.FadingOut:
-                    if (now - summon.StageTime >= SummonFadeTime) {
-                        PlaceSummonedHero(hero, partner, summon);
-                        ScreenFaderUtils.Fade(Color.black, Color.clear, SummonFadeTime);
-                        summon.Stage = SummonStage.FadingIn;
-                        summon.StageTime = now;
+                    if (now - summon.StageTime < SummonFadeTime) {
+                        break;
                     }
 
+                    // Something that happened while the screen got dark, like a hazard, leaves the hero where they are
+                    if (!CanPlaceSummonedHero(hero, partner, summon)) {
+                        FinishSummon(hero);
+                        break;
+                    }
+
+                    PlaceSummonedHero(hero, partner, summon);
+                    ScreenFaderUtils.Fade(Color.black, Color.clear, SummonFadeTime);
+                    summon.Stage = SummonStage.FadingIn;
+                    summon.StageTime = now;
                     break;
                 case SummonStage.FadingIn:
                     if (now - summon.StageTime >= SummonFadeTime) {
@@ -568,8 +710,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts bringing the local player to a delivery once nothing keeps them where they are. A player who is in a fight,
-    /// at a bench, in other dialogue or in a race stays, and gets the delivery all the same.
+    /// Starts bringing the local player to a delivery once nothing keeps them where they are. A player who is in a fight
+    /// or a boss room that waits, at a bench, in other dialogue or in a race stays, and gets the delivery all the same.
     /// </summary>
     private void StartSummonMove(HeroController hero, ClientPlayerData partner, PendingSummon summon, float now) {
         var gameManager = global::GameManager.instance;
@@ -579,15 +721,14 @@ internal partial class CoopSave {
         }
 
         if (hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning || IsInBossFight() ||
-            IsHeroLockedInArena?.Invoke() == true || playerData.atBench ||
+            IsHeroLockedInArena?.Invoke() == true || IsHeroInWaitingBossRoom?.Invoke() == true || playerData.atBench ||
             InteractManager.BlockingInteractable != null || IsRacing()) {
             SkipSummon(partner);
             return;
         }
 
-        // Moments like a scene change, an open menu or the hero being busy pass
-        if (gameManager.GameState != GameState.PLAYING || gameManager.IsInSceneTransition ||
-            hero.cState.transitioning || hero.controlReqlinquished || gameManager.IsGamePaused()) {
+        // Moments like a scene change, an open menu, a lift ride or the hero being busy pass
+        if (!CanMoveHeroNow(gameManager, hero)) {
             if (now - summon.StageTime > SummonWaitTime) {
                 SkipSummon(partner);
             }
@@ -602,7 +743,7 @@ internal partial class CoopSave {
             }
 
             StartSummonFade(hero, summon, now);
-            Chat($"{partner.Username} is turning in a delivery, so you are brought there.");
+            Chat($"{partner.Username} turned in a delivery, so you are brought there.");
             return;
         }
 
@@ -626,8 +767,22 @@ internal partial class CoopSave {
 
         summon.Stage = SummonStage.Loading;
         summon.StageTime = now;
-        Chat($"{partner.Username} is turning in a delivery, so you are brought there.");
+        Chat($"{partner.Username} turned in a delivery, so you are brought there.");
         Logger.Info($"Bringing the local player to the delivery of {partner.Username} in '{summon.Scene}'");
+    }
+
+    /// <summary>
+    /// Whether nothing that passes keeps the hero from being moved right now, like a scene change, an open menu,
+    /// swimming, a lift ride or something that took control from them. Shared dialogue that the local player reads, like
+    /// the lines of the delivery, takes control too, but doesn't keep them.
+    /// </summary>
+    private bool CanMoveHeroNow(global::GameManager gameManager, HeroController hero) {
+        if (gameManager.GameState != GameState.PLAYING || gameManager.IsInSceneTransition ||
+            gameManager.IsGamePaused() || hero.cState.transitioning || hero.cState.swimming || IsRidingLift(hero)) {
+            return false;
+        }
+
+        return IsReadingSharedDialogue?.Invoke() == true || (!hero.controlReqlinquished && hero.CanInput());
     }
 
     /// <summary>
@@ -641,9 +796,9 @@ internal partial class CoopSave {
         }
 
         var gameManager = global::GameManager.instance;
-        if (gameManager == null || SceneUtil.GetCurrentSceneName() != summon.Scene || gameManager.IsInSceneTransition ||
-            !gameManager.HasFinishedEnteringScene || gameManager.GameState != GameState.PLAYING ||
-            hero.cState.transitioning || hero.controlReqlinquished) {
+        if (gameManager == null || SceneUtil.GetCurrentSceneName() != summon.Scene ||
+            !gameManager.HasFinishedEnteringScene || hero.cState.dead || hero.cState.hazardDeath ||
+            hero.cState.hazardRespawning || !CanMoveHeroNow(gameManager, hero)) {
             return;
         }
 
@@ -670,6 +825,18 @@ internal partial class CoopSave {
         ScreenFaderUtils.Fade(Color.clear, Color.black, SummonFadeTime);
         summon.Stage = SummonStage.FadingOut;
         summon.StageTime = now;
+    }
+
+    /// <summary>
+    /// Whether the hero can still be moved to the delivery once the screen is dark, since nothing like a hazard, death
+    /// or a scene change happened meanwhile.
+    /// </summary>
+    private static bool CanPlaceSummonedHero(HeroController hero, ClientPlayerData partner, PendingSummon summon) {
+        var gameManager = global::GameManager.instance;
+        return gameManager != null && gameManager.GameState == GameState.PLAYING && !gameManager.IsInSceneTransition &&
+               !hero.cState.dead && !hero.cState.hazardDeath && !hero.cState.hazardRespawning &&
+               !hero.cState.transitioning &&
+               (SceneUtil.GetCurrentSceneName() == summon.Scene || partner.IsInLocalScene);
     }
 
     /// <summary>
@@ -716,13 +883,13 @@ internal partial class CoopSave {
     private void SkipSummon(ClientPlayerData partner) {
         _summon = null;
         Chat(
-            $"{partner.Username} is turning in a delivery. You can't be brought there right now, but it counts for you " +
-            "too."
+            $"{partner.Username} turned in a delivery. You can't be brought there right now, but it counts for you too."
         );
     }
 
     /// <summary>
     /// Ends bringing the local player to a delivery, giving the hero back and fading the screen in if it was dark.
+    /// Shared dialogue that the local player still reads keeps control until it is read.
     /// </summary>
     private void FinishSummon(HeroController? hero) {
         if (_summon is not { } summon) {
@@ -736,7 +903,11 @@ internal partial class CoopSave {
 
         if (hero != null) {
             hero.RemoveInvulnerabilitySource(SummonInvulnerability);
-            hero.RegainControl();
+            if (GiveBackHeroControl != null) {
+                GiveBackHeroControl(hero);
+            } else {
+                hero.RegainControl();
+            }
         }
 
         if (summon.Stage == SummonStage.FadingOut) {
@@ -759,6 +930,19 @@ internal partial class CoopSave {
         return false;
     }
 
+    /// <summary>
+    /// Whether the hero rides a lift of the room that moves right now.
+    /// </summary>
+    private bool IsRidingLift(HeroController hero) {
+        foreach (var lift in _lifts.Values) {
+            if (lift.Owner != null && lift.IsMoving && lift.ContainsHero(hero)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     #endregion
 
     /// <summary>
@@ -771,11 +955,20 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Forgets the deliveries that broke, were turned in or came from the partner, for a new check.
+    /// </summary>
+    private void ResetDeliveryCheck() {
+        _brokenDeliveries.Clear();
+        _deliveredWishes.Clear();
+        _appliedPartnerCompletions.Clear();
+    }
+
+    /// <summary>
     /// Forgets deliveries and gives the hero back, for a new session.
     /// </summary>
     private void ResetDeliveries() {
         FinishSummon(HeroController.instance);
-        _heldBrokenDeliveries.Clear();
+        ResetDeliveryCheck();
         _questsByName.Clear();
     }
 

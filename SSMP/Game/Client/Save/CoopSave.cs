@@ -404,6 +404,7 @@ internal partial class CoopSave {
 
         var marker = GetMarker(slot);
         if (marker == null) {
+            FinishSummon(hero);
             ReleaseHold(hero);
             return;
         }
@@ -1535,10 +1536,13 @@ internal partial class CoopSave {
     /// </summary>
     private void Send(CoopSaveUpdate update) {
         if (update.Kind is CoopSaveUpdateKind.WorldChange or CoopSaveUpdateKind.WishChange or
-                CoopSaveUpdateKind.Interaction or CoopSaveUpdateKind.WishTurnIn ||
-            update is { Kind: CoopSaveUpdateKind.DeliveryBreak, PartCount: DeliveryBreakReport }) {
+            CoopSaveUpdateKind.Interaction or CoopSaveUpdateKind.WishTurnIn) {
             update.Sequence = NextChangeSequence();
             StampLocalChanges(update);
+        } else if (update is { Kind: CoopSaveUpdateKind.DeliveryBreak, PartCount: DeliveryBreakReport }) {
+            // A break doesn't count as the last change of its wish, so that a delivery of the partner that crossed it
+            // still counts for the local player
+            update.Sequence = NextChangeSequence();
         }
 
         if (_netClient.IsConnected) {

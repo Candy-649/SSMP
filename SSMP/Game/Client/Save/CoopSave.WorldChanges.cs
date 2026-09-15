@@ -116,12 +116,13 @@ internal partial class CoopSave {
         }
 
         // Other updates list wishes for other reasons
-        if (update.Kind is not (CoopSaveUpdateKind.WishChange or CoopSaveUpdateKind.WishTurnIn or
-            CoopSaveUpdateKind.DeliveryBreak)) {
+        if (update.Kind is not (CoopSaveUpdateKind.WishChange or CoopSaveUpdateKind.WishTurnIn)) {
             return;
         }
 
-        for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
+        // Changes that dialogue about wishes sent before keep the stamps that they got then
+        var first = update.Kind == CoopSaveUpdateKind.WishTurnIn ? update.PartCount : 0;
+        for (var i = (int) first; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
             _wishSequences[GetWishChangeKey(update.WishNames[i], update.WishValues[i])] = stamp;
         }
     }

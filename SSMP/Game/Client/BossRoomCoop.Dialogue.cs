@@ -534,6 +534,30 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Whether shared dialogue is shown to the local player and took control from them.
+    /// </summary>
+    public bool HasSharedDialogueControl => _shownDialogue != null && _tookHeroControl;
+
+    /// <summary>
+    /// Gives control back to the local player after something else took it for a moment, like bringing them to a
+    /// delivery of a two-player save. Shared dialogue that is shown keeps control until it is read instead. Giving
+    /// control back this way doesn't count as the game giving it back to a room that waits.
+    /// </summary>
+    public void GiveBackTakenControl(HeroController heroController) {
+        if (_shownDialogue != null) {
+            _tookHeroControl = true;
+            return;
+        }
+
+        _changingHero = true;
+        try {
+            heroController.RegainControl();
+        } finally {
+            _changingHero = false;
+        }
+    }
+
+    /// <summary>
     /// Holds back the transition of a room with dialogue into its fight until every player got there, so that nobody
     /// is attacked while still reading.
     /// </summary>

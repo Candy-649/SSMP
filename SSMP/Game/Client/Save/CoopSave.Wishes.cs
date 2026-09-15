@@ -222,6 +222,7 @@ internal partial class CoopSave {
             var changed = 0;
             var accepted = 0;
             var completed = 0;
+            var refused = 0;
             for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
                 var name = update.WishNames[i];
                 var value = update.WishValues[i];
@@ -245,7 +246,14 @@ internal partial class CoopSave {
                     continue;
                 }
 
+                var before = playerData.QuestCompletionData.GetData(name);
                 ApplyPartnerWish(playerData, name, value, ref changed, ref accepted, ref completed);
+                if (RefuseUncarriedDelivery(playerData, name, before)) {
+                    refused++;
+                    if (!before.IsAccepted) {
+                        accepted--;
+                    }
+                }
             }
 
             if (changed == 0) {
@@ -262,6 +270,12 @@ internal partial class CoopSave {
                         ? $"accepted {CountWishes(accepted)}"
                         : $"completed {CountWishes(completed)}";
                 Chat($"{player.Username} {what}. Your wish log has the same now.");
+            }
+
+            if (refused > 0) {
+                Chat(
+                    $"{player.Username} accepted a delivery whose item you don't carry, so it isn't accepted for you."
+                );
             }
         } catch (Exception e) {
             LogWishError(e);

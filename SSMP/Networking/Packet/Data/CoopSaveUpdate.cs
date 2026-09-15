@@ -31,7 +31,8 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For pairing, the ID of the request. For a hello, world progress and leaving, the key of the check, which tells
-    /// newer checks from older ones. For a lift, a count that grows with every ride that the sender starts.
+    /// newer checks from older ones. For a lift, a count that grows with every ride that the sender starts. For an
+    /// answer about a delivery that broke, the <see cref="Sequence"/> of the report that it answers.
     /// </summary>
     public ulong Key { get; set; }
 
@@ -52,7 +53,8 @@ internal class CoopSaveUpdate : IPacketData {
     /// For key dialogue, 1 when it starts, 0 when it ends and 2 when it couldn't start without the other player. For a
     /// call of a lift, 1 if the sender is inside it. For the state of a lift, 1 while it moves. For driving a carriage,
     /// 1 while the sender holds its button. For a delivery that broke, 0 when it broke for the sender, 1 when the sender
-    /// still carries theirs and 2 when the sender doesn't either.
+    /// still carries theirs and 2 when the sender doesn't either. For dialogue about wishes, how many of its changes of
+    /// wishes went to the other player before, which come again for what the dialogue changed afterwards.
     /// </summary>
     public ushort PartCount { get; set; }
 
@@ -107,9 +109,9 @@ internal class CoopSaveUpdate : IPacketData {
     public float PlayTime { get; set; }
 
     /// <summary>
-    /// For changes of the world, changes of the wish log and interactions, the check that the sender was in, in the
-    /// upper half, and a count that grows with every such update of the sender, in the lower half. The network can
-    /// deliver an update that it sent again after a newer one, which this tells apart.
+    /// For changes of the world, changes of the wish log, interactions and deliveries that broke for the sender, the
+    /// check that the sender was in, in the upper half, and a count that grows with every such update of the sender, in
+    /// the lower half. The network can deliver an update that it sent again after a newer one, which this tells apart.
     /// </summary>
     public ulong Sequence { get; set; }
 
@@ -392,7 +394,7 @@ internal enum CoopSaveUpdateKind : byte {
     DeliveryBreak,
 
     /// <summary>
-    /// The sender turns in a delivery at a character, so the game of the other player brings them there.
+    /// The sender turned in a delivery at a character, so the game of the other player brings them there.
     /// </summary>
     DeliverySummon
 }

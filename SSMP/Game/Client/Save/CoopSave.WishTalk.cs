@@ -294,8 +294,8 @@ internal partial class CoopSave {
         public bool IsKey { get; set; }
 
         /// <summary>
-        /// Whether it turns in a delivery, which needs nobody else, and whose lines the partner reads too without the
-        /// dialogue waiting for them.
+        /// Whether it can turn in a delivery, which needs nobody else, whose character doesn't talk to the partner
+        /// meanwhile, and whose lines the partner reads too without the dialogue waiting for them.
         /// </summary>
         public bool IsDelivery { get; set; }
 
@@ -303,6 +303,18 @@ internal partial class CoopSave {
         /// What the dialogue gives later that went to the partner already, like the reward of a delivery.
         /// </summary>
         public HashSet<string> CreditedGains { get; } = [];
+
+        /// <summary>
+        /// How many changes at the start of <see cref="Changes"/> went to the partner already, like a delivery that went
+        /// the moment it was turned in, which what the dialogue changes afterwards belongs to.
+        /// </summary>
+        public int SentChanges { get; set; }
+
+        /// <summary>
+        /// The wishes that dialogue of the partner turned in with the local player while this dialogue could take them
+        /// in too, whose reward this dialogue then doesn't give again.
+        /// </summary>
+        public HashSet<string> RewardedByPartner { get; } = new(StringComparer.Ordinal);
 
         /// <summary>
         /// The scene of the character.
@@ -368,6 +380,7 @@ internal partial class CoopSave {
         /// Forgets what the dialogue changed so far, once it went to the partner.
         /// </summary>
         public void ClearChanges() {
+            SentChanges = 0;
             Wishes.Clear();
             Changes.Clear();
             ChangeValues.Clear();
@@ -376,6 +389,12 @@ internal partial class CoopSave {
             IntChanges.Clear();
             Quests.Clear();
         }
+
+        /// <summary>
+        /// Whether the dialogue changed something that didn't go to the partner yet.
+        /// </summary>
+        public bool HasUnsentChanges =>
+            Changes.Count > SentChanges || Items.Count > 0 || Flags.Count > 0 || IntChanges.Count > 0;
 
         /// <summary>
         /// Whether an FSM runs the dialogue of the character.
@@ -655,6 +674,11 @@ internal partial class CoopSave {
             ),
             new Action<Action<HutongGames.PlayMaker.Actions.SavedItemGet>, HutongGames.PlayMaker.Actions.SavedItemGet>(
                 (orig, self) => {
+                    if (SkipsPartnerReward(self.Fsm, self.Item?.Value as SavedItem)) {
+                        self.Finish();
+                        return;
+                    }
+
                     RecordTalkGain(self.Fsm, self.Item?.Value as SavedItem, 1);
                     RunTalkGain(() => orig(self));
                 }
@@ -666,6 +690,11 @@ internal partial class CoopSave {
             ),
             new Action<Action<HutongGames.PlayMaker.Actions.SavedItemGetV2>,
                 HutongGames.PlayMaker.Actions.SavedItemGetV2>((orig, self) => {
+                if (SkipsPartnerReward(self.Fsm, self.Item?.Value as SavedItem)) {
+                    self.Finish();
+                    return;
+                }
+
                 RecordTalkGain(self.Fsm, self.Item?.Value as SavedItem, self.Amount?.Value ?? 1);
                 RunTalkGain(() => orig(self));
             })
@@ -692,6 +721,41 @@ internal partial class CoopSave {
                 }
 
                 RunTalkGain(() => orig(self, item!));
+            })
+        );
+
+        // The reward of a wish that dialogue of the partner turned in with the local player isn't given again by local
+        // dialogue that takes in the same wish
+        AddWishTalkHook(
+            typeof(QuestPlaymakerActions.GetQuestReward).GetMethod(
+                "DoQuestAction", InstanceFlags | BindingFlags.DeclaredOnly, null, [typeof(FullQuestBase)], null
+            ),
+            new Action<Action<QuestPlaymakerActions.GetQuestReward, FullQuestBase>, QuestPlaymakerActions.GetQuestReward,
+                FullQuestBase>((orig, self, quest) => {
+                orig(self, quest);
+                if (TakesPartnerReward(self.Fsm, quest) && self.StoreReward != null) {
+                    self.StoreReward.Value = null;
+                }
+            })
+        );
+        AddWishTalkHook(
+            typeof(QuestPlaymakerActions.GetQuestRewardV2).GetMethod(
+                "DoQuestAction", InstanceFlags | BindingFlags.DeclaredOnly, null, [typeof(FullQuestBase)], null
+            ),
+            new Action<Action<QuestPlaymakerActions.GetQuestRewardV2, FullQuestBase>,
+                QuestPlaymakerActions.GetQuestRewardV2, FullQuestBase>((orig, self, quest) => {
+                orig(self, quest);
+                if (!TakesPartnerReward(self.Fsm, quest)) {
+                    return;
+                }
+
+                if (self.StoreReward != null) {
+                    self.StoreReward.Value = null;
+                }
+
+                if (self.StoreAmount != null) {
+                    self.StoreAmount.Value = 0;
+                }
             })
         );
 
@@ -1046,9 +1110,10 @@ internal partial class CoopSave {
                         kind = TalkKind.Key;
                     }
                 } else if (quest.IsAccepted && !quest.IsCompleted) {
-                    // A delivery goes first, since whoever gets there first turns it in without waiting. Its character
-                    // takes it in also when the item got damaged on the way
-                    if (IsCarriedDelivery(quest)) {
+                    // A delivery goes first, since whoever gets there first turns it in without waiting. The character
+                    // of a delivery wish takes it in also when the item got damaged on the way, while an item that runs
+                    // against time among what a wish gathers only makes a delivery of a wish that can be completed
+                    if (IsCarriedDelivery(quest) && (IsBreakableDelivery(quest) || quest.CanComplete)) {
                         return TalkKind.Delivery;
                     }
 
@@ -1236,7 +1301,7 @@ internal partial class CoopSave {
 
         _wishTalk = null;
         var partner = GetCurrentMarker() is { } marker ? FindPartner(marker) : null;
-        if (talk.IsKey && partner != null) {
+        if ((talk.IsKey || talk.IsDelivery) && partner != null) {
             Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkEnded));
         }
 
@@ -1245,10 +1310,11 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Sends the wishes that dialogue accepted or completed to the partner, with what it took and gave, if it changed
-    /// any.
+    /// any. Changes that went to the partner before, like a delivery, go again for what the dialogue changed afterwards,
+    /// which the partner takes if they took those changes.
     /// </summary>
     private void SendTalkChanges(WishTalk talk, ClientPlayerData? partner) {
-        if (talk.Changes.Count == 0) {
+        if (talk.Changes.Count == 0 || !talk.HasUnsentChanges) {
             return;
         }
 
@@ -1261,6 +1327,7 @@ internal partial class CoopSave {
         // A wish that changed twice, like one that was completed and accepted again, has an entry for each change
         var update = new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.WishTurnIn,
+            PartCount = (ushort) Mathf.Min(talk.SentChanges, ushort.MaxValue),
             Scene = talk.Scene,
             ObjectPath = talk.Path
         };
@@ -1306,7 +1373,8 @@ internal partial class CoopSave {
     private void SendWishTurnIn(CoopSaveUpdate update, ClientPlayerData partner) {
         update.TargetId = partner.Id;
         Send(update);
-        for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
+        // Changes that went to the partner before are known already, and the wish log may have changed since
+        for (var i = (int) update.PartCount; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
             _knownWishes[update.WishNames[i]] = update.WishValues[i];
         }
 
@@ -1396,11 +1464,17 @@ internal partial class CoopSave {
         }
 
         if (ended && !wasCompleted && self.IsCompleted && !_applyingPartnerTalk) {
-            AddTalkWish(self);
-            if (_boardCompletionDepth > 0) {
-                RecordBoardReward(self);
-            } else if (_wishTalk is { IsDelivery: true } talk) {
-                SendDelivery(talk, self);
+            // What throws here must not stop the action of the game that ends the wish, which would keep the hero
+            // without control
+            try {
+                AddTalkWish(self);
+                if (_boardCompletionDepth > 0) {
+                    RecordBoardReward(self);
+                } else if (_wishTalk is { IsDelivery: true } talk) {
+                    SendDelivery(talk, self);
+                }
+            } catch (Exception e) {
+                LogWishTalkError(e);
             }
         }
 
@@ -1549,7 +1623,8 @@ internal partial class CoopSave {
     /// <summary>
     /// Adds the wishes that dialogue of the partner accepted or completed to the local wish log, and takes and gives in
     /// the local save what the dialogue took from the partner and gave them. A wish that the local save had accepted or
-    /// completed itself, or that the check left completed in only one save, isn't paid or rewarded again.
+    /// completed itself, or that the check left completed in only one save, isn't paid or rewarded again. Local dialogue
+    /// that can take in a wish that this completes doesn't give its reward again.
     /// </summary>
     private void OnWishTurnIn(ClientPlayerData player, CoopSaveUpdate update) {
         var playerData = PlayerData.instance;
@@ -1562,16 +1637,30 @@ internal partial class CoopSave {
             var count = Mathf.Min(update.WishNames.Count, update.WishValues.Count);
             var applies = new bool[count];
             var newer = new Dictionary<string, bool>(StringComparer.Ordinal);
+            var lastBefore = new Dictionary<string, QuestCompletionData.Completion>(StringComparer.Ordinal);
             var anyApplies = false;
+            var anyNewApplies = false;
             var anyCompleted = false;
             var completionApplies = false;
+            var brokenApplies = false;
             var turnedInHere = false;
+            var deliveredHere = false;
             var changed = 0;
             var accepted = 0;
             var completed = 0;
             for (var i = 0; i < count; i++) {
                 var name = update.WishNames[i];
                 var value = update.WishValues[i];
+                var isCompletion = (value & WishCompleted) != 0;
+
+                // A change that came before, like a delivery the moment it was turned in, comes again for what the
+                // dialogue changed afterwards, which counts if that change counted
+                if (i < update.PartCount) {
+                    applies[i] = isCompletion && _appliedPartnerCompletions.TryGetValue(name, out var applied) &&
+                                 applied == value;
+                    anyApplies |= applies[i];
+                    continue;
+                }
 
                 // A wish that changed more than once in the dialogue has an entry for each change, in order
                 if (!newer.TryGetValue(name, out var isNewer)) {
@@ -1584,22 +1673,42 @@ internal partial class CoopSave {
                 }
 
                 var before = playerData.QuestCompletionData.GetData(name);
-                var isCompletion = (value & WishCompleted) != 0;
+                var packedBefore = PackCompletion(before);
+                lastBefore[name] = before;
 
                 // A wish that the local player turns in at a board at the same time is paid and rewarded there
                 var isTurnedInHere = isCompletion && !before.IsCompleted && IsTurningInAtBoard(name);
                 turnedInHere |= isTurnedInHere;
 
-                // A delivery whose item broke for the local player while the partner carried theirs is rewarded, also
-                // when the break completed it without a reward
-                var isHeldBroken = isCompletion && _heldBrokenDeliveries.Remove(name);
+                // A delivery that the local player turned in at the same time was paid and rewarded with that turn-in
+                deliveredHere |= isCompletion && before.IsCompleted &&
+                                 _deliveredWishes.TryGetValue(name, out var delivered) && delivered == packedBefore;
+
+                // A delivery whose item broke for the local player is rewarded when the partner delivers it, also when
+                // the break completed it without a reward, as long as the wish stayed as the break left it
+                var isBroken = isCompletion && _brokenDeliveries.TryGetValue(name, out var broken) &&
+                               broken.Value == packedBefore;
+                if (isCompletion) {
+                    _brokenDeliveries.Remove(name);
+                }
+
                 applies[i] = !_differentWishNames.Contains(name) && !isTurnedInHere &&
-                             (isHeldBroken ||
+                             (isBroken ||
                               (isCompletion ? !before.IsCompleted : !before.IsAccepted || before.IsCompleted));
                 anyApplies |= applies[i];
+                anyNewApplies |= applies[i];
                 anyCompleted |= isCompletion;
                 completionApplies |= isCompletion && applies[i];
+                brokenApplies |= isBroken && applies[i];
                 ApplyPartnerWish(playerData, name, value, ref changed, ref accepted, ref completed);
+
+                // Local dialogue that takes in the same wish, like with the same character, doesn't reward it again
+                if (isCompletion && applies[i]) {
+                    _appliedPartnerCompletions[name] = value;
+                    if (_wishTalk is { } talk && FindQuest(name) is { } quest && CanTalkTurnIn(talk, quest)) {
+                        talk.RewardedByPartner.Add(name);
+                    }
+                }
             }
 
             if (changed > 0) {
@@ -1629,19 +1738,42 @@ internal partial class CoopSave {
                 }
             }
 
-            if (completionApplies) {
+            // A delivery that the partner accepted stays unaccepted for a local player who didn't get its item with it
+            var refused = 0;
+            foreach (var pair in lastBefore) {
+                if (RefuseUncarriedDelivery(playerData, pair.Key, pair.Value)) {
+                    refused++;
+                }
+            }
+
+            if (refused > 0) {
+                QuestManager.IncrementVersion();
+            }
+
+            if (brokenApplies) {
+                Chat($"{player.Username} delivered what broke for you, so you got the reward too.");
+            } else if (completionApplies) {
                 Chat($"{player.Username} turned in a wish with you. You paid your own copy and got the reward too.");
             } else if (turnedInHere) {
                 Chat(
                     $"{player.Username} turned in the same wish at the same time. You pay your copy and get the reward " +
                     "once, at your board."
                 );
+            } else if (deliveredHere) {
+                Chat(
+                    $"{player.Username} turned in the same delivery at the same time. You paid your copy and got the " +
+                    "reward once, with your own turn-in."
+                );
             } else if (anyCompleted) {
                 Chat(
                     $"{player.Username} turned in a wish that your save had completed already, so you didn't pay or " +
                     "get the reward again."
                 );
-            } else if (anyApplies && items > 0) {
+            } else if (refused > 0) {
+                Chat(
+                    $"{player.Username} accepted a delivery whose item you didn't get, so it isn't accepted for you."
+                );
+            } else if (anyNewApplies && items > 0) {
                 Chat($"{player.Username} accepted a wish with you, and you got what came with it too.");
             } else if (accepted > 0) {
                 Chat($"{player.Username} accepted {CountWishes(accepted)}. Your wish log has the same now.");
@@ -1654,6 +1786,59 @@ internal partial class CoopSave {
         } catch (Exception e) {
             LogWishTalkError(e);
         }
+    }
+
+    /// <summary>
+    /// Whether dialogue of the local player can take in a wish, whose FSMs would then give its reward.
+    /// </summary>
+    private bool CanTalkTurnIn(WishTalk talk, FullQuestBase quest) {
+        foreach (var component in talk.Fsms) {
+            if (component == null || component.Fsm is not { } fsm) {
+                continue;
+            }
+
+            foreach (var action in GetWishActions(fsm)) {
+                if (action.IsTurnIn && action.Quest.Value == quest) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an FSM of local dialogue gets the reward of a wish that dialogue of the partner turned in with the local
+    /// player, who got the reward with that turn-in, so that the FSM doesn't give it again. It counts once.
+    /// </summary>
+    private bool TakesPartnerReward(Fsm? fsm, FullQuestBase? quest) {
+        if (quest == null || _wishTalk is not { } talk || !talk.IsTalkFsm(fsm) ||
+            !talk.RewardedByPartner.Remove(quest.name)) {
+            return false;
+        }
+
+        Logger.Info($"Not giving the reward of '{quest.name}' again, which came with the partner's turn-in");
+        return true;
+    }
+
+    /// <summary>
+    /// Whether an FSM of local dialogue gives the reward item of a wish that dialogue of the partner turned in with the
+    /// local player without getting it from the wish first, which it then doesn't give again. It counts once.
+    /// </summary>
+    private bool SkipsPartnerReward(Fsm? fsm, SavedItem? item) {
+        if (item == null || _wishTalk is not { } talk || talk.RewardedByPartner.Count == 0 || !talk.IsTalkFsm(fsm)) {
+            return false;
+        }
+
+        foreach (var name in talk.RewardedByPartner) {
+            if (FindQuest(name) is { } quest && quest.RewardItem == item) {
+                talk.RewardedByPartner.Remove(name);
+                Logger.Info($"Not giving the reward of '{name}' again, which came with the partner's turn-in");
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

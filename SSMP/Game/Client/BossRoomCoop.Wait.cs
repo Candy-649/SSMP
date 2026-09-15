@@ -241,6 +241,16 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Whether the local player is in a boss room that waits for the other players.
+    /// </summary>
+    public bool IsLocalHeroInWaitingRoom() {
+        var heroController = HeroController.instance;
+        return heroController != null && _bossRooms.Values.Any(room =>
+            room.Wait is { } wait && wait.Shape.Contains(heroController.transform.position)
+        );
+    }
+
+    /// <summary>
     /// Keeps the local player free to move and inside the boss room they wait in, and stops waiting in rooms that don't
     /// wait anymore.
     /// </summary>
