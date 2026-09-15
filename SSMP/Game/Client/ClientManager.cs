@@ -317,6 +317,7 @@ internal class ClientManager : IClientManager {
         _uiManager.RequestClientDisconnectEvent += Disconnect;
         _uiManager.RequestServerStartHostEvent += (_, _, _, _, _) => { _saveManager.IsHostingServer = true; };
         _uiManager.RequestServerStopHostEvent += () => { _saveManager.IsHostingServer = false; };
+        _uiManager.HostSaveLoadedEvent += SendCrest;
 
         UiManager.ChatInputEvent += OnChatInput;
 
@@ -754,9 +755,7 @@ internal class ClientManager : IClientManager {
                 }
             );
         } else {
-            _netClient.UpdateManager.AddPlayerSettingUpdate(
-                crestType: CrestTypeExt.FromInternal(PlayerData.instance.CurrentCrestID)
-            );
+            SendCrest();
         }
 
         // Fill the player data dictionary with the info from the packet
@@ -786,6 +785,20 @@ internal class ClientManager : IClientManager {
             Logger.Warn(
                 $"Exception thrown while invoking Connect event:\n{e}"
             );
+        }
+    }
+
+    /// <summary>
+    /// Sends the crest of the loaded save to the server. A host whose two-player save waits in the menu for its
+    /// partner has no save loaded when it connects, so it sends the crest again once the save loads.
+    /// </summary>
+    private void SendCrest() {
+        try {
+            _netClient.UpdateManager.AddPlayerSettingUpdate(
+                crestType: CrestTypeExt.FromInternal(PlayerData.instance.CurrentCrestID)
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not send the crest of the loaded save: {e.Message}");
         }
     }
 

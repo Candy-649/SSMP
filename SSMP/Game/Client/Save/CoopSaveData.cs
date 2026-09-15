@@ -55,4 +55,11 @@ internal class CoopWorldItems {
     /// </summary>
     [JsonProperty("bools")]
     public Dictionary<string, List<string>> Bools { get; set; } = new();
+
+    /// <summary>
+    /// The booleans of the player data that saved booleans of the world set to true together with their own state, by
+    /// the scene name in lower case and the ID of the saved boolean.
+    /// </summary>
+    [JsonProperty("playerData")]
+    public Dictionary<string, Dictionary<string, List<string>>> PlayerData { get; set; } = new();
 }

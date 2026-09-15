@@ -4,7 +4,6 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using SSMP.Networking.Packet.Data;
-using SSMP.Ui;
 using SSMP.Util;
 using Logger = SSMP.Logging.Logger;
 
@@ -12,7 +11,8 @@ namespace SSMP.Game.Client.Save;
 
 /// <summary>
 /// Checking two-player saves: once both players have loaded their paired saves, each backs up its save file and sends
-/// the world progress of its save, and each adds the progress of the other that it lacks.
+/// the bosses it has beaten and the saved objects of the world that it changed. Each save gets the changed objects that
+/// it lacks and hears whether the beaten bosses differ, which are never copied because they come with rewards.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -31,7 +31,7 @@ internal partial class CoopSave {
     private const int MaxBackups = 10;
 
     /// <summary>
-    /// How many records and saved objects go in one part of the world progress.
+    /// How many beaten bosses and saved objects go in one part of the world progress.
     /// </summary>
     private const int EntriesPerPart = 64;
 
@@ -46,9 +46,14 @@ internal partial class CoopSave {
     private const ushort HelloAnswer = 1;
 
     /// <summary>
-    /// The boolean fields of the player data that can be defeat or encounter records.
+    /// The boolean fields of the player data that record a beaten boss.
     /// </summary>
-    private static FieldInfo[]? _recordFields;
+    private static FieldInfo[]? _defeatFields;
+
+    /// <summary>
+    /// The names of the boolean fields of the player data.
+    /// </summary>
+    private static HashSet<string>? _playerDataBoolNames;
 
     /// <summary>
     /// The field of a collection of saved objects that holds them by scene.
@@ -59,6 +64,12 @@ internal partial class CoopSave {
     /// The saved booleans of the world, as keys from <see cref="GetItemKey"/>.
     /// </summary>
     private HashSet<string>? _worldBools;
+
+    /// <summary>
+    /// The booleans of the player data that saved objects of the world set together with their own state, by the key
+    /// of the object.
+    /// </summary>
+    private Dictionary<string, List<string>>? _worldPlayerData;
 
     /// <summary>
     /// The player that the current check is with, or null.
@@ -91,9 +102,16 @@ internal partial class CoopSave {
     private readonly Dictionary<ushort, CoopSaveUpdate> _stateParts = new();
 
     /// <summary>
-    /// How many records and saved objects the last check added.
+    /// How many saved objects and their player data the last check added.
     /// </summary>
     private int _addedChanges;
+
+    /// <summary>
+    /// How many bosses only the partner's save has beaten, and how many only the local save has.
+    /// </summary>
+    private int _onlyPartnerDefeats;
+
+    private int _onlyLocalDefeats;
 
     /// <summary>
     /// Forgets the progress of the current check.
@@ -106,6 +124,8 @@ internal partial class CoopSave {
         _stateReceived = false;
         _stateParts.Clear();
         _addedChanges = 0;
+        _onlyPartnerDefeats = 0;
+        _onlyLocalDefeats = 0;
     }
 
     /// <summary>
@@ -149,15 +169,15 @@ internal partial class CoopSave {
     /// </summary>
     private void OnHello(ClientPlayerData player, CoopSaveUpdate update) {
         var marker = GetCurrentMarker();
-        if (marker == null || player.SaveKey.Length == 0 || player.SaveKey != marker.PartnerKey) {
+        if (marker == null || !IsPartner(player, marker)) {
             return;
         }
 
         if (update.PartnerKey != LocalKey) {
             if (update.PartCount == HelloStart) {
-                UiManager.InternalChatBox.AddMessage(
-                    $"{player.Username} loaded a save that isn't paired with yours. Your two-player save waits " +
-                    "for them to load the paired save, or to pair again with /coopsave."
+                Chat(
+                    $"{player.Username} loaded a save that isn't paired with yours. Your two-player save waits for " +
+                    "them to load the paired save, or to pair again with /coopsave."
                 );
             }
 
@@ -187,7 +207,7 @@ internal partial class CoopSave {
     /// </summary>
     private void OnWorldState(ClientPlayerData player, CoopSaveUpdate update) {
         if (_checkPartnerId != player.Id || _stateReceived || GetCurrentMarker() is not { } marker ||
-            player.SaveKey != marker.PartnerKey) {
+            !IsPartner(player, marker)) {
             return;
         }
 
@@ -208,29 +228,38 @@ internal partial class CoopSave {
         _everChecked = true;
 
         marker.PartnerName = partner.Username;
+        if (partner.SaveKey.Length > 0) {
+            marker.PartnerKey = partner.SaveKey;
+        }
+
         marker.LastCheckUtc = DateTime.UtcNow;
         SaveMarkers();
 
         Logger.Info($"Checked two-player save with {partner.Username}, {_addedChanges} changes added");
-        UiManager.InternalChatBox.AddMessage(
-            _addedChanges == 0
-                ? $"Two-player save with {partner.Username}: backed up, and your worlds match."
-                : $"Two-player save with {partner.Username}: backed up, and {_addedChanges} changes from their " +
-                  "world were added to yours. Changes in the room you are in show once you enter it again."
-        );
+        var message = _addedChanges == 0
+            ? $"Two-player save with {partner.Username}: backed up, and your worlds match."
+            : $"Two-player save with {partner.Username}: backed up, and {_addedChanges} changes from their world " +
+              "were added to yours. Changes in the room you are in show once you enter it again.";
+        if (_onlyPartnerDefeats > 0 || _onlyLocalDefeats > 0) {
+            message += $" Your saves have beaten different bosses ({partner.Username} beat {_onlyPartnerDefeats} " +
+                       $"that you haven't, you beat {_onlyLocalDefeats} that they haven't). Beaten bosses aren't " +
+                       "copied, so nobody misses a reward.";
+        }
+
+        Chat(message);
     }
 
     #region World progress
 
     /// <summary>
-    /// Sends the defeat and encounter records and the saved objects of the world that are set in the local save.
+    /// Sends the bosses that the local save has beaten and the saved objects of the world that are set in it.
     /// </summary>
     private void SendWorldState(ClientPlayerData partner) {
-        var records = GetRecords();
+        var defeats = GetDefeatRecords();
         var items = GetWorldItems();
-        var partCount = System.Math.Max(1, (records.Count + items.Count + EntriesPerPart - 1) / EntriesPerPart);
+        var partCount = System.Math.Max(1, (defeats.Count + items.Count + EntriesPerPart - 1) / EntriesPerPart);
 
-        var recordIndex = 0;
+        var defeatIndex = 0;
         var itemIndex = 0;
         for (var part = 0; part < partCount; part++) {
             var update = new CoopSaveUpdate {
@@ -241,8 +270,8 @@ internal partial class CoopSave {
             };
 
             for (var entries = 0; entries < EntriesPerPart; entries++) {
-                if (recordIndex < records.Count) {
-                    update.Records.Add(records[recordIndex++]);
+                if (defeatIndex < defeats.Count) {
+                    update.Records.Add(defeats[defeatIndex++]);
                 } else if (itemIndex < items.Count) {
                     update.ItemScenes.Add(items[itemIndex].Scene);
                     update.ItemIds.Add(items[itemIndex].Id);
@@ -256,14 +285,14 @@ internal partial class CoopSave {
         }
 
         Logger.Info(
-            $"Sent world progress to {partner.Username}: {records.Count} records and {items.Count} saved objects " +
-            $"in {partCount} parts"
+            $"Sent world progress to {partner.Username}: {defeats.Count} beaten bosses and {items.Count} saved " +
+            $"objects in {partCount} parts"
         );
     }
 
     /// <summary>
-    /// Adds the records and saved objects of the world from the partner that the local save lacks. Only what the local
-    /// player also counts as world progress is added.
+    /// Adds the saved objects of the world from the partner that the local save lacks, with the player data that they
+    /// set, and compares the beaten bosses. Only what the local player also counts as the world is added.
     /// </summary>
     private void AddWorldState(ClientPlayerData partner) {
         var playerData = PlayerData.instance;
@@ -272,23 +301,29 @@ internal partial class CoopSave {
             return;
         }
 
-        var recordNames = new HashSet<string>(GetRecordFields().Select(field => field.Name));
+        var parts = _stateParts.OrderBy(pair => pair.Key).Select(pair => pair.Value).ToList();
+
+        var partnerDefeats = new HashSet<string>(parts.SelectMany(part => part.Records));
+        var localDefeats = new HashSet<string>(GetDefeatRecords());
+        var onlyPartner = partnerDefeats.Where(name => !localDefeats.Contains(name)).ToList();
+        var onlyLocal = localDefeats.Where(name => !partnerDefeats.Contains(name)).ToList();
+        _onlyPartnerDefeats = onlyPartner.Count;
+        _onlyLocalDefeats = onlyLocal.Count;
+        if (onlyPartner.Count > 0 || onlyLocal.Count > 0) {
+            Logger.Info(
+                $"Beaten bosses differ from {partner.Username}. Only theirs: {string.Join(", ", onlyPartner)}; " +
+                $"only local: {string.Join(", ", onlyLocal)}"
+            );
+        }
+
         var worldBools = GetWorldBools();
+        var boolNames = GetPlayerDataBoolNames();
         var loadedScenes = GetLoadedSceneNames();
         var loadedItems = new HashSet<string>(StringComparer.Ordinal);
-        var records = 0;
         var items = 0;
+        var flags = 0;
 
-        foreach (var part in _stateParts.OrderBy(pair => pair.Key).Select(pair => pair.Value)) {
-            foreach (var name in part.Records) {
-                if (!recordNames.Contains(name) || playerData.GetBool(name)) {
-                    continue;
-                }
-
-                playerData.SetBool(name, true);
-                records++;
-            }
-
+        foreach (var part in parts) {
             for (var i = 0; i < part.ItemIds.Count && i < part.ItemScenes.Count; i++) {
                 var scene = part.ItemScenes[i];
                 var id = part.ItemIds[i];
@@ -309,70 +344,58 @@ internal partial class CoopSave {
                 if (loadedScenes.Contains(scene.ToLowerInvariant())) {
                     loadedItems.Add(key);
                 }
+
+                if (_worldPlayerData!.TryGetValue(key, out var names)) {
+                    foreach (var name in names) {
+                        if (boolNames.Contains(name) && !BossRoomCoop.IsHeroStateName(name) && !playerData.GetBool(name)) {
+                            playerData.SetBool(name, true);
+                            flags++;
+                        }
+                    }
+                }
             }
         }
 
         OverrideLoadedItems(loadedItems);
 
-        _addedChanges = records + items;
-        Logger.Info($"Added world progress of {partner.Username}: {records} records and {items} saved objects");
+        _addedChanges = items;
+        Logger.Info($"Added world progress of {partner.Username}: {items} saved objects and {flags} player data flags");
     }
 
     /// <summary>
-    /// The names of the loaded scenes in lower case.
+    /// Whether a boolean of the player data records a beaten boss.
     /// </summary>
-    private static HashSet<string> GetLoadedSceneNames() {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++) {
-            names.Add(UnityEngine.SceneManagement.SceneManager.GetSceneAt(i).name.ToLowerInvariant());
-        }
-
-        return names;
+    private static bool IsDefeatRecord(string name) {
+        return name.StartsWith("defeated", StringComparison.OrdinalIgnoreCase) ||
+               name.EndsWith("Defeated", StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Makes the saved objects of the loaded scenes that the partner changed keep that change. They still look the old
-    /// way until the player enters the scene again, and without this they would save the old way when the player leaves.
+    /// The bosses that the local save has beaten, by the names of their records.
     /// </summary>
-    private static void OverrideLoadedItems(HashSet<string> keys) {
-        if (keys.Count == 0) {
-            return;
-        }
-
-        foreach (var item in UnityEngine.Object.FindObjectsByType<PersistentBoolItem>(
-                     UnityEngine.FindObjectsInactive.Include, UnityEngine.FindObjectsSortMode.None
-                 )) {
-            var data = item.ItemData;
-            var id = string.IsNullOrEmpty(data?.ID) ? item.gameObject.name : data!.ID;
-            var scene = string.IsNullOrEmpty(data?.SceneName) ? item.gameObject.scene.name : data!.SceneName;
-            if (keys.Contains(GetItemKey(scene, id))) {
-                item.SetValueOverride(true);
-            }
-        }
-    }
-
-    /// <summary>
-    /// The defeat and encounter records that are set in the local save.
-    /// </summary>
-    private static List<string> GetRecords() {
+    private static List<string> GetDefeatRecords() {
         var playerData = PlayerData.instance;
-        return playerData == null
-            ? []
-            : GetRecordFields()
-                .Where(field => field.GetValue(playerData) is true)
-                .Select(field => field.Name)
-                .ToList();
+        if (playerData == null) {
+            return [];
+        }
+
+        _defeatFields ??= typeof(PlayerData)
+            .GetFields(BindingFlags.Instance | BindingFlags.Public)
+            .Where(field => field.FieldType == typeof(bool) && IsDefeatRecord(field.Name))
+            .ToArray();
+        return _defeatFields
+            .Where(field => field.GetValue(playerData) is true)
+            .Select(field => field.Name)
+            .ToList();
     }
 
-    /// <summary>
-    /// The boolean fields of the player data that are defeat or encounter records, which boss rooms share too.
-    /// </summary>
-    private static FieldInfo[] GetRecordFields() {
-        return _recordFields ??= typeof(PlayerData)
-            .GetFields(BindingFlags.Instance | BindingFlags.Public)
-            .Where(field => field.FieldType == typeof(bool) && BossRoomCoop.IsSharedRecordName(field.Name) &&
-                            !BossRoomCoop.IsHeroStateName(field.Name))
-            .ToArray();
+    private static HashSet<string> GetPlayerDataBoolNames() {
+        return _playerDataBoolNames ??= new HashSet<string>(
+            typeof(PlayerData)
+                .GetFields(BindingFlags.Instance | BindingFlags.Public)
+                .Where(field => field.FieldType == typeof(bool))
+                .Select(field => field.Name)
+        );
     }
 
     /// <summary>
@@ -412,6 +435,7 @@ internal partial class CoopSave {
         }
 
         _worldBools = new HashSet<string>(StringComparer.Ordinal);
+        _worldPlayerData = new Dictionary<string, List<string>>(StringComparer.Ordinal);
         var worldItems = FileUtil.LoadObjectFromEmbeddedJson<CoopWorldItems>(WorldItemsFilePath);
         if (worldItems == null) {
             Logger.Warn("Could not load the saved objects of the world for two-player saves");
@@ -424,6 +448,12 @@ internal partial class CoopSave {
             }
         }
 
+        foreach (var scene in worldItems.PlayerData) {
+            foreach (var item in scene.Value) {
+                _worldPlayerData[GetItemKey(scene.Key, item.Key)] = item.Value;
+            }
+        }
+
         return _worldBools;
     }
 
@@ -431,6 +461,39 @@ internal partial class CoopSave {
     /// The key of a saved object: the scene in lower case, because the list comes from bundle names, and the ID.
     /// </summary>
     private static string GetItemKey(string scene, string id) => scene.ToLowerInvariant() + "\n" + id;
+
+    /// <summary>
+    /// The names of the loaded scenes in lower case.
+    /// </summary>
+    private static HashSet<string> GetLoadedSceneNames() {
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++) {
+            names.Add(UnityEngine.SceneManagement.SceneManager.GetSceneAt(i).name.ToLowerInvariant());
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// Makes the saved objects of the loaded scenes that the partner changed keep that change. They still look the old
+    /// way until the player enters the scene again, and without this they would save the old way when the player leaves.
+    /// </summary>
+    private static void OverrideLoadedItems(HashSet<string> keys) {
+        if (keys.Count == 0) {
+            return;
+        }
+
+        foreach (var item in UnityEngine.Object.FindObjectsByType<PersistentBoolItem>(
+                     UnityEngine.FindObjectsInactive.Include, UnityEngine.FindObjectsSortMode.None
+                 )) {
+            var data = item.ItemData;
+            var id = string.IsNullOrEmpty(data?.ID) ? item.gameObject.name : data!.ID;
+            var scene = string.IsNullOrEmpty(data?.SceneName) ? item.gameObject.scene.name : data!.SceneName;
+            if (keys.Contains(GetItemKey(scene, id))) {
+                item.SetValueOverride(true);
+            }
+        }
+    }
 
     #endregion
 

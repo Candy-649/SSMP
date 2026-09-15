@@ -44,24 +44,16 @@
   "abyss_cocoon": [
    "glow_rim_Remasker"
   ],
-  "ant_02": [
-   "Battle Scene"
-  ],
   "ant_04": [
    "Secret Mask New"
   ],
   "ant_04_left": [
-   "Black_Thread_Core",
    "Secret Mask New"
   ],
   "ant_04_mid": [
-   "Battle Scene",
-   "Battle Scene Black Thread",
    "Secret Mask New"
   ],
   "ant_05b": [
-   "Battle Scene",
-   "Black_Thread_Core",
    "One Way Wall",
    "Remasker New",
    "Remasker New (1)",
@@ -81,10 +73,6 @@
    "Remasker New",
    "Remasker New (1)",
    "ant_lever_persistent"
-  ],
-  "ant_21": [
-   "Battle Scene Extra",
-   "Battle Scene Init"
   ],
   "ant_merchant": [
    "Remasker New Sharp Ultra"
@@ -158,7 +146,6 @@
    "Crust Wall"
   ],
   "arborium_07": [
-   "Battle Scene",
    "Breakable Wall",
    "Grouped Remasker_Large",
    "Remasker New (1)",
@@ -276,14 +263,10 @@
    "bell_toll_machine"
   ],
   "bone_01": [
-   "Battle Scene",
    "Bone Lever",
    "Breakable Wall",
-   "Collapser Small (1)",
    "Inverse Remasker",
-   "Inverse Remasker (1)",
-   "Remasker New",
-   "Secret Mask"
+   "Inverse Remasker (1)"
   ],
   "bone_01b": [
    "Breakable Wall"
@@ -294,14 +277,12 @@
    "bell_toll_machine"
   ],
   "bone_02": [
-   "Black_Thread_Core",
    "Chain Drop Platform"
   ],
   "bone_03": [
    "Song_lever_side"
   ],
   "bone_04": [
-   "Black_Thread_Core",
    "Bone Gate",
    "Bone Lever",
    "Fall_platform_barrels",
@@ -314,7 +295,6 @@
    "Secret Sound Region"
   ],
   "bone_07": [
-   "Black_Thread_Core",
    "Remasker New",
    "Remasker New (1)",
    "Remasker New (2)",
@@ -332,8 +312,6 @@
    "lever"
   ],
   "bone_09": [
-   "Black_Thread_Core",
-   "Garmond Fighter",
    "Remasker New",
    "sack_breakable_single"
   ],
@@ -345,7 +323,6 @@
    "Song_lever_side"
   ],
   "bone_11": [
-   "Garmond Fighter",
    "Trapdoor Lever"
   ],
   "bone_11b": [
@@ -369,9 +346,6 @@
    "Remasker New",
    "Remasker New (1)"
   ],
-  "bone_18": [
-   "Battle Scene"
-  ],
   "bone_19": [
    "Breakable Wall"
   ],
@@ -381,14 +355,7 @@
    "Song_lever_side",
    "Song_lever_side (1)"
   ],
-  "bone_east_02": [
-   "Garmond Fighter"
-  ],
-  "bone_east_02b": [
-   "Black_Thread_Core"
-  ],
   "bone_east_03": [
-   "Black_Thread_Core",
    "DockDashExplodeRock"
   ],
   "bone_east_04": [
@@ -411,8 +378,6 @@
   ],
   "bone_east_05": [
    "Barrel Plat Lift (1)",
-   "Black_Thread_Core",
-   "Garmond Fighter",
    "Song_Gate_small",
    "Song_lever_side",
    "Song_lever_side (1)"
@@ -485,7 +450,6 @@
   ],
   "bone_east_14": [
    "DropBomb Rock (2)",
-   "Garmond Fighter",
    "Inverse Remasker",
    "Secret Mask New",
    "explode_wall",
@@ -508,7 +472,6 @@
    "Breakable Wall"
   ],
   "bone_east_17": [
-   "Black_Thread_Core",
    "Secret Mask New",
    "ant_lever_persistent"
   ],
@@ -541,16 +504,11 @@
    "explode_wall_norck"
   ],
   "bone_east_25": [
-   "Battle Scene",
    "Remasker New Sharp Ultra"
-  ],
-  "bone_east_26": [
-   "Black_Thread_Core_Citadel"
   ],
   "bone_east_lavachallenge": [
    "Inverse Remasker",
    "Remasker New Sharp",
-   "explode_wall",
    "explode_wall (1)",
    "explode_wall (2)",
    "explode_wall (3)"
@@ -569,11 +527,9 @@
    "Act3_Bellway_01_Breakable_wall",
    "Bone Lever",
    "Remasker New",
-   "Remasker New (1)",
-   "Weakness Scene"
+   "Remasker New (1)"
   ],
   "chapel_wanderer": [
-   "Battle Scene",
    "Collapser Small",
    "One Way Wall",
    "Remasker New",
@@ -589,7 +545,6 @@
    "Moss Vine Cluster"
   ],
   "clover_04b": [
-   "Battle Scene",
    "Clover Gate",
    "Clover Gate (1)",
    "Hornet_pressure_plate_small_persistent"
@@ -622,34 +577,22 @@
    "Shrine Pressure Plate TR"
   ],
   "cog_04": [
-   "Black_Thread_Core",
    "cog_lever",
    "cog_lever (1)"
   ],
   "cog_05": [
-   "Battle Scene",
    "Remasker New Sharp"
   ],
   "cog_06": [
    "cog_lever"
   ],
   "cog_07": [
-   "Battle Scene",
    "Remasker New Sharp",
    "Remasker New Sharp (1)",
    "cog_lever"
   ],
   "cog_08": [
    "cog_lever"
-  ],
-  "cog_09": [
-   "Cog_Choir_Cylinder",
-   "Cog_Choir_Cylinder (1)",
-   "Cog_Choir_Cylinder (2)",
-   "Cog_Choir_Cylinder (3)"
-  ],
-  "cog_09_destroyed": [
-   "Weakness Cog Drop Scene"
   ],
   "cog_10": [
    "Active",
@@ -661,10 +604,8 @@
    "cog_junk_pile_break (1)"
   ],
   "cog_10_destroyed": [
-   "Battle Scene",
    "Pipe_Vent_Hatch Broken",
    "Secret Mask New",
-   "Wake Scene",
    "plank_wall_cluster_metal",
    "plank_wall_cluster_metal (1)",
    "plank_wall_cluster_metal (2)"
@@ -675,11 +616,9 @@
    "cog_lever (2)"
   ],
   "cog_dancers": [
-   "cog_lever",
    "slide_gate_ring"
   ],
   "coral_02": [
-   "Garmond Fighter",
    "Remasker New",
    "Remasker New (1)",
    "Song_lever_side",
@@ -701,11 +640,7 @@
    "Silkfly Ambient Perched (2)",
    "Silkfly Ambient Perched (3)"
   ],
-  "coral_11": [
-   "Black_Thread_Core"
-  ],
   "coral_12": [
-   "Black_Thread_Core",
    "Breakable Wall"
   ],
   "coral_19": [
@@ -734,9 +669,6 @@
   "coral_26": [
    "Coral Crust Wall Tall"
   ],
-  "coral_27": [
-   "Battle Scene"
-  ],
   "coral_28": [
    "Coral_gate_large",
    "Coral_gate_large (1)",
@@ -749,7 +681,6 @@
    "Remasker New Sharp Ultra"
   ],
   "coral_32": [
-   "Black_Thread_Core",
    "Coral Crust Wall Tall",
    "Remasker New",
    "Remasker New Sharp Ultra",
@@ -782,7 +713,6 @@
    "Coral Crust Wall Tall",
    "Coral Crust Wall Tall (1)",
    "Coral Crust Wall Tall (2)",
-   "Hornet_cage_rect_lift",
    "Remasker New Sharp Ultra",
    "song_bridge_pole_large (1)",
    "song_bridge_pole_large (2)",
@@ -1015,7 +945,6 @@
    "Remasker New (2)"
   ],
   "dock_03c": [
-   "Battle Scene",
    "Breakable Wall_Silhouette",
    "Breakable Window",
    "Remasker New",
@@ -1034,7 +963,6 @@
    "Breakable Window"
   ],
   "dock_04": [
-   "Black_Thread_Core",
    "dock_pressure_plate_lock"
   ],
   "dock_06_church": [
@@ -1042,7 +970,6 @@
    "Song_lever_side"
   ],
   "dock_08": [
-   "Battle Scene",
    "Remasker New",
    "Song_Gate_small",
    "Song_lever_side"
@@ -1086,13 +1013,10 @@
   ],
   "dust_02": [
    "Dust_02Gate",
-   "Prince Cell Door",
    "Remasker New Sharp Ultra",
    "greymoor_lever_simple_EDITED"
   ],
   "dust_03": [
-   "Battle Scene",
-   "Black_Thread_Core",
    "Remasker New",
    "Remasker New (1)"
   ],
@@ -1102,7 +1026,6 @@
   ],
   "dust_05": [
    "Breakable Wall",
-   "Garmond Fighter",
    "Remasker New",
    "Remasker New (2)",
    "greymoor_lever_simple"
@@ -1127,10 +1050,6 @@
    "bell_toll_machine"
   ],
   "dust_11": [
-   "Battle Scene 1",
-   "Battle Scene Act3",
-   "Black_Thread_Core",
-   "Black_Thread_Core (1)",
    "Breakable Wall",
    "One Way Wall (1)",
    "One Way Wall (2)",
@@ -1143,7 +1062,6 @@
    "Break Wall Dustpen Cage"
   ],
   "dust_chef": [
-   "Battle Scene",
    "Chef_Meat_React",
    "Chef_Meat_React (1)",
    "Chef_Meat_React (2)",
@@ -1164,7 +1082,6 @@
    "Song_lever_side"
   ],
   "greymoor_02": [
-   "Black_Thread_Core",
    "Breakable Wall",
    "Collapser Small",
    "Craw_home_front",
@@ -1177,12 +1094,9 @@
   ],
   "greymoor_03": [
    "Breakable Wall",
-   "Hornet_cage_rect_lift_greymoor",
    "Hornet_pressure_plate_small_persistent"
   ],
   "greymoor_04": [
-   "Battle Scene",
-   "Black Thread Battle Scene",
    "Remasker New",
    "propeller (1)",
    "propeller (2)",
@@ -1190,7 +1104,6 @@
    "propeller (4)"
   ],
   "greymoor_05": [
-   "Garmond Fighter",
    "cage_main",
    "cage_tentacle_top",
    "fly corpse",
@@ -1208,7 +1121,6 @@
    "belltown_lever_drop_plat"
   ],
   "greymoor_07": [
-   "Black_Thread_Core",
    "One Way Wall"
   ],
   "greymoor_08": [
@@ -1216,12 +1128,8 @@
    "greymoor_drop_propeller"
   ],
   "greymoor_11": [
-   "Black_Thread_Core",
    "propeller",
    "propeller (1)"
-  ],
-  "greymoor_12": [
-   "Black_Thread_Core"
   ],
   "greymoor_13": [
    "Remasker New (1)"
@@ -1239,7 +1147,6 @@
    "Remasker New Sharp Ultra (1)"
   ],
   "greymoor_16": [
-   "Black_Thread_Core",
    "Breakable Wall",
    "Inverse Remasker",
    "Inverse Remasker (1)",
@@ -1255,7 +1162,6 @@
    "plank_wall_cluster"
   ],
   "greymoor_20c": [
-   "Battle Scene",
    "Inverse Remasker",
    "Inverse Remasker (5)",
    "Inverse Remasker (6)",
@@ -1274,7 +1180,6 @@
    "Breakable Window (1)"
   ],
   "hang_03": [
-   "Black_Thread_Core_Citadel",
    "Breakable Window (1)"
   ],
   "hang_03_top": [
@@ -1282,7 +1187,6 @@
    "lamp_hang_top"
   ],
   "hang_04": [
-   "Battle Scene Act3",
    "Breakable Window (1)",
    "smash_floor",
    "smash_floor (1)",
@@ -1299,10 +1203,6 @@
    "smash_floor (7)",
    "smash_floor (8)",
    "smash_floor (9)"
-  ],
-  "hang_04_boss": [
-   "Battle Scene",
-   "Start Range"
   ],
   "hang_06": [
    "Bot Blocker",
@@ -1339,7 +1239,6 @@
    "Breakable Window (1)"
   ],
   "hang_13": [
-   "Black_Thread_Core",
    "Breakable Window (1)"
   ],
   "hang_14": [
@@ -1363,8 +1262,6 @@
    "Breakable Wall"
   ],
   "library_02": [
-   "Battle Scene",
-   "Battle Scene Acolyte",
    "Grouped Remasker",
    "Remasker New",
    "Remasker New (1)"
@@ -1377,8 +1274,6 @@
    "innerworks_lever"
   ],
   "library_04": [
-   "Black_Thread_Core_Citadel",
-   "Black_Thread_Core_Citadel (1)",
    "Remasker New",
    "Remasker New Sharp",
    "Song_lever_side",
@@ -1393,7 +1288,6 @@
    "library_glass_heart_piece"
   ],
   "library_06": [
-   "Black_Thread_Core_Citadel",
    "Remasker New"
   ],
   "library_07": [
@@ -1483,7 +1377,6 @@
   ],
   "memory_coral_tower": [
    "Remasker New (1)",
-   "Remasker New Top",
    "Stalactite Group"
   ],
   "memory_silk_heart_bellbeast": [
@@ -1500,7 +1393,6 @@
    "Trapdoor Lever"
   ],
   "mosstown_02": [
-   "Black_Thread_Core",
    "Bone Lever 2",
    "Breakable Wall",
    "Remasker New Sharp",
@@ -1519,7 +1411,6 @@
    "explode_wall"
   ],
   "organ_01": [
-   "Hornet_cage_rect_lift_organ (1)",
    "Organ Webbed Bench",
    "Remasker New",
    "Remasker New (1)",
@@ -1579,8 +1470,6 @@
    "Remasker New"
   ],
   "room_crowcourt": [
-   "Battle Scene",
-   "Bone Lever",
    "Craw_home_front",
    "Craw_home_front (1)",
    "Craw_home_front (2)",
@@ -1601,7 +1490,6 @@
    "diving_bell_door_breakable"
   ],
   "room_forge": [
-   "Battle Scene",
    "Inverse Remasker",
    "Remasker New",
    "Remasker New (1)",
@@ -1634,7 +1522,6 @@
    "Swamp Muckman FG"
   ],
   "shadow_05": [
-   "Black_Thread_Core",
    "Breakable Wall",
    "Swamp Muckman FG",
    "cage_mid_small_long_sway drop (2)",
@@ -1739,34 +1626,20 @@
    "loom_room_jar2 (2)",
    "weaver_lift_power_chamber"
   ],
-  "shellgrave": [
-   "Battle Scene"
-  ],
   "shellwood_01": [
-   "Hornet_pressure_plate",
-   "Shellwood Hive"
+   "Hornet_pressure_plate"
   ],
   "shellwood_01b": [
-   "Battle Scene",
-   "Black_Thread_Core",
-   "Hornet_cage_rect_lift",
    "Remasker New",
    "Remasker New (1)",
    "bell_toll_machine"
   ],
   "shellwood_02": [
-   "Black_Thread_Core",
-   "Hornet_cage_rect_lift",
    "Hornet_pressure_plate",
-   "Plank Solid 2",
-   "Shellwood Hive (1)"
+   "Plank Solid 2"
   ],
   "shellwood_03": [
    "Shellwood Twig Wall"
-  ],
-  "shellwood_04b": [
-   "Black_Thread_Core",
-   "Garmond Fighter"
   ],
   "shellwood_08c": [
    "bell_toll_machine"
@@ -1799,7 +1672,6 @@
    "Shellwood Twig Wall (1)"
   ],
   "shellwood_15": [
-   "Black_Thread_Core",
    "Shellwood Twig Wall",
    "Shellwood Twig Wall (1)"
   ],
@@ -1816,8 +1688,6 @@
    "Witch_Cluster_Vine (2)"
   ],
   "shellwood_26": [
-   "Black_Thread_Core",
-   "Shellwood Hive (1)",
    "Shellwood Twig Wall (2)"
   ],
   "slab_02": [
@@ -1830,7 +1700,6 @@
    "Remasker New",
    "Remasker New Sharp Ultra",
    "Secret Mask New",
-   "door_slabCaged",
    "slab_jail_lever",
    "slab_jail_lever (1)"
   ],
@@ -1895,16 +1764,11 @@
    "Slab_vent_mask"
   ],
   "slab_16": [
-   "Battle Cloaked Scene",
-   "Jail Gate Door - Persistent",
    "Remasker New",
    "Remasker New (1)",
    "Remasker New Sharp",
    "Slab_vent_mask",
    "slab_item_chain (1)"
-  ],
-  "slab_16b": [
-   "Battle Scene Broodmother"
   ],
   "slab_17": [
    "slab_cage_plat_thin_fall (1)"
@@ -1929,7 +1793,6 @@
    "slab_jail_lever"
   ],
   "slab_23": [
-   "Battle Scene",
    "One Way Wall",
    "Remasker New"
   ],
@@ -1938,7 +1801,6 @@
    "One Way Wall"
   ],
   "song_01": [
-   "Black_Thread_Core_Citadel",
    "Breakable Floor_basic Song_01",
    "Breakable Wall",
    "Remasker New",
@@ -1964,16 +1826,12 @@
    "Remasker New (1)"
   ],
   "song_04": [
-   "Battle Scene",
-   "Black_Thread_Core",
    "Bot Blocker",
    "Breakable Wall",
    "Remasker New",
-   "Remasker New (1)",
-   "Wake Scene"
+   "Remasker New (1)"
   ],
   "song_05": [
-   "Black_Thread_Core_Citadel",
    "Breakable Window",
    "Breakable Window (1)",
    "Remasker New",
@@ -2041,12 +1899,10 @@
    "propeller understore propeller"
   ],
   "song_15": [
-   "Black_Thread_Core_Citadel",
    "Remasker New",
    "Remasker New Sharp"
   ],
   "song_17": [
-   "Black_Thread_Core_Citadel",
    "black_thread_impacter",
    "black_thread_impacter (1)",
    "black_thread_impacter (2)"
@@ -2076,15 +1932,12 @@
    "black_thread_impacter (1)"
   ],
   "song_25": [
-   "Hatch",
    "Moss Vine Cluster",
    "Remasker New",
    "Remasker New Sharp",
-   "Remasker New Sharp Drapes",
-   "Weakness Scene Act3 Final"
+   "Remasker New Sharp Drapes"
   ],
   "song_27": [
-   "Black_Thread_Core_Citadel",
    "Song_lever_side",
    "Song_lever_side - merchant quest accepted"
   ],
@@ -2132,8 +1985,7 @@
    "Silkfly Ambient (1)",
    "Silkfly Ambient (2)",
    "Silkfly Ambient (3)",
-   "Sound Control",
-   "Weakness Scene"
+   "Sound Control"
   ],
   "tut_01b": [
    "remask right"
@@ -2145,12 +1997,10 @@
    "Remasker New"
   ],
   "tut_03": [
-   "Battle Scene",
    "Interact Reminder",
    "Moss Vine Cluster",
    "Moss Vine Cluster (1)",
-   "Silkfly Ambient",
-   "Weakness Scene"
+   "Silkfly Ambient"
   ],
   "tut_04": [
    "Remasker New Sharp Ultra",
@@ -2195,7 +2045,6 @@
    "Barrel Plat Lift Thin (6)",
    "Barrel Plat Lift Thin (7)",
    "Barrel Plat Lift Thin (8)",
-   "Black_Thread_Core",
    "Collapser Small Understore Grate (1)",
    "Grouped Remasker_Large",
    "Remasker New Sharp Ultra",
@@ -2230,7 +2079,6 @@
    "Barrel Plat Lift Thin (3)",
    "Barrel Plat Lift Thin (4)",
    "Barrel Plat Lift Thin (5)",
-   "Black_Thread_Core",
    "Collapser Small Understore Grate",
    "Fall_platform_barrel wide",
    "Song_lever_side",
@@ -2238,7 +2086,6 @@
    "cog_05_shortcut"
   ],
   "under_07": [
-   "Battle Scene",
    "Remasker New Sharp",
    "breakable blocker struts"
   ],
@@ -2247,7 +2094,6 @@
    "Remasker New"
   ],
   "under_07c": [
-   "Battle Scene",
    "Bot Blocker",
    "Breakable Wall",
    "Inverse Remasker",
@@ -2273,7 +2119,6 @@
    "lamp_pivot"
   ],
   "under_10": [
-   "Battle Scene",
    "Remasker New",
    "Song_Gate_small",
    "Song_lever_side"
@@ -2320,8 +2165,6 @@
   ],
   "under_18": [
    "Barrel Plat Lift Thin",
-   "Battle Scene",
-   "Black_Thread_Core",
    "Inverse Remasker",
    "Remasker New (1)"
   ],
@@ -2336,7 +2179,6 @@
   ],
   "under_27": [
    "Barrel Plat Lift Thin",
-   "Black_Thread_Core",
    "Fall platform support pole",
    "Fall_platform_barrel",
    "Remasker",
@@ -2360,16 +2202,11 @@
    "Remasker New Sharp Ultra",
    "Remasker New Sharp Ultra (1)",
    "Remasker New Sharp Ultra (2)",
-   "Understore Lever L Main",
-   "under_lift_large"
+   "Understore Lever L Main"
   ],
   "ward_02": [
-   "Pipe_Vent_Hatch",
    "Remasker New Sharp",
    "lock_machine"
-  ],
-  "ward_02_boss": [
-   "Remasker New"
   ],
   "ward_02b": [
    "Remasker New",
@@ -2416,8 +2253,6 @@
    "weaver_lift_power_chamber"
   ],
   "weave_03": [
-   "Black_Thread_Core",
-   "Boss Scene",
    "Moss Vine Cluster (1)",
    "Moss Vine Cluster (2)"
   ],
@@ -2475,5 +2310,211 @@
    "Breakable Wall",
    "Breakable Wall (1)"
   ]
+ },
+ "playerData": {
+  "arborium_08": {
+   "One Way Wall": [
+    "arborium_08_oneWay"
+   ]
+  },
+  "arborium_09": {
+   "Moss Vine Cluster": [
+    "arborium_09_oneWay"
+   ]
+  },
+  "bellway_03": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "bellway_08": {
+   "bell_toll_machine": [
+    "activatedStepsUpperBellbench",
+    "hasActivatedBellBench"
+   ]
+  },
+  "bellway_aqueduct": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "bellway_peak": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "bellway_shadow": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "bone_01c": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "bone_east_04b": {
+   "explode_wall": [
+    "Bone_East_04b_ExplodeWall"
+   ]
+  },
+  "bone_east_07": {
+   "explode_wall (6)": [
+    "openedTallGeyser"
+   ],
+   "explode_wall (7) - boneEast07_openedMidRoof": [
+    "boneEast07_openedMidRoof"
+   ]
+  },
+  "bone_east_09": {
+   "Wind Rock (3)": [
+    "cauldronShortcutUpdraft"
+   ]
+  },
+  "bone_east_09b": {
+   "explode_wall": [
+    "openedCauldronShortcut"
+   ]
+  },
+  "bone_east_15": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "bone_east_16": {
+   "Breakable Wall": [
+    "antMerchantShortcut"
+   ]
+  },
+  "bone_east_17b": {
+   "Breakable Wall": [
+    "antMerchantShortcut"
+   ]
+  },
+  "bone_east_18c": {
+   "explode_wall": [
+    "explodeWallBoneEast18c"
+   ]
+  },
+  "bonegrave": {
+   "Moss Vine Cluster": [
+    "bonegraveOpen"
+   ]
+  },
+  "clover_16": {
+   "Breakable Wall (1)": [
+    "aspid_16_oneway"
+   ]
+  },
+  "cog_06": {
+   "cog_lever": [
+    "opened_cog_06_door"
+   ]
+  },
+  "cog_07": {
+   "cog_lever": [
+    "cog7_gateOpened"
+   ]
+  },
+  "coral_02": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "crawl_03": {
+   "Breakable Wall (1)": [
+    "crawl03_oneWayWall"
+   ]
+  },
+  "dock_01": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "dock_03": {
+   "Breakable Wall_Silhouette": [
+    "openedDocksBackEntrance"
+   ]
+  },
+  "dock_03b": {
+   "Breakable Wall": [
+    "openedDocksBackEntrance"
+   ]
+  },
+  "dock_03c": {
+   "Breakable Wall_Silhouette": [
+    "openedDocksBackEntrance"
+   ]
+  },
+  "dock_03d": {
+   "Breakable Wall_Silhouette": [
+    "openedDocksBackEntrance"
+   ]
+  },
+  "dust_10": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "greymoor_05": {
+   "greymoor_breakable_plat": [
+    "greymoor05_farmerPlatBroken"
+   ]
+  },
+  "greymoor_08": {
+   "grey_wood_chain_plat_mid_breakable": [
+    "greymoor08_plat_destroyed"
+   ]
+  },
+  "hang_10": {
+   "Breakable Wall (1)": [
+    "hang_10_oneWay"
+   ]
+  },
+  "mosstown_03": {
+   "explode_wall": [
+    "explodeWallMosstown3"
+   ]
+  },
+  "shellwood_01b": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "shellwood_08c": {
+   "bell_toll_machine": [
+    "hasActivatedBellBench"
+   ]
+  },
+  "shellwood_13": {
+   "Bell Wall Tall": [
+    "shellwood13_BellWall"
+   ]
+  },
+  "shellwood_15": {
+   "Shellwood Twig Wall (1)": [
+    "shellwoodTwigShortcut"
+   ]
+  },
+  "slab_18": {
+   "One Way Wall": [
+    "slab_03_rubbishCleared"
+   ]
+  },
+  "slab_cell_quiet": {
+   "One Way Wall": [
+    "slab_cell_quiet_oneWayWall"
+   ]
+  },
+  "song_11": {
+   "Plug_Gate": [
+    "song_11_oneway"
+   ]
+  },
+  "under_27": {
+   "Shellwood Twig Wall (1)": [
+    "sethShortcut"
+   ]
+  }
  }
 }

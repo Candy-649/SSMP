@@ -137,5 +137,11 @@ internal enum CoopSaveUpdateKind : byte {
     /// <summary>
     /// A part of the world progress of the save of the sender.
     /// </summary>
-    WorldState
+    WorldState,
+
+    /// <summary>
+    /// A player couldn't pair saves with the request of the other player, because their saves have beaten different
+    /// bosses, which the update lists for the sender.
+    /// </summary>
+    PairRefused
 }

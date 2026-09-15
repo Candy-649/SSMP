@@ -142,6 +142,18 @@ internal class UiManager : IUiManager {
     /// </summary>
     public event Action? RequestClientDisconnectEvent;
 
+    /// <summary>
+    /// Event raised when a save loads after hosting already started for it, which a two-player save does while it
+    /// waits in the menu for its partner.
+    /// </summary>
+    public event Action? HostSaveLoadedEvent;
+
+    /// <summary>
+    /// Event raised when hosting that started before a save loaded stops without the save loading, because the
+    /// connection failed or was lost.
+    /// </summary>
+    public event Action? HostBeforeSaveStoppedEvent;
+
     /// <inheritdoc />
     public event Action? MultiplayerButtonPressed;
 
@@ -509,6 +521,16 @@ internal class UiManager : IUiManager {
     }
 
     /// <summary>
+    /// Starts the hosting that the save slot selection is open for, or null outside that selection.
+    /// </summary>
+    private Action? _startPendingHost;
+
+    /// <summary>
+    /// Whether hosting started before the chosen save loaded, which a two-player save does to wait for its partner.
+    /// </summary>
+    private bool _hostStartedBeforeSave;
+
+    /// <summary>
     /// Handles host button press by opening save selection.
     /// </summary>
     private void OnStartHostRequested(
@@ -520,15 +542,63 @@ internal class UiManager : IUiManager {
     ) {
         if (!_isSlotSelectionActive) {
             IsSelectingHostSave = true;
+            _hostStartedBeforeSave = false;
+            _startPendingHost = () => {
+                RequestServerStartHostEvent?.Invoke(address, port, username, transportType, fallbackAddress);
+                RequestClientConnectEvent?.Invoke(LocalhostAddress, port, username, transportType, true, null);
+            };
         }
 
         OpenSaveSlotSelection(saveSelected => {
             IsSelectingHostSave = false;
-            if (!saveSelected) return;
+            var startHost = _startPendingHost;
+            _startPendingHost = null;
 
-            RequestServerStartHostEvent?.Invoke(address, port, username, transportType, fallbackAddress);
-            RequestClientConnectEvent?.Invoke(LocalhostAddress, port, username, transportType, true, null);
+            if (!saveSelected) {
+                StopHostBeforeSave();
+                return;
+            }
+
+            // A two-player save already started hosting while it waited for its partner
+            if (_hostStartedBeforeSave) {
+                _hostStartedBeforeSave = false;
+                HostSaveLoadedEvent?.Invoke();
+                return;
+            }
+
+            startHost?.Invoke();
         });
+    }
+
+    /// <summary>
+    /// Starts hosting before the chosen save loads, so a two-player save can wait in the menu for its partner.
+    /// </summary>
+    /// <returns>Whether hosting runs now.</returns>
+    public bool StartHostBeforeSave() {
+        if (_hostStartedBeforeSave) {
+            return true;
+        }
+
+        if (!IsSelectingHostSave || _startPendingHost == null) {
+            return false;
+        }
+
+        _hostStartedBeforeSave = true;
+        _startPendingHost();
+        return true;
+    }
+
+    /// <summary>
+    /// Stops hosting that started before the save loaded, for when the player stops waiting for their partner.
+    /// </summary>
+    public void StopHostBeforeSave() {
+        if (!_hostStartedBeforeSave) {
+            return;
+        }
+
+        _hostStartedBeforeSave = false;
+        RequestClientDisconnectEvent?.Invoke();
+        RequestServerStopHostEvent?.Invoke();
     }
 
     /// <summary>
@@ -597,8 +667,10 @@ internal class UiManager : IUiManager {
     /// </summary>
     /// <param name="result">The reason for connection failure</param>
     /// <param name="fallbackAddress">Optional fallback address (IP:Port) to attempt on failure.</param>
-    public void OnFailedConnect(ConnectionFailedResult result, string? fallbackAddress = null) =>
+    public void OnFailedConnect(ConnectionFailedResult result, string? fallbackAddress = null) {
         _connectInterface.OnFailedConnect(result, fallbackAddress);
+        EndHostBeforeSave();
+    }
 
     /// <summary>
     /// Callback invoked when client disconnects from the server.
@@ -608,6 +680,21 @@ internal class UiManager : IUiManager {
         _connectInterface.OnClientDisconnect();
         _pingInterface.SetEnabled(false);
         _isSlotSelectionActive = false;
+        EndHostBeforeSave();
+    }
+
+    /// <summary>
+    /// Stops the server of hosting that started before a save loaded, after its connection failed or was lost, so that
+    /// choosing the save again hosts again.
+    /// </summary>
+    private void EndHostBeforeSave() {
+        if (!_hostStartedBeforeSave) {
+            return;
+        }
+
+        _hostStartedBeforeSave = false;
+        RequestServerStopHostEvent?.Invoke();
+        HostBeforeSaveStoppedEvent?.Invoke();
     }
 
     #endregion
