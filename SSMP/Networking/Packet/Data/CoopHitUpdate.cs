@@ -22,27 +22,38 @@ internal class CoopHitUpdate : IPacketData {
     public ushort TargetId { get; set; }
 
     /// <summary>
-    /// The name of the scene of the object that was hit.
+    /// What the hit hit.
+    /// </summary>
+    public CoopHitKind Kind { get; set; }
+
+    /// <summary>
+    /// For the knockback of an enemy, the ID of its entity.
+    /// </summary>
+    public ushort EntityId { get; set; }
+
+    /// <summary>
+    /// For a hit on an object, the name of the scene of the object.
     /// </summary>
     public string Scene { get; set; } = "";
 
     /// <summary>
-    /// The path of the object that was hit in its scene.
+    /// For a hit on an object, the path of the object in its scene.
     /// </summary>
     public string Path { get; set; } = "";
 
     /// <summary>
-    /// The name of the type of the component on the object that took the hit.
+    /// For a hit on an object, the name of the type of the component on the object that took the hit.
     /// </summary>
     public string Responder { get; set; } = "";
 
     /// <summary>
-    /// Which component of that type on the object took the hit, counting from 0.
+    /// For a hit on an object, which component of that type on the object took the hit, counting from 0.
     /// </summary>
     public byte Index { get; set; }
 
     /// <summary>
-    /// The hit itself, which only the games of the players read.
+    /// The hit itself, or the direction and magnitude of the knockback of an enemy, which only the games of the
+    /// players read.
     /// </summary>
     public byte[] Hit { get; set; } = [];
 
@@ -50,6 +61,8 @@ internal class CoopHitUpdate : IPacketData {
     public void WriteData(IPacket packet) {
         packet.Write(PlayerId);
         packet.Write(TargetId);
+        packet.Write((byte) Kind);
+        packet.Write(EntityId);
         packet.Write(Scene);
         packet.Write(Path);
         packet.Write(Responder);
@@ -62,10 +75,27 @@ internal class CoopHitUpdate : IPacketData {
     public void ReadData(IPacket packet) {
         PlayerId = packet.ReadUShort();
         TargetId = packet.ReadUShort();
+        Kind = (CoopHitKind) packet.ReadByte();
+        EntityId = packet.ReadUShort();
         Scene = packet.ReadString();
         Path = packet.ReadString();
         Responder = packet.ReadString();
         Index = packet.ReadByte();
         Hit = packet.ReadBytes(packet.ReadUShort());
     }
+}
+
+/// <summary>
+/// What a hit in a two-player save hit.
+/// </summary>
+internal enum CoopHitKind : byte {
+    /// <summary>
+    /// A shared object of the world, found by its path, on which the other game replays the hit.
+    /// </summary>
+    Object,
+
+    /// <summary>
+    /// An enemy, found by the ID of its entity, whose knockback the game of the scene host applies.
+    /// </summary>
+    EnemyKnockback
 }

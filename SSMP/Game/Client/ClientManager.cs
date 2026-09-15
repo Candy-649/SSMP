@@ -278,7 +278,9 @@ internal class ClientManager : IClientManager {
         );
         _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager);
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
-        _coopHits = new CoopHits(netClient, _playerData, _gamePatcher, () => _coopSave.CheckedPartnerId);
+        _coopHits = new CoopHits(
+            netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedPartnerId
+        );
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();

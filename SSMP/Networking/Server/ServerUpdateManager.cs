@@ -554,6 +554,8 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                 new CoopHitUpdate {
                     PlayerId = update.PlayerId,
                     TargetId = update.TargetId,
+                    Kind = update.Kind,
+                    EntityId = update.EntityId,
                     Scene = update.Scene,
                     Path = update.Path,
                     Responder = update.Responder,

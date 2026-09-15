@@ -14,6 +14,7 @@ using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using SSMP.Game.Client.Save;
 using Math_Vector2 = SSMP.Math.Vector2;
 
 //using Logger = SSMP.Logging.Logger;
@@ -664,7 +665,11 @@ internal class Entity {
             if (Object.Client != null &&
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
                 interpolation.AdaptToRTT(_netClient.UpdateManager.AverageRtt);
-                interpolation.ManualUpdate(Time.deltaTime);
+
+                // A knockback from a hit of the local player moves the object until it ends, then it blends back
+                if (!CoopHits.IsRecoilPredicted(Object.Client)) {
+                    interpolation.ManualUpdate(Time.deltaTime);
+                }
             }
 
             return;

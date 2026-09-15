@@ -10,6 +10,7 @@ using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using SSMP.Game.Client.Entity;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
 
@@ -22,12 +23,20 @@ namespace SSMP.Game.Client.Save;
 /// that nothing is hit twice.
 /// A replayed hit gives the local player nothing: no knockback, no silk and no hit pause. What the object drops is
 /// dropped in both games, so each player gets their own.
+/// Knockback of enemies is local first as well: a hit of the local player knocks back an enemy at once, also when the
+/// scene host controls the enemy, and the game of the scene host applies the same knockback when the hit arrives.
 /// </summary>
 internal class CoopHits {
     /// <summary>
     /// Binding flags for the instance methods that are hooked.
     /// </summary>
     private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+    /// <summary>
+    /// The longest time that the local game predicts a knockback of an enemy that the scene host controls, in
+    /// seconds, in case the knockback doesn't end.
+    /// </summary>
+    private const float MaxPredictedRecoilTime = 1f;
 
     /// <summary>
     /// The types of objects whose hits are replayed: objects of the world that both players share. Objects that give
@@ -67,6 +76,12 @@ internal class CoopHits {
     private static readonly Dictionary<Type, bool> IsReplayedByType = new();
 
     /// <summary>
+    /// The knockbacks of enemies that the scene host controls which the local game predicts, with the time at which
+    /// the prediction ends at the latest.
+    /// </summary>
+    private static readonly Dictionary<Recoil, float> PredictedRecoils = new();
+
+    /// <summary>
     /// The net client for sending hits.
     /// </summary>
     private readonly NetClient _netClient;
@@ -80,6 +95,11 @@ internal class CoopHits {
     /// The game patcher, which keeps replayed hits from knocking back the local player.
     /// </summary>
     private readonly GamePatcher _gamePatcher;
+
+    /// <summary>
+    /// The entity manager, which knows the enemies that the scene host controls.
+    /// </summary>
+    private readonly EntityManager _entityManager;
 
     /// <summary>
     /// Gets the ID of the partner that the two-player save was checked with, or null outside a checked save.
@@ -107,6 +127,11 @@ internal class CoopHits {
     private bool _isReplaying;
 
     /// <summary>
+    /// Whose hit is being processed, for the knockback that it causes.
+    /// </summary>
+    private HitContext _hitContext;
+
+    /// <summary>
     /// Whether sending a hit threw, which is only logged once.
     /// </summary>
     private bool _sendFailed;
@@ -115,11 +140,13 @@ internal class CoopHits {
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         GamePatcher gamePatcher,
+        EntityManager entityManager,
         Func<ushort?> getPartnerId
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _gamePatcher = gamePatcher;
+        _entityManager = entityManager;
         _getPartnerId = getPartnerId;
     }
 
@@ -163,6 +190,12 @@ internal class CoopHits {
             new Action<Action<global::GameManager, FreezeMomentTypes, Action?>, global::GameManager, FreezeMomentTypes,
                 Action?>(OnFreezeMoment)
         );
+        AddHook(
+            typeof(Recoil).GetMethod(
+                nameof(Recoil.RecoilByDirection), InstanceFlags, null, [typeof(int), typeof(float)], null
+            ),
+            new Action<Action<Recoil, int, float>, Recoil, int, float>(OnRecoilByDirection)
+        );
     }
 
     /// <summary>
@@ -175,6 +208,8 @@ internal class CoopHits {
 
         _hooks.Clear();
         _isReplaying = false;
+        _hitContext = HitContext.None;
+        PredictedRecoils.Clear();
 
         if (_hitSource != null) {
             Object.Destroy(_hitSource);
@@ -189,11 +224,17 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Replays a hit of the partner on the local copy of the object that they hit.
+    /// Replays a hit of the partner on the local copy of the object that they hit, or applies the knockback of their
+    /// hit on an enemy.
     /// </summary>
     public void OnCoopHitUpdate(CoopHitUpdate update) {
         if (_getPartnerId() != update.PlayerId || !_playerData.TryGetValue(update.PlayerId, out var partner) ||
             !partner.IsInLocalScene) {
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.EnemyKnockback) {
+            ApplyKnockback(update);
             return;
         }
 
@@ -365,22 +406,182 @@ internal class CoopHits {
     /// <param name="damager">The attack that hits the object.</param>
     /// <returns>How the object responded to the hit.</returns>
     private IHitResponder.HitResponse OnDamagerHit(IHitResponder responder, HitInstance hit, DamageEnemies damager) {
-        if (_getPartnerId() is not { } partnerId || responder is not Component component || !IsReplayed(component)) {
+        if (_getPartnerId() is not { } partnerId) {
             return responder.Hit(hit);
         }
 
-        if (RemoteAttackComponent.IsRemoteAttack(damager.gameObject)) {
-            return IHitResponder.Response.None;
+        var isRemote = RemoteAttackComponent.IsRemoteAttack(damager.gameObject);
+        if (responder is Component component && IsReplayed(component)) {
+            if (isRemote) {
+                return IHitResponder.Response.None;
+            }
+
+            // The update is made before the hit, since a hit can break the object and move its parts
+            var update = hit.IsHeroDamage ? CreateUpdate(partnerId, component, hit) : null;
+            var response = responder.Hit(hit);
+            if (update != null && response.response != IHitResponder.Response.None && _netClient.IsConnected) {
+                _netClient.UpdateManager.SetCoopHitUpdate(update);
+            }
+
+            return response;
         }
 
-        // The update is made before the hit, since a hit can break the object and move its parts
-        var update = hit.IsHeroDamage ? CreateUpdate(partnerId, component, hit) : null;
-        var response = responder.Hit(hit);
-        if (update != null && response.response != IHitResponder.Response.None && _netClient.IsConnected) {
-            _netClient.UpdateManager.SetCoopHitUpdate(update);
+        // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is
+        var lastContext = _hitContext;
+        _hitContext = isRemote ? HitContext.Remote : hit.IsHeroDamage ? HitContext.Local : HitContext.None;
+        try {
+            return responder.Hit(hit);
+        } finally {
+            _hitContext = lastContext;
+        }
+    }
+
+    /// <summary>
+    /// Hook for <see cref="Recoil.RecoilByDirection"/>, which makes the knockback of enemies local first in a checked
+    /// two-player save. A hit of the local player knocks back an enemy at once, also a copy of an enemy that the scene
+    /// host controls, and the knockback goes to the partner, whose game applies it if it is the scene host. Copies of
+    /// attacks of the partner don't knock back enemies, since the partner's game sends its knockback.
+    /// </summary>
+    private void OnRecoilByDirection(Action<Recoil, int, float> orig, Recoil self, int direction, float magnitude) {
+        if (_hitContext == HitContext.None || _getPartnerId() is not { } partnerId ||
+            !TryGetEntity(self.gameObject, out var entityId, out var isClientCopy)) {
+            orig(self, direction, magnitude);
+            return;
         }
 
-        return response;
+        if (_hitContext == HitContext.Remote) {
+            return;
+        }
+
+        orig(self, direction, magnitude);
+
+        if (!isClientCopy || !self.IsRecoiling) {
+            return;
+        }
+
+        PredictedRecoils[self] = Time.unscaledTime + MaxPredictedRecoilTime;
+        SendKnockback(partnerId, entityId, direction, magnitude);
+    }
+
+    /// <summary>
+    /// Finds the entity whose host or client object is the given object.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    /// <param name="entityId">The ID of the entity.</param>
+    /// <param name="isClientCopy">Whether the object is the client object, which the scene host controls.</param>
+    /// <returns>Whether the object belongs to an entity.</returns>
+    private bool TryGetEntity(GameObject gameObject, out ushort entityId, out bool isClientCopy) {
+        entityId = 0;
+        isClientCopy = false;
+
+        try {
+            foreach (var entity in _entityManager.ActiveEntities) {
+                if (entity.Object.Client == gameObject) {
+                    entityId = entity.Id;
+                    isClientCopy = true;
+                    return true;
+                }
+
+                if (entity.Object.Host == gameObject) {
+                    entityId = entity.Id;
+                    return true;
+                }
+            }
+        } catch (InvalidOperationException) {
+            // The entities changed while looking, which only happens when a hit spawns one
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Sends the knockback of a hit of the local player on an enemy that the scene host controls to the partner.
+    /// </summary>
+    private void SendKnockback(ushort partnerId, ushort entityId, int direction, float magnitude) {
+        if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
+            !partner.IsInLocalScene) {
+            return;
+        }
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write(direction);
+        writer.Write(magnitude);
+        writer.Flush();
+
+        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
+            TargetId = partnerId,
+            Kind = CoopHitKind.EnemyKnockback,
+            EntityId = entityId,
+            Hit = stream.ToArray()
+        });
+    }
+
+    /// <summary>
+    /// Applies the knockback of a hit of the partner on an enemy, if the local game is the scene host and so controls
+    /// the enemy.
+    /// </summary>
+    private void ApplyKnockback(CoopHitUpdate update) {
+        if (!_entityManager.IsSceneHost) {
+            return;
+        }
+
+        GameObject? enemy = null;
+        foreach (var entity in _entityManager.ActiveEntities) {
+            if (entity.Id == update.EntityId) {
+                enemy = entity.Object.Host;
+                break;
+            }
+        }
+
+        if (enemy == null || !enemy.activeInHierarchy || !enemy.TryGetComponent<Recoil>(out var recoil) ||
+            enemy.TryGetComponent<HealthManager>(out var healthManager) && healthManager.GetIsDead()) {
+            return;
+        }
+
+        int direction;
+        float magnitude;
+        try {
+            using var reader = new BinaryReader(new MemoryStream(update.Hit));
+            direction = reader.ReadInt32();
+            magnitude = reader.ReadSingle();
+        } catch (IOException) {
+            Logger.Warn($"Could not read the knockback of a hit of the partner on entity {update.EntityId}");
+            return;
+        }
+
+        recoil.RecoilByDirection(direction, magnitude);
+    }
+
+    /// <summary>
+    /// Whether the given client object of an entity moves with a knockback that a hit of the local player started, so
+    /// that its position doesn't follow the scene host until the knockback ends.
+    /// </summary>
+    public static bool IsRecoilPredicted(GameObject clientObject) {
+        if (PredictedRecoils.Count == 0) {
+            return false;
+        }
+
+        List<Recoil>? ended = null;
+        var predicted = false;
+        foreach (var pair in PredictedRecoils) {
+            if (pair.Key == null || !pair.Key.IsRecoiling || Time.unscaledTime > pair.Value) {
+                (ended ??= []).Add(pair.Key!);
+                continue;
+            }
+
+            if (pair.Key.gameObject == clientObject) {
+                predicted = true;
+            }
+        }
+
+        if (ended != null) {
+            foreach (var recoil in ended) {
+                PredictedRecoils.Remove(recoil);
+            }
+        }
+
+        return predicted;
     }
 
     /// <summary>
@@ -638,6 +839,26 @@ internal class CoopHits {
         } catch (IOException) {
             return false;
         }
+    }
+
+    /// <summary>
+    /// Whose hit is being processed.
+    /// </summary>
+    private enum HitContext {
+        /// <summary>
+        /// No hit, or a hit that isn't from a player, like from a hazard.
+        /// </summary>
+        None,
+
+        /// <summary>
+        /// A hit of an attack of the local player.
+        /// </summary>
+        Local,
+
+        /// <summary>
+        /// A hit of the local copy of an attack of a remote player.
+        /// </summary>
+        Remote
     }
 
     /// <summary>
