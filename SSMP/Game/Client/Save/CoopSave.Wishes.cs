@@ -11,7 +11,7 @@ namespace SSMP.Game.Client.Save;
 /// one player, the wish log of the partner gets the same at once, even when the partner is in another room, so both
 /// players follow the same wishes. What each player has seen in their log stays their own. The check of the saves adds
 /// the wishes that only the partner accepted, and counts the wishes that only one save completed, which aren't copied
-/// because they come with rewards.
+/// because they come with rewards. Later changes of those wishes only share whether they are accepted.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -76,6 +76,23 @@ internal partial class CoopSave {
     private int _differentWishes;
 
     /// <summary>
+    /// The wishes that the current check found completed in only one of the saves. Their changes only share whether they
+    /// are accepted, so that the completion of one save doesn't get copied later.
+    /// </summary>
+    private readonly HashSet<string> _differentWishNames = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The wishes and rumours that the local save sent for the current check.
+    /// </summary>
+    private List<(string Name, int Value)> _sentWishEntries = [];
+
+    /// <summary>
+    /// The wishes and rumours that the current check changed in the local wish log, by the keys from
+    /// <see cref="GetWishChangeKey"/>.
+    /// </summary>
+    private readonly HashSet<string> _mergedWishKeys = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Whether syncing the wish log threw, which is only logged once.
     /// </summary>
     private bool _wishSyncFailed;
@@ -91,19 +108,42 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes the local wish log as the one that both games know, once a check made both logs agree.
+    /// Takes the wish log that the check made both games agree on as the one that both games know: what the local save
+    /// sent, with what the check and the partner changed since. What the local player changed after the local save sent
+    /// its wish log differs from it, so it goes to the partner.
     /// </summary>
     private void RememberWishes() {
         ResetWishes();
+        foreach (var (name, value) in _sentWishEntries) {
+            RememberWish(name, value);
+        }
+
         foreach (var (name, value) in GetWishEntries()) {
-            if ((value & RumourEntry) != 0) {
-                _knownRumours[name] = value;
-            } else {
-                _knownWishes[name] = value;
+            var key = GetWishChangeKey(name, value);
+            if (_mergedWishKeys.Contains(key) || _wishSequences.ContainsKey(key)) {
+                RememberWish(name, value);
             }
         }
 
         _knownQuestVersion = QuestManager.Version;
+    }
+
+    /// <summary>
+    /// Remembers the packed state of a wish or rumour as known by both games.
+    /// </summary>
+    private void RememberWish(string name, int value) {
+        if ((value & RumourEntry) != 0) {
+            _knownRumours[name] = value;
+        } else {
+            _knownWishes[name] = value;
+        }
+    }
+
+    /// <summary>
+    /// The key of a wish or rumour for its last change: its name, with "rumour:" before the name of a rumour.
+    /// </summary>
+    private static string GetWishChangeKey(string name, int value) {
+        return (value & RumourEntry) != 0 ? "rumour:" + name : name;
     }
 
     /// <summary>
@@ -182,34 +222,42 @@ internal partial class CoopSave {
             for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
                 var name = update.WishNames[i];
                 var value = update.WishValues[i];
-                if (!IsNewerChange(_wishSequences, update, (value & RumourEntry) != 0 ? "rumour:" + name : name)) {
+                if (!IsNewerChange(_wishSequences, update, GetWishChangeKey(name, value))) {
                     continue;
                 }
 
                 if ((value & RumourEntry) != 0) {
-                    _knownRumours[name] = value;
                     var rumour = playerData.QuestRumourData.GetData(name);
-                    if (PackRumour(rumour) == value) {
-                        continue;
+                    if (PackRumour(rumour) != value) {
+                        rumour.IsAccepted = (value & WishAccepted) != 0;
+                        if (rumour.IsAccepted) {
+                            rumour.HasBeenSeen = false;
+                        }
+
+                        playerData.QuestRumourData.SetData(name, rumour);
+                        changed++;
                     }
 
-                    rumour.IsAccepted = (value & WishAccepted) != 0;
-                    if (rumour.IsAccepted) {
-                        rumour.HasBeenSeen = false;
-                    }
-
-                    playerData.QuestRumourData.SetData(name, rumour);
-                    changed++;
+                    _knownRumours[name] = PackRumour(rumour);
                     continue;
                 }
 
-                _knownWishes[name] = value;
                 var wish = playerData.QuestCompletionData.GetData(name);
-                if (PackCompletion(wish) == value) {
+                var next = UnpackCompletion(value, wish.HasBeenSeen);
+                if (_differentWishNames.Contains(name)) {
+                    // The check left this wish completed in only one of the saves, so only whether it is accepted is
+                    // shared, and the completion of one save isn't copied
+                    next = wish;
+                    next.IsAccepted = (value & WishAccepted) != 0;
+                }
+
+                // The known state is the local one, which may keep what the partner's doesn't share
+                if (PackCompletion(next) == PackCompletion(wish)) {
+                    _knownWishes[name] = PackCompletion(wish);
                     continue;
                 }
 
-                var next = UnpackCompletion(value, wish.HasBeenSeen);
+                _knownWishes[name] = PackCompletion(next);
                 if (next.IsAccepted && !wish.IsAccepted) {
                     next.HasBeenSeen = false;
                     if (!next.IsCompleted) {
@@ -274,8 +322,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Adds the wishes and rumours that the save of the partner accepted and the local save didn't to the local wish
-    /// log, for a check, and counts the wishes that only one of the saves completed, which stay as they are. Both
-    /// games do the same, so both wish logs agree afterwards apart from those wishes.
+    /// log, for a check, and finds the wishes that only one of the saves completed, which stay as they are. Both games
+    /// compare what both saves sent, so they find the same wishes, and both wish logs agree afterwards apart from those.
+    /// Wishes and rumours that changed live during the check are newer than both saves and stay as they are.
     /// </summary>
     /// <returns>How many wishes and rumours were added.</returns>
     private int AddWishes(IEnumerable<(string Name, int Value)> partnerEntries) {
@@ -288,38 +337,53 @@ internal partial class CoopSave {
                 continue;
             }
 
+            var key = GetWishChangeKey(name, value);
             var rumour = playerData.QuestRumourData.GetData(name);
-            if ((value & WishAccepted) != 0 && !rumour.IsAccepted) {
+            if ((value & WishAccepted) != 0 && !rumour.IsAccepted && !_wishSequences.ContainsKey(key)) {
                 rumour.IsAccepted = true;
                 rumour.HasBeenSeen = false;
                 playerData.QuestRumourData.SetData(name, rumour);
+                _mergedWishKeys.Add(key);
                 added++;
             }
         }
 
-        var names = new List<string>(partnerWishes.Keys);
-        foreach (var pair in playerData.QuestCompletionData.Enumerate()) {
-            if (!partnerWishes.ContainsKey(pair.Key)) {
-                names.Add(pair.Key);
+        var localWishes = new Dictionary<string, int>(StringComparer.Ordinal);
+        foreach (var (name, value) in _sentWishEntries) {
+            if ((value & RumourEntry) == 0) {
+                localWishes[name] = value;
             }
         }
 
-        _differentWishes = 0;
+        var names = new HashSet<string>(partnerWishes.Keys, StringComparer.Ordinal);
+        names.UnionWith(localWishes.Keys);
+
+        _differentWishNames.Clear();
         foreach (var name in names) {
-            var wish = playerData.QuestCompletionData.GetData(name);
+            if (_wishSequences.ContainsKey(name)) {
+                continue;
+            }
+
             var partnerValue = partnerWishes.TryGetValue(name, out var value) ? value : 0;
+            var localValue = localWishes.TryGetValue(name, out var sent) ? sent : 0;
             var partnerDone = (partnerValue & (WishCompleted | WishEverCompleted)) != 0;
-            var localDone = wish.IsCompleted || wish.WasEverCompleted;
+            var localDone = (localValue & (WishCompleted | WishEverCompleted)) != 0;
             if (partnerDone != localDone) {
-                _differentWishes++;
-            } else if (!localDone && (partnerValue & WishAccepted) != 0 && !wish.IsAccepted) {
+                _differentWishNames.Add(name);
+                continue;
+            }
+
+            var wish = playerData.QuestCompletionData.GetData(name);
+            if (!localDone && (partnerValue & WishAccepted) != 0 && !wish.IsAccepted && !wish.IsCompleted) {
                 wish.IsAccepted = true;
                 wish.HasBeenSeen = false;
                 playerData.QuestCompletionData.SetData(name, wish);
+                _mergedWishKeys.Add(name);
                 added++;
             }
         }
 
+        _differentWishes = _differentWishNames.Count;
         if (added > 0) {
             QuestManager.IncrementVersion();
         }

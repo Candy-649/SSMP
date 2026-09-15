@@ -428,6 +428,7 @@ internal partial class CoopSave {
         }
 
         if (partner != null && _checkedWith == partner.Id) {
+            UpdateCheckedPlayTime(marker);
             UpdateInteractions(partner);
             UpdateWorldChanges(partner);
             UpdateWishes(partner);
@@ -513,6 +514,11 @@ internal partial class CoopSave {
         var partnerId = _checkedWith ?? _checkPartnerId;
         if (notifyPartner && partnerId is { } id && _playerData.ContainsKey(id)) {
             Send(new CoopSaveUpdate { TargetId = id, Kind = CoopSaveUpdateKind.Left, Key = _highestCheckKey });
+        }
+
+        // The play time that both players played together is kept for the next check
+        if (_checkedWith != null) {
+            SaveMarkers();
         }
 
         _held = false;
@@ -607,6 +613,10 @@ internal partial class CoopSave {
         var wasChecked = _checkedWith == id;
         _checkedWith = null;
         ResetCheck();
+        if (wasChecked) {
+            // The play time that both players played together is kept for the next check
+            SaveMarkers();
+        }
 
         // A boss fight that the partner was in ends for the local player too
         if (wasChecked && IsInBossFight()) {
@@ -1483,6 +1493,7 @@ internal partial class CoopSave {
         if (update.Kind is CoopSaveUpdateKind.WorldChange or CoopSaveUpdateKind.WishChange or
             CoopSaveUpdateKind.Interaction) {
             update.Sequence = NextChangeSequence();
+            StampLocalChanges(update);
         }
 
         if (_netClient.IsConnected) {

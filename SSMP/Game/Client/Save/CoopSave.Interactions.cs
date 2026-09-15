@@ -234,9 +234,9 @@ internal partial class CoopSave {
         public bool WasEntered { get; set; }
 
         /// <summary>
-        /// When the replay started.
+        /// When the replay started or last waited in a check of who is inside the mechanism, from which it times out.
         /// </summary>
-        public float Started { get; } = Time.unscaledTime;
+        public float TimeoutStart { get; set; } = Time.unscaledTime;
     }
 
     /// <summary>
@@ -328,25 +328,35 @@ internal partial class CoopSave {
         try {
             if (_interactionFlags.Count > 0) {
                 var update = new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange };
-                foreach (var pair in _interactionFlags) {
-                    update.FlagNames.Add(pair.Key);
-                    update.FlagValues.Add(pair.Value);
+                foreach (var name in _interactionFlags.Keys) {
+                    // The value that the save has now, since a check may have changed the flag after it was set
+                    if (ReadPlayerDataFlag(name) is { } value) {
+                        update.FlagNames.Add(name);
+                        update.FlagValues.Add(value);
+                    }
                 }
 
                 _interactionFlags.Clear();
-                Send(update);
-                Logger.Info($"Sent {update.FlagNames.Count} flags of used mechanisms to {partner.Username}");
-            }
-
-            foreach (var pair in _replays.ToList()) {
-                if (!UpdateReplayPresence(pair.Key, pair.Value) &&
-                    Time.unscaledTime - pair.Value.Started > MaxReplayTime) {
-                    EndReplay(pair.Key, pair.Value);
+                if (update.FlagNames.Count > 0) {
+                    Send(update);
+                    Logger.Info($"Sent {update.FlagNames.Count} flags of used mechanisms to {partner.Username}");
                 }
             }
 
-            foreach (var fsm in _capturedMechanisms.Keys.Where(fsm => fsm.Owner == null).ToList()) {
-                _capturedMechanisms.Remove(fsm);
+            if (_replays.Count > 0) {
+                foreach (var pair in _replays.ToList()) {
+                    if (UpdateReplayPresence(pair.Key, pair.Value)) {
+                        pair.Value.TimeoutStart = Time.unscaledTime;
+                    } else if (Time.unscaledTime - pair.Value.TimeoutStart > MaxReplayTime) {
+                        EndReplay(pair.Key, pair.Value);
+                    }
+                }
+            }
+
+            if (_capturedMechanisms.Count > 0) {
+                foreach (var fsm in _capturedMechanisms.Keys.Where(fsm => fsm.Owner == null).ToList()) {
+                    _capturedMechanisms.Remove(fsm);
+                }
             }
 
             StartPendingReplays();
@@ -369,7 +379,7 @@ internal partial class CoopSave {
         _localInteractions.Clear();
         _remoteInteractions.Clear();
         _pendingReceptacles.Clear();
-        _promptInteraction = null;
+        DropPromptInteraction();
     }
 
     /// <summary>
@@ -442,12 +452,29 @@ internal partial class CoopSave {
 
         var from = fsm.ActiveStateName ?? "";
         if (mechanism.IdleStates.Contains(from) && mechanism.PromptStates.Contains(toState.Name)) {
+            DropPromptInteraction();
             _promptInteraction = new LocalInteraction(fsm);
         } else if (_promptInteraction?.Target == fsm && !mechanism.PromptStates.Contains(toState.Name) &&
                    !mechanism.WorldStarts.ContainsKey(toState.Name)) {
             // The hero left the prompt without paying
-            _promptInteraction = null;
+            DropPromptInteraction();
         }
+    }
+
+    /// <summary>
+    /// Forgets the prompt of a mechanism that the local hero left without using it. The flags that the prompt set still
+    /// go to the partner, with the next changes of the world.
+    /// </summary>
+    private void DropPromptInteraction() {
+        if (_promptInteraction == null) {
+            return;
+        }
+
+        foreach (var pair in _promptInteraction.Flags) {
+            _interactionFlags[pair.Key] = pair.Value;
+        }
+
+        _promptInteraction = null;
     }
 
     /// <summary>
@@ -568,26 +595,36 @@ internal partial class CoopSave {
         }
 
         var owner = _captureFsm ?? GetExecutingCaptureFsm();
-        if (owner == null || BossRoomCoop.IsHeroStateName(name)) {
+        if (owner == null || BossRoomCoop.IsHeroStateName(name) || ReadPlayerDataFlag(name) is not { } value) {
             return;
-        }
-
-        int value;
-        switch (GetPlayerDataField(name)?.GetValue(PlayerData.instance)) {
-            case bool flag:
-                value = flag ? 1 : 0;
-                break;
-            case int number:
-                value = number;
-                break;
-            default:
-                return;
         }
 
         var flags = _promptInteraction is { } interaction && interaction.Target == owner
             ? interaction.Flags
             : _interactionFlags;
         flags[name] = value;
+
+        // The flag goes to the partner with the use of the mechanism. If the story flags sent it before, the mechanism
+        // of the partner would look done already and not open
+        RememberStoryValues([name]);
+    }
+
+    /// <summary>
+    /// Reads a flag of the player data as a number: 1 or 0 for a boolean, and the number of an enum value. Null for a
+    /// name that isn't such a flag.
+    /// </summary>
+    private static int? ReadPlayerDataFlag(string name) {
+        var playerData = PlayerData.instance;
+        if (playerData == null) {
+            return null;
+        }
+
+        return GetPlayerDataField(name)?.GetValue(playerData) switch {
+            bool flag => flag ? 1 : 0,
+            int number => number,
+            Enum enumValue => Convert.ToInt32(enumValue),
+            _ => null
+        };
     }
 
     /// <summary>
@@ -626,7 +663,12 @@ internal partial class CoopSave {
     /// Plays the partner's use of a mechanism or item receptacle on the local copy.
     /// </summary>
     private void OnInteraction(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+            return;
+        }
+
+        if (_checkedWith != player.Id) {
+            AddInteractionDuringCheck(player, update);
             return;
         }
 
@@ -639,6 +681,34 @@ internal partial class CoopSave {
             } else {
                 ApplyInteractionFlags(update);
             }
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+    }
+
+    /// <summary>
+    /// Adds what a use of the partner saved while the local game still runs the check that the game of the partner
+    /// finished already, which doesn't send it again. The use itself isn't replayed, and shows once the local player
+    /// enters its room again.
+    /// </summary>
+    private void AddInteractionDuringCheck(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_checkPartnerId != player.Id || _checkKey == 0 || update.Sequence >> 32 != _checkKey >> 16) {
+            return;
+        }
+
+        try {
+            ApplyInteractionFlags(update);
+            AddInteractionItems(update);
+
+            var loadedScenes = GetLoadedSceneNames();
+            var loadedItems = new HashSet<string>(StringComparer.Ordinal);
+            for (var i = 0; i < update.ItemIds.Count && i < update.ItemScenes.Count; i++) {
+                if (loadedScenes.Contains(update.ItemScenes[i].ToLowerInvariant())) {
+                    loadedItems.Add(GetItemKey(update.ItemScenes[i], update.ItemIds[i]));
+                }
+            }
+
+            OverrideLoadedItems(loadedItems);
         } catch (Exception e) {
             LogInteractionError(e);
         }
@@ -700,19 +770,25 @@ internal partial class CoopSave {
     /// Starts the replays of mechanisms and item receptacles that waited, once the local copies can play them.
     /// </summary>
     private void StartPendingReplays() {
-        foreach (var pair in _pendingReplays.ToList()) {
-            var fsm = pair.Key;
-            if (fsm.Owner == null || GetMechanism(fsm) is not { } mechanism ||
-                !mechanism.WorldStarts.TryGetValue(pair.Value, out var states)) {
-                _pendingReplays.Remove(fsm);
-            } else if (CanReplay(fsm, mechanism)) {
-                _pendingReplays.Remove(fsm);
-                Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by the partner, which waited");
-                StartReplay(fsm, pair.Value, states);
-            } else {
-                // A prompt whose text was still showing closes once it waits for an answer
-                TryClosePrompt(fsm);
+        if (_pendingReplays.Count > 0) {
+            foreach (var pair in _pendingReplays.ToList()) {
+                var fsm = pair.Key;
+                if (fsm.Owner == null || GetMechanism(fsm) is not { } mechanism ||
+                    !mechanism.WorldStarts.TryGetValue(pair.Value, out var states)) {
+                    _pendingReplays.Remove(fsm);
+                } else if (CanReplay(fsm, mechanism)) {
+                    _pendingReplays.Remove(fsm);
+                    Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by the partner, which waited");
+                    StartReplay(fsm, pair.Value, states);
+                } else {
+                    // A prompt whose text was still showing closes once it waits for an answer
+                    TryClosePrompt(fsm);
+                }
             }
+        }
+
+        if (_pendingReceptacles.Count == 0) {
+            return;
         }
 
         // The local hero may have read the text of a receptacle without the item, which ends without a prompt

@@ -105,9 +105,15 @@ internal partial class CoopSave {
     private bool _stateSent;
 
     /// <summary>
-    /// Whether the world progress of the partner arrived and was added.
+    /// Whether all parts of the world progress of the partner arrived.
     /// </summary>
     private bool _stateReceived;
+
+    /// <summary>
+    /// Whether the world progress of the partner was added, which waits until the local save sent its own, so that both
+    /// games compare what both saves sent.
+    /// </summary>
+    private bool _stateAdded;
 
     /// <summary>
     /// The parts of the world progress of the partner that arrived for the current check, by part.
@@ -140,8 +146,13 @@ internal partial class CoopSave {
         _partnerHello = false;
         _stateSent = false;
         _stateReceived = false;
+        _stateAdded = false;
         _stateParts.Clear();
         _sentWorldItems = [];
+        _sentWishEntries = [];
+        _mergedWishKeys.Clear();
+        _differentWishNames.Clear();
+        _agreedStoryValues = null;
         _addedChanges = 0;
         _onlyPartnerDefeats = 0;
         _onlyLocalDefeats = 0;
@@ -175,6 +186,11 @@ internal partial class CoopSave {
         }
 
         if (_stateSent && _stateReceived) {
+            if (!_stateAdded) {
+                _stateAdded = true;
+                AddWorldState(partner);
+            }
+
             FinishCheck(marker, partner);
         }
     }
@@ -261,7 +277,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// A part of the world progress of the partner arrived. Once all parts of the current check are in, the progress is
-    /// added.
+    /// added after the local save sent its own.
     /// </summary>
     private void OnWorldState(ClientPlayerData player, CoopSaveUpdate update) {
         if (_checkKey == 0 || update.Key != _checkKey || _checkPartnerId != player.Id || _stateReceived ||
@@ -275,7 +291,6 @@ internal partial class CoopSave {
         }
 
         _stateReceived = true;
-        AddWorldState(player);
     }
 
     /// <summary>
@@ -306,6 +321,8 @@ internal partial class CoopSave {
         }
 
         marker.LastCheckUtc = DateTime.UtcNow;
+        marker.CheckedPlayTime = PlayerData.instance != null ? PlayerData.instance.playTime : marker.CheckedPlayTime;
+        _nextCheckedPlayTimeSave = UnityEngine.Time.unscaledTime + CheckedPlayTimeSaveInterval;
         SaveMarkers();
 
         Logger.Info($"Checked two-player save with {partner.Username}, {_addedChanges} changes added");
@@ -326,11 +343,13 @@ internal partial class CoopSave {
         }
 
         if (_differentStoryFlags > 0) {
+            var longer = _checkPlayTimeSinceTogether
+                ? "played longer since you last played together"
+                : "played for longer";
             message += _storyFlagsFromPartner
-                ? $" {_differentStoryFlags} story changes came from the save of {partner.Username}, which was played " +
-                  "for longer."
+                ? $" {_differentStoryFlags} story changes came from the save of {partner.Username}, which was {longer}."
                 : $" {_differentStoryFlags} story changes went from your save to {partner.Username}, because yours was " +
-                  "played for longer.";
+                  $"{longer}.";
         }
 
         Chat(message);
@@ -348,6 +367,8 @@ internal partial class CoopSave {
         var wishes = GetWishEntries();
         var storyFlags = GetStoryEntries();
         _sentWorldItems = items;
+        _sentWishEntries = wishes;
+        _agreedStoryValues = storyFlags.Select(entry => entry.Value).ToArray();
         var partCount = System.Math.Max(
             1, (defeats.Count + items.Count + wishes.Count + storyFlags.Count + EntriesPerPart - 1) / EntriesPerPart
         );

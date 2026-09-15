@@ -57,20 +57,36 @@ internal partial class CoopSave {
     private bool _worldChangeFailed;
 
     /// <summary>
-    /// How many changes of the world, changes of the wish log and interactions the local game sent, for their sequences.
+    /// The clock of the changes of the world, changes of the wish log and interactions that the local game sends. It
+    /// counts up with every such update and jumps ahead to the counts in the updates of the partner, so a change that the
+    /// local player makes after one of the partner arrived has a larger count.
     /// </summary>
     private uint _changeCounter;
 
     /// <summary>
-    /// The counts in the sequences of the last changes of flags of the player data from the partner that were applied,
-    /// by name.
+    /// The last change of each flag of the player data in the current check, from either game, by name.
     /// </summary>
-    private readonly Dictionary<string, uint> _flagSequences = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ChangeStamp> _flagSequences = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The counts in the sequences of the last changes of wishes and rumours from the partner that were applied, by name.
+    /// The last change of each wish and rumour in the current check, from either game, by the keys from
+    /// <see cref="GetWishChangeKey"/>.
     /// </summary>
-    private readonly Dictionary<string, uint> _wishSequences = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ChangeStamp> _wishSequences = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// When a flag or wish last changed: the count in the sequence of its update, and whether the partner sent it.
+    /// </summary>
+    private readonly struct ChangeStamp {
+        public ChangeStamp(uint count, bool fromPartner) {
+            Count = count;
+            FromPartner = fromPartner;
+        }
+
+        public uint Count { get; }
+
+        public bool FromPartner { get; }
+    }
 
     /// <summary>
     /// Forgets the saved objects of the world that were found and known to both saves, for a new check or session.
@@ -90,12 +106,28 @@ internal partial class CoopSave {
     private ulong NextChangeSequence() => ((_checkKey >> 16) << 32) | ++_changeCounter;
 
     /// <summary>
-    /// Whether the change of a flag or wish in an update of the partner is newer than the last one that was applied for
-    /// it, and if so remembers it as the last one. A change from another check, or one that the network delivered after
-    /// a newer one, is old. Updates that weren't sent, like the changes that a check applies, have no sequence and
-    /// count as new.
+    /// Remembers the flags and wishes in an update that the local game sends as their last changes, so that older
+    /// changes of the partner that arrive afterwards don't undo them.
     /// </summary>
-    private bool IsNewerChange(Dictionary<string, uint> sequences, CoopSaveUpdate update, string name) {
+    private void StampLocalChanges(CoopSaveUpdate update) {
+        var stamp = new ChangeStamp((uint) update.Sequence, false);
+        foreach (var name in update.FlagNames) {
+            _flagSequences[name] = stamp;
+        }
+
+        for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
+            _wishSequences[GetWishChangeKey(update.WishNames[i], update.WishValues[i])] = stamp;
+        }
+    }
+
+    /// <summary>
+    /// Whether the change of a flag or wish in an update of the partner is newer than its last change in either game,
+    /// and if so remembers it as the last one. A change from another check, one that the network delivered after a newer
+    /// one, and one that the local player overwrote after it arrived are old. When both players changed the same thing
+    /// at the same count, the change from the save with the larger key wins in both games. Updates that weren't sent,
+    /// like the changes that a check applies, have no sequence and count as new.
+    /// </summary>
+    private bool IsNewerChange(Dictionary<string, ChangeStamp> sequences, CoopSaveUpdate update, string name) {
         if (update.Sequence == 0) {
             return true;
         }
@@ -105,12 +137,21 @@ internal partial class CoopSave {
         }
 
         var count = (uint) update.Sequence;
-        if (sequences.TryGetValue(name, out var last) && last >= count) {
+        _changeCounter = System.Math.Max(_changeCounter, count);
+        if (sequences.TryGetValue(name, out var last) &&
+            (last.Count > count || (last.Count == count && (last.FromPartner || !PartnerKeyWins())))) {
             return false;
         }
 
-        sequences[name] = count;
+        sequences[name] = new ChangeStamp(count, true);
         return true;
+    }
+
+    /// <summary>
+    /// Whether the save of the partner has the larger key, which decides between things that both games chose at once.
+    /// </summary>
+    private bool PartnerKeyWins() {
+        return string.CompareOrdinal(GetCurrentMarker()?.PartnerKey ?? "", LocalKey) > 0;
     }
 
     /// <summary>

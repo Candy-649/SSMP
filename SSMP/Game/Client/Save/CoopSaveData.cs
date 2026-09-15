@@ -45,6 +45,13 @@ internal class CoopSaveMarker {
     public DateTime? LastCheckUtc { get; set; }
 
     /// <summary>
+    /// The play time of the local save when both players last played it together, or null if they never did. The next
+    /// check compares how long each save was played since then.
+    /// </summary>
+    [JsonProperty("checkedPlayTime")]
+    public float? CheckedPlayTime { get; set; }
+
+    /// <summary>
     /// The scene of the boss fight that started in the save with both players, while the fight lasts, or null.
     /// </summary>
     [JsonProperty("bossScene")]

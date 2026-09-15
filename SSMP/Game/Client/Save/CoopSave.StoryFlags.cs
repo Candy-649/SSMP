@@ -12,8 +12,8 @@ namespace SSMP.Game.Client.Save;
 /// The story state of a checked two-player save: the flags of the player data that tell where the story of the world
 /// is, like where characters went and which ways the story opened, as tools/coop_story_flags.py sorts them. When one
 /// of them changes in the game of one player, the save of the partner gets it at once, and the latest change wins. The
-/// check of the saves takes the flags that differ from the save that was played for longer, which is the one that went
-/// on while the other player was away.
+/// check of the saves takes the flags that differ from the save that was played longer since both players last played
+/// together, which is the one that went on while the other player was away.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -25,6 +25,12 @@ internal partial class CoopSave {
     /// How often the story flags are compared with the known ones, in seconds.
     /// </summary>
     private const float StoryFlagInterval = 0.5f;
+
+    /// <summary>
+    /// How often, in seconds, the play time that both players played together is written to the pairing, so that a
+    /// crash loses little of it.
+    /// </summary>
+    private const float CheckedPlayTimeSaveInterval = 60f;
 
     /// <summary>
     /// The fields of the player data that hold the story state, loaded when first needed.
@@ -52,6 +58,23 @@ internal partial class CoopSave {
     private float? _checkPlayTime;
 
     /// <summary>
+    /// Whether the play time that the current check compares counts from when both players last played together,
+    /// rather than from the start of the save.
+    /// </summary>
+    private bool _checkPlayTimeSinceTogether;
+
+    /// <summary>
+    /// The values of the story fields that both games agree on in the current check: the ones that the local save
+    /// sent, with the ones that the check and the partner changed since. Null before the local save sent them.
+    /// </summary>
+    private int[]? _agreedStoryValues;
+
+    /// <summary>
+    /// When the play time that both players played together is written to the pairing next.
+    /// </summary>
+    private float _nextCheckedPlayTimeSave;
+
+    /// <summary>
     /// How many story flags the current check found different in both saves.
     /// </summary>
     private int _differentStoryFlags;
@@ -75,7 +98,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes the local story flags as the ones that both games know, once a check made both saves agree.
+    /// Takes the story flags that the check made both saves agree on as the ones that both games know. A flag that the
+    /// local player changed after the local save sent its story flags differs from them, so it goes to the partner.
     /// </summary>
     private void RememberStoryFlags() {
         var playerData = PlayerData.instance;
@@ -86,7 +110,25 @@ internal partial class CoopSave {
         var fields = GetStoryFields();
         _knownStoryValues = new int[fields.Length];
         for (var i = 0; i < fields.Length; i++) {
-            _knownStoryValues[i] = ReadStoryValue(fields[i], playerData);
+            _knownStoryValues[i] = _agreedStoryValues != null && i < _agreedStoryValues.Length
+                ? _agreedStoryValues[i]
+                : ReadStoryValue(fields[i], playerData);
+        }
+    }
+
+    /// <summary>
+    /// Remembers the play time of the local save while both players play it together, from which the next check counts
+    /// how long each save was played.
+    /// </summary>
+    private void UpdateCheckedPlayTime(CoopSaveMarker marker) {
+        if (PlayerData.instance == null) {
+            return;
+        }
+
+        marker.CheckedPlayTime = PlayerData.instance.playTime;
+        if (Time.unscaledTime >= _nextCheckedPlayTimeSave) {
+            _nextCheckedPlayTimeSave = Time.unscaledTime + CheckedPlayTimeSaveInterval;
+            SaveMarkers();
         }
     }
 
@@ -129,19 +171,28 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes the story flags among the given names as known by both games, after the partner set them, so they don't go
-    /// back to the partner.
+    /// Takes the story flags among the given names as known by both games, after the partner set them or while they go
+    /// to the partner another way, so that the story flags don't send them.
     /// </summary>
     private void RememberStoryValues(List<string> names) {
         var playerData = PlayerData.instance;
-        if (_knownStoryValues == null || playerData == null) {
+        if ((_knownStoryValues == null && _agreedStoryValues == null) || playerData == null) {
             return;
         }
 
         var fields = GetStoryFields();
         foreach (var name in names) {
-            if (StoryFieldIndices.TryGetValue(name, out var index) && index < _knownStoryValues.Length) {
-                _knownStoryValues[index] = ReadStoryValue(fields[index], playerData);
+            if (!StoryFieldIndices.TryGetValue(name, out var index)) {
+                continue;
+            }
+
+            var value = ReadStoryValue(fields[index], playerData);
+            if (_knownStoryValues != null && index < _knownStoryValues.Length) {
+                _knownStoryValues[index] = value;
+            }
+
+            if (_agreedStoryValues != null && index < _agreedStoryValues.Length) {
+                _agreedStoryValues[index] = value;
             }
         }
     }
@@ -164,18 +215,28 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The play time of the local save for the current check, which stays the same for the whole check, so both games
-    /// compare the same play times.
+    /// How long the local save was played for the current check: since both players last played it together, or since
+    /// its start if they never did. It stays the same for the whole check, so that both games compare the same times.
     /// </summary>
     private float GetCheckPlayTime() {
-        _checkPlayTime ??= PlayerData.instance != null ? PlayerData.instance.playTime : 0f;
+        if (_checkPlayTime is { } checkPlayTime) {
+            return checkPlayTime;
+        }
+
+        var playTime = PlayerData.instance != null ? PlayerData.instance.playTime : 0f;
+        var checkedPlayTime = GetMarker(_sessionSlot)?.CheckedPlayTime;
+        _checkPlayTimeSinceTogether = checkedPlayTime != null;
+        _checkPlayTime = checkedPlayTime is { } together ? Mathf.Max(0f, playTime - together) : playTime;
         return _checkPlayTime.Value;
     }
 
     /// <summary>
-    /// Compares the story flags of the partner's save with the local ones, for a check. The flags that differ are taken
-    /// from the save that was played for longer, or from the save with the larger key if both were played equally long,
-    /// so both games choose the same save.
+    /// Compares the story flags that the partner's save sent with the ones that the local save sent, for a check, so that
+    /// both games compare the same values. The flags that differ are taken from the save that was played longer since
+    /// both players last played together, or from the save with the larger key if both were played equally long, so
+    /// both games choose the same save. A boolean that a saved object of the world sets stays set if either save has
+    /// that object, since the check gives it to both saves. Flags that changed live during the check are newer than
+    /// both saves and stay as they are.
     /// </summary>
     /// <returns>How many story flags changed in the local save.</returns>
     private int AddStoryFlags(ClientPlayerData partner, List<CoopSaveUpdate> parts) {
@@ -183,27 +244,69 @@ internal partial class CoopSave {
         var fields = GetStoryFields();
         var partnerTime = parts.Count > 0 ? parts[0].PlayTime : 0f;
         var localTime = GetCheckPlayTime();
-        _storyFlagsFromPartner = partnerTime > localTime ||
-                                 (partnerTime.Equals(localTime) && string.CompareOrdinal(partner.SaveKey, LocalKey) > 0);
+        _storyFlagsFromPartner = partnerTime > localTime || (partnerTime.Equals(localTime) && PartnerKeyWins());
+        var worldItemFlags = GetWorldItemFlags(parts);
 
         _differentStoryFlags = 0;
         var changes = new CoopSaveUpdate();
         foreach (var part in parts) {
             for (var i = 0; i < part.FlagNames.Count && i < part.FlagValues.Count; i++) {
-                if (!StoryFieldIndices.TryGetValue(part.FlagNames[i], out var index) ||
-                    ReadStoryValue(fields[index], playerData) == part.FlagValues[i]) {
+                var name = part.FlagNames[i];
+                if (!StoryFieldIndices.TryGetValue(name, out var index) || _flagSequences.ContainsKey(name)) {
+                    continue;
+                }
+
+                var partnerValue = part.FlagValues[i];
+                var hasSent = _agreedStoryValues != null && index < _agreedStoryValues.Length;
+                var localValue = hasSent ? _agreedStoryValues![index] : ReadStoryValue(fields[index], playerData);
+                if (localValue == partnerValue) {
                     continue;
                 }
 
                 _differentStoryFlags++;
-                if (_storyFlagsFromPartner) {
-                    changes.FlagNames.Add(part.FlagNames[i]);
-                    changes.FlagValues.Add(part.FlagValues[i]);
+                var value = _storyFlagsFromPartner ? partnerValue : localValue;
+                if (fields[index].FieldType == typeof(bool) && worldItemFlags.Contains(name)) {
+                    value = 1;
+                }
+
+                if (hasSent) {
+                    _agreedStoryValues![index] = value;
+                }
+
+                // A flag that keeps the value of the local save keeps what the local player changed since, which goes to
+                // the partner after the check
+                if (value != localValue && ReadStoryValue(fields[index], playerData) != value) {
+                    changes.FlagNames.Add(name);
+                    changes.FlagValues.Add(value);
                 }
             }
         }
 
         return changes.FlagNames.Count > 0 ? ApplyInteractionFlags(changes) : 0;
+    }
+
+    /// <summary>
+    /// The booleans of the player data that the saved objects of the world in either save set, for a check, which gives
+    /// those objects to both saves.
+    /// </summary>
+    private HashSet<string> GetWorldItemFlags(List<CoopSaveUpdate> parts) {
+        var flags = new HashSet<string>(StringComparer.Ordinal);
+        GetWorldBools();
+        foreach (var (scene, id) in _sentWorldItems) {
+            if (_worldPlayerData!.TryGetValue(GetItemKey(scene, id), out var names)) {
+                flags.UnionWith(names);
+            }
+        }
+
+        foreach (var part in parts) {
+            for (var i = 0; i < part.ItemIds.Count && i < part.ItemScenes.Count; i++) {
+                if (_worldPlayerData!.TryGetValue(GetItemKey(part.ItemScenes[i], part.ItemIds[i]), out var names)) {
+                    flags.UnionWith(names);
+                }
+            }
+        }
+
+        return flags;
     }
 
     /// <summary>
