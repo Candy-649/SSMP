@@ -1908,7 +1908,8 @@ internal partial class CoopSave {
                 return taken > 0;
             }
             case CollectItemChange when parts.Length == 3 && amount > 0: {
-                if (FindSavedItem(parts[1], parts[2]) is not CollectableItem item) {
+                // Collecting doesn't look at whether the local player can get more, like an item that they have once
+                if (FindSavedItem(parts[1], parts[2]) is not CollectableItem item || !item.CanGetMore()) {
                     return false;
                 }
 
