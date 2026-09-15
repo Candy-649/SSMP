@@ -57,6 +57,22 @@ internal partial class CoopSave {
     private bool _worldChangeFailed;
 
     /// <summary>
+    /// How many changes of the world, changes of the wish log and interactions the local game sent, for their sequences.
+    /// </summary>
+    private uint _changeCounter;
+
+    /// <summary>
+    /// The counts in the sequences of the last changes of flags of the player data from the partner that were applied,
+    /// by name.
+    /// </summary>
+    private readonly Dictionary<string, uint> _flagSequences = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The counts in the sequences of the last changes of wishes and rumours from the partner that were applied, by name.
+    /// </summary>
+    private readonly Dictionary<string, uint> _wishSequences = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Forgets the saved objects of the world that were found and known to both saves, for a new check or session.
     /// </summary>
     private void ResetWorldChanges() {
@@ -65,6 +81,36 @@ internal partial class CoopSave {
         _loadedWorldItemsDirty = true;
         _savedWorldItemsDirty = true;
         _nextWorldChangeTime = 0f;
+    }
+
+    /// <summary>
+    /// The sequence of the next change of the world, change of the wish log or interaction that the local game sends:
+    /// the current check in the upper half and a growing count in the lower half.
+    /// </summary>
+    private ulong NextChangeSequence() => ((_checkKey >> 16) << 32) | ++_changeCounter;
+
+    /// <summary>
+    /// Whether the change of a flag or wish in an update of the partner is newer than the last one that was applied for
+    /// it, and if so remembers it as the last one. A change from another check, or one that the network delivered after
+    /// a newer one, is old. Updates that weren't sent, like the changes that a check applies, have no sequence and
+    /// count as new.
+    /// </summary>
+    private bool IsNewerChange(Dictionary<string, uint> sequences, CoopSaveUpdate update, string name) {
+        if (update.Sequence == 0) {
+            return true;
+        }
+
+        if (update.Sequence >> 32 != _checkKey >> 16) {
+            return false;
+        }
+
+        var count = (uint) update.Sequence;
+        if (sequences.TryGetValue(name, out var last) && last >= count) {
+            return false;
+        }
+
+        sequences[name] = count;
+        return true;
     }
 
     /// <summary>

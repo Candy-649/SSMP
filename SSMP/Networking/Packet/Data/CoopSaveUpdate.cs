@@ -97,6 +97,13 @@ internal class CoopSaveUpdate : IPacketData {
     public float PlayTime { get; set; }
 
     /// <summary>
+    /// For changes of the world, changes of the wish log and interactions, the check that the sender was in, in the
+    /// upper half, and a count that grows with every such update of the sender, in the lower half. The network can
+    /// deliver an update that it sent again after a newer one, which this tells apart.
+    /// </summary>
+    public ulong Sequence { get; set; }
+
+    /// <summary>
     /// For an interaction, the scene of the object that the sender used.
     /// </summary>
     public string Scene { get; set; } = "";
@@ -145,6 +152,7 @@ internal class CoopSaveUpdate : IPacketData {
         }
 
         packet.Write(PlayTime);
+        packet.Write(Sequence);
     }
 
     /// <inheritdoc />
@@ -178,6 +186,7 @@ internal class CoopSaveUpdate : IPacketData {
         }
 
         PlayTime = packet.ReadFloat();
+        Sequence = packet.ReadULong();
     }
 
     /// <summary>

@@ -182,6 +182,10 @@ internal partial class CoopSave {
             for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
                 var name = update.WishNames[i];
                 var value = update.WishValues[i];
+                if (!IsNewerChange(_wishSequences, update, (value & RumourEntry) != 0 ? "rumour:" + name : name)) {
+                    continue;
+                }
+
                 if ((value & RumourEntry) != 0) {
                     _knownRumours[name] = value;
                     var rumour = playerData.QuestRumourData.GetData(name);

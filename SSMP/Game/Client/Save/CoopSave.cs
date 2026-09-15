@@ -1480,6 +1480,11 @@ internal partial class CoopSave {
     /// Sends an update of a two-player save to another player.
     /// </summary>
     private void Send(CoopSaveUpdate update) {
+        if (update.Kind is CoopSaveUpdateKind.WorldChange or CoopSaveUpdateKind.WishChange or
+            CoopSaveUpdateKind.Interaction) {
+            update.Sequence = NextChangeSequence();
+        }
+
         if (_netClient.IsConnected) {
             _netClient.UpdateManager.SetCoopSaveUpdate(update);
         }

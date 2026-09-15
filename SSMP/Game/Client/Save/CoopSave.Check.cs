@@ -149,6 +149,8 @@ internal partial class CoopSave {
         _differentStoryFlags = 0;
         _storyFlagsFromPartner = false;
         _checkPlayTime = null;
+        _flagSequences.Clear();
+        _wishSequences.Clear();
     }
 
     /// <summary>

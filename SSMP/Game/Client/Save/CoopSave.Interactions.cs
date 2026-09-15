@@ -1085,13 +1085,15 @@ internal partial class CoopSave {
         }
 
         var changed = 0;
+        var applied = new List<string>();
         for (var i = 0; i < update.FlagNames.Count && i < update.FlagValues.Count; i++) {
             var name = update.FlagNames[i];
             var value = update.FlagValues[i];
-            if (BossRoomCoop.IsHeroStateName(name)) {
+            if (BossRoomCoop.IsHeroStateName(name) || !IsNewerChange(_flagSequences, update, name)) {
                 continue;
             }
 
+            applied.Add(name);
             var field = GetPlayerDataField(name);
             if (field?.FieldType == typeof(bool)) {
                 if (playerData.GetBool(name) != (value != 0)) {
@@ -1109,7 +1111,7 @@ internal partial class CoopSave {
             }
         }
 
-        RememberStoryValues(update.FlagNames);
+        RememberStoryValues(applied);
         return changed;
     }
 
