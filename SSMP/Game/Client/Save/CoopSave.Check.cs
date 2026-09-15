@@ -146,6 +146,9 @@ internal partial class CoopSave {
         _onlyPartnerDefeats = 0;
         _onlyLocalDefeats = 0;
         _differentWishes = 0;
+        _differentStoryFlags = 0;
+        _storyFlagsFromPartner = false;
+        _checkPlayTime = null;
     }
 
     /// <summary>
@@ -293,6 +296,7 @@ internal partial class CoopSave {
         ResetWorldChanges();
         AddKnownWorldItems();
         RememberWishes();
+        RememberStoryFlags();
 
         marker.PartnerName = partner.Username;
         if (partner.SaveKey.Length > 0) {
@@ -319,34 +323,45 @@ internal partial class CoopSave {
                        "misses a reward.";
         }
 
+        if (_differentStoryFlags > 0) {
+            message += _storyFlagsFromPartner
+                ? $" {_differentStoryFlags} story changes came from the save of {partner.Username}, which was played " +
+                  "for longer."
+                : $" {_differentStoryFlags} story changes went from your save to {partner.Username}, because yours was " +
+                  "played for longer.";
+        }
+
         Chat(message);
     }
 
     #region World progress
 
     /// <summary>
-    /// Sends the bosses that the local save has beaten, the saved objects of the world that are set in it and its wish
-    /// log.
+    /// Sends the bosses that the local save has beaten, the saved objects of the world that are set in it, its wish log
+    /// and its story flags.
     /// </summary>
     private void SendWorldState(ClientPlayerData partner) {
         var defeats = GetDefeatRecords();
         var items = GetWorldItems();
         var wishes = GetWishEntries();
+        var storyFlags = GetStoryEntries();
         _sentWorldItems = items;
         var partCount = System.Math.Max(
-            1, (defeats.Count + items.Count + wishes.Count + EntriesPerPart - 1) / EntriesPerPart
+            1, (defeats.Count + items.Count + wishes.Count + storyFlags.Count + EntriesPerPart - 1) / EntriesPerPart
         );
 
         var defeatIndex = 0;
         var itemIndex = 0;
         var wishIndex = 0;
+        var storyIndex = 0;
         for (var part = 0; part < partCount; part++) {
             var update = new CoopSaveUpdate {
                 TargetId = partner.Id,
                 Kind = CoopSaveUpdateKind.WorldState,
                 Key = _checkKey,
                 Part = (ushort) part,
-                PartCount = (ushort) partCount
+                PartCount = (ushort) partCount,
+                PlayTime = GetCheckPlayTime()
             };
 
             for (var entries = 0; entries < EntriesPerPart; entries++) {
@@ -357,9 +372,13 @@ internal partial class CoopSave {
                     update.ItemIds.Add(items[itemIndex].Id);
                     itemIndex++;
                 } else if (wishIndex < wishes.Count) {
-                    update.FlagNames.Add(wishes[wishIndex].Name);
-                    update.FlagValues.Add(wishes[wishIndex].Value);
+                    update.WishNames.Add(wishes[wishIndex].Name);
+                    update.WishValues.Add(wishes[wishIndex].Value);
                     wishIndex++;
+                } else if (storyIndex < storyFlags.Count) {
+                    update.FlagNames.Add(storyFlags[storyIndex].Name);
+                    update.FlagValues.Add(storyFlags[storyIndex].Value);
+                    storyIndex++;
                 } else {
                     break;
                 }
@@ -369,15 +388,16 @@ internal partial class CoopSave {
         }
 
         Logger.Info(
-            $"Sent world progress to {partner.Username}: {defeats.Count} beaten bosses, {items.Count} saved objects " +
-            $"and {wishes.Count} entries of the wish log in {partCount} parts"
+            $"Sent world progress to {partner.Username}: {defeats.Count} beaten bosses, {items.Count} saved objects, " +
+            $"{wishes.Count} entries of the wish log and {storyFlags.Count} story flags in {partCount} parts"
         );
     }
 
     /// <summary>
     /// Adds the saved objects of the world from the partner that the local save lacks, with the player data that they
-    /// set, and the wishes that the partner accepted, and compares the beaten bosses and completed wishes. Only what the
-    /// local player also counts as the world is added.
+    /// set, and the wishes that the partner accepted, takes the story flags that differ from the save that was played for
+    /// longer, and compares the beaten bosses and completed wishes. Only what the local player also counts as the world
+    /// is added.
     /// </summary>
     private void AddWorldState(ClientPlayerData partner) {
         var playerData = PlayerData.instance;
@@ -416,13 +436,15 @@ internal partial class CoopSave {
 
         OverrideLoadedItems(loadedItems);
         var wishes = AddWishes(
-            parts.SelectMany(part => part.FlagNames.Zip(part.FlagValues, (name, value) => (name, value)))
+            parts.SelectMany(part => part.WishNames.Zip(part.WishValues, (name, value) => (name, value)))
         );
+        var storyFlags = AddStoryFlags(partner, parts);
 
-        _addedChanges = items + wishes;
+        _addedChanges = items + wishes + storyFlags;
         Logger.Info(
-            $"Added world progress of {partner.Username}: {items} saved objects, {flags} player data flags and " +
-            $"{wishes} entries of the wish log, with {_differentWishes} wishes completed in only one save"
+            $"Added world progress of {partner.Username}: {items} saved objects, {flags} player data flags, " +
+            $"{wishes} entries of the wish log and {storyFlags} story flags, with {_differentWishes} wishes completed " +
+            $"in only one save and {_differentStoryFlags} story flags that differed"
         );
     }
 

@@ -69,16 +69,32 @@ internal class CoopSaveUpdate : IPacketData {
     public List<string> ItemIds { get; set; } = [];
 
     /// <summary>
-    /// For changes of the world, the names of the booleans and integers of the player data that got set. For world
-    /// progress and changes of the wish log, the names of wishes and rumours. In the order of <see cref="FlagValues"/>.
+    /// For changes of the world, interactions and world progress, the names of flags of the player data: booleans,
+    /// integers and enums. In the order of <see cref="FlagValues"/>.
     /// </summary>
     public List<string> FlagNames { get; set; } = [];
 
     /// <summary>
-    /// For changes of the world, the values of the player data in <see cref="FlagNames"/>, with 1 and 0 for booleans.
-    /// For wishes and rumours, their packed states.
+    /// The values of the flags of the player data in <see cref="FlagNames"/>, with 1 and 0 for booleans and the numbers
+    /// of enum values.
     /// </summary>
     public List<int> FlagValues { get; set; } = [];
+
+    /// <summary>
+    /// For changes of the wish log and world progress, the names of wishes and rumours, in the order of
+    /// <see cref="WishValues"/>.
+    /// </summary>
+    public List<string> WishNames { get; set; } = [];
+
+    /// <summary>
+    /// The packed states of the wishes and rumours in <see cref="WishNames"/>.
+    /// </summary>
+    public List<int> WishValues { get; set; } = [];
+
+    /// <summary>
+    /// For world progress, the play time of the save of the sender in seconds.
+    /// </summary>
+    public float PlayTime { get; set; }
 
     /// <summary>
     /// For an interaction, the scene of the object that the sender used.
@@ -122,6 +138,13 @@ internal class CoopSaveUpdate : IPacketData {
         packet.Write(ObjectPath);
         packet.Write(FsmName);
         packet.Write(StateName);
+        WriteStrings(packet, WishNames);
+        packet.Write((ushort) WishValues.Count);
+        foreach (var value in WishValues) {
+            packet.Write(value);
+        }
+
+        packet.Write(PlayTime);
     }
 
     /// <inheritdoc />
@@ -147,6 +170,14 @@ internal class CoopSaveUpdate : IPacketData {
         ObjectPath = packet.ReadString();
         FsmName = packet.ReadString();
         StateName = packet.ReadString();
+        WishNames = ReadStrings(packet);
+        var wishCount = packet.ReadUShort();
+        WishValues = new List<int>(wishCount);
+        for (var i = 0; i < wishCount; i++) {
+            WishValues.Add(packet.ReadInt());
+        }
+
+        PlayTime = packet.ReadFloat();
     }
 
     /// <summary>

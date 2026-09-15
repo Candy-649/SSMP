@@ -431,6 +431,7 @@ internal partial class CoopSave {
             UpdateInteractions(partner);
             UpdateWorldChanges(partner);
             UpdateWishes(partner);
+            UpdateStoryFlags(partner);
             ReleaseHold(hero);
             return;
         }
@@ -523,6 +524,7 @@ internal partial class CoopSave {
         ResetWorldChanges();
         ResetInteractionSession();
         ResetWishes();
+        ResetStoryFlags();
     }
 
     /// <summary>

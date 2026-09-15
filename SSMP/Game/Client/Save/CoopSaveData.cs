@@ -81,3 +81,33 @@ internal class CoopWorldItems {
     [JsonProperty("playerData")]
     public Dictionary<string, Dictionary<string, List<string>>> PlayerData { get; set; } = new();
 }
+
+/// <summary>
+/// The flags of the player data that two-player saves share as the story state of the world, made by
+/// tools/coop_story_flags.py from the scenes and the code of the game.
+/// </summary>
+internal class CoopStoryFlags {
+    /// <summary>
+    /// The names of the boolean fields.
+    /// </summary>
+    [JsonProperty("Bools")]
+    public List<string> Bools { get; set; } = [];
+
+    /// <summary>
+    /// The names of the integer fields.
+    /// </summary>
+    [JsonProperty("Ints")]
+    public List<string> Ints { get; set; } = [];
+
+    /// <summary>
+    /// The names of the string fields, which don't sync yet.
+    /// </summary>
+    [JsonProperty("Strings")]
+    public List<string> Strings { get; set; } = [];
+
+    /// <summary>
+    /// The names of the fields of other types, of which the enums sync as their numbers.
+    /// </summary>
+    [JsonProperty("Enums")]
+    public List<string> Enums { get; set; } = [];
+}

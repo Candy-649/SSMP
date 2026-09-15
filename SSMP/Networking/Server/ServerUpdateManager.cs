@@ -543,7 +543,10 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     Scene = update.Scene,
                     ObjectPath = update.ObjectPath,
                     FsmName = update.FsmName,
-                    StateName = update.StateName
+                    StateName = update.StateName,
+                    WishNames = update.WishNames,
+                    WishValues = update.WishValues,
+                    PlayTime = update.PlayTime
                 }
             );
         }

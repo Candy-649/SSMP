@@ -1074,11 +1074,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sets the flags of the player data that a mechanism of the partner set.
+    /// Sets the flags of the player data that the partner set, like with a mechanism or in the story, and takes them as
+    /// known by both games.
     /// </summary>
     /// <returns>How many flags changed.</returns>
-    private static int ApplyInteractionFlags(CoopSaveUpdate update) {
+    private int ApplyInteractionFlags(CoopSaveUpdate update) {
         var playerData = PlayerData.instance;
+        if (playerData == null) {
+            return 0;
+        }
+
         var changed = 0;
         for (var i = 0; i < update.FlagNames.Count && i < update.FlagValues.Count; i++) {
             var name = update.FlagNames[i];
@@ -1093,12 +1098,18 @@ internal partial class CoopSave {
                     playerData.SetBool(name, value != 0);
                     changed++;
                 }
-            } else if (field?.FieldType == typeof(int) && playerData.GetInt(name) != value) {
-                playerData.SetInt(name, value);
+            } else if (field?.FieldType == typeof(int)) {
+                if (playerData.GetInt(name) != value) {
+                    playerData.SetInt(name, value);
+                    changed++;
+                }
+            } else if (field != null && field.FieldType.IsEnum && Convert.ToInt32(field.GetValue(playerData)) != value) {
+                field.SetValue(playerData, Enum.ToObject(field.FieldType, value));
                 changed++;
             }
         }
 
+        RememberStoryValues(update.FlagNames);
         return changed;
     }
 

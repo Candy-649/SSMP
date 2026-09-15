@@ -135,7 +135,7 @@ internal partial class CoopSave {
 
             if (update != null) {
                 Send(update);
-                Logger.Info($"Sent {update.FlagNames.Count} changes of the wish log to {partner.Username}");
+                Logger.Info($"Sent {update.WishNames.Count} changes of the wish log to {partner.Username}");
             }
         } catch (Exception e) {
             LogWishError(e);
@@ -161,8 +161,8 @@ internal partial class CoopSave {
 
         known[name] = value;
         update ??= new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WishChange };
-        update.FlagNames.Add(name);
-        update.FlagValues.Add(value);
+        update.WishNames.Add(name);
+        update.WishValues.Add(value);
     }
 
     /// <summary>
@@ -179,9 +179,9 @@ internal partial class CoopSave {
             var changed = 0;
             var accepted = 0;
             var completed = 0;
-            for (var i = 0; i < update.FlagNames.Count && i < update.FlagValues.Count; i++) {
-                var name = update.FlagNames[i];
-                var value = update.FlagValues[i];
+            for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
+                var name = update.WishNames[i];
+                var value = update.WishValues[i];
                 if ((value & RumourEntry) != 0) {
                     _knownRumours[name] = value;
                     var rumour = playerData.QuestRumourData.GetData(name);
