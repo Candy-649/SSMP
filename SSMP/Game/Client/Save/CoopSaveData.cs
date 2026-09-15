@@ -43,6 +43,24 @@ internal class CoopSaveMarker {
     /// </summary>
     [JsonProperty("lastCheckUtc")]
     public DateTime? LastCheckUtc { get; set; }
+
+    /// <summary>
+    /// The scene of the boss fight that started in the save with both players, while the fight lasts, or null.
+    /// </summary>
+    [JsonProperty("bossScene")]
+    public string? BossScene { get; set; }
+
+    /// <summary>
+    /// The door that the local player came into the scene of the boss fight through.
+    /// </summary>
+    [JsonProperty("bossGate")]
+    public string? BossGate { get; set; }
+
+    /// <summary>
+    /// How many bosses the save had beaten when the boss fight started, to notice when it is won.
+    /// </summary>
+    [JsonProperty("bossDefeats")]
+    public int BossDefeats { get; set; }
 }
 
 /// <summary>

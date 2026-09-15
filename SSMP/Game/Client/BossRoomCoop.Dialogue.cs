@@ -567,6 +567,7 @@ internal partial class BossRoomCoop {
             }
 
             _startedFights.Add(fsm);
+            OnBossFightStarting(fsm);
             return false;
         }
 
@@ -747,6 +748,11 @@ internal partial class BossRoomCoop {
             return true;
         }
 
+        // The partner of a two-player save counts as not there while they aren't on the server
+        if (_isPartnerMissing()) {
+            return false;
+        }
+
         foreach (var playerData in _playerData.Values) {
             if (!playerData.IsInLocalScene || !progress.Remote.Contains(playerData.Id)) {
                 return false;
@@ -902,6 +908,7 @@ internal partial class BossRoomCoop {
 
             _heldFights.Remove(fsm);
             _startedFights.Add(fsm);
+            OnBossFightStarting(fsm);
             RestoreHero(held);
             EndRoomWaitFor(fsm);
             Logger.Info($"Every player finished the dialogue of '{GetPath(fsm)}', starting its fight");

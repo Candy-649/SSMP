@@ -261,6 +261,7 @@ internal partial class BossRoomCoop {
             if (isForwardDone) {
                 room.ForwardPending = false;
                 room.Started = true;
+                OnBossFightStarting(room);
             }
 
             if (!IsRoomHeld(room)) {
@@ -422,6 +423,7 @@ internal partial class BossRoomCoop {
     private void MarkRoomStartedByGate(Fsm gate) {
         if (GetBossRoom(gate) is { HasBossStarts: false } room) {
             room.Started = true;
+            OnBossFightStarting(room);
         }
     }
 

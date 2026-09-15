@@ -266,6 +266,7 @@ internal partial class BossRoomCoop {
             }
 
             room.Started = true;
+            OnBossFightStarting(room);
             return false;
         }
 
@@ -308,6 +309,7 @@ internal partial class BossRoomCoop {
 
             _heldEventStarts.Remove(fsm);
             MarkRoomStarted(fsm);
+            OnBossFightStarting(fsm);
             RestoreHero(held);
             EndRoomWaitFor(fsm);
             Logger.Info($"All players are in the room of '{GetPath(fsm)}', continuing with '{held.EventName}'");
@@ -332,6 +334,7 @@ internal partial class BossRoomCoop {
 
         room.FightBegan = true;
         room.Started = true;
+        OnBossFightStarting(room);
     }
 
     /// <summary>
@@ -368,6 +371,11 @@ internal partial class BossRoomCoop {
     private bool AreAllInRoom(RoomShape shape) {
         if (!IsHoldActive()) {
             return true;
+        }
+
+        // The partner of a two-player save counts as not there while they aren't on the server
+        if (_isPartnerMissing()) {
+            return false;
         }
 
         var heroController = HeroController.instance;
@@ -841,6 +849,11 @@ internal partial class BossRoomCoop {
         /// The wait of the room for the other players, or null while it doesn't wait.
         /// </summary>
         public RoomWait? Wait;
+
+        /// <summary>
+        /// Whether the start of the fight of the room with every player there was reported to the two-player save.
+        /// </summary>
+        public bool FightStartReported;
 
         public BossRoom(Transform root) {
             Root = root;

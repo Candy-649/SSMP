@@ -174,5 +174,11 @@ internal enum CoopSaveUpdateKind : byte {
     /// <summary>
     /// A player left the two-player save that they were playing with the other player, like by going to the menu.
     /// </summary>
-    Left
+    Left,
+
+    /// <summary>
+    /// A boss fight started with both players in the scene that the update lists, so the game of the other player gives
+    /// it a checkpoint too.
+    /// </summary>
+    BossFight
 }

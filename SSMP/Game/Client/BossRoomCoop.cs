@@ -226,17 +226,30 @@ internal partial class BossRoomCoop {
     /// </summary>
     private float _nextTeammateNoticeTime;
 
+    /// <summary>
+    /// Whether the loaded save is a two-player save whose partner isn't on the server, who then counts as a player that
+    /// every room waits for.
+    /// </summary>
+    private readonly Func<bool> _isPartnerMissing;
+
     public BossRoomCoop(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
-        Func<bool> isFullSynchronisation
+        Func<bool> isFullSynchronisation,
+        Func<bool> isPartnerMissing
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _entityManager = entityManager;
         _isFullSynchronisation = isFullSynchronisation;
+        _isPartnerMissing = isPartnerMissing;
     }
+
+    /// <summary>
+    /// Event raised once for each visit of a boss room, when its fight starts with every player there.
+    /// </summary>
+    public event Action? BossFightStartedEvent;
 
     /// <summary>
     /// Registers the hooks for boss room co-op.
@@ -468,6 +481,7 @@ internal partial class BossRoomCoop {
 
         if (HaveAllArrived(fsm, arrivals)) {
             _heldStarts.Remove(fsm);
+            OnBossFightStarting(fsm);
             return false;
         }
 
@@ -531,6 +545,11 @@ internal partial class BossRoomCoop {
 
         if (!IsHoldActive()) {
             return true;
+        }
+
+        // The partner of a two-player save counts as not there while they aren't on the server
+        if (_isPartnerMissing()) {
+            return false;
         }
 
         foreach (var playerData in _playerData.Values) {
@@ -893,9 +912,36 @@ internal partial class BossRoomCoop {
             }
 
             _heldStarts.Remove(fsm);
+            OnBossFightStarting(fsm);
             Logger.Info($"All players reached '{GetPath(fsm)}', starting it");
             EndRoomWaitFor(fsm);
             fsm.Event(held.EventName);
+        }
+    }
+
+    /// <summary>
+    /// Tells a two-player save that the fight of the boss room of an FSM starts with every player there.
+    /// </summary>
+    private void OnBossFightStarting(Fsm fsm) {
+        if (GetBossRoom(fsm) is { } room) {
+            OnBossFightStarting(room);
+        }
+    }
+
+    /// <summary>
+    /// Tells a two-player save that the fight of a boss room starts with every player there, once for each visit of the
+    /// room.
+    /// </summary>
+    private void OnBossFightStarting(BossRoom room) {
+        if (room.FightStartReported) {
+            return;
+        }
+
+        room.FightStartReported = true;
+        try {
+            BossFightStartedEvent?.Invoke();
+        } catch (Exception e) {
+            Logger.Error($"Could not report the start of boss room '{GetRoomPath(room)}':\n{e}");
         }
     }
 
@@ -1115,11 +1161,11 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether rooms wait for other players, because other players are connected and the server synchronises
-    /// entities.
+    /// Whether rooms wait for other players, because other players are connected, or the partner of a two-player save
+    /// is expected, and the server synchronises entities.
     /// </summary>
     private bool IsHoldActive() {
-        return _playerData.Count > 0 && _netClient.IsConnected && _isFullSynchronisation();
+        return (_playerData.Count > 0 || _isPartnerMissing()) && _netClient.IsConnected && _isFullSynchronisation();
     }
 
     /// <summary>

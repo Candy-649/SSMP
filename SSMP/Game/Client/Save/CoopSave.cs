@@ -385,6 +385,7 @@ internal partial class CoopSave {
         if (slot != _sessionSlot) {
             ResetSession(true);
             _sessionSlot = slot;
+            _loadedWithCheckpoint = GetMarker(slot)?.BossScene != null;
         }
 
         var marker = GetMarker(slot);
@@ -403,6 +404,16 @@ internal partial class CoopSave {
                     _checkFailed = true;
                     Logger.Error($"Could not check the two-player save:\n{e}");
                 }
+            }
+        }
+
+        // A boss checkpoint that throws must not keep the hold below from working either
+        try {
+            UpdateCheckpoint(hero, marker, partner);
+        } catch (Exception e) {
+            if (!_checkpointFailed) {
+                _checkpointFailed = true;
+                Logger.Error($"Could not update the boss checkpoint of the two-player save:\n{e}");
             }
         }
 
@@ -495,6 +506,7 @@ internal partial class CoopSave {
         _everChecked = false;
         _checkedWith = null;
         ResetCheck();
+        ResetCheckpointSession();
     }
 
     /// <summary>
@@ -506,12 +518,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Leaves the loaded save when the scene of the main menu loads.
+    /// Leaves the loaded save when the scene of the main menu loads, and ends the boss checkpoint of the loaded save
+    /// when the local player leaves the scene of its fight.
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         if (newScene.name == MenuSceneName) {
             OnReturnToMainMenu();
+            return;
         }
+
+        OnCheckpointSceneChanged(newScene.name);
     }
 
     /// <summary>
@@ -572,6 +588,11 @@ internal partial class CoopSave {
         var wasChecked = _checkedWith == id;
         _checkedWith = null;
         ResetCheck();
+
+        // A boss fight that the partner was in ends for the local player too
+        if (wasChecked && GetCurrentMarker() is { BossScene: not null }) {
+            _interruptPending = true;
+        }
 
         if (wasChecked && how != null && GetCurrentMarker() is { } marker) {
             Chat($"{marker.PartnerName} {how}. Your two-player save waits for them at the next bench you sit on.");
@@ -638,6 +659,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.Left:
                 OnLeft(player, update);
+                break;
+            case CoopSaveUpdateKind.BossFight:
+                OnBossFight(player, update);
                 break;
         }
     }
