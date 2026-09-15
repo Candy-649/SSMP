@@ -114,6 +114,11 @@ internal partial class CoopSave {
     private readonly Dictionary<ushort, CoopSaveUpdate> _stateParts = new();
 
     /// <summary>
+    /// The saved objects of the world that the local save sent for the current check.
+    /// </summary>
+    private List<(string Scene, string Id)> _sentWorldItems = [];
+
+    /// <summary>
     /// How many saved objects the last check added.
     /// </summary>
     private int _addedChanges;
@@ -135,6 +140,7 @@ internal partial class CoopSave {
         _stateSent = false;
         _stateReceived = false;
         _stateParts.Clear();
+        _sentWorldItems = [];
         _addedChanges = 0;
         _onlyPartnerDefeats = 0;
         _onlyLocalDefeats = 0;
@@ -283,6 +289,7 @@ internal partial class CoopSave {
         _checkedWith = partner.Id;
         _everChecked = true;
         ResetWorldChanges();
+        AddKnownWorldItems();
 
         marker.PartnerName = partner.Username;
         if (partner.SaveKey.Length > 0) {
@@ -314,6 +321,7 @@ internal partial class CoopSave {
     private void SendWorldState(ClientPlayerData partner) {
         var defeats = GetDefeatRecords();
         var items = GetWorldItems();
+        _sentWorldItems = items;
         var partCount = System.Math.Max(1, (defeats.Count + items.Count + EntriesPerPart - 1) / EntriesPerPart);
 
         var defeatIndex = 0;

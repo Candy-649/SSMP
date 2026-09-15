@@ -25,7 +25,8 @@ internal partial class CoopSave {
     private readonly List<(PersistentBoolItem Item, string Scene, string Id, string Key)> _loadedWorldItems = [];
 
     /// <summary>
-    /// The keys of the saved objects of the world that both saves are known to have set.
+    /// The keys of the saved objects of the world that both saves are known to have set: those that the last check
+    /// exchanged, and those that were sent or received since.
     /// </summary>
     private readonly HashSet<string> _knownWorldItems = new(StringComparer.Ordinal);
 
@@ -33,6 +34,12 @@ internal partial class CoopSave {
     /// Whether scenes loaded or unloaded since the saved objects of the world in the loaded scenes were found.
     /// </summary>
     private bool _loadedWorldItemsDirty = true;
+
+    /// <summary>
+    /// Whether the save may have saved objects of the world set that the loaded objects don't show, like objects that
+    /// save their change at once and objects of scenes that unloaded, so the save is compared with the known ones.
+    /// </summary>
+    private bool _savedWorldItemsDirty = true;
 
     /// <summary>
     /// The time at which the saved objects of the world are checked for changes next.
@@ -56,18 +63,41 @@ internal partial class CoopSave {
         _loadedWorldItems.Clear();
         _knownWorldItems.Clear();
         _loadedWorldItemsDirty = true;
+        _savedWorldItemsDirty = true;
         _nextWorldChangeTime = 0f;
+    }
+
+    /// <summary>
+    /// Remembers the saved objects of the world that both saves have after a check: those that the local save sent and
+    /// those that the save of the partner sent. Everything else that is set gets sent as a change.
+    /// </summary>
+    private void AddKnownWorldItems() {
+        foreach (var (scene, id) in _sentWorldItems) {
+            _knownWorldItems.Add(GetItemKey(scene, id));
+        }
+
+        foreach (var part in _stateParts.Values) {
+            for (var i = 0; i < part.ItemIds.Count && i < part.ItemScenes.Count; i++) {
+                _knownWorldItems.Add(GetItemKey(part.ItemScenes[i], part.ItemIds[i]));
+            }
+        }
     }
 
     /// <summary>
     /// Makes the saved objects of the world be found again after a scene loaded.
     /// </summary>
-    private void OnWorldSceneLoaded(Scene scene, LoadSceneMode mode) => _loadedWorldItemsDirty = true;
+    private void OnWorldSceneLoaded(Scene scene, LoadSceneMode mode) {
+        _loadedWorldItemsDirty = true;
+        _savedWorldItemsDirty = true;
+    }
 
     /// <summary>
     /// Makes the saved objects of the world be found again after a scene unloaded.
     /// </summary>
-    private void OnWorldSceneUnloaded(Scene scene) => _loadedWorldItemsDirty = true;
+    private void OnWorldSceneUnloaded(Scene scene) {
+        _loadedWorldItemsDirty = true;
+        _savedWorldItemsDirty = true;
+    }
 
     /// <summary>
     /// Checks the world for changes right before the game saves the objects of the level it leaves, since those
@@ -94,12 +124,14 @@ internal partial class CoopSave {
             return;
         }
 
+        _savedWorldItemsDirty = true;
         _nextWorldChangeTime = 0f;
         UpdateWorldChanges(partner);
     }
 
     /// <summary>
-    /// Sends the saved objects of the world that got set in the loaded scenes to the partner.
+    /// Sends the saved objects of the world that got set to the partner: those that the loaded objects show, and those
+    /// that only the save shows.
     /// </summary>
     private void UpdateWorldChanges(ClientPlayerData partner) {
         if (Time.unscaledTime < _nextWorldChangeTime) {
@@ -116,18 +148,25 @@ internal partial class CoopSave {
             CoopSaveUpdate? update = null;
             foreach (var (item, scene, id, key) in _loadedWorldItems) {
                 if (item == null) {
+                    // An object that is gone may have saved its change right before, which the save shows
                     _loadedWorldItemsDirty = true;
+                    _savedWorldItemsDirty = true;
                     continue;
                 }
 
-                if (_knownWorldItems.Contains(key) || !item.GetCurrentValue()) {
-                    continue;
+                if (!_knownWorldItems.Contains(key) && item.GetCurrentValue()) {
+                    AddWorldChange(ref update, partner, scene, id, key);
                 }
+            }
 
-                _knownWorldItems.Add(key);
-                update ??= new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange };
-                update.ItemScenes.Add(scene);
-                update.ItemIds.Add(id);
+            if (_savedWorldItemsDirty) {
+                _savedWorldItemsDirty = false;
+                foreach (var (scene, id) in GetWorldItems()) {
+                    var key = GetItemKey(scene, id);
+                    if (!_knownWorldItems.Contains(key)) {
+                        AddWorldChange(ref update, partner, scene, id, key);
+                    }
+                }
             }
 
             if (update != null) {
@@ -143,16 +182,24 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Finds the saved objects of the world in the loaded scenes. Those that the save has set already count as known,
-    /// because the check added them to both saves.
+    /// Adds a saved object of the world to the update with the changes for the partner and remembers it as known.
+    /// </summary>
+    private void AddWorldChange(ref CoopSaveUpdate? update, ClientPlayerData partner, string scene, string id, string key) {
+        _knownWorldItems.Add(key);
+        update ??= new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange };
+        update.ItemScenes.Add(scene);
+        update.ItemIds.Add(id);
+    }
+
+    /// <summary>
+    /// Finds the saved objects of the world in the loaded scenes.
     /// </summary>
     private void FindLoadedWorldItems() {
         _loadedWorldItemsDirty = false;
         _loadedWorldItems.Clear();
 
         var worldBools = GetWorldBools();
-        var sceneData = SceneData.instance;
-        if (worldBools.Count == 0 || sceneData == null) {
+        if (worldBools.Count == 0) {
             return;
         }
 
@@ -161,22 +208,20 @@ internal partial class CoopSave {
                  )) {
             GetItemSceneAndId(item, out var scene, out var id);
             var key = GetItemKey(scene, id);
-            if (!worldBools.Contains(key) || item.GetIsSemiPersistent()) {
-                continue;
-            }
-
-            _loadedWorldItems.Add((item, scene, id, key));
-            if (sceneData.PersistentBools.TryGetValue(scene, id, out var saved) && saved.Value) {
-                _knownWorldItems.Add(key);
+            if (worldBools.Contains(key) && !item.GetIsSemiPersistent()) {
+                _loadedWorldItems.Add((item, scene, id, key));
             }
         }
     }
 
     /// <summary>
-    /// Adds saved objects of the world that got set in the game of the partner to the local save.
+    /// Adds saved objects of the world that got set in the game of the partner to the local save. They are added as soon
+    /// as the loaded save is paired with the partner, also while its check is still running, because the game of the
+    /// partner may have finished its check already and doesn't send them again.
     /// </summary>
     private void OnWorldChange(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || PlayerData.instance == null || SceneData.instance == null) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || PlayerData.instance == null ||
+            SceneData.instance == null) {
             return;
         }
 

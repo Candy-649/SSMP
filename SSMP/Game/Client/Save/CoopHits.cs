@@ -455,11 +455,16 @@ internal class CoopHits {
 
         orig(self, direction, magnitude);
 
-        if (!isClientCopy || !self.IsRecoiling) {
+        if (!isClientCopy) {
             return;
         }
 
-        PredictedRecoils[self] = Time.unscaledTime + MaxPredictedRecoilTime;
+        // The enemy moves here until the knockback ends, unless the knockback doesn't move it at all
+        if (self.IsRecoiling && self.RecoilSpeedBase * magnitude > 0f) {
+            PredictedRecoils[self] = Time.unscaledTime + MaxPredictedRecoilTime;
+        }
+
+        // The scene host gets it either way, since the knockback can also freeze the enemy or stop early here
         SendKnockback(partnerId, entityId, direction, magnitude);
     }
 
