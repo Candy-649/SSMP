@@ -55,6 +55,12 @@ internal partial class CoopSave {
     /// </summary>
     private const float CarriageCatchUp = 5f;
 
+    /// <summary>
+    /// The count of the updates of the drives of carriages that the local game sent, which tells newer ones from older
+    /// ones in the game of the partner, also across rooms.
+    /// </summary>
+    private ulong _carriageDriveCount;
+
     private static readonly FieldInfo? CarriageLeftPressedField = typeof(ManualLift).GetField("isLeftPressed", InstanceFlags);
     private static readonly FieldInfo? CarriageRightPressedField = typeof(ManualLift).GetField("isRightPressed", InstanceFlags);
     private static readonly FieldInfo? CarriageCalledField = typeof(ManualLift).GetField("calledDirection", InstanceFlags);
@@ -132,9 +138,10 @@ internal partial class CoopSave {
         public bool WasFollowing { get; set; }
 
         /// <summary>
-        /// The count of the updates of the drives of the local game.
+        /// The direction of the drive of the partner in which the carriage already reached its end in the local game, or
+        /// 0. The carriage waits there instead of stopping at the end again every frame.
         /// </summary>
-        public ulong DriveCount { get; set; }
+        public float ArrivedDirection { get; set; }
 
         /// <summary>
         /// The count of the newest update of a drive of the partner.
@@ -333,8 +340,21 @@ internal partial class CoopSave {
     /// </summary>
     private void OnCarriageUpdate(Action<ManualLift> orig, ManualLift self) {
         ClientPlayerData? partner;
-        if ((partner = GetLiftPartner()) == null || !_lifts.TryGetValue(self, out var found) ||
-            found is not Carriage carriage) {
+        if (!_lifts.TryGetValue(self, out var found) || found is not Carriage carriage) {
+            orig(self);
+            return;
+        }
+
+        if ((partner = GetLiftPartner()) == null) {
+            // A partner who left in the middle of a drive doesn't drive the carriage on to its end
+            if (carriage.PartnerTime > float.NegativeInfinity) {
+                carriage.PartnerTime = float.NegativeInfinity;
+                carriage.PartnerDriving = false;
+                if (!carriage.IsPressed) {
+                    carriage.Direction = 0f;
+                }
+            }
+
             orig(self);
             return;
         }
@@ -358,12 +378,29 @@ internal partial class CoopSave {
             carriage.WasFollowing = following;
             follow = !carriage.LocalDriving && Time.unscaledTime - carriage.PartnerTime < CarriageFollowTime;
             if (follow) {
-                carriage.Direction = carriage.PartnerDirection;
+                if (carriage.ArrivedDirection != 0f && carriage.PartnerDirection != carriage.ArrivedDirection) {
+                    carriage.ArrivedDirection = 0f;
+                }
+
                 CarriageDelayField?.SetValue(self, 0f);
                 CarriageCalledField?.SetValue(self, 0);
-                carriage.Velocity = Mathf.Lerp(
-                    carriage.Velocity, carriage.PartnerVelocity, Mathf.Min(1f, Time.deltaTime * CarriageCatchUp)
-                );
+                if (carriage.ArrivedDirection != 0f || IsAtCarriageEnd(carriage, carriage.PartnerDirection)) {
+                    // The carriage reached the end that the partner drives to before the partner did
+                    carriage.ArrivedDirection = carriage.PartnerDirection;
+                    carriage.Direction = 0f;
+                    carriage.Velocity = 0f;
+                } else {
+                    carriage.Direction = carriage.PartnerDirection;
+                    carriage.Velocity = Mathf.Lerp(
+                        carriage.Velocity, carriage.PartnerVelocity, Mathf.Min(1f, Time.deltaTime * CarriageCatchUp)
+                    );
+                }
+            } else if (carriage.PartnerTime > float.NegativeInfinity && !carriage.LocalDriving) {
+                // The drive of the partner stopped coming without them letting go
+                carriage.PartnerTime = float.NegativeInfinity;
+                if (!carriage.IsPressed) {
+                    carriage.Direction = 0f;
+                }
             }
         } catch (Exception e) {
             LogLiftError(e);
@@ -372,7 +409,11 @@ internal partial class CoopSave {
         orig(self);
 
         try {
-            if (follow) {
+            if (follow && carriage.ArrivedDirection == 0f && IsAtCarriageEnd(carriage, carriage.PartnerDirection)) {
+                carriage.ArrivedDirection = carriage.PartnerDirection;
+            }
+
+            if (follow && carriage.ArrivedDirection == 0f) {
                 var ahead = Mathf.Min(
                     Time.unscaledTime - carriage.PartnerTime + (float) _netClient.UpdateManager.AverageRtt / 2000f,
                     CarriagePredictTime
@@ -383,8 +424,14 @@ internal partial class CoopSave {
                     ? target
                     : carriage.Part + difference * Mathf.Min(1f, Time.deltaTime * CarriageCatchUp);
                 carriage.UpdatePosition();
-            } else if (carriage.LocalDriving || !carriage.SentStopped) {
-                SendCarriageDrive(carriage, partner, false);
+            } else if (!follow) {
+                if (carriage.LocalDriving && !carriage.IsPressed) {
+                    // A call plate drives the carriage without a button, and its end clears the call without telling
+                    carriage.LocalDriving = false;
+                    SendCarriageDrive(carriage, partner, true);
+                } else if (carriage.LocalDriving || !carriage.SentStopped) {
+                    SendCarriageDrive(carriage, partner, false);
+                }
             }
         } catch (Exception e) {
             LogLiftError(e);
@@ -411,7 +458,7 @@ internal partial class CoopSave {
             ObjectPath = carriage.Path,
             FsmName = CarriageKind,
             PartCount = (ushort) (carriage.LocalDriving ? 1 : 0),
-            Key = ++carriage.DriveCount,
+            Key = ++_carriageDriveCount,
             Amounts = [carriage.LocalClaim],
             Values = [carriage.Part, carriage.Velocity, carriage.Direction]
         });
@@ -467,6 +514,13 @@ internal partial class CoopSave {
         } catch (Exception e) {
             LogLiftError(e);
         }
+    }
+
+    /// <summary>
+    /// Whether a carriage is at the end of its way in a direction.
+    /// </summary>
+    private static bool IsAtCarriageEnd(Carriage carriage, float direction) {
+        return direction > 0f ? carriage.Part >= 1f : direction < 0f && carriage.Part <= 0f;
     }
 
     /// <summary>

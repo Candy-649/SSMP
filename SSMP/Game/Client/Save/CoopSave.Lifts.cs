@@ -372,12 +372,15 @@ internal partial class CoopSave {
             return true;
         }
 
-        if (_liftStateRequested && !_liftStateReceived &&
-            Time.unscaledTime - _liftRoomStart < LiftStateRequestDelay + LiftStateWaitTime) {
-            return false;
-        }
+        return !IsWaitingForLiftState() && !PartnerKeyWins();
+    }
 
-        return !PartnerKeyWins();
+    /// <summary>
+    /// Whether the local player entered the current room a moment ago and the game still waits for the state of its lifts
+    /// from a partner in it, during which neither game may decide about them yet.
+    /// </summary>
+    private bool IsWaitingForLiftState() {
+        return !_liftStateReceived && Time.unscaledTime - _liftRoomStart < LiftStateRequestDelay + LiftStateWaitTime;
     }
 
     /// <summary>
@@ -473,6 +476,8 @@ internal partial class CoopSave {
 
             if (gone != null) {
                 foreach (var key in gone) {
+                    // A lift that is gone can't end the ride of the avatar on it anymore
+                    EndAvatarRide(_lifts[key]);
                     _lifts.Remove(key);
                 }
             }
@@ -488,6 +493,10 @@ internal partial class CoopSave {
     /// </summary>
     private void UpdateLift(SyncedLift lift, ClientPlayerData? partner, bool decides) {
         lift.Update();
+        if (lift is FsmLift fsmLift) {
+            UpdateFsmLiftRide(fsmLift, partner);
+        }
+
         var moving = lift.IsMoving;
         if (lift.WasMoving && !moving) {
             lift.ArrivedAt = Time.unscaledTime;
@@ -495,7 +504,11 @@ internal partial class CoopSave {
 
         lift.WasMoving = moving;
         if (!decides) {
-            lift.Calls.Clear();
+            // Calls that came while both games waited for the state of the room wait for the game that decides
+            if (!IsWaitingForLiftState()) {
+                lift.Calls.Clear();
+            }
+
             return;
         }
 
@@ -540,6 +553,11 @@ internal partial class CoopSave {
                     Part = (ushort) stop,
                     PartCount = (ushort) (inside ? 1 : 0)
                 });
+            }
+
+            // If this game turns out to decide once the state of the room arrived, it serves the call itself
+            if (IsWaitingForLiftState()) {
+                QueueLiftCall(lift, stop, false, inside);
             }
 
             return;

@@ -75,6 +75,18 @@ internal partial class CoopSave {
                 return;
             }
 
+            var partner = player.IsInLocalScene ? player : null;
+            var inside = update.PartCount == 1;
+            if (!DecidesLifts(partner)) {
+                // Only the game that decides serves calls and corrects the other game. While both games wait for the
+                // state of the room, the call waits for whichever of them decides
+                if (IsWaitingForLiftState()) {
+                    QueueLiftCall(lift, stop, true, inside);
+                }
+
+                return;
+            }
+
             if (lift.Stop == stop) {
                 // The lift goes to that stop or stands there already, which the game of the partner may not show
                 if (!lift.IsMoving) {
@@ -84,8 +96,6 @@ internal partial class CoopSave {
                 return;
             }
 
-            var partner = player.IsInLocalScene ? player : null;
-            var inside = update.PartCount == 1;
             var hero = HeroController.instance;
             if (lift.IsMoving || IsLiftHeldForOther(lift, true, partner) ||
                 !StartLiftRide(lift, stop, hero != null && lift.ContainsHero(hero), player)) {
@@ -105,6 +115,17 @@ internal partial class CoopSave {
         }
 
         try {
+            // The partner entered the room, maybe after their game started again, so their counts start over
+            foreach (var known in _lifts.Values) {
+                known.PartnerRide = 0;
+                if (known is Carriage carriage) {
+                    carriage.PartnerDriveKey = 0;
+                    carriage.PartnerDriving = false;
+                    carriage.PartnerTime = float.NegativeInfinity;
+                    carriage.SeenClaim = carriage.LocalDriving ? carriage.LocalClaim : 0;
+                }
+            }
+
             foreach (var lift in FindRoomLifts()) {
                 SendLiftState(lift, player.Id, false);
             }
@@ -169,7 +190,8 @@ internal partial class CoopSave {
                         Scene = update.Scene,
                         ObjectPath = lift.Path,
                         FsmName = lift.FsmName,
-                        Part = (ushort) lift.Stop
+                        Part = (ushort) lift.Stop,
+                        PartCount = 1
                     });
                 }
 
@@ -180,7 +202,11 @@ internal partial class CoopSave {
             try {
                 var value = update.Values.Count > 0 ? update.Values[0] : lift.StateValue;
                 if (moving) {
-                    if (!lift.IsMoving || lift.Stop != stop) {
+                    // A lift that stands where the ride of the partner ends already, like at the end of the ride,
+                    // doesn't ride there again
+                    if (lift.IsMoving
+                            ? lift.Stop != stop
+                            : lift.Stop != stop || Mathf.Abs(lift.StateValue - value) > lift.StateTolerance) {
                         lift.JoinRide(stop, value);
                     }
                 } else if (lift.IsMoving || lift.Stop != stop ||
@@ -229,7 +255,9 @@ internal partial class CoopSave {
         }
 
         var container = partner?.PlayerContainer;
-        if (container == null || !container.activeInHierarchy || !lift.IsMoving ||
+        var stopped = !lift.IsMoving &&
+                      (!lift.AvatarRiding || Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime);
+        if (container == null || !container.activeInHierarchy || stopped ||
             lift.AvatarRiding && lift.AvatarContainer != container) {
             EndAvatarRide(lift);
             return;

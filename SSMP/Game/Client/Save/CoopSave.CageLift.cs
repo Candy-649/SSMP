@@ -23,6 +23,14 @@ internal partial class CoopSave {
     private static readonly FieldInfo? LiftDoorTriggerField =
         typeof(LiftControl).GetField("doorCloseTrigger", InstanceFlags);
 
+    private static readonly FieldInfo? LiftDoorButtonField = typeof(LiftControl).GetField("doorCloseButton", InstanceFlags);
+    private static readonly FieldInfo? LiftBobPlatformField = typeof(LiftControl).GetField("bobPlat", InstanceFlags);
+
+    /// <summary>
+    /// How far a cage lift may move in one frame, above which a call plate moved it closer to its stop at once.
+    /// </summary>
+    private const float LiftTeleportHeight = 1f;
+
     private static readonly MethodInfo? LiftSetInitialPosMethod =
         typeof(LiftControl).GetMethod("SetInitialPos", InstanceFlags, null, Type.EmptyTypes, null);
 
@@ -48,9 +56,9 @@ internal partial class CoopSave {
         public required Rect Inside { get; init; }
 
         /// <summary>
-        /// The height of the lift in the last frame in which it stood, from which a call plate moved it closer.
+        /// The height of the lift in the last frame, from which a call plate moves it closer to its stop.
         /// </summary>
-        public float StandingY { get; set; }
+        public float LastFrameY { get; set; }
 
         /// <inheritdoc />
         public override MonoBehaviour Owner => Control;
@@ -118,11 +126,21 @@ internal partial class CoopSave {
         public override void PlaceAt(int stop, float value) {
             if (IsMoving) {
                 Control.StopMoving();
+
+                // A stopped ride leaves off what it turned off, which the end of the ride turns on again. This only
+                // runs while the local hero isn't in the lift, so the button can't start a ride
+                if (LiftBobPlatformField?.GetValue(Control) is Behaviour bobPlatform && bobPlatform != null) {
+                    bobPlatform.enabled = true;
+                }
+
+                if (LiftDoorButtonField?.GetValue(Control) is SimpleButton button && button != null) {
+                    button.SetLocked(false);
+                }
             }
 
             LiftCurrentStopField?.SetValue(Control, stop);
             LiftSetInitialPosMethod?.Invoke(Control, null);
-            StandingY = Control.transform.position.y;
+            LastFrameY = Control.transform.position.y;
         }
 
         /// <inheritdoc />
@@ -149,9 +167,7 @@ internal partial class CoopSave {
 
         /// <inheritdoc />
         public override void Update() {
-            if (!IsMoving) {
-                StandingY = Control.transform.position.y;
-            }
+            LastFrameY = Control.transform.position.y;
         }
 
         /// <inheritdoc />
@@ -166,13 +182,14 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// Puts a standing lift back to its height from before a call plate moved it closer to its stop.
+        /// Puts the lift back to its height from before a call plate moved it closer to its stop, also while it waits at
+        /// a stop before or after a ride. During the ride itself the ride sets the height every frame anyway.
         /// </summary>
         private void RestoreStandingHeight() {
             var transform = Control.transform;
             var position = transform.position;
-            if (!IsMoving && Mathf.Abs(position.y - StandingY) > 0.01f) {
-                position.y = StandingY;
+            if (Mathf.Abs(position.y - LastFrameY) > LiftTeleportHeight) {
+                position.y = LastFrameY;
                 transform.position = position;
             }
         }
@@ -240,7 +257,7 @@ internal partial class CoopSave {
             Path = ScenePath.Get(control.transform),
             Control = control,
             Inside = GetCageSpace(control),
-            StandingY = control.transform.position.y
+            LastFrameY = control.transform.position.y
         };
         cage.WasMoving = cage.IsMoving;
         _lifts[control] = cage;

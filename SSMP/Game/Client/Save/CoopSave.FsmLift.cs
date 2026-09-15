@@ -12,7 +12,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// <summary>
 /// Lifts that an FSM runs in a checked two-player save (see CoopSave.Lifts). A platform lift starts a ride when the hero
 /// lands on it, and comes by itself when the hero is at the other end, both through an event of its FSM into its bob
-/// state. The one-time story lift only starts once both players are in it.
+/// state. With two players it only comes by itself for a player close to its shaft, and not for a player who stood at
+/// its stop while it left without them, until they left that stop and came back. The one-time story lift only starts
+/// once both players are in it.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -105,6 +107,22 @@ internal partial class CoopSave {
         /// </summary>
         public Collider2D? Platform { get; init; }
 
+        /// <summary>
+        /// The state of the FSM when the sync last looked, which tells rides that the FSM started by itself.
+        /// </summary>
+        public string? LastState { get; set; }
+
+        /// <summary>
+        /// The stop that the lift stood at when the sync last looked, or -1 while it moves.
+        /// </summary>
+        public int StoodAt { get; set; } = -1;
+
+        /// <summary>
+        /// The stop that the lift left while the local hero stood there without riding it, or -1. Standing there doesn't
+        /// call it back until the hero left that stop.
+        /// </summary>
+        public int DeclinedStop { get; set; } = -1;
+
         /// <inheritdoc />
         public override MonoBehaviour Owner => Fsm.Owner;
 
@@ -159,7 +177,9 @@ internal partial class CoopSave {
         public override bool Move(int stop, bool camera, float skippedDelay) {
             if (IsMoving) {
                 if (Stop != stop) {
-                    Fsm.SetState(stop == 1 ? "Move Up" : "Move Down");
+                    // Turning around goes through the state that picks the way, which also lets the lift carry the hero
+                    IsDown.Value = stop == 1;
+                    SetState(LiftDirectionState);
                 }
 
                 return true;
@@ -170,23 +190,36 @@ internal partial class CoopSave {
             }
 
             IsDown.Value = stop == 1;
-            Fsm.SetState(skippedDelay >= LiftBobSkip ? LiftDirectionState : LiftBobState);
+            SetState(skippedDelay >= LiftBobSkip ? LiftDirectionState : LiftBobState);
             return IsMoving;
         }
 
         /// <inheritdoc />
         public override void PlaceAt(int stop, float value) {
+            // A lift that is locked or didn't set itself up yet keeps its own state
             var state = stop == 1 ? "Start Up" : "Start Down";
-            if (Fsm.GetState(state) != null) {
-                Fsm.SetState(state);
+            if ((IsStanding || IsMoving) && Fsm.GetState(state) != null) {
+                SetState(state);
             }
         }
 
         /// <inheritdoc />
         public override void JoinRide(int stop, float value) {
+            if (!IsStanding && !IsMoving) {
+                return;
+            }
+
             SetHeight(value);
             IsDown.Value = stop == 1;
-            Fsm.SetState(stop == 1 ? "Move Up" : "Move Down");
+            SetState(LiftDirectionState);
+        }
+
+        /// <summary>
+        /// Sets the state of the FSM for the sync, which doesn't count as a ride that the FSM started by itself.
+        /// </summary>
+        private void SetState(string state) {
+            Fsm.SetState(state);
+            LastState = Fsm.ActiveStateName;
         }
 
         /// <summary>
@@ -286,40 +319,25 @@ internal partial class CoopSave {
             return;
         }
 
-        string? from = null, to = null;
-        var fromY = 0f;
-        FsmLift? lift = null;
         try {
-            from = self.ActiveStateName;
-            to = GetTransitionTarget(self.ActiveState, fsmEvent);
-            if (to != null) {
+            var from = self.ActiveStateName;
+            if (GetTransitionTarget(self.ActiveState, fsmEvent) is { } to) {
                 if (self.Name == StoryLiftFsmName) {
                     if (from == StoryLiftIdleState && to == StoryLiftEnteredState && HoldStoryLift(self)) {
                         return;
                     }
-                } else if (GetFsmLift(self) is FsmLift found) {
-                    lift = found;
-                    fromY = lift.Transform.position.y;
-                    if (to == LiftBobState && lift.IsStanding && HoldFsmLiftRide(lift, fsmEvent.Name, from == null ||
-                            !LiftStandingStates.TryGetValue(from, out var standing) || standing == 0 ? 1 : 0)) {
-                        return;
-                    }
+                } else if (GetFsmLift(self) is FsmLift lift && to == LiftBobState && lift.IsStanding &&
+                           HoldFsmLiftRide(lift, fsmEvent.Name, lift.Stop == 0 ? 1 : 0)) {
+                    return;
                 }
             }
         } catch (Exception e) {
             LogLiftError(e);
         }
 
+        // A ride that the event starts reaches the partner once the FSM switched to it, which an event that the FSM
+        // sends itself only does after its actions ran (see UpdateFsmLiftRide)
         orig(self, fsmEvent, eventData);
-        if (lift == null || to == null) {
-            return;
-        }
-
-        try {
-            AfterFsmLiftEvent(lift, from, to, fromY);
-        } catch (Exception e) {
-            LogLiftError(e);
-        }
     }
 
     /// <summary>
@@ -355,8 +373,9 @@ internal partial class CoopSave {
         var inside = hero != null && lift.ContainsHero(hero);
 
         // Alone, the lift comes for a hero anywhere at the other end. With two players that only counts close to its
-        // shaft, or a partner far away would send it away from the other player again and again
-        if (!inside && (hero == null || !lift.IsAtStop(stop, hero.transform.position))) {
+        // shaft, or a partner far away would send it away from the other player again and again. A hero who stood at
+        // that stop while the lift left without them calls it again once they left the stop and came back
+        if (!inside && (hero == null || !lift.IsAtStop(stop, hero.transform.position) || lift.DeclinedStop == stop)) {
             return true;
         }
 
@@ -369,22 +388,42 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends a ride of a platform lift that started or turned around in the local game.
+    /// Follows the state of a platform lift every frame: sends a ride that its FSM started or turned around by itself,
+    /// and remembers a stop that the lift left while the local hero stood there without riding it.
     /// </summary>
-    private void AfterFsmLiftEvent(FsmLift lift, string? from, string to, float fromY) {
-        if (GetLiftPartner() is not { } partner || !lift.IsMoving) {
+    private void UpdateFsmLiftRide(FsmLift lift, ClientPlayerData? partner) {
+        var state = lift.Fsm.ActiveStateName;
+        var last = lift.LastState;
+        lift.LastState = state;
+
+        var hero = HeroController.instance;
+        if (lift.IsStanding) {
+            lift.StoodAt = lift.Stop;
+        } else if (lift.IsMoving && lift.StoodAt >= 0) {
+            if (hero != null && !lift.ContainsHero(hero) && lift.IsAtStop(lift.StoodAt, hero.transform.position)) {
+                lift.DeclinedStop = lift.StoodAt;
+            }
+
+            lift.StoodAt = -1;
+        }
+
+        if (lift.DeclinedStop >= 0 && (hero == null || !lift.IsAtStop(lift.DeclinedStop, hero.transform.position))) {
+            lift.DeclinedStop = -1;
+        }
+
+        if (partner == null || last == null || state == null || last == state) {
             return;
         }
 
-        var started = to == LiftBobState && (from == null || !LiftRideStates.ContainsKey(from) || from == "Flip Dir");
-        var turned = to is "Move Up" or "Move Down" && from is "Move Up" or "Move Down" && from != to;
+        var started = LiftStandingStates.ContainsKey(last) && LiftRideStates.ContainsKey(state);
+        var turned = last is "Move Up" or "Move Down" && state is "Move Up" or "Move Down";
         if (!started && !turned) {
             return;
         }
 
         lift.WasMoving = true;
         lift.Calls.RemoveAll(call => call.Stop == lift.Stop);
-        SendLiftMove(lift, lift.Stop, fromY, partner.Id);
+        SendLiftMove(lift, lift.Stop, lift.Transform.position.y, partner.Id);
     }
 
     /// <summary>
@@ -425,6 +464,11 @@ internal partial class CoopSave {
         _liftFsms[fsm] = lift;
         if (lift != null) {
             lift.WasMoving = lift.IsMoving;
+            if (lift is FsmLift fsmLift) {
+                fsmLift.LastState = fsm.ActiveStateName;
+                fsmLift.StoodAt = fsmLift.IsStanding ? fsmLift.Stop : -1;
+            }
+
             _lifts[fsm] = lift;
         }
 
