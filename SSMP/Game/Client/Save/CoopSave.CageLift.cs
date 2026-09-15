@@ -115,7 +115,7 @@ internal partial class CoopSave {
         }
 
         /// <inheritdoc />
-        public override void PlaceAt(int stop) {
+        public override void PlaceAt(int stop, float value) {
             if (IsMoving) {
                 Control.StopMoving();
             }
@@ -126,12 +126,12 @@ internal partial class CoopSave {
         }
 
         /// <inheritdoc />
-        public override void JoinRide(int stop, float height) {
+        public override void JoinRide(int stop, float value) {
             if (IsMoving) {
                 Control.StopMoving();
             }
 
-            SetHeight(height);
+            SetHeight(value);
             if (Stop == stop) {
                 // Moving to the stop that the lift is at only opens its doors
                 LiftCurrentStopField?.SetValue(Control, stop == 0 ? 1 : 0);

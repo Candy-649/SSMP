@@ -128,7 +128,8 @@ internal class CoopSaveUpdate : IPacketData {
     public string ObjectPath { get; set; } = "";
 
     /// <summary>
-    /// For an interaction, the name of the FSM of the object that runs it, or empty for an item receptacle.
+    /// For an interaction, the name of the FSM of the object that runs it, or empty for an item receptacle. For a lift,
+    /// the name of the FSM that runs it, empty for a cage lift, or ManualLift for a carriage.
     /// </summary>
     public string FsmName { get; set; } = "";
 

@@ -175,7 +175,7 @@ internal partial class CoopSave {
         }
 
         /// <inheritdoc />
-        public override void PlaceAt(int stop) {
+        public override void PlaceAt(int stop, float value) {
             var state = stop == 1 ? "Start Up" : "Start Down";
             if (Fsm.GetState(state) != null) {
                 Fsm.SetState(state);
@@ -183,8 +183,8 @@ internal partial class CoopSave {
         }
 
         /// <inheritdoc />
-        public override void JoinRide(int stop, float height) {
-            SetHeight(height);
+        public override void JoinRide(int stop, float value) {
+            SetHeight(value);
             IsDown.Value = stop == 1;
             Fsm.SetState(stop == 1 ? "Move Up" : "Move Down");
         }
@@ -245,11 +245,11 @@ internal partial class CoopSave {
         public override bool Move(int stop, bool camera, float skippedDelay) => false;
 
         /// <inheritdoc />
-        public override void PlaceAt(int stop) {
+        public override void PlaceAt(int stop, float value) {
         }
 
         /// <inheritdoc />
-        public override void JoinRide(int stop, float height) {
+        public override void JoinRide(int stop, float value) {
         }
     }
 

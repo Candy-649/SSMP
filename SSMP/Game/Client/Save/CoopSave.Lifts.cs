@@ -167,12 +167,35 @@ internal partial class CoopSave {
         /// <summary>
         /// Puts the lift standing at a stop at once.
         /// </summary>
-        public abstract void PlaceAt(int stop);
+        /// <param name="stop">The stop.</param>
+        /// <param name="value">Where the lift stands in the other game (see <see cref="StateValue"/>).</param>
+        public abstract void PlaceAt(int stop, float value);
 
         /// <summary>
-        /// Continues a ride to a stop from a height at once, for a ride that is under way in the other game.
+        /// Continues a ride to a stop at once from where the lift is in the other game, for a ride that is under way
+        /// there.
         /// </summary>
-        public abstract void JoinRide(int stop, float height);
+        public abstract void JoinRide(int stop, float value);
+
+        /// <summary>
+        /// Where the lift is, for the state that the game sends: its height, unless its kind says otherwise.
+        /// </summary>
+        public virtual float StateValue => Transform.position.y;
+
+        /// <summary>
+        /// The difference of <see cref="StateValue"/> below which the lift counts as in the same place in both games.
+        /// </summary>
+        public virtual float StateTolerance => LiftSameHeight;
+
+        /// <summary>
+        /// Whether a player can call the lift to a stop.
+        /// </summary>
+        public virtual bool CanCall => true;
+
+        /// <summary>
+        /// Whether the lift moves sideways rather than up and down.
+        /// </summary>
+        public virtual bool MovesSideways => false;
 
         /// <summary>
         /// Whether the local hero is in or on the lift.
@@ -309,6 +332,7 @@ internal partial class CoopSave {
     private void RegisterLiftHooks() {
         RegisterCageLiftHooks();
         RegisterFsmLiftHooks();
+        RegisterCarriageHooks();
         Application.onBeforeRender += OnLiftBeforeRender;
     }
 
@@ -368,6 +392,7 @@ internal partial class CoopSave {
         var lifts = new List<SyncedLift>();
         AddRoomCageLifts(lifts);
         AddRoomFsmLifts(lifts);
+        AddRoomCarriages(lifts);
         return lifts;
     }
 
@@ -381,6 +406,10 @@ internal partial class CoopSave {
 
         if (update.FsmName.Length == 0) {
             return target.TryGetComponent<LiftControl>(out var control) ? GetCageLift(control) : null;
+        }
+
+        if (update.FsmName == CarriageKind) {
+            return target.TryGetComponent<ManualLift>(out var carriage) ? GetCarriage(carriage) : null;
         }
 
         foreach (var component in target.GetComponents<PlayMakerFSM>()) {

@@ -131,7 +131,7 @@ internal partial class CoopSave {
             PartCount = (ushort) (lift.IsMoving ? 1 : 0),
             Key = _liftRideCount,
             PlayTime = correction ? float.MaxValue : Time.unscaledTime - _liftRoomStart,
-            Values = [lift.Transform.position.y]
+            Values = [lift.StateValue]
         });
     }
 
@@ -162,7 +162,7 @@ internal partial class CoopSave {
             var moving = update.PartCount == 1;
             var hero = HeroController.instance;
             if (hero != null && lift.ContainsHero(hero)) {
-                if ((moving || stop != lift.Stop) && !lift.IsMoving) {
+                if (lift.CanCall && (moving || stop != lift.Stop) && !lift.IsMoving) {
                     Send(new CoopSaveUpdate {
                         TargetId = player.Id,
                         Kind = CoopSaveUpdateKind.LiftCall,
@@ -178,14 +178,14 @@ internal partial class CoopSave {
 
             _liftReplaying = true;
             try {
+                var value = update.Values.Count > 0 ? update.Values[0] : lift.StateValue;
                 if (moving) {
                     if (!lift.IsMoving || lift.Stop != stop) {
-                        lift.JoinRide(stop, update.Values.Count > 0 ? update.Values[0] : lift.Transform.position.y);
+                        lift.JoinRide(stop, value);
                     }
                 } else if (lift.IsMoving || lift.Stop != stop ||
-                           update.Values.Count > 0 &&
-                           Mathf.Abs(lift.Transform.position.y - update.Values[0]) > LiftSameHeight) {
-                    lift.PlaceAt(stop);
+                           Mathf.Abs(lift.StateValue - value) > lift.StateTolerance) {
+                    lift.PlaceAt(stop, value);
                 }
 
                 lift.WasMoving = lift.IsMoving;
@@ -248,11 +248,11 @@ internal partial class CoopSave {
                 interpolation.SetPredictionEnabled(false);
             }
         } else if ((position - lift.AvatarPlaced).sqrMagnitude > 0.0001f) {
-            // A position from the partner moved the avatar, which lags behind the height of a moving lift
+            // A position from the partner moved the avatar, which lags behind a moving lift along its way
             var offset = position - liftPosition;
-            lift.AvatarOffset = Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime
-                ? offset
-                : new Vector3(offset.x, lift.AvatarOffset.y, offset.z);
+            lift.AvatarOffset = Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime ? offset :
+                lift.MovesSideways ? new Vector3(lift.AvatarOffset.x, offset.y, offset.z) :
+                new Vector3(offset.x, lift.AvatarOffset.y, offset.z);
         }
 
         var placed = liftPosition + lift.AvatarOffset;
