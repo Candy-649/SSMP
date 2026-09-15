@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Net;
+using SSMP.Util;
 using SSMP.Animation;
 using SSMP.Api.Command.Server;
 using SSMP.Api.Eventing.ServerEvents;
@@ -349,6 +350,10 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.BossRoomUpdate,
             OnBossRoomUpdate
         );
+        _packetManager.RegisterServerUpdatePacketHandler<CoopSaveUpdate>(
+            ServerUpdatePacketId.CoopSaveUpdate,
+            OnCoopSaveUpdate
+        );
         _packetManager.RegisterServerUpdatePacketHandler<ChatMessage>(
             ServerUpdatePacketId.ChatMessage,
             OnChatMessage
@@ -397,6 +402,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BossRoomUpdate);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopSaveUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ChatMessage);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ServerSettings);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerSetting);
@@ -1373,6 +1379,25 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
+    /// Callback method for when a player sends an update of a two-player save, which goes to the player it names.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="update">The CoopSaveUpdate packet data.</param>
+    private void OnCoopSaveUpdate(ushort id, CoopSaveUpdate update) {
+        if (!_playerData.ContainsKey(id)) {
+            Logger.Warn($"Received CoopSaveUpdate data, but player with ID {id} is not in mapping");
+            return;
+        }
+
+        if (update.TargetId == id || !_playerData.ContainsKey(update.TargetId)) {
+            return;
+        }
+
+        update.PlayerId = id;
+        _netServer.GetUpdateManagerForClient(update.TargetId)?.AddCoopSaveUpdateData(update);
+    }
+
+    /// <summary>
     /// Try to update the team for the player with the given ID.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
@@ -1664,14 +1689,16 @@ internal abstract class ServerManager : IServerManager {
                     Username = otherPd.Username,
                     Team = otherPd.Team,
                     SkinId = otherPd.SkinId,
-                    CrestType = otherPd.CrestType
+                    CrestType = otherPd.CrestType,
+                    SaveKey = AuthUtil.GetSaveKey(otherPd.AuthKey)
                 }
             );
 
             // Send to the other players that this client has just connected
             _netServer.GetUpdateManagerForClient(otherId)?.AddPlayerConnectData(
                 netServerClient.Id,
-                clientInfo.Username
+                clientInfo.Username,
+                AuthUtil.GetSaveKey(clientInfo.AuthKey)
             );
         }
 

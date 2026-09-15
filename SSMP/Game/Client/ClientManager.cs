@@ -122,6 +122,11 @@ internal class ClientManager : IClientManager {
     private readonly BossRoomCoop _bossRoomCoop;
 
     /// <summary>
+    /// Two-player saves: pairing saves and keeping paired saves in step.
+    /// </summary>
+    private readonly CoopSave _coopSave;
+
+    /// <summary>
     /// The FSM patcher instance.
     /// </summary>
     private readonly FsmPatcher _fsmPatcher;
@@ -264,6 +269,7 @@ internal class ClientManager : IClientManager {
         _enemyHealthCoop = new EnemyHealthCoop(_playerData);
         _arenaCoop = new ArenaCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
         _bossRoomCoop = new BossRoomCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
+        _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager);
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -287,6 +293,7 @@ internal class ClientManager : IClientManager {
         _mapManager.Initialize();
 
         _entityManager.Initialize();
+        _coopSave.Initialize();
         // _saveManager.Initialize();
 
         RegisterCommands();
@@ -398,6 +405,7 @@ internal class ClientManager : IClientManager {
         _commandManager.RegisterCommand(new DebugCommand());
         _commandManager.RegisterCommand(new InviteCommand());
         _commandManager.RegisterCommand(new GiveUpCommand(_bossRoomCoop));
+        _commandManager.RegisterCommand(new CoopSaveCommand(_coopSave));
     }
 
     /// <summary>
@@ -460,6 +468,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.BossRoomUpdate,
             _bossRoomCoop.OnBossRoomUpdate
         );
+        _packetManager.RegisterClientUpdatePacketHandler<CoopSaveUpdate>(
+            ClientUpdatePacketId.CoopSaveUpdate,
+            _coopSave.OnCoopSaveUpdate
+        );
 
         // Register packet handlers related to full synchronisation
         if (_fullSynchronisation) {
@@ -504,6 +516,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BossRoomUpdate);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopSaveUpdate);
 
         if (_fullSynchronisation) {
             _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);
@@ -595,6 +608,7 @@ internal class ClientManager : IClientManager {
         _autoConnect = false;
 
         _netClient.Disconnect();
+        _coopSave.OnLocalDisconnect();
 
         // Leave Steam Lobby in case we are connected
         if (SteamManager.IsInLobby) {
@@ -752,7 +766,8 @@ internal class ClientManager : IClientManager {
                 Username = playerInfo.Username,
                 Team = playerInfo.Team,
                 SkinId = playerInfo.SkinId,
-                CrestType = playerInfo.CrestType
+                CrestType = playerInfo.CrestType,
+                SaveKey = playerInfo.SaveKey
             };
         }
 
@@ -819,10 +834,12 @@ internal class ClientManager : IClientManager {
         var playerData = new ClientPlayerData {
             Id = playerConnect.Id,
             Username = playerConnect.Username,
+            SaveKey = playerConnect.SaveKey
         };
         _playerData[playerConnect.Id] = playerData;
 
         UiManager.InternalChatBox.AddMessage($"Player '{playerConnect.Username}' connected to the server");
+        _coopSave.OnPlayerConnect(playerData);
 
         try {
             PlayerConnectEvent?.Invoke(playerData);
@@ -867,6 +884,7 @@ internal class ClientManager : IClientManager {
                 ? $"Player '{username}' timed out"
                 : $"Player '{username}' disconnected from the server"
         );
+        _coopSave.OnPlayerDisconnect(id);
 
         try {
             PlayerDisconnectEvent?.Invoke(playerData!);

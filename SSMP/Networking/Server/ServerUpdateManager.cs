@@ -135,10 +135,12 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// </summary>
     /// <param name="id">The ID of the player connecting.</param>
     /// <param name="username">The username of the player connecting.</param>
-    public void AddPlayerConnectData(ushort id, string username) {
+    /// <param name="saveKey">The key that identifies the player for two-player saves.</param>
+    public void AddPlayerConnectData(ushort id, string username, string saveKey) {
         lock (Lock) {
             var playerConnect = FindOrCreatePacketData<PlayerConnect>(id, ClientUpdatePacketId.PlayerConnect);
             playerConnect.Username = username;
+            playerConnect.SaveKey = saveKey;
         }
     }
 
@@ -512,6 +514,29 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     OverrideContinue = update.OverrideContinue,
                     TextAlignment = update.TextAlignment,
                     OffsetY = update.OffsetY
+                }
+            );
+        }
+    }
+
+    /// <summary>
+    /// Add an update of a two-player save from another player to the current packet.
+    /// </summary>
+    /// <param name="update">The update of the two-player save.</param>
+    public void AddCoopSaveUpdateData(CoopSaveUpdate update) {
+        lock (Lock) {
+            var coopSaveUpdateCollection = GetOrCreateCollection<CoopSaveUpdate>(ClientUpdatePacketId.CoopSaveUpdate);
+            coopSaveUpdateCollection.DataInstances.Add(
+                new CoopSaveUpdate {
+                    PlayerId = update.PlayerId,
+                    TargetId = update.TargetId,
+                    Kind = update.Kind,
+                    PartnerKey = update.PartnerKey,
+                    Part = update.Part,
+                    PartCount = update.PartCount,
+                    Records = update.Records,
+                    ItemScenes = update.ItemScenes,
+                    ItemIds = update.ItemIds
                 }
             );
         }

@@ -113,4 +113,9 @@ internal enum ClientUpdatePacketId {
     /// Something happened in a room whose gates are closed by an FSM, such as a boss room.
     /// </summary>
     BossRoomUpdate = 21,
+
+    /// <summary>
+    /// An update of a two-player save from another player.
+    /// </summary>
+    CoopSaveUpdate = 22,
 }

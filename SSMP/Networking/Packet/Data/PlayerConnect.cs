@@ -10,6 +10,11 @@ internal class PlayerConnect : GenericClientData {
     public string Username { get; set; } = null!;
 
     /// <summary>
+    /// The key that identifies the connecting player for two-player saves, a hash of their authentication key.
+    /// </summary>
+    public string SaveKey { get; set; } = "";
+
+    /// <summary>
     /// Construct the player connect data.
     /// </summary>
     public PlayerConnect() {
@@ -21,11 +26,13 @@ internal class PlayerConnect : GenericClientData {
     public override void WriteData(IPacket packet) {
         packet.Write(Id);
         packet.Write(Username);
+        packet.Write(SaveKey);
     }
 
     /// <inheritdoc />
     public override void ReadData(IPacket packet) {
         Id = packet.ReadUShort();
         Username = packet.ReadString();
+        SaveKey = packet.ReadString();
     }
 }

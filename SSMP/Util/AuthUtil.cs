@@ -62,6 +62,22 @@ internal static class AuthUtil {
     }
 
     /// <summary>
+    /// Gets the key that identifies a player for two-player saves from their authentication key. It is a hash, so other
+    /// players can know it without learning the authentication key.
+    /// </summary>
+    /// <param name="authKey">The authentication key of the player.</param>
+    /// <returns>The save key, or an empty string if there is no authentication key.</returns>
+    public static string GetSaveKey(string? authKey) {
+        if (string.IsNullOrEmpty(authKey)) {
+            return "";
+        }
+
+        using var sha256 = System.Security.Cryptography.SHA256.Create();
+        var hash = sha256.ComputeHash(System.Text.Encoding.UTF8.GetBytes(authKey));
+        return System.BitConverter.ToString(hash, 0, 12).Replace("-", "").ToLowerInvariant();
+    }
+
+    /// <summary>
     /// Generates a new authentication key.
     /// </summary>
     /// <returns>The authentication key as string.</returns>

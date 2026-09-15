@@ -12,6 +12,11 @@ internal class ClientPlayerData : IClientPlayer {
     /// <inheritdoc />
     public required string Username { get; init; }
 
+    /// <summary>
+    /// The key that identifies the player for two-player saves, or an empty string if the server didn't send it.
+    /// </summary>
+    public string SaveKey { get; init; } = "";
+
     /// <inheritdoc />
     public bool IsInLocalScene { get; set; }
 

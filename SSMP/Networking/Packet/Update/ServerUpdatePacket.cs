@@ -39,6 +39,8 @@ internal class ServerUpdatePacket : UpdatePacket<ServerUpdatePacketId> {
                 return new PacketDataCollection<BattleSceneUpdate>();
             case ServerUpdatePacketId.BossRoomUpdate:
                 return new PacketDataCollection<BossRoomUpdate>();
+            case ServerUpdatePacketId.CoopSaveUpdate:
+                return new PacketDataCollection<CoopSaveUpdate>();
             default:
                 return new EmptyData();
         }

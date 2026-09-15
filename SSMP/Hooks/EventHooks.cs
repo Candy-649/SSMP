@@ -428,13 +428,24 @@ public static class EventHooks {
     }
     
     private static bool OnLanguageHas(Func<string, string, bool> orig, string key, string sheet) {
-        var result = LanguageHas?.Invoke(key, sheet);
-        return result ?? orig(key, sheet);
+        // Each handler is asked in turn, because invoking an event only returns what its last handler returned
+        foreach (var handler in LanguageHas?.GetInvocationList() ?? []) {
+            if (((Func<string, string, bool?>) handler)(key, sheet) is { } result) {
+                return result;
+            }
+        }
+
+        return orig(key, sheet);
     }
 
     private static string OnLanguageGet(Func<string, string, string> orig, string key, string sheet) {
-        var result = LanguageGet?.Invoke(key, sheet);
-        return result ?? orig(key, sheet);
+        foreach (var handler in LanguageGet?.GetInvocationList() ?? []) {
+            if (((Func<string, string, string?>) handler)(key, sheet) is { } result) {
+                return result;
+            }
+        }
+
+        return orig(key, sheet);
     }
 
     private static void OnGameManagerStartNewGame(Action<GameManager, bool, bool> orig, GameManager self,

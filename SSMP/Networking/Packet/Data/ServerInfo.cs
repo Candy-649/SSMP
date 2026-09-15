@@ -175,6 +175,10 @@ internal class ServerInfo : IPacketData {
         /// The current crest type of the player.
         /// </summary>
         public required CrestType CrestType { get; init; }
+        /// <summary>
+        /// The key that identifies the player for two-player saves, a hash of their authentication key.
+        /// </summary>
+        public required string SaveKey { get; init; }
 
         /// <inheritdoc cref="IPacketData.WriteData" />
         public void WriteData(IPacket packet) {
@@ -183,6 +187,7 @@ internal class ServerInfo : IPacketData {
             packet.Write((byte) Team);
             packet.Write(SkinId);
             packet.Write((byte) CrestType);
+            packet.Write(SaveKey);
         }
 
         /// <summary>
@@ -196,7 +201,8 @@ internal class ServerInfo : IPacketData {
                 Username = packet.ReadString(),
                 Team = (Team) packet.ReadByte(),
                 SkinId = packet.ReadByte(),
-                CrestType = (CrestType) packet.ReadByte()
+                CrestType = (CrestType) packet.ReadByte(),
+                SaveKey = packet.ReadString()
             };
         }
     }

@@ -665,7 +665,7 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// Whether a record of the player data is a defeat or encounter record, which all players in a room share.
     /// </summary>
-    private static bool IsSharedRecordName(string name) {
+    internal static bool IsSharedRecordName(string name) {
         return name.StartsWith("defeated", StringComparison.OrdinalIgnoreCase) ||
                name.StartsWith("encountered", StringComparison.OrdinalIgnoreCase) ||
                name.EndsWith("Defeated", StringComparison.Ordinal) ||
@@ -676,7 +676,7 @@ internal partial class BossRoomCoop {
     /// Whether a boolean of the player data holds the state of the hero while a boss plays out, like whether they can
     /// pause or take damage, instead of progress. That state belongs to the player whose game set it.
     /// </summary>
-    private static bool IsHeroStateName(string name) {
+    internal static bool IsHeroStateName(string name) {
         return name.StartsWith("disable", StringComparison.Ordinal) ||
                name.StartsWith("respawn", StringComparison.Ordinal) ||
                name.StartsWith("hazard", StringComparison.Ordinal) ||

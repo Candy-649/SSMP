@@ -1,0 +1,2479 @@
+{
+ "bools": {
+  "abandoned_town": [
+   "Remasker New"
+  ],
+  "abyss_02b": [
+   "Abyss_Collapse_Wall_bot"
+  ],
+  "abyss_03": [
+   "Shaman_Collapse_Wall"
+  ],
+  "abyss_05": [
+   "Remasker New Sharp Ultra"
+  ],
+  "abyss_07": [
+   "Abyss_Weaver_Hanging_Plat",
+   "Abyss_Weaver_Hanging_Plat (1)",
+   "Abyss_Weaver_Hanging_Plat (2)",
+   "Abyss_Weaver_Hanging_Plat (3)",
+   "Abyss_Weaver_Hanging_Plat (4)",
+   "Abyss_Weaver_Hanging_Plat (5)",
+   "Abyss_Weaver_Hanging_Plat (6)",
+   "Abyss_Weaver_Hanging_Plat (7)"
+  ],
+  "abyss_08": [
+   "Power Chamber Read"
+  ],
+  "abyss_09": [
+   "Abyss_Collapse_Wall",
+   "explode_wall (3)",
+   "explode_wall (4)",
+   "explode_wall 4"
+  ],
+  "abyss_11": [
+   "Abyss_Collapse_Wall_bot"
+  ],
+  "abyss_12": [
+   "weaver_lift_power_chamber"
+  ],
+  "abyss_13": [
+   "Abyss_Collapse_Wall",
+   "weaver_lift_power_chamber"
+  ],
+  "abyss_cocoon": [
+   "glow_rim_Remasker"
+  ],
+  "ant_02": [
+   "Battle Scene"
+  ],
+  "ant_04": [
+   "Secret Mask New"
+  ],
+  "ant_04_left": [
+   "Black_Thread_Core",
+   "Secret Mask New"
+  ],
+  "ant_04_mid": [
+   "Battle Scene",
+   "Battle Scene Black Thread",
+   "Secret Mask New"
+  ],
+  "ant_05b": [
+   "Battle Scene",
+   "Black_Thread_Core",
+   "One Way Wall",
+   "Remasker New",
+   "Remasker New (1)",
+   "ant_lever_persistent"
+  ],
+  "ant_05c": [
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)"
+  ],
+  "ant_17": [
+   "Remasker New Sharp Ultra",
+   "ant_lever_persistent"
+  ],
+  "ant_19": [
+   "Collapser Small (6)",
+   "Collapser Small (7)",
+   "Remasker New",
+   "Remasker New (1)",
+   "ant_lever_persistent"
+  ],
+  "ant_21": [
+   "Battle Scene Extra",
+   "Battle Scene Init"
+  ],
+  "ant_merchant": [
+   "Remasker New Sharp Ultra"
+  ],
+  "aqueduct_01": [
+   "Breakable Wall Aqueduct Start",
+   "Remasker New Sharp Ultra"
+  ],
+  "aqueduct_02": [
+   "Breakable Wall",
+   "Breakable Wall_Silhouette",
+   "Remasker New"
+  ],
+  "aqueduct_03": [
+   "Breakable Wall",
+   "Remasker New Sharp"
+  ],
+  "aqueduct_04": [
+   "Breakable Wall bot mid",
+   "One Way Wall",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp Ultra",
+   "drop_planks"
+  ],
+  "aqueduct_05": [
+   "Remasker New Sharp Ultra"
+  ],
+  "aqueduct_05_pre": [
+   "Hornet Hint Dlg"
+  ],
+  "aqueduct_06": [
+   "Remasker New Sharp Ultra",
+   "Secret Sound Region",
+   "Secret Sound Region (1)"
+  ],
+  "aqueduct_07": [
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "aqueduct_08": [
+   "Breakable Wall_Silhouette",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "arborium_01": [
+   "Breakable Window Arborium",
+   "Moss Vine Cluster",
+   "Remasker New Sharp Ultra"
+  ],
+  "arborium_04": [
+   "Moss Vine Cluster",
+   "Moss Vine Cluster (1)",
+   "Moss Vine Cluster (2)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "Remasker New (4)"
+  ],
+  "arborium_05": [
+   "Coral Crust Wall Sphere"
+  ],
+  "arborium_06": [
+   "Coral Crust Wall Mid (1)",
+   "Coral Crust Wall Small",
+   "Coral Crust Wall Small (1)",
+   "Coral Crust Wall Tall",
+   "Coral Crust Wall Tall (1)",
+   "Coral Crust Wall Tall (3)",
+   "Crust Wall"
+  ],
+  "arborium_07": [
+   "Battle Scene",
+   "Breakable Wall",
+   "Grouped Remasker_Large",
+   "Remasker New (1)",
+   "Remasker New Sharp"
+  ],
+  "arborium_08": [
+   "One Way Wall",
+   "Remasker New (1)",
+   "Remasker New Inverse"
+  ],
+  "arborium_09": [
+   "Breakable Window",
+   "Grouped Remasker_Large (1)",
+   "Grouped Remasker_Large (2)",
+   "Moss Vine Cluster",
+   "Moss Vine Cluster (1)",
+   "Remasker New (3)"
+  ],
+  "arborium_11": [
+   "Breakable Wall Aqueduct Start",
+   "Grouped Remasker_Large"
+  ],
+  "aspid_01": [
+   "Breakable Wall"
+  ],
+  "bellshrine_05": [
+   "Song_lever_side old"
+  ],
+  "bellshrine_coral": [
+   "Coral Crust Wall Sphere (2)",
+   "Coral Crust Wall Sphere (3)",
+   "Coral Crust Wall Sphere (4)"
+  ],
+  "belltown": [
+   "Remasker New Sharp Ultra"
+  ],
+  "belltown_04": [
+   "Bell Wall Tall",
+   "Bell Wall Tall (1)",
+   "Bell Wall Tall (2)",
+   "Bell Wall Tall (3)",
+   "Bell Wall Tall (4)",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "belltown_06": [
+   "Mines Lift",
+   "Remasker New Sharp Ultra"
+  ],
+  "belltown_07": [
+   "Remasker New Sharp Ultra"
+  ],
+  "belltown_basement": [
+   "Remasker New"
+  ],
+  "belltown_basement_03": [
+   "Collapser Small_Bell_Type",
+   "Collapser Small_Bell_Type (1)",
+   "Collapser Small_Bell_Type (2)",
+   "One Way Wall (1)",
+   "One Way Wall (3)",
+   "One Way Wall (4)",
+   "One Way Wall (5)"
+  ],
+  "belltown_shrine": [
+   "Song_lever_side"
+  ],
+  "bellway_01": [
+   "Act3_Bellway_01_Breakable_wall"
+  ],
+  "bellway_02": [
+   "Breakable Wall",
+   "Remasker New"
+  ],
+  "bellway_03": [
+   "Secret Mask New",
+   "Secret Mask New (1)",
+   "Wind Rock",
+   "Wind Rock (1)",
+   "bell_toll_machine"
+  ],
+  "bellway_04": [
+   "Remasker New Sharp",
+   "plank_wall_cluster"
+  ],
+  "bellway_08": [
+   "bell_toll_machine",
+   "song_bridge_pole_large (2)"
+  ],
+  "bellway_aqueduct": [
+   "Collapser Small",
+   "Remasker New Sharp Ultra",
+   "bell_toll_machine"
+  ],
+  "bellway_city": [
+   "GG_Breakable_Junk_Pile_red",
+   "GG_Breakable_Junk_Pile_red (1)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Understore Lever"
+  ],
+  "bellway_peak": [
+   "Breakable Wall",
+   "Remasker New(Clone)",
+   "Song_lever_side",
+   "bell_toll_machine"
+  ],
+  "bellway_peak_02": [
+   "One Way Wall Crystal (2)",
+   "Remasker New",
+   "Remasker New(Clone)",
+   "charm_break_wall"
+  ],
+  "bellway_shadow": [
+   "bell_toll_machine"
+  ],
+  "bone_01": [
+   "Battle Scene",
+   "Bone Lever",
+   "Breakable Wall",
+   "Collapser Small (1)",
+   "Inverse Remasker",
+   "Inverse Remasker (1)",
+   "Remasker New",
+   "Secret Mask"
+  ],
+  "bone_01b": [
+   "Breakable Wall"
+  ],
+  "bone_01c": [
+   "Inverse Remasker",
+   "Inverse Remasker (1)",
+   "bell_toll_machine"
+  ],
+  "bone_02": [
+   "Black_Thread_Core",
+   "Chain Drop Platform"
+  ],
+  "bone_03": [
+   "Song_lever_side"
+  ],
+  "bone_04": [
+   "Black_Thread_Core",
+   "Bone Gate",
+   "Bone Lever",
+   "Fall_platform_barrels",
+   "Inverse Remasker",
+   "Song_lever_side",
+   "Song_lever_side right"
+  ],
+  "bone_05b": [
+   "Remasker New Sharp Ultra",
+   "Secret Sound Region"
+  ],
+  "bone_07": [
+   "Black_Thread_Core",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "explode_wall",
+   "explode_wall (2)",
+   "explode_wall (3)",
+   "explode_wall fake",
+   "explode_wall fake (1)",
+   "explode_wall fake (2)",
+   "explode_wall fake (3)"
+  ],
+  "bone_08": [
+   "Remasker New Sharp Ultra",
+   "lever"
+  ],
+  "bone_09": [
+   "Black_Thread_Core",
+   "Garmond Fighter",
+   "Remasker New",
+   "sack_breakable_single"
+  ],
+  "bone_10": [
+   "Breakable Wall",
+   "Remasker New",
+   "Secret Mask New",
+   "Song_Gate_small",
+   "Song_lever_side"
+  ],
+  "bone_11": [
+   "Garmond Fighter",
+   "Trapdoor Lever"
+  ],
+  "bone_11b": [
+   "Plate"
+  ],
+  "bone_12": [
+   "jail_door (1)",
+   "jail_door (2)"
+  ],
+  "bone_15": [
+   "Remasker New",
+   "Remasker New (1)",
+   "Secret Mask New"
+  ],
+  "bone_16": [
+   "Bone Carriage",
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "Breakable Wall (2)",
+   "Collapser Small (1)",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "bone_18": [
+   "Battle Scene"
+  ],
+  "bone_19": [
+   "Breakable Wall"
+  ],
+  "bone_east_01": [
+   "Barrel Plat Lift",
+   "Barrel Plat Lift (2)",
+   "Song_lever_side",
+   "Song_lever_side (1)"
+  ],
+  "bone_east_02": [
+   "Garmond Fighter"
+  ],
+  "bone_east_02b": [
+   "Black_Thread_Core"
+  ],
+  "bone_east_03": [
+   "Black_Thread_Core",
+   "DockDashExplodeRock"
+  ],
+  "bone_east_04": [
+   "DockDashExplodeRock",
+   "Inverse Remasker",
+   "explode_wall"
+  ],
+  "bone_east_04b": [
+   "Breakable Wall (1)",
+   "Remasker New",
+   "Reminder Look Down",
+   "explode_wall"
+  ],
+  "bone_east_04c": [
+   "cage_main",
+   "cage_tentacle_top",
+   "fly corpse",
+   "tentacle_round",
+   "tentacle_straight"
+  ],
+  "bone_east_05": [
+   "Barrel Plat Lift (1)",
+   "Black_Thread_Core",
+   "Garmond Fighter",
+   "Song_Gate_small",
+   "Song_lever_side",
+   "Song_lever_side (1)"
+  ],
+  "bone_east_07": [
+   "Remasker_Left",
+   "Secret Mask New (1)",
+   "Secret Mask New (2)",
+   "explode_wall",
+   "explode_wall (1)",
+   "explode_wall (2)",
+   "explode_wall (3)",
+   "explode_wall (5)",
+   "explode_wall (6)",
+   "explode_wall (7) - boneEast07_openedMidRoof"
+  ],
+  "bone_east_08": [
+   "Remasker New"
+  ],
+  "bone_east_09": [
+   "Secret Mask New",
+   "Wind Rock (1)",
+   "Wind Rock (2)",
+   "Wind Rock (3)"
+  ],
+  "bone_east_09b": [
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Wind Rock (4)",
+   "Wind Rock (6)",
+   "explode_wall"
+  ],
+  "bone_east_10": [
+   "Bone_East_10_Church",
+   "Chain Drop Platform (1)",
+   "Remasker New (1)",
+   "Toll Door"
+  ],
+  "bone_east_10_church": [
+   "Bone_East_10_Church",
+   "Inverse Remasker",
+   "Song_Gate_small (1)"
+  ],
+  "bone_east_10_room": [
+   "Toll Door Breakable Cog"
+  ],
+  "bone_east_11": [
+   "Bone East 11 Cross Over Group",
+   "DropBomb Rock",
+   "Remasker New Sharp",
+   "Song_lever_side",
+   "Song_lever_side (1)",
+   "Wind Rock",
+   "explode_wall"
+  ],
+  "bone_east_12": [
+   "Dock Key Receptacle",
+   "Song_Gate_small",
+   "Song_Gate_small_demo",
+   "Song_lever_side"
+  ],
+  "bone_east_13": [
+   "Coal Bucket Plat",
+   "Coal Bucket Plat (1)",
+   "Coal Bucket Plat (2)",
+   "Coal Bucket Plat (3)",
+   "Coal Bucket Plat (4)",
+   "Coal Bucket Plat (6)",
+   "Song_lever_side"
+  ],
+  "bone_east_14": [
+   "DropBomb Rock (2)",
+   "Garmond Fighter",
+   "Inverse Remasker",
+   "Secret Mask New",
+   "explode_wall",
+   "explode_wall (1)",
+   "explode_wall (3)",
+   "explode_wall (4)"
+  ],
+  "bone_east_14b": [
+   "DropBomb Rock",
+   "DropBomb Rock (1)"
+  ],
+  "bone_east_15": [
+   "Remasker New",
+   "Remasker New (1)",
+   "Song_Gate_small (3)",
+   "Song_lever_side",
+   "bell_toll_machine"
+  ],
+  "bone_east_16": [
+   "Breakable Wall"
+  ],
+  "bone_east_17": [
+   "Black_Thread_Core",
+   "Secret Mask New",
+   "ant_lever_persistent"
+  ],
+  "bone_east_17b": [
+   "Breakable Wall"
+  ],
+  "bone_east_18": [
+   "Remasker New Sharp",
+   "ant_lever_persistent (1)"
+  ],
+  "bone_east_18b": [
+   "Remasker New Sharp Ultra"
+  ],
+  "bone_east_18c": [
+   "Remasker New Sharp",
+   "explode_wall"
+  ],
+  "bone_east_20": [
+   "DropBomb Rock",
+   "Remasker New Sharp",
+   "Wind Rock (10)",
+   "Wind Rock (8)",
+   "Wind Rock (9)",
+   "explode_wall_norck"
+  ],
+  "bone_east_24": [
+   "DropBomb Rock (2)",
+   "ant_lever_persistent",
+   "ant_lever_persistent (1)",
+   "explode_wall_norck"
+  ],
+  "bone_east_25": [
+   "Battle Scene",
+   "Remasker New Sharp Ultra"
+  ],
+  "bone_east_26": [
+   "Black_Thread_Core_Citadel"
+  ],
+  "bone_east_lavachallenge": [
+   "Inverse Remasker",
+   "Remasker New Sharp",
+   "explode_wall",
+   "explode_wall (1)",
+   "explode_wall (2)",
+   "explode_wall (3)"
+  ],
+  "bone_east_weavehome": [
+   "Remasker New Sharp Ultra",
+   "weaver_lift_power_chamber"
+  ],
+  "bonegrave": [
+   "Col_Glow_Remasker",
+   "Moss Vine Cluster",
+   "One Way Wall",
+   "Remasker New Sharp Ultra"
+  ],
+  "bonetown": [
+   "Act3_Bellway_01_Breakable_wall",
+   "Bone Lever",
+   "Remasker New",
+   "Remasker New (1)",
+   "Weakness Scene"
+  ],
+  "chapel_wanderer": [
+   "Battle Scene",
+   "Collapser Small",
+   "One Way Wall",
+   "Remasker New",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)"
+  ],
+  "clover_01": [
+   "Breakable Wall_Silhouette",
+   "Remasker New Sharp Ultra"
+  ],
+  "clover_02c": [
+   "Grouped Remasker_Large",
+   "Moss Vine Cluster"
+  ],
+  "clover_04b": [
+   "Battle Scene",
+   "Clover Gate",
+   "Clover Gate (1)",
+   "Hornet_pressure_plate_small_persistent"
+  ],
+  "clover_05c": [
+   "Clover Gate (1)",
+   "Hornet_pressure_plate_small_persistent"
+  ],
+  "clover_10": [
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)"
+  ],
+  "clover_10_web": [
+   "Remasker New Sharp Ultra"
+  ],
+  "clover_16": [
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "Remasker New Sharp Ultra"
+  ],
+  "clover_18": [
+   "Plaque Pressure Plate",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Sharp Ultra",
+   "Shrine Pressure Plate BR",
+   "Shrine Pressure Plate L",
+   "Shrine Pressure Plate TR"
+  ],
+  "cog_04": [
+   "Black_Thread_Core",
+   "cog_lever",
+   "cog_lever (1)"
+  ],
+  "cog_05": [
+   "Battle Scene",
+   "Remasker New Sharp"
+  ],
+  "cog_06": [
+   "cog_lever"
+  ],
+  "cog_07": [
+   "Battle Scene",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "cog_lever"
+  ],
+  "cog_08": [
+   "cog_lever"
+  ],
+  "cog_09": [
+   "Cog_Choir_Cylinder",
+   "Cog_Choir_Cylinder (1)",
+   "Cog_Choir_Cylinder (2)",
+   "Cog_Choir_Cylinder (3)"
+  ],
+  "cog_09_destroyed": [
+   "Weakness Cog Drop Scene"
+  ],
+  "cog_10": [
+   "Active",
+   "Silkfly Ambient",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient (2)",
+   "Song Knight Tube",
+   "cog_junk_pile_break",
+   "cog_junk_pile_break (1)"
+  ],
+  "cog_10_destroyed": [
+   "Battle Scene",
+   "Pipe_Vent_Hatch Broken",
+   "Secret Mask New",
+   "Wake Scene",
+   "plank_wall_cluster_metal",
+   "plank_wall_cluster_metal (1)",
+   "plank_wall_cluster_metal (2)"
+  ],
+  "cog_bench": [
+   "Hornet_pressure_plate_small_persistent",
+   "cog_lever",
+   "cog_lever (2)"
+  ],
+  "cog_dancers": [
+   "cog_lever",
+   "slide_gate_ring"
+  ],
+  "coral_02": [
+   "Garmond Fighter",
+   "Remasker New",
+   "Remasker New (1)",
+   "Song_lever_side",
+   "bell_toll_machine"
+  ],
+  "coral_03": [
+   "Song_lever_side",
+   "song_bridge_pole_large (1)",
+   "song_bridge_pole_large (2)"
+  ],
+  "coral_10": [
+   "Coral10rightsidegate",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient (3)",
+   "Silkfly Ambient (4)",
+   "Silkfly Ambient (6)",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)",
+   "Silkfly Ambient Perched (2)",
+   "Silkfly Ambient Perched (3)"
+  ],
+  "coral_11": [
+   "Black_Thread_Core"
+  ],
+  "coral_12": [
+   "Black_Thread_Core",
+   "Breakable Wall"
+  ],
+  "coral_19": [
+   "Remasker New Sharp Ultra",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)"
+  ],
+  "coral_19b": [
+   "Collapser Small"
+  ],
+  "coral_23": [
+   "Breakable Wall",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "coral_24": [
+   "Coral Crust Mask",
+   "Coral Crust Mask (1) - not used",
+   "Coral Crust Wall Tall",
+   "Coral Crust Wall Tall (1)",
+   "Coral Crust Wall Tall (2)",
+   "Coral Crust Wall Tall (3)",
+   "Coral Crust Wall Tall (4)",
+   "Coral Crust Wall Tall (5)"
+  ],
+  "coral_26": [
+   "Coral Crust Wall Tall"
+  ],
+  "coral_27": [
+   "Battle Scene"
+  ],
+  "coral_28": [
+   "Coral_gate_large",
+   "Coral_gate_large (1)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Tension Tone Single"
+  ],
+  "coral_29": [
+   "Collapser Small",
+   "Remasker New Sharp Ultra"
+  ],
+  "coral_32": [
+   "Black_Thread_Core",
+   "Coral Crust Wall Tall",
+   "Remasker New",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Remasker New Sharp Ultra (2)"
+  ],
+  "coral_35": [
+   "Breakable Wall",
+   "Stalactite Group Bottom"
+  ],
+  "coral_35b": [
+   "Coral Crust Wall Tall (1)",
+   "Coral Crust Wall Tall (2)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra 1",
+   "Remasker New Sharp Ultra 2",
+   "Stalactite Group Bottom",
+   "Stalactite Group Top"
+  ],
+  "coral_36": [
+   "Remasker New Sharp Ultra"
+  ],
+  "coral_37": [
+   "Remasker New",
+   "Remasker New Sharp Ultra"
+  ],
+  "coral_38": [
+   "Coral Crust Wall Mid",
+   "Coral Crust Wall Sphere",
+   "Coral Crust Wall Tall",
+   "Coral Crust Wall Tall (1)",
+   "Coral Crust Wall Tall (2)",
+   "Hornet_cage_rect_lift",
+   "Remasker New Sharp Ultra",
+   "song_bridge_pole_large (1)",
+   "song_bridge_pole_large (2)",
+   "song_bridge_pole_large (4)",
+   "song_bridge_pole_large (5)",
+   "song_bridge_pole_large (7)",
+   "song_bridge_pole_large (8)",
+   "song_bridge_pole_large (9)"
+  ],
+  "coral_41": [
+   "Coral Crust Wall Mid",
+   "Coral Crust Wall Mid (1)",
+   "Coral Crust Wall Mid (10)",
+   "Coral Crust Wall Mid (11)",
+   "Coral Crust Wall Mid (12)",
+   "Coral Crust Wall Mid (13)",
+   "Coral Crust Wall Mid (15)",
+   "Coral Crust Wall Mid (16)",
+   "Coral Crust Wall Mid (2)",
+   "Coral Crust Wall Mid (20)",
+   "Coral Crust Wall Mid (21)",
+   "Coral Crust Wall Mid (23)",
+   "Coral Crust Wall Mid (24)",
+   "Coral Crust Wall Mid (26)",
+   "Coral Crust Wall Mid (27)",
+   "Coral Crust Wall Mid (28)",
+   "Coral Crust Wall Mid (3)",
+   "Coral Crust Wall Mid (31)",
+   "Coral Crust Wall Mid (33)",
+   "Coral Crust Wall Mid (35)",
+   "Coral Crust Wall Mid (36)",
+   "Coral Crust Wall Mid (37)",
+   "Coral Crust Wall Mid (38)",
+   "Coral Crust Wall Mid (39)",
+   "Coral Crust Wall Mid (4)",
+   "Coral Crust Wall Mid (40)",
+   "Coral Crust Wall Mid (41)",
+   "Coral Crust Wall Mid (44)",
+   "Coral Crust Wall Mid (45)",
+   "Coral Crust Wall Mid (46)",
+   "Coral Crust Wall Mid (7)",
+   "Coral Crust Wall Mid (8)",
+   "Coral Crust Wall Mid (9)",
+   "Coral Crust Wall Small",
+   "Coral Crust Wall Sphere",
+   "Coral Crust Wall Sphere (1)",
+   "Coral Crust Wall Sphere (3)",
+   "Coral Crust Wall Sphere (4)",
+   "Coral Crust Wall Sphere (5)",
+   "Coral Crust Wall Sphere (6)",
+   "Coral Crust Wall Sphere (7)",
+   "Coral Crust Wall Sphere (9)",
+   "Coral Crust Wall Tall",
+   "Coral Crust Wall Tall (1)",
+   "Coral Crust Wall Tall (3)",
+   "Coral Crust Wall Tall (6)",
+   "Coral Crust Wall Tall (7)",
+   "Coral Crust Wall Tall (8)",
+   "Remasker New"
+  ],
+  "coral_44": [
+   "Coral Crust Wall Mid",
+   "Coral Crust Wall Mid (1)",
+   "Remasker New Sharp Ultra",
+   "Secret Mask New Sharp Ultra"
+  ],
+  "coral_judge_arena": [
+   "SC_0058_sc_floor_03 (1)",
+   "SC_0058_sc_floor_03 (2)",
+   "SC_0058_sc_floor_03 (3)",
+   "SC_0058_sc_floor_03 (4)",
+   "SC_0058_sc_floor_03 (5)",
+   "SC_0058_sc_floor_03 (6)",
+   "SC_0058_sc_floor_03 (7)",
+   "SC_0058_sc_floor_03 (8)",
+   "SC_0059_sc_floor_02",
+   "SC_0059_sc_floor_02 (1)",
+   "SC_0059_sc_floor_02 (2)",
+   "SC_0059_sc_floor_02 (3)",
+   "SC_0059_sc_floor_02 (4)",
+   "SC_0060_sc_floor_01",
+   "SC_0060_sc_floor_01 (1)",
+   "SC_0060_sc_floor_01 (11)",
+   "SC_0060_sc_floor_01 (14)",
+   "SC_0060_sc_floor_01 (15)",
+   "SC_0060_sc_floor_01 (18)",
+   "SC_0060_sc_floor_01 (2)",
+   "SC_0060_sc_floor_01 (21)",
+   "SC_0060_sc_floor_01 (23)",
+   "SC_0060_sc_floor_01 (26)",
+   "SC_0060_sc_floor_01 (3)",
+   "SC_0060_sc_floor_01 (39)",
+   "SC_0060_sc_floor_01 (4)",
+   "SC_0060_sc_floor_01 (40)",
+   "SC_0060_sc_floor_01 (41)",
+   "SC_0060_sc_floor_01 (42)",
+   "SC_0060_sc_floor_01 (5)",
+   "SC_0060_sc_floor_01 (6)",
+   "SC_0060_sc_post_01 (12)",
+   "SC_0060_sc_post_01 (31)",
+   "SC_0060_sc_post_01 (35)",
+   "SC_0060_sc_post_01 (36)",
+   "SC_0060_sc_post_01 (37)",
+   "SC_0060_sc_post_01 (38)",
+   "SC_0060_sc_post_01 (43)",
+   "song_bridge_pole_large",
+   "song_bridge_pole_large (1)",
+   "song_bridge_pole_large (2)"
+  ],
+  "coral_tower_01": [
+   "Remasker New Sharp Ultra",
+   "Tension Tone Single"
+  ],
+  "cradle_01": [
+   "Inverse Remasker",
+   "Silkfly Ambient",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient (5)",
+   "Silkfly Ambient (6)",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)",
+   "Silkfly Ambient Perched (2)",
+   "Silkfly Ambient Perched (3)"
+  ],
+  "cradle_02": [
+   "breakable blocker struts"
+  ],
+  "cradle_03": [
+   "Abyss_Collapse_Wall",
+   "Remasker New Sharp Ultra",
+   "Silkfly Ambient",
+   "Silkfly Ambient (4)",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)",
+   "Silkfly Ambient Perched (2)",
+   "Silkfly Ambient Perched (3)",
+   "Silkfly Ambient Perched (4)",
+   "cradle_plat",
+   "cradle_plat (1)",
+   "cradle_plat (2)",
+   "cradle_plat (6)",
+   "cradle_plat (7)",
+   "cradle_plat (8)",
+   "cradle_spike_plat (10)",
+   "cradle_spike_plat (2)",
+   "cradle_spike_plat (8)",
+   "cradle_spike_plat (9)",
+   "glow_rim_Remasker"
+  ],
+  "cradle_03_destroyed": [
+   "Remasker New Sharp",
+   "cradle_spike_plat (2)"
+  ],
+  "cradle_destroyed_challenge_01": [
+   "Inverse Remasker",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "cradle_destroyed_challenge_bench": [
+   "plank_wall_cluster"
+  ],
+  "crawl_02": [
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "Song_lever_side",
+   "aspid_sealed_gate_stone",
+   "pustule_set_large_single_black_thread"
+  ],
+  "crawl_03": [
+   "Breakable Wall (1)",
+   "pustule_set_large_single_black_thread",
+   "pustule_set_large_single_black_thread (2)",
+   "pustule_set_small (1)"
+  ],
+  "crawl_03b": [
+   "pustule_set_large_single_black_thread",
+   "pustule_set_large_single_black_thread (1)",
+   "pustule_set_large_single_black_thread (2)"
+  ],
+  "crawl_05": [
+   "pustule_set_large_single_black_thread (1)"
+  ],
+  "crawl_07": [
+   "pustule_set_small (1)",
+   "pustule_set_small 3"
+  ],
+  "crawl_08": [
+   "pustule_set_large_single_black_thread",
+   "pustule_set_large_single_black_thread (1)",
+   "pustule_set_large_single_black_thread (2)"
+  ],
+  "crawl_09": [
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "pustule_set_large_single_black_thread (1)",
+   "pustule_set_large_single_black_thread (2)",
+   "pustule_set_small (1)"
+  ],
+  "dock_01": [
+   "Song_lever_side",
+   "bell_toll_machine"
+  ],
+  "dock_02": [
+   "Coal Bucket Plat (7)",
+   "One Way Wall",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "dock_02b": [
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Song_lever_side"
+  ],
+  "dock_03": [
+   "Breakable Wall_Silhouette",
+   "Harpoon Ring Pull Switch",
+   "One Way Wall",
+   "Remasker New Sharp",
+   "Secret Mask New Gate",
+   "Song_Gate_small",
+   "Song_lever_side"
+  ],
+  "dock_03b": [
+   "Breakable Wall",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)"
+  ],
+  "dock_03c": [
+   "Battle Scene",
+   "Breakable Wall_Silhouette",
+   "Breakable Window",
+   "Remasker New",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp (2)",
+   "Remasker New Sharp (3)",
+   "explode_wall",
+   "explode_wall (2)",
+   "explode_wall (3)",
+   "explode_wall (4)",
+   "explode_wall (5)"
+  ],
+  "dock_03d": [
+   "Breakable Wall_Silhouette",
+   "Breakable Window"
+  ],
+  "dock_04": [
+   "Black_Thread_Core",
+   "dock_pressure_plate_lock"
+  ],
+  "dock_06_church": [
+   "Remasker New Sharp Ultra",
+   "Song_lever_side"
+  ],
+  "dock_08": [
+   "Battle Scene",
+   "Remasker New",
+   "Song_Gate_small",
+   "Song_lever_side"
+  ],
+  "dock_10": [
+   "dock_pressure_plate_lock"
+  ],
+  "dock_11": [
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New Sharp",
+   "Song_lever_side",
+   "Song_lever_side (1)",
+   "Song_lever_side (2)",
+   "explode_wall",
+   "explode_wall (2)",
+   "explode_wall (4)",
+   "explode_wall (5)"
+  ],
+  "dock_12": [
+   "Diving Bell Door",
+   "Remasker New Sharp Ultra"
+  ],
+  "dock_14": [
+   "Remasker New"
+  ],
+  "dock_15": [
+   "Breakable Wall"
+  ],
+  "dock_16": [
+   "Collapser Small"
+  ],
+  "dust_01": [
+   "Breakable Wall",
+   "Remasker New Sharp Ultra",
+   "Secret Mask New",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)",
+   "Silkfly Ambient Perched (2)"
+  ],
+  "dust_02": [
+   "Dust_02Gate",
+   "Prince Cell Door",
+   "Remasker New Sharp Ultra",
+   "greymoor_lever_simple_EDITED"
+  ],
+  "dust_03": [
+   "Battle Scene",
+   "Black_Thread_Core",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "dust_04": [
+   "Dust_02Gate",
+   "greymoor_lever_simple"
+  ],
+  "dust_05": [
+   "Breakable Wall",
+   "Garmond Fighter",
+   "Remasker New",
+   "Remasker New (2)",
+   "greymoor_lever_simple"
+  ],
+  "dust_06": [
+   "Breakable Wall",
+   "One Way Wall",
+   "Remasker New",
+   "Secret Mask New"
+  ],
+  "dust_09": [
+   "Breakable Wall",
+   "Silkfly Ambient",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)"
+  ],
+  "dust_10": [
+   "Breakable Wall",
+   "One Way Wall",
+   "Secret Mask New",
+   "bell_toll_machine"
+  ],
+  "dust_11": [
+   "Battle Scene 1",
+   "Battle Scene Act3",
+   "Black_Thread_Core",
+   "Black_Thread_Core (1)",
+   "Breakable Wall",
+   "One Way Wall (1)",
+   "One Way Wall (2)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New Sharp Ultra"
+  ],
+  "dust_12": [
+   "Break Wall Dustpen Cage"
+  ],
+  "dust_chef": [
+   "Battle Scene",
+   "Chef_Meat_React",
+   "Chef_Meat_React (1)",
+   "Chef_Meat_React (2)",
+   "Chef_Meat_React (3)",
+   "Chef_Meat_React (4)",
+   "Chef_Meat_React (5)",
+   "Chef_Meat_React (6)",
+   "Remasker New",
+   "Remasker New (1)",
+   "greymoor_lever_simple"
+  ],
+  "dust_maze_08_completed": [
+   "Breakable Wall",
+   "Plat Collider"
+  ],
+  "greymoor_01": [
+   "Bell Chain Plat",
+   "Song_lever_side"
+  ],
+  "greymoor_02": [
+   "Black_Thread_Core",
+   "Breakable Wall",
+   "Collapser Small",
+   "Craw_home_front",
+   "Craw_home_front (1)",
+   "Craw_home_right",
+   "Flyaway Scene",
+   "Greymoor Stand Lever - Bridge",
+   "Greymoor Stand Lever - Crane",
+   "greymoor_lever_simple"
+  ],
+  "greymoor_03": [
+   "Breakable Wall",
+   "Hornet_cage_rect_lift_greymoor",
+   "Hornet_pressure_plate_small_persistent"
+  ],
+  "greymoor_04": [
+   "Battle Scene",
+   "Black Thread Battle Scene",
+   "Remasker New",
+   "propeller (1)",
+   "propeller (2)",
+   "propeller (3)",
+   "propeller (4)"
+  ],
+  "greymoor_05": [
+   "Garmond Fighter",
+   "cage_main",
+   "cage_tentacle_top",
+   "fly corpse",
+   "greymoor_breakable_plat",
+   "greymoor_breakable_plat (1)",
+   "greymoor_breakable_plat (2)",
+   "greymoor_breakable_plat (3)",
+   "greymoor_breakable_plat (4)",
+   "greymoor_breakable_plat (5)",
+   "tentacle_round",
+   "tentacle_straight"
+  ],
+  "greymoor_06": [
+   "Remasker New",
+   "belltown_lever_drop_plat"
+  ],
+  "greymoor_07": [
+   "Black_Thread_Core",
+   "One Way Wall"
+  ],
+  "greymoor_08": [
+   "grey_wood_chain_plat_mid_breakable",
+   "greymoor_drop_propeller"
+  ],
+  "greymoor_11": [
+   "Black_Thread_Core",
+   "propeller",
+   "propeller (1)"
+  ],
+  "greymoor_12": [
+   "Black_Thread_Core"
+  ],
+  "greymoor_13": [
+   "Remasker New (1)"
+  ],
+  "greymoor_15": [
+   "Craw_home_right",
+   "greymoor_lever_simple"
+  ],
+  "greymoor_15b": [
+   "Craw_home_right",
+   "Craw_home_right (1)",
+   "Greymoor Stand Lever",
+   "Greymoor Stand Lever (1)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)"
+  ],
+  "greymoor_16": [
+   "Black_Thread_Core",
+   "Breakable Wall",
+   "Inverse Remasker",
+   "Inverse Remasker (1)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "greystore_floor_shortcut (1)",
+   "plank_wall_cluster"
+  ],
+  "greymoor_17": [
+   "Remasker New Sharp Ultra",
+   "plank_wall_cluster"
+  ],
+  "greymoor_20c": [
+   "Battle Scene",
+   "Inverse Remasker",
+   "Inverse Remasker (5)",
+   "Inverse Remasker (6)",
+   "greystore_floor_shortcut"
+  ],
+  "greymoor_22": [
+   "One Way Wall (2)",
+   "Remasker New Sharp",
+   "Remasker New Sharp Ultra"
+  ],
+  "halfway_01": [
+   "Hornet_pressure_plate_small_persistent",
+   "Secret Mask New"
+  ],
+  "hang_02": [
+   "Breakable Window (1)"
+  ],
+  "hang_03": [
+   "Black_Thread_Core_Citadel",
+   "Breakable Window (1)"
+  ],
+  "hang_03_top": [
+   "Breakable Window (1)",
+   "lamp_hang_top"
+  ],
+  "hang_04": [
+   "Battle Scene Act3",
+   "Breakable Window (1)",
+   "smash_floor",
+   "smash_floor (1)",
+   "smash_floor (10)",
+   "smash_floor (11)",
+   "smash_floor (12)",
+   "smash_floor (13)",
+   "smash_floor (14)",
+   "smash_floor (2)",
+   "smash_floor (3)",
+   "smash_floor (4)",
+   "smash_floor (5)",
+   "smash_floor (6)",
+   "smash_floor (7)",
+   "smash_floor (8)",
+   "smash_floor (9)"
+  ],
+  "hang_04_boss": [
+   "Battle Scene",
+   "Start Range"
+  ],
+  "hang_06": [
+   "Bot Blocker",
+   "bank_door"
+  ],
+  "hang_06_bank": [
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "Inverse Remasker",
+   "Remasker New Sharp",
+   "Remasker New Sharp (2)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Secret Mask New",
+   "Song_lever_side"
+  ],
+  "hang_07": [
+   "Bot Blocker"
+  ],
+  "hang_08": [
+   "Breakable Wall",
+   "Breakable Window (1)",
+   "Remasker New",
+   "slide_gate_ring",
+   "slide_gate_ring (2)",
+   "slide_gate_ring (3)"
+  ],
+  "hang_09": [
+   "Breakable Window (1)",
+   "Remasker New (2)"
+  ],
+  "hang_10": [
+   "Breakable Wall (1)",
+   "Breakable Window (1)"
+  ],
+  "hang_13": [
+   "Black_Thread_Core",
+   "Breakable Window (1)"
+  ],
+  "hang_14": [
+   "Breakable Wall",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)"
+  ],
+  "hang_15": [
+   "Breakable Window (1)"
+  ],
+  "hang_16": [
+   "Remasker New Sharp"
+  ],
+  "hang_17b": [
+   "Silkfly Ambient",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient (2)",
+   "Silkfly Ambient Perched"
+  ],
+  "library_01": [
+   "Breakable Wall"
+  ],
+  "library_02": [
+   "Battle Scene",
+   "Battle Scene Acolyte",
+   "Grouped Remasker",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "library_03": [
+   "CameraLockArea",
+   "Grouped Remasker_Large",
+   "Secret Mask New",
+   "Song_lever_side",
+   "innerworks_lever"
+  ],
+  "library_04": [
+   "Black_Thread_Core_Citadel",
+   "Black_Thread_Core_Citadel (1)",
+   "Remasker New",
+   "Remasker New Sharp",
+   "Song_lever_side",
+   "Song_lever_side (1)",
+   "Top Shortcut",
+   "attic_ladder"
+  ],
+  "library_05": [
+   "Remasker New",
+   "Remasker New Sharp Ultra",
+   "attic_ladder",
+   "library_glass_heart_piece"
+  ],
+  "library_06": [
+   "Black_Thread_Core_Citadel",
+   "Remasker New"
+  ],
+  "library_07": [
+   "GG_Breakable_Junk_Pile_gold",
+   "GG_Breakable_Junk_Pile_gold (1)",
+   "Plate",
+   "Remasker New",
+   "Remasker New (1)",
+   "slide_gate_ring",
+   "understore propeller"
+  ],
+  "library_08": [
+   "Collapser Small",
+   "Remasker New",
+   "Remasker New (2)",
+   "Remasker New Inverted"
+  ],
+  "library_09": [
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp (3)",
+   "Song_lever_side"
+  ],
+  "library_10": [
+   "Breakable Wall",
+   "Hornet_pressure_plate_small_persistent",
+   "Remasker New",
+   "Remasker New (1)",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)",
+   "Tension Tone Single"
+  ],
+  "library_11": [
+   "Remasker New",
+   "Remasker New - Centre",
+   "Remasker New - Left",
+   "Remasker New - Right",
+   "Understore Big Plate Gate"
+  ],
+  "library_11b": [
+   "Barrel Plat Lift (1)",
+   "Barrel Plat Lift (2)",
+   "Barrel Plat Lift (3)",
+   "Barrel Plat Lift (4)",
+   "Barrel Plat Lift Thin",
+   "Barrel Plat Lift Thin (1)",
+   "Barrel Plat Lift Thin (3)",
+   "Barrel Plat Lift Thin (4)",
+   "Barrel Plat Lift Thin (5)",
+   "Plug_Gate",
+   "Remasker New Sharp",
+   "Secret Mask New",
+   "Understore Big Plate Gate",
+   "plank_wall_cluster_metal (1)"
+  ],
+  "library_12": [
+   "One Way Wall",
+   "Plug_Gate",
+   "Remasker",
+   "Remasker (1)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "breakable blocker struts"
+  ],
+  "library_13": [
+   "Grouped Remasker",
+   "Inverse Remasker",
+   "Song_Gate_small",
+   "Song_lever_side",
+   "Song_lever_side (1)"
+  ],
+  "library_13b": [
+   "Remasker New Sharp Ultra (1)"
+  ],
+  "library_14": [
+   "Breakable Wall",
+   "Remasker New"
+  ],
+  "library_15": [
+   "Remasker New Sharp Ultra",
+   "Song_lever_side"
+  ],
+  "memory_ant_queen": [
+   "Col_Glow_Remasker"
+  ],
+  "memory_coral_tower": [
+   "Remasker New (1)",
+   "Remasker New Top",
+   "Stalactite Group"
+  ],
+  "memory_silk_heart_bellbeast": [
+   "glow_rim_Remasker"
+  ],
+  "memory_silk_heart_lacetower": [
+   "glow_rim_Remasker"
+  ],
+  "memory_silk_heart_wardboss": [
+   "glow_rim_Remasker"
+  ],
+  "mosstown_01": [
+   "Remasker New (1)",
+   "Trapdoor Lever"
+  ],
+  "mosstown_02": [
+   "Black_Thread_Core",
+   "Bone Lever 2",
+   "Breakable Wall",
+   "Remasker New Sharp",
+   "Reminder Silk Skill",
+   "Reminder Silk Skill (1)",
+   "Silkfly Ambient",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient (2)",
+   "Thick Silk Vines",
+   "Thick Silk Vines (1)",
+   "Vine Platform",
+   "moss_bone_plaque"
+  ],
+  "mosstown_03": [
+   "Shellwood Twig Wall",
+   "explode_wall"
+  ],
+  "organ_01": [
+   "Hornet_cage_rect_lift_organ (1)",
+   "Organ Webbed Bench",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "Remasker New Sharp Ultra",
+   "organ_lift_broken_drop"
+  ],
+  "peak_01": [
+   "One Way Wall Crystal",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "peak_02": [
+   "Crystal Break Chunk (11)",
+   "Crystal Break Chunk (12)"
+  ],
+  "peak_04": [
+   "drop pillar_chunk (1)",
+   "drop pillar_chunk (2)"
+  ],
+  "peak_04c": [
+   "One Way Wall Crystal"
+  ],
+  "peak_04d": [
+   "Remasker New Sharp Ultra",
+   "junk_pile_break_peak"
+  ],
+  "peak_05": [
+   "Remasker New(Clone)",
+   "Song_lever_side"
+  ],
+  "peak_05c": [
+   "Crystal Break Chunk (10)",
+   "Crystal Break Chunk (11)",
+   "Crystal Break Chunk (12)",
+   "Crystal Break Chunk (6)",
+   "Crystal Break Chunk (7)",
+   "Crystal Break Chunk (8)",
+   "Crystal Break Chunk (9)",
+   "Remasker New Sharp Ultra"
+  ],
+  "peak_05e": [
+   "Remasker New Sharp",
+   "drop pillar_chunk"
+  ],
+  "peak_06": [
+   "Remasker New Sharp Ultra",
+   "charm_break_wall"
+  ],
+  "peak_07": [
+   "Remasker New Sharp Ultra",
+   "Secret Mask New",
+   "sack_multi_breakable (2)"
+  ],
+  "peak_08b": [
+   "Remasker New"
+  ],
+  "room_crowcourt": [
+   "Battle Scene",
+   "Bone Lever",
+   "Craw_home_front",
+   "Craw_home_front (1)",
+   "Craw_home_front (2)",
+   "Craw_home_hang",
+   "Craw_home_hang (1)",
+   "Craw_home_right",
+   "Craw_home_right (1)",
+   "greymoor_lever_simple"
+  ],
+  "room_crowcourt_02": [
+   "One Way Wall",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp Ultra"
+  ],
+  "room_diving_bell_abyss": [
+   "Wake Up Scene",
+   "diving_bell_door_breakable"
+  ],
+  "room_forge": [
+   "Battle Scene",
+   "Inverse Remasker",
+   "Remasker New",
+   "Remasker New (1)",
+   "Song_Gate_small",
+   "Song_lever_side",
+   "dock_sealed_gate"
+  ],
+  "room_witch": [
+   "body lower",
+   "body top",
+   "head",
+   "vine_1",
+   "vine_2",
+   "vine_3",
+   "vine_4"
+  ],
+  "shadow_01": [
+   "Breakable Wall",
+   "Inverse Remasker",
+   "Remasker New",
+   "drop_planks"
+  ],
+  "shadow_03": [
+   "Swamp Muckman FG"
+  ],
+  "shadow_04": [
+   "Breakable Wall"
+  ],
+  "shadow_04b": [
+   "Swamp Muckman FG"
+  ],
+  "shadow_05": [
+   "Black_Thread_Core",
+   "Breakable Wall",
+   "Swamp Muckman FG",
+   "cage_mid_small_long_sway drop (2)",
+   "cage_mid_small_long_sway drop (3)"
+  ],
+  "shadow_08": [
+   "Breakable Hang Sack 2",
+   "Breakable Hang Sack 2 (1)",
+   "Breakable Hang Sack 2 (2)",
+   "Breakable Hang Sack 2 (3)",
+   "Breakable Hang Sack 2 (4)",
+   "Breakable Wall",
+   "BreakableWallSwampBenchShortcut",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Tension Tone Single"
+  ],
+  "shadow_09": [
+   "Breakable Wall",
+   "Remasker New Sharp Ultra",
+   "Swamp Muckman FG"
+  ],
+  "shadow_10": [
+   "Breakable Wall",
+   "Remasker New",
+   "Remasker New Sharp Ultra",
+   "Swamp Muckman FG"
+  ],
+  "shadow_11": [
+   "plank_wall_cluster_swamp",
+   "plank_wall_cluster_swamp (1)",
+   "plank_wall_cluster_swamp (2)",
+   "stake_trap_spikeball_loose",
+   "stake_trap_spikeball_loose (1)",
+   "stake_trap_spikeball_loose (2)",
+   "stake_trap_spikeball_loose (3)",
+   "stake_trap_spikeball_loose (4)"
+  ],
+  "shadow_12": [
+   "Swamp Muckman FG",
+   "Swamp Muckman FG (1)"
+  ],
+  "shadow_13": [
+   "Collapser Small"
+  ],
+  "shadow_15": [
+   "Fake Bench Collapser",
+   "Remasker New"
+  ],
+  "shadow_16": [
+   "Tension Tone Single"
+  ],
+  "shadow_18": [
+   "Grouped Remasker_Large",
+   "Remasker"
+  ],
+  "shadow_19": [
+   "Remasker New",
+   "Remasker New Sharp"
+  ],
+  "shadow_20": [
+   "Breakable Wall",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp (2)",
+   "Remasker New Sharp Ultra (1)",
+   "Secret Sound Region_right_Bot",
+   "Swamp Muckman FG",
+   "Witch_Cluster_Vine",
+   "Witch_Cluster_Vine (1)",
+   "Witch_Cluster_Vine (2)",
+   "drop_planks_horizontal",
+   "plank_wall_cluster"
+  ],
+  "shadow_21": [
+   "cage_main",
+   "cage_tentacle_top",
+   "fly corpse",
+   "tentacle_round",
+   "tentacle_straight"
+  ],
+  "shadow_22": [
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)"
+  ],
+  "shadow_26": [
+   "gloom_lift_destroy"
+  ],
+  "shadow_27": [
+   "Breakable Hang Sack 2",
+   "BreakableWallSwampBenchShortcut"
+  ],
+  "shadow_weavehome": [
+   "Remasker New",
+   "Remasker New Inverted",
+   "loom_room_jar2 (2)",
+   "weaver_lift_power_chamber"
+  ],
+  "shellgrave": [
+   "Battle Scene"
+  ],
+  "shellwood_01": [
+   "Hornet_pressure_plate",
+   "Shellwood Hive"
+  ],
+  "shellwood_01b": [
+   "Battle Scene",
+   "Black_Thread_Core",
+   "Hornet_cage_rect_lift",
+   "Remasker New",
+   "Remasker New (1)",
+   "bell_toll_machine"
+  ],
+  "shellwood_02": [
+   "Black_Thread_Core",
+   "Hornet_cage_rect_lift",
+   "Hornet_pressure_plate",
+   "Plank Solid 2",
+   "Shellwood Hive (1)"
+  ],
+  "shellwood_03": [
+   "Shellwood Twig Wall"
+  ],
+  "shellwood_04b": [
+   "Black_Thread_Core",
+   "Garmond Fighter"
+  ],
+  "shellwood_08c": [
+   "bell_toll_machine"
+  ],
+  "shellwood_10": [
+   "Silkfly Ambient",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient Perched"
+  ],
+  "shellwood_11": [
+   "Remasker New (1)",
+   "Remasker New Twig Wall",
+   "Shellwood Twig Wall (3)",
+   "Shellwood Twig Wall start",
+   "Shellwood Twig Wall top"
+  ],
+  "shellwood_11b_memory": [
+   "Remasker New"
+  ],
+  "shellwood_13": [
+   "Bell Wall Tall",
+   "Bell Wall Tall (1)",
+   "Bell Wall Tall (2)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Secret Mask New"
+  ],
+  "shellwood_14": [
+   "Shellwood Twig Wall",
+   "Shellwood Twig Wall (1)"
+  ],
+  "shellwood_15": [
+   "Black_Thread_Core",
+   "Shellwood Twig Wall",
+   "Shellwood Twig Wall (1)"
+  ],
+  "shellwood_25": [
+   "Shellwood Twig Wall",
+   "Shellwood Twig Wall (1)",
+   "Shellwood Twig Wall (2)",
+   "Shellwood Twig Wall (3)",
+   "Shellwood Twig Wall (4)",
+   "Shellwood Twig Wall (5)",
+   "Shellwood Twig Wall (6)",
+   "Witch_Cluster_Vine",
+   "Witch_Cluster_Vine (1)",
+   "Witch_Cluster_Vine (2)"
+  ],
+  "shellwood_26": [
+   "Black_Thread_Core",
+   "Shellwood Hive (1)",
+   "Shellwood Twig Wall (2)"
+  ],
+  "slab_02": [
+   "slab_jail_lever"
+  ],
+  "slab_03": [
+   "Coral Crust Wall Tall (2)",
+   "One Way Wall",
+   "One Way Wall (1)",
+   "Remasker New",
+   "Remasker New Sharp Ultra",
+   "Secret Mask New",
+   "door_slabCaged",
+   "slab_jail_lever",
+   "slab_jail_lever (1)"
+  ],
+  "slab_04": [
+   "slab_cage_plat_thin_fall (2)"
+  ],
+  "slab_05": [
+   "Remasker New",
+   "Remasker New Sharp"
+  ],
+  "slab_06": [
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)"
+  ],
+  "slab_07": [
+   "Collapser Small",
+   "Coral Crust Wall Mid (3)",
+   "Coral Crust Wall Mid (5)",
+   "Coral Crust Wall Mid (6)",
+   "Coral Crust Wall Mid (7)",
+   "Coral Crust Wall Mid (9)",
+   "Coral Crust Wall Tall",
+   "Coral Crust Wall Tall (1)",
+   "Coral Crust Wall Tall (2)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra(Clone)"
+  ],
+  "slab_08": [
+   "Remasker New Sharp Ultra"
+  ],
+  "slab_10b": [
+   "Tension Tone Single"
+  ],
+  "slab_10c": [
+   "slab_break_weaver_gate_ring",
+   "slab_break_weaver_gate_ring (1)",
+   "slab_break_weaver_gate_ring (2)",
+   "slab_break_weaver_gate_ring (3)"
+  ],
+  "slab_12": [
+   "Collapser Small",
+   "Collapser Small (1)",
+   "Coral Crust Wall Mid",
+   "Coral Crust Wall Mid (1)",
+   "Coral Crust Wall Sphere",
+   "Coral Crust Wall Tall",
+   "Coral Crust Wall Tall (1)",
+   "Coral Crust Wall Tall (2)"
+  ],
+  "slab_13": [
+   "Remasker New Sharp",
+   "Slab_vent_mask"
+  ],
+  "slab_14": [
+   "Grouped Remasker_Large",
+   "slab_item_chain"
+  ],
+  "slab_15": [
+   "Breakable Wall Waterways",
+   "Remasker New Sharp",
+   "Secret Mask New",
+   "Slab_vent_mask"
+  ],
+  "slab_16": [
+   "Battle Cloaked Scene",
+   "Jail Gate Door - Persistent",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Sharp",
+   "Slab_vent_mask",
+   "slab_item_chain (1)"
+  ],
+  "slab_16b": [
+   "Battle Scene Broodmother"
+  ],
+  "slab_17": [
+   "slab_cage_plat_thin_fall (1)"
+  ],
+  "slab_18": [
+   "One Way Wall"
+  ],
+  "slab_19b": [
+   "Remasker New Sharp Ultra"
+  ],
+  "slab_20": [
+   "Remasker New Sharp Ultra"
+  ],
+  "slab_21": [
+   "Breakable Wall"
+  ],
+  "slab_22": [
+   "Collapser Small (1)",
+   "Collapser Small (2)",
+   "Remasker New",
+   "Remasker New(Clone)",
+   "slab_jail_lever"
+  ],
+  "slab_23": [
+   "Battle Scene",
+   "One Way Wall",
+   "Remasker New"
+  ],
+  "slab_cell_quiet": [
+   "Breakable Wall",
+   "One Way Wall"
+  ],
+  "song_01": [
+   "Black_Thread_Core_Citadel",
+   "Breakable Floor_basic Song_01",
+   "Breakable Wall",
+   "Remasker New",
+   "Remasker New Sharp Ultra",
+   "Song_lever_side"
+  ],
+  "song_01b": [
+   "Remasker New (1)",
+   "Song_lever_side (1)"
+  ],
+  "song_01c": [
+   "Breakable Floor_basic Song_01",
+   "Breakable Wall Entrance Secret"
+  ],
+  "song_02": [
+   "Remasker New",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp (2)"
+  ],
+  "song_03": [
+   "Bot Blocker",
+   "Remasker New (1)"
+  ],
+  "song_04": [
+   "Battle Scene",
+   "Black_Thread_Core",
+   "Bot Blocker",
+   "Breakable Wall",
+   "Remasker New",
+   "Remasker New (1)",
+   "Wake Scene"
+  ],
+  "song_05": [
+   "Black_Thread_Core_Citadel",
+   "Breakable Window",
+   "Breakable Window (1)",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "song_07": [
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "song_09": [
+   "Breakable Wall Ruin Lift",
+   "Hornet_pressure_plate_small_persistent",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "Remasker New (4)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Remasker New Sharp Ultra (2)",
+   "Remasker New Sharp Ultra (3)",
+   "Secret Mask New"
+  ],
+  "song_09b": [
+   "Breakable Restaurant Sack Small",
+   "Breakable Restaurant Sack Small (1)",
+   "Breakable Restaurant Sack Small (3)",
+   "Breakable Restaurant Sack Tall Variant",
+   "Grouped Remasker_Large",
+   "Inverse Remasker",
+   "Inverse Remasker (1)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Song_lever_side",
+   "Song_lever_side (1)"
+  ],
+  "song_10": [
+   "Breakable Wall",
+   "Breakable Wall  second",
+   "Chain Platform Breaker",
+   "Collapser Small",
+   "Inverse Remasker",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "Remasker New (4)",
+   "Remasker New (5)",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Song_Gate_small",
+   "Song_Gate_small (1)",
+   "Song_lever_side"
+  ],
+  "song_11": [
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "Inverse Remasker",
+   "Plug_Gate",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Inverse",
+   "Song_lever_side",
+   "propeller understore propeller"
+  ],
+  "song_15": [
+   "Black_Thread_Core_Citadel",
+   "Remasker New",
+   "Remasker New Sharp"
+  ],
+  "song_17": [
+   "Black_Thread_Core_Citadel",
+   "black_thread_impacter",
+   "black_thread_impacter (1)",
+   "black_thread_impacter (2)"
+  ],
+  "song_18": [
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp (2)",
+   "Remasker New Sharp (3)"
+  ],
+  "song_19_entrance": [
+   "Breakable Wall Entrance Secret",
+   "Coral10rightsidegate",
+   "Song_lever_side"
+  ],
+  "song_20": [
+   "Breakable Window"
+  ],
+  "song_20b": [
+   "Dial Door Bridge",
+   "Remasker New",
+   "Remasker New Sharp Ultra",
+   "Song_lever_side"
+  ],
+  "song_24": [
+   "black_thread_impacter",
+   "black_thread_impacter (1)"
+  ],
+  "song_25": [
+   "Hatch",
+   "Moss Vine Cluster",
+   "Remasker New",
+   "Remasker New Sharp",
+   "Remasker New Sharp Drapes",
+   "Weakness Scene Act3 Final"
+  ],
+  "song_27": [
+   "Black_Thread_Core_Citadel",
+   "Song_lever_side",
+   "Song_lever_side - merchant quest accepted"
+  ],
+  "song_enclave": [
+   "Top Shortcut"
+  ],
+  "song_enclave_tube": [
+   "One Way Wall",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "song_tower_destroyed": [
+   "Collapser Small"
+  ],
+  "tube_hub": [
+   "Breakable Floor_basic",
+   "Breakable Wall",
+   "Breakable Wall_Silhouette",
+   "Remasker (1)",
+   "Remasker New",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp (2)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Remasker Pre Hub Left",
+   "Remasker Pre Hub Right",
+   "Understore Lever",
+   "cradle_pipe_trapdoor"
+  ],
+  "tut_01": [
+   "Interact Reminder (1)",
+   "Moss Vine Cluster",
+   "Moss Vine Cluster (1)",
+   "Moss Vine Cluster (2)",
+   "Moss Vine Cluster (3)",
+   "Remasker",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "Remasker New thumper",
+   "Reminder Look Down",
+   "Secret sounder",
+   "Silkfly Ambient",
+   "Silkfly Ambient (1)",
+   "Silkfly Ambient (2)",
+   "Silkfly Ambient (3)",
+   "Sound Control",
+   "Weakness Scene"
+  ],
+  "tut_01b": [
+   "remask right"
+  ],
+  "tut_02": [
+   "One Way VineWall",
+   "Remasker",
+   "Remasker (1)",
+   "Remasker New"
+  ],
+  "tut_03": [
+   "Battle Scene",
+   "Interact Reminder",
+   "Moss Vine Cluster",
+   "Moss Vine Cluster (1)",
+   "Silkfly Ambient",
+   "Weakness Scene"
+  ],
+  "tut_04": [
+   "Remasker New Sharp Ultra",
+   "bell_necklace"
+  ],
+  "tut_05": [
+   "Snail_Collapse_wall",
+   "Snail_Collapse_wall (1)",
+   "Snail_Collapse_wall (2)"
+  ],
+  "under_01": [
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "Pipe_Cog_Lever",
+   "Remasker",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Right Blackout",
+   "Remasker New Sharp",
+   "Remasker New Top_glower",
+   "Secret Mask New",
+   "Shellwood Twig Wall"
+  ],
+  "under_01b": [
+   "Understore Big Plate Gate"
+  ],
+  "under_02": [
+   "Barrel Plat Lift",
+   "Barrel Plat Lift (1)",
+   "Barrel Plat Lift (2)",
+   "Barrel Plat Lift (3)",
+   "Barrel Plat Lift (4)",
+   "Barrel Plat Lift (5)",
+   "Barrel Plat Lift (6)",
+   "Barrel Plat Lift (7)",
+   "Barrel Plat Lift DROPPER",
+   "Barrel Plat Lift DROPPER Bottom",
+   "Barrel Plat Lift Thin",
+   "Barrel Plat Lift Thin (3)",
+   "Barrel Plat Lift Thin (4)",
+   "Barrel Plat Lift Thin (5)",
+   "Barrel Plat Lift Thin (6)",
+   "Barrel Plat Lift Thin (7)",
+   "Barrel Plat Lift Thin (8)",
+   "Black_Thread_Core",
+   "Collapser Small Understore Grate (1)",
+   "Grouped Remasker_Large",
+   "Remasker New Sharp Ultra",
+   "Song_lever_side",
+   "Song_lever_side (1)",
+   "Song_lever_side (3)",
+   "Understore Big Plate Gate"
+  ],
+  "under_03": [
+   "Breakable Wall",
+   "Remasker New (1)"
+  ],
+  "under_03c": [
+   "Collapser Small Understore Grate"
+  ],
+  "under_03d": [
+   "Remasker New (1)"
+  ],
+  "under_04": [
+   "Breakable Wall",
+   "Collapser Small Understore Grate",
+   "Remasker New",
+   "Understore Big Plate Gate"
+  ],
+  "under_05": [
+   "Barrel Plat Lift",
+   "Barrel Plat Lift (1)",
+   "Barrel Plat Lift (2)",
+   "Barrel Plat Lift Thin",
+   "Barrel Plat Lift Thin (1)",
+   "Barrel Plat Lift Thin (2)",
+   "Barrel Plat Lift Thin (3)",
+   "Barrel Plat Lift Thin (4)",
+   "Barrel Plat Lift Thin (5)",
+   "Black_Thread_Core",
+   "Collapser Small Understore Grate",
+   "Fall_platform_barrel wide",
+   "Song_lever_side",
+   "Understore Big Plate Gate",
+   "cog_05_shortcut"
+  ],
+  "under_07": [
+   "Battle Scene",
+   "Remasker New Sharp",
+   "breakable blocker struts"
+  ],
+  "under_07b": [
+   "Bot Blocker",
+   "Remasker New"
+  ],
+  "under_07c": [
+   "Battle Scene",
+   "Bot Blocker",
+   "Breakable Wall",
+   "Inverse Remasker",
+   "Inverse Remasker (1)",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New Sharp",
+   "Remasker New Sharp Ultra",
+   "breakable blocker struts"
+  ],
+  "under_08": [
+   "Breakable Wall",
+   "Disable Sound Trigger",
+   "One Way Wall",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (3)",
+   "Remasker New Sharp",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Remasker New Sharp Ultra (2)",
+   "Secret Sound Region",
+   "lamp_pivot"
+  ],
+  "under_10": [
+   "Battle Scene",
+   "Remasker New",
+   "Song_Gate_small",
+   "Song_lever_side"
+  ],
+  "under_11": [
+   "Breakable Wall",
+   "Pipe_Cog_Lever"
+  ],
+  "under_13": [
+   "Coal Bucket Plat (1)",
+   "Coal Bucket Plat (10)",
+   "Coal Bucket Plat (2)",
+   "Coal Bucket Plat (5)",
+   "Coal Bucket Plat (6)",
+   "Coal Bucket Plat (7)",
+   "Coal Bucket Plat (9)",
+   "Innerworks Trap Bridge Large",
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New (3)"
+  ],
+  "under_14": [
+   "Breakable Wall (1)",
+   "Remasker New Sharp"
+  ],
+  "under_16": [
+   "Breakable Wall",
+   "Remasker New (1)"
+  ],
+  "under_17": [
+   "Architect Shrine Door",
+   "Remasker New (10)",
+   "Remasker New (2)",
+   "Remasker New (3)",
+   "Remasker New (4)",
+   "Remasker New (6)",
+   "Remasker New (7)",
+   "Remasker New (8)",
+   "Remasker New (9)",
+   "Silkfly Ambient Perched",
+   "Tension Tone Single",
+   "understore propeller"
+  ],
+  "under_18": [
+   "Barrel Plat Lift Thin",
+   "Battle Scene",
+   "Black_Thread_Core",
+   "Inverse Remasker",
+   "Remasker New (1)"
+  ],
+  "under_20": [
+   "Breakable Wall",
+   "Remasker New Sharp Ultra"
+  ],
+  "under_23": [
+   "Remasker New Sharp",
+   "Remasker New Sharp Ultra",
+   "Song_lever_side"
+  ],
+  "under_27": [
+   "Barrel Plat Lift Thin",
+   "Black_Thread_Core",
+   "Fall platform support pole",
+   "Fall_platform_barrel",
+   "Remasker",
+   "Remasker (1)",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp Ultra",
+   "Shellwood Twig Wall",
+   "Shellwood Twig Wall (1)",
+   "Shellwood Twig Wall (2)"
+  ],
+  "ward_01": [
+   "Breakable Wall",
+   "Breakable Wall (1)",
+   "Remasker New - Centre",
+   "Remasker New - Left",
+   "Remasker New - Right",
+   "Remasker New - bot",
+   "Remasker New Sharp",
+   "Remasker New Sharp (1)",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Remasker New Sharp Ultra (2)",
+   "Understore Lever L Main",
+   "under_lift_large"
+  ],
+  "ward_02": [
+   "Pipe_Vent_Hatch",
+   "Remasker New Sharp",
+   "lock_machine"
+  ],
+  "ward_02_boss": [
+   "Remasker New"
+  ],
+  "ward_02b": [
+   "Remasker New",
+   "Remasker New (1)",
+   "Remasker New (2)",
+   "Remasker New Sharp",
+   "ward_junk_pile_break 1",
+   "ward_junk_pile_break 2",
+   "ward_junk_pile_break 3",
+   "ward_junk_pile_break 4"
+  ],
+  "ward_03": [
+   "Remasker New",
+   "Remasker New Sharp",
+   "Remasker New Sharp Ultra"
+  ],
+  "ward_05": [
+   "Breakable Wall",
+   "Remasker New Sharp Ultra",
+   "Remasker New Sharp Ultra (1)",
+   "Silkfly Ambient Perched",
+   "Silkfly Ambient Perched (1)",
+   "Tension Tone Single",
+   "Tension Tone Single (1)"
+  ],
+  "ward_06": [
+   "Breakable Wall",
+   "Remasker New Sharp Ultra"
+  ],
+  "ward_07": [
+   "GG_Breakable_Junk_Pile_red",
+   "Junk Hatch",
+   "Remasker New Sharp Ultra",
+   "ward_junk_pile_break 1"
+  ],
+  "ward_09": [
+   "ward_junk_pile_break"
+  ],
+  "weave_02": [
+   "Inverse Remasker",
+   "Remasker New",
+   "Weaver Sign",
+   "crest_shrine_break_tube",
+   "weaver_lift_power_chamber"
+  ],
+  "weave_03": [
+   "Black_Thread_Core",
+   "Boss Scene",
+   "Moss Vine Cluster (1)",
+   "Moss Vine Cluster (2)"
+  ],
+  "weave_04": [
+   "Remasker New Sharp",
+   "weaver_lift_power_chamber"
+  ],
+  "weave_05b": [
+   "weaver_lift_power_chamber"
+  ],
+  "weave_07": [
+   "Remasker New Sharp Ultra",
+   "weaver_lift_power_chamber"
+  ],
+  "weave_08": [
+   "Breakable Wall",
+   "Remasker New Sharp Ultra",
+   "weaver_lift_power_chamber"
+  ],
+  "weave_10": [
+   "crest_shrine_break_tube",
+   "crest_shrine_break_tube (1)",
+   "crest_shrine_break_tube (2)"
+  ],
+  "weave_11": [
+   "Remasker New Sharp Ultra",
+   "weaver_lift_power_chamber"
+  ],
+  "weave_12": [
+   "weaver_lift_power_chamber"
+  ],
+  "weave_14": [
+   "weaver_lift_power_chamber"
+  ],
+  "wisp_02": [
+   "Breakable Hang Sack 3 (1)",
+   "plank_wall_cluster_swamp"
+  ],
+  "wisp_03": [
+   "Remasker New Sharp",
+   "plank_wall_cluster"
+  ],
+  "wisp_04": [
+   "Breakable Hang Sack 3"
+  ],
+  "wisp_05": [
+   "Breakable Wall"
+  ],
+  "wisp_07": [
+   "Breakable Wall",
+   "Remasker New",
+   "Remasker New (1)"
+  ],
+  "wisp_09": [
+   "Breakable Wall",
+   "Breakable Wall (1)"
+  ]
+ }
+}

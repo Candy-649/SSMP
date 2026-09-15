@@ -53,6 +53,8 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new PacketDataCollection<BattleSceneUpdate>();
             case ClientUpdatePacketId.BossRoomUpdate:
                 return new PacketDataCollection<BossRoomUpdate>();
+            case ClientUpdatePacketId.CoopSaveUpdate:
+                return new PacketDataCollection<CoopSaveUpdate>();
             default:
                 return new EmptyData();
         }

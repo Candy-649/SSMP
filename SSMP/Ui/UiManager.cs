@@ -211,6 +211,12 @@ internal class UiManager : IUiManager {
     private bool _isSlotSelectionActive;
 
     /// <summary>
+    /// Whether the save slot selection is open for hosting, where the chosen save loads before the server starts and
+    /// before any other player can connect.
+    /// </summary>
+    public bool IsSelectingHostSave { get; private set; }
+
+    /// <summary>
     /// The head of the multiplayer menu hook chain.
     /// Starts as the bare transition; each registered hook wraps it.
     /// </summary>
@@ -512,7 +518,12 @@ internal class UiManager : IUiManager {
         TransportType transportType,
         string? fallbackAddress
     ) {
+        if (!_isSlotSelectionActive) {
+            IsSelectingHostSave = true;
+        }
+
         OpenSaveSlotSelection(saveSelected => {
+            IsSelectingHostSave = false;
             if (!saveSelected) return;
 
             RequestServerStartHostEvent?.Invoke(address, port, username, transportType, fallbackAddress);
