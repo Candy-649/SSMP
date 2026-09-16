@@ -11,8 +11,16 @@ internal class Keybinds : PlayerActionSet {
     /// </summary>
     public PlayerAction OpenChat { get; }
 
+    /// <summary>
+    /// Keybind to agree to a two-player save with the other player, which both of them press.
+    /// </summary>
+    public PlayerAction CoopPair { get; }
+
     public Keybinds() {
         OpenChat = CreatePlayerAction("OpenChat");
         OpenChat.AddDefaultBinding(Key.Y);
+
+        CoopPair = CreatePlayerAction("CoopPair");
+        CoopPair.AddDefaultBinding(Key.J);
     }
 }

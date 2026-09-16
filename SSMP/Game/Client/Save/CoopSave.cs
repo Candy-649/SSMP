@@ -383,6 +383,17 @@ internal partial class CoopSave {
                 Logger.Error($"Could not update the two-player save:\n{e}");
             }
         }
+
+        // Its own try, because a line of text failing must not stop the save from keeping step with the partner, and
+        // a session that fails must still leave the players a way to pair without typing
+        try {
+            UpdatePairPrompt();
+        } catch (Exception e) {
+            if (!_pairPromptFailed) {
+                _pairPromptFailed = true;
+                Logger.Error($"Could not show the two-player save prompt:\n{e}");
+            }
+        }
     }
 
     /// <summary>
@@ -768,6 +779,61 @@ internal partial class CoopSave {
     #endregion
 
     #region Pairing
+
+    /// <summary>
+    /// The name of the key that agrees to a two-player save, for the line that offers one. It is the default binding:
+    /// a player who rebinds it in the settings file presses their own key, and only reads the wrong name here.
+    /// </summary>
+    private const string PairKeyName = "J";
+
+    /// <summary>
+    /// Whether the key that agrees to a two-player save was already down last frame.
+    /// </summary>
+    private bool _pairKeyHeld;
+
+    /// <summary>
+    /// Whether showing the line that offers a two-player save failed, so it is only logged once.
+    /// </summary>
+    private bool _pairPromptFailed;
+
+    /// <summary>
+    /// Offers a two-player save in game, so that pairing takes a key rather than a typed command, and pairs when that
+    /// key is pressed. Both players press it: this asks for them and agrees for them, whichever of the two it is.
+    /// </summary>
+    private void UpdatePairPrompt() {
+        var prompt = _uiManager.CoopPrompt;
+
+        // A two-player save needs both players on the server, and a save loaded to pair
+        if (!_netClient.IsConnected || !IsInGame() || _playerData.Count != 1) {
+            prompt.Hide();
+            _pairKeyHeld = false;
+            return;
+        }
+
+        var other = _playerData.Values.First();
+        var marker = GetMarker(global::GameManager.instance.profileID);
+        if (other.SaveKey.Length == 0 || (marker != null && marker.PartnerKey == other.SaveKey)) {
+            prompt.Hide();
+            _pairKeyHeld = false;
+            return;
+        }
+
+        if (_sentPairRequest is { IsOpen: true } sent && sent.PlayerId == other.Id) {
+            prompt.Show($"Waiting for {other.Username} to press {PairKeyName} too");
+        } else if (_receivedPairRequest is { IsOpen: true } received && received.PlayerId == other.Id) {
+            prompt.Show($"{other.Username} wants a two-player save. Press {PairKeyName} to agree");
+        } else {
+            prompt.Show($"Press {PairKeyName} to play a two-player save with {other.Username}");
+        }
+
+        // Only where the key goes down, or holding it would ask again every frame of the whole press
+        var held = _modSettings.Keybinds.CoopPair.IsPressed;
+        if (held && !_pairKeyHeld) {
+            OnCommand(["/coopsave"]);
+        }
+
+        _pairKeyHeld = held;
+    }
 
     /// <summary>
     /// Runs /coopsave: asks the other player to pair the current saves or agrees to their request, or with "off" makes

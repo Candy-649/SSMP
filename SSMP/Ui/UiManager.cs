@@ -209,6 +209,11 @@ internal class UiManager : IUiManager {
     private PingInterface _pingInterface = null!;
 
     /// <summary>
+    /// The line in game that offers a two-player save with the other player.
+    /// </summary>
+    private CoopPromptInterface _coopPromptInterface = null!;
+
+    /// <summary>
     /// Original event triggers for the save selection screen's back button.
     /// Stored when overridden to return to multiplayer menu instead of main menu.
     /// Restored when exiting save selection.
@@ -248,6 +253,11 @@ internal class UiManager : IUiManager {
     /// Used by server manager to access MmsClient for HolePunch lobby cleanup.
     /// </summary>
     public ConnectInterface ConnectInterface => _connectInterface;
+
+    /// <summary>
+    /// The line in game that offers a two-player save, which the two-player saves themselves put text into.
+    /// </summary>
+    public CoopPromptInterface CoopPrompt => _coopPromptInterface;
 
     /// <summary>
     /// Gets the chat box interface for sending and receiving messages.
@@ -515,6 +525,9 @@ internal class UiManager : IUiManager {
 
         var pingGroup = new ComponentGroup(parent: _inGameGroup);
         _pingInterface = new PingInterface(pingGroup, _modSettings, _netClient);
+
+        var coopPromptGroup = new ComponentGroup(parent: _inGameGroup);
+        _coopPromptInterface = new CoopPromptInterface(coopPromptGroup);
     }
 
     /// <summary>
@@ -700,6 +713,7 @@ internal class UiManager : IUiManager {
     public void OnClientDisconnect() {
         _connectInterface.OnClientDisconnect();
         _pingInterface.SetEnabled(false);
+        _coopPromptInterface.Hide();
         _isSlotSelectionActive = false;
         EndHostBeforeSave();
     }
