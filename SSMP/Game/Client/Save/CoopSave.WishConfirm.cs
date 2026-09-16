@@ -17,11 +17,15 @@ namespace SSMP.Game.Client.Save;
 /// the partner is asked the same question; their answer runs the held one. A refusal answers no, so the dialogue takes
 /// the path it takes whenever a player declines, and nothing else has to know that two of them were asked.
 ///
-/// Holding the answer is safe: the boxes only show what is being asked for, and everything is taken by the FSM after
-/// the yes event, so a prompt that is never agreed to leaves both saves untouched. Nearly every prompt answers with
-/// nothing but that event; one version shows a "taken" popup first, which changes no save either. What the agreement
-/// then changes reaches the partner through the syncs that were already there, which is why the box shown to the
-/// partner never begins a wish and never consumes anything itself.
+/// The hold sits on the button rather than on the answer, because the box pays before it answers: the box wraps the
+/// yes it is given so that it takes the currency, locks the tools and takes the items first, and only then runs the
+/// wrapped yes, which is what sends the event to the FSM. Holding the event would therefore hold an answer whose price
+/// was already paid, and a partner who refused would leave the player short with nothing to show for it. Holding the
+/// button is before all of it: agreeing runs the real button and pays exactly as the game always would, refusing runs
+/// the no and pays nothing. The box stays open while it waits, so answering no is how the waiting player takes it back.
+///
+/// What the agreement changes reaches the partner through the syncs that were already there, which is why the box
+/// shown to the partner never begins a wish and never consumes anything itself.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -122,6 +126,13 @@ internal partial class CoopSave {
     private static readonly FieldInfo? BoxPaneField = PromptBoxType?.GetField("pane", InstanceFlags);
 
     /// <summary>
+    /// The getter that says why the yes of a box is greyed out, or gives nothing while it can be pressed. The box that
+    /// shows items has its own, which reading it through the getter reaches.
+    /// </summary>
+    private static readonly MethodInfo? BoxInactiveYesGetter =
+        PromptBoxType?.GetProperty("InactiveYesText", InstanceFlags)?.GetGetMethod(true);
+
+    /// <summary>
     /// The fields with the animations of a panel, looked up from a panel of the game the first time one is seen.
     /// </summary>
     private static FieldInfo? _paneClosingField;
@@ -129,6 +140,12 @@ internal partial class CoopSave {
     private static FieldInfo? _paneOpeningField;
 
     private static bool _paneFieldsLookedUp;
+
+    /// <summary>
+    /// The prompt whose box is open on this machine, or null. A box that the mod opened itself to ask about a prompt
+    /// of the partner has none, which is how the two are told apart at the button.
+    /// </summary>
+    private YesNoAction? _openPrompt;
 
     /// <summary>
     /// The yes of the local player that waits for the partner to agree, or null.
@@ -152,10 +169,21 @@ internal partial class CoopSave {
     /// </summary>
     private void RegisterWishConfirmHook() {
         AddWishTalkHook(
+            typeof(YesNoBox).GetMethod("SelectYes", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null),
+            new Action<Action<YesNoBox>, YesNoBox>(OnPromptSelectYes)
+        );
+        AddWishTalkHook(
+            typeof(YesNoBox).GetMethod("SelectNo", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null),
+            new Action<Action<YesNoBox>, YesNoBox>(OnPromptSelectNo)
+        );
+        AddWishTalkHook(
             typeof(YesNoAction).GetMethod(
-                "SendEvent", InstanceFlags | BindingFlags.DeclaredOnly, null, [typeof(bool)], null
+                "OnEnter", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null
             ),
-            new Action<Action<YesNoAction, bool>, YesNoAction, bool>(OnYesNoAnswer)
+            new Action<Action<YesNoAction>, YesNoAction>((orig, self) => {
+                _openPrompt = self;
+                orig(self);
+            })
         );
         AddWishTalkHook(
             typeof(YesNoAction).GetMethod(
@@ -169,6 +197,10 @@ internal partial class CoopSave {
                     if (_wishConfirm is { } held && ReferenceEquals(held.Action, self)) {
                         CancelHeldConfirm("The dialogue ended before your teammate answered.", false);
                     }
+
+                    if (ReferenceEquals(_openPrompt, self)) {
+                        _openPrompt = null;
+                    }
                 } catch (Exception e) {
                     LogWishTalkError(e);
                 }
@@ -179,16 +211,28 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Hook for the answer of a yes/no prompt: one that changes what both players share waits for the partner to agree
-    /// to it.
+    /// Hook for the yes button of a prompt box: one that changes what both players share waits for the partner to
+    /// agree before the button is really pressed, which is before the box takes anything.
     /// </summary>
-    private void OnYesNoAnswer(Action<YesNoAction, bool> orig, YesNoAction self, bool isYes) {
+    private void OnPromptSelectYes(Action<YesNoBox> orig, YesNoBox self) {
+        // Pressing yes again on the box that is already waiting must not let it through and pay
+        if (_wishConfirm is { } waiting && ReferenceEquals(waiting.Box, self)) {
+            return;
+        }
+
+        // A yes that the box greys out does nothing when it is pressed, so asking the partner about it would spend
+        // their answer on a press that goes nowhere. It is left to be refused the way the game refuses it.
+        if (GetInactiveYesText(self).Length > 0) {
+            orig(self);
+            return;
+        }
+
         CoopSaveUpdate? ask = null;
         var what = "";
         try {
-            // A no is never held: it takes nothing, so there is nothing for the partner to agree to
-            if (isYes && _everChecked && _checkedWith is { } partnerId) {
-                ask = GetConfirmAsk(self, out what);
+            // A box the mod opened to ask about the partner has no prompt behind it and is left alone
+            if (_wishConfirm == null && _openPrompt is { } prompt && _everChecked && _checkedWith is { } partnerId) {
+                ask = GetConfirmAsk(prompt, out what);
                 if (ask != null) {
                     ask.TargetId = partnerId;
                 }
@@ -199,22 +243,31 @@ internal partial class CoopSave {
         }
 
         if (ask == null) {
-            orig(self, isYes);
+            orig(self);
             return;
         }
 
-        // One at a time: a second prompt is declined rather than asked about, so neither can hide the other
-        if (_wishConfirm != null) {
-            Chat($"{GetPartnerName()} is already being asked about something else.");
-            orig(self, false);
-            return;
-        }
-
-        // The answer is held rather than dropped, and the partner agreeing is what finally runs it
-        _wishConfirm = new HeldConfirm(ask.Key, self, agreed => orig(self, agreed), what);
+        // Nothing has been taken: the box pays only once the real button runs, which is what the partner agreeing does
+        _wishConfirm = new HeldConfirm(ask.Key, _openPrompt!, self, () => orig(self), what);
         Send(ask);
-        Chat($"{GetPartnerName()} has to agree to this too.");
-        Logger.Info($"Held the answer about {what} until the partner agrees");
+        Chat($"{GetPartnerName()} has to agree to this too. Answer no to take it back.");
+        Logger.Info($"Held the button about {what} until the partner agrees");
+    }
+
+    /// <summary>
+    /// Hook for the no button of a prompt box: answering no while waiting is how the player takes back what they asked
+    /// the partner about.
+    /// </summary>
+    private void OnPromptSelectNo(Action<YesNoBox> orig, YesNoBox self) {
+        try {
+            if (_wishConfirm is { } held && ReferenceEquals(held.Box, self)) {
+                CancelHeldConfirm("You took it back.", false);
+            }
+        } catch (Exception e) {
+            LogWishTalkError(e);
+        }
+
+        orig(self);
     }
 
     /// <summary>
@@ -374,7 +427,21 @@ internal partial class CoopSave {
 
         _wishConfirm = null;
         Chat(message);
-        held.Answer(agreed);
+        if (agreed) {
+            held.Proceed();
+        } else {
+            DeclineHeld(held);
+        }
+    }
+
+    /// <summary>
+    /// Answers no on the box that waited, which pays nothing and lets the dialogue take the path it takes whenever a
+    /// player declines.
+    /// </summary>
+    private static void DeclineHeld(HeldConfirm held) {
+        if (held.Box != null) {
+            held.Box.SelectNo();
+        }
     }
 
     /// <summary>
@@ -403,7 +470,7 @@ internal partial class CoopSave {
         }
 
         if (answerNo) {
-            held.Answer(false);
+            DeclineHeld(held);
         }
     }
 
@@ -480,6 +547,19 @@ internal partial class CoopSave {
         }
 
         return _paneClosingField?.GetValue(pane) != null || _paneOpeningField?.GetValue(pane) != null;
+    }
+
+    /// <summary>
+    /// Why the yes of a box is greyed out, or an empty string while it can be pressed. A box that can't be read counts
+    /// as pressable, which is how it behaved before this was asked at all.
+    /// </summary>
+    private static string GetInactiveYesText(YesNoBox box) {
+        try {
+            return BoxInactiveYesGetter?.Invoke(box, null) as string ?? "";
+        } catch (Exception e) {
+            Logger.Info($"Could not read whether a prompt can be agreed to: {e.Message}");
+            return "";
+        }
     }
 
     /// <summary>
@@ -644,10 +724,11 @@ internal partial class CoopSave {
     /// A yes of the local player that waits for the partner to agree.
     /// </summary>
     private sealed class HeldConfirm {
-        public HeldConfirm(ulong key, YesNoAction action, Action<bool> answer, string what) {
+        public HeldConfirm(ulong key, YesNoAction action, YesNoBox box, Action proceed, string what) {
             Key = key;
             Action = action;
-            Answer = answer;
+            Box = box;
+            Proceed = proceed;
             What = what;
         }
 
@@ -662,9 +743,14 @@ internal partial class CoopSave {
         public YesNoAction Action { get; }
 
         /// <summary>
-        /// Runs the held answer, with whether the partner agreed.
+        /// The box that waits, which stays open until it is answered one way or the other.
         /// </summary>
-        public Action<bool> Answer { get; }
+        public YesNoBox Box { get; }
+
+        /// <summary>
+        /// Presses the yes button for real, which is where the box takes what the prompt asks for.
+        /// </summary>
+        public Action Proceed { get; }
 
         /// <summary>
         /// What the prompt was about, for the log.
