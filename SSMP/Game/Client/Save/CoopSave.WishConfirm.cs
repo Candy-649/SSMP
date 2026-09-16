@@ -326,13 +326,21 @@ internal partial class CoopSave {
             return null;
         }
 
-        var fsm = prompt.Fsm;
-        if (fsm == null || fsm.GameObject == null || fsm.ActiveState?.Name != prompt.State?.Name) {
+        if (!IsPromptLive(prompt)) {
             _openPrompt = null;
             return null;
         }
 
         return prompt;
+    }
+
+    /// <summary>
+    /// Whether a prompt is still standing in the state its box belongs to. Asked of a named prompt rather than of the
+    /// one that is on screen, because a button that waits holds its own and the two need not be the same.
+    /// </summary>
+    private static bool IsPromptLive(YesNoAction prompt) {
+        var fsm = prompt.Fsm;
+        return fsm != null && fsm.GameObject != null && fsm.ActiveState?.Name == prompt.State?.Name;
     }
 
     /// <summary>
@@ -779,7 +787,7 @@ internal partial class CoopSave {
             return;
         }
 
-        var shown = new PartnerConfirm(key, isWish);
+        var shown = new PartnerConfirm(partnerId, key, isWish);
 
         // Only the showing that is still being asked about may answer: a box that was let go of already, and is only
         // now finishing its closing animation, must not send an answer or wipe a newer question
@@ -925,9 +933,7 @@ internal partial class CoopSave {
             _partnerConfirm = null;
             LetHeroGoAfterConfirm();
             CloseConfirmBox(shown.IsWish);
-            if (_checkedWith is { } waitingId) {
-                SendConfirmAnswer(waitingId, shown.Key, false);
-            }
+            SendConfirmAnswer(shown.PartnerId, shown.Key, false);
         }
 
         if (_pendingConfirmAsk is { } pending) {
@@ -950,8 +956,12 @@ internal partial class CoopSave {
         // than whichever prompt is on screen, which need not be the held one: while the box still holds the answer
         // that was held, the dialogue is still standing there to be ended, and pressing no really ends it. Silencing
         // a box that is still open takes away the only way any answer ever reaches its FSM, stranding it for good.
+        // The prompt has to still be there as well as the box. A state machine that was destroyed never ran OnExit,
+        // so a button can still be holding one that is gone - and pressing no would then fire its event into nothing.
+        // A hold with no prompt behind it at all is a receptacle or a desk, which answers through the box itself.
         var end = _wishConfirm is { } waiting && waiting.Box != null &&
-                  Equals(BoxCurrentYesField?.GetValue(waiting.Box), waiting.Callback)
+                  Equals(BoxCurrentYesField?.GetValue(waiting.Box), waiting.Callback) &&
+                  (waiting.Action == null || IsPromptLive(waiting.Action))
             ? HeldEnd.PressNo
             : HeldEnd.Silence;
 
@@ -961,12 +971,9 @@ internal partial class CoopSave {
             _partnerConfirm = null;
             LetHeroGoAfterConfirm();
 
-            // Answered while there is still somebody to answer, so that whoever asked is not left waiting out their
-            // timeout for a question that is already off the screen here
-            if (_checkedWith is { } askerId) {
-                SendConfirmAnswer(askerId, shown.Key, false);
-            }
-
+            // Answered to whoever asked, so they are not left waiting out their timeout for a question that is
+            // already off the screen here
+            SendConfirmAnswer(shown.PartnerId, shown.Key, false);
             CloseConfirmBox(shown.IsWish);
         }
 
@@ -1060,10 +1067,18 @@ internal partial class CoopSave {
     /// A prompt of the partner that the local player is being asked about.
     /// </summary>
     private sealed class PartnerConfirm {
-        public PartnerConfirm(ulong key, bool isWish) {
+        public PartnerConfirm(ushort partnerId, ulong key, bool isWish) {
+            PartnerId = partnerId;
             Key = key;
             IsWish = isWish;
         }
+
+        /// <summary>
+        /// Who asked, and who the answer goes back to. Kept on the showing itself rather than read from the pairing,
+        /// which can already be cleared by the time a question is shown or taken down - and then there would be
+        /// nobody to answer, leaving the one who asked to wait out their whole timeout.
+        /// </summary>
+        public ushort PartnerId { get; }
 
         /// <summary>
         /// The key that the answer goes back with.

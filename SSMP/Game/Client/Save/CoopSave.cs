@@ -534,6 +534,10 @@ internal partial class CoopSave {
         _held = false;
         _tookControl = false;
         _everChecked = false;
+
+        // Before the pairing is forgotten, so that a question of the partner still on screen is answered back to them
+        // and a button that waited on them is told it is over. ResetWishTalk below runs it again, which does nothing.
+        ResetWishConfirm();
         _checkedWith = null;
         ResetCheck();
         ResetCheckpointSession();
