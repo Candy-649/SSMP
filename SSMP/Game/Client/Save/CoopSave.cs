@@ -668,6 +668,11 @@ internal partial class CoopSave {
     /// Called when the local player disconnects from the server.
     /// </summary>
     public void OnLocalDisconnect() {
+        // Leaving the server while the save holds the player has to give them back, or they stay frozen with nothing
+        // left that could ever free them: the hold only lifts when a partner checks in, and there is no partner any
+        // more. Reloading the save does not help either, since a save whose partner is missing holds them again.
+        ReleaseHold(HeroController.instance);
+
         _sentPairRequest = null;
         _receivedPairRequest = null;
         _acceptedPairRequest = null;
@@ -802,6 +807,19 @@ internal partial class CoopSave {
     /// </summary>
     private void UpdatePairPrompt() {
         var prompt = _uiManager.CoopPrompt;
+
+        // A held player owns this line, because being unable to move with no idea why is the worst thing this mod
+        // can do to someone. The chat line that the hold writes is invisible to anyone playing with chat closed.
+        if (_held && IsInGame()) {
+            var heldMarker = GetMarker(global::GameManager.instance.profileID);
+            prompt.Show(
+                heldMarker != null
+                    ? $"Waiting for {heldMarker.PartnerName}. Type /coopsave off to play this save alone"
+                    : "Waiting for your teammate"
+            );
+            _pairKeyHeld = false;
+            return;
+        }
 
         // A two-player save needs both players on the server, and a save loaded to pair
         if (!_netClient.IsConnected || !IsInGame() || _playerData.Count != 1) {
@@ -1132,7 +1150,15 @@ internal partial class CoopSave {
 
         var partner = FindPartner(marker);
         if (partner == null) {
-            Chat($"A two-player save only becomes a normal save again while {marker.PartnerName} is here.");
+            // Refusing here used to leave the save impossible to play and impossible to leave: it holds the player
+            // because the partner is missing, and it turned down unpairing for that same reason. Only this side's
+            // pairing goes, so the partner still has to turn theirs off before either of them plays it alone.
+            RemoveLocalPairing(slot);
+            ReleaseHold(HeroController.instance);
+            Chat(
+                $"Your save is a normal save again. It stays a two-player save for {marker.PartnerName} until they " +
+                "use /coopsave off as well."
+            );
             return;
         }
 

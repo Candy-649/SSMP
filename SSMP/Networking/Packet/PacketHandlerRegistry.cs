@@ -35,6 +35,27 @@ internal class PacketHandlerRegistry<TPacketId, THandler>
     private readonly string _registryName;
 
     /// <summary>
+    /// Data that arrived before anything had registered to handle it, kept per packet ID until something does.
+    ///
+    /// Handlers are registered while the server info is being handled, and a reliable packet sent right behind that
+    /// info arrives before they exist. The transport has already acknowledged such a packet, so it is never sent
+    /// again: dropping it here loses it for good. Pairing a two-player save was lost exactly this way, which left
+    /// both players waiting on a check that could no longer complete.
+    /// </summary>
+    private readonly Dictionary<TPacketId, List<Action<THandler>>> _waiting = new();
+
+    /// <summary>
+    /// How much data one packet ID keeps while nothing handles it, after which the oldest is dropped. Without a
+    /// limit, an ID that nothing ever registers for would grow without end.
+    /// </summary>
+    private const int MaxWaitingPerId = 64;
+
+    /// <summary>
+    /// Guards both dictionaries, which the network thread reads and the main thread writes.
+    /// </summary>
+    private readonly object _lock = new();
+
+    /// <summary>
     /// Constructs a new packet handler registry.
     /// </summary>
     /// <param name="registryName">Name for logging purposes (e.g., "client update", "server connection").</param>
@@ -51,8 +72,29 @@ internal class PacketHandlerRegistry<TPacketId, THandler>
     /// <param name="handler">The handler delegate.</param>
     /// <returns>True if registration successful, false if handler already exists.</returns>
     public void Register(TPacketId packetId, THandler handler) {
-        if (_handlers.TryAdd(packetId, handler)) return;
-        Logger.Warn($"Tried to register already existing {_registryName} packet handler: {packetId}");
+        List<Action<THandler>>? waiting;
+        lock (_lock) {
+            if (!_handlers.TryAdd(packetId, handler)) {
+                Logger.Warn($"Tried to register already existing {_registryName} packet handler: {packetId}");
+                return;
+            }
+
+            _waiting.Remove(packetId, out waiting);
+        }
+
+        if (waiting == null || waiting.Count == 0) {
+            return;
+        }
+
+        Logger.Info(
+            $"Handing {waiting.Count} {_registryName} packet(s) for ID {packetId} to the handler that just registered"
+        );
+
+        // Outside the lock, because a server dispatcher runs the handler right here and handler code must never run
+        // while this registry is locked
+        foreach (var invoker in waiting) {
+            _dispatcher.Dispatch(() => SafeInvoke(packetId, handler, invoker));
+        }
     }
 
     /// <summary>
@@ -61,10 +103,16 @@ internal class PacketHandlerRegistry<TPacketId, THandler>
     /// <param name="packetId">The packet ID to deregister.</param>
     /// <returns>True if deregistration successful, false if handler didn't exist.</returns>
     public bool Deregister(TPacketId packetId) {
-        if (!_handlers.Remove(packetId)) {
-            Logger.Warn($"Tried to remove nonexistent {_registryName} packet handler: {packetId}");
-            return false;
+        lock (_lock) {
+            // Anything still waiting belongs to the session that is ending, so it must not reach the next one
+            _waiting.Remove(packetId);
+
+            if (!_handlers.Remove(packetId)) {
+                Logger.Warn($"Tried to remove nonexistent {_registryName} packet handler: {packetId}");
+                return false;
+            }
         }
+
         return true;
     }
 
@@ -75,9 +123,26 @@ internal class PacketHandlerRegistry<TPacketId, THandler>
     /// <param name="invoker">Action that invokes the handler with appropriate parameters.</param>
     /// <returns>True if handler was found and invoked, false otherwise.</returns>
     public void Execute(TPacketId packetId, Action<THandler> invoker) {
-        if (!_handlers.TryGetValue(packetId, out var handler)) {
-            Logger.Error($"There is no {_registryName} packet handler registered for ID: {packetId}");
-            return;
+        THandler? handler;
+        lock (_lock) {
+            if (!_handlers.TryGetValue(packetId, out handler)) {
+                // Kept rather than dropped, and handed over as soon as something registers for this ID
+                if (!_waiting.TryGetValue(packetId, out var waiting)) {
+                    waiting = [];
+                    _waiting[packetId] = waiting;
+                }
+
+                if (waiting.Count >= MaxWaitingPerId) {
+                    Logger.Warn(
+                        $"Nothing has registered for {_registryName} packet ID {packetId}, dropping the oldest of " +
+                        $"{waiting.Count} kept for it"
+                    );
+                    waiting.RemoveAt(0);
+                }
+
+                waiting.Add(invoker);
+                return;
+            }
         }
 
         _dispatcher.Dispatch(() => SafeInvoke(packetId, handler, invoker));
