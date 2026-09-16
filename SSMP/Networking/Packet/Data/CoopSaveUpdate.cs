@@ -151,6 +151,12 @@ internal class CoopSaveUpdate : IPacketData {
     /// </summary>
     public List<float> Values { get; set; } = [];
 
+    /// <summary>
+    /// Names that a kind of update carries as a set, like the boss scenes that the save of the sender has
+    /// unlocked. They only ever get added, so both games take the union of them.
+    /// </summary>
+    public List<string> Names { get; set; } = [];
+
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
         packet.Write(PlayerId);
@@ -190,6 +196,8 @@ internal class CoopSaveUpdate : IPacketData {
         foreach (var value in Values) {
             packet.Write(value);
         }
+
+        WriteStrings(packet, Names);
     }
 
     /// <inheritdoc />
@@ -235,6 +243,8 @@ internal class CoopSaveUpdate : IPacketData {
         for (var i = 0; i < floatCount; i++) {
             Values.Add(packet.ReadFloat());
         }
+
+        Names = ReadStrings(packet);
     }
 
     /// <summary>

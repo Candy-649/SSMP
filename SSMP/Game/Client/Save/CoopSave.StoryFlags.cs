@@ -48,6 +48,12 @@ internal partial class CoopSave {
     private int[]? _knownStoryValues;
 
     /// <summary>
+    /// The boss scenes that the local save had unlocked when they were last compared, or null before the check.
+    /// The list only ever grows, so the partner is sent what is new and both saves end up with the union.
+    /// </summary>
+    private List<string>? _knownBossScenes;
+
+    /// <summary>
     /// When the story flags are compared next.
     /// </summary>
     private float _nextStoryFlagTime;
@@ -94,7 +100,41 @@ internal partial class CoopSave {
     /// </summary>
     private void ResetStoryFlags() {
         _knownStoryValues = null;
+        _knownBossScenes = null;
         _nextStoryFlagTime = 0f;
+    }
+
+    /// <summary>
+    /// The boss scenes that the local save has unlocked, which BossScene.IsUnlockedSelf looks its own name up in.
+    /// </summary>
+    private static List<string> GetBossScenes() {
+        return PlayerData.instance?.unlockedBossScenes ?? [];
+    }
+
+    /// <summary>
+    /// Unlocks the boss scenes of the partner that the local save lacks. Unlocking only ever adds, so the union
+    /// of both saves is right and nothing has to be taken away.
+    /// </summary>
+    /// <returns>How many the local save did not have.</returns>
+    private int AddBossScenes(List<string> names) {
+        if (names.Count == 0 || PlayerData.instance is not { } playerData) {
+            return 0;
+        }
+
+        playerData.unlockedBossScenes ??= [];
+        var added = 0;
+        foreach (var scene in names) {
+            if (scene.Length == 0 || playerData.unlockedBossScenes.Contains(scene)) {
+                continue;
+            }
+
+            playerData.unlockedBossScenes.Add(scene);
+            // The partner has it, so the tick does not send it back to them
+            _knownBossScenes?.Add(scene);
+            added++;
+        }
+
+        return added;
     }
 
     /// <summary>
@@ -158,9 +198,25 @@ internal partial class CoopSave {
                 update.FlagValues.Add(value);
             }
 
+            // Boss scenes that this save unlocked since the last look. They only ever get added
+            var unlocked = GetBossScenes();
+            if (_knownBossScenes == null) {
+                _knownBossScenes = new List<string>(unlocked);
+            } else {
+                foreach (var scene in unlocked) {
+                    if (!_knownBossScenes.Contains(scene)) {
+                        _knownBossScenes.Add(scene);
+                        update ??= new CoopSaveUpdate {
+                            TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange
+                        };
+                        update.Names.Add(scene);
+                    }
+                }
+            }
+
             if (update != null) {
                 Send(update);
-                Logger.Info($"Sent {update.FlagNames.Count} story flags to {partner.Username}");
+                Logger.Info($"Sent {update.FlagNames.Count} story flags and {update.Names.Count} boss scenes to {partner.Username}");
             }
         } catch (Exception e) {
             if (!_storyFlagsFailed) {

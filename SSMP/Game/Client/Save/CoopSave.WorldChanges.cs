@@ -338,8 +338,10 @@ internal partial class CoopSave {
         OverrideLoadedItems(loadedItems);
         flags += ApplyInteractionFlags(update);
 
-        if (items > 0 || flags > 0) {
-            Logger.Info($"Added {items} changes of the world from {player.Username}, with {flags} player data flags");
+        var bosses = AddBossScenes(update.Names);
+
+        if (items > 0 || flags > 0 || bosses > 0) {
+            Logger.Info($"Added {items} changes of the world from {player.Username}, with {flags} player data flags and {bosses} boss scenes");
         }
     }
 }

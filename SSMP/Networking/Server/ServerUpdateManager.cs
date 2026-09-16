@@ -550,7 +550,8 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     PlayTime = update.PlayTime,
                     Sequence = update.Sequence,
                     Amounts = update.Amounts,
-                    Values = update.Values
+                    Values = update.Values,
+                    Names = update.Names
                 }
             );
         }
