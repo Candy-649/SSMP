@@ -45,6 +45,14 @@ internal partial class CoopSave {
     private readonly HashSet<ulong> _appliedStoryItems = [];
 
     /// <summary>
+    /// The gifts of a first talk that both saves settled already, as the scene and the path of the character
+    /// and the change of the item. A character hands its items over once for both players: the partner isn't
+    /// sent a gift that they gave themselves, and a character doesn't hand the local player an item that the
+    /// partner already got from it.
+    /// </summary>
+    private readonly HashSet<string> _settledTalkGifts = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Whether the local save gives or takes an item of the story that the partner sent, which is never sent back.
     /// </summary>
     private bool _applyingStoryItem;
@@ -77,6 +85,14 @@ internal partial class CoopSave {
             new Action<Action<BasicNPC>, BasicNPC>((orig, self) => {
                 _npcTalkStateField ??= typeof(BasicNPC).GetField("talkState", InstanceFlags);
                 var firstTalk = _npcTalkStateField?.GetValue(self) is 0;
+                if (firstTalk) {
+                    try {
+                        DropGiftsThePartnerGot(self);
+                    } catch (Exception e) {
+                        Logger.Error($"Could not drop what the partner already got from a character:\n{e}");
+                    }
+                }
+
                 orig(self);
 
                 try {
@@ -95,6 +111,7 @@ internal partial class CoopSave {
     /// </summary>
     private void ResetStoryItems() {
         _appliedStoryItems.Clear();
+        _settledTalkGifts.Clear();
         _applyingStoryItem = false;
         _purchaseDepth = 0;
     }
@@ -108,11 +125,41 @@ internal partial class CoopSave {
             return;
         }
 
+        var character = GetTalkGiftKey(npc);
         foreach (var item in items) {
-            if (item != null && IsStoryItem(item, out _)) {
-                SendStoryItem(GetItemChangeKey(GetItemChange, item), 1, $"was given {item.name} by a character");
+            if (item == null || !IsStoryItem(item, out _)) {
+                continue;
+            }
+
+            // A gift that the partner already got from this character doesn't go back to them
+            var change = GetItemChangeKey(GetItemChange, item);
+            if (_settledTalkGifts.Add(character + "\n" + change)) {
+                SendStoryItem(change, 1, $"was given {item.name} by a character", npc);
             }
         }
+    }
+
+    /// <summary>
+    /// Takes the items that the partner already got from a character out of what it hands over on a first
+    /// talk, so that the local player doesn't end up with a second copy of what their save already got.
+    /// </summary>
+    private void DropGiftsThePartnerGot(BasicNPC npc) {
+        if (_settledTalkGifts.Count == 0 || npc.GiveOnFirstTalk is not { } items) {
+            return;
+        }
+
+        var character = GetTalkGiftKey(npc);
+        items.RemoveAll(item =>
+            item != null && IsStoryItem(item, out _) &&
+            _settledTalkGifts.Contains(character + "\n" + GetItemChangeKey(GetItemChange, item))
+        );
+    }
+
+    /// <summary>
+    /// The entry of a character that hands items over, which is the same in both games.
+    /// </summary>
+    private static string GetTalkGiftKey(BasicNPC npc) {
+        return npc.gameObject.scene.name + "\n" + ScenePath.Get(npc.transform);
     }
 
     /// <summary>
@@ -126,8 +173,11 @@ internal partial class CoopSave {
             return;
         }
 
-        // The wish sync takes what dialogue about a wish takes from both players already
-        if (_wishTalk is { } talk && IsTalking(talk.Npc)) {
+        // The wish sync takes what dialogue about a wish takes from both players already. It records while the
+        // FSM of that dialogue runs, which outlasts the character letting the hero go, so both are asked here.
+        // QuestConsumeTargetTake takes without raising _consumingWish; no item whose removal is shared is the
+        // target of a wish, and tools/coop_story_items.py asserts that it stays that way.
+        if (IsInTalkFsm() || (_wishTalk is { } talk && IsTalking(talk.Npc))) {
             return;
         }
 
@@ -147,15 +197,23 @@ internal partial class CoopSave {
             return;
         }
 
+        var wasApplyingPartnerTalk = _applyingPartnerTalk;
         _applyingStoryItem = true;
+        _applyingPartnerTalk = true;
         try {
             for (var i = 0; i < update.Records.Count && i < update.Amounts.Count; i++) {
                 var change = update.Records[i];
+                var parts = change.Split('\n');
+
+                // The character that handed this over hands it to the local player only once
+                if (parts[0] == GetItemChange && update.ObjectPath.Length > 0) {
+                    _settledTalkGifts.Add(update.Scene + "\n" + update.ObjectPath + "\n" + change);
+                }
+
                 if (!ApplyTalkItem(change, update.Amounts[i])) {
                     continue;
                 }
 
-                var parts = change.Split('\n');
                 var name = parts.Length == 3 ? parts[2] : "an item";
                 Chat(parts[0] == TakeItemChange
                     ? $"{GetPartnerName()} used up {name}, so yours is gone too."
@@ -166,6 +224,7 @@ internal partial class CoopSave {
             Logger.Error($"Could not apply an item of the story of the partner:\n{e}");
         } finally {
             _applyingStoryItem = false;
+            _applyingPartnerTalk = wasApplyingPartnerTalk;
         }
     }
 
@@ -175,7 +234,8 @@ internal partial class CoopSave {
     /// <param name="change">The change, as <see cref="GetItemChangeKey"/> writes it.</param>
     /// <param name="amount">How many of the item were given or taken.</param>
     /// <param name="what">What the local player did, for the log.</param>
-    private void SendStoryItem(string change, int amount, string what) {
+    /// <param name="npc">The character that handed the item over, for a gift of a first talk.</param>
+    private void SendStoryItem(string change, int amount, string what, BasicNPC? npc = null) {
         if (!_everChecked || _checkedWith is not { } partnerId) {
             return;
         }
@@ -187,6 +247,11 @@ internal partial class CoopSave {
             Kind = CoopSaveUpdateKind.StoryItem,
             Key = BitConverter.ToUInt64(bytes, 0)
         };
+
+        if (npc != null) {
+            update.Scene = npc.gameObject.scene.name;
+            update.ObjectPath = ScenePath.Get(npc.transform);
+        }
 
         update.Records.Add(change);
         update.Amounts.Add(amount);

@@ -820,6 +820,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether the FSM that runs right now belongs to dialogue that the local player has open. This outlasts
+    /// the character letting the hero go again, which is why it is asked next to <see cref="IsTalking"/>.
+    /// </summary>
+    private bool IsInTalkFsm() {
+        return _wishTalk is { } talk && talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm);
+    }
+
+    /// <summary>
     /// Whether an FSM runs key dialogue of the local player or turns in a delivery, which the partner reads too.
     /// </summary>
     public bool IsSharedTalk(Fsm fsm) {

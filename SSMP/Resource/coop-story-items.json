@@ -64,7 +64,7 @@
       "type": "CollectableItemBasic",
       "name": "Broken SilkShot",
       "kind": "plot",
-      "shareRemoval": true
+      "shareRemoval": false
     },
     {
       "type": "CollectableItemBasic",
