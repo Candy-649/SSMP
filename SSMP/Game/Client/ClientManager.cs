@@ -573,8 +573,11 @@ internal class ClientManager : IClientManager {
         TransportType transportType,
         string? fallbackAddress = null
     ) {
-        // Store fallback address for potential retry on failure
-        _lastFallbackAddress = fallbackAddress;
+        // Kept only for the transport it belongs to. A fallback address is a hole punch address, but it was stored
+        // for every connection and handed to the failure handler whichever transport had just failed - which then
+        // redialled that stale address over hole punching. After a few attempts in one sitting that reads as the
+        // game connecting to somewhere nobody asked for.
+        _lastFallbackAddress = transportType == TransportType.HolePunch ? fallbackAddress : null;
         // If we are hosting and using Steam, we need to connect to our own Steam ID
         if (_autoConnect && transportType == TransportType.Steam) {
             address = SteamUser.GetSteamID().ToString();

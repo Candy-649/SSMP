@@ -1755,12 +1755,16 @@ internal class ConnectInterface {
     /// Handles connection to a Steam lobby.
     /// </summary>
     private void ConnectToSteamLobby(string connectionData) {
+        // Both of these ends the join, so the buttons have to come back with them. Without that the connect button
+        // stays on "Connecting..." and refuses every further press, and the only way out is restarting the game.
         if (!SteamManager.IsInitialized) {
+            ResetConnectionButtons();
             ShowFeedback(Color.red, "Steam is not initialized");
             return;
         }
 
         if (!ulong.TryParse(connectionData, out var steamLobbyId)) {
+            ResetConnectionButtons();
             ShowFeedback(Color.red, "Invalid Steam lobby ID.");
             Logger.Warn($"ConnectInterface: MMS returned invalid Steam lobby ID '{connectionData}'");
             return;

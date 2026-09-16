@@ -441,6 +441,16 @@ internal class UiManager : IUiManager {
     private void OnReturnToMainMenu() {
         RequestClientDisconnectEvent?.Invoke();
         RequestServerStopHostEvent?.Invoke();
+
+        // Choosing a save deliberately leaves the slot selection marked active, so that the menu cannot be reopened
+        // while the game loads it. Nothing cleared it afterwards, so hosting again after coming back here did nothing
+        // whatsoever: the host press found the selection still active, and so neither opened the save menu nor kept
+        // the action that starts the server. No message either, because there was no failure - only a press that
+        // quietly led nowhere.
+        _isSlotSelectionActive = false;
+        IsSelectingHostSave = false;
+        _hostStartedBeforeSave = false;
+        _startPendingHost = null;
     }
 
     #endregion
