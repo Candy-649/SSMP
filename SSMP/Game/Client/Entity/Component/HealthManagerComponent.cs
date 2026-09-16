@@ -48,6 +48,12 @@ internal class HealthManagerComponent : EntityComponent {
     private bool _allowDeath;
 
     /// <summary>
+    /// Whether a death of the client entity that was turned down has already been told about. A copy that has no
+    /// health left asks to die again every frame, so without this one room fills the log with thousands of lines.
+    /// </summary>
+    private bool _toldRefusedDeath;
+
+    /// <summary>
     /// MonoMod hook for HealthManager.Die.
     /// </summary>
     private Hook? _healthManagerDieHook;
@@ -224,13 +230,18 @@ internal class HealthManagerComponent : EntityComponent {
 
         if (self == _healthManager.Client) {
             if (!_allowDeath) {
-                Logger.Info("HealthManager Die was called on client entity");
+                // Said once: a copy with no health left asks to die every frame for as long as the room lasts
+                if (!_toldRefusedDeath) {
+                    _toldRefusedDeath = true;
+                    Logger.Info("HealthManager Die was called on client entity");
+                }
             } else {
                 Logger.Info("HealthManager Die was called on client entity, but it is allowed death");
 
                 InvokeOrig();
 
                 _allowDeath = false;
+                _toldRefusedDeath = false;
             }
 
             return;
@@ -444,6 +455,18 @@ internal class HealthManagerComponent : EntityComponent {
         if (alreadyInSceneUpdate) {
             ResetHealthOrderingForEpoch(healthEpoch);
             ApplyHp(newHp, triggerHostDeath: false);
+
+            // Walking into a room that the other player already cleared sends the health of everything in it, but
+            // never the deaths themselves - the server keeps health and whether an object is active, and drops death
+            // data. Health alone leaves a copy that is alive with nothing left, which then asks to die every frame
+            // and is turned down every frame, for as long as the room lasts. Its death is played out once here
+            // instead, the same way one that arrives over the network is. A player who is scene host needs none of
+            // this: their own object dies by itself and tells the others.
+            if (newHp <= 0 && IsControlled && _healthManager.Client != null) {
+                _allowDeath = true;
+                _clientCorpse = null;
+                _healthManager.Client.Die(null, AttackTypes.Generic, true);
+            }
         } else {
             // Cache once; avoids re-evaluating the IsControlled check twice below on every packet
             var isControlled = IsControlled;
