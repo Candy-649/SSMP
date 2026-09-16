@@ -721,6 +721,11 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.Unpaired:
                 OnUnpaired(player);
                 break;
+            case CoopSaveUpdateKind.WaitingRoomReady:
+                // Handled by the menu rather than here: at this point neither player has a save loaded, so there is
+                // nothing about a two-player save to act on yet
+                _uiManager.OnPartnerReadyChanged(player.Username, update.Part != 0);
+                break;
             case CoopSaveUpdateKind.Hello:
                 OnHello(player, update);
                 break;
@@ -1638,6 +1643,25 @@ internal partial class CoopSave {
     #endregion
 
     private static void Chat(string message) => UiManager.InternalChatBox.AddMessage(message);
+
+    /// <summary>
+    /// Tells the other player in the waiting room whether the local player is ready to choose a save. Sent from the
+    /// menu, so it deliberately asks nothing about saves being loaded or paired.
+    /// </summary>
+    /// <param name="ready">Whether the local player is ready.</param>
+    public void SendWaitingRoomReady(bool ready) {
+        if (!_netClient.IsConnected) {
+            return;
+        }
+
+        foreach (var other in _playerData.Values) {
+            Send(new CoopSaveUpdate {
+                TargetId = other.Id,
+                Kind = CoopSaveUpdateKind.WaitingRoomReady,
+                Part = (ushort) (ready ? 1 : 0)
+            });
+        }
+    }
 
     /// <summary>
     /// Sends an update of a two-player save to another player.

@@ -159,6 +159,18 @@ internal class UiManager : IUiManager {
     /// </summary>
     public event Action? HostSaveSelectionClosedEvent;
 
+    /// <summary>
+    /// Event raised when the local player says they are ready in the waiting room, or takes it back, so that the
+    /// other player is told.
+    /// </summary>
+    public event Action<bool>? ReadyToggledEvent;
+
+    /// <summary>
+    /// Event raised when everyone in the waiting room is ready, so a player who joined chooses the save their game
+    /// held back.
+    /// </summary>
+    public event Action? BothReadyEvent;
+
     /// <inheritdoc />
     public event Action? MultiplayerButtonPressed;
 
@@ -549,6 +561,8 @@ internal class UiManager : IUiManager {
         _connectInterface.StartHostWithoutSavePressed += StartHostWithoutSave;
         _connectInterface.HostSaveSelectionRequested += OpenHostSaveSelection;
         _connectInterface.StopWaitingRoomHostingEvent += StopHostBeforeSave;
+        _connectInterface.JoinSaveSelectionRequested += () => BothReadyEvent?.Invoke();
+        _connectInterface.WaitingRoomReadyToggled += ready => ReadyToggledEvent?.Invoke(ready);
 
         // Both are multicast and already have listeners elsewhere, so the waiting room just adds itself
         HostSaveSelectionClosedEvent += _connectInterface.OnHostSaveSelectionClosed;
@@ -698,6 +712,21 @@ internal class UiManager : IUiManager {
     /// </summary>
     /// <param name="username">The name of the player that left.</param>
     public void OnPlayerLeft(string username) => _connectInterface.OnPlayerLeft(username);
+
+    /// <summary>
+    /// Shows the waiting room to a player who joined someone else's game, rather than opening their save selection
+    /// straight away.
+    /// </summary>
+    /// <param name="others">The players already on the server.</param>
+    public void ShowJoinWaitingRoom(IReadOnlyList<string> others) => _connectInterface.ShowJoinWaitingRoom(others);
+
+    /// <summary>
+    /// Tells the waiting room that the other player said they are ready, or took it back.
+    /// </summary>
+    /// <param name="username">The name of the player whose readiness changed.</param>
+    /// <param name="ready">Whether they are ready now.</param>
+    public void OnPartnerReadyChanged(string username, bool ready) =>
+        _connectInterface.OnPartnerReadyChanged(username, ready);
 
     /// <summary>
     /// Handles connect button press.

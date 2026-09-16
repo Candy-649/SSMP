@@ -7,11 +7,29 @@ using Object = UnityEngine.Object;
 namespace SSMP.Ui.Component;
 
 /// <summary>
-/// The screen the host waits on after opening their game, listing who is in so far.
+/// One player in the waiting room, and whether they have said they are ready.
+/// </summary>
+internal readonly struct WaitingRoomMember {
+    /// <summary>The name shown for this player.</summary>
+    public string Name { get; }
+
+    /// <summary>Whether this player has said they are ready to choose a save.</summary>
+    public bool Ready { get; }
+
+    public WaitingRoomMember(string name, bool ready) {
+        Name = name;
+        Ready = ready;
+    }
+}
+
+/// <summary>
+/// The screen both players wait on before either of them chooses a save, listing who is in and who has said they are
+/// ready.
 ///
-/// It exists because hosting used to go straight from creating a lobby into choosing a save, which loaded the save
-/// before anyone could join and left no obvious place to invite anyone from. Waiting here instead means the host can
-/// see their teammate arrive, and only then pick the save.
+/// Hosting used to go from creating a lobby straight into choosing a save, which loaded the game before anyone could
+/// join and left nowhere obvious to invite from. Worse, whoever joined was dropped into their own save menu while the
+/// other player was still waiting - the two sides were never looking at the same thing. Both sides wait here instead,
+/// and neither save menu opens until both have said they are ready.
 /// </summary>
 internal class WaitingRoomPanel : IComponent {
     /// <summary>The root GameObject for this panel.</summary>
@@ -23,24 +41,21 @@ internal class WaitingRoomPanel : IComponent {
     /// <summary>Line above the list saying what is being waited for.</summary>
     private readonly Text _statusText;
 
-    /// <summary>The rows currently shown, destroyed and rebuilt whenever the list changes.</summary>
+    /// <summary>The rows currently shown, destroyed and rebuilt whenever anything about the room changes.</summary>
     private readonly List<GameObject> _rows = [];
 
-    /// <summary>The button that opens the save selection, greyed out until someone else is in.</summary>
-    private readonly Image _startImage;
+    /// <summary>The background of the ready button, which says at a glance whether it is on.</summary>
+    private readonly Image _readyImage;
 
-    /// <summary>The label of the start button.</summary>
-    private readonly Text _startText;
+    /// <summary>The label of the ready button, which says what pressing it does next.</summary>
+    private readonly Text _readyText;
 
-    /// <summary>The button that opens Steam's invite dialog.</summary>
+    /// <summary>The button that opens Steam's invite dialog, which only the host has anyone to invite with.</summary>
     private readonly GameObject _inviteButton;
 
     private Action? _onInvite;
-    private Action? _onStart;
+    private Action? _onReady;
     private Action? _onLeave;
-
-    /// <summary>Whether the start button does anything, which is only true once a teammate is in.</summary>
-    private bool _canStart;
 
     /// <summary>Tracks the panel's own active state.</summary>
     private bool _activeSelf;
@@ -57,8 +72,10 @@ internal class WaitingRoomPanel : IComponent {
 
     private static readonly Color Accent = new(1f, 0.85f, 0.6f, 1f);
     private static readonly Color RowBackground = new(0.12f, 0.12f, 0.15f, 1f);
-    private static readonly Color StartEnabled = new(0.2f, 0.5f, 0.3f, 1f);
-    private static readonly Color StartDisabled = new(0.18f, 0.18f, 0.2f, 1f);
+    private static readonly Color ReadyOn = new(0.2f, 0.5f, 0.3f, 1f);
+    private static readonly Color ReadyOff = new(0.35f, 0.3f, 0.15f, 1f);
+    private static readonly Color ReadyMark = new(0.45f, 0.85f, 0.55f, 1f);
+    private static readonly Color WaitingMark = new(0.6f, 0.6f, 0.6f, 1f);
 
     public WaitingRoomPanel(ComponentGroup parent, Vector2 position, Vector2 size) {
         GameObject = new GameObject("WaitingRoomPanel");
@@ -76,7 +93,8 @@ internal class WaitingRoomPanel : IComponent {
             new Vector2(0f, HeaderHeight),
             Vector2.zero,
             18,
-            Accent
+            Accent,
+            TextAnchor.MiddleCenter
         );
 
         _statusText = CreateLabel(
@@ -88,10 +106,10 @@ internal class WaitingRoomPanel : IComponent {
             new Vector2(0f, StatusHeight),
             new Vector2(0f, -HeaderHeight),
             15,
-            new Color(0.75f, 0.75f, 0.75f, 1f)
+            new Color(0.75f, 0.75f, 0.75f, 1f),
+            TextAnchor.MiddleCenter
         );
 
-        // The list of who is in, between the status line and the buttons
         var listObj = new GameObject("List");
         _content = listObj.AddComponent<RectTransform>();
         _content.anchorMin = new Vector2(0f, 0f);
@@ -133,22 +151,18 @@ internal class WaitingRoomPanel : IComponent {
             out _
         );
 
-        // Refuses rather than silently doing nothing while it is greyed out, because a button that ignores presses
-        // with no explanation is exactly what made the old flow so hard to read
+        // Always pressable, unlike the start button this replaces. Both players say they are ready and both save
+        // menus open together, so neither side is left pressing something that silently does nothing.
         CreateButton(
             buttonArea.transform,
-            "StartButton",
-            "START",
+            "ReadyButton",
+            "I'M READY",
             new Vector2(0.64f, 0.12f),
             new Vector2(0.98f, 0.88f),
-            StartDisabled,
-            () => {
-                if (_canStart) {
-                    _onStart?.Invoke();
-                }
-            },
-            out _startImage,
-            out _startText
+            ReadyOff,
+            () => _onReady?.Invoke(),
+            out _readyImage,
+            out _readyText
         );
 
         _componentGroup = parent;
@@ -158,12 +172,9 @@ internal class WaitingRoomPanel : IComponent {
         Object.DontDestroyOnLoad(GameObject);
         GameObject.SetActive(false);
 
-        SetPlayers([], hosting: true);
+        SetRoom([], localReady: false, hosting: true);
     }
 
-    /// <summary>
-    /// Builds a text object, returning its <see cref="Text"/> so callers can change it later.
-    /// </summary>
     private static Text CreateLabel(
         Transform parent,
         string name,
@@ -173,7 +184,8 @@ internal class WaitingRoomPanel : IComponent {
         Vector2 sizeDelta,
         Vector2 anchoredPosition,
         int fontSize,
-        Color color
+        Color color,
+        TextAnchor alignment
     ) {
         var obj = new GameObject(name);
         var rect = obj.AddComponent<RectTransform>();
@@ -187,7 +199,7 @@ internal class WaitingRoomPanel : IComponent {
         textComponent.text = text;
         textComponent.font = Resources.FontManager.UIFontRegular;
         textComponent.fontSize = fontSize;
-        textComponent.alignment = TextAnchor.MiddleCenter;
+        textComponent.alignment = alignment;
         textComponent.color = color;
         obj.transform.SetParent(parent, false);
 
@@ -240,19 +252,19 @@ internal class WaitingRoomPanel : IComponent {
     /// <summary>Sets what happens when the host asks to invite someone.</summary>
     public void SetOnInvite(Action callback) => _onInvite = callback;
 
-    /// <summary>Sets what happens when the host starts, which is only reachable once a teammate is in.</summary>
-    public void SetOnStart(Action callback) => _onStart = callback;
+    /// <summary>Sets what happens when the local player says they are ready, or takes it back.</summary>
+    public void SetOnReady(Action callback) => _onReady = callback;
 
     /// <summary>Sets what happens when the waiting is given up on.</summary>
     public void SetOnLeave(Action callback) => _onLeave = callback;
 
     /// <summary>
-    /// Shows who is in. The start button only does anything once somebody other than the host is listed, since a
-    /// two-player save has nothing to check against on its own.
+    /// Shows who is in and who is ready.
     /// </summary>
-    /// <param name="names">Everyone in, the local player included.</param>
-    /// <param name="hosting">Whether the local player is the one hosting, who alone can invite and start.</param>
-    public void SetPlayers(IReadOnlyList<string> names, bool hosting) {
+    /// <param name="members">Everyone in, the local player included.</param>
+    /// <param name="localReady">Whether the local player has said they are ready.</param>
+    /// <param name="hosting">Whether the local player is hosting, who alone has a lobby to invite to.</param>
+    public void SetRoom(IReadOnlyList<WaitingRoomMember> members, bool localReady, bool hosting) {
         foreach (var row in _rows) {
             Object.Destroy(row);
         }
@@ -260,27 +272,36 @@ internal class WaitingRoomPanel : IComponent {
         _rows.Clear();
 
         var y = -2f;
-        foreach (var name in names) {
-            _rows.Add(CreateRow(name, y));
+        foreach (var member in members) {
+            _rows.Add(CreateRow(member, y));
             y -= RowHeight + RowSpacing;
         }
 
-        _canStart = hosting && names.Count > 1;
         _inviteButton.SetActive(hosting);
-        _startImage.color = _canStart ? StartEnabled : StartDisabled;
-        _startText.color = _canStart ? Color.white : new Color(0.5f, 0.5f, 0.5f, 1f);
+        _readyImage.color = localReady ? ReadyOn : ReadyOff;
+        _readyText.text = localReady ? "CANCEL READY" : "I'M READY";
 
-        _statusText.text = names.Count > 1
+        var alone = members.Count < 2;
+        var waitingOn = 0;
+        foreach (var member in members) {
+            if (!member.Ready) {
+                waitingOn++;
+            }
+        }
+
+        _statusText.text = alone
             ? hosting
-                ? "Everyone is here. Start when you are ready."
-                : "Waiting for the host to choose a save."
-            : hosting
                 ? "Waiting for your teammate. Invite them, or have them join your lobby."
-                : "Waiting for the host.";
+                : "Waiting for your teammate."
+            : waitingOn == 0
+                ? "Everyone is ready. Choose your saves."
+                : localReady
+                    ? "Waiting for your teammate to be ready."
+                    : "Say you are ready when you want to choose your saves.";
     }
 
-    private GameObject CreateRow(string name, float y) {
-        var row = new GameObject($"Player_{name}");
+    private GameObject CreateRow(WaitingRoomMember member, float y) {
+        var row = new GameObject($"Player_{member.Name}");
         var rect = row.AddComponent<RectTransform>();
         rect.anchorMin = new Vector2(0f, 1f);
         rect.anchorMax = new Vector2(1f, 1f);
@@ -291,18 +312,31 @@ internal class WaitingRoomPanel : IComponent {
         var background = row.AddComponent<Image>();
         background.color = RowBackground;
 
-        var label = CreateLabel(
+        CreateLabel(
             row.transform,
             "Name",
-            name,
+            member.Name,
             new Vector2(0f, 0f),
-            new Vector2(1f, 1f),
+            new Vector2(0.65f, 1f),
             Vector2.zero,
             Vector2.zero,
             15,
-            Color.white
-        );
-        label.alignment = TextAnchor.MiddleCenter;
+            Color.white,
+            TextAnchor.MiddleLeft
+        ).rectTransform.offsetMin = new Vector2(12f, 0f);
+
+        CreateLabel(
+            row.transform,
+            "State",
+            member.Ready ? "READY" : "NOT READY",
+            new Vector2(0.65f, 0f),
+            new Vector2(1f, 1f),
+            Vector2.zero,
+            Vector2.zero,
+            14,
+            member.Ready ? ReadyMark : WaitingMark,
+            TextAnchor.MiddleRight
+        ).rectTransform.offsetMax = new Vector2(-12f, 0f);
 
         row.transform.SetParent(_content.transform, false);
         Object.DontDestroyOnLoad(row);

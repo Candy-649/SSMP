@@ -419,5 +419,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender answered yes to a prompt that changes what both players share, so the other player is asked
     /// to agree to it, answers one they were asked about, or hears that the prompt is over.
     /// </summary>
-    WishConfirm
+    WishConfirm,
+
+    /// <summary>
+    /// The sender is ready to leave the waiting room and choose a save, or took that back.
+    /// <see cref="CoopSaveUpdate.Part"/> is 1 for ready and 0 for not. This one is sent from the menu, before either
+    /// player has a save loaded.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    WaitingRoomReady
 }

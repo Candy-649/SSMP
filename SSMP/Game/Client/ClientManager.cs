@@ -58,6 +58,12 @@ internal class ClientManager : IClientManager {
     private readonly UiManager _uiManager;
 
     /// <summary>
+    /// Opens the save selection of a player who joined, once everyone in the waiting room is ready. Null when this
+    /// client is not waiting to choose a save.
+    /// </summary>
+    private Action? _openSaveAfterReady;
+
+    /// <summary>
     /// The current server settings.
     /// </summary>
     private readonly ServerSettings _serverSettings;
@@ -342,6 +348,8 @@ internal class ClientManager : IClientManager {
         _uiManager.RequestServerStartHostEvent += (_, _, _, _, _) => { _saveManager.IsHostingServer = true; };
         _uiManager.RequestServerStopHostEvent += () => { _saveManager.IsHostingServer = false; };
         _uiManager.HostSaveLoadedEvent += SendCrest;
+        _uiManager.ReadyToggledEvent += ready => _coopSave.SendWaitingRoomReady(ready);
+        _uiManager.BothReadyEvent += OpenSaveAfterReady;
 
         UiManager.ChatInputEvent += OnChatInput;
 
@@ -775,7 +783,10 @@ internal class ClientManager : IClientManager {
                 );
             }
 
-            _uiManager.OpenSaveSlotSelection(saveSelected => {
+            // Held back until both players say they are ready in the waiting room. Joining used to open this at
+            // once, which dropped one player into the save menu while the other was still waiting for them - the
+            // lopsidedness that made the whole flow so hard to follow.
+            _openSaveAfterReady = () => _uiManager.OpenSaveSlotSelection(saveSelected => {
                     // If this callback executes, but we have not selected a save (by pressing the back button on
                     // the save selection screen, we need to disconnect from the server again, because we are not
                     // entering the world
@@ -803,6 +814,17 @@ internal class ClientManager : IClientManager {
                 CrestType = playerInfo.CrestType,
                 SaveKey = playerInfo.SaveKey
             };
+        }
+
+        // Only now, because the waiting room has to list the players who were here before this client arrived, and
+        // those only exist in the dictionary once the loop above has run
+        if (_openSaveAfterReady != null) {
+            var names = new List<string>();
+            foreach (var player in _playerData.Values) {
+                names.Add(player.Username);
+            }
+
+            _uiManager.ShowJoinWaitingRoom(names);
         }
 
         // A two-player save that waits in the menu loads if its partner was on the server already
@@ -900,6 +922,17 @@ internal class ClientManager : IClientManager {
                 $"Exception thrown while invoking PlayerConnect event:\n{e}"
             );
         }
+    }
+
+    /// <summary>
+    /// Everyone in the waiting room said they are ready, so this client chooses its save now. Runs once: a second
+    /// call after the menu is already open would be ignored by the save selection anyway, but clearing it keeps a
+    /// later session from reopening a menu that belonged to this one.
+    /// </summary>
+    private void OpenSaveAfterReady() {
+        var open = _openSaveAfterReady;
+        _openSaveAfterReady = null;
+        open?.Invoke();
     }
 
     /// <summary>

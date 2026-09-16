@@ -493,6 +493,26 @@ internal class ConnectInterface {
     private CSteamID _waitingRoomLobbyId;
 
     /// <summary>
+    /// Whether the local player is the one hosting the waiting room, who alone has a lobby to invite to.
+    /// </summary>
+    private bool _waitingRoomHosting;
+
+    /// <summary>
+    /// Whether the local player has said they are ready to choose a save.
+    /// </summary>
+    private bool _waitingRoomLocalReady;
+
+    /// <summary>
+    /// The other players who have said they are ready, by name.
+    /// </summary>
+    private readonly HashSet<string> _waitingRoomReadyNames = [];
+
+    /// <summary>
+    /// Whether the room has already sent everyone off to choose their saves, so that it happens once.
+    /// </summary>
+    private bool _waitingRoomProceeded;
+
+    /// <summary>
     /// Button to join a friend via invite.
     /// </summary>
     // ReSharper disable once NotAccessedField.Local
@@ -602,6 +622,16 @@ internal class ConnectInterface {
     public event Action? HostSaveSelectionRequested;
 
     /// <summary>
+    /// Raised when a player who joined is done waiting and chooses their save, which their game held back until now.
+    /// </summary>
+    public event Action? JoinSaveSelectionRequested;
+
+    /// <summary>
+    /// Raised when the local player says they are ready, or takes it back, so the other player is told.
+    /// </summary>
+    public event Action<bool>? WaitingRoomReadyToggled;
+
+    /// <summary>
     /// Raised when a host gives up waiting, so the server they opened is closed again.
     /// </summary>
     public event Action? StopWaitingRoomHostingEvent;
@@ -690,11 +720,10 @@ internal class ConnectInterface {
                 SteamFriends.ActivateGameOverlayInviteDialog(_waitingRoomLobbyId);
             }
         );
-        _waitingRoomPanel.SetOnStart(() => {
-                // Put away rather than torn down, because backing out of the save menu has to come back here: the
-                // game is still hosted and the teammate is still connected at that point
-                SuspendWaitingRoom();
-                HostSaveSelectionRequested?.Invoke();
+        _waitingRoomPanel.SetOnReady(() => {
+                _waitingRoomLocalReady = !_waitingRoomLocalReady;
+                WaitingRoomReadyToggled?.Invoke(_waitingRoomLocalReady);
+                RefreshWaitingRoom();
             }
         );
         _waitingRoomPanel.SetOnLeave(() => {
@@ -1262,18 +1291,102 @@ internal class ConnectInterface {
     /// </summary>
     /// <param name="lobbyId">The lobby that people are invited to.</param>
     private void ShowWaitingRoom(CSteamID lobbyId) {
-        _waitingRoomActive = true;
         _waitingRoomLobbyId = lobbyId;
+        OpenWaitingRoom(hosting: true, [_usernameInput.GetInput()]);
+    }
+
+    /// <summary>
+    /// Shows the waiting room to a player who just joined someone else's game, listing everyone already in. Their own
+    /// save selection stays shut until both players are ready, so that neither of them is left staring at a menu the
+    /// other cannot see.
+    /// </summary>
+    /// <param name="others">The players already on the server.</param>
+    public void ShowJoinWaitingRoom(IReadOnlyList<string> others) {
+        var players = new List<string> { _usernameInput.GetInput() };
+        players.AddRange(others);
+        OpenWaitingRoom(hosting: false, players);
+    }
+
+    /// <summary>
+    /// Puts the waiting room on screen with the given players, nobody ready yet.
+    /// </summary>
+    private void OpenWaitingRoom(bool hosting, List<string> players) {
+        _waitingRoomActive = true;
+        _waitingRoomHosting = hosting;
+        _waitingRoomLocalReady = false;
+        _waitingRoomProceeded = false;
+        _waitingRoomReadyNames.Clear();
 
         _waitingRoomPlayers.Clear();
-        _waitingRoomPlayers.Add(_usernameInput.GetInput());
+        _waitingRoomPlayers.AddRange(players);
 
         _steamGroup?.SetActive(false);
         _steamLobbyConfigPanel?.Hide();
         _steamLobbyBrowserPanel?.Hide();
 
-        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
         _waitingRoomPanel.Show();
+        RefreshWaitingRoom();
+    }
+
+    /// <summary>
+    /// Redraws the room, and sends everyone off to choose their saves once every player in it is ready.
+    /// </summary>
+    private void RefreshWaitingRoom() {
+        if (!_waitingRoomActive) {
+            return;
+        }
+
+        // By position, not by name: the local player is always put in first, and two players who happened to pick the
+        // same name would otherwise both be read as the local one, so one of them pressing ready would count for both
+        var members = new List<WaitingRoomMember>();
+        for (var i = 0; i < _waitingRoomPlayers.Count; i++) {
+            var name = _waitingRoomPlayers[i];
+            members.Add(
+                new WaitingRoomMember(name, i == 0 ? _waitingRoomLocalReady : _waitingRoomReadyNames.Contains(name))
+            );
+        }
+
+        _waitingRoomPanel.SetRoom(members, _waitingRoomLocalReady, _waitingRoomHosting);
+
+        if (_waitingRoomProceeded || members.Count < 2) {
+            return;
+        }
+
+        foreach (var member in members) {
+            if (!member.Ready) {
+                return;
+            }
+        }
+
+        _waitingRoomProceeded = true;
+        if (_waitingRoomHosting) {
+            // Put away rather than torn down, because backing out of the save menu has to come back here: the game
+            // is still hosted and the teammate is still connected at that point
+            SuspendWaitingRoom();
+            HostSaveSelectionRequested?.Invoke();
+        } else {
+            HideWaitingRoom();
+            JoinSaveSelectionRequested?.Invoke();
+        }
+    }
+
+    /// <summary>
+    /// The other player said they are ready, or took it back.
+    /// </summary>
+    /// <param name="username">The name of the player whose readiness changed.</param>
+    /// <param name="ready">Whether they are ready now.</param>
+    public void OnPartnerReadyChanged(string username, bool ready) {
+        if (!_waitingRoomActive) {
+            return;
+        }
+
+        if (ready) {
+            _waitingRoomReadyNames.Add(username);
+        } else {
+            _waitingRoomReadyNames.Remove(username);
+        }
+
+        RefreshWaitingRoom();
     }
 
     /// <summary>
@@ -1281,8 +1394,12 @@ internal class ConnectInterface {
     /// </summary>
     private void HideWaitingRoom() {
         _waitingRoomActive = false;
+        _waitingRoomHosting = false;
+        _waitingRoomLocalReady = false;
+        _waitingRoomProceeded = false;
         _waitingRoomLobbyId = default;
         _waitingRoomPlayers.Clear();
+        _waitingRoomReadyNames.Clear();
         _waitingRoomPanel.Hide();
     }
 
@@ -1304,8 +1421,18 @@ internal class ConnectInterface {
         }
 
         _steamGroup?.SetActive(false);
-        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
+        _waitingRoomProceeded = false;
+
+        // Backing out of the save menu means the host is not ready after all. Without this the room would see both
+        // players still ready the moment it reappeared and send the host straight back into the save menu, over and
+        // over, with no way to return here.
+        if (_waitingRoomLocalReady) {
+            _waitingRoomLocalReady = false;
+            WaitingRoomReadyToggled?.Invoke(false);
+        }
+
         _waitingRoomPanel.Show();
+        RefreshWaitingRoom();
     }
 
     /// <summary>
@@ -1327,7 +1454,7 @@ internal class ConnectInterface {
         }
 
         _waitingRoomPlayers.Add(username);
-        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
+        RefreshWaitingRoom();
     }
 
     /// <summary>
@@ -1339,7 +1466,9 @@ internal class ConnectInterface {
             return;
         }
 
-        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
+        // Their readiness leaves with them, or a player who readied up and then dropped would still be counted
+        _waitingRoomReadyNames.Remove(username);
+        RefreshWaitingRoom();
     }
 
     /// <summary>
