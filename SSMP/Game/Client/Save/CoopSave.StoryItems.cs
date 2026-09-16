@@ -205,13 +205,14 @@ internal partial class CoopSave {
                 var change = update.Records[i];
                 var parts = change.Split('\n');
 
-                // The character that handed this over hands it to the local player only once
-                if (parts[0] == GetItemChange && update.ObjectPath.Length > 0) {
-                    _settledTalkGifts.Add(update.Scene + "\n" + update.ObjectPath + "\n" + change);
-                }
-
                 if (!ApplyTalkItem(change, update.Amounts[i])) {
                     continue;
+                }
+
+                // The character that handed this over hands it to the local player only once, but only now that
+                // the local save really got it: a gift that never arrived has to stay there to be picked up later
+                if (parts[0] == GetItemChange && update.ObjectPath.Length > 0) {
+                    _settledTalkGifts.Add(update.Scene + "\n" + update.ObjectPath + "\n" + change);
                 }
 
                 var name = parts.Length == 3 ? parts[2] : "an item";
