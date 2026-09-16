@@ -58,9 +58,27 @@ internal class NetServer : INetServer {
     private readonly AutoResetEvent _processingWaitHandle;
 
     /// <summary>
-    /// Byte array containing leftover data that was not processed as a packet yet.
+    /// The bytes of each connection that did not complete a packet yet, kept apart per connection.
+    ///
+    /// This cannot be one buffer for the whole server. The queue below carries the data of every player mixed
+    /// together, and reassembly glues whatever arrives next onto whatever is held here, so a shared buffer glued one
+    /// player's half-finished packet onto the next player's packet and lost the framing of the stream for good. The
+    /// symptom is "Invalid packet length read: 0", after which that connection receives nothing more and times out
+    /// five seconds later. Only a packet above the MTU is ever split, so this stayed hidden until two players
+    /// exchanged one - which is what the world progress of a two-player save is.
+    ///
+    /// Keyed by the transport client itself, not by its identifier: a player who reconnects gets a new transport
+    /// client, and must start from an empty buffer rather than inherit the bytes of the session that died.
     /// </summary>
-    private byte[]? _leftoverData;
+    private readonly ConcurrentDictionary<IEncryptedTransportClient, LeftoverBuffer> _leftoverByClient = new();
+
+    /// <summary>
+    /// The leftover bytes of a single connection, in a class because a dictionary value cannot be passed by
+    /// reference.
+    /// </summary>
+    private sealed class LeftoverBuffer {
+        public byte[]? Data;
+    }
 
     /// <summary>
     /// Cancellation token source for all threads of the server.
@@ -170,15 +188,10 @@ internal class NetServer : INetServer {
             while (_receivedQueue.TryDequeue(out var receivedData)) {
                 if (token.IsCancellationRequested) break;
 
-                var packets = PacketManager.HandleReceivedData(
-                    receivedData.Buffer,
-                    receivedData.NumReceived,
-                    ref _leftoverData
-                );
-
                 var transportClient = receivedData.TransportClient;
 
-                // Try to find existing client by transport client reference
+                // Which connection these bytes belong to comes from the queue itself and decides which reassembly
+                // buffer they are added to, so it has to be settled before a single byte is parsed
                 var client = _clientsById.Values.FirstOrDefault(c => c.TransportClient == transportClient);
 
                 if (client == null) {
@@ -204,6 +217,13 @@ internal class NetServer : INetServer {
                     // that wants to connect
                     client = CreateNewClient(transportClient);
                 }
+
+                var leftover = _leftoverByClient.GetOrAdd(transportClient, _ => new LeftoverBuffer());
+                var packets = PacketManager.HandleReceivedData(
+                    receivedData.Buffer,
+                    receivedData.NumReceived,
+                    ref leftover.Data
+                );
 
                 HandleClientPackets(client, packets);
             }
@@ -249,6 +269,7 @@ internal class NetServer : INetServer {
         client.Dispose();
         _transportServer?.DisconnectClient(client.TransportClient);
         _clientsById.TryRemove(id, out _);
+        _leftoverByClient.TryRemove(client.TransportClient, out _);
 
         Logger.Info($"Client {id} timed out");
     }
@@ -403,7 +424,7 @@ internal class NetServer : INetServer {
         _taskTokenSource = null;
 
         // Clear leftover data
-        _leftoverData = null;
+        _leftoverByClient.Clear();
 
         // Deregister the client info handler to prevent leaks when restarting the server
         _packetManager.DeregisterServerConnectionPacketHandler(ServerConnectionPacketId.ClientInfo);
@@ -448,6 +469,7 @@ internal class NetServer : INetServer {
         client.Dispose();
         _transportServer?.DisconnectClient(client.TransportClient);
         _clientsById.TryRemove(id, out _);
+        _leftoverByClient.TryRemove(client.TransportClient, out _);
 
         Logger.Info($"Client {id} disconnected");
     }
