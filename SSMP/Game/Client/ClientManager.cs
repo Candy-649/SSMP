@@ -890,6 +890,7 @@ internal class ClientManager : IClientManager {
         _playerData[playerConnect.Id] = playerData;
 
         UiManager.InternalChatBox.AddMessage($"Player '{playerConnect.Username}' connected to the server");
+        _uiManager.OnPlayerJoined(playerData.Username);
         _coopSave.OnPlayerConnect(playerData);
 
         try {
@@ -935,6 +936,7 @@ internal class ClientManager : IClientManager {
                 ? $"Player '{username}' timed out"
                 : $"Player '{username}' disconnected from the server"
         );
+        _uiManager.OnPlayerLeft(username);
         _coopSave.OnPlayerDisconnect(id);
 
         try {

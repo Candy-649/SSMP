@@ -546,6 +546,13 @@ internal class UiManager : IUiManager {
     private void RegisterInterfaceCallbacks() {
         _connectInterface.StartHostButtonPressed += OnStartHostRequested;
         _connectInterface.ConnectButtonPressed += OnConnectRequested;
+        _connectInterface.StartHostWithoutSavePressed += StartHostWithoutSave;
+        _connectInterface.HostSaveSelectionRequested += OpenHostSaveSelection;
+        _connectInterface.StopWaitingRoomHostingEvent += StopHostBeforeSave;
+
+        // Both are multicast and already have listeners elsewhere, so the waiting room just adds itself
+        HostSaveSelectionClosedEvent += _connectInterface.OnHostSaveSelectionClosed;
+        HostSaveLoadedEvent += _connectInterface.OnHostSaveLoaded;
     }
 
     /// <summary>
@@ -629,6 +636,68 @@ internal class UiManager : IUiManager {
         RequestClientDisconnectEvent?.Invoke();
         RequestServerStopHostEvent?.Invoke();
     }
+
+    /// <summary>
+    /// Starts hosting without opening the save selection, so the host can wait on a screen of their own until their
+    /// teammate is in. The save is chosen afterwards through <see cref="OpenHostSaveSelection"/>.
+    /// </summary>
+    public void StartHostWithoutSave(
+        string address,
+        int port,
+        string username,
+        TransportType transportType,
+        string? fallbackAddress
+    ) {
+        if (_hostStartedBeforeSave) {
+            return;
+        }
+
+        // The same state the save menu uses when a two-player save hosts before loading, so that choosing the save
+        // later does not try to start a second server
+        _hostStartedBeforeSave = true;
+        _startPendingHost = null;
+
+        RequestServerStartHostEvent?.Invoke(address, port, username, transportType, fallbackAddress);
+        RequestClientConnectEvent?.Invoke(LocalhostAddress, port, username, transportType, true, null);
+    }
+
+    /// <summary>
+    /// Opens the save selection for a host that is already hosting, for when they are done waiting for their teammate.
+    /// </summary>
+    public void OpenHostSaveSelection() {
+        if (_isSlotSelectionActive) {
+            return;
+        }
+
+        IsSelectingHostSave = true;
+
+        OpenSaveSlotSelection(saveSelected => {
+            IsSelectingHostSave = false;
+
+            if (!saveSelected) {
+                // Deliberately not stopping the hosting that the waiting room started, unlike the older save menu
+                // above: the game stays open and the teammate stays connected, and this event puts the host back on
+                // the waiting room so a mis-press does not cost them the lobby.
+                HostSaveSelectionClosedEvent?.Invoke();
+                return;
+            }
+
+            _hostStartedBeforeSave = false;
+            HostSaveLoadedEvent?.Invoke();
+        });
+    }
+
+    /// <summary>
+    /// Tells the connection UI that a player joined, so a host waiting for them sees it.
+    /// </summary>
+    /// <param name="username">The name of the player that joined.</param>
+    public void OnPlayerJoined(string username) => _connectInterface.OnPlayerJoined(username);
+
+    /// <summary>
+    /// Tells the connection UI that a player left.
+    /// </summary>
+    /// <param name="username">The name of the player that left.</param>
+    public void OnPlayerLeft(string username) => _connectInterface.OnPlayerLeft(username);
 
     /// <summary>
     /// Handles connect button press.

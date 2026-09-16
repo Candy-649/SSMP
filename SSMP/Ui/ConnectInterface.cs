@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Sockets;
 using SSMP.Game;
@@ -471,6 +472,27 @@ internal class ConnectInterface {
     private readonly LobbyConfigPanel? _steamLobbyConfigPanel;
 
     /// <summary>
+    /// The screen a host waits on until their teammate is in, before any save is chosen.
+    /// </summary>
+    private readonly WaitingRoomPanel _waitingRoomPanel;
+
+    /// <summary>
+    /// Everyone in while the waiting room is up, the local player first.
+    /// </summary>
+    private readonly List<string> _waitingRoomPlayers = [];
+
+    /// <summary>
+    /// Whether the host is still waiting, so that leaving the tab and coming back shows the waiting room again
+    /// instead of the buttons that would start a second lobby.
+    /// </summary>
+    private bool _waitingRoomActive;
+
+    /// <summary>
+    /// The lobby the waiting room belongs to, kept for inviting people to it.
+    /// </summary>
+    private CSteamID _waitingRoomLobbyId;
+
+    /// <summary>
     /// Button to join a friend via invite.
     /// </summary>
     // ReSharper disable once NotAccessedField.Local
@@ -569,6 +591,21 @@ internal class ConnectInterface {
     /// </summary>
     public event Action<string, int, string, TransportType, string?>? StartHostButtonPressed;
 
+    /// <summary>
+    /// Raised to start hosting without opening the save selection, so the host waits for their teammate first.
+    /// </summary>
+    public event Action<string, int, string, TransportType, string?>? StartHostWithoutSavePressed;
+
+    /// <summary>
+    /// Raised when a host that is already hosting is done waiting and wants to choose their save.
+    /// </summary>
+    public event Action? HostSaveSelectionRequested;
+
+    /// <summary>
+    /// Raised when a host gives up waiting, so the server they opened is closed again.
+    /// </summary>
+    public event Action? StopWaitingRoomHostingEvent;
+
     #endregion
 
     #region Tab Enum
@@ -637,6 +674,36 @@ internal class ConnectInterface {
             }
         );
         _lobbyBrowserPanel.SetOnRefresh(() => { MonoBehaviourUtil.Instance.StartCoroutine(FetchLobbiesCoroutine()); });
+
+        _waitingRoomPanel = new WaitingRoomPanel(
+            _backgroundGroup,
+            new Vector2(InitialX, currentY),
+            new Vector2(ContentWidth, 280f)
+        );
+        _waitingRoomPanel.SetOnInvite(() => {
+                if (!SteamManager.IsInitialized || _waitingRoomLobbyId == default) {
+                    ShowFeedback(Color.red, "Cannot invite: no Steam lobby is open.");
+                    return;
+                }
+
+                // Steam's own invite dialog, so the host never has to go looking for the overlay themselves
+                SteamFriends.ActivateGameOverlayInviteDialog(_waitingRoomLobbyId);
+            }
+        );
+        _waitingRoomPanel.SetOnStart(() => {
+                // Put away rather than torn down, because backing out of the save menu has to come back here: the
+                // game is still hosted and the teammate is still connected at that point
+                SuspendWaitingRoom();
+                HostSaveSelectionRequested?.Invoke();
+            }
+        );
+        _waitingRoomPanel.SetOnLeave(() => {
+                HideWaitingRoom();
+                _steamGroup?.SetActive(_activeTab == Tab.Steam);
+                ShowFeedback(Color.yellow, "Stopped waiting. Your game is closed again.");
+                StopWaitingRoomHostingEvent?.Invoke();
+            }
+        );
 
         var steamComponents = CreateSteamTab(currentY);
         _steamGroup = steamComponents.group;
@@ -1178,7 +1245,101 @@ internal class ConnectInterface {
         );
         _steamGroup?.SetActive(tab == Tab.Steam);
         _directIpGroup.SetActive(tab == Tab.DirectIp);
+
+        // A host that is still waiting gets their waiting room back rather than the buttons that would open a
+        // second lobby underneath it
+        _waitingRoomPanel.Hide();
+        if (_waitingRoomActive && tab == Tab.Steam) {
+            _steamGroup?.SetActive(false);
+            _waitingRoomPanel.Show();
+        }
+
         RefreshMatchmakingStatusFeedback();
+    }
+
+    /// <summary>
+    /// Shows the waiting room for a host that just opened their game, listing only themselves to begin with.
+    /// </summary>
+    /// <param name="lobbyId">The lobby that people are invited to.</param>
+    private void ShowWaitingRoom(CSteamID lobbyId) {
+        _waitingRoomActive = true;
+        _waitingRoomLobbyId = lobbyId;
+
+        _waitingRoomPlayers.Clear();
+        _waitingRoomPlayers.Add(_usernameInput.GetInput());
+
+        _steamGroup?.SetActive(false);
+        _steamLobbyConfigPanel?.Hide();
+        _steamLobbyBrowserPanel?.Hide();
+
+        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
+        _waitingRoomPanel.Show();
+    }
+
+    /// <summary>
+    /// Closes the waiting room for good, for when the host gives up, loses the connection, or their save loads.
+    /// </summary>
+    private void HideWaitingRoom() {
+        _waitingRoomActive = false;
+        _waitingRoomLobbyId = default;
+        _waitingRoomPlayers.Clear();
+        _waitingRoomPanel.Hide();
+    }
+
+    /// <summary>
+    /// Takes the waiting room off the screen while the save menu is open, keeping who is in so that coming back
+    /// shows the same room rather than an empty one.
+    /// </summary>
+    private void SuspendWaitingRoom() {
+        _waitingRoomPanel.Hide();
+    }
+
+    /// <summary>
+    /// The host closed the save menu without choosing, so they go back to waiting. Their game stayed open the whole
+    /// time and their teammate is still connected, so there is a room to go back to.
+    /// </summary>
+    public void OnHostSaveSelectionClosed() {
+        if (!_waitingRoomActive) {
+            return;
+        }
+
+        _steamGroup?.SetActive(false);
+        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
+        _waitingRoomPanel.Show();
+    }
+
+    /// <summary>
+    /// The host chose a save and the game is loading it, so there is nothing left to wait for.
+    /// </summary>
+    public void OnHostSaveLoaded() {
+        if (_waitingRoomActive) {
+            HideWaitingRoom();
+        }
+    }
+
+    /// <summary>
+    /// Adds a player that joined to the waiting room, if one is up.
+    /// </summary>
+    /// <param name="username">The name of the player that joined.</param>
+    public void OnPlayerJoined(string username) {
+        if (!_waitingRoomActive || _waitingRoomPlayers.Contains(username)) {
+            return;
+        }
+
+        _waitingRoomPlayers.Add(username);
+        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
+    }
+
+    /// <summary>
+    /// Takes a player that left back out of the waiting room, if one is up.
+    /// </summary>
+    /// <param name="username">The name of the player that left.</param>
+    public void OnPlayerLeft(string username) {
+        if (!_waitingRoomActive || !_waitingRoomPlayers.Remove(username)) {
+            return;
+        }
+
+        _waitingRoomPanel.SetPlayers(_waitingRoomPlayers, hosting: true);
     }
 
     /// <summary>
@@ -1403,8 +1564,12 @@ internal class ConnectInterface {
             _pendingHostedSteamLobbyId = steamLobbyId.m_SteamID.ToString();
             _pendingHostedSteamLobbyIsPublic = isPublic;
 
-            ShowFeedback(Color.yellow, "Steam lobby created. Starting host...");
-            StartHostButtonPressed?.Invoke("0.0.0.0", 0, username, TransportType.SteamRelay, null);
+            // Hosting starts here, but the save is not chosen until the waiting room says everyone is in. Going
+            // straight into the save selection was what made the old flow so strange: the game loaded before anyone
+            // could join, and there was nowhere obvious to invite them from.
+            ShowFeedback(Color.yellow, "Steam lobby created. Opening your game...");
+            StartHostWithoutSavePressed?.Invoke("0.0.0.0", 0, username, TransportType.SteamRelay, null);
+            ShowWaitingRoom(steamLobbyId);
         }
     }
 
@@ -1802,6 +1967,12 @@ internal class ConnectInterface {
     /// Resets the connection UI to allow reconnection.
     /// </summary>
     public void OnClientDisconnect() {
+        // The waiting room belongs to a game that is open; without a connection there is nothing left to wait in
+        if (_waitingRoomActive) {
+            HideWaitingRoom();
+            _steamGroup?.SetActive(_activeTab == Tab.Steam);
+        }
+
         ResetConnectionButtons();
     }
 
