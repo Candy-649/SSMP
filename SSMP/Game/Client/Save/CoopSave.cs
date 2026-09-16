@@ -629,6 +629,7 @@ internal partial class CoopSave {
 
         var wasChecked = _checkedWith == id;
         _checkedWith = null;
+        ResetWishConfirm();
         ResetCheck();
         if (wasChecked) {
             // The play time that both players played together is kept for the next check

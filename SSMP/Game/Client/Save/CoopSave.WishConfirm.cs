@@ -182,6 +182,17 @@ internal partial class CoopSave {
     private bool _heroHeldForConfirm;
 
     /// <summary>
+    /// What keeps the hero from getting hurt while they are stopped to answer about the partner.
+    /// </summary>
+    private static readonly object ConfirmInvulnerability = new();
+
+    /// <summary>
+    /// The control version when the hero was stopped. The game counts every time anyone takes control, so a version
+    /// that still matches is what says the hero is ours to give back rather than somebody else's to finish with.
+    /// </summary>
+    private int _heroControlVersion;
+
+    /// <summary>
     /// Hooks the answer of every yes/no prompt of the game, and the end of one. They all go through the two methods of
     /// the class they share, so the prompts that need both players are picked out here rather than hooked one type at
     /// a time.
@@ -214,7 +225,7 @@ internal partial class CoopSave {
                     // other reason to leave the state ends the prompt, and the answer then has nothing to run on: the
                     // FSM has moved on, and sending the event now would fire it at whatever it is doing instead.
                     if (_wishConfirm is { } held && ReferenceEquals(held.Action, self)) {
-                        CancelHeldConfirm("The dialogue ended before your teammate answered.", false);
+                        CancelHeldConfirm("The dialogue ended before your teammate answered.", HeldEnd.Silence);
                     }
 
                     if (ReferenceEquals(_openPrompt, self)) {
@@ -249,6 +260,14 @@ internal partial class CoopSave {
         CoopSaveUpdate? ask = null;
         var what = "";
         try {
+            // Half the guards of a hold are reflection: clearing the side the box remembers, and telling its answer
+            // apart from a later one. Without them a hold is worse than no hold at all, because a box that is closed
+            // rather than answered would pay for something nobody agreed to. So the press is simply let through.
+            if (!CanGuardAHold()) {
+                orig(self);
+                return;
+            }
+
             // The box this mod opened to ask about the partner is answered by the player, never held again
             if (_wishConfirm == null && _partnerConfirm == null && _everChecked && _checkedWith is { } partnerId) {
                 ask = GetConfirmAsk(GetLivePrompt(), self, out what);
@@ -287,7 +306,7 @@ internal partial class CoopSave {
     private void OnPromptSelectNo(Action<YesNoBox> orig, YesNoBox self) {
         try {
             if (_wishConfirm is { } held && ReferenceEquals(held.Box, self)) {
-                CancelHeldConfirm("You took it back.", false);
+                CancelHeldConfirm("You took it back.", HeldEnd.LeaveAlone);
             }
         } catch (Exception e) {
             LogWishTalkError(e);
@@ -323,8 +342,41 @@ internal partial class CoopSave {
     /// </summary>
     private CoopSaveUpdate? GetConfirmAsk(YesNoAction? action, YesNoBox box, out string what) {
         what = "";
-        var wish = action == null ? null : GetWishConfirmAsk(action, ref what);
-        return wish ?? GetBoxItemConfirm(box, ref what);
+
+        // Both kinds of box are their own single instance and can be open at the same time, so a prompt is only taken
+        // for the one on screen when the box is the kind that prompt opens
+        if (action != null && IsWishPrompt(action, box)) {
+            var wish = GetWishConfirmAsk(action, ref what);
+            if (wish == null) {
+                // Falling through to the items would accept the wish without asking anybody, silently
+                Logger.Warn("A prompt about a wish could not be read, so the partner was not asked about it");
+                Chat("This wish could not be shared with your teammate, so it was left to you.");
+            }
+
+            return wish;
+        }
+
+        return GetBoxItemConfirm(box, action != null, ref what);
+    }
+
+    /// <summary>
+    /// Whether a prompt is about a wish and the box on screen is the one it opens.
+    /// </summary>
+    private static bool IsWishPrompt(YesNoAction action, YesNoBox box) {
+        return action switch {
+            QuestYesNo or QuestYesNoV2 => box is QuestYesNoBox,
+            HutongGames.PlayMaker.Actions.QuestCompleteYesNo => box is DialogueYesNoBox,
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Whether every part of the game that a hold leans on can be read. A hold with these missing would keep none of
+    /// the promises it makes.
+    /// </summary>
+    private static bool CanGuardAHold() {
+        return PromptBoxType != null && BoxCurrentYesField != null && BoxCurrentNoField != null &&
+               BoxSelectedStateField != null;
     }
 
     /// <summary>
@@ -344,9 +396,16 @@ internal partial class CoopSave {
     /// What to ask about a box that is about to take items, or null unless it takes one that the story takes from both
     /// players. Everything else is paid out of the copy of whoever answered, so it stays theirs.
     /// </summary>
-    private CoopSaveUpdate? GetBoxItemConfirm(YesNoBox box, ref string what) {
+    private CoopSaveUpdate? GetBoxItemConfirm(YesNoBox box, bool hasPrompt, ref string what) {
         if (BoxRequiredItemsField?.GetValue(box) is not List<SavedItem> items ||
             BoxRequiredAmountsField?.GetValue(box) is not List<int> amounts) {
+            return null;
+        }
+
+        // The box lists what it asks for whether or not it takes any of it, because the same lists grey out its yes.
+        // A prompt of an action that only wants the player to hold something takes nothing and needs nobody. One with
+        // no action behind it is a different matter: those take afterwards, through the machine or desk that asked.
+        if (hasPrompt && BoxTakesWhatItLists(box) == false) {
             return null;
         }
 
@@ -381,6 +440,18 @@ internal partial class CoopSave {
         var update = CreateConfirm(kind);
         update.WishNames.Add(full.name);
         return update;
+    }
+
+    /// <summary>
+    /// Whether the box itself takes what it lists, or null when that can't be told. The box wraps the yes it is given
+    /// in a closure that carries the flag deciding it, and that closure is the answer the box now holds.
+    /// </summary>
+    private static bool? BoxTakesWhatItLists(YesNoBox box) {
+        if (BoxCurrentYesField?.GetValue(box) is not Delegate yes || yes.Target is not { } closure) {
+            return null;
+        }
+
+        return closure.GetType().GetField("consumeCurrency", InstanceFlags)?.GetValue(closure) as bool?;
     }
 
     /// <summary>
@@ -455,7 +526,7 @@ internal partial class CoopSave {
             // The box is the only one the game has, so another prompt may have taken it over while the partner was
             // deciding. Pressing it now would pay for whatever it shows instead, which nobody agreed to.
             if (held.Box == null || !Equals(BoxCurrentYesField?.GetValue(held.Box), held.Callback)) {
-                ClearBoxAnswers(held.Box);
+                // Whatever the box holds now belongs to a prompt of its own, which must keep both its answers
                 Chat($"{GetPartnerName()} agreed, but the prompt was gone by then, so nothing was taken.");
                 return;
             }
@@ -510,9 +581,8 @@ internal partial class CoopSave {
     /// Gives up on a held answer, telling the partner that the prompt is over so that their box closes.
     /// </summary>
     /// <param name="message">What to tell the local player, or null to tell them nothing.</param>
-    /// <param name="answerNo">Whether the prompt is still being asked and can be answered no. A prompt that already
-    /// ended must not be answered, because its FSM has moved on and the event would fire at whatever it does now.</param>
-    private void CancelHeldConfirm(string? message, bool answerNo) {
+    /// <param name="end">How to leave the box behind.</param>
+    private void CancelHeldConfirm(string? message, HeldEnd end) {
         if (_wishConfirm is not { } held) {
             return;
         }
@@ -531,15 +601,44 @@ internal partial class CoopSave {
             });
         }
 
-        if (answerNo) {
-            DeclineHeld(held);
-            return;
-        }
+        switch (end) {
+            case HeldEnd.PressNo:
+                DeclineHeld(held);
+                return;
+            case HeldEnd.LeaveAlone:
+                // The player is answering the box themselves. The side it remembers was cleared when the hold began,
+                // so closing it runs its no, which is the whole point: taking either answer away would leave the
+                // dialogue with nothing to end it.
+                return;
+            case HeldEnd.Silence:
+            default:
+                // The prompt is gone and its FSM has moved on, so the box must answer nobody when something closes it
+                if (held.Box != null && Equals(BoxCurrentYesField?.GetValue(held.Box), held.Callback)) {
+                    ClearBoxAnswers(held.Box);
+                }
 
-        // Nothing is going to answer this box now, so it must not answer itself when something closes it
-        if (held.Box != null && Equals(BoxCurrentYesField?.GetValue(held.Box), held.Callback)) {
-            ClearBoxAnswers(held.Box);
+                return;
         }
+    }
+
+    /// <summary>
+    /// How a hold that is given up leaves the box behind.
+    /// </summary>
+    private enum HeldEnd {
+        /// <summary>
+        /// The prompt is still being asked, so it is answered no, which pays nothing.
+        /// </summary>
+        PressNo,
+
+        /// <summary>
+        /// The player is answering the box themselves, so it is left exactly as it is.
+        /// </summary>
+        LeaveAlone,
+
+        /// <summary>
+        /// The prompt is over, so the box is left with no answer to run.
+        /// </summary>
+        Silence
     }
 
     /// <summary>
@@ -580,7 +679,14 @@ internal partial class CoopSave {
     /// was just filled in.
     /// </summary>
     private bool CanShowConfirmNow() {
-        return IsAnyDialogueRunning() != true && !IsBoxBusy(GetPromptBox(true)) && !IsBoxBusy(GetPromptBox(false));
+        if (IsAnyDialogueRunning() == true || IsBoxBusy(GetPromptBox(true)) || IsBoxBusy(GetPromptBox(false))) {
+            return false;
+        }
+
+        // Answering stops the hero for as long as it takes, so it waits for a moment when standing still is safe
+        // rather than freezing them in the middle of something. A two-player save shares what a death costs.
+        var hero = HeroController.instance;
+        return hero != null && !hero.controlReqlinquished && !IsHeroTakenByGame(hero);
     }
 
     /// <summary>
@@ -744,7 +850,9 @@ internal partial class CoopSave {
             return;
         }
 
+        _heroControlVersion = HeroController.ControlVersion + 1;
         hero.RelinquishControl();
+        hero.AddInvulnerabilitySource(ConfirmInvulnerability);
         _heroHeldForConfirm = true;
     }
 
@@ -758,7 +866,16 @@ internal partial class CoopSave {
 
         _heroHeldForConfirm = false;
         var hero = HeroController.instance;
-        if (hero != null && hero.controlReqlinquished && PlayerData.instance?.atBench != true) {
+        if (hero == null) {
+            return;
+        }
+
+        hero.RemoveInvulnerabilitySource(ConfirmInvulnerability);
+
+        // Anyone taking control counts up the version, so one that still matches says the hero is ours to give back.
+        // A changed one means something else holds them now and will finish with them in its own time.
+        if (HeroController.ControlVersion == _heroControlVersion && hero.controlReqlinquished &&
+            !IsHeroTakenByGame(hero) && PlayerData.instance?.atBench != true) {
             hero.RegainControl();
         }
     }
@@ -793,7 +910,7 @@ internal partial class CoopSave {
     private void UpdateWishConfirm() {
         var now = Time.unscaledTime;
         if (_wishConfirm is { } held && now - held.Started > WishConfirmTimeout) {
-            CancelHeldConfirm($"{GetPartnerName()} didn't answer, so nothing was taken.", true);
+            CancelHeldConfirm($"{GetPartnerName()} didn't answer, so nothing was taken.", HeldEnd.PressNo);
         }
 
         if (_partnerConfirm is { } shown && now - shown.Started > WishConfirmTimeout) {
@@ -829,9 +946,10 @@ internal partial class CoopSave {
             CloseConfirmBox(shown.IsWish);
         }
 
-        // Usually the dialogue that asked is gone with the scene, but a pairing that ends leaves it standing and
-        // nothing would tick it out of its wait, so the answer is let go of rather than left hanging
-        CancelHeldConfirm(null, false);
+        // A pairing that ends leaves the dialogue standing with nothing to tick it out of its wait. While the box
+        // is still the one that was held, pressing no really ends it; once the prompt is gone, silencing it is all
+        // that is left, and taking its answers away while it is still open would strand the dialogue for good.
+        CancelHeldConfirm(null, GetLivePrompt() != null ? HeldEnd.PressNo : HeldEnd.Silence);
     }
 
     /// <summary>
