@@ -183,6 +183,12 @@ internal class Death : AnimationEffect {
 
         Cocoons[playerObject] = cocoon;
 
+        // Renamed so that nothing can mistake it for the cocoon of this game. It is spawned without a parent, which
+        // makes it a root object of the scene sitting next to the real one under the same name, and hits that the
+        // partner sends over are found again by walking names from the root - so an identical name would let a hit
+        // meant for one of them land on the other, or shift which one is counted as first.
+        cocoon.name = "SSMP Partner Cocoon";
+
         // This is something to look at, not something to open. Its "Break" FSM hands the currency over by calling
         // HeroController.CocoonBroken, which pays out and then clears the money, the scene and the marker that this
         // game's save keeps for its own cocoon - so letting anyone hit a copy would wipe out their real one. The same
