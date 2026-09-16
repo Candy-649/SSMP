@@ -45,10 +45,11 @@ internal partial class CoopSave {
     private readonly HashSet<ulong> _appliedStoryItems = [];
 
     /// <summary>
-    /// The gifts of a first talk that both saves settled already, as the scene and the path of the character
-    /// and the change of the item. A character hands its items over once for both players: the partner isn't
-    /// sent a gift that they gave themselves, and a character doesn't hand the local player an item that the
-    /// partner already got from it.
+    /// The gifts of a first talk that the local save has settled, as the scene and the path of the character
+    /// and the change of the item. A character hands each of its items over once for both players: it isn't sent
+    /// to the partner twice, the character doesn't hand the local player one that the partner already got from
+    /// it, and a gift of the partner is not taken once the local save has it. An entry is kept even when the
+    /// partner could not be told, because it still says that the local save has that gift.
     /// </summary>
     private readonly HashSet<string> _settledTalkGifts = new(StringComparer.Ordinal);
 
@@ -85,15 +86,23 @@ internal partial class CoopSave {
             new Action<Action<BasicNPC>, BasicNPC>((orig, self) => {
                 _npcTalkStateField ??= typeof(BasicNPC).GetField("talkState", InstanceFlags);
                 var firstTalk = _npcTalkStateField?.GetValue(self) is 0;
+                List<SavedItem>? dropped = null;
                 if (firstTalk) {
                     try {
-                        DropGiftsThePartnerGot(self);
+                        dropped = DropGiftsThePartnerGot(self);
                     } catch (Exception e) {
                         Logger.Error($"Could not drop what the partner already got from a character:\n{e}");
                     }
                 }
 
-                orig(self);
+                try {
+                    orig(self);
+                } finally {
+                    // The character keeps what it was set up with; only this one handing over skipped them
+                    if (dropped is { Count: > 0 } && self.GiveOnFirstTalk is { } all) {
+                        all.AddRange(dropped);
+                    }
+                }
 
                 try {
                     if (firstTalk) {
@@ -143,16 +152,23 @@ internal partial class CoopSave {
     /// Takes the items that the partner already got from a character out of what it hands over on a first
     /// talk, so that the local player doesn't end up with a second copy of what their save already got.
     /// </summary>
-    private void DropGiftsThePartnerGot(BasicNPC npc) {
+    /// <returns>What was taken out, to be put back once the character handed the rest over.</returns>
+    private List<SavedItem>? DropGiftsThePartnerGot(BasicNPC npc) {
         if (_settledTalkGifts.Count == 0 || npc.GiveOnFirstTalk is not { } items) {
-            return;
+            return null;
         }
 
         var character = GetTalkGiftKey(npc);
-        items.RemoveAll(item =>
+        var dropped = items.FindAll(item =>
             item != null && IsStoryItem(item, out _) &&
             _settledTalkGifts.Contains(character + "\n" + GetItemChangeKey(GetItemChange, item))
         );
+
+        foreach (var item in dropped) {
+            items.Remove(item);
+        }
+
+        return dropped;
     }
 
     /// <summary>
@@ -197,6 +213,7 @@ internal partial class CoopSave {
             return;
         }
 
+        var wasApplyingStoryItem = _applyingStoryItem;
         var wasApplyingPartnerTalk = _applyingPartnerTalk;
         _applyingStoryItem = true;
         _applyingPartnerTalk = true;
@@ -205,14 +222,24 @@ internal partial class CoopSave {
                 var change = update.Records[i];
                 var parts = change.Split('\n');
 
+                var gift = parts[0] == GetItemChange && update.ObjectPath.Length > 0
+                    ? update.Scene + "\n" + update.ObjectPath + "\n" + change
+                    : null;
+
+                // A character hands each of its items over once for both players, so a gift that the local save
+                // already has from it, by talking to it or by getting it from the partner, is not taken again.
+                // Both players walking through the same first talk inside one round trip send one each.
+                if (gift != null && _settledTalkGifts.Contains(gift)) {
+                    continue;
+                }
+
                 if (!ApplyTalkItem(change, update.Amounts[i])) {
                     continue;
                 }
 
-                // The character that handed this over hands it to the local player only once, but only now that
-                // the local save really got it: a gift that never arrived has to stay there to be picked up later
-                if (parts[0] == GetItemChange && update.ObjectPath.Length > 0) {
-                    _settledTalkGifts.Add(update.Scene + "\n" + update.ObjectPath + "\n" + change);
+                // Written down once the local save really got it: one that never arrived stays to be picked up
+                if (gift != null) {
+                    _settledTalkGifts.Add(gift);
                 }
 
                 var name = parts.Length == 3 ? parts[2] : "an item";
@@ -224,7 +251,7 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Error($"Could not apply an item of the story of the partner:\n{e}");
         } finally {
-            _applyingStoryItem = false;
+            _applyingStoryItem = wasApplyingStoryItem;
             _applyingPartnerTalk = wasApplyingPartnerTalk;
         }
     }

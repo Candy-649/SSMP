@@ -1163,6 +1163,7 @@ internal partial class CoopSave {
 
         interaction.Refunded = true;
         var returned = 0;
+        var shared = 0;
         foreach (var (type, amount) in interaction.Currency) {
             CurrencyManager.AddCurrency(amount, type, true);
             returned++;
@@ -1172,7 +1173,12 @@ internal partial class CoopSave {
             // An item of the story whose removal is shared is taken from both players anyway, so giving it
             // back here would undo that, and which of the two arrived last would decide whether the local
             // player keeps it
-            if (item == null || (IsStoryItem(item, out var story) && story.ShareRemoval)) {
+            if (item == null) {
+                continue;
+            }
+
+            if (IsStoryItem(item, out var story) && story.ShareRemoval) {
+                shared++;
                 continue;
             }
 
@@ -1181,6 +1187,11 @@ internal partial class CoopSave {
         }
 
         if (returned == 0) {
+            // What the story takes for good is gone for both players, so there is nothing to give back
+            if (shared > 0) {
+                Chat($"{GetPartnerName()} {how}, and what you gave is used up for both of you.");
+            }
+
             return;
         }
 
