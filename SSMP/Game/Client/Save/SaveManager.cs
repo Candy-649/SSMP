@@ -385,6 +385,14 @@ internal class SaveManager {
     /// <param name="deltaEncodeFunc">Function to encode the delta value of the variable of the type is applicable.
     /// </param>
     private void CheckSendSaveUpdate(string name, Func<byte[]> encodeFunc, Func<byte[]>? deltaEncodeFunc = null) {
+        // Two-player saves decide for themselves what the players share: story flags travel, while pickups, money
+        // and upgrades stay with each player. This mirrors raw player data instead, field by field, and would
+        // undo those rules. It was only ever quiet because nothing registered a handler for it, and turning on
+        // full synchronisation for the enemies would have switched this on with it.
+        return;
+
+        // ReSharper disable once HeuristicUnreachableCode
+#pragma warning disable CS0162 // Unreachable code detected
         // If we are not connected or the 'permadeathMode' is 2, meaning we have broken/lost Steel Soul
         if (!_netClient.IsConnected || PlayerData.instance.GetInt("permadeathMode") == 2) {
             return;
@@ -426,6 +434,7 @@ internal class SaveManager {
             index,
             toUseEncodeFunc.Invoke()
         );
+#pragma warning restore CS0162
     }
 
     /// <summary>

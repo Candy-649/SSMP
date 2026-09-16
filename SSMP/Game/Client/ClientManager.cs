@@ -1492,11 +1492,8 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="saveUpdate">The SaveUpdate packet data.</param>
     private void OnSaveUpdate(SaveUpdate saveUpdate) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
-        _saveManager.UpdateSaveWithData(saveUpdate);
+        // Left unapplied on purpose: this copies raw player data between the players field by field, which goes
+        // against what a two-player save shares deliberately (see CoopSave). Nothing sends these any more either.
     }
 
     /// <summary>
