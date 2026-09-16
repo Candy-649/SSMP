@@ -45,6 +45,12 @@ internal class BenchCoop {
     private const string SitNoTweenStateName = "Start Rest NoTween";
 
     /// <summary>
+    /// State of the bench FSM that the tween path goes to next, which sets a position outright. That put the hero
+    /// back in the middle of the seat right after the tween had taken them to their side.
+    /// </summary>
+    private const string SitSettleStateName = "Fake?";
+
+    /// <summary>
     /// How far, in units, each player sits from the middle of the seat while other players are connected. Hornet's
     /// sitting sprites are drawn on a canvas about 3.2 units wide. Her trimmed needolin sitting sprites are 1.5 to 2.3
     /// units wide, which gives her real width, so two Hornets whose centres are 2 units apart barely touch. The bench
@@ -118,6 +124,11 @@ internal class BenchCoop {
     /// </summary>
     private Hook? _vector3AddEnterHook;
 
+    /// <summary>
+    /// Hook for keeping the hero on their side when the bench settles them onto the seat after the tween.
+    /// </summary>
+    private Hook? _setPositionEnterHook;
+
     public BenchCoop(NetClient netClient, Dictionary<ushort, ClientPlayerData> playerData, SaveManager saveManager) {
         _netClient = netClient;
         _playerData = playerData;
@@ -150,6 +161,10 @@ internal class BenchCoop {
             typeof(Vector3Add),
             new Action<Action<Vector3Add>, Vector3Add>(OnVector3AddEnter)
         );
+        _setPositionEnterHook = CreateOnEnterHook(
+            typeof(SetPosition),
+            new Action<Action<SetPosition>, SetPosition>(OnSetPositionEnter)
+        );
 
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
     }
@@ -169,6 +184,9 @@ internal class BenchCoop {
 
         _vector3AddEnterHook?.Dispose();
         _vector3AddEnterHook = null;
+
+        _setPositionEnterHook?.Dispose();
+        _setPositionEnterHook = null;
 
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
         _wakeUpPositions.Clear();
@@ -315,6 +333,45 @@ internal class BenchCoop {
         }
 
         MoveHero(hero, GetSeatOffset());
+    }
+
+    /// <summary>
+    /// Keeps the hero on their side of the bench when the FSM settles them onto the seat in the state right after the
+    /// tween. That state sets a position outright, which undid the offset the tween had just taken them to, so both
+    /// players ended up in the middle of the seat after briefly moving to their side.
+    ///
+    /// Only a position being given to the hero is moved. The same action runs on all kinds of objects, and the target
+    /// is resolved the way the game itself resolves it rather than assumed to be the hero: if this state turns out to
+    /// position the bench rather than the hero, this does nothing at all instead of moving the wrong thing.
+    /// </summary>
+    private void OnSetPositionEnter(Action<SetPosition> orig, SetPosition self) {
+        var hero = HeroController.instance;
+        if (!ShouldUseSides() || hero == null || !IsBenchState(self, SitSettleStateName) ||
+            self.Fsm?.GetOwnerDefaultTarget(self.gameObject) != hero.gameObject) {
+            orig(self);
+            return;
+        }
+
+        // Whichever of the two carries the position. The action lets x override the vector's x, so both are moved
+        // when both are set, and both are put back afterwards so the FSM's own variables stay untouched.
+        var originalVector = self.vector;
+        var originalX = self.x;
+        var offset = GetSeatOffset();
+
+        if (originalVector is { IsNone: false }) {
+            self.vector = new FsmVector3 { Value = originalVector.Value + new Vector3(offset, 0f, 0f) };
+        }
+
+        if (originalX is { IsNone: false }) {
+            self.x = new FsmFloat { Value = originalX.Value + offset };
+        }
+
+        try {
+            orig(self);
+        } finally {
+            self.vector = originalVector;
+            self.x = originalX;
+        }
     }
 
     /// <summary>
