@@ -796,6 +796,8 @@ internal partial class CoopSave {
                 }
             })
         );
+
+        RegisterWishConfirmHook();
     }
 
     /// <summary>
@@ -867,6 +869,8 @@ internal partial class CoopSave {
                 _partnerTalk = null;
             }
 
+            UpdateWishConfirm();
+
             if (partner != null && _checkedWith == partner.Id) {
                 UpdateWishProgress(partner);
             }
@@ -912,6 +916,7 @@ internal partial class CoopSave {
         _partnerTalk = null;
         _wishActions.Clear();
         _talkStates.Clear();
+        ResetWishConfirm();
     }
 
     /// <summary>
@@ -924,6 +929,7 @@ internal partial class CoopSave {
         _talkStates.Clear();
         _pendingWishTurnIns.Clear();
         _nextMissingCopyNotices.Clear();
+        ResetWishConfirm();
         ResetWishProgress();
     }
 

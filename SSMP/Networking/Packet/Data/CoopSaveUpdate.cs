@@ -413,5 +413,11 @@ internal enum CoopSaveUpdateKind : byte {
     /// story interaction used one up, so the game of the other player gives or takes it too. Picking one up in the
     /// world is not sent: every pickup stays one copy per player.
     /// </summary>
-    StoryItem
+    StoryItem,
+
+    /// <summary>
+    /// The sender answered yes to a prompt that changes what both players share, so the other player is asked
+    /// to agree to it, answers one they were asked about, or hears that the prompt is over.
+    /// </summary>
+    WishConfirm
 }

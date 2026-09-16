@@ -751,6 +751,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.StoryItem:
                 OnStoryItem(player, update);
                 break;
+            case CoopSaveUpdateKind.WishConfirm:
+                OnWishConfirm(player, update);
+                break;
         }
     }
 
