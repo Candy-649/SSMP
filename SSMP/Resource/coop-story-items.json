@@ -1,0 +1,358 @@
+{
+  "items": [
+    {
+      "type": "CollectableRelic",
+      "name": "Ancient Egg Abyss Middle",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Ant Trapper Item",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Architect Key",
+      "kind": "key",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Beastfly Remains",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Belltown House Key",
+      "kind": "key",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemQuestDisplay",
+      "name": "Blue Goop Jar",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Bone Record Bone_East_14",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Bone Record Greymoor_flooded_corridor",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Bone Record Understore_Map_Room",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Bone Record Wisp Top",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Broken SilkShot",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Broodmother Remains",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Clover Heart",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Coral Chunk",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Coral Heart",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Coral Ingredient",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Craw Summons",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Crawbell",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Crowman Memento",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Dock Demo Key",
+      "kind": "key",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Dock Key",
+      "kind": "key",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Farsight",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Flower Heart",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Grey Memento",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Hunter Heart",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Hunter Memento",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Librarian Melody Cylinder",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Materium",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Memento Garmond",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Memento Seth",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Memento Surface",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Pickled Roach Egg",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Psalm Cylinder Grindle",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Psalm Cylinder Hang",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Psalm Cylinder Librarian",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Psalm Cylinder Library Roof",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Psalm Cylinder Ward",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Seal Chit Aspid_01",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Seal Chit City Merchant",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Seal Chit Silk Siphon",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Seal Chit Ward Corpse",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Simple Key",
+      "kind": "key",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Skull King Fragment",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "PlayerDataCollectable",
+      "name": "Slab Key A",
+      "kind": "boolKey",
+      "shareRemoval": false
+    },
+    {
+      "type": "PlayerDataCollectable",
+      "name": "Slab Key B",
+      "kind": "boolKey",
+      "shareRemoval": false
+    },
+    {
+      "type": "PlayerDataCollectable",
+      "name": "Slab Key C",
+      "kind": "boolKey",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Snare Soul Swamp Bug",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemMemento",
+      "name": "Sprintmaster Memento",
+      "kind": "memento",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Vintage Nectar",
+      "kind": "wish",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Ward Boss Key",
+      "kind": "key",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Ward Key",
+      "kind": "key",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Weaver Record Conductor",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Weaver Record Sprint_Challenge",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Weaver Record Weave_08",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Weaver Totem Bonetown_upper_room",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Weaver Totem Slab_Bottom",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableRelic",
+      "name": "Weaver Totem Witch",
+      "kind": "relic",
+      "shareRemoval": false
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "White Flower",
+      "kind": "plot",
+      "shareRemoval": true
+    },
+    {
+      "type": "CollectableItemBasic",
+      "name": "Wood Witch Item",
+      "kind": "plot",
+      "shareRemoval": true
+    }
+  ]
+}

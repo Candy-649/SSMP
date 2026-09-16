@@ -118,3 +118,48 @@ internal class CoopStoryFlags {
     [JsonProperty("Enums")]
     public List<string> Enums { get; set; } = [];
 }
+
+/// <summary>
+/// The items that hold the story of the world, made by tools/coop_story_items.py from the data of the game. Picking
+/// one up is not shared: every pickup in the world stays one copy per player, like all other pickups. The list only
+/// says which items a character giving one in dialogue hands to both players, because the partner has no pickup of it
+/// anywhere, and which of them a one-off story interaction takes from both players once it uses one up.
+/// </summary>
+internal class CoopStoryItems {
+    /// <summary>
+    /// The items of the story.
+    /// </summary>
+    [JsonProperty("items")]
+    public List<CoopStoryItem> Items { get; set; } = [];
+}
+
+/// <summary>
+/// One item that holds the story of the world.
+/// </summary>
+internal class CoopStoryItem {
+    /// <summary>
+    /// The name of the type that the item is, which tells the items of different kinds with the same name apart.
+    /// </summary>
+    [JsonProperty("type")]
+    public string Type { get; set; } = "";
+
+    /// <summary>
+    /// The name of the item asset.
+    /// </summary>
+    [JsonProperty("name")]
+    public string Name { get; set; } = "";
+
+    /// <summary>
+    /// What the item is: a lock key, a key that only sets a flag, an item that a one-off story interaction uses up, a
+    /// memento, a relic, or the fixed target of a wish.
+    /// </summary>
+    [JsonProperty("kind")]
+    public string Kind { get; set; } = "";
+
+    /// <summary>
+    /// Whether a one-off story interaction that uses the item up takes it from both players, because the world shows
+    /// the result to both of them. Keys that shops also sell stay with the player who used theirs.
+    /// </summary>
+    [JsonProperty("shareRemoval")]
+    public bool ShareRemoval { get; set; }
+}

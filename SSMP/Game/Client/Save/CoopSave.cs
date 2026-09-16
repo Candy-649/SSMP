@@ -338,6 +338,7 @@ internal partial class CoopSave {
         RegisterWishBoardHooks();
         RegisterDeliveryHooks();
         RegisterLiftHooks();
+        RegisterStoryItemHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -543,6 +544,7 @@ internal partial class CoopSave {
         ResetWishTalk();
         ResetLifts();
         ResetDeliveries();
+        ResetStoryItems();
     }
 
     /// <summary>
@@ -745,6 +747,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.DeliverySummon:
                 OnDeliverySummon(player, update);
+                break;
+            case CoopSaveUpdateKind.StoryItem:
+                OnStoryItem(player, update);
                 break;
         }
     }

@@ -396,5 +396,12 @@ internal enum CoopSaveUpdateKind : byte {
     /// <summary>
     /// The sender turned in a delivery at a character, so the game of the other player brings them there.
     /// </summary>
-    DeliverySummon
+    DeliverySummon,
+
+    /// <summary>
+    /// A character gave the sender an item of the story in dialogue that the other player doesn't read, or a one-off
+    /// story interaction used one up, so the game of the other player gives or takes it too. Picking one up in the
+    /// world is not sent: every pickup stays one copy per player.
+    /// </summary>
+    StoryItem
 }

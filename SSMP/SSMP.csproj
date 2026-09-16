@@ -52,6 +52,7 @@
         <EmbeddedResource Include="Resource\music-data.json"/>
         <EmbeddedResource Include="Resource\coop-world-items.json"/>
         <EmbeddedResource Include="Resource\coop-story-flags.json"/>
+        <EmbeddedResource Include="Resource\coop-story-items.json"/>
     </ItemGroup>
 
     <ItemGroup>

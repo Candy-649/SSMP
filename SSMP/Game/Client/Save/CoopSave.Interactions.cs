@@ -690,6 +690,7 @@ internal partial class CoopSave {
 
         _promptInteraction?.Items.Add((self, amount));
         RecordTalkTake(self, null, GetItemChangeKey(TakeItemChange, self), amount);
+        NoticeStoryRemoval(self, amount);
     }
 
     /// <summary>
