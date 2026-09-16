@@ -797,9 +797,21 @@ internal partial class CoopSave {
     private const string PairKeyName = "J";
 
     /// <summary>
+    /// The name of the key that leaves a two-player save waiting for a partner who is not coming, for the line that
+    /// offers it. The default binding, with the same caveat as <see cref="PairKeyName"/>.
+    /// </summary>
+    private const string LeaveKeyName = "K";
+
+    /// <summary>
     /// Whether the key that agrees to a two-player save was already down last frame.
     /// </summary>
     private bool _pairKeyHeld;
+
+    /// <summary>
+    /// Whether the key that leaves a waiting two-player save was already down last frame, so that holding it asks
+    /// once rather than every frame.
+    /// </summary>
+    private bool _leaveKeyHeld;
 
     /// <summary>
     /// Whether showing the line that offers a two-player save failed, so it is only logged once.
@@ -819,12 +831,32 @@ internal partial class CoopSave {
             var heldMarker = GetMarker(global::GameManager.instance.profileID);
             prompt.Show(
                 heldMarker != null
-                    ? $"Waiting for {heldMarker.PartnerName}. Type /coopsave off to play this save alone"
+                    ? $"Waiting for {heldMarker.PartnerName}. Press {LeaveKeyName} to play this save alone"
                     : "Waiting for your teammate"
             );
             _pairKeyHeld = false;
+
+            // A key rather than the chat command, and the leave itself rather than a call to that command. A held
+            // player cannot open the chat to type it, and with the partner connected the command only asks them to
+            // agree and leaves the player held exactly where they were - so the line above promised a way out that
+            // did not exist. Only this side's pairing goes, like when the partner is not on the server at all.
+            var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
+            if (leaveHeld && !_leaveKeyHeld) {
+                RemoveLocalPairing(global::GameManager.instance.profileID);
+                ReleaseHold(HeroController.instance);
+                Chat(
+                    heldMarker != null
+                        ? "Your save is a normal save again. It stays a two-player save for " +
+                          $"{heldMarker.PartnerName} until they leave it as well."
+                        : "Your save is a normal save again."
+                );
+            }
+
+            _leaveKeyHeld = leaveHeld;
             return;
         }
+
+        _leaveKeyHeld = false;
 
         // A two-player save needs both players on the server, and a save loaded to pair
         if (!_netClient.IsConnected || !IsInGame() || _playerData.Count != 1) {
@@ -1124,6 +1156,7 @@ internal partial class CoopSave {
         _receivedPairRequest = null;
         _checkedWith = null;
         ResetCheck();
+        _helloKeyMismatchTold = false;
 
         Logger.Info($"Paired save slot {slot} with the save of {player.Username}");
         Chat(

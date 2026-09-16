@@ -138,9 +138,27 @@ internal partial class CoopSave {
     private int _onlyLocalDefeats;
 
     /// <summary>
+    /// Whether the players have already been told that their pairings point at different saves. The two games keep
+    /// exchanging hellos for as long as a check cannot finish, so without this a mismatch would say the same thing
+    /// again on every single one of them.
+    /// </summary>
+    private bool _helloKeyMismatchTold;
+
+    /// <summary>
+    /// How long a hello goes unanswered before it is sent again.
+    /// </summary>
+    private static readonly TimeSpan HelloRetryDelay = TimeSpan.FromSeconds(2);
+
+    /// <summary>
+    /// When the last hello went out, so that one which the partner never answered is sent again.
+    /// </summary>
+    private DateTime _lastHelloUtc;
+
+    /// <summary>
     /// Forgets the current check. The largest key stays, so the next check gets a larger one.
     /// </summary>
     private void ResetCheck() {
+        _lastHelloUtc = default;
         _checkPartnerId = null;
         _checkKey = 0;
         _partnerHello = false;
@@ -177,6 +195,19 @@ internal partial class CoopSave {
 
         if (_checkKey == 0) {
             _checkKey = NewCheckKey();
+
+            // Printed once per check, because a check that never finishes used to leave nothing behind to say which
+            // of the three keys disagreed - which is what made two players wait with nothing to go on
+            Logger.Info(
+                $"Starting a check with {partner.Username}: this save has the key '{LocalKey}', the pairing is " +
+                $"addressed to '{marker.PartnerKey}', and the server says they are '{partner.SaveKey}'"
+            );
+
+            SendHello(partner, marker, HelloStart);
+        } else if (!_partnerHello && DateTime.UtcNow - _lastHelloUtc >= HelloRetryDelay) {
+            // The first hello is sent the moment the partner is there, which can be before their game has loaded the
+            // save it belongs to. Their game drops a hello that early without a trace, and this used to be sent
+            // exactly once, so a single early or lost hello left both players waiting for ever.
             SendHello(partner, marker, HelloStart);
         }
 
@@ -208,6 +239,8 @@ internal partial class CoopSave {
     }
 
     private void SendHello(ClientPlayerData partner, CoopSaveMarker marker, ushort kind) {
+        _lastHelloUtc = DateTime.UtcNow;
+
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.Hello,
@@ -227,11 +260,35 @@ internal partial class CoopSave {
         }
 
         if (update.PartnerKey != LocalKey) {
+            // Only the first one. Hellos are sent again until they are answered, so a mismatch that stays would
+            // otherwise say this, and start a fresh check, every couple of seconds for as long as both games run.
+            if (_helloKeyMismatchTold) {
+                return;
+            }
+
+            _helloKeyMismatchTold = true;
+
+            // Logged for both kinds. An answer turned down here used to say nothing at all, anywhere, so both players
+            // sat waiting with neither log showing that a hello had been thrown away - exactly the state two players
+            // ended up in and could not diagnose.
+            Logger.Warn(
+                $"Turned down a hello from {player.Username}: it is addressed to the save key " +
+                $"'{update.PartnerKey}', but this save has the key '{LocalKey}'."
+            );
+
             if (update.PartCount == HelloStart) {
                 PartnerLeft(player.Id, null);
+
                 Chat(
                     $"{player.Username} loaded a save that isn't paired with yours. Your two-player save waits for " +
                     "them to load the paired save, or to pair again with /coopsave."
+                );
+            } else {
+                // The partner is on the paired save and answered for it, so telling them to load a different one
+                // would be wrong: the two games disagree about the key itself, which only pairing again settles
+                Chat(
+                    $"Your game turned down an answer from {player.Username}, because it is addressed to a different " +
+                    "save key than this save has. Both of you have to pair again with /coopsave."
                 );
             }
 
@@ -310,6 +367,7 @@ internal partial class CoopSave {
     /// </summary>
     private void FinishCheck(CoopSaveMarker marker, ClientPlayerData partner) {
         _checkedWith = partner.Id;
+        _helloKeyMismatchTold = false;
         _everChecked = true;
         ResetWorldChanges();
         AddKnownWorldItems();
