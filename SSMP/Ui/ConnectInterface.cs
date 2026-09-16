@@ -1404,7 +1404,7 @@ internal class ConnectInterface {
             _pendingHostedSteamLobbyIsPublic = isPublic;
 
             ShowFeedback(Color.yellow, "Steam lobby created. Starting host...");
-            StartHostButtonPressed?.Invoke("0.0.0.0", 0, username, TransportType.Steam, null);
+            StartHostButtonPressed?.Invoke("0.0.0.0", 0, username, TransportType.SteamRelay, null);
         }
     }
 
@@ -1747,8 +1747,8 @@ internal class ConnectInterface {
             return;
         }
 
-        // Connect using Steam ID as address with Steam transport
-        ConnectButtonPressed?.Invoke(hostId.ToString(), 0, username, TransportType.Steam, null);
+        // Connect using Steam ID as address, over the relay network
+        ConnectButtonPressed?.Invoke(hostId.ToString(), 0, username, TransportType.SteamRelay, null);
     }
 
     /// <summary>

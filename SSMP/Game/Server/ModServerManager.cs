@@ -7,6 +7,7 @@ using SSMP.Networking.Server;
 using SSMP.Networking.Transport.Common;
 using SSMP.Networking.Transport.HolePunch;
 using SSMP.Networking.Transport.SteamP2P;
+using SSMP.Networking.Transport.SteamRelay;
 using SSMP.Networking.Transport.UDP;
 using SSMP.Ui;
 
@@ -97,6 +98,7 @@ internal class ModServerManager : ServerManager {
             TransportType.Udp => new UdpEncryptedTransportServer(),
             TransportType.Steam => new SteamEncryptedTransportServer(),
             TransportType.HolePunch => CreateHolePunchServer(),
+            TransportType.SteamRelay => new SteamRelayTransportServer(),
             _ => throw new ArgumentOutOfRangeException(nameof(transportType), transportType, null)
         };
 

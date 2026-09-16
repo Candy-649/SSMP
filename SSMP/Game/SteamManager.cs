@@ -137,6 +137,11 @@ public static class SteamManager {
             IsInitialized = true;
             Logger.Info($"Steam: Initialized successfully (SteamID: {SteamUser.GetSteamID()})");
 
+            // Starts working out how to reach Steam's relay network now rather than when someone first tries to
+            // connect over it, which otherwise pays for it in the first seconds of a game. Costs nothing if no one
+            // uses the relay transport.
+            SteamNetworkingUtils.InitRelayNetworkAccess();
+
             // Register callbacks for joining via overlay/friends
             Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
             Callback<GameRichPresenceJoinRequested_t>.Create(OnGameRichPresenceJoinRequested);

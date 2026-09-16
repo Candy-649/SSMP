@@ -23,6 +23,7 @@ using SSMP.Networking.Packet.Update;
 using SSMP.Networking.Transport.Common;
 using SSMP.Networking.Transport.HolePunch;
 using SSMP.Networking.Transport.SteamP2P;
+using SSMP.Networking.Transport.SteamRelay;
 using SSMP.Networking.Transport.UDP;
 using SSMP.Ui;
 using SSMP.Util;
@@ -579,12 +580,12 @@ internal class ClientManager : IClientManager {
         // game connecting to somewhere nobody asked for.
         _lastFallbackAddress = transportType == TransportType.HolePunch ? fallbackAddress : null;
         // If we are hosting and using Steam, we need to connect to our own Steam ID
-        if (_autoConnect && transportType == TransportType.Steam) {
+        if (_autoConnect && transportType is TransportType.Steam or TransportType.SteamRelay) {
             address = SteamUser.GetSteamID().ToString();
         }
 
         // Log connection details based on transport type
-        if (transportType == TransportType.Steam) {
+        if (transportType is TransportType.Steam or TransportType.SteamRelay) {
             Logger.Info($"Connecting client via Steam to {address} as {username}");
         } else {
             var fallbackString = fallbackAddress == null ? "" : $" (Fallback: {fallbackAddress})";
@@ -606,6 +607,7 @@ internal class ClientManager : IClientManager {
             TransportType.Udp => new UdpEncryptedTransport(),
             TransportType.Steam => new SteamEncryptedTransport(),
             TransportType.HolePunch => new HolePunchEncryptedTransport(),
+            TransportType.SteamRelay => new SteamRelayTransport(),
             _ => throw new ArgumentOutOfRangeException(
                 nameof(transportType), transportType, "Unsupported transport type"
             )

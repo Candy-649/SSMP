@@ -17,5 +17,12 @@ public enum TransportType {
     /// <summary>
     /// UDP Hole Punch transport (NAT traversal).
     /// </summary>
-    HolePunch
+    HolePunch,
+
+    /// <summary>
+    /// Steam transport that carries the game over Valve's relay network instead of trying to reach the other player
+    /// directly. Slower in the best case, but it holds up between players far apart from each other, where a direct
+    /// route can be established and still carry nothing.
+    /// </summary>
+    SteamRelay
 }
