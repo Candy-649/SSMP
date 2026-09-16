@@ -36,6 +36,10 @@ internal class ChatInputComponent : InputComponent {
         Resources.FontManager.UIFontRegular,
         fontSize
     ) {
+        // The chat sits against the left edge, so it has to be anchored to that edge rather than to a fraction of the
+        // screen's width, which slides inwards and off on a screen narrower than 16:9
+        AnchorToLeftEdge();
+
         Text.alignment = TextAnchor.MiddleLeft;
 
         InputField.characterLimit = ChatMessage.MaxMessageLength;

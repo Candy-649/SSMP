@@ -67,7 +67,8 @@ internal class ChatMessage {
             ChatBox.MessageSize,
             text,
             UiManager.ChatFontSize,
-            alignment: TextAnchor.LowerLeft
+            alignment: TextAnchor.LowerLeft,
+            anchorLeft: true
         );
         _textComponent.SetActive(false);
     }

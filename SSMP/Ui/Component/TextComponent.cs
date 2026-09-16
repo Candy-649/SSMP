@@ -18,8 +18,20 @@ internal class TextComponent : Component, ITextComponent {
         int fontSize,
         FontStyle fontStyle = FontStyle.Normal,
         TextAnchor alignment = TextAnchor.MiddleCenter,
-        bool wrap = false
-    ) : this(componentGroup, position, size, new Vector2(0.5f, 0.5f), text, fontSize, fontStyle, alignment, wrap) {
+        bool wrap = false,
+        bool anchorLeft = false
+    ) : this(
+        componentGroup,
+        position,
+        size,
+        new Vector2(0.5f, 0.5f),
+        text,
+        fontSize,
+        fontStyle,
+        alignment,
+        wrap,
+        anchorLeft
+    ) {
     }
 
     public TextComponent(
@@ -31,11 +43,18 @@ internal class TextComponent : Component, ITextComponent {
         int fontSize,
         FontStyle fontStyle = FontStyle.Normal,
         TextAnchor alignment = TextAnchor.MiddleCenter,
-        bool wrap = false
+        bool wrap = false,
+        bool anchorLeft = false
     ) : base(componentGroup, position, size) {
         _textObject = CreateTextObject(text, fontSize, fontStyle, alignment, pivot, wrap);
         AddSizeFitter();
         AddOutline();
+
+        // Anything sitting against the left edge has to be anchored to it, or it slides off a screen that is
+        // narrower than 16:9
+        if (anchorLeft) {
+            AnchorToLeftEdge();
+        }
     }
 
     /// <inheritdoc />
