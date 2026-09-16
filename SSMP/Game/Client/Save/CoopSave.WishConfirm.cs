@@ -257,17 +257,18 @@ internal partial class CoopSave {
             return;
         }
 
+        // Half the guards of a hold are reflection: clearing the side the box remembers, and telling its answer
+        // apart from a later one. Without them a hold is worse than no hold at all, because a box that is closed
+        // rather than answered would pay for something nobody agreed to. So the press is simply let through. This
+        // stays outside the catch below, which would otherwise swallow a throw here and press the button a second time.
+        if (!CanGuardAHold()) {
+            orig(self);
+            return;
+        }
+
         CoopSaveUpdate? ask = null;
         var what = "";
         try {
-            // Half the guards of a hold are reflection: clearing the side the box remembers, and telling its answer
-            // apart from a later one. Without them a hold is worse than no hold at all, because a box that is closed
-            // rather than answered would pay for something nobody agreed to. So the press is simply let through.
-            if (!CanGuardAHold()) {
-                orig(self);
-                return;
-            }
-
             // The box this mod opened to ask about the partner is answered by the player, never held again
             if (_wishConfirm == null && _partnerConfirm == null && _everChecked && _checkedWith is { } partnerId) {
                 ask = GetConfirmAsk(GetLivePrompt(), self, out what);
@@ -397,6 +398,13 @@ internal partial class CoopSave {
     /// players. Everything else is paid out of the copy of whoever answered, so it stays theirs.
     /// </summary>
     private CoopSaveUpdate? GetBoxItemConfirm(YesNoBox box, bool hasPrompt, ref string what) {
+        // The two boxes are built on the same class as each other rather than one on the other, and only this one
+        // lists items. Reading them off the other throws, and that throw would be swallowed into letting a wish
+        // through without asking.
+        if (box is not DialogueYesNoBox) {
+            return null;
+        }
+
         if (BoxRequiredItemsField?.GetValue(box) is not List<SavedItem> items ||
             BoxRequiredAmountsField?.GetValue(box) is not List<int> amounts) {
             return null;
@@ -938,18 +946,31 @@ internal partial class CoopSave {
     /// about one.
     /// </summary>
     private void ResetWishConfirm() {
+        // Settled before anything below is cleared, or the clearing decides it by accident. It asks the box rather
+        // than whichever prompt is on screen, which need not be the held one: while the box still holds the answer
+        // that was held, the dialogue is still standing there to be ended, and pressing no really ends it. Silencing
+        // a box that is still open takes away the only way any answer ever reaches its FSM, stranding it for good.
+        var end = _wishConfirm is { } waiting && waiting.Box != null &&
+                  Equals(BoxCurrentYesField?.GetValue(waiting.Box), waiting.Callback)
+            ? HeldEnd.PressNo
+            : HeldEnd.Silence;
+
         _pendingConfirmAsk = null;
         _openPrompt = null;
         if (_partnerConfirm is { } shown) {
             _partnerConfirm = null;
             LetHeroGoAfterConfirm();
+
+            // Answered while there is still somebody to answer, so that whoever asked is not left waiting out their
+            // timeout for a question that is already off the screen here
+            if (_checkedWith is { } askerId) {
+                SendConfirmAnswer(askerId, shown.Key, false);
+            }
+
             CloseConfirmBox(shown.IsWish);
         }
 
-        // A pairing that ends leaves the dialogue standing with nothing to tick it out of its wait. While the box
-        // is still the one that was held, pressing no really ends it; once the prompt is gone, silencing it is all
-        // that is left, and taking its answers away while it is still open would strand the dialogue for good.
-        CancelHeldConfirm(null, GetLivePrompt() != null ? HeldEnd.PressNo : HeldEnd.Silence);
+        CancelHeldConfirm(null, end);
     }
 
     /// <summary>

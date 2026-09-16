@@ -628,8 +628,11 @@ internal partial class CoopSave {
         }
 
         var wasChecked = _checkedWith == id;
-        _checkedWith = null;
+
+        // Before the partner is forgotten: a question of theirs still on screen is answered back to them, and a
+        // button that waited on them tells them it is over. Afterwards there is nobody left to address either to.
         ResetWishConfirm();
+        _checkedWith = null;
         ResetCheck();
         if (wasChecked) {
             // The play time that both players played together is kept for the next check
