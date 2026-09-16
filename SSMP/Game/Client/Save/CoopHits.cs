@@ -411,6 +411,16 @@ internal class CoopHits {
         }
 
         var isRemote = RemoteAttackComponent.IsRemoteAttack(damager.gameObject);
+
+        // A cocoon that a death leaves behind belongs to the player who died and to their save alone: breaking one
+        // hands that player back the money it holds and clears what their save keeps of it. Both games spawn one
+        // under the same name, so a hit that the partner sends over is found here as this game's own cocoon, and a
+        // copy of their attack swung beside it reaches it just as well. Neither may touch it. Hits of this game's own
+        // player still land, and stay here.
+        if (IsHeroCocoon(responder)) {
+            return isRemote ? IHitResponder.Response.None : responder.Hit(hit);
+        }
+
         if (responder is Component component && IsReplayed(component)) {
             if (isRemote) {
                 return IHitResponder.Response.None;
@@ -670,6 +680,39 @@ internal class CoopHits {
         source.AddComponent<RemoteAttackComponent>();
         Object.DontDestroyOnLoad(source);
         return source;
+    }
+
+    /// <summary>
+    /// The name of the cocoon that a death leaves behind, taken once from the prefab that the game spawns it from,
+    /// or null while it has not been found yet.
+    /// </summary>
+    private static string? _heroCocoonName;
+
+    /// <summary>
+    /// Whether the object that was hit is a cocoon left behind by a death. The name comes from the prefab the game
+    /// spawns rather than a name written out here, so it holds in every language the game runs in.
+    /// </summary>
+    /// <param name="responder">The object that is hit.</param>
+    /// <returns>true if the object is a cocoon left behind by a death; otherwise false.</returns>
+    private static bool IsHeroCocoon(IHitResponder responder) {
+        if (responder is not Component component) {
+            return false;
+        }
+
+        if (_heroCocoonName == null) {
+            var gameManager = global::GameManager.instance;
+            var sceneManager = gameManager == null ? null : gameManager.GetSceneManager();
+            var prefab = sceneManager == null
+                ? null
+                : sceneManager.GetComponent<CustomSceneManager>()?.heroCorpsePrefab;
+            if (prefab == null) {
+                return false;
+            }
+
+            _heroCocoonName = prefab.name;
+        }
+
+        return component.gameObject.name.StartsWith(_heroCocoonName, StringComparison.Ordinal);
     }
 
     /// <summary>
