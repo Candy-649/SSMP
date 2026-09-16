@@ -293,7 +293,7 @@ internal partial class CoopSave {
 
         // Nothing has been taken: the box pays only once the real button runs, which is what the partner agreeing does
         _wishConfirm = new HeldConfirm(
-            ask.Key, GetLivePrompt(), self, BoxCurrentYesField?.GetValue(self), () => orig(self), what
+            ask.TargetId, ask.Key, GetLivePrompt(), self, BoxCurrentYesField?.GetValue(self), () => orig(self), what
         );
         Send(ask);
         Chat($"{GetPartnerName()} has to agree to this too. Answer no to take it back.");
@@ -608,14 +608,14 @@ internal partial class CoopSave {
             Chat(message);
         }
 
-        if (_checkedWith is { } partnerId) {
-            Send(new CoopSaveUpdate {
-                TargetId = partnerId,
-                Kind = CoopSaveUpdateKind.WishConfirm,
-                PartCount = WishConfirmGone,
-                Key = held.Key
-            });
-        }
+        // Told to whoever was asked, rather than to whoever the pairing names by now. A partner reloading their save
+        // clears the pairing without ending this, and the notice would then be dropped and leave their box waiting.
+        Send(new CoopSaveUpdate {
+            TargetId = held.PartnerId,
+            Kind = CoopSaveUpdateKind.WishConfirm,
+            PartCount = WishConfirmGone,
+            Key = held.Key
+        });
 
         switch (end) {
             case HeldEnd.PressNo:
@@ -965,7 +965,13 @@ internal partial class CoopSave {
             ? HeldEnd.PressNo
             : HeldEnd.Silence;
 
-        _pendingConfirmAsk = null;
+        // A question that never got its turn is answered as well, or the one who asked sits out their whole timeout
+        // waiting on something that was dropped here without a word
+        if (_pendingConfirmAsk is { } queued) {
+            _pendingConfirmAsk = null;
+            SendConfirmAnswer(queued.PartnerId, queued.Update.Key, false);
+        }
+
         _openPrompt = null;
         if (_partnerConfirm is { } shown) {
             _partnerConfirm = null;
@@ -985,8 +991,10 @@ internal partial class CoopSave {
     /// </summary>
     private sealed class HeldConfirm {
         public HeldConfirm(
-            ulong key, YesNoAction? action, YesNoBox box, object? callback, Action proceed, string what
+            ushort partnerId, ulong key, YesNoAction? action, YesNoBox box, object? callback, Action proceed,
+            string what
         ) {
+            PartnerId = partnerId;
             Key = key;
             Action = action;
             Box = box;
@@ -994,6 +1002,12 @@ internal partial class CoopSave {
             Proceed = proceed;
             What = what;
         }
+
+        /// <summary>
+        /// Who was asked, and who is told when this ends. Kept here rather than read from the pairing, which can be
+        /// cleared while the button still waits - and the telling would then go nowhere.
+        /// </summary>
+        public ushort PartnerId { get; }
 
         /// <summary>
         /// The answer the box held when it was asked about, which says whether it still shows the same prompt.
