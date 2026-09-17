@@ -2164,6 +2164,16 @@ internal class ConnectInterface {
                 _feedbackHideCoroutine,
                 out var newCoroutine
             )) {
+            // Remembered here rather than in each caller. The name was only ever saved alongside an address and a
+            // port, which is written by the two paths that take one - so a player who opens a lobby, joins one, or
+            // picks from the lobby list was asked for their name again every single time, and it was never their
+            // forgetfulness. Every one of those paths comes through here. Only written when it actually changed, so
+            // that pressing a button does not rewrite the settings file each time.
+            if (_modSettings.Username != username) {
+                _modSettings.Username = username;
+                _modSettings.Save();
+            }
+
             return true;
         }
 
