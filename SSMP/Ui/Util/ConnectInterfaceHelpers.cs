@@ -247,7 +247,7 @@ internal static class ConnectInterfaceHelpers {
             newCoroutine = SetFeedbackText(
                 feedbackText,
                 Color.red,
-                "Failed to connect:\nYou must enter a username",
+                Lang.Pick("Failed to connect:\nYou must enter a username", "连接失败：\n必须填写昵称"),
                 currentCoroutine
             );
             return false;
@@ -257,7 +257,7 @@ internal static class ConnectInterfaceHelpers {
             newCoroutine = SetFeedbackText(
                 feedbackText,
                 Color.red,
-                "Failed to connect:\nUsername is too long",
+                Lang.Pick("Failed to connect:\nUsername is too long", "连接失败：\n昵称太长了"),
                 currentCoroutine
             );
             return false;

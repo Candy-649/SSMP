@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
+using SSMP.Util;
 
 namespace SSMP.Ui.Component;
 
@@ -87,7 +88,7 @@ internal class WaitingRoomPanel : IComponent {
         CreateLabel(
             GameObject.transform,
             "Header",
-            "WAITING ROOM",
+            Lang.Pick("WAITING ROOM", "等待房间"),
             new Vector2(0f, 1f),
             new Vector2(1f, 1f),
             new Vector2(0f, HeaderHeight),
@@ -130,7 +131,7 @@ internal class WaitingRoomPanel : IComponent {
         _inviteButton = CreateButton(
             buttonArea.transform,
             "InviteButton",
-            "INVITE FRIEND",
+            Lang.Pick("INVITE FRIEND", "邀请好友"),
             new Vector2(0.02f, 0.12f),
             new Vector2(0.35f, 0.88f),
             new Color(0.2f, 0.35f, 0.55f, 1f),
@@ -142,7 +143,7 @@ internal class WaitingRoomPanel : IComponent {
         CreateButton(
             buttonArea.transform,
             "LeaveButton",
-            "LEAVE",
+            Lang.Pick("LEAVE", "离开"),
             new Vector2(0.37f, 0.12f),
             new Vector2(0.62f, 0.88f),
             new Color(0.15f, 0.15f, 0.18f, 1f),
@@ -156,7 +157,7 @@ internal class WaitingRoomPanel : IComponent {
         CreateButton(
             buttonArea.transform,
             "ReadyButton",
-            "I'M READY",
+            Lang.Pick("I'M READY", "我准备好了"),
             new Vector2(0.64f, 0.12f),
             new Vector2(0.98f, 0.88f),
             ReadyOff,
@@ -279,7 +280,9 @@ internal class WaitingRoomPanel : IComponent {
 
         _inviteButton.SetActive(hosting);
         _readyImage.color = localReady ? ReadyOn : ReadyOff;
-        _readyText.text = localReady ? "CANCEL READY" : "I'M READY";
+        _readyText.text = localReady
+            ? Lang.Pick("CANCEL READY", "取消准备")
+            : Lang.Pick("I'M READY", "我准备好了");
 
         var alone = members.Count < 2;
         var waitingOn = 0;

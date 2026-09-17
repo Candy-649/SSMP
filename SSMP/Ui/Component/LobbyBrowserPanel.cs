@@ -4,6 +4,7 @@ using SSMP.Networking.Matchmaking.Protocol;
 using UnityEngine;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
+using SSMP.Util;
 
 namespace SSMP.Ui.Component;
 
@@ -71,7 +72,7 @@ internal class LobbyBrowserPanel : IComponent {
         headerRect.anchoredPosition = Vector2.zero;
         headerRect.sizeDelta = new Vector2(0f, HeaderHeight);
         var headerText = header.AddComponent<Text>();
-        headerText.text = "PUBLIC LOBBIES";
+        headerText.text = Lang.Pick("PUBLIC LOBBIES", "公开房间");
         headerText.font = Resources.FontManager.UIFontRegular;
         headerText.fontSize = 18;
         headerText.alignment = TextAnchor.MiddleCenter;
@@ -123,7 +124,10 @@ internal class LobbyBrowserPanel : IComponent {
         emptyRect.pivot = new Vector2(0.5f, 0.5f);
         emptyRect.sizeDelta = new Vector2(size.x - 60f, 80f);
         _emptyText = emptyObj.AddComponent<Text>();
-        _emptyText.text = "No public lobbies found.\nClick Refresh to check again.";
+        _emptyText.text = Lang.Pick(
+            "No public lobbies found.\nClick Refresh to check again.",
+            "没有找到公开房间。\n点刷新再看一次。"
+        );
         _emptyText.font = Resources.FontManager.UIFontRegular;
         _emptyText.fontSize = 16;
         _emptyText.alignment = TextAnchor.MiddleCenter;
@@ -141,12 +145,12 @@ internal class LobbyBrowserPanel : IComponent {
         buttonArea.transform.SetParent(GameObject.transform, false);
 
         // Back button (left)
-        CreateButton(buttonArea.transform, "BackButton", "← BACK", 
+        CreateButton(buttonArea.transform, "BackButton", Lang.Pick("← BACK", "← 返回"),
             new Vector2(0.02f, 0.12f), new Vector2(0.48f, 0.88f),
             new Color(0.15f, 0.15f, 0.18f, 1f), () => _onBack?.Invoke());
 
         // Refresh button (right)
-        CreateButton(buttonArea.transform, "RefreshButton", "↻ REFRESH",
+        CreateButton(buttonArea.transform, "RefreshButton", Lang.Pick("↻ REFRESH", "↻ 刷新"),
             new Vector2(0.52f, 0.12f), new Vector2(0.98f, 0.88f),
             new Color(0.15f, 0.4f, 0.25f, 1f), () => _onRefresh?.Invoke());
 

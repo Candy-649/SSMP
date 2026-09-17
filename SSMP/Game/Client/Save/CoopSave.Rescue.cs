@@ -387,7 +387,7 @@ internal partial class CoopSave {
                 }
             }
 
-            Chat("Your teammate pulled you back up.");
+            Chat(Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。"));
             Logger.Info("Pulled back up after a death instead of going to the bench");
 
             return true;
@@ -440,10 +440,18 @@ internal partial class CoopSave {
 
                 _uiManager.CoopPrompt.Show(
                     rescue.Hits > 0
-                        ? $"{partner.Username} is breaking you out ({rescue.Hits}/{RescueHits}). " +
-                          $"Press {LeaveKeyName} to go to your bench instead"
-                        : $"Waiting for {partner.Username} to break you out. " +
-                          $"Press {LeaveKeyName} to go to your bench instead"
+                        ? Lang.Pick(
+                            $"{partner.Username} is breaking you out ({rescue.Hits}/{RescueHits}). " +
+                            $"Press {LeaveKeyName} to go to your bench instead",
+                            $"{partner.Username} 正在打你的茧（{rescue.Hits}/{RescueHits}）。" +
+                            $"按 {LeaveKeyName} 直接回长椅"
+                        )
+                        : Lang.Pick(
+                            $"Waiting for {partner.Username} to break you out. " +
+                            $"Press {LeaveKeyName} to go to your bench instead",
+                            $"等 {partner.Username} 来打破你的茧。" +
+                            $"按 {LeaveKeyName} 直接回长椅"
+                        )
                 );
 
                 var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
@@ -491,8 +499,14 @@ internal partial class CoopSave {
 
         Chat(
             SceneUtil.GetCurrentSceneName() == update.Scene
-                ? $"{player.Username} died. Hit their cocoon {RescueHits} times to break them out."
-                : $"{player.Username} died. Their cocoon is where they fell, and {RescueHits} hits break them out."
+                ? Lang.Pick(
+                    $"{player.Username} died. Hit their cocoon {RescueHits} times to break them out.",
+                    $"{player.Username} 死了。攻击他们的茧 {RescueHits} 次就能把人救出来。"
+                )
+                : Lang.Pick(
+                    $"{player.Username} died. Their cocoon is where they fell, and {RescueHits} hits break them out.",
+                    $"{player.Username} 死了。茧就在他们倒下的地方，打 {RescueHits} 次能把人救出来。"
+                )
         );
 
         ShowPartnerCocoon();
@@ -590,7 +604,7 @@ internal partial class CoopSave {
 
         if (target.Hits >= RescueHits) {
             RemoveRescueTarget();
-            Chat($"You broke {partner.Username} out.");
+            Chat(Lang.Pick($"You broke {partner.Username} out.", $"你把 {partner.Username} 拉起来了。"));
         }
     }
 

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
+using SSMP.Util;
 
 namespace SSMP.Game.Client.Save;
 
@@ -265,16 +266,25 @@ internal partial class CoopSave {
 
             if (accepted > 0 || completed > 0) {
                 var what = accepted > 0 && completed > 0
-                    ? $"accepted {CountWishes(accepted)} and completed {CountWishes(completed)}"
+                    ? Lang.Pick(
+                        $"accepted {CountWishes(accepted)} and completed {CountWishes(completed)}",
+                        $"接了 {CountWishes(accepted)}，还完成了 {CountWishes(completed)}"
+                    )
                     : accepted > 0
-                        ? $"accepted {CountWishes(accepted)}"
-                        : $"completed {CountWishes(completed)}";
-                Chat($"{player.Username} {what}. Your wish log has the same now.");
+                        ? Lang.Pick($"accepted {CountWishes(accepted)}", $"接了 {CountWishes(accepted)}")
+                        : Lang.Pick($"completed {CountWishes(completed)}", $"完成了 {CountWishes(completed)}");
+                Chat(Lang.Pick(
+                    $"{player.Username} {what}. Your wish log has the same now.",
+                    $"{player.Username} {what}。你的愿望记录现在也一样了。"
+                ));
             }
 
             if (refused > 0) {
                 Chat(
-                    $"{player.Username} accepted a delivery whose item you don't carry, so it isn't accepted for you."
+                    Lang.Pick(
+                        $"{player.Username} accepted a delivery whose item you don't carry, so it isn't accepted for you.",
+                        $"{player.Username} 接了一个托运，但你身上没有那件东西，所以你这边没有接下。"
+                    )
                 );
             }
         } catch (Exception e) {
@@ -457,7 +467,8 @@ internal partial class CoopSave {
     /// <summary>
     /// "a wish" or the number of wishes, for messages.
     /// </summary>
-    private static string CountWishes(int count) => count == 1 ? "a wish" : $"{count} wishes";
+    private static string CountWishes(int count) =>
+        Lang.Pick(count == 1 ? "a wish" : $"{count} wishes", $"{count} 个愿望");
 
     /// <summary>
     /// Logs the first error of syncing the wish log.

@@ -280,15 +280,23 @@ internal partial class CoopSave {
                 PartnerLeft(player.Id, null);
 
                 Chat(
-                    $"{player.Username} loaded a save that isn't paired with yours. Your two-player save waits for " +
-                    "them to load the paired save, or to pair again with /coopsave."
+                    Lang.Pick(
+                        $"{player.Username} loaded a save that isn't paired with yours. Your two-player save waits for " +
+                        "them to load the paired save, or to pair again with /coopsave.",
+                        $"{player.Username} 进的存档和你的没有配对。你们的双人存档会一直等对方进入已配对的那个存档，" +
+                        "或者用 /coopsave 重新配对。"
+                    )
                 );
             } else {
                 // The partner is on the paired save and answered for it, so telling them to load a different one
                 // would be wrong: the two games disagree about the key itself, which only pairing again settles
                 Chat(
-                    $"Your game turned down an answer from {player.Username}, because it is addressed to a different " +
-                    "save key than this save has. Both of you have to pair again with /coopsave."
+                    Lang.Pick(
+                        $"Your game turned down an answer from {player.Username}, because it is addressed to a different " +
+                        "save key than this save has. Both of you have to pair again with /coopsave.",
+                        $"你的游戏拒绝了 {player.Username} 的一条回应，因为它指向的存档标识和当前存档的对不上。" +
+                        "你们两个都要用 /coopsave 重新配对。"
+                    )
                 );
             }
 
@@ -359,7 +367,7 @@ internal partial class CoopSave {
             return;
         }
 
-        PartnerLeft(player.Id, "left your two-player save");
+        PartnerLeft(player.Id, Lang.Pick("left your two-player save", "退出了你们的双人存档"));
     }
 
     /// <summary>

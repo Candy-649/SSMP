@@ -2,6 +2,7 @@ using SSMP.Ui.Resources;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using SSMP.Util;
 
 namespace SSMP.Ui.Component;
 

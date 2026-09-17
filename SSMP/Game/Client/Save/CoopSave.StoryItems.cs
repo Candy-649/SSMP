@@ -244,8 +244,14 @@ internal partial class CoopSave {
 
                 var name = parts.Length == 3 ? parts[2] : "an item";
                 Chat(parts[0] == TakeItemChange
-                    ? $"{GetPartnerName()} used up {name}, so yours is gone too."
-                    : $"{GetPartnerName()} was given {name}, so you got one too.");
+                    ? Lang.Pick(
+                        $"{GetPartnerName()} used up {name}, so yours is gone too.",
+                        $"{GetPartnerName()} 用掉了 {name}，所以你那份也没了。"
+                    )
+                    : Lang.Pick(
+                        $"{GetPartnerName()} was given {name}, so you got one too.",
+                        $"{GetPartnerName()} 拿到了 {name}，所以你也拿到了一份。"
+                    ));
                 Logger.Info($"Applied the story item '{change.Replace('\n', ' ')}' of the partner");
             }
         } catch (Exception e) {

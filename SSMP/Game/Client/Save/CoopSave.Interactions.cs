@@ -15,6 +15,7 @@ namespace SSMP.Game.Client.Save;
 
 // SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
 using Fsm = HutongGames.PlayMaker.Fsm;
+using SSMP.Util;
 
 /// <summary>
 /// Mechanisms that players use with the interact button in a checked two-player save: toll machines, doors that take an
@@ -568,7 +569,7 @@ internal partial class CoopSave {
         }
 
         if (afterPartner) {
-            Refund(interaction, "had already paid for it");
+            Refund(interaction, Lang.Pick("had already paid for it", "已经付过了"));
         }
     }
 
@@ -904,7 +905,10 @@ internal partial class CoopSave {
         }
 
         var partnerName = GetPartnerName();
-        Chat($"{partnerName} already paid for this, so it opens for you too.");
+        Chat(Lang.Pick(
+            $"{partnerName} already paid for this, so it opens for you too.",
+            $"{partnerName} 已经付过了，所以这边对你也打开了。"
+        ));
         Logger.Info($"Closed the prompt of mechanism '{fsm.Name}', which {partnerName} used first");
         return true;
     }
@@ -1147,7 +1151,7 @@ internal partial class CoopSave {
     /// </summary>
     private void RefundIfBothPaid(LocalInteraction interaction, ulong partnerKey) {
         if (interaction.Key > partnerKey) {
-            Refund(interaction, "paid for it at the same moment");
+            Refund(interaction, Lang.Pick("paid for it at the same moment", "和你同时付了"));
         }
     }
 
@@ -1189,13 +1193,19 @@ internal partial class CoopSave {
         if (returned == 0) {
             // What the story takes for good is gone for both players, so there is nothing to give back
             if (shared > 0) {
-                Chat($"{GetPartnerName()} {how}, and what you gave is used up for both of you.");
+                Chat(Lang.Pick(
+                    $"{GetPartnerName()} {how}, and what you gave is used up for both of you.",
+                    $"{GetPartnerName()}{how}，你交的东西两个人一起用掉了。"
+                ));
             }
 
             return;
         }
 
-        Chat($"{GetPartnerName()} {how}, so you got your payment back.");
+        Chat(Lang.Pick(
+            $"{GetPartnerName()} {how}, so you got your payment back.",
+            $"{GetPartnerName()}{how}，所以你付的东西退回来了。"
+        ));
         Logger.Info($"Gave back the payment for a mechanism that the partner {how}");
     }
 
@@ -1314,7 +1324,7 @@ internal partial class CoopSave {
             }
 
             if (afterPartner) {
-                Refund(interaction, "had already paid for it");
+                Refund(interaction, Lang.Pick("had already paid for it", "已经付过了"));
             }
         } catch (Exception e) {
             LogInteractionError(e);

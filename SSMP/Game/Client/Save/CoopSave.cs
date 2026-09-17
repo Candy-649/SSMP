@@ -483,10 +483,19 @@ internal partial class CoopSave {
             Logger.Info($"Two-player save waits for {marker.PartnerName}");
             Chat(
                 partner != null
-                    ? $"Waiting for {partner.Username} to load your two-player save."
+                    ? Lang.Pick(
+                        $"Waiting for {partner.Username} to load your two-player save.",
+                        $"正在等 {partner.Username} 进入你们的双人存档。"
+                    )
                     : atBench
-                        ? $"Your two-player save waits for {marker.PartnerName}. You can't get up until they are back."
-                        : $"Your two-player save waits for {marker.PartnerName}. You can't move until they are back."
+                        ? Lang.Pick(
+                            $"Your two-player save waits for {marker.PartnerName}. You can't get up until they are back.",
+                            $"你们的双人存档在等 {marker.PartnerName}。他们回来之前你起不来。"
+                        )
+                        : Lang.Pick(
+                            $"Your two-player save waits for {marker.PartnerName}. You can't move until they are back.",
+                            $"你们的双人存档在等 {marker.PartnerName}。他们回来之前你动不了。"
+                        )
             );
         }
 
@@ -622,7 +631,10 @@ internal partial class CoopSave {
         _checkedWith = null;
         ResetCheck();
         _highestCheckKey = 0;
-        Chat($"{player.Username} is here. Your two-player save continues once they have loaded theirs.");
+        Chat(Lang.Pick(
+            $"{player.Username} is here. Your two-player save continues once they have loaded theirs.",
+            $"{player.Username} 来了。等对方也进了自己的存档，你们的双人存档就能继续。"
+        ));
     }
 
     /// <summary>
@@ -632,7 +644,7 @@ internal partial class CoopSave {
         ForgetRequestsOf(id);
 
         if (_checkPartnerId == id || _checkedWith == id) {
-            PartnerLeft(id, "left");
+            PartnerLeft(id, Lang.Pick("left", "离开了"));
             _highestCheckKey = 0;
         }
     }
@@ -671,7 +683,10 @@ internal partial class CoopSave {
         }
 
         if (wasChecked && how != null && GetCurrentMarker() is { } marker) {
-            Chat($"{marker.PartnerName} {how}. Your two-player save waits for them at the next bench you sit on.");
+            Chat(Lang.Pick(
+                $"{marker.PartnerName} {how}. Your two-player save waits for them at the next bench you sit on.",
+                $"{marker.PartnerName} {how}。你们的双人存档会在你下次坐上长椅时等他们。"
+            ));
         }
     }
 
@@ -890,8 +905,11 @@ internal partial class CoopSave {
             var heldMarker = GetMarker(global::GameManager.instance.profileID);
             prompt.Show(
                 heldMarker != null
-                    ? $"Waiting for {heldMarker.PartnerName}. Press {LeaveKeyName} to play this save alone"
-                    : "Waiting for your teammate"
+                    ? Lang.Pick(
+                        $"Waiting for {heldMarker.PartnerName}. Press {LeaveKeyName} to play this save alone",
+                        $"正在等 {heldMarker.PartnerName}。按 {LeaveKeyName} 就一个人玩这个存档"
+                    )
+                    : Lang.Pick("Waiting for your teammate", "正在等你的队友")
             );
             _pairKeyHeld = false;
 
@@ -905,9 +923,13 @@ internal partial class CoopSave {
                 ReleaseHold(HeroController.instance);
                 Chat(
                     heldMarker != null
-                        ? "Your save is a normal save again. It stays a two-player save for " +
-                          $"{heldMarker.PartnerName} until they leave it as well."
-                        : "Your save is a normal save again."
+                        ? Lang.Pick(
+                            "Your save is a normal save again. It stays a two-player save for " +
+                            $"{heldMarker.PartnerName} until they leave it as well.",
+                            $"你的存档变回普通存档了。在 {heldMarker.PartnerName} 那边也退出之前，" +
+                            "它对对方来说仍然是双人存档。"
+                        )
+                        : Lang.Pick("Your save is a normal save again.", "你的存档变回普通存档了。")
                 );
             }
 
@@ -933,11 +955,20 @@ internal partial class CoopSave {
         }
 
         if (_sentPairRequest is { IsOpen: true } sent && sent.PlayerId == other.Id) {
-            prompt.Show($"Waiting for {other.Username} to press {PairKeyName} too");
+            prompt.Show(Lang.Pick(
+                $"Waiting for {other.Username} to press {PairKeyName} too",
+                $"等 {other.Username} 也按一下 {PairKeyName}"
+            ));
         } else if (_receivedPairRequest is { IsOpen: true } received && received.PlayerId == other.Id) {
-            prompt.Show($"{other.Username} wants a two-player save. Press {PairKeyName} to agree");
+            prompt.Show(Lang.Pick(
+                $"{other.Username} wants a two-player save. Press {PairKeyName} to agree",
+                $"{other.Username} 想和你组双人存档。按 {PairKeyName} 同意"
+            ));
         } else {
-            prompt.Show($"Press {PairKeyName} to play a two-player save with {other.Username}");
+            prompt.Show(Lang.Pick(
+                $"Press {PairKeyName} to play a two-player save with {other.Username}",
+                $"按 {PairKeyName} 和 {other.Username} 组成双人存档"
+            ));
         }
 
         // Only where the key goes down, or holding it would ask again every frame of the whole press
@@ -955,7 +986,7 @@ internal partial class CoopSave {
     /// </summary>
     public void OnCommand(string[] arguments) {
         if (!IsInGame()) {
-            Chat("Load a save first.");
+            Chat(Lang.Pick("Load a save first.", "先进一个存档。"));
             return;
         }
 
@@ -968,23 +999,35 @@ internal partial class CoopSave {
         }
 
         if (!_netClient.IsConnected) {
-            Chat("Connect to your teammate first to pair your saves.");
+            Chat(Lang.Pick(
+                "Connect to your teammate first to pair your saves.",
+                "先和队友连上，才能配对存档。"
+            ));
             return;
         }
 
         if (_playerData.Count != 1) {
-            Chat("A two-player save needs you and exactly one other player on the server.");
+            Chat(Lang.Pick(
+                "A two-player save needs you and exactly one other player on the server.",
+                "双人存档需要服务器上正好只有你和另一个人。"
+            ));
             return;
         }
 
         var other = _playerData.Values.First();
         if (other.SaveKey.Length == 0) {
-            Chat($"The game of {other.Username} doesn't support two-player saves.");
+            Chat(Lang.Pick(
+                $"The game of {other.Username} doesn't support two-player saves.",
+                $"{other.Username} 的游戏不支持双人存档。"
+            ));
             return;
         }
 
         if (_acceptedPairRequest is { IsOpen: true } accepted && accepted.PlayerId == other.Id) {
-            Chat($"Waiting for the game of {other.Username} to confirm the pairing.");
+            Chat(Lang.Pick(
+                $"Waiting for the game of {other.Username} to confirm the pairing.",
+                $"正在等 {other.Username} 那边确认配对。"
+            ));
             return;
         }
 
@@ -997,7 +1040,10 @@ internal partial class CoopSave {
         }
 
         if (marker != null && marker.PartnerKey == other.SaveKey) {
-            Chat($"Your current save is already a two-player save with {other.Username}.");
+            Chat(Lang.Pick(
+                $"Your current save is already a two-player save with {other.Username}.",
+                $"你当前的存档已经是和 {other.Username} 的双人存档了。"
+            ));
             return;
         }
 
@@ -1008,10 +1054,12 @@ internal partial class CoopSave {
             Key = _sentPairRequest.Id,
             Records = GetDefeatRecords()
         });
-        Chat(
+        Chat(Lang.Pick(
             $"Asked {other.Username} to pair your current saves as a two-player save, which neither of you can play " +
-            "alone. They need to type /coopsave too."
-        );
+            "alone. They need to type /coopsave too.",
+            $"已经问 {other.Username} 要不要把你们当前的存档配成双人存档——配成之后两个人都不能单独玩。" +
+            "对方也要打一次 /coopsave。"
+        ));
     }
 
     /// <summary>
@@ -1034,10 +1082,12 @@ internal partial class CoopSave {
         }
 
         _receivedPairRequest = request;
-        Chat(
+        Chat(Lang.Pick(
             $"{player.Username} wants to pair your current saves as a two-player save, which neither of you can play " +
-            "alone. Type /coopsave to agree."
-        );
+            "alone. Type /coopsave to agree.",
+            $"{player.Username} 想把你们当前的存档配成双人存档——配成之后两个人都不能单独玩。" +
+            "打一次 /coopsave 就是同意。"
+        ));
     }
 
     /// <summary>
@@ -1064,7 +1114,10 @@ internal partial class CoopSave {
             Key = request.Id,
             Records = localDefeats
         });
-        Chat($"Agreed to pair your current save with the save of {player.Username}. Waiting for their game to confirm.");
+        Chat(Lang.Pick(
+            $"Agreed to pair your current save with the save of {player.Username}. Waiting for their game to confirm.",
+            $"已同意把你当前的存档和 {player.Username} 的存档配对，正在等对方那边确认。"
+        ));
     }
 
     /// <summary>
@@ -1081,10 +1134,11 @@ internal partial class CoopSave {
         _sentPairRequest = null;
         if (!sent.IsOpen || !IsInGame() || global::GameManager.instance.profileID != sent.Slot) {
             SendPairCancel(player, update.Key);
-            Chat(
+            Chat(Lang.Pick(
                 $"{player.Username} agreed too late, because your request ran out or you changed saves. Type /coopsave " +
-                "to ask again."
-            );
+                "to ask again.",
+                $"{player.Username} 同意得太晚了——你的请求已经过期，或者你换了存档。打 /coopsave 再问一次。"
+            ));
             return;
         }
 
@@ -1118,10 +1172,11 @@ internal partial class CoopSave {
         _acceptedPairRequest = null;
         if (!accepted.IsOpen || !IsInGame() || global::GameManager.instance.profileID != accepted.Slot) {
             SendPairCancel(player, update.Key);
-            Chat(
+            Chat(Lang.Pick(
                 $"The pairing with {player.Username} didn't go through, because you changed saves. Type /coopsave to " +
-                "try again."
-            );
+                "try again.",
+                $"和 {player.Username} 的配对没成功，因为你换了存档。打 /coopsave 再试一次。"
+            ));
             return;
         }
 
@@ -1134,7 +1189,10 @@ internal partial class CoopSave {
     private void OnPairCancel(ClientPlayerData player, CoopSaveUpdate update) {
         if (_acceptedPairRequest is { } accepted && accepted.PlayerId == player.Id && accepted.Id == update.Key) {
             _acceptedPairRequest = null;
-            Chat($"The pairing with {player.Username} didn't go through. Type /coopsave to try again.");
+            Chat(Lang.Pick(
+                $"The pairing with {player.Username} didn't go through. Type /coopsave to try again.",
+                $"和 {player.Username} 的配对没成功。打 /coopsave 再试一次。"
+            ));
         }
 
         if (_sentPairRequest is { } sent && sent.PlayerId == player.Id && sent.Id == update.Key) {
@@ -1149,10 +1207,11 @@ internal partial class CoopSave {
         _confirmedPairRequest = null;
         if (GetMarker(confirmed.Slot) is { } marker && marker.PartnerKey == confirmed.PartnerKey) {
             RemoveLocalPairing(confirmed.Slot);
-            Chat(
+            Chat(Lang.Pick(
                 $"The pairing with {player.Username} was undone, because their game changed saves before it finished. " +
-                "Type /coopsave to try again."
-            );
+                "Type /coopsave to try again.",
+                $"和 {player.Username} 的配对被撤销了，因为对方在完成之前换了存档。打 /coopsave 再试一次。"
+            ));
         }
     }
 
@@ -1167,7 +1226,10 @@ internal partial class CoopSave {
 
         _sentPairRequest = null;
         if (HaveSameDefeats(player, update.Records, GetDefeatRecords())) {
-            Chat($"{player.Username} couldn't agree, because their save had beaten different bosses. Type /coopsave to ask again.");
+            Chat(Lang.Pick(
+                $"{player.Username} couldn't agree, because their save had beaten different bosses. Type /coopsave to ask again.",
+                $"{player.Username} 没能同意，因为对方存档打过的 Boss 和你的对不上。打 /coopsave 再问一次。"
+            ));
         }
     }
 
@@ -1193,9 +1255,13 @@ internal partial class CoopSave {
             $"only local: {string.Join(", ", onlyLocal)}"
         );
         Chat(
-            $"These saves can't become a two-player save, because they have beaten different bosses: {player.Username} " +
-            $"beat {onlyPartner.Count} that you haven't, and you beat {onlyLocal.Count} that they haven't. A two-player " +
-            "save needs the same bosses beaten in both saves, like two new games."
+            Lang.Pick(
+                $"These saves can't become a two-player save, because they have beaten different bosses: {player.Username} " +
+                $"beat {onlyPartner.Count} that you haven't, and you beat {onlyLocal.Count} that they haven't. A two-player " +
+                "save needs the same bosses beaten in both saves, like two new games.",
+                $"这两个存档没法组成双人存档，因为打过的 Boss 对不上：{player.Username} 打过 {onlyPartner.Count} 个你没打过的，" +
+                $"你打过 {onlyLocal.Count} 个他们没打过的。双人存档需要两边打过的 Boss 完全一样，比如两个都是新游戏。"
+            )
         );
         return false;
     }
@@ -1220,10 +1286,17 @@ internal partial class CoopSave {
         Logger.Info($"Paired save slot {slot} with the save of {player.Username}");
         Chat(
             previous != null && previous.PartnerKey != player.SaveKey
-                ? $"Your current save is now a two-player save with {player.Username} instead of " +
-                  $"{previous.PartnerName}. Both saves get backed up and compared now."
-                : $"Your current save is now a two-player save with {player.Username}. Both saves get backed up and " +
-                  "compared now."
+                ? Lang.Pick(
+                    $"Your current save is now a two-player save with {player.Username} instead of " +
+                    $"{previous.PartnerName}. Both saves get backed up and compared now.",
+                    $"你当前的存档现在是和 {player.Username} 的双人存档了，不再是和 {previous.PartnerName} 的。" +
+                    "从现在起两边的存档都会备份并互相比对。"
+                )
+                : Lang.Pick(
+                    $"Your current save is now a two-player save with {player.Username}. Both saves get backed up and " +
+                    "compared now.",
+                    $"你当前的存档现在是和 {player.Username} 的双人存档了。从现在起两边的存档都会备份并互相比对。"
+                )
         );
     }
 
@@ -1241,7 +1314,7 @@ internal partial class CoopSave {
         }
 
         if (marker == null) {
-            Chat("Your current save isn't a two-player save.");
+            Chat(Lang.Pick("Your current save isn't a two-player save.", "你当前的存档不是双人存档。"));
             return;
         }
 
@@ -1253,15 +1326,22 @@ internal partial class CoopSave {
             RemoveLocalPairing(slot);
             ReleaseHold(HeroController.instance);
             Chat(
-                $"Your save is a normal save again. It stays a two-player save for {marker.PartnerName} until they " +
-                "use /coopsave off as well."
+                Lang.Pick(
+                    $"Your save is a normal save again. It stays a two-player save for {marker.PartnerName} until they " +
+                    "use /coopsave off as well.",
+                    $"你的存档变回普通存档了。在 {marker.PartnerName} 那边也用 /coopsave off 之前，" +
+                    "它对对方来说仍然是双人存档。"
+                )
             );
             return;
         }
 
         if (_checkedWith == partner.Id) {
             RemoveLocalPairing(slot);
-            Chat($"Your two-player save with {partner.Username} is a normal save again, for both of you.");
+            Chat(Lang.Pick(
+                $"Your two-player save with {partner.Username} is a normal save again, for both of you.",
+                $"你和 {partner.Username} 的双人存档已经变回普通存档了，两个人都是。"
+            ));
             Send(new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.Unpaired });
             return;
         }
@@ -1273,8 +1353,11 @@ internal partial class CoopSave {
             Key = _sentUnpairRequest.Id
         });
         Chat(
-            $"Asked {partner.Username} to agree to make this two-player save a normal save again. They need to type " +
-            "/coopsave off too."
+            Lang.Pick(
+                $"Asked {partner.Username} to agree to make this two-player save a normal save again. They need to type " +
+                "/coopsave off too.",
+                $"已经问 {partner.Username} 要不要把这个双人存档变回普通存档。对方也要打 /coopsave off 才算数。"
+            )
         );
     }
 
@@ -1291,8 +1374,11 @@ internal partial class CoopSave {
 
         _receivedUnpairRequest = new PairingRequest { PlayerId = player.Id, Id = update.Key };
         Chat(
-            $"{player.Username} wants to make your two-player save a normal save again, for both of you. Type " +
-            "/coopsave off to agree."
+            Lang.Pick(
+                $"{player.Username} wants to make your two-player save a normal save again, for both of you. Type " +
+                "/coopsave off to agree.",
+                $"{player.Username} 想把你们的双人存档变回普通存档，两个人都变。打 /coopsave off 表示同意。"
+            )
         );
     }
 
@@ -1306,7 +1392,10 @@ internal partial class CoopSave {
         }
 
         Send(new CoopSaveUpdate { TargetId = requester.Id, Kind = CoopSaveUpdateKind.Unpaired });
-        Chat($"Your two-player save with {requester.Username} is a normal save again, for both of you.");
+        Chat(Lang.Pick(
+            $"Your two-player save with {requester.Username} is a normal save again, for both of you.",
+            $"你和 {requester.Username} 的双人存档已经变回普通存档了，两个人都是。"
+        ));
     }
 
     /// <summary>
@@ -1329,7 +1418,10 @@ internal partial class CoopSave {
 
         RemoveLocalPairing(slot);
         Logger.Info($"{player.Username} unpaired the two-player save");
-        Chat($"{player.Username} made your two-player save a normal save again, for both of you.");
+        Chat(Lang.Pick(
+            $"{player.Username} made your two-player save a normal save again, for both of you.",
+            $"{player.Username} 把你们的双人存档变回普通存档了，两个人都是。"
+        ));
     }
 
     /// <summary>

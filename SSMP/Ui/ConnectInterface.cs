@@ -172,29 +172,29 @@ internal class ConnectInterface {
     /// <summary>
     /// Text displayed on buttons while a connection is being attempted.
     /// </summary>
-    private const string ConnectingText = "Connecting...";
+    private static string ConnectingText => Lang.Pick("Connecting...", "正在连接……");
 
     /// <summary>
     /// Main title text for the multiplayer interface.
     /// </summary>
-    private const string HeaderText = "M U L T I P L A Y E R";
+    private static string HeaderText => Lang.Pick("M U L T I P L A Y E R", "多 人 游 戏");
 
     /// <summary>
     /// Label text for the player identification section.
     /// </summary>
-    private const string IdentityLabelText = "Identity";
+    private static string IdentityLabelText => Lang.Pick("Identity", "身份");
 
     /// <summary>
     /// Placeholder text for the username input field.
     /// </summary>
-    private const string UsernamePlaceholder = "Enter Username";
+    private static string UsernamePlaceholder => Lang.Pick("Enter Username", "输入昵称");
 
     // Tab names
 
     /// <summary>
     /// Label for the Matchmaking tab.
     /// </summary>
-    private const string MatchmakingTabText = "Matchmaking";
+    private static string MatchmakingTabText => Lang.Pick("Matchmaking", "匹配大厅");
 
     /// <summary>
     /// Label for the Steam tab.
@@ -204,68 +204,71 @@ internal class ConnectInterface {
     /// <summary>
     /// Label for the Direct IP tab.
     /// </summary>
-    private const string DirectIpTabText = "Direct IP";
+    private static string DirectIpTabText => Lang.Pick("Direct IP", "直连 IP");
 
     // Matchmaking tab
 
     /// <summary>
     /// Header text for the Matchmaking tab.
     /// </summary>
-    private const string JoinSessionText = "JOIN SESSION";
+    private static string JoinSessionText => Lang.Pick("JOIN SESSION", "加入房间");
 
     /// <summary>
     /// Description/instructions for the Matchmaking tab.
     /// </summary>
-    private const string JoinSessionDescText = "Enter the unique Lobby ID\nto join an existing session.";
+    private static string JoinSessionDescText => Lang.Pick(
+        "Enter the unique Lobby ID\nto join an existing session.",
+        "输入房间 ID，\n加入一个已经开好的房间。"
+    );
 
     /// <summary>
     /// Label for the Lobby ID input field.
     /// </summary>
-    private const string LobbyIdLabelText = "Lobby ID";
+    private static string LobbyIdLabelText => Lang.Pick("Lobby ID", "房间 ID");
 
     /// <summary>
     /// Placeholder text for the Lobby ID input.
     /// </summary>
-    private const string LobbyIdPlaceholder = "e.g. 8x92-AC44";
+    private static string LobbyIdPlaceholder => Lang.Pick("e.g. 8x92-AC44", "例如 8x92-AC44");
 
     /// <summary>
     /// Text for the Connect button in the Matchmaking tab.
     /// </summary>
-    private const string LobbyConnectButtonText = "CONNECT";
+    private static string LobbyConnectButtonText => Lang.Pick("CONNECT", "连接");
 
     /// <summary>
     /// Text for the Host Lobby button in the Matchmaking tab.
     /// </summary>
-    private const string HostLobbyButtonText = "HOST LOBBY";
+    private static string HostLobbyButtonText => Lang.Pick("HOST LOBBY", "创建房间");
 
     // Steam tab
 
     /// <summary>
     /// Status text when connected to Steam.
     /// </summary>
-    private const string SteamConnectedText = "Connected to Steam Workshop";
+    private static string SteamConnectedText => Lang.Pick("Connected to Steam Workshop", "已连接到 Steam");
 
     /// <summary>
     /// Text for the Create Lobby button.
     /// </summary>
-    private const string CreateLobbyButtonText = "+ CREATE LOBBY";
+    private static string CreateLobbyButtonText => Lang.Pick("+ CREATE LOBBY", "+ 创建房间");
 
     /// <summary>
     /// Text for the Browse Lobbies button.
     /// </summary>
-    private const string BrowseLobbyButtonText = "☰ BROWSE PUBLIC LOBBIES";
+    private static string BrowseLobbyButtonText => Lang.Pick("☰ BROWSE PUBLIC LOBBIES", "☰ 浏览公开房间");
 
     /// <summary>
     /// Text for the Join Friend button.
     /// </summary>
-    private const string JoinFriendButtonText = "→ JOIN FRIEND (INVITE)";
+    private static string JoinFriendButtonText => Lang.Pick("→ JOIN FRIEND (INVITE)", "→ 加入好友（邀请）");
 
     // Direct IP tab
 
     /// <summary>
     /// Label for the Server Address input.
     /// </summary>
-    private const string ServerAddressLabelText = "Server Address";
+    private static string ServerAddressLabelText => Lang.Pick("Server Address", "服务器地址");
 
     /// <summary>
     /// Placeholder for the Server Address input.
@@ -275,7 +278,7 @@ internal class ConnectInterface {
     /// <summary>
     /// Label for the Port input.
     /// </summary>
-    private const string PortLabelText = "Port";
+    private static string PortLabelText => Lang.Pick("Port", "端口");
 
     /// <summary>
     /// Placeholder for the Port input.
@@ -285,12 +288,12 @@ internal class ConnectInterface {
     /// <summary>
     /// Text for the Connect button in Direct IP tab. Public for access by helpers if needed.
     /// </summary>
-    public const string DirectConnectButtonText = "CONNECT";
+    public static string DirectConnectButtonText => Lang.Pick("CONNECT", "连接");
 
     /// <summary>
     /// Text for the Host button in Direct IP tab.
     /// </summary>
-    private const string HostButtonText = "HOST";
+    private static string HostButtonText => Lang.Pick("HOST", "创建");
 
     #endregion
 
@@ -299,65 +302,88 @@ internal class ConnectInterface {
     /// <summary>
     /// Error message when address input is missing.
     /// </summary>
-    private const string ErrorEnterAddress = "Failed to connect:\nYou must enter an address";
+    private static string ErrorEnterAddress => Lang.Pick(
+        "Failed to connect:\nYou must enter an address",
+        "连接失败：\n必须填写地址"
+    );
 
     /// <summary>
     /// Error message when port input is invalid or missing.
     /// </summary>
-    private const string ErrorEnterValidPort = "Failed to connect:\nYou must enter a valid port";
+    private static string ErrorEnterValidPort => Lang.Pick(
+        "Failed to connect:\nYou must enter a valid port",
+        "连接失败：\n必须填写有效的端口"
+    );
 
     /// <summary>
     /// Error message when hosting port is invalid.
     /// </summary>
-    private const string ErrorEnterValidPortHost = "Failed to host:\nYou must enter a valid port";
+    private static string ErrorEnterValidPortHost => Lang.Pick(
+        "Failed to host:\nYou must enter a valid port",
+        "创建失败：\n必须填写有效的端口"
+    );
 
     /// <summary>
     /// Status message for successful connection.
     /// </summary>
-    private const string MsgConnected = "Successfully connected";
+    private static string MsgConnected => Lang.Pick("Successfully connected", "连接成功");
 
     /// <summary>
     /// Error message for addon mismatch.
     /// </summary>
-    private const string ErrorInvalidAddons = "Failed to connect:\nInvalid addons";
+    private static string ErrorInvalidAddons => Lang.Pick(
+        "Failed to connect:\nInvalid addons",
+        "连接失败：\n附加组件对不上"
+    );
 
     /// <summary>
     /// Error message for internal exceptions (Socket/IO).
     /// </summary>
-    private const string ErrorInternal = "Failed to connect:\nInternal error";
+    private static string ErrorInternal => Lang.Pick("Failed to connect:\nInternal error", "连接失败：\n内部错误");
 
     /// <summary>
     /// Error message for connection timeout.
     /// </summary>
-    private const string ErrorTimeout = "Failed to connect:\nConnection timed out";
+    private static string ErrorTimeout => Lang.Pick("Failed to connect:\nConnection timed out", "连接失败：\n连接超时");
 
     /// <summary>
     /// Fallback error message for unknown failures.
     /// </summary>
-    private const string ErrorUnknown = "Failed to connect:\nUnknown reason";
+    private static string ErrorUnknown => Lang.Pick("Failed to connect:\nUnknown reason", "连接失败：\n原因不明");
 
     /// <summary>
     /// Warning shown when matchmaking HTTP traffic and UDP discovery use different network paths.
     /// </summary>
-    private const string ErrorSplitTunnelDetected =
+    private static string ErrorSplitTunnelDetected => Lang.Pick(
         "Failed to connect:\nMatchmaking detected split-tunneling or interfering network software. " +
-        "Ensure MMS and gameplay traffic use the same network path.";
+        "Ensure MMS and gameplay traffic use the same network path.",
+        "连接失败：\n匹配服务检测到分流，或者有别的网络软件在干扰。" +
+        "请让 MMS 和游戏的流量走同一条网络路径。"
+    );
 
     /// <summary>
     /// Large blocking message shown when the client must update before using matchmaking.
     /// </summary>
-    private const string MatchmakingUpdateRequiredText =
-        "Please update to the latest version in order to use matchmaking!";
+    private static string MatchmakingUpdateRequiredText => Lang.Pick(
+        "Please update to the latest version in order to use matchmaking!",
+        "请先更新到最新版本，才能使用匹配功能！"
+    );
 
     /// <summary>
     /// Temporary message shown while the client verifies matchmaking compatibility.
     /// </summary>
-    private const string MatchmakingCheckingText = "Checking matchmaking compatibility...";
+    private static string MatchmakingCheckingText => Lang.Pick(
+        "Checking matchmaking compatibility...",
+        "正在检查匹配兼容性……"
+    );
 
     /// <summary>
     /// Blocking message shown when MMS cannot be reached, so matchmaking stays unavailable.
     /// </summary>
-    private const string MatchmakingUnavailableText = "Unable to contact matchmaking server right now.";
+    private static string MatchmakingUnavailableText => Lang.Pick(
+        "Unable to contact matchmaking server right now.",
+        "现在联系不上匹配服务器。"
+    );
 
     #endregion
 
@@ -695,7 +721,7 @@ internal class ConnectInterface {
                 _lobbyIdInput.SetInput(lobby.LobbyCode);
                 _lobbyBrowserPanel.Hide();
                 _matchmakingGroup.SetActive(true);
-                ShowFeedback(Color.green, $"Selected lobby: {lobby.LobbyCode}");
+                ShowFeedback(Color.green, Lang.Pick($"Selected lobby: {lobby.LobbyCode}", $"已选择房间：{lobby.LobbyCode}"));
             }
         );
         _lobbyBrowserPanel.SetOnBack(() => {
@@ -712,7 +738,7 @@ internal class ConnectInterface {
         );
         _waitingRoomPanel.SetOnInvite(() => {
                 if (!SteamManager.IsInitialized || _waitingRoomLobbyId == default) {
-                    ShowFeedback(Color.red, "Cannot invite: no Steam lobby is open.");
+                    ShowFeedback(Color.red, Lang.Pick("Cannot invite: no Steam lobby is open.", "没法邀请：当前没有打开的 Steam 房间。"));
                     return;
                 }
 
@@ -729,7 +755,7 @@ internal class ConnectInterface {
         _waitingRoomPanel.SetOnLeave(() => {
                 HideWaitingRoom();
                 _steamGroup?.SetActive(_activeTab == Tab.Steam);
-                ShowFeedback(Color.yellow, "Stopped waiting. Your game is closed again.");
+                ShowFeedback(Color.yellow, Lang.Pick("Stopped waiting. Your game is closed again.", "已停止等待。你的游戏重新关上了。"));
                 StopWaitingRoomHostingEvent?.Invoke();
             }
         );
@@ -755,7 +781,7 @@ internal class ConnectInterface {
                     if (lobby.LobbyType == PublicLobbyType.Steam) {
                         JoinSteamLobbyFromBrowser(lobby.ConnectionData);
                     } else {
-                        ShowFeedback(Color.red, "Invalid Steam lobby");
+                        ShowFeedback(Color.red, Lang.Pick("Invalid Steam lobby", "无效的 Steam 房间"));
                     }
                 }
             );
@@ -1034,7 +1060,7 @@ internal class ConnectInterface {
             group,
             new Vector2(InitialX, y),
             new Vector2(ContentWidth, UniformHeight),
-            "☰ BROWSE PUBLIC LOBBIES",
+            Lang.Pick("☰ BROWSE PUBLIC LOBBIES", "☰ 浏览公开房间"),
             Resources.TextureManager.ButtonBg,
             Resources.FontManager.UIFontRegular,
             UiManager.NormalFontSize
@@ -1498,7 +1524,7 @@ internal class ConnectInterface {
         }
 
         if (_isLobbyJoinInProgress) {
-            ShowFeedback(Color.yellow, "Already connecting...");
+            ShowFeedback(Color.yellow, Lang.Pick("Already connecting...", "已经在连接了……"));
             return;
         }
 
@@ -1508,7 +1534,7 @@ internal class ConnectInterface {
 
         var lobbyId = _lobbyIdInput.GetInput();
         if (string.IsNullOrWhiteSpace(lobbyId)) {
-            ShowFeedback(Color.red, "Enter a lobby ID");
+            ShowFeedback(Color.red, Lang.Pick("Enter a lobby ID", "请输入房间 ID"));
             return;
         }
 
@@ -1516,7 +1542,7 @@ internal class ConnectInterface {
         _pendingHolePunchRetryLobbyId = lobbyId;
 
         SetLobbyJoinInProgress();
-        ShowFeedback(Color.yellow, "Connecting...");
+        ShowFeedback(Color.yellow, Lang.Pick("Connecting...", "正在连接……"));
         MonoBehaviourUtil.Instance.StartCoroutine(JoinLobbyCoroutine(lobbyId, username));
     }
 
@@ -1524,7 +1550,7 @@ internal class ConnectInterface {
     /// Coroutine to join a lobby, handling both Matchmaking and Steam types.
     /// </summary>
     private IEnumerator JoinLobbyCoroutine(string lobbyId, string username) {
-        ShowFeedback(Color.yellow, "Joining lobby...");
+        ShowFeedback(Color.yellow, Lang.Pick("Joining lobby...", "正在加入房间……"));
 
         // Create hole-punch socket for non-Steam lobbies
         var holePunchSocket = CreateHolePunchSocket(_modSettings.MmsSettings.LocalBindIp);
@@ -1540,7 +1566,7 @@ internal class ConnectInterface {
             Logger.Error(
                 $"ConnectInterface: JoinLobbyAsync failed: {task.Exception?.GetBaseException().Message ?? "cancelled"}"
             );
-            ShowFeedback(Color.red, "Lobby not found, offline, or join failed");
+            ShowFeedback(Color.red, Lang.Pick("Lobby not found, offline, or join failed", "找不到房间，可能已关闭，或者加入失败"));
             yield break;
         }
 
@@ -1554,7 +1580,7 @@ internal class ConnectInterface {
                 yield break;
             }
 
-            ShowFeedback(Color.red, "Lobby not found, offline, or join failed");
+            ShowFeedback(Color.red, Lang.Pick("Lobby not found, offline, or join failed", "找不到房间，可能已关闭，或者加入失败"));
             yield break;
         }
 
@@ -1571,7 +1597,7 @@ internal class ConnectInterface {
             if (string.IsNullOrEmpty(joinId)) {
                 CleanupHolePunchSocket(holePunchSocket);
                 ResetConnectionButtons();
-                ShowFeedback(Color.red, "Lobby not found, offline, or join failed");
+                ShowFeedback(Color.red, Lang.Pick("Lobby not found, offline, or join failed", "找不到房间，可能已关闭，或者加入失败"));
                 yield break;
             }
 
@@ -1588,7 +1614,7 @@ internal class ConnectInterface {
                 Logger.Error(
                     $"ConnectInterface: CoordinateMatchmakingJoinAsync failed: {joinTask.Exception?.GetBaseException().Message ?? "cancelled"}"
                 );
-                ShowFeedback(Color.red, "Lobby not found, offline, or join failed");
+                ShowFeedback(Color.red, Lang.Pick("Lobby not found, offline, or join failed", "找不到房间，可能已关闭，或者加入失败"));
                 yield break;
             }
 
@@ -1607,7 +1633,7 @@ internal class ConnectInterface {
                     yield break;
                 }
 
-                ShowFeedback(Color.red, "Lobby not found, offline, or join failed");
+                ShowFeedback(Color.red, Lang.Pick("Lobby not found, offline, or join failed", "找不到房间，可能已关闭，或者加入失败"));
                 yield break;
             }
 
@@ -1648,7 +1674,7 @@ internal class ConnectInterface {
             return;
         }
 
-        ShowFeedback(Color.yellow, "Creating lobby...");
+        ShowFeedback(Color.yellow, Lang.Pick("Creating lobby...", "正在创建房间……"));
         Logger.Info($"Host lobby requested: ({visibility}) - HolePunch transport");
 
         MonoBehaviourUtil.Instance.StartCoroutine(
@@ -1665,7 +1691,7 @@ internal class ConnectInterface {
             return;
         }
 
-        ShowFeedback(Color.yellow, "Creating Steam lobby...");
+        ShowFeedback(Color.yellow, Lang.Pick("Creating Steam lobby...", "正在创建 Steam 房间……"));
         Logger.Info($"Steam lobby requested: ({visibility})");
 
         // Convert visibility to Steam lobby type
@@ -1696,7 +1722,7 @@ internal class ConnectInterface {
             // Hosting starts here, but the save is not chosen until the waiting room says everyone is in. Going
             // straight into the save selection was what made the old flow so strange: the game loaded before anyone
             // could join, and there was nowhere obvious to invite them from.
-            ShowFeedback(Color.yellow, "Steam lobby created. Opening your game...");
+            ShowFeedback(Color.yellow, Lang.Pick("Steam lobby created. Opening your game...", "Steam 房间已创建。正在打开你的游戏……"));
             StartHostWithoutSavePressed?.Invoke("0.0.0.0", 0, username, TransportType.SteamRelay, null);
             ShowWaitingRoom(steamLobbyId);
         }
@@ -1717,12 +1743,12 @@ internal class ConnectInterface {
             yield return new WaitUntil(() => task.IsCompleted);
 
             if (!task.IsCompletedSuccessfully || task.Result == null) {
-                ShowFeedback(Color.yellow, "Steam lobby created (browser listing failed)");
+                ShowFeedback(Color.yellow, Lang.Pick("Steam lobby created (browser listing failed)", "Steam 房间已创建（但没能列进房间列表）"));
             } else {
-                ShowFeedback(Color.green, "Steam lobby created!");
+                ShowFeedback(Color.green, Lang.Pick("Steam lobby created!", "Steam 房间已创建！"));
             }
         } else {
-            ShowFeedback(Color.green, "Steam lobby created!");
+            ShowFeedback(Color.green, Lang.Pick("Steam lobby created!", "Steam 房间已创建！"));
         }
 
         SteamManager.SetLobbyReady(true);
@@ -1759,7 +1785,7 @@ internal class ConnectInterface {
             Logger.Error(
                 $"ConnectInterface: CreateLobbyAsync failed: {task.Exception?.GetBaseException().Message ?? "cancelled"}"
             );
-            ShowFeedback(Color.red, "Failed to create lobby. Is MMS running?");
+            ShowFeedback(Color.red, Lang.Pick("Failed to create lobby. Is MMS running?", "创建房间失败。MMS 在运行吗？"));
             yield break;
         }
 
@@ -1771,7 +1797,7 @@ internal class ConnectInterface {
                 yield break;
             }
 
-            ShowFeedback(Color.red, "Failed to create lobby. Is MMS running?");
+            ShowFeedback(Color.red, Lang.Pick("Failed to create lobby. Is MMS running?", "创建房间失败。MMS 在运行吗？"));
             CleanupHolePunchSocket(holePunchSocket);
             yield break;
         }
@@ -1781,12 +1807,12 @@ internal class ConnectInterface {
             UiManager.InternalChatBox.AddMessage(
                 $"<color=yellow>[Private Lobby]</color> Invite code: <color=lime>{lobbyId}</color>"
             );
-            ShowFeedback(Color.green, "Private lobby created!");
+            ShowFeedback(Color.green, Lang.Pick("Private lobby created!", "私人房间已创建！"));
         } else {
             UiManager.InternalChatBox.AddMessage(
                 $"<color=yellow>[Public Lobby]</color> Lobby name: <color=lime>{lobbyName}</color>, invite code: <color=lime>{lobbyId}</color>"
             );
-            ShowFeedback(Color.green, $"Lobby: {lobbyId}");
+            ShowFeedback(Color.green, Lang.Pick($"Lobby: {lobbyId}", $"房间：{lobbyId}"));
         }
 
         // Pass the pre-bound socket to the transport layer before hosting
@@ -1808,7 +1834,7 @@ internal class ConnectInterface {
         _matchmakingGroup.SetActive(false);
         _lobbyBrowserPanel.Show();
 
-        ShowFeedback(Color.yellow, "Fetching lobbies...");
+        ShowFeedback(Color.yellow, Lang.Pick("Fetching lobbies...", "正在获取房间列表……"));
         MonoBehaviourUtil.Instance.StartCoroutine(FetchLobbiesCoroutine());
     }
 
@@ -1829,7 +1855,7 @@ internal class ConnectInterface {
                 yield break;
             }
 
-            ShowFeedback(Color.red, "Failed to fetch lobbies. Is MMS running?");
+            ShowFeedback(Color.red, Lang.Pick("Failed to fetch lobbies. Is MMS running?", "获取房间列表失败。MMS 在运行吗？"));
             yield break;
         }
 
@@ -1838,10 +1864,10 @@ internal class ConnectInterface {
         _lobbyBrowserPanel.Show();
 
         if (lobbies.Count == 0) {
-            ShowFeedback(Color.yellow, "No public lobbies found.");
+            ShowFeedback(Color.yellow, Lang.Pick("No public lobbies found.", "没有找到公开房间。"));
         } else {
             var word = lobbies.Count == 1 ? "Lobby" : "Lobbies";
-            ShowFeedback(Color.green, $"Found {lobbies.Count} {word}");
+            ShowFeedback(Color.green, Lang.Pick($"Found {lobbies.Count} {word}", $"找到 {lobbies.Count} 个房间"));
         }
 
         Logger.Info($"ConnectInterface: Displaying {lobbies.Count} public lobbies");
@@ -1857,7 +1883,7 @@ internal class ConnectInterface {
     /// </summary>
     private void OnCreateLobbyButtonPressed() {
         if (!SteamManager.IsInitialized) {
-            ShowFeedback(Color.red, "Steam is not available. Please ensure Steam is running.");
+            ShowFeedback(Color.red, Lang.Pick("Steam is not available. Please ensure Steam is running.", "Steam 不可用。请确认 Steam 正在运行。"));
             Logger.Warn("Cannot create Steam lobby: Steam is not initialized");
             return;
         }
@@ -1879,7 +1905,7 @@ internal class ConnectInterface {
     /// </summary>
     private void OnBrowseLobbyButtonPressed() {
         if (!SteamManager.IsInitialized) {
-            ShowFeedback(Color.red, "Steam is not available.");
+            ShowFeedback(Color.red, Lang.Pick("Steam is not available.", "Steam 不可用。"));
             return;
         }
 
@@ -1889,7 +1915,7 @@ internal class ConnectInterface {
         _steamGroup.SetActive(false);
         _steamLobbyBrowserPanel.Show();
 
-        ShowFeedback(Color.yellow, "Fetching lobbies...");
+        ShowFeedback(Color.yellow, Lang.Pick("Fetching lobbies...", "正在获取房间列表……"));
         MonoBehaviourUtil.Instance.StartCoroutine(FetchSteamLobbiesCoroutine());
     }
 
@@ -1903,7 +1929,7 @@ internal class ConnectInterface {
 
         var lobbies = task.Result;
         if (lobbies == null) {
-            ShowFeedback(Color.red, "Failed to fetch lobbies. Is MMS running?");
+            ShowFeedback(Color.red, Lang.Pick("Failed to fetch lobbies. Is MMS running?", "获取房间列表失败。MMS 在运行吗？"));
             yield break;
         }
 
@@ -1912,8 +1938,11 @@ internal class ConnectInterface {
         ShowFeedback(
             lobbies.Count == 0 ? Color.yellow : Color.green,
             lobbies.Count == 0
-                ? "No public lobbies found."
-                : $"Found {lobbies.Count} {(lobbies.Count == 1 ? "Lobby" : "Lobbies")}"
+                ? Lang.Pick("No public lobbies found.", "没有找到公开房间。")
+                : Lang.Pick(
+                    $"Found {lobbies.Count} {(lobbies.Count == 1 ? "Lobby" : "Lobbies")}",
+                    $"找到 {lobbies.Count} 个房间"
+                )
         );
 
         Logger.Info($"ConnectInterface: Displaying {lobbies.Count} public lobbies (Steam tab)");
@@ -1926,16 +1955,16 @@ internal class ConnectInterface {
     /// <param name="steamLobbyIdString">The Steam lobby ID as a string.</param>
     private void JoinSteamLobbyFromBrowser(string steamLobbyIdString) {
         if (!SteamManager.IsInitialized) {
-            ShowFeedback(Color.red, "Steam is not available.");
+            ShowFeedback(Color.red, Lang.Pick("Steam is not available.", "Steam 不可用。"));
             return;
         }
 
         if (!ulong.TryParse(steamLobbyIdString, out var steamLobbyId)) {
-            ShowFeedback(Color.red, "Invalid Steam lobby ID.");
+            ShowFeedback(Color.red, Lang.Pick("Invalid Steam lobby ID.", "无效的 Steam 房间 ID。"));
             return;
         }
 
-        ShowFeedback(Color.yellow, "Joining Steam lobby...");
+        ShowFeedback(Color.yellow, Lang.Pick("Joining Steam lobby...", "正在加入 Steam 房间……"));
         SteamManager.JoinLobby(new CSteamID(steamLobbyId));
     }
 
@@ -1945,12 +1974,15 @@ internal class ConnectInterface {
     /// </summary>
     private void OnJoinFriendButtonPressed() {
         if (!SteamManager.IsInitialized) {
-            ShowFeedback(Color.red, "Steam is not available.");
+            ShowFeedback(Color.red, Lang.Pick("Steam is not available.", "Steam 不可用。"));
             return;
         }
 
         SteamFriends.ActivateGameOverlay("Friends");
-        ShowFeedback(Color.yellow, "Opened Steam Friends. Right-click friend to Join Game.");
+        ShowFeedback(Color.yellow, Lang.Pick(
+            "Opened Steam Friends. Right-click friend to Join Game.",
+            "已打开 Steam 好友列表。右键点击好友，选择加入游戏。"
+        ));
     }
 
     #endregion
@@ -2016,12 +2048,15 @@ internal class ConnectInterface {
     /// <param name="lobbyIds">Array of Steam lobby IDs found in the search.</param>
     private void OnLobbyListReceived(CSteamID[] lobbyIds) {
         if (lobbyIds.Length == 0) {
-            ShowFeedback(Color.yellow, "No lobbies found.");
+            ShowFeedback(Color.yellow, Lang.Pick("No lobbies found.", "没有找到房间。"));
             return;
         }
 
         Logger.Info($"Found {lobbyIds.Length} lobbies. Auto-joining first one.");
-        ShowFeedback(Color.yellow, $"Found {lobbyIds.Length} lobbies. Joining first...");
+        ShowFeedback(Color.yellow, Lang.Pick(
+            $"Found {lobbyIds.Length} lobbies. Joining first...",
+            $"找到 {lobbyIds.Length} 个房间。正在加入第一个……"
+        ));
 
         SteamManager.JoinLobby(lobbyIds[0]);
     }
@@ -2045,12 +2080,15 @@ internal class ConnectInterface {
 
             SteamManager.LeaveLobby();
             ResetConnectionButtons();
-            ShowFeedback(Color.red, "You are on different versions of the mod. Both players need the same one.");
+            ShowFeedback(Color.red, Lang.Pick(
+                "You are on different versions of the mod. Both players need the same one.",
+                "你们两个装的模组版本不一样。两个人必须用同一个版本。"
+            ));
 
             return;
         }
 
-        ShowFeedback(Color.green, "Joined lobby! Connecting to host...");
+        ShowFeedback(Color.green, Lang.Pick("Joined lobby! Connecting to host...", "已加入房间！正在连接房主……"));
 
         var hostId = SteamManager.GetLobbyOwner(lobbyId);
 
@@ -2070,18 +2108,18 @@ internal class ConnectInterface {
         // stays on "Connecting..." and refuses every further press, and the only way out is restarting the game.
         if (!SteamManager.IsInitialized) {
             ResetConnectionButtons();
-            ShowFeedback(Color.red, "Steam is not initialized");
+            ShowFeedback(Color.red, Lang.Pick("Steam is not initialized", "Steam 还没有初始化"));
             return;
         }
 
         if (!ulong.TryParse(connectionData, out var steamLobbyId)) {
             ResetConnectionButtons();
-            ShowFeedback(Color.red, "Invalid Steam lobby ID.");
+            ShowFeedback(Color.red, Lang.Pick("Invalid Steam lobby ID.", "无效的 Steam 房间 ID。"));
             Logger.Warn($"ConnectInterface: MMS returned invalid Steam lobby ID '{connectionData}'");
             return;
         }
 
-        ShowFeedback(Color.yellow, "Joining Steam lobby...");
+        ShowFeedback(Color.yellow, Lang.Pick("Joining Steam lobby...", "正在加入 Steam 房间……"));
         SteamManager.JoinLobby(new CSteamID(steamLobbyId));
     }
 
@@ -2132,7 +2170,7 @@ internal class ConnectInterface {
         // If we have a fallback connection to try, we do so now
         if (!string.IsNullOrEmpty(fallbackAddress) &&
             TryParseConnectionData(fallbackAddress, out var address, out var port)) {
-            ShowFeedback(Color.yellow, "LAN failed, retrying Public...");
+            ShowFeedback(Color.yellow, Lang.Pick("LAN failed, retrying Public...", "局域网连接失败，正在改用公开方式重试……"));
             Logger.Info($"ConnectInterface: LAN connection failed, retrying Public at {address}:{port}");
 
             // Trigger the fallback connection using the current username input
@@ -2151,7 +2189,7 @@ internal class ConnectInterface {
                     $"ConnectInterface: Connection timed out. Retrying full join flow for lobby {lobbyIdToRetry} once."
                 );
                 SetLobbyJoinInProgress();
-                ShowFeedback(Color.yellow, "Connection timed out. Retrying...");
+                ShowFeedback(Color.yellow, Lang.Pick("Connection timed out. Retrying...", "连接超时。正在重试……"));
                 MonoBehaviourUtil.Instance.StartCoroutine(JoinLobbyCoroutine(lobbyIdToRetry, username));
                 return;
             }
@@ -2404,7 +2442,7 @@ internal class ConnectInterface {
         var connectionInfo = DetermineConnectionInfo(connectionData, lanConnectionData, preferLanFastPath);
 
         if (connectionInfo == null) {
-            ShowFeedback(Color.red, "Invalid connection data");
+            ShowFeedback(Color.red, Lang.Pick("Invalid connection data", "连接数据无效"));
             CleanupHolePunchSocket(holePunchSocket);
             return;
         }

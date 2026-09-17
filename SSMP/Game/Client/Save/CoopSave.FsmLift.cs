@@ -8,6 +8,7 @@ namespace SSMP.Game.Client.Save;
 
 // SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
 using Fsm = HutongGames.PlayMaker.Fsm;
+using SSMP.Util;
 
 /// <summary>
 /// Lifts that an FSM runs in a checked two-player save (see CoopSave.Lifts). A platform lift starts a ride when the hero
@@ -503,7 +504,7 @@ internal partial class CoopSave {
             var name = _checkedWith is { } id && _playerData.TryGetValue(id, out var partner)
                 ? partner.Username
                 : "your partner";
-            Chat($"Waiting for {name} to ride this lift together");
+            Chat(Lang.Pick($"Waiting for {name} to ride this lift together", $"正在等 {name} 一起坐这台升降台"));
         }
 
         return true;

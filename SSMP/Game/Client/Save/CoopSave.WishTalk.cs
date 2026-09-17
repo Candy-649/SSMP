@@ -13,6 +13,7 @@ namespace SSMP.Game.Client.Save;
 
 // SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
 using Fsm = HutongGames.PlayMaker.Fsm;
+using SSMP.Util;
 
 /// <summary>
 /// Dialogue about wishes in a checked two-player save. Talking to a character who can offer a wish right now or take
@@ -956,8 +957,14 @@ internal partial class CoopSave {
                 if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == self) {
                     Chat(
                         self is QuestBoardInteractable
-                            ? $"{GetPartnerName()} is using this board right now."
-                            : $"{GetPartnerName()} is talking to them right now."
+                            ? Lang.Pick(
+                                $"{GetPartnerName()} is using this board right now.",
+                                $"{GetPartnerName()} 正在用这块板子。"
+                            )
+                            : Lang.Pick(
+                                $"{GetPartnerName()} is talking to them right now.",
+                                $"{GetPartnerName()} 正在和他们说话。"
+                            )
                     );
                     allowed = false;
                 } else if (self is PlayMakerNPC npc) {
@@ -994,9 +1001,9 @@ internal partial class CoopSave {
         var partner = _checkedWith is { } partnerId && _playerData.TryGetValue(partnerId, out var checkedPartner)
             ? checkedPartner
             : null;
-        var absence = partner == null ? $"This wish needs {marker.PartnerName} here too." : GetWishTalkAbsence(partner);
+        var absence = partner == null ? Lang.Pick($"This wish needs {marker.PartnerName} here too.", $"这个愿望也需要 {marker.PartnerName} 在场。") : GetWishTalkAbsence(partner);
         if (absence != null || partner == null) {
-            Chat(absence ?? $"This wish needs {marker.PartnerName} here too.");
+            Chat(absence ?? Lang.Pick($"This wish needs {marker.PartnerName} here too.", $"这个愿望也需要 {marker.PartnerName} 在场。"));
             if (partner != null) {
                 Send(CreateWishTalkUpdate(partner.Id, npc.gameObject.scene.name, ScenePath.Get(npc.transform), WishTalkRefused));
             }
@@ -1050,12 +1057,18 @@ internal partial class CoopSave {
         var hero = HeroController.instance;
         var avatar = partner.PlayerObject;
         if (!partner.IsInLocalScene || avatar == null || hero == null) {
-            return $"This wish needs {partner.Username} here too. Come back together.";
+            return Lang.Pick(
+                $"This wish needs {partner.Username} here too. Come back together.",
+                $"这个愿望也需要 {partner.Username} 在场。一起回来吧。"
+            );
         }
 
         var offset = avatar.transform.position - hero.transform.position;
         return Mathf.Abs(offset.x) > WishTalkRangeX || Mathf.Abs(offset.y) > WishTalkRangeY
-            ? $"{partner.Username} needs to come closer for this wish."
+            ? Lang.Pick(
+                $"{partner.Username} needs to come closer for this wish.",
+                $"{partner.Username} 要再靠近一点才能弄这个愿望。"
+            )
             : null;
     }
 
@@ -1429,8 +1442,14 @@ internal partial class CoopSave {
                     var refusedAt = ScenePath.Find(update.ObjectPath, update.Scene);
                     Chat(
                         refusedAt != null && refusedAt.GetComponent<QuestBoardInteractable>() != null
-                            ? $"{player.Username} wants to use a wish board with you, which needs you close by."
-                            : $"{player.Username} wants to talk about a wish, which needs you close by."
+                            ? Lang.Pick(
+                                $"{player.Username} wants to use a wish board with you, which needs you close by.",
+                                $"{player.Username} 想和你一起用愿望板，需要你靠近一点。"
+                            )
+                            : Lang.Pick(
+                                $"{player.Username} wants to talk about a wish, which needs you close by.",
+                                $"{player.Username} 想聊一个愿望，需要你靠近一点。"
+                            )
                     );
                     break;
                 case WishTalkEnded:
@@ -1800,33 +1819,57 @@ internal partial class CoopSave {
             refused += refusedAfter;
 
             if (brokenApplies) {
-                Chat($"{player.Username} delivered what broke for you, so you got the reward too.");
+                Chat(Lang.Pick(
+                    $"{player.Username} delivered what broke for you, so you got the reward too.",
+                    $"{player.Username} 把你那份坏掉的东西送到了，所以你也拿到了奖励。"
+                ));
             } else if (completionApplies) {
-                Chat($"{player.Username} turned in a wish with you. You paid your own copy and got the reward too.");
+                Chat(Lang.Pick(
+                    $"{player.Username} turned in a wish with you. You paid your own copy and got the reward too.",
+                    $"{player.Username} 和你一起交了一个愿望。你出了自己那份，也拿到了奖励。"
+                ));
             } else if (turnedInHere) {
                 Chat(
-                    $"{player.Username} turned in the same wish at the same time. You pay your copy and get the reward " +
-                    "once, at your board."
+                    Lang.Pick(
+                        $"{player.Username} turned in the same wish at the same time. You pay your copy and get the reward " +
+                        "once, at your board.",
+                        $"{player.Username} 和你同时交了同一个愿望。你出自己那份，奖励只在你这块板子上拿一次。"
+                    )
                 );
             } else if (deliveredHere) {
                 Chat(
-                    $"{player.Username} turned in the same delivery at the same time. You paid your copy and got the " +
-                    "reward once, with your own turn-in."
+                    Lang.Pick(
+                        $"{player.Username} turned in the same delivery at the same time. You paid your copy and got the " +
+                        "reward once, with your own turn-in.",
+                        $"{player.Username} 和你同时交了同一份托运。你出了自己那份，奖励只按你自己那次算一次。"
+                    )
                 );
             } else if (anyCompleted) {
                 Chat(
-                    $"{player.Username} turned in a wish that your save had completed already, so you didn't pay or " +
-                    "get the reward again."
+                    Lang.Pick(
+                        $"{player.Username} turned in a wish that your save had completed already, so you didn't pay or " +
+                        "get the reward again.",
+                        $"{player.Username} 交的这个愿望你的存档早就完成了，所以你没有再出一份，也没有再拿奖励。"
+                    )
                 );
             } else if (anyNewApplies && items > 0) {
-                Chat($"{player.Username} accepted a wish with you, and you got what came with it too.");
+                Chat(Lang.Pick(
+                    $"{player.Username} accepted a wish with you, and you got what came with it too.",
+                    $"{player.Username} 和你一起接了一个愿望，附带的东西你也拿到了。"
+                ));
             } else if (accepted > 0) {
-                Chat($"{player.Username} accepted {CountWishes(accepted)}. Your wish log has the same now.");
+                Chat(Lang.Pick(
+                    $"{player.Username} accepted {CountWishes(accepted)}. Your wish log has the same now.",
+                    $"{player.Username} 接了 {CountWishes(accepted)}。你的愿望记录现在也一样了。"
+                ));
             }
 
             if (refused > 0) {
                 Chat(
-                    $"{player.Username} accepted a delivery whose item you didn't get, so it isn't accepted for you."
+                    Lang.Pick(
+                        $"{player.Username} accepted a delivery whose item you didn't get, so it isn't accepted for you.",
+                        $"{player.Username} 接了一个托运，但那件东西你没拿到，所以你这边没有接下。"
+                    )
                 );
             }
 
@@ -2208,9 +2251,15 @@ internal partial class CoopSave {
         _nextMissingCopyNotices[wish] = Time.unscaledTime + MissingCopyNoticeInterval;
         Chat(
             amount < 0
-                ? $"Your game doesn't know yet what {GetPartnerName()} carries for this wish. Try again in a moment."
-                : $"{GetPartnerName()} doesn't have a full copy of what this wish takes yet ({amount} of {needed}). " +
-                  "Both of you pay one to turn it in."
+                ? Lang.Pick(
+                    $"Your game doesn't know yet what {GetPartnerName()} carries for this wish. Try again in a moment.",
+                    $"你的游戏还不知道 {GetPartnerName()} 身上这个愿望要交的东西有多少。过一会儿再试。"
+                )
+                : Lang.Pick(
+                    $"{GetPartnerName()} doesn't have a full copy of what this wish takes yet ({amount} of {needed}). " +
+                    "Both of you pay one to turn it in.",
+                    $"{GetPartnerName()} 还没凑齐这个愿望要交的东西（{amount}/{needed}）。要交的话，你们两个各出一份。"
+                )
         );
     }
 

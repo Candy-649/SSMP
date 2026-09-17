@@ -5,6 +5,7 @@ using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
+using SSMP.Util;
 
 namespace SSMP.Game.Client.Save;
 
@@ -296,7 +297,10 @@ internal partial class CoopSave {
             ask.TargetId, ask.Key, GetLivePrompt(), self, BoxCurrentYesField?.GetValue(self), () => orig(self), what
         );
         Send(ask);
-        Chat($"{GetPartnerName()} has to agree to this too. Answer no to take it back.");
+        Chat(Lang.Pick(
+            $"{GetPartnerName()} has to agree to this too. Answer no to take it back.",
+            $"{GetPartnerName()} 也要同意才行。选「否」就可以收回。"
+        ));
         Logger.Info($"Held the button about {what} until the partner agrees");
     }
 
@@ -359,7 +363,10 @@ internal partial class CoopSave {
             if (wish == null) {
                 // Falling through to the items would accept the wish without asking anybody, silently
                 Logger.Warn("A prompt about a wish could not be read, so the partner was not asked about it");
-                Chat("This wish could not be shared with your teammate, so it was left to you.");
+                Chat(Lang.Pick(
+                    "This wish could not be shared with your teammate, so it was left to you.",
+                    "这个愿望没能和队友共享，所以只留给你了。"
+                ));
             }
 
             return wish;
@@ -543,13 +550,19 @@ internal partial class CoopSave {
             // deciding. Pressing it now would pay for whatever it shows instead, which nobody agreed to.
             if (held.Box == null || !Equals(BoxCurrentYesField?.GetValue(held.Box), held.Callback)) {
                 // Whatever the box holds now belongs to a prompt of its own, which must keep both its answers
-                Chat($"{GetPartnerName()} agreed, but the prompt was gone by then, so nothing was taken.");
+                Chat(Lang.Pick(
+                    $"{GetPartnerName()} agreed, but the prompt was gone by then, so nothing was taken.",
+                    $"{GetPartnerName()} 同意了，但那时候提示已经没了，所以什么都没拿走。"
+                ));
                 return;
             }
 
             // The real button checks again whether it can be pressed, and would quietly do nothing if it can't
             if (GetInactiveYesText(held.Box).Length > 0) {
-                Chat($"{GetPartnerName()} agreed, but you can't do this any more.");
+                Chat(Lang.Pick(
+                    $"{GetPartnerName()} agreed, but you can't do this any more.",
+                    $"{GetPartnerName()} 同意了，但你已经不能这么做了。"
+                ));
                 DeclineHeld(held);
                 return;
             }

@@ -3,6 +3,7 @@ using SSMP.Networking.Matchmaking.Protocol;
 using UnityEngine;
 using UnityEngine.UI;
 using Object = UnityEngine.Object;
+using SSMP.Util;
 
 namespace SSMP.Ui.Component;
 
@@ -76,7 +77,7 @@ internal class LobbyConfigPanel : IComponent {
 
         // Header
         var header = CreateText(
-            "HOST LOBBY",
+            Lang.Pick("HOST LOBBY", "创建房间"),
             new Vector2(0f, currentY),
             size.x,
             HeaderHeight,
@@ -88,7 +89,7 @@ internal class LobbyConfigPanel : IComponent {
 
         // Visibility row (for all lobby types)
         var visLabel = CreateText(
-            "Visibility:",
+            Lang.Pick("Visibility:", "可见性："),
             new Vector2(-size.x / 4f - 10f, currentY),
             size.x / 2f - 20f,
             RowHeight,
@@ -125,7 +126,7 @@ internal class LobbyConfigPanel : IComponent {
         var buttonWidth = (size.x - Padding * 3) / 2f;
 
         var cancelBtn = CreateButton(
-            "CANCEL",
+            Lang.Pick("CANCEL", "取消"),
             new Vector2(-buttonWidth / 2f - Padding / 2f, currentY - ButtonHeight / 2f),
             new Vector2(buttonWidth, ButtonHeight),
             () => _onCancel?.Invoke(),
@@ -134,7 +135,7 @@ internal class LobbyConfigPanel : IComponent {
         cancelBtn.transform.SetParent(GameObject.transform, false);
 
         var createBtn = CreateButton(
-            "CREATE",
+            Lang.Pick("CREATE", "创建"),
             new Vector2(buttonWidth / 2f + Padding / 2f, currentY - ButtonHeight / 2f),
             new Vector2(buttonWidth, ButtonHeight),
             OnCreatePressed,

@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
+using SSMP.Util;
 
 namespace SSMP.Game.Client.Save;
 
@@ -141,18 +142,28 @@ internal partial class CoopSave {
 
         // The partner started to turn in or donate here while the local hero walked up to the board
         if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
-            Chat($"{GetPartnerName()} is using this board right now, so it opens without turning in wishes.");
+            Chat(Lang.Pick(
+                $"{GetPartnerName()} is using this board right now, so it opens without turning in wishes.",
+                $"{GetPartnerName()} 正在用这块板子，所以这次只打开，不交愿望。"
+            ));
             _wishTalk = new WishTalk(board, fsms, false);
             return true;
         }
 
         var partner = GetCheckedPartner();
-        var absence = GetBoardAbsence(partner, marker, "turn in wishes at this board");
+        var absence = GetBoardAbsence(
+            partner,
+            marker,
+            Lang.Pick("turn in wishes at this board", "在这块板子上交愿望")
+        );
         if (partner == null || absence != null) {
             // Looking at the board again soon doesn't repeat why its wishes stay
             if (Time.unscaledTime >= _nextBoardHoldNoticeTime) {
                 _nextBoardHoldNoticeTime = Time.unscaledTime + BoardHoldNoticeInterval;
-                Chat($"{absence} Until then, the board opens without turning them in.");
+                Chat(Lang.Pick(
+                    $"{absence} Until then, the board opens without turning them in.",
+                    $"{absence} 在那之前，这块板子只会打开，不交愿望。"
+                ));
                 if (partner != null) {
                     Send(CreateWishTalkUpdate(
                         partner.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
@@ -190,8 +201,11 @@ internal partial class CoopSave {
 
             _nextMissingCopyNotices[name] = Time.unscaledTime + MissingCopyNoticeInterval;
             Chat(
-                $"{GetPartnerName()} doesn't have a full copy of what a wish on this board takes yet. Both of you pay " +
-                "one to turn it in here."
+                Lang.Pick(
+                    $"{GetPartnerName()} doesn't have a full copy of what a wish on this board takes yet. Both of you pay " +
+                    "one to turn it in here.",
+                    $"{GetPartnerName()} 还没凑齐这块板子上某个愿望要交的东西。在这里交，需要你们两个各出一份。"
+                )
             );
             return;
         }
@@ -283,7 +297,10 @@ internal partial class CoopSave {
                 return;
             }
 
-            Chat($"{GetPartnerName()} doesn't have enough to donate too. Both of you pay the donation.");
+            Chat(Lang.Pick(
+                $"{GetPartnerName()} doesn't have enough to donate too. Both of you pay the donation.",
+                $"{GetPartnerName()} 那边也不够捐。捐赠需要你们两个各出一份。"
+            ));
         } catch (Exception e) {
             LogWishTalkError(e);
         }
@@ -321,12 +338,16 @@ internal partial class CoopSave {
         }
 
         if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
-            Chat($"{GetPartnerName()} is using this board right now.");
+            Chat(Lang.Pick($"{GetPartnerName()} is using this board right now.", $"{GetPartnerName()} 正在用这块板子。"));
             return false;
         }
 
         var partner = GetCheckedPartner();
-        var absence = GetBoardAbsence(partner, marker, "donate, since both of you pay");
+        var absence = GetBoardAbsence(
+            partner,
+            marker,
+            Lang.Pick("donate, since both of you pay", "一起捐赠（两个人都要出）")
+        );
         if (partner == null || absence != null) {
             Chat(absence!);
             if (partner != null) {
@@ -340,7 +361,10 @@ internal partial class CoopSave {
 
         // The board doesn't let the local player pay what they lack, but the money of the partner can change meanwhile
         if (!quest.CanComplete) {
-            Chat($"{partner.Username} doesn't have enough to donate too. Both of you pay the donation.");
+            Chat(Lang.Pick(
+                $"{partner.Username} doesn't have enough to donate too. Both of you pay the donation.",
+                $"{partner.Username} 那边也不够捐。捐赠需要你们两个各出一份。"
+            ));
             return false;
         }
 
@@ -393,7 +417,10 @@ internal partial class CoopSave {
     /// </summary>
     private static string? GetBoardAbsence(ClientPlayerData? partner, CoopSaveMarker marker, string use) {
         if (partner == null) {
-            return $"{marker.PartnerName} needs to be here too to {use}.";
+            return Lang.Pick(
+                $"{marker.PartnerName} needs to be here too to {use}.",
+                $"{marker.PartnerName} 也要在场，才能{use}。"
+            );
         }
 
         if (GetWishTalkAbsence(partner) == null) {
@@ -401,8 +428,14 @@ internal partial class CoopSave {
         }
 
         return partner.IsInLocalScene && partner.PlayerObject != null
-            ? $"{partner.Username} needs to come closer to {use}."
-            : $"{partner.Username} needs to be here too to {use}.";
+            ? Lang.Pick(
+                $"{partner.Username} needs to come closer to {use}.",
+                $"{partner.Username} 要再靠近一点，才能{use}。"
+            )
+            : Lang.Pick(
+                $"{partner.Username} needs to be here too to {use}.",
+                $"{partner.Username} 也要在场，才能{use}。"
+            );
     }
 
     /// <summary>

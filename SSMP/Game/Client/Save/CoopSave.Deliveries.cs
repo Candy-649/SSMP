@@ -360,12 +360,18 @@ internal partial class CoopSave {
                 if (update.PartCount == DeliveryStillCarried && !broken.StillCarried) {
                     broken.StillCarried = true;
                     Chat(
-                        $"Your delivery broke, but {player.Username} still carries theirs. If they deliver it, you " +
-                        "get the reward too."
+                        Lang.Pick(
+                            $"Your delivery broke, but {player.Username} still carries theirs. If they deliver it, you " +
+                            "get the reward too.",
+                            $"你要送的东西坏了，但 {player.Username} 手上那份还在。只要对方送到，你也能拿到奖励。"
+                        )
                     );
                 } else if (update.PartCount == DeliveryFailed) {
                     _brokenDeliveries.Remove(name);
-                    Chat($"{player.Username} doesn't carry this delivery either, so it failed.");
+                    Chat(Lang.Pick(
+                        $"{player.Username} doesn't carry this delivery either, so it failed.",
+                        $"{player.Username} 手上也没有这份要送的东西，所以这次托运失败了。"
+                    ));
                 }
             }
         } catch (Exception e) {
@@ -405,8 +411,11 @@ internal partial class CoopSave {
             _brokenDeliveries.Remove(name);
             SendDeliveryAnswer(player, report, name, value, DeliveryStillCarried);
             Chat(
-                $"{player.Username}'s delivery broke, but yours is still intact. If you deliver it, you both get the " +
-                "reward."
+                Lang.Pick(
+                    $"{player.Username}'s delivery broke, but yours is still intact. If you deliver it, you both get the " +
+                    "reward.",
+                    $"{player.Username} 要送的东西坏了，但你那份还好好的。只要你送到，你们两个都能拿到奖励。"
+                )
             );
             Logger.Info($"The delivery '{name}' broke for {player.Username}, but the local player still carries it");
             return;
@@ -423,7 +432,10 @@ internal partial class CoopSave {
 
         SendDeliveryAnswer(player, report, name, value, DeliveryFailed);
         if (wasActive) {
-            Chat($"{player.Username}'s delivery broke too, so the delivery failed.");
+            Chat(Lang.Pick(
+                $"{player.Username}'s delivery broke too, so the delivery failed.",
+                $"{player.Username} 那份也坏了，所以这次托运失败了。"
+            ));
         }
 
         Logger.Info($"The delivery '{name}' broke for {player.Username}, and no player carries it anymore");
@@ -780,7 +792,10 @@ internal partial class CoopSave {
             }
 
             StartSummonFade(hero, summon, now);
-            Chat($"{partner.Username} turned in a delivery, so you are brought there.");
+            Chat(Lang.Pick(
+            $"{partner.Username} turned in a delivery, so you are brought there.",
+            $"{partner.Username} 交了一份托运，所以你被带过去了。"
+        ));
             return;
         }
 
@@ -804,7 +819,10 @@ internal partial class CoopSave {
 
         summon.Stage = SummonStage.Loading;
         summon.StageTime = now;
-        Chat($"{partner.Username} turned in a delivery, so you are brought there.");
+        Chat(Lang.Pick(
+            $"{partner.Username} turned in a delivery, so you are brought there.",
+            $"{partner.Username} 交了一份托运，所以你被带过去了。"
+        ));
         Logger.Info($"Bringing the local player to the delivery of {partner.Username} in '{summon.Scene}'");
     }
 
@@ -930,7 +948,10 @@ internal partial class CoopSave {
     private void SkipSummon(ClientPlayerData partner) {
         _summon = null;
         Chat(
-            $"{partner.Username} turned in a delivery. You can't be brought there right now, but it counts for you too."
+            Lang.Pick(
+                $"{partner.Username} turned in a delivery. You can't be brought there right now, but it counts for you too.",
+                $"{partner.Username} 交了一份托运。现在没法把你带过去，不过这份也算你的。"
+            )
         );
     }
 

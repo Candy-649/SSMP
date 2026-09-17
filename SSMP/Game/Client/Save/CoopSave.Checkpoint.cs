@@ -264,7 +264,7 @@ internal partial class CoopSave {
             _fightSaveScene = null;
             Logger.Info($"Saving the two-player save for the boss fight in '{scene}'");
             gameManager.SaveGame(success => Logger.Info($"Saved the two-player save for the boss fight: {success}"));
-            Chat("Saved your game at the start of the boss fight.");
+            Chat(Lang.Pick("Saved your game at the start of the boss fight.", "已经在这场 Boss 战开始的地方存了档。"));
         }
 
         if (bossScene == null || !_loadedWithCheckpoint || !partnerIn) {
@@ -280,7 +280,7 @@ internal partial class CoopSave {
         if (playerData.atBench || hero.controlReqlinquished) {
             if (playerData.atBench && !_checkpointMoveNoticed) {
                 _checkpointMoveNoticed = true;
-                Chat("Get up to go back to the door of your boss fight.");
+                Chat(Lang.Pick("Get up to go back to the door of your boss fight.", "站起来就会回到你那场 Boss 战的门口。"));
             }
 
             return;
@@ -344,8 +344,11 @@ internal partial class CoopSave {
                 : $"The partner dropped out of the boss fight, coming back in through door '{gate}', which doesn't lead out"
         );
         Chat(
-            $"{marker.PartnerName} dropped out of the boss fight, so it ends for you too. The boss waits until you are " +
-            "both back in the room."
+            Lang.Pick(
+                $"{marker.PartnerName} dropped out of the boss fight, so it ends for you too. The boss waits until you are " +
+                "both back in the room.",
+                $"{marker.PartnerName} 掉出了这场 Boss 战，所以你这边也跟着结束了。等你们两个都回到房间，Boss 才会继续。"
+            )
         );
         return true;
     }
@@ -374,7 +377,7 @@ internal partial class CoopSave {
 
         Logger.Info($"Taking the local player back to door '{gate}' of '{scene}'");
         if (!_checkpointMoveNoticed) {
-            Chat("Going back to the door of your boss fight.");
+            Chat(Lang.Pick("Going back to the door of your boss fight.", "正在回到你那场 Boss 战的门口。"));
         }
 
         return true;
