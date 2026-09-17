@@ -51,12 +51,16 @@ internal class BenchCoop {
     private const string SitSettleStateName = "Fake?";
 
     /// <summary>
-    /// How far, in units, each player sits from the middle of the seat while other players are connected. Hornet's
-    /// sitting sprites are drawn on a canvas about 3.2 units wide. Her trimmed needolin sitting sprites are 1.5 to 2.3
-    /// units wide, which gives her real width, so two Hornets whose centres are 2 units apart barely touch. The bench
-    /// lengths are unmeasured, so this still needs checking in game.
+    /// How far, in units, each player sits from the middle of the seat while other players are connected. One player
+    /// is moved this far one way and the other the same distance the other way, so the gap between them is twice this.
+    ///
+    /// It was 1, which the sprite widths said would have them "barely touching" - and in game on 2026-09-17 that read
+    /// as two people sitting pointedly apart rather than resting together. The sprites are drawn on a canvas about
+    /// 3.2 units wide while the trimmed art is 1.5 to 2.3, so touching art and touching canvases are far apart, and
+    /// the arithmetic was measuring the wrong one. 0.6 lets the canvases overlap and the drawn shapes sit close
+    /// without either player disappearing behind the other.
     /// </summary>
-    private const float SeatOffset = 1f;
+    private const float SeatOffset = 0.6f;
 
     /// <summary>
     /// The largest distance, in units, between the hero and the position they were moved to on waking up for the hero

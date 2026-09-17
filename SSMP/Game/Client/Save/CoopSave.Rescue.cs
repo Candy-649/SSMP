@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using HutongGames.PlayMaker.Actions;
 using SSMP.Hooks;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -37,6 +38,20 @@ internal partial class CoopSave {
     /// How long that invulnerability lasts, in seconds.
     /// </summary>
     private const float RescueInvulnerabilityTime = 2f;
+
+    /// <summary>
+    /// The name of the one FSM on a cocoon that is kept. It is the game's own name for it, matched at runtime
+    /// rather than written into the prefab, so the cocoon shown for the partner decides how it looks the same way
+    /// the player's own cocoon does.
+    /// </summary>
+    private const string BreakFsmName = "Break";
+
+    /// <summary>
+    /// The name of the state in that FSM which hands out the money and silk the cocoon holds. It is taken out of
+    /// the cocoon shown for the partner, because what it pays out belongs to the player lying in it and not to the
+    /// one looking at it.
+    /// </summary>
+    private const string ReturnCurrencyStateName = "Return Currency";
 
     /// <summary>
     /// How the wait of the local player ended.
@@ -257,6 +272,11 @@ internal partial class CoopSave {
             yield break;
         }
 
+        // The wait is on, so the death's own playing-out has to go now rather than at the end of it. Left alone it
+        // holds a black screen over the whole wait, which hides the world, the cocoon and the line that explains
+        // what is happening - the wait becomes indistinguishable from the game having frozen.
+        ClearDeathSequence();
+
         // Running out of time is decided here rather than only frame by frame next door, because the update that runs
         // frame by frame sits behind early returns of its own: a marker that is gone for a moment is enough to stop it,
         // and then this would hold the death for as long as the game runs. A held death has already switched the pause
@@ -334,6 +354,38 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Takes away the object the death spawned to play itself out, which is what darkens the screen.
+    ///
+    /// The death spawns it and activates it *before* its first yield - the exact point a held death stops at. Holding
+    /// the death stops the player being taken to their bench but takes nothing away, so that object carries on
+    /// playing the death out over a player who is not going anywhere. That is a black screen for as long as the wait
+    /// lasts: up to <see cref="RescueWaitTime"/> seconds of staring at nothing, unable to see the world, their own
+    /// cocoon, or the line telling them what is happening.
+    ///
+    /// Safe to do while the death is still held: the wait the game itself uses was read off this object into the
+    /// coroutine before the yield, so taking the object away afterwards cannot change it, and giving up still ends
+    /// through <c>GameManager.PlayerDead</c>, which does not need it either.
+    ///
+    /// Found by its component rather than by the prefab it came from, because a cursed, frost, memory or non-lethal
+    /// death each spawn a different prefab and every one of them carries this component. It came out of the game's
+    /// pool, so it goes back to the pool: destroying a pooled object leaves the pool believing it is still on loan.
+    /// </summary>
+    private static void ClearDeathSequence() {
+        foreach (var sequence in UnityEngine.Object.FindObjectsByType<HeroDeathSequence>(FindObjectsSortMode.None)) {
+            if (sequence == null) {
+                continue;
+            }
+
+            try {
+                sequence.gameObject.Recycle();
+            } catch (Exception e) {
+                Logger.Warn($"Could not return the death sequence to the pool: {e.Message}");
+                UnityEngine.Object.Destroy(sequence.gameObject);
+            }
+        }
+    }
+
+    /// <summary>
     /// Puts the local player back on their feet where they fell, with half of their health. This undoes by hand what
     /// the death did before it was held, in the order the game's own respawn does it, and then hands back what the
     /// cocoon held, which is what makes being pulled up worth anything: the money and the silk are already inside it
@@ -348,27 +400,8 @@ internal partial class CoopSave {
         }
 
         try {
-            // The death spawns its own sequence object and activates it *before* the first yield, which is exactly
-            // where a held death stops. Holding the death stops the bench transition but takes nothing away, so that
-            // object carries on playing the death out - and it is what keeps the screen black long after the player
-            // is back on their feet, which is what a rescue looked like from the inside: revived, and still blind.
-            //
-            // Found by its component rather than by the prefab it came from, because a cursed, frost, memory or
-            // non-lethal death each spawn a different prefab and every one of them carries this component. It came
-            // out of the game's pool, so it goes back to the pool; destroying a pooled object leaves the pool
-            // believing it is still out on loan.
-            foreach (var sequence in UnityEngine.Object.FindObjectsByType<HeroDeathSequence>(FindObjectsSortMode.None)) {
-                if (sequence == null) {
-                    continue;
-                }
-
-                try {
-                    sequence.gameObject.Recycle();
-                } catch (Exception recycleError) {
-                    Logger.Warn($"Could not return the death sequence to the pool: {recycleError.Message}");
-                    UnityEngine.Object.Destroy(sequence.gameObject);
-                }
-            }
+            // Again here as well as when the wait started, in case a death got held without going through that path
+            ClearDeathSequence();
 
             hero.gameObject.layer = 9;
             hero.renderer.enabled = true;
@@ -570,10 +603,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Puts something that stands in for the cocoon of the partner in the room, without the parts of it that pay out
-    /// and clear the save: its own FSMs call <c>HeroController.CocoonBroken</c>, which would hand the money and the
-    /// silk of whoever is looking at it to them and wipe the record of their own cocoon, and HitResponse is what turns
-    /// a hit into the event those FSMs wait for. The hits are counted here instead.
+    /// Puts something that stands in for the cocoon of the partner in the room, keeping the part of it that decides
+    /// how it looks and dropping the parts that pay out, clear the save, or make it fade away again.
+    ///
+    /// Destroying every FSM was too blunt. The cocoon's own "Break" FSM starts in "Next Frame" and walks straight
+    /// into "Appearance?", which reads <c>HeroCorpseType</c> and switches on the matching child of its "Appearances
+    /// parent" - no hit needed. With every FSM gone that step never ran, nothing was switched on, and the cocoon
+    /// showed the form it has after it has already burst.
     /// </summary>
     /// <param name="position">Where the partner died.</param>
     /// <returns>The object, or null if it could not be made.</returns>
@@ -588,24 +624,53 @@ internal partial class CoopSave {
         }
 
         var cocoon = UnityEngine.Object.Instantiate(prefab, position, Quaternion.identity);
-        cocoon.DestroyComponentsInChildren<PlayMakerFSM>();
-        cocoon.DestroyComponentsInChildren<HitResponse>();
-        cocoon.SetActive(true);
 
-        var core = cocoon.FindGameObjectInChildren("Core");
-        if (core != null) {
-            ActivateAll(core);
+        // Only the root's "Break" FSM survives. The one on the "Core" child is called "Dissolve" and starts in
+        // "Delay", which fades the cocoon out and leaves: keeping it would trade a cocoon that looks wrong for one
+        // that quietly disappears a moment after it arrives.
+        foreach (var fsm in cocoon.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            if (fsm == null || (fsm.FsmName == BreakFsmName && fsm.gameObject == cocoon)) {
+                continue;
+            }
+
+            UnityEngine.Object.DestroyImmediate(fsm);
         }
+
+        // HitResponse still goes. It is what turns a hit into the event the FSM breaks on, and how many hits open
+        // this cocoon is a rule of ours, not the game's, so the counting stays in RescueCocoonHits.
+        cocoon.DestroyComponentsInChildren<HitResponse>();
+
+        // Without HitResponse the state that pays out cannot be reached at all - but that state is the entire
+        // reason these FSMs used to be destroyed wholesale, so the call is taken out as well. Then the cocoon
+        // cannot hand this player the money and silk of the one lying in it, or wipe their own cocoon's record,
+        // even if something later finds another way into that state.
+        RemoveCocoonPayout(cocoon);
+
+        cocoon.SetActive(true);
 
         var hits = cocoon.AddComponent<RescueCocoonHits>();
         hits.Hits = OnRescueCocoonHit;
 
         return cocoon;
+    }
 
-        void ActivateAll(GameObject obj) {
-            obj.SetActive(true);
-            foreach (var child in obj.GetChildren()) {
-                ActivateAll(child);
+    /// <summary>
+    /// Takes the <c>HeroController.CocoonBroken</c> call out of a cocoon, which is the one thing on it that would
+    /// pay out and clear a save.
+    /// </summary>
+    /// <param name="cocoon">The cocoon to take it out of.</param>
+    private static void RemoveCocoonPayout(GameObject cocoon) {
+        foreach (var fsm in cocoon.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            // Asked for by name first: RemoveFirstAction throws when the state is missing, and a cocoon that the
+            // game one day ships without this state should still be shown rather than swallowed by an exception.
+            if (fsm == null || fsm.GetStateOrNull(ReturnCurrencyStateName) == null) {
+                continue;
+            }
+
+            try {
+                fsm.RemoveFirstAction<CallMethodProper>(ReturnCurrencyStateName);
+            } catch (Exception e) {
+                Logger.Warn($"Could not take the payout out of the cocoon of the partner: {e.Message}");
             }
         }
     }
