@@ -11,6 +11,9 @@ public class BepInExLogger : BaseLogger {
     /// </summary>
     private readonly BepInEx.Logging.ManualLogSource _logSource;
 
+    /// <summary>
+    /// Creates the logger and its log source, which is what names this mod in BepInEx's own log.
+    /// </summary>
     public BepInExLogger() {
         _logSource = BepInEx.Logging.Logger.CreateLogSource(SSMPPlugin.Name);
     }

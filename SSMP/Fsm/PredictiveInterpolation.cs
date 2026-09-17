@@ -40,7 +40,6 @@ internal class PredictiveInterpolation : MonoBehaviour {
     [Header("Smoothing Weights")] [SerializeField, Range(0f, 1f)]
     private float velocityBlendFactor = 0.7f;
 
-    [SerializeField] private float visualCorrectionTime = 0.1f;
     [SerializeField] private float velocityDecayRate = 2.0f;
 
     [Header("RTT Adaptation")] [SerializeField]

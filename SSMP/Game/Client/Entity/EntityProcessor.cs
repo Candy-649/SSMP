@@ -111,7 +111,9 @@ internal class EntityProcessor {
         IEnumerable<EntityRegistryEntry> entries = null,
         GameObject parentClientObject = null
     ) {
-        EntityRegistryEntry foundEntry;
+        // Nullable, so that the NotNullWhen of TryGetEntry is what decides it is there, rather than the declaration
+        // saying it always is and the assignment having to be taken on trust
+        EntityRegistryEntry? foundEntry;
 
         // If the given entries are null, query the entity registry for all top-level entries
         // Otherwise only use the given entries (used for child entities)

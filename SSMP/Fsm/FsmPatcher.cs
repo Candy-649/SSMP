@@ -22,11 +22,9 @@ internal class FsmPatcher {
         // On.PlayMakerFSM.OnEnable -= OnFsmEnable;
     }
 
-    /// <summary>
-    /// Callback method for the PlayMakerFSM#OnEnable hook.
-    /// </summary>
-    /// <param name="orig">The original method.</param>
-    /// <param name="self">The PlayMakerFSM instance that the hooked method was called on.</param>
+    // Callback method for the PlayMakerFSM#OnEnable hook.
+    //   orig: The original method.
+    //   self: The PlayMakerFSM instance that the hooked method was called on.
     // private void OnFsmEnable(On.PlayMakerFSM.orig_OnEnable orig, PlayMakerFSM self) {
     //     orig(self);
     //

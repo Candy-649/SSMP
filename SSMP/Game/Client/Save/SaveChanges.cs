@@ -50,10 +50,8 @@ internal class SaveChanges {
         return !outOfDialogueStateNames.Contains(currentStateName);
     }
 
-    /// <summary>
-    /// Hide the currently active dialogue box by setting the state of the 'Dialogue Page Control' FSM of the 'Text YN'
-    /// game object. Needs to be amended if this method should also hide dialogue boxes of other dialogue types.
-    /// </summary>
+    // Hide the currently active dialogue box by setting the state of the 'Dialogue Page Control' FSM of the 'Text YN'
+    // game object. Needs to be amended if this method should also hide dialogue boxes of other dialogue types.
     // private void HideDialogueBox() {
     //     var gc = GameCameras.instance;
     //     if (gc == null) {

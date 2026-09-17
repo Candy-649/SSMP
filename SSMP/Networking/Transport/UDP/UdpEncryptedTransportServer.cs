@@ -7,7 +7,7 @@ using SSMP.Networking.Transport.Common;
 namespace SSMP.Networking.Transport.UDP;
 
 /// <summary>
-/// UDP+DTLS implementation of <see cref="IEncryptedTransportServer{TClient}"/> that wraps DtlsServer.
+/// UDP+DTLS implementation of <see cref="IEncryptedTransportServer"/> that wraps DtlsServer.
 /// </summary>
 internal class UdpEncryptedTransportServer : IEncryptedTransportServer {
     /// <summary>

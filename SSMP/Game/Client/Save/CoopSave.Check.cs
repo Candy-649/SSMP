@@ -233,7 +233,9 @@ internal partial class CoopSave {
     /// too.
     /// </summary>
     private ulong NewCheckKey() {
-        var key = (((_highestCheckKey >> 16) + 1) << 16) | (ulong) UnityEngine.Random.Range(1, 0x10000);
+        // Through uint, so that the lower bits are laid in as they are. Random.Range never returns a negative here,
+        // but a signed value widened to ulong would fill the whole upper half with ones and bury the count above
+        var key = (((_highestCheckKey >> 16) + 1) << 16) | (uint) UnityEngine.Random.Range(1, 0x10000);
         _highestCheckKey = key;
         return key;
     }

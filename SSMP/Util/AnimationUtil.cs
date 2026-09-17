@@ -7,6 +7,9 @@ using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Util;
 
+/// <summary>
+/// Helpers for animation effects that happen in steps, where a part of an effect has to wait for an earlier one.
+/// </summary>
 public static class AnimationUtil {
     /// <summary>
     /// Execute the given action after the given delay in seconds. Will start a coroutine that waits for the delay,

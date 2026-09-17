@@ -6,16 +6,37 @@ namespace SSMP.Internals;
 /// Enumeration of Crest types.
 /// </summary>
 public enum CrestType : byte {
+    /// <summary>The starting crest, known to the game as "Hunter".</summary>
     Hunter = 0,
+
+    /// <summary>The second form of the starting crest, known to the game as "Hunter_v2".</summary>
     HunterV2,
+
+    /// <summary>The third form of the starting crest, known to the game as "Hunter_v3".</summary>
     HunterV3,
+
+    /// <summary>Known to the game as "Reaper".</summary>
     Reaper,
+
+    /// <summary>Known to the game as "Wanderer".</summary>
     Wanderer,
+
+    /// <summary>Known to the game as "Warrior", which is not what it is called here.</summary>
     Beast,
+
+    /// <summary>Known to the game as "Witch".</summary>
     Witch,
+
+    /// <summary>Known to the game as "Toolmaster", which is not what it is called here.</summary>
     Architect,
+
+    /// <summary>Known to the game as "Spell", which is not what it is called here.</summary>
     Shaman,
+
+    /// <summary>Known to the game as "Cursed".</summary>
     Cursed,
+
+    /// <summary>Known to the game as "Cloakless".</summary>
     Cloakless
 }
 
