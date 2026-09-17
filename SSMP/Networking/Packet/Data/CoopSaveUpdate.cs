@@ -429,5 +429,29 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    WaitingRoomReady
+    WaitingRoomReady,
+
+    /// <summary>
+    /// The sender died and is waiting to be pulled back up instead of going to their bench, so the other player may
+    /// break the cocoon they left behind. <see cref="CoopSaveUpdate.Scene"/> is the room they died in and
+    /// <see cref="CoopSaveUpdate.Values"/> holds the x and y of the cocoon, so that the other game can show one where
+    /// there is none of its own.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    RescueOffer,
+
+    /// <summary>
+    /// The sender hit the cocoon that the other player left behind. <see cref="CoopSaveUpdate.Part"/> counts the hits
+    /// so far and <see cref="CoopSaveUpdate.PartCount"/> how many it takes, so that the player waiting sees how far it
+    /// got and is pulled back up on the last one.
+    /// </summary>
+    RescueHit,
+
+    /// <summary>
+    /// The sender is no longer waiting to be pulled back up, because they went to their bench, they were pulled up, or
+    /// nobody could reach them any more. The cocoon that the other game showed for them goes away again.
+    /// </summary>
+    RescueEnd
 }

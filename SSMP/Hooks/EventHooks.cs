@@ -187,6 +187,16 @@ public static class EventHooks {
     public static event Action<bool, bool>? HeroControllerDie;
 
     /// <summary>
+    /// Wraps the coroutine that plays out a death of the local player, for the one consumer that needs to hold a death
+    /// rather than only hear about it. The wrapper is given the coroutine of the game, and whatever it returns is run
+    /// in its place, so it can let the death run to a point and stop there.
+    ///
+    /// This is deliberately not an event: only one thing can decide how a death plays out, and everyone who only wants
+    /// to know that a death happened uses <see cref="HeroControllerDie"/> instead and is left alone by this.
+    /// </summary>
+    public static Func<IEnumerator, bool, bool, IEnumerator>? HeroControllerDieWrapper;
+
+    /// <summary>
     /// Event that is called when HeroController.UseLavaBell is called.
     /// </summary>
     public static event Action? UseLavaBell;
@@ -516,7 +526,10 @@ public static class EventHooks {
         ) {
         HeroControllerDie?.Invoke(nonLethal, frostDeath);
 
-        return orig(self, nonLethal, frostDeath);
+        var death = orig(self, nonLethal, frostDeath);
+        var wrapper = HeroControllerDieWrapper;
+
+        return wrapper == null ? death : wrapper(death, nonLethal, frostDeath);
     }
 
     private static void OnUseLavaBell(Action<HeroController> orig, HeroController self) {

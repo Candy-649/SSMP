@@ -339,6 +339,7 @@ internal partial class CoopSave {
         RegisterDeliveryHooks();
         RegisterLiftHooks();
         RegisterStoryItemHooks();
+        RegisterRescueHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -446,6 +447,7 @@ internal partial class CoopSave {
 
         UpdateWishTalk(partner);
         UpdateDeliverySummon(hero, partner != null && _checkedWith == partner.Id ? partner : null);
+        UpdateRescue(hero, partner != null && _checkedWith == partner.Id ? partner : null);
 
         if (partner != null && _checkedWith == partner.Id) {
             UpdateCheckedPlayTime(marker);
@@ -782,6 +784,15 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WishConfirm:
                 OnWishConfirm(player, update);
+                break;
+            case CoopSaveUpdateKind.RescueOffer:
+                OnRescueOffer(player, update);
+                break;
+            case CoopSaveUpdateKind.RescueHit:
+                OnRescueHit(player, update);
+                break;
+            case CoopSaveUpdateKind.RescueEnd:
+                OnRescueEnd(player, update);
                 break;
         }
     }
