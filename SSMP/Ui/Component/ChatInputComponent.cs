@@ -52,8 +52,12 @@ internal class ChatInputComponent : InputComponent {
             return addedChar;
         };
 
+        // This listens for as long as the game runs, not only while the chat is open, so it has to ask whether anyone
+        // is actually typing. Without that, Enter pressed anywhere - it is also the confirm key of the game's own
+        // menus, and not one a player can rebind - submits an empty line here, and submitting closes the chat, which
+        // hands back mouse input, the pause menu and every hero action even though nothing had taken them away.
         MonoBehaviourUtil.Instance.OnUpdateEvent += () => {
-            if (Input.GetKeyDown(KeyCode.Return)) {
+            if (InputField.gameObject.activeInHierarchy && Input.GetKeyDown(KeyCode.Return)) {
                 OnSubmit?.Invoke(InputField.text);
 
                 InputField.text = "";

@@ -29,7 +29,10 @@ internal class Keybinds : PlayerActionSet {
         OpenChat.AddDefaultBinding(Key.Y);
 
         CoopPair = CreatePlayerAction("CoopPair");
-        CoopPair.AddDefaultBinding(Key.J);
+        // Not J, which the game itself binds by default to opening a page of the inventory: both action sets are
+        // listening, so one press did both. L is bound to nothing by the game, and sits next to the key that leaves
+        // a two-player save, which is the other half of the same choice.
+        CoopPair.AddDefaultBinding(Key.L);
 
         CoopLeave = CreatePlayerAction("CoopLeave");
         CoopLeave.AddDefaultBinding(Key.K);

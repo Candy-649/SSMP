@@ -88,6 +88,10 @@ internal class ChatBox : IChatBox {
     /// The chat input component.
     /// </summary>
     private readonly ChatInputComponent _chatInput;
+    /// <summary>
+    /// The mod settings, which hold the keys of this mod so they can be switched off while someone is typing.
+    /// </summary>
+    private readonly ModSettings _modSettings;
     /// <inheritdoc />
     public bool IsOpen { get; private set; }
     /// <summary>
@@ -109,11 +113,12 @@ internal class ChatBox : IChatBox {
         _chatBoxGroup = chatBoxGroup;
         _textGenerator = new TextGenerator();
         _messages = new ChatMessage[MaxMessages];
+        _modSettings = modSettings;
 
         _chatInput = CreateChatInput(chatBoxGroup);
         InitializeTextSettings();
 
-        MonoBehaviourUtil.Instance.OnUpdateEvent += () => CheckKeyBinds(modSettings);
+        MonoBehaviourUtil.Instance.OnUpdateEvent += CheckKeyBinds;
     }
 
     /// <summary>
@@ -173,13 +178,12 @@ internal class ChatBox : IChatBox {
     /// <summary>
     /// Check whether key-binds for the chat box are pressed.
     /// </summary>
-    /// <param name="modSettings">The mod settings that hold the current key-binds.</param>
-    private void CheckKeyBinds(ModSettings modSettings) {
+    private void CheckKeyBinds() {
         if (!_chatBoxGroup.IsActive()) return;
 
         if (IsOpen) {
             HandleOpenChatInput();
-        } else if (modSettings.Keybinds.OpenChat.IsPressed && CanOpenChat()) {
+        } else if (_modSettings.Keybinds.OpenChat.IsPressed && CanOpenChat()) {
             ShowChatInput();
         }
     }
@@ -299,6 +303,12 @@ internal class ChatBox : IChatBox {
         InputHandler.Instance.StopMouseInput();
         InputHandler.Instance.PreventPause();
         SetEnabledHeroActions(false);
+
+        // The keys of this mod are switched off for the same reason the game's own actions are: a letter typed into
+        // the chat is otherwise also a key press. Typing "ok" pressed the key that gives up on being pulled back up
+        // after a death, and a "j" asked the other player for a two-player save. Switching off the whole set rather
+        // than the two keys by name means a key added later cannot be forgotten here.
+        _modSettings.Keybinds.Enabled = false;
     }
 
     /// <summary>
@@ -316,6 +326,7 @@ internal class ChatBox : IChatBox {
         InputHandler.Instance.inputActions.Pause.ClearInputState();
         InputHandler.Instance.AllowPause();
         SetEnabledHeroActions(true);
+        _modSettings.Keybinds.Enabled = true;
     }
 
     /// <summary>

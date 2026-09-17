@@ -818,7 +818,7 @@ internal partial class CoopSave {
     /// The name of the key that agrees to a two-player save, for the line that offers one. It is the default binding:
     /// a player who rebinds it in the settings file presses their own key, and only reads the wrong name here.
     /// </summary>
-    private const string PairKeyName = "J";
+    private const string PairKeyName = "L";
 
     /// <summary>
     /// The name of the key that leaves a two-player save waiting for a partner who is not coming, for the line that
