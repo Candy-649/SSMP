@@ -513,6 +513,13 @@ internal class UiManager : IUiManager {
         _eventSystem.sendNavigationEvents = true;
         _eventSystem.pixelDragThreshold = 10;
 
+        // The rule that keeps this one out of the way in menus lives in the scene change handler, and a scene change
+        // is exactly what does not happen next: this is built while the main menu is already loaded, so nothing
+        // applied the rule until the game was entered. That left a second event system running through the
+        // multiplayer menu, the waiting room and the save selection - the screens where the game's own handling of a
+        // gamepad has to work, and where a gamepad could move between saves but not open one.
+        _eventSystem.enabled = !SceneUtil.IsNonGameplayScene(SceneUtil.GetCurrentSceneName());
+
         eventSystemObj.AddComponent<StandaloneInputModule>();
         Object.DontDestroyOnLoad(eventSystemObj);
     }
@@ -1100,6 +1107,19 @@ internal class UiManager : IUiManager {
         if (UM != null) {
              yield return UM.GoToProfileMenu();
              OverrideSaveMenuBackButton();
+
+             // Which event system drives this screen decides whether a gamepad can open a save at all. The game's own
+             // one asks the gamepad properly; a plain Unity one does not treat the confirm the same way, and this is
+             // the screen where a gamepad could move between saves but not open one. Which of the two ends up in
+             // charge cannot be told from the code alone, so it is written into the log rather than guessed at.
+             var eventSystem = EventSystem.current;
+             Logger.Info(
+                 "Save selection is driven by " +
+                 (eventSystem == null
+                     ? "no event system at all"
+                     : $"'{eventSystem.gameObject.name}' using " +
+                       $"{eventSystem.currentInputModule?.GetType().Name ?? "no input module"}")
+             );
         } else {
              Logger.Error("UIManager instance is null, cannot go to profile menu");
              _isSlotSelectionActive = false;
