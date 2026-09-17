@@ -1,5 +1,6 @@
-﻿using TMProOld;
+using TMProOld;
 using UnityEngine;
+using SSMP.Util;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Ui.Resources;
@@ -9,14 +10,56 @@ namespace SSMP.Ui.Resources;
 /// </summary>
 internal static class FontManager {
     /// <summary>
-    /// The font used for UI.
+    /// The font the game draws its English text with, and the one this mod drew everything with.
     /// </summary>
-    public static Font UIFontRegular = null!;
+    private static Font _latinFont = null!;
 
     /// <summary>
-    /// The font used for usernames above player objects.
+    /// A font that can draw Chinese, once one has been looked for.
+    /// </summary>
+    private static Font? _chineseFont;
+
+    /// <summary>
+    /// Whether a font that can draw Chinese has been looked for, so that a game with none does not search again for
+    /// every piece of text it shows.
+    /// </summary>
+    private static bool _searchedForChinese;
+
+    /// <summary>
+    /// The font used for UI.
+    ///
+    /// The font above cannot draw Chinese: it is Perpetua, which the game keeps in its English font bundle, while a
+    /// game running in Chinese draws its own text from a separate one. Handing it Chinese gives empty boxes rather
+    /// than an error, so the Chinese wording of this mod would be there and unreadable.
+    ///
+    /// Asked for each time rather than settled once, because the language can be changed in the game's own options
+    /// while it runs, and because it is not worth depending on whether fonts are loaded before the language is known.
+    /// </summary>
+    public static Font UIFontRegular => Lang.IsChinese ? FindChineseFont() ?? _latinFont : _latinFont;
+
+    /// <summary>
+    /// The font used for usernames above player objects. Left as the game's own, which cannot draw Chinese either, so
+    /// a Chinese username still shows as boxes. Changing it means picking a different font for text this mod did not
+    /// introduce, which is worth doing on its own rather than as part of translating the mod.
     /// </summary>
     public static TMP_FontAsset InGameNameFont = null!;
+
+    /// <summary>
+    /// A character no font without Chinese glyphs can draw, used to ask a font whether it is one rather than guessing
+    /// from its name. The game's fonts are in compressed bundles, so their names cannot be known ahead of time.
+    /// </summary>
+    private const char ChineseSample = '的';
+
+    /// <summary>
+    /// The fonts to ask Windows for if the game turns out to have none that can draw Chinese, in order of preference.
+    /// </summary>
+    private static readonly string[] ChineseOsFonts = [
+        "Microsoft YaHei UI",
+        "Microsoft YaHei",
+        "SimHei",
+        "SimSun",
+        "NSimSun"
+    ];
 
     /// <summary>
     /// Load the fonts by trying to find them in the game through Unity.
@@ -25,18 +68,20 @@ internal static class FontManager {
         Logger.Info("Loading fonts...");
 
         foreach (var font in UnityEngine.Resources.FindObjectsOfTypeAll<Font>()) {
-            // Logger.Info($"Font: {font.name}");
-            
+            // Logged because which fonts a game has loaded depends on the language it is set to, and they arrive in
+            // compressed bundles that cannot be read from outside the game. A log says what was really there.
+            Logger.Info($"Font: {font.name}");
+
             switch (font.name) {
                 case "Perpetua":
-                    UIFontRegular = font;
+                    _latinFont = font;
                     break;
             }
         }
 
         foreach (var textMeshProFont in UnityEngine.Resources.FindObjectsOfTypeAll<TMP_FontAsset>()) {
-            // Logger.Info($"TMP_FontAsset: {textMeshProFont.name}");
-            
+            Logger.Info($"TMP_FontAsset: {textMeshProFont.name}");
+
             switch (textMeshProFont.name) {
                 case "TrajanPro-Bold SDF":
                     InGameNameFont = textMeshProFont;
@@ -44,12 +89,72 @@ internal static class FontManager {
             }
         }
 
-        if (UIFontRegular == null) {
+        if (_latinFont == null) {
             Logger.Error("UI font regular is missing!");
         }
 
         if (InGameNameFont == null) {
             Logger.Error("In-game name font is missing!");
+        }
+    }
+
+    /// <summary>
+    /// A font that can draw Chinese: one the game has already loaded if there is one, and otherwise one asked of
+    /// Windows, which always has at least one of these. Looked for once, because a game that has none will not grow
+    /// one, and the fallback does not need the game to provide anything.
+    /// </summary>
+    /// <returns>A font that can draw Chinese, or null if neither the game nor Windows offered one.</returns>
+    private static Font? FindChineseFont() {
+        if (_searchedForChinese) {
+            return _chineseFont;
+        }
+
+        _searchedForChinese = true;
+
+        foreach (var font in UnityEngine.Resources.FindObjectsOfTypeAll<Font>()) {
+            if (!CanDrawChinese(font)) {
+                continue;
+            }
+
+            Logger.Info($"Drawing Chinese with the game's own font: {font.name}");
+            _chineseFont = font;
+
+            return _chineseFont;
+        }
+
+        foreach (var name in ChineseOsFonts) {
+            var font = Font.CreateDynamicFontFromOSFont(name, 16);
+            if (font == null || !CanDrawChinese(font)) {
+                continue;
+            }
+
+            Logger.Info($"Drawing Chinese with a font from Windows: {name}");
+            _chineseFont = font;
+
+            return _chineseFont;
+        }
+
+        Logger.Error("Found no font that can draw Chinese, so this mod's text stays in the game's own font");
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a font has the glyphs to draw Chinese. A font that answers by throwing is treated as one that cannot,
+    /// because asking is only worth doing while it cannot break showing the text at all.
+    /// </summary>
+    /// <param name="font">The font to ask.</param>
+    /// <returns>Whether the font can draw Chinese.</returns>
+    private static bool CanDrawChinese(Font font) {
+        try {
+            // A dynamic font only builds the glyphs asked of it, so it has to be asked before it can answer.
+            if (font.dynamic) {
+                font.RequestCharactersInTexture(ChineseSample.ToString());
+            }
+
+            return font.HasCharacter(ChineseSample);
+        } catch {
+            return false;
         }
     }
 }
