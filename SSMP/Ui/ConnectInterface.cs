@@ -2033,6 +2033,23 @@ internal class ConnectInterface {
     /// <param name="lobbyId">The Steam ID of the joined lobby.</param>
     private void OnLobbyJoined(CSteamID lobbyId) {
         Logger.Info($"Joined lobby: {lobbyId}");
+
+        // Both games have to be the same build. Picking a lobby out of the list already filters on this, but an
+        // invite and joining through a friends list never go near that filter, which is how two people actually play
+        // together. Until now a mismatch was silent: nothing refused it, the two saves simply behaved differently and
+        // it read as a fresh bug. Leaving the lobby and putting the buttons back matters as much as the message - an
+        // early return on its own would strand the connect button on "Connecting..." with no way back.
+        var hostVersion = SteamManager.GetLobbyModVersion(lobbyId);
+        if (hostVersion.Length > 0 && hostVersion != SteamManager.LocalModVersion) {
+            Logger.Warn($"Lobby runs '{hostVersion}', this game runs '{SteamManager.LocalModVersion}'");
+
+            SteamManager.LeaveLobby();
+            ResetConnectionButtons();
+            ShowFeedback(Color.red, "You are on different versions of the mod. Both players need the same one.");
+
+            return;
+        }
+
         ShowFeedback(Color.green, "Joined lobby! Connecting to host...");
 
         var hostId = SteamManager.GetLobbyOwner(lobbyId);

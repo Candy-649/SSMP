@@ -94,7 +94,16 @@ public static class SteamManager {
     /// <summary>
     /// Cached mod version string from assembly metadata.
     /// </summary>
-    private static readonly string ModVersion = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "0.0.0.0";
+    /// <summary>
+    /// The build this game is running, as told to the other player. The informational version carries the commit it
+    /// was built from, so two builds of the same mod are told apart; the plain assembly version has stood still for
+    /// every build handed out so far and would report two different games as the same one.
+    /// </summary>
+    private static readonly string ModVersion =
+        Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion
+        ?? Assembly.GetExecutingAssembly().GetName().Version?.ToString()
+        ?? "0.0.0.0";
 
     /// <summary>
     /// Reusable callback instances to avoid GC allocations.
@@ -223,6 +232,24 @@ public static class SteamManager {
         
         var apiCall = SteamMatchmaking.JoinLobby(lobbyId);
         _lobbyEnterCallback?.Set(apiCall);
+    }
+
+    /// <summary>
+    /// The build this game is running, for telling whether the other player is running the same one.
+    /// </summary>
+    public static string LocalModVersion => ModVersion;
+
+    /// <summary>
+    /// The build the host of a lobby is running, as they published it when the lobby was opened.
+    /// </summary>
+    /// <param name="lobbyId">The lobby.</param>
+    /// <returns>The version the host published, or an empty string if the lobby does not say.</returns>
+    public static string GetLobbyModVersion(CSteamID lobbyId) {
+        if (!IsInitialized) {
+            return "";
+        }
+
+        return SteamMatchmaking.GetLobbyData(lobbyId, LobbyKeyVersion) ?? "";
     }
 
     /// <summary>
