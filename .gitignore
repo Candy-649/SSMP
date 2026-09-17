@@ -426,3 +426,12 @@ LocalBuildProperties.props
 # files that must never be committed, and this repository is meant to be published, so one careless "add ." would
 # have put someone's saves online permanently.
 installer/save-backups/
+
+# The BepInEx loader archive the release is packaged with. It is a third-party binary that installer/README.md
+# deliberately keeps out of this repository; it lives here only so the packaging script has a stable path to
+# read it from, instead of depending on a temporary folder that disappears.
+dist-assets/
+
+# Where installer/pack-npm.ps1 assembles the package. It is rebuilt from scratch on every run and holds copies
+# of build output, so committing it would only ever add a second, staler copy of things already tracked.
+dist-npm/
