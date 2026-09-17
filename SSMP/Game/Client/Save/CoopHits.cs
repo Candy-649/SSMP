@@ -39,6 +39,13 @@ internal class CoopHits {
     private const float MaxPredictedRecoilTime = 1f;
 
     /// <summary>
+    /// The longest that a knockback of an enemy that the scene host controls is held on after the knockback itself
+    /// has ended, in seconds, to wait for the position of the scene host to catch up with it. A knockback lasts a
+    /// fraction of a second, so a round trip worse than this is past the point where holding on still helps.
+    /// </summary>
+    private const float MaxRecoilHoldTime = 0.35f;
+
+    /// <summary>
     /// The types of objects whose hits are replayed: objects of the world that both players share. Objects that give
     /// the player who hits them something, that move that player, or that only react to hits, are left out.
     /// </summary>
@@ -76,10 +83,28 @@ internal class CoopHits {
     private static readonly Dictionary<Type, bool> IsReplayedByType = new();
 
     /// <summary>
-    /// The knockbacks of enemies that the scene host controls which the local game predicts, with the time at which
-    /// the prediction ends at the latest.
+    /// A knockback of an enemy that the scene host controls which the local game predicts.
     /// </summary>
-    private static readonly Dictionary<Recoil, float> PredictedRecoils = new();
+    /// <param name="minHoldUntil">The time until which the prediction is held at the earliest.</param>
+    /// <param name="hardExpiry">The time at which the prediction ends at the latest.</param>
+    private readonly struct PredictedRecoil(float minHoldUntil, float hardExpiry) {
+        /// <summary>
+        /// The time until which the prediction is held even once the knockback itself has ended. The scene host
+        /// only starts this knockback when it arrives there, and its position only shows it here a further trip
+        /// later, so following that position again any earlier pulls the enemy back to where it was standing.
+        /// </summary>
+        public float MinHoldUntil { get; } = minHoldUntil;
+
+        /// <summary>
+        /// The time at which the prediction ends at the latest, in case the knockback doesn't end.
+        /// </summary>
+        public float HardExpiry { get; } = hardExpiry;
+    }
+
+    /// <summary>
+    /// The knockbacks of enemies that the scene host controls which the local game predicts.
+    /// </summary>
+    private static readonly Dictionary<Recoil, PredictedRecoil> PredictedRecoils = new();
 
     /// <summary>
     /// The net client for sending hits.
@@ -497,7 +522,14 @@ internal class CoopHits {
 
         // The enemy moves here until the knockback ends, unless the knockback doesn't move it at all
         if (self.IsRecoiling && self.RecoilSpeedBase * magnitude > 0f) {
-            PredictedRecoils[self] = Time.unscaledTime + MaxPredictedRecoilTime;
+            // This knockback reaches the scene host a trip from now, and the position it moves the enemy to takes
+            // another trip to come back, so its position cannot show this knockback for a round trip yet. Holding
+            // the prediction for that long keeps a short knockback from being corrected away against a position
+            // that was measured before it ever happened.
+            var now = Time.unscaledTime;
+            var roundTrip = Mathf.Clamp(_netClient.UpdateManager.AverageRtt / 1000f, 0f, MaxRecoilHoldTime);
+
+            PredictedRecoils[self] = new PredictedRecoil(now + roundTrip, now + MaxPredictedRecoilTime);
         }
 
         // The scene host gets it either way, since the knockback can also freeze the enemy or stop early here
@@ -665,13 +697,17 @@ internal class CoopHits {
 
         List<Recoil>? ended = null;
         var predicted = false;
+        var now = Time.unscaledTime;
         foreach (var pair in PredictedRecoils) {
-            if (pair.Key == null || !pair.Key.IsRecoiling || Time.unscaledTime > pair.Value) {
+            // The knockback is held while it still moves the enemy, and for a round trip either way, so that the
+            // position of the scene host is not followed again before it can possibly have this knockback in it
+            var isHeld = pair.Key != null && (pair.Key.IsRecoiling || now < pair.Value.MinHoldUntil);
+            if (!isHeld || now > pair.Value.HardExpiry) {
                 (ended ??= []).Add(pair.Key!);
                 continue;
             }
 
-            if (pair.Key.gameObject == clientObject) {
+            if (pair.Key!.gameObject == clientObject) {
                 predicted = true;
             }
         }
