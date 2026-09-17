@@ -7,6 +7,21 @@ namespace SSMP.Ui.Menu;
 /// </summary>
 internal class Keybinds : PlayerActionSet {
     /// <summary>
+    /// The gamepad button that agrees to a two-player save and that gives up on waiting, so that neither of them
+    /// needs a keyboard once the game is running.
+    ///
+    /// Pressing down the left stick is the only button the game itself leaves alone: it binds both triggers, both
+    /// bumpers, all four face buttons, pressing down the right stick, and the two buttons beside them, and anything
+    /// past the fourth face button does not exist on a real gamepad.
+    ///
+    /// The same button serves both because the two can never be waiting at once - a player is offered a two-player
+    /// save only before they have one, and can only give up on waiting once they do - so whichever of the two is
+    /// being offered on screen is the one it answers. Opening the chat deliberately gets no button: there is no way
+    /// to type on a gamepad, so it would only open a box that cannot be filled in.
+    /// </summary>
+    private const InputControlType CoopButton = InputControlType.LeftStickButton;
+
+    /// <summary>
     /// Keybind to open the chat.
     /// </summary>
     public PlayerAction OpenChat { get; }
@@ -33,8 +48,10 @@ internal class Keybinds : PlayerActionSet {
         // listening, so one press did both. L is bound to nothing by the game, and sits next to the key that leaves
         // a two-player save, which is the other half of the same choice.
         CoopPair.AddDefaultBinding(Key.L);
+        CoopPair.AddDefaultBinding(new DeviceBindingSource(CoopButton));
 
         CoopLeave = CreatePlayerAction("CoopLeave");
         CoopLeave.AddDefaultBinding(Key.K);
+        CoopLeave.AddDefaultBinding(new DeviceBindingSource(CoopButton));
     }
 }

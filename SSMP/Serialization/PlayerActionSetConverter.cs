@@ -42,13 +42,31 @@ public class PlayerActionSetConverter : JsonConverter {
             var ac = set.GetPlayerActionByName(name);
             reader.Read();
             if (ac != null) {
-                if (reader.Value is string val) {
+                if (reader.TokenType == JsonToken.StartArray) {
+                    ac.ClearBindings();
+
+                    reader.Read();
+                    while (reader.TokenType != JsonToken.EndArray) {
+                        if (reader.Value is string entry) {
+                            AddBinding(ac, entry);
+                        }
+
+                        reader.Read();
+                    }
+                } else if (reader.Value is string val) {
+                    // A file written before a binding could be a list holds a single value. Clearing everything for
+                    // it would also throw away the gamepad button the action was just built with, and the file names
+                    // no gamepad button to put back - which is how a gamepad binding disappeared on first read. The
+                    // key it does name replaces the key, and the gamepad button it is silent about is kept.
+                    var controller = ac.GetControllerButtonBinding();
+
                     if (val == new InputHandler.KeyOrMouseBinding().ToString() ||
                         val == nameof(InputControlType.None)) {
                         ac.ClearBindings();
                     } else if (KeybindUtil.ParseBinding(val) is { } bind) {
                         ac.ClearBindings();
                         ac.AddKeyOrMouseBinding(bind);
+                        ac.AddInputControlType(controller);
                     } else if (KeybindUtil.ParseInputControlTypeBinding(val) is { } button) {
                         ac.ClearBindings();
                         ac.AddInputControlType(button);
@@ -56,7 +74,7 @@ public class PlayerActionSetConverter : JsonConverter {
                         Logger.Warn($"Invalid keybinding {val}");
                     }
                 } else {
-                    Logger.Warn($"Expected string for keybind, got `{reader.Value}");
+                    Logger.Warn($"Expected a string or a list for keybind, got `{reader.Value}");
                 }
             } else {
                 Logger.Warn($"Invalid keybind name {name}");
@@ -67,6 +85,20 @@ public class PlayerActionSetConverter : JsonConverter {
         }
 
         return set;
+
+        static void AddBinding(PlayerAction action, string value) {
+            if (value == nameof(InputControlType.None)) {
+                return;
+            }
+
+            if (KeybindUtil.ParseBinding(value) is { } bind) {
+                action.AddKeyOrMouseBinding(bind);
+            } else if (KeybindUtil.ParseInputControlTypeBinding(value) is { } button) {
+                action.AddInputControlType(button);
+            } else {
+                Logger.Warn($"Invalid keybinding {value}");
+            }
+        }
     }
 
     /// <inheritdoc />
@@ -80,15 +112,23 @@ public class PlayerActionSetConverter : JsonConverter {
         foreach (var ac in set.Actions) {
             if (filter(ac.Name)) {
                 writer.WritePropertyName(ac.Name);
+
+                // A list rather than one value. An action can be reached from a key and from a gamepad button at the
+                // same time, and writing only one of the two threw the other away the first time the settings were
+                // saved - which is why a gamepad button could never survive a session.
+                writer.WriteStartArray();
+
                 var keyOrMouse = ac.GetKeyOrMouseBinding();
-                var controllerButton = ac.GetControllerButtonBinding();
                 if (keyOrMouse.Key != Key.None) {
                     writer.WriteValue(keyOrMouse.ToString());
-                } else if (controllerButton != InputControlType.None) {
-                    writer.WriteValue(controllerButton.ToString());
-                } else {
-                    writer.WriteValue("None");
                 }
+
+                var controllerButton = ac.GetControllerButtonBinding();
+                if (controllerButton != InputControlType.None) {
+                    writer.WriteValue(controllerButton.ToString());
+                }
+
+                writer.WriteEndArray();
             }
         }
 
