@@ -97,6 +97,10 @@ internal class HolePunchEncryptedTransport : IEncryptedTransport {
     /// </summary>
     public bool RequiresSequencing => true;
 
+    /// <inheritdoc />
+    /// <remarks>This transport measures nothing of its own, so the round trip is timed from sequence numbers.</remarks>
+    public int? Ping => null;
+
     /// <summary>
     /// Gets the maximum packet size that can be safely transmitted.
     /// Limited by MTU considerations to avoid fragmentation.

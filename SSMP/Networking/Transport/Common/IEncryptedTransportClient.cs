@@ -36,6 +36,12 @@ internal interface IEncryptedTransportClient {
     bool RequiresSequencing { get; }
 
     /// <summary>
+    /// The round trip time to this client in milliseconds, as the transport itself measures it, or null when the
+    /// transport cannot say.
+    /// </summary>
+    int? Ping { get; }
+
+    /// <summary>
     /// Event raised when data is received from this client.
     /// </summary>
     event Action<byte[], int>? DataReceivedEvent;

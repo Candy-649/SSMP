@@ -61,6 +61,36 @@ internal static class SteamRelayMessaging {
     }
 
     /// <summary>
+    /// The round trip to a player in milliseconds, as Valve's own relay network measures it, or null while there is
+    /// no session to measure.
+    ///
+    /// This transport carries none of the sequence numbers that the rest of the mod times a round trip from, so
+    /// asking the relay is the only honest answer available here. Timing the gap between a send and the next arrival
+    /// of anything, as this used to do instead, reports the send interval - a small number that stays the same
+    /// whether the two players are in one room or on different continents.
+    /// </summary>
+    /// <param name="steamId">The player to measure the round trip to.</param>
+    /// <returns>The round trip in milliseconds, or null if the relay has no connected session to report on.</returns>
+    public static int? PingTo(ulong steamId) {
+        if (steamId == 0) {
+            return null;
+        }
+
+        // Hosting for yourself never leaves the machine, and Steam has no session with you to ask about
+        if (steamId == SteamUser.GetSteamID().m_SteamID) {
+            return 0;
+        }
+
+        var identity = IdentityOf(steamId);
+        var state = SteamNetworkingMessages.GetSessionConnectionInfo(ref identity, out _, out var status);
+        if (state != ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected) {
+            return null;
+        }
+
+        return status.m_nPing >= 0 ? status.m_nPing : null;
+    }
+
+    /// <summary>
     /// Sends a buffer to a player over the relay network.
     /// </summary>
     /// <returns>Whether Steam accepted the message for sending.</returns>

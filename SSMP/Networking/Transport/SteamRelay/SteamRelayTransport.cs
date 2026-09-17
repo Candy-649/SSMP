@@ -36,6 +36,9 @@ internal sealed class SteamRelayTransport : IReliableTransport {
     public bool RequiresSequencing => false;
 
     /// <inheritdoc />
+    public int? Ping => _isLoopback ? 0 : SteamRelayMessaging.PingTo(_remoteSteamId);
+
+    /// <inheritdoc />
     public int MaxPacketSize => SteamRelayMessaging.MaxPacketSize;
 
     /// <summary>

@@ -38,6 +38,10 @@ internal class SteamEncryptedTransportClient : IReliableTransportClient {
     public bool RequiresSequencing => true;
 
     /// <inheritdoc />
+    /// <remarks>This transport keeps sequence numbers, so the round trip is timed from those instead.</remarks>
+    public int? Ping => null;
+
+    /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
 
     /// <summary>

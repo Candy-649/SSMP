@@ -34,6 +34,10 @@ internal class HolePunchEncryptedTransportClient : IEncryptedTransportClient {
 
     /// <inheritdoc />
     public bool RequiresSequencing => true;
+
+    /// <inheritdoc />
+    /// <remarks>This transport measures nothing of its own, so the round trip is timed from sequence numbers.</remarks>
+    public int? Ping => null;
     
     /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;

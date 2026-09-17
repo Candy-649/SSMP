@@ -42,6 +42,12 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private RttTracker? _rttTracker;
 
     /// <summary>
+    /// Asks the transport what the round trip to the other end is, when the transport measures one itself. Held as a
+    /// call rather than the transport, because the two ends of this class are set through different interfaces.
+    /// </summary>
+    private Func<int?>? _transportPing;
+
+    /// <summary>
     /// The reliability manager for packet loss detection and resending.
     /// Lazily initialized only when transport requires reliability.
     /// </summary>
@@ -132,6 +138,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSender = value;
             if (value == null) return;
 
+            _transportPing = () => value.Ping;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             InitializeManagersIfNeeded();
@@ -147,6 +154,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSender = value;
             if (value == null) return;
 
+            _transportPing = () => value.Ping;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             InitializeManagersIfNeeded();
@@ -177,10 +185,22 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     public int CurrentSendRate { get; set; } = CongestionManager<TOutgoing, TPacketId>.HighSendRate;
 
     /// <summary>
-    /// Moving average of round trip time (RTT) between sending and receiving a packet.
-    /// Works for all transports including Steam.
+    /// Round trip time to the other end in milliseconds.
+    ///
+    /// A transport that measures the real time to the other player is believed over anything timed here. Steam's
+    /// relayed messaging is the case that matters: it carries no sequence numbers of its own, so the moving average
+    /// below has nothing to time against and used to report the send interval rather than the distance to the other
+    /// player - the same small number whether the two were in one room or on different continents.
     /// </summary>
-    public int AverageRtt => _rttTracker != null ? (int) System.Math.Round(_rttTracker.AverageRtt) : 0;
+    public int AverageRtt {
+        get {
+            if (_transportPing?.Invoke() is { } ping and >= 0) {
+                return ping;
+            }
+
+            return _rttTracker != null ? (int) System.Math.Round(_rttTracker.AverageRtt) : 0;
+        }
+    }
 
     /// <summary>
     /// Event that is called when the client times out.
@@ -262,11 +282,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         // Reset the connection timeout timer
         _lastReceiveTime = DateTime.UtcNow;
 
-        // For Steam (no sequencing): Estimate RTT by completing the round-trip for last sent sequence.
-        // Note: _localSequence is post-incremented after OnSendPacket, so the last sequence
-        // that was tracked via OnSendPacket is (_localSequence - 1).
+        // A transport without sequence numbers has nothing here to acknowledge: the packet that just arrived answers
+        // nothing that was sent. Closing the round trip of the last sent sequence anyway, as this used to, timed the
+        // gap between sending and the next arrival of anything - the send interval - and fed that to the tracker as
+        // though it were the distance to the other player. Such a transport reports its own ping instead.
         if (!_requiresSequencing) {
-            _rttTracker?.OnAckReceived((ushort) (_localSequence - 1));
             return;
         }
 

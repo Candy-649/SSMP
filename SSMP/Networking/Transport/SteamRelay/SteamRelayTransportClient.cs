@@ -36,6 +36,9 @@ internal class SteamRelayTransportClient : IReliableTransportClient {
     public bool RequiresSequencing => false;
 
     /// <inheritdoc />
+    public int? Ping => SteamRelayMessaging.PingTo(SteamId);
+
+    /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
 
     public SteamRelayTransportClient(ulong steamId) {

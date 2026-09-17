@@ -33,6 +33,10 @@ internal class UdpEncryptedTransportClient : IEncryptedTransportClient {
     public bool RequiresSequencing => true;
 
     /// <inheritdoc />
+    /// <remarks>Plain UDP measures nothing of its own, so the round trip is timed from sequence numbers.</remarks>
+    public int? Ping => null;
+
+    /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
 
     public UdpEncryptedTransportClient(DtlsServerClient dtlsServerClient) {

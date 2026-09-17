@@ -40,6 +40,13 @@ internal interface IEncryptedTransport {
     bool RequiresSequencing { get; }
 
     /// <summary>
+    /// The round trip time to the server in milliseconds, as the transport itself measures it, or null when the
+    /// transport cannot say. A transport that carries traffic over a network of its own knows the real time to the
+    /// other player, which is worth more than anything this mod can time from the outside.
+    /// </summary>
+    int? Ping { get; }
+
+    /// <summary>
     /// Maximum packet size supported by this transport in bytes.
     /// Used for MTU-based fragmentation decisions.
     /// </summary>

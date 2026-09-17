@@ -46,6 +46,10 @@ internal sealed class SteamEncryptedTransport : IReliableTransport {
     public bool RequiresSequencing => true;
 
     /// <inheritdoc />
+    /// <remarks>This transport keeps sequence numbers, so the round trip is timed from those instead.</remarks>
+    public int? Ping => null;
+
+    /// <inheritdoc />
     public int MaxPacketSize => SteamMaxPacketSize;
 
     /// <summary>
