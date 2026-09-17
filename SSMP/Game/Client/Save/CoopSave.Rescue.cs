@@ -160,6 +160,18 @@ internal partial class CoopSave {
     private ushort? _partnerWaitingRescue;
 
     /// <summary>
+    /// The room the waiting partner died in, or empty while none is waiting. Remembered even while the local player is
+    /// somewhere else, so that walking into that room later still shows their cocoon: an offer that was thrown away
+    /// because it arrived while the player was elsewhere could never be shown at all.
+    /// </summary>
+    private string _partnerCocoonScene = "";
+
+    /// <summary>
+    /// Where in that room their cocoon is.
+    /// </summary>
+    private Vector2 _partnerCocoonPosition;
+
+    /// <summary>
     /// Whether the give-up key was held on the previous frame, so that holding it counts once.
     /// </summary>
     private bool _rescueLeaveHeld;
@@ -242,7 +254,18 @@ internal partial class CoopSave {
             yield break;
         }
 
-        while (_rescue is { Outcome: RescueOutcome.Waiting }) {
+        // Running out of time is decided here rather than only frame by frame next door, because the update that runs
+        // frame by frame sits behind early returns of its own: a marker that is gone for a moment is enough to stop it,
+        // and then this would hold the death for as long as the game runs. A held death has already switched the pause
+        // menu off, so there would be nothing left to do about it but kill the game. This loop is the one thing that is
+        // certainly still running while a death is held, so the way out that must always work lives in it.
+        while (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
+            if (Time.unscaledTime - waiting.StartTime >= RescueWaitTime) {
+                waiting.Outcome = RescueOutcome.Ended;
+
+                break;
+            }
+
             yield return null;
         }
 
@@ -397,6 +420,18 @@ internal partial class CoopSave {
     private void UpdateRescue(HeroController hero, ClientPlayerData? partner) {
         try {
             if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
+                // A death that is being held always leaves the player marked dead - that is set in the part of the
+                // death that has already been played out by the time a wait starts - so finding them alive means the
+                // death itself is gone: the room was loaded again underneath it, or the save was left, and whatever
+                // was holding it went away with it. After a room is loaded this is a different hero entirely. Nothing
+                // else can end the wait once that has happened, so it ends here, which also takes the cocoon of
+                // someone who is walking around again off the screen of the other player.
+                if (!hero.cState.dead) {
+                    EndRescueWait();
+
+                    return;
+                }
+
                 if (partner == null) {
                     // Nobody is left to open it
                     rescue.Outcome = RescueOutcome.Ended;
@@ -417,10 +452,6 @@ internal partial class CoopSave {
                 }
 
                 _rescueLeaveHeld = leaveHeld;
-
-                if (Time.unscaledTime - rescue.StartTime >= RescueWaitTime) {
-                    rescue.Outcome = RescueOutcome.Ended;
-                }
 
                 return;
             }
@@ -448,21 +479,23 @@ internal partial class CoopSave {
 
         RemoveRescueTarget();
 
-        // Noted whichever room they died in: it decides whether a death of this player can wait for them at all
+        if (update.Values.Count < 2) {
+            return;
+        }
+
+        // Noted whichever room they died in: it decides whether a death of this player can wait for them at all, and
+        // it is what lets their cocoon appear when this player walks into that room later
         _partnerWaitingRescue = player.Id;
+        _partnerCocoonScene = update.Scene;
+        _partnerCocoonPosition = new Vector2(update.Values[0], update.Values[1]);
 
-        if (update.Values.Count < 2 || SceneUtil.GetCurrentSceneName() != update.Scene) {
-            // Nothing to show from another room: walking in later is not handled yet
-            return;
-        }
+        Chat(
+            SceneUtil.GetCurrentSceneName() == update.Scene
+                ? $"{player.Username} died. Hit their cocoon {RescueHits} times to break them out."
+                : $"{player.Username} died. Their cocoon is where they fell, and {RescueHits} hits break them out."
+        );
 
-        var position = new Vector2(update.Values[0], update.Values[1]);
-        if (SpawnRescueCocoon(position) is not { } cocoon) {
-            return;
-        }
-
-        _rescueTarget = new RescueTarget(player.Id, update.Scene, cocoon);
-        Chat($"{player.Username} died. Hit their cocoon {RescueHits} times to break them out.");
+        ShowPartnerCocoon();
     }
 
     /// <summary>
@@ -559,6 +592,56 @@ internal partial class CoopSave {
             RemoveRescueTarget();
             Chat($"You broke {partner.Username} out.");
         }
+    }
+
+    /// <summary>
+    /// Puts the cocoon of a waiting partner in the room once the local player is standing in the room it is in. It is
+    /// shown on arriving as well as on hearing about it, since a player who was elsewhere when their partner died can
+    /// still be the one who walks in and opens it.
+    /// </summary>
+    private void ShowPartnerCocoon() {
+        if (_partnerWaitingRescue is not { } playerId || _rescueTarget != null ||
+            _partnerCocoonScene.Length == 0 || SceneUtil.GetCurrentSceneName() != _partnerCocoonScene) {
+            return;
+        }
+
+        if (SpawnRescueCocoon(_partnerCocoonPosition) is not { } cocoon) {
+            return;
+        }
+
+        _rescueTarget = new RescueTarget(playerId, _partnerCocoonScene, cocoon);
+    }
+
+    /// <summary>
+    /// Shows or takes away the cocoon of a waiting partner when the local player changes rooms.
+    /// </summary>
+    private void OnRescueSceneChanged() {
+        try {
+            if (_rescueTarget is { } target && SceneUtil.GetCurrentSceneName() != target.Scene) {
+                RemoveRescueTarget();
+            }
+
+            ShowPartnerCocoon();
+        } catch (Exception e) {
+            LogRescueError(e);
+        }
+    }
+
+    /// <summary>
+    /// Forgets everything about a rescue when the loaded save is left, so that a cocoon of a partner does not stay
+    /// behind in the world and a partner who is remembered as waiting cannot keep the next death of this player from
+    /// waiting for a rescue of its own.
+    /// </summary>
+    private void ResetRescue() {
+        if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
+            rescue.Outcome = RescueOutcome.Ended;
+        }
+
+        RemoveRescueTarget();
+        _partnerWaitingRescue = null;
+        _partnerCocoonScene = "";
+        _rescueLeaveHeld = false;
+        _uiManager.CoopPrompt.Hide();
     }
 
     /// <summary>

@@ -562,6 +562,7 @@ internal partial class CoopSave {
         ResetLifts();
         ResetDeliveries();
         ResetStoryItems();
+        ResetRescue();
     }
 
     /// <summary>
@@ -587,6 +588,7 @@ internal partial class CoopSave {
         OnWishTalkSceneChanged();
         OnLiftSceneChanged();
         OnDeliverySceneChanged();
+        OnRescueSceneChanged();
     }
 
     /// <summary>
@@ -651,6 +653,12 @@ internal partial class CoopSave {
         ResetWishConfirm();
         _checkedWith = null;
         ResetCheck();
+
+        // This path does not go through ResetSession, so a cocoon of theirs left standing in the room would stay for
+        // good, and this player would be remembered as waiting to be pulled up by someone who is gone - which would
+        // quietly stop the next death of the local player from waiting for anyone
+        ResetRescue();
+
         if (wasChecked) {
             // The play time that both players played together is kept for the next check
             SaveMarkers();
@@ -683,6 +691,11 @@ internal partial class CoopSave {
         _receivedUnpairRequest = null;
         _checkedWith = null;
         ResetCheck();
+
+        // This path does not go through ResetSession either, so the same cocoon and the same memory of a partner
+        // waiting would be left behind, this time by leaving the server rather than by them leaving it
+        ResetRescue();
+
         _highestCheckKey = 0;
 
         if (_waitingMarker != null) {
