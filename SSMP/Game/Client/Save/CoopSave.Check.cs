@@ -396,30 +396,66 @@ internal partial class CoopSave {
         SaveMarkers();
 
         Logger.Info($"Checked two-player save with {partner.Username}, {_addedChanges} changes added");
+        // Every sentence is picked whole, and the four ways the last one can read are written out in full rather
+        // than built from a translated fragment dropped into a translated frame. A fragment reads as a sentence in
+        // English and as debris in Chinese, and that is exactly how this summary reached a player half-translated
+        // while the shorter lines around it came out fine.
         var message = _addedChanges == 0
-            ? $"Two-player save with {partner.Username}: backed up, and your worlds match."
-            : $"Two-player save with {partner.Username}: backed up, and {_addedChanges} changes from their world " +
-              "were added to yours. Changes in the room you are in show once you enter it again.";
+            ? Lang.Pick(
+                $"Two-player save with {partner.Username}: backed up, and your worlds match.",
+                $"和 {partner.Username} 的双人存档：已备份，你们的世界是一致的。"
+            )
+            : Lang.Pick(
+                $"Two-player save with {partner.Username}: backed up, and {_addedChanges} changes from their world " +
+                "were added to yours. Changes in the room you are in show once you enter it again.",
+                $"和 {partner.Username} 的双人存档：已备份，并把对方世界里的 {_addedChanges} 处改动合进了你这边。" +
+                "你当前所在房间的改动，要重新进这个房间才会显示。"
+            );
         if (_onlyPartnerDefeats > 0 || _onlyLocalDefeats > 0) {
-            message += $" Your saves have beaten different bosses ({partner.Username} beat {_onlyPartnerDefeats} " +
-                       $"that you haven't, you beat {_onlyLocalDefeats} that they haven't). Beaten bosses aren't " +
-                       "copied, so nobody misses a reward.";
+            message += Lang.Pick(
+                $" Your saves have beaten different bosses ({partner.Username} beat {_onlyPartnerDefeats} " +
+                $"that you haven't, you beat {_onlyLocalDefeats} that they haven't). Beaten bosses aren't " +
+                "copied, so nobody misses a reward.",
+                $"你们两边打过的 Boss 不一样（{partner.Username} 打过 {_onlyPartnerDefeats} 个你没打的，" +
+                $"你打过 {_onlyLocalDefeats} 个他们没打的）。打过的 Boss 不会互相复制，免得谁少拿奖励。"
+            );
         }
 
         if (_differentWishes > 0) {
-            var wishes = _differentWishes == 1 ? "1 wish is" : $"{_differentWishes} wishes are";
-            message += $" {wishes} completed in only one of your saves. Completed wishes aren't copied, so nobody " +
-                       "misses a reward.";
+            message += Lang.Pick(
+                _differentWishes == 1
+                    ? " 1 wish is completed in only one of your saves. Completed wishes aren't copied, so nobody " +
+                      "misses a reward."
+                    : $" {_differentWishes} wishes are completed in only one of your saves. Completed wishes aren't " +
+                      "copied, so nobody misses a reward.",
+                $"有 {_differentWishes} 个心愿只在你们其中一边完成了。完成的心愿不会互相复制，免得谁少拿奖励。"
+            );
         }
 
         if (_differentStoryFlags > 0) {
-            var longer = _checkPlayTimeSinceTogether
-                ? "played longer since you last played together"
-                : "played for longer";
             message += _storyFlagsFromPartner
-                ? $" {_differentStoryFlags} story changes came from the save of {partner.Username}, which was {longer}."
-                : $" {_differentStoryFlags} story changes went from your save to {partner.Username}, because yours was " +
-                  $"{longer}.";
+                ? _checkPlayTimeSinceTogether
+                    ? Lang.Pick(
+                        $" {_differentStoryFlags} story changes came from the save of {partner.Username}, which was " +
+                        "played longer since you last played together.",
+                        $"有 {_differentStoryFlags} 处剧情改动来自 {partner.Username} 的存档，因为上次一起玩之后他们玩得更久。"
+                    )
+                    : Lang.Pick(
+                        $" {_differentStoryFlags} story changes came from the save of {partner.Username}, which was " +
+                        "played for longer.",
+                        $"有 {_differentStoryFlags} 处剧情改动来自 {partner.Username} 的存档，因为他们玩得更久。"
+                    )
+                : _checkPlayTimeSinceTogether
+                    ? Lang.Pick(
+                        $" {_differentStoryFlags} story changes went from your save to {partner.Username}, because " +
+                        "yours was played longer since you last played together.",
+                        $"有 {_differentStoryFlags} 处剧情改动从你的存档传给了 {partner.Username}，因为上次一起玩之后你玩得更久。"
+                    )
+                    : Lang.Pick(
+                        $" {_differentStoryFlags} story changes went from your save to {partner.Username}, because " +
+                        "yours was played for longer.",
+                        $"有 {_differentStoryFlags} 处剧情改动从你的存档传给了 {partner.Username}，因为你玩得更久。"
+                    );
         }
 
         Chat(message);

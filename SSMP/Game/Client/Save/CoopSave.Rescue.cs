@@ -138,7 +138,10 @@ internal partial class CoopSave {
         public IHitResponder.HitResponse Hit(HitInstance damageInstance) {
             Hits?.Invoke();
 
-            return IHitResponder.Response.None;
+            // Not None. That is the answer for "there was nothing there", so the nail passes straight through with
+            // no impact, no sound and nothing to bounce off - which is why hitting the cocoon felt like hitting air
+            // and a downward strike would not pogo. GenericHit is what something solid but undamageable answers.
+            return IHitResponder.Response.GenericHit;
         }
     }
 
@@ -345,6 +348,28 @@ internal partial class CoopSave {
         }
 
         try {
+            // The death spawns its own sequence object and activates it *before* the first yield, which is exactly
+            // where a held death stops. Holding the death stops the bench transition but takes nothing away, so that
+            // object carries on playing the death out - and it is what keeps the screen black long after the player
+            // is back on their feet, which is what a rescue looked like from the inside: revived, and still blind.
+            //
+            // Found by its component rather than by the prefab it came from, because a cursed, frost, memory or
+            // non-lethal death each spawn a different prefab and every one of them carries this component. It came
+            // out of the game's pool, so it goes back to the pool; destroying a pooled object leaves the pool
+            // believing it is still out on loan.
+            foreach (var sequence in UnityEngine.Object.FindObjectsByType<HeroDeathSequence>(FindObjectsSortMode.None)) {
+                if (sequence == null) {
+                    continue;
+                }
+
+                try {
+                    sequence.gameObject.Recycle();
+                } catch (Exception recycleError) {
+                    Logger.Warn($"Could not return the death sequence to the pool: {recycleError.Message}");
+                    UnityEngine.Object.Destroy(sequence.gameObject);
+                }
+            }
+
             hero.gameObject.layer = 9;
             hero.renderer.enabled = true;
             hero.heroBox.HeroBoxNormal();

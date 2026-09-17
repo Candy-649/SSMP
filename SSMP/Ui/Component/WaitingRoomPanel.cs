@@ -292,15 +292,24 @@ internal class WaitingRoomPanel : IComponent {
             }
         }
 
+        // Each line is picked whole rather than assembled from translated pieces: a sentence stitched together from
+        // fragments reads like one in English and like nothing at all in Chinese, and it is how the other half of
+        // this panel ended up half-translated.
         _statusText.text = alone
             ? hosting
-                ? "Waiting for your teammate. Invite them, or have them join your lobby."
-                : "Waiting for your teammate."
+                ? Lang.Pick(
+                    "Waiting for your teammate. Invite them, or have them join your lobby.",
+                    "正在等队友。邀请他们，或者让他们自己进你的房间。"
+                )
+                : Lang.Pick("Waiting for your teammate.", "正在等队友。")
             : waitingOn == 0
-                ? "Everyone is ready. Choose your saves."
+                ? Lang.Pick("Everyone is ready. Choose your saves.", "都准备好了，挑存档吧。")
                 : localReady
-                    ? "Waiting for your teammate to be ready."
-                    : "Say you are ready when you want to choose your saves.";
+                    ? Lang.Pick("Waiting for your teammate to be ready.", "正在等队友准备。")
+                    : Lang.Pick(
+                        "Say you are ready when you want to choose your saves.",
+                        "想开始挑存档的话，点一下「我准备好了」。"
+                    );
     }
 
     private GameObject CreateRow(WaitingRoomMember member, float y) {
@@ -331,7 +340,7 @@ internal class WaitingRoomPanel : IComponent {
         CreateLabel(
             row.transform,
             "State",
-            member.Ready ? "READY" : "NOT READY",
+            member.Ready ? Lang.Pick("READY", "已准备") : Lang.Pick("NOT READY", "未准备"),
             new Vector2(0.65f, 0f),
             new Vector2(1f, 1f),
             Vector2.zero,

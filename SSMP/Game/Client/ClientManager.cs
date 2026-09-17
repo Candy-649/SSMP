@@ -700,7 +700,10 @@ internal class ClientManager : IClientManager {
 
         if (result.Reason == ConnectionFailedReason.InvalidAddons) {
             // Inform the user of the correct addons that the server needs
-            UiManager.InternalChatBox.AddMessage("Server requires the following addons:");
+            UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                "Server requires the following addons:",
+                "服务器需要以下附加组件："
+            ));
 
             // Keep track of addons that the client has that the server does not, by removing all addons
             // that the server reports to have
@@ -715,12 +718,12 @@ internal class ClientManager : IClientManager {
 
                 if (_addonManager.TryGetNetworkedAddon(addonName, addonVersion, out var addon)) {
                     if (addon is TogglableClientAddon { Disabled: true }) {
-                        message += " (disabled)";
+                        message += Lang.Pick(" (disabled)", "（已停用）");
                     } else {
-                        message += " (installed)";
+                        message += Lang.Pick(" (installed)", "（已安装）");
                     }
                 } else {
-                    message += " (missing)";
+                    message += Lang.Pick(" (missing)", "（缺少）");
                 }
 
                 UiManager.InternalChatBox.AddMessage(message);
@@ -730,7 +733,10 @@ internal class ClientManager : IClientManager {
 
             // If the client has additional addons that the server does not, we list these as well
             if (clientAddonData.Count > 0) {
-                UiManager.InternalChatBox.AddMessage("Incompatible client addons:");
+                UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                    "Incompatible client addons:",
+                    "你这边多出来、服务器没有的附加组件："
+                ));
 
                 foreach (var addonData in clientAddonData) {
                     UiManager.InternalChatBox.AddMessage($"  {addonData.Identifier} v{addonData.Version}");
@@ -886,11 +892,14 @@ internal class ClientManager : IClientManager {
         Logger.Info($"Received ServerClientDisconnect, reason: {disconnect.Reason}");
 
         if (disconnect.Reason == DisconnectReason.Banned) {
-            UiManager.InternalChatBox.AddMessage("You are banned from the server");
+            UiManager.InternalChatBox.AddMessage(Lang.Pick("You are banned from the server", "你被服务器封禁了"));
         } else if (disconnect.Reason == DisconnectReason.Kicked) {
-            UiManager.InternalChatBox.AddMessage("You are kicked from the server");
+            UiManager.InternalChatBox.AddMessage(Lang.Pick("You are kicked from the server", "你被踢出服务器了"));
         } else if (disconnect.Reason == DisconnectReason.Shutdown) {
-            UiManager.InternalChatBox.AddMessage("You are disconnected from the server (server is shutting down)");
+            UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                "You are disconnected from the server (server is shutting down)",
+                "你和服务器断开了（服务器正在关闭）"
+            ));
         }
 
         _uiManager.ReturnToMainMenuFromGame();
@@ -913,7 +922,10 @@ internal class ClientManager : IClientManager {
         };
         _playerData[playerConnect.Id] = playerData;
 
-        UiManager.InternalChatBox.AddMessage($"Player '{playerConnect.Username}' connected to the server");
+        UiManager.InternalChatBox.AddMessage(Lang.Pick(
+            $"Player '{playerConnect.Username}' connected to the server",
+            $"{playerConnect.Username} 连上了服务器"
+        ));
         _uiManager.OnPlayerJoined(playerData.Username);
         _coopSave.OnPlayerConnect(playerData);
 
@@ -968,8 +980,8 @@ internal class ClientManager : IClientManager {
 
         UiManager.InternalChatBox.AddMessage(
             playerDisconnect.TimedOut
-                ? $"Player '{username}' timed out"
-                : $"Player '{username}' disconnected from the server"
+                ? Lang.Pick($"Player '{username}' timed out", $"{username} 掉线了")
+                : Lang.Pick($"Player '{username}' disconnected from the server", $"{username} 断开了连接")
         );
         _uiManager.OnPlayerLeft(username);
         _coopSave.OnPlayerDisconnect(id);
@@ -1510,7 +1522,10 @@ internal class ClientManager : IClientManager {
 
         _uiManager.ReturnToMainMenuFromGame();
 
-        UiManager.InternalChatBox.AddMessage("You are disconnected from the server (server timed out)");
+        UiManager.InternalChatBox.AddMessage(Lang.Pick(
+            "You are disconnected from the server (server timed out)",
+            "你和服务器断开了（服务器超时）"
+        ));
 
         Disconnect();
     }

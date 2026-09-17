@@ -1,6 +1,7 @@
 using SSMP.Api.Command;
 using SSMP.Api.Command.Client;
 using SSMP.Ui;
+using SSMP.Util;
 
 namespace SSMP.Game.Command.Client;
 
@@ -14,23 +15,29 @@ internal class InviteCommand : IClientCommand, ICommandWithDescription {
 
     /// <inheritdoc />
     public string[] Aliases => ["/inv"];
-    
+
     /// <inheritdoc />
-    public string Description => "Open Steam's invite dialog to invite friends to your lobby.";
+    public string Description => Lang.Pick(
+        "Open Steam's invite dialog to invite friends to your lobby.",
+        "打开 Steam 的邀请窗口，把好友请进你的房间。"
+    );
 
     /// <inheritdoc />
     public void Execute(string[] arguments) {
         if (!SteamManager.IsInitialized) {
-            UiManager.InternalChatBox.AddMessage("Steam is not available.");
+            UiManager.InternalChatBox.AddMessage(Lang.Pick("Steam is not available.", "Steam 用不了。"));
             return;
         }
 
         if (!SteamManager.IsHostingLobby) {
-            UiManager.InternalChatBox.AddMessage("You must be hosting a Steam lobby to invite players.");
+            UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                "You must be hosting a Steam lobby to invite players.",
+                "你得先开一个 Steam 房间，才能邀请别人。"
+            ));
             return;
         }
 
         SteamManager.OpenInviteDialog();
-        UiManager.InternalChatBox.AddMessage("Opening Steam invite dialog...");
+        UiManager.InternalChatBox.AddMessage(Lang.Pick("Opening Steam invite dialog...", "正在打开 Steam 邀请窗口……"));
     }
 }

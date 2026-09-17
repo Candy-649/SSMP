@@ -4,6 +4,7 @@ using SSMP.Api.Client;
 using SSMP.Api.Command.Client;
 using SSMP.Networking.Client;
 using SSMP.Ui;
+using SSMP.Util;
 
 namespace SSMP.Game.Command.Client;
 
@@ -74,7 +75,10 @@ internal class AddonCommand : IClientCommand, ICommandWithDescription {
         }
 
         if (_netClient.ConnectionStatus != ClientConnectionStatus.NotConnected) {
-            UiManager.InternalChatBox.AddMessage("Cannot toggle addons while connecting or connected to a server.");
+            UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                "Cannot toggle addons while connecting or connected to a server.",
+                "连接中或已连上服务器时不能开关附加组件。"
+            ));
             return;
         }
 
@@ -83,9 +87,15 @@ internal class AddonCommand : IClientCommand, ICommandWithDescription {
                 var addonName = arguments[i];
 
                 if (_addonManager.TryEnableAddon(addonName)) {
-                    UiManager.InternalChatBox.AddMessage($"Successfully enabled '{addonName}'");
+                    UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                        $"Successfully enabled '{addonName}'",
+                        $"已启用「{addonName}」"
+                    ));
                 } else {
-                    UiManager.InternalChatBox.AddMessage($"Could not enable addon '{addonName}'");
+                    UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                        $"Could not enable addon '{addonName}'",
+                        $"启用不了附加组件「{addonName}」"
+                    ));
                 }
             }
         } else if (action == "disable") {
@@ -93,9 +103,15 @@ internal class AddonCommand : IClientCommand, ICommandWithDescription {
                 var addonName = arguments[i];
 
                 if (_addonManager.TryDisableAddon(addonName)) {
-                    UiManager.InternalChatBox.AddMessage($"Successfully disabled '{addonName}'");
+                    UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                        $"Successfully disabled '{addonName}'",
+                        $"已停用「{addonName}」"
+                    ));
                 } else {
-                    UiManager.InternalChatBox.AddMessage($"Could not disable addon '{addonName}'");
+                    UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                        $"Could not disable addon '{addonName}'",
+                        $"停用不了附加组件「{addonName}」"
+                    ));
                 }
             }
         }
@@ -105,6 +121,9 @@ internal class AddonCommand : IClientCommand, ICommandWithDescription {
     /// Sends the command usage to the chat box.
     /// </summary>
     private void SendUsage() {
-        UiManager.InternalChatBox.AddMessage($"Usage: {Trigger} <enable|disable|list> [addon(s)]");
+        UiManager.InternalChatBox.AddMessage(Lang.Pick(
+            $"Usage: {Trigger} <enable|disable|list> [addon(s)]",
+            $"用法：{Trigger} <enable|disable|list> [附加组件]"
+        ));
     }
 }
