@@ -238,6 +238,11 @@ internal class CoopHits {
             return;
         }
 
+        if (update.Kind == CoopHitKind.EnemyHitEffect) {
+            ApplyHitEffect(update);
+            return;
+        }
+
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
         if (type == null || !typeof(IHitResponder).IsAssignableFrom(type) || !IsReplayed(type)) {
             return;
@@ -436,11 +441,32 @@ internal class CoopHits {
             return response;
         }
 
+        // An enemy that both games keep a copy of. A copy of the partner's attack doesn't touch it at all: their game
+        // works out what their own hit did and sends the result, so a copy of their swing finding its own targets
+        // here would be a second hit that never happened. What a copy used to do was take the whole hit and put the
+        // health back afterwards, which left behind everything a hit does apart from health - the event it sends to
+        // the enemy's own state machine, and the rounding that the co-op damage split carries to the next hit.
+        ushort enemyId = 0;
+        var isEnemyEntity = responder is Component enemyComponent &&
+                            enemyComponent.TryGetComponent<HealthManager>(out _) &&
+                            TryGetEntity(enemyComponent.gameObject, out enemyId, out _);
+
+        if (isEnemyEntity && isRemote) {
+            return IHitResponder.Response.None;
+        }
+
         // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is
         var lastContext = _hitContext;
         _hitContext = isRemote ? HitContext.Remote : hit.IsHeroDamage ? HitContext.Local : HitContext.None;
         try {
-            return responder.Hit(hit);
+            var response = responder.Hit(hit);
+
+            // Nothing of this hit happens in the partner's game any more, so what it looked like is sent to them
+            if (isEnemyEntity && hit.IsHeroDamage && response.response != IHitResponder.Response.None) {
+                SendHitEffect(partnerId, enemyId, hit);
+            }
+
+            return response;
         } finally {
             _hitContext = lastContext;
         }
@@ -566,6 +592,66 @@ internal class CoopHits {
         }
 
         recoil.RecoilByDirection(direction, magnitude);
+    }
+
+    /// <summary>
+    /// Sends what a hit of the local player on an enemy looked like to the partner, whose copy of the attack no
+    /// longer hits that enemy itself.
+    /// </summary>
+    /// <param name="partnerId">The ID of the partner.</param>
+    /// <param name="entityId">The ID of the entity that was hit.</param>
+    /// <param name="hit">The hit, which decides which effect is played.</param>
+    private void SendHitEffect(ushort partnerId, ushort entityId, HitInstance hit) {
+        if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
+            !partner.IsInLocalScene) {
+            return;
+        }
+
+        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
+            TargetId = partnerId,
+            Kind = CoopHitKind.EnemyHitEffect,
+            EntityId = entityId,
+            Hit = WriteHit(hit)
+        });
+    }
+
+    /// <summary>
+    /// Plays what a hit of the partner on an enemy looked like, without the hit itself. The enemy's own health comes
+    /// from whichever game controls it, so all that is left to do here is show that it was hit.
+    /// </summary>
+    /// <param name="update">The update of the partner's hit.</param>
+    private void ApplyHitEffect(CoopHitUpdate update) {
+        GameObject? enemy = null;
+        foreach (var entity in _entityManager.ActiveEntities) {
+            if (entity.Id == update.EntityId) {
+                // The scene host watches its own object, and everyone else the copy that follows it
+                enemy = _entityManager.IsSceneHost ? entity.Object.Host : entity.Object.Client;
+                break;
+            }
+        }
+
+        if (enemy == null || !enemy.activeInHierarchy ||
+            !enemy.TryGetComponent<HealthManager>(out var healthManager) || healthManager.GetIsDead()) {
+            return;
+        }
+
+        var receiver = healthManager.hitEffectReceiver;
+        if (receiver == null) {
+            return;
+        }
+
+        if (!TryReadHit(update.Hit, out var hit, out var source)) {
+            Logger.Warn($"Could not read the hit effect of the partner on entity {update.EntityId}");
+            return;
+        }
+
+        // The game leaves this one without an effect itself
+        if (hit.AttackType == AttackTypes.RuinsWater) {
+            return;
+        }
+
+        hit.Source = GetHitSource(source);
+        receiver.ReceiveHitEffect(hit);
     }
 
     /// <summary>

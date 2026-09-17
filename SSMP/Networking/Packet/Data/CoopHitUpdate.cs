@@ -97,5 +97,14 @@ internal enum CoopHitKind : byte {
     /// <summary>
     /// An enemy, found by the ID of its entity, whose knockback the game of the scene host applies.
     /// </summary>
-    EnemyKnockback
+    EnemyKnockback,
+
+    /// <summary>
+    /// An enemy, found by the ID of its entity, whose hit effect the other game plays.
+    ///
+    /// A copy of an attack no longer hits enemies at all, so the other game has nothing left to show for a hit that
+    /// landed here. The hit itself is sent so that the effect it plays there is the one this hit really was, rather
+    /// than a generic one guessed from a direction.
+    /// </summary>
+    EnemyHitEffect
 }
