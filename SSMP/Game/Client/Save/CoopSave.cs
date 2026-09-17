@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using GlobalEnums;
 using HutongGames.PlayMaker;
+using InControl;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Settings;
 using SSMP.Hooks;
@@ -815,16 +816,50 @@ internal partial class CoopSave {
     #region Pairing
 
     /// <summary>
-    /// The name of the key that agrees to a two-player save, for the line that offers one. It is the default binding:
-    /// a player who rebinds it in the settings file presses their own key, and only reads the wrong name here.
+    /// The name of the key or button that agrees to a two-player save, for the line that offers one. Taken from the
+    /// binding that is actually in force rather than written out, so that rebinding it no longer leaves every prompt
+    /// naming a key that does nothing.
     /// </summary>
-    private const string PairKeyName = "L";
+    private string PairKeyName => PromptKeyName(_modSettings.Keybinds.CoopPair);
 
     /// <summary>
-    /// The name of the key that leaves a two-player save waiting for a partner who is not coming, for the line that
-    /// offers it. The default binding, with the same caveat as <see cref="PairKeyName"/>.
+    /// The name of the key or button that leaves a two-player save waiting for a partner who is not coming, and that
+    /// gives up on waiting to be pulled back up after a death. The same as <see cref="PairKeyName"/> otherwise.
     /// </summary>
-    private const string LeaveKeyName = "K";
+    private string LeaveKeyName => PromptKeyName(_modSettings.Keybinds.CoopLeave);
+
+    /// <summary>
+    /// What a prompt should tell the player to press. Someone holding a gamepad is told the button, because the key
+    /// of a keyboard they are not touching is worse than useless to them: it reads as though the way out is a key
+    /// they cannot reach. Someone on a keyboard is told the key.
+    /// </summary>
+    /// <param name="action">The action the prompt is about.</param>
+    /// <returns>The name to show.</returns>
+    private static string PromptKeyName(PlayerAction action) {
+        var inputHandler = InputHandler.Instance;
+        if (inputHandler != null && inputHandler.activeGamepadType != GamepadType.NONE) {
+            var button = action.GetControllerButtonBinding();
+            if (button != InputControlType.None) {
+                return ButtonName(button);
+            }
+        }
+
+        var binding = action.GetKeyOrMouseBinding();
+
+        return InputHandler.KeyOrMouseBinding.IsNone(binding) ? "the co-op key" : binding.Key.ToString();
+    }
+
+    /// <summary>
+    /// The name a player would recognise for a gamepad button. Pressing a stick down is called L3 and R3 on the pads
+    /// someone is likely to be holding, which is not what the button is called in the game's own list.
+    /// </summary>
+    /// <param name="button">The button.</param>
+    /// <returns>The name to show.</returns>
+    private static string ButtonName(InputControlType button) => button switch {
+        InputControlType.LeftStickButton => "L3",
+        InputControlType.RightStickButton => "R3",
+        _ => button.ToString()
+    };
 
     /// <summary>
     /// Whether the key that agrees to a two-player save was already down last frame.
