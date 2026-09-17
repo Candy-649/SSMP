@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
@@ -18,6 +19,24 @@ internal partial class CoopSave {
     /// How often the saved objects of the world in the loaded scenes are checked for changes, in seconds.
     /// </summary>
     private const float WorldChangeInterval = 0.5f;
+
+    /// <summary>
+    /// The state that a part of the world which collapses waits in until a player walks under it.
+    /// </summary>
+    private const string CollapseIdleStateName = "Idle";
+
+    /// <summary>
+    /// The event that brings a part of the world down, which the game itself sends from the collision with the player
+    /// that walks under it. Sending it by hand plays the whole collapse: the shake, the dust, the sound and the
+    /// camera, rather than the object simply being gone.
+    /// </summary>
+    private const string CollapseEventName = "BREAK";
+
+    /// <summary>
+    /// States that only a part of the world which collapses has. They are what tells it apart from every other saved
+    /// object the partner can set, such as a lever or a wall that breaks, which must not be sent the event.
+    /// </summary>
+    private static readonly string[] CollapseStateNames = ["Antic", "Break"];
 
     /// <summary>
     /// The saved objects of the world in the loaded scenes, with their scenes, IDs and keys.
@@ -336,6 +355,11 @@ internal partial class CoopSave {
         }
 
         OverrideLoadedItems(loadedItems);
+
+        // Only here, and not in OverrideLoadedItems itself: a whole save merged when the two players pair up goes
+        // through that same method, and would bring down everything the partner ever collapsed at once
+        ReplayLoadedCollapses(loadedItems);
+
         flags += ApplyInteractionFlags(update);
 
         var bosses = AddBossScenes(update.Names);
@@ -343,5 +367,62 @@ internal partial class CoopSave {
         if (items > 0 || flags > 0 || bosses > 0) {
             Logger.Info($"Added {items} changes of the world from {player.Username}, with {flags} player data flags and {bosses} boss scenes");
         }
+    }
+
+    /// <summary>
+    /// Brings down the parts of the world that the partner walked under, in the room the local player is standing in.
+    /// The save already carries the change, but a saved object only looks the part once its room is loaded again, so
+    /// without this the rock hangs in the air here and is simply gone the next time the player walks in.
+    /// </summary>
+    /// <param name="keys">The keys of the objects in loaded scenes that the partner set.</param>
+    private static void ReplayLoadedCollapses(HashSet<string> keys) {
+        if (keys.Count == 0) {
+            return;
+        }
+
+        foreach (var item in UnityEngine.Object.FindObjectsByType<PersistentBoolItem>(
+                     FindObjectsInactive.Include, FindObjectsSortMode.None
+                 )) {
+            // An object that already collapsed here is switched off whole, and a switched off FSM runs nothing
+            if (item == null || !item.gameObject.activeInHierarchy) {
+                continue;
+            }
+
+            GetItemSceneAndId(item, out var scene, out var id);
+            if (!keys.Contains(GetItemKey(scene, id))) {
+                continue;
+            }
+
+            foreach (var fsm in item.GetComponents<PlayMakerFSM>()) {
+                if (!IsWaitingCollapse(fsm)) {
+                    continue;
+                }
+
+                try {
+                    fsm.SendEvent(CollapseEventName);
+                } catch (Exception e) {
+                    Logger.Warn($"Could not bring down '{id}' the way the partner did: {e.Message}");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an FSM belongs to a part of the world that collapses and is still waiting to be walked under. A player
+    /// who brought it down themselves leaves it somewhere else, so this also keeps the collapse from being played
+    /// twice when both players walk under the same rock.
+    /// </summary>
+    private static bool IsWaitingCollapse(PlayMakerFSM fsm) {
+        if (fsm == null || fsm.ActiveStateName != CollapseIdleStateName) {
+            return false;
+        }
+
+        foreach (var stateName in CollapseStateNames) {
+            if (fsm.GetStateOrNull(stateName) == null) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }
