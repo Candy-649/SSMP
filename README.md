@@ -1,10 +1,24 @@
 # SSMP <img src="res/round_icon.svg" width="52" align="right">
 
+> ## This is a modified copy, not the original
+>
+> The multiplayer mod itself, and nearly all of the code here, is the work of
+> **[Extremelyd1](https://github.com/Extremelyd1/SSMP)**. This copy only adds a two-player shared save on top of it:
+> two people play one run together, with the world, quests and story kept in step between them.
+>
+> **Please do not take questions or bug reports about this copy to the original author.** Their Discord, their issue
+> tracker and their releases are for their mod, and none of the changes here are theirs to explain or reproduce.
+>
+> Everything below this box is the original project's own README, kept as it was apart from the links that would have
+> sent you to the wrong place. It is distributed under the GNU Lesser General Public License 2.1, the same licence the
+> original carries; see [LICENSE](LICENSE) and the copyright notice at the end of this file.
+
 ## What is Silksong Multiplayer?
 As the name might suggest, Silksong Multiplayer (SSMP) is a multiplayer mod for the popular 2D action-adventure game Hollow Knight: Silksong.
 The main purpose of this mod is to allow people to host games and let others join them in their adventures.
-There is a dedicated [Discord server](https://discord.gg/KbgxvDyzHP) for the mod where you can ask questions or generally talk about the mod.
-Moreover, you can leave suggestions or bug reports. The latest announcements will be posted there.
+The original mod has a dedicated [Discord server](https://discord.gg/KbgxvDyzHP) where you can ask questions about it
+and where its announcements are posted. It is the original author's channel: it is not a support channel for this
+modified copy, so please do not report anything from this copy there.
 
 ## Install
 ### Thunderstore
@@ -15,7 +29,9 @@ SSMP works with the [BepInExPack for Silksong](https://thunderstore.io/c/hollow-
 found on the [Silksong Thunderstore community](https://thunderstore.io/c/hollow-knight-silksong).
 Follow the instructions for the BepInExPack on Thunderstore and once completed, do the following:
 - Make a new directory named `SSMP` in the BepInEx plugins folder found: `path\to\Hollow Knight Silksong\BepInEx\plugins\`
-- Unzip the `SSMP.zip` file from the [releases](https://github.com/Extremelyd1/SSMP/releases) into this new directory
+- Unzip the `SSMP.zip` file from the original mod's [releases](https://github.com/Extremelyd1/SSMP/releases) into this
+  new directory. Note that those releases are the original mod, without the two-player save; this copy ships its own
+  installer instead
   - Make sure that all `.dll` files are in the `SSMP` directory without any additional directories
 
 ## Usage
@@ -181,19 +197,17 @@ The system for skins is currently not implemented entirely.
 While it is possible to change skin IDs using the command system, it will most likely not work correctly.
 
 ## Contributing
-There are a few ways you can contribute to this project, which are all outlined below.
+The section below is about contributing to the original project, and its links go there. Anything to do with the
+two-player save added in this copy does not belong on the original author's tracker.
+
+There are a few ways you can contribute to the original project, which are all outlined below.
 Please also read and adhere to the [contributing guide](https://github.com/Extremelyd1/SSMP/blob/master/CONTRIBUTING.md).
 
 ### Github issues
-If you have any suggestions or bug reports, please leave them at the [issues page](https://github.com/Extremelyd1/SSMP/issues).
+If you have any suggestions or bug reports about the original mod, please leave them at the
+[issues page](https://github.com/Extremelyd1/SSMP/issues).
 Make sure to label the issues correctly and provide a proper explanation.
 Suggestions or feature requests can be labeled with "Enhancement", bug reports with "Bug", etc.
-
-## Patreon
-If you like this project and are interested in its development, consider becoming a supporter on
-[Patreon](https://www.patreon.com/Extremelyd1). You will get access to development posts, sneak peeks
-and early access to new features. Additionally, you'll receive a role in the Discord server with access
-to exclusive channels.
 
 ## Copyright and license
 HKMP is a game modification for Hollow Knight that adds multiplayer.  

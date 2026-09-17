@@ -1,4 +1,9 @@
 # Contributing to this repository
+
+> This is the original project's contributing guide, kept because the code in this copy follows the same style, and
+> the style guide below is worth keeping. Its links point at the original author's repositories, and the issue and
+> pull request process it describes is theirs, not this copy's.
+
 ## Issues
 If you come across a bug or have an idea of a feature you want to see, feel free to open an issue.
 Please check before opening a new issue whether the same thing has not already been proposed by someone else.

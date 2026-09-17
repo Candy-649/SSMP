@@ -19,7 +19,7 @@ jobs:
           dotnet-version: 9.x
 
       - name: Build
-        run: dotnet build -c Release --verbosity normal
+        run: dotnet build -c Release -p:LangVersion=preview --verbosity normal
 
       - name: Pack NuGet
         working-directory: ./SSMP

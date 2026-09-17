@@ -226,3 +226,22 @@ exe 旁边放一个 dll，让游戏启动时连带加载它。这是所有同类
 如果是卡在「Waiting for XXX」，日志里这两句最有用：
   Starting a check     —— 会列出三个存档 key，一眼能看出哪个对不上
   Turned down a hello  —— 说明有一条握手消息被丢掉了，以及丢的原因
+
+
+六、这东西是谁写的
+------------------
+
+联机功能本身、以及这里几乎全部的代码，都是 Extremelyd1 写的
+（原项目：github.com/Extremelyd1/SSMP）。
+这一份只是在它上面加了「两个人共用一条流程」的双人存档，
+沿用和原作相同的 LGPL-2.1 许可证。
+
+※ 有任何问题请找我，【不要去原作者的 Discord 或 issues 页面】。
+  这些改动不是人家写的，人家既复现不了也没义务解释。
+
+包里还有两个别人的东西：
+  BouncyCastle.Cryptography.dll —— 第三方加密库，MIT 许可证，
+    版权归 The Legion of the Bouncy Castle Inc.，
+    完整条款见同目录下的 LICENSE-BouncyCastle.md。
+  BepInEx_win_x64_5.4.23.4.zip —— BepInEx 官方发布的原包，
+    一个字节都没有改过。
