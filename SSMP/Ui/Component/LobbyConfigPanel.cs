@@ -111,7 +111,9 @@ internal class LobbyConfigPanel : IComponent {
         prevVisBtn.transform.SetParent(visSelector.transform, false);
 
         // Visibility text
-        var visTextGo = CreateText("Public", Vector2.zero, 100f, RowHeight, 14, new Color(0.5f, 1f, 0.5f, 1f));
+        var visTextGo = CreateText(
+            Lang.Pick("Public", "公开"), Vector2.zero, 100f, RowHeight, 14, new Color(0.5f, 1f, 0.5f, 1f)
+        );
         visTextGo.transform.SetParent(visSelector.transform, false);
         _visibilityText = visTextGo.GetComponent<Text>();
 
@@ -255,10 +257,10 @@ internal class LobbyConfigPanel : IComponent {
 
     private void UpdateVisibilityText() {
         _visibilityText.text = _visibility switch {
-            LobbyVisibility.Public => "Public",
-            LobbyVisibility.FriendsOnly => "Friends",
-            LobbyVisibility.Private => "Private",
-            _ => "Public"
+            LobbyVisibility.Public => Lang.Pick("Public", "公开"),
+            LobbyVisibility.FriendsOnly => Lang.Pick("Friends", "仅好友"),
+            LobbyVisibility.Private => Lang.Pick("Private", "私密"),
+            _ => Lang.Pick("Public", "公开")
         };
         _visibilityText.color = _visibility switch {
             LobbyVisibility.Public => new Color(0.5f, 1f, 0.5f, 1f),

@@ -277,7 +277,9 @@ internal class LobbyBrowserPanel : IComponent {
         typeRect.offsetMin = Vector2.zero;
         typeRect.offsetMax = Vector2.zero;
         var typeText = typeObj.AddComponent<Text>();
-        typeText.text = lobby.LobbyType == PublicLobbyType.Matchmaking ? "MATCH\nMAKING" : "STEAM";
+        typeText.text = lobby.LobbyType == PublicLobbyType.Matchmaking
+            ? Lang.Pick("MATCH\nMAKING", "自动\n匹配")
+            : "STEAM";
         typeText.font = Resources.FontManager.UIFontRegular;
         typeText.fontSize = 14;
         typeText.alignment = TextAnchor.MiddleCenter;
@@ -301,7 +303,7 @@ internal class LobbyBrowserPanel : IComponent {
         btnTextRect.offsetMin = Vector2.zero;
         btnTextRect.offsetMax = Vector2.zero;
         var btnTextComp = btnText.AddComponent<Text>();
-        btnTextComp.text = "JOIN";
+        btnTextComp.text = Lang.Pick("JOIN", "加入");
         btnTextComp.font = Resources.FontManager.UIFontRegular;
         btnTextComp.fontSize = 14;
         btnTextComp.alignment = TextAnchor.MiddleCenter;

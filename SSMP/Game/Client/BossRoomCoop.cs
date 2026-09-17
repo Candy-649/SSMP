@@ -10,6 +10,7 @@ using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Ui;
+using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
@@ -84,12 +85,18 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// The message for a player who waits in a room for the other players.
     /// </summary>
-    private const string WaitingMessage = "Waiting for your teammate to catch up...";
+    private static string WaitingMessage => Lang.Pick(
+        "Waiting for your teammate to catch up...",
+        "正在等队友跟上来……"
+    );
 
     /// <summary>
     /// The message for a player whose teammate waits in a room.
     /// </summary>
-    private const string TeammateWaitingMessage = "Your teammate is waiting for you.";
+    private static string TeammateWaitingMessage => Lang.Pick(
+        "Your teammate is waiting for you.",
+        "你的队友正在等你。"
+    );
 
     /// <summary>
     /// Events that close gates.

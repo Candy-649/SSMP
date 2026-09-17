@@ -7,6 +7,7 @@ using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Networking.Packet.Data;
 using SSMP.Ui;
+using SSMP.Util;
 using TeamCherry.Localization;
 using TMProOld;
 using UnityEngine;
@@ -49,7 +50,10 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// The message for a player whose boss waits for other players to read its dialogue.
     /// </summary>
-    private const string ReadingMessage = "Waiting for your teammate to finish the dialogue...";
+    private static string ReadingMessage => Lang.Pick(
+        "Waiting for your teammate to finish the dialogue...",
+        "正在等队友把对话看完……"
+    );
 
     /// <summary>
     /// The field with the dialogue box of the game.

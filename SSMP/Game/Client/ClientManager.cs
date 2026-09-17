@@ -1262,8 +1262,9 @@ internal class ClientManager : IClientManager {
         if (_serverSettings.AlwaysShowMapIcons != newServerSettings.AlwaysShowMapIcons) {
             alwaysShowMapChanged = true;
 
-            var message =
-                $"Map icons are now{(newServerSettings.AlwaysShowMapIcons ? "" : " not")} always visible";
+            var message = newServerSettings.AlwaysShowMapIcons
+                ? Lang.Pick("Map icons are now always visible", "地图图标现在始终可见")
+                : Lang.Pick("Map icons are now not always visible", "地图图标现在不再始终可见");
 
             UiManager.InternalChatBox.AddMessage(message);
             Logger.Info(message);
@@ -1274,8 +1275,15 @@ internal class ClientManager : IClientManager {
             newServerSettings.OnlyBroadcastMapIconWithCompass) {
             onlyCompassChanged = true;
 
-            var message =
-                $"Map icons are {(newServerSettings.OnlyBroadcastMapIconWithCompass ? "now only" : "not")} broadcast when wearing the Wayward Compass charm";
+            var message = newServerSettings.OnlyBroadcastMapIconWithCompass
+                ? Lang.Pick(
+                    "Map icons are now only broadcast when wearing the Wayward Compass charm",
+                    "现在只有佩戴指南针护符时才会广播地图图标"
+                )
+                : Lang.Pick(
+                    "Map icons are not broadcast when wearing the Wayward Compass charm",
+                    "地图图标不再需要佩戴指南针护符才广播"
+                );
 
             UiManager.InternalChatBox.AddMessage(message);
             Logger.Info(message);
@@ -1285,7 +1293,9 @@ internal class ClientManager : IClientManager {
         if (_serverSettings.DisplayNames != newServerSettings.DisplayNames) {
             displayNamesChanged = true;
 
-            var message = $"Names are {(newServerSettings.DisplayNames ? "now" : "no longer")} displayed";
+            var message = newServerSettings.DisplayNames
+                ? Lang.Pick("Names are now displayed", "现在会显示玩家名字")
+                : Lang.Pick("Names are no longer displayed", "不再显示玩家名字");
 
             UiManager.InternalChatBox.AddMessage(message);
             Logger.Info(message);
@@ -1295,7 +1305,9 @@ internal class ClientManager : IClientManager {
         if (_serverSettings.TeamsEnabled != newServerSettings.TeamsEnabled) {
             teamsChanged = true;
 
-            var message = $"Teams are {(newServerSettings.TeamsEnabled ? "now" : "no longer")} enabled";
+            var message = newServerSettings.TeamsEnabled
+                ? Lang.Pick("Teams are now enabled", "队伍功能已开启")
+                : Lang.Pick("Teams are no longer enabled", "队伍功能已关闭");
 
             UiManager.InternalChatBox.AddMessage(message);
             Logger.Info(message);
@@ -1305,7 +1317,9 @@ internal class ClientManager : IClientManager {
         if (_serverSettings.AllowSkins != newServerSettings.AllowSkins) {
             allowSkinsChanged = true;
 
-            var message = $"Skins are {(newServerSettings.AllowSkins ? "now" : "no longer")} enabled";
+            var message = newServerSettings.AllowSkins
+                ? Lang.Pick("Skins are now enabled", "皮肤功能已开启")
+                : Lang.Pick("Skins are no longer enabled", "皮肤功能已关闭");
 
             UiManager.InternalChatBox.AddMessage(message);
             Logger.Info(message);

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using MonoMod.RuntimeDetour;
 using SSMP.Ui;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -38,17 +39,26 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// The message that tells a player in a waiting room how to leave it.
     /// </summary>
-    private const string GiveUpHintMessage = "Type /giveup to open the doors if you don't want to wait.";
+    private static string GiveUpHintMessage => Lang.Pick(
+        "Type /giveup to open the doors if you don't want to wait.",
+        "不想等的话，输入 /giveup 就能把门打开。"
+    );
 
     /// <summary>
     /// The message for a player who opened the doors of the room they waited in.
     /// </summary>
-    private const string GaveUpMessage = "The doors are open. The boss still waits until your teammate is in the room.";
+    private static string GaveUpMessage => Lang.Pick(
+        "The doors are open. The boss still waits until your teammate is in the room.",
+        "门开了。不过在队友进屋之前，这里仍然不会开打。"
+    );
 
     /// <summary>
     /// The message for a player who gives up waiting while they don't wait in a room.
     /// </summary>
-    private const string NothingToGiveUpMessage = "You aren't waiting in a boss room.";
+    private static string NothingToGiveUpMessage => Lang.Pick(
+        "You aren't waiting in a boss room.",
+        "你现在并没有在等待什么。"
+    );
 
     /// <summary>
     /// The events that close a gate, in the order they are tried. Gates only react to them while they are open.
