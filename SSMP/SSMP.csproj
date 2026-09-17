@@ -33,7 +33,13 @@
     <PropertyGroup>
         <!--These properties will control the generated PluginInfo. Version is also used by various parts of the build system.-->
         <AssemblyTitle>SSMP</AssemblyTitle>
-        <Version>0.3.1.0</Version>
+        <!--
+        The version the npm package publishes under, and the one an update check compares. npm requires a
+        unique version per publish, so this must be raised for every release: a build that reports the same
+        version as the last one is indistinguishable from it, which is what made the old fixed 0.3.1.0 useless
+        to compare against. Kept ahead of upstream's own 0.3.1.0 because this copy is a fork, not a patch of it.
+        -->
+        <Version>0.4.0.0</Version>
         <PackageId>Silksong.SSMP</PackageId>
     </PropertyGroup>
 
