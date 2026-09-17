@@ -131,6 +131,10 @@ try {
     Copy-Item (Join-Path $PSScriptRoot 'install.ps1') $OutDir
     Copy-Item (Join-Path $PSScriptRoot 'INSTALL.txt') $OutDir
     Copy-Item (Join-Path $PSScriptRoot 'LICENSE-BouncyCastle.md') $OutDir
+    # The updater ships with the package so a player who has any build can reach the newest one without
+    # being sent a file again. It is useless on its own, which is why it travels with the installer.
+    Copy-Item (Join-Path $PSScriptRoot 'UPDATE.bat') $OutDir
+    Copy-Item (Join-Path $PSScriptRoot 'update.ps1') $OutDir
     Copy-Item $BepInExZip $OutDir
     Copy-Item $dll $pluginDir
     Copy-Item (Join-Path $BuiltDir 'BouncyCastle.Cryptography.dll') $pluginDir
@@ -152,7 +156,10 @@ try {
         keywords    = @('silksong', 'bepinex', 'mod', 'installer')
         # No "main", no "bin", no lifecycle "scripts": this is a data package fetched as a tarball, never
         # required into a program and never run on install.
-        files       = @('INSTALL.bat', 'INSTALL.txt', 'install.ps1', 'LICENSE', 'LICENSE-BouncyCastle.md',
+        # npm ships exactly what is listed here and nothing else, so a file copied into the stage but missing
+        # from this list is silently left out of the tarball.
+        files       = @('INSTALL.bat', 'INSTALL.txt', 'install.ps1', 'UPDATE.bat', 'update.ps1',
+                        'LICENSE', 'LICENSE-BouncyCastle.md',
                         'BepInEx_win_x64_5.4.23.4.zip', 'SSMP/', 'README.md')
     }
     $pkgJson = $pkg | ConvertTo-Json -Depth 5
@@ -187,7 +194,8 @@ under the GNU LGPL 2.1 - see ``LICENSE``. Built from https://github.com/Candy-64
     $stagedHash = (Get-FileHash $stagedDll -Algorithm SHA256).Hash
     if ($stagedHash -ne $dllHash) { throw 'The staged DLL does not match the built one.' }
 
-    foreach ($required in @('INSTALL.bat', 'INSTALL.txt', 'install.ps1', 'LICENSE', 'LICENSE-BouncyCastle.md',
+    foreach ($required in @('INSTALL.bat', 'INSTALL.txt', 'install.ps1', 'UPDATE.bat', 'update.ps1',
+                            'LICENSE', 'LICENSE-BouncyCastle.md',
                             'package.json', 'README.md', 'BepInEx_win_x64_5.4.23.4.zip',
                             'SSMP\SSMP.dll', 'SSMP\BouncyCastle.Cryptography.dll')) {
         if (-not (Test-Path (Join-Path $OutDir $required))) { throw "Missing from the stage: $required" }
