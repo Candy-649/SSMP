@@ -421,3 +421,8 @@ InitTestScene*.unity
 */lib/
 */Lib/
 LocalBuildProperties.props
+
+# The installer writes a zip of the player's saves next to itself, into installer/save-backups/. Those are personal
+# files that must never be committed, and this repository is meant to be published, so one careless "add ." would
+# have put someone's saves online permanently.
+installer/save-backups/
