@@ -481,5 +481,17 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    RescueLost
+    RescueLost,
+
+    /// <summary>
+    /// A trap of the world went off for the sender, so the game of the other player sets the same one off.
+    /// <see cref="CoopSaveUpdate.Scene"/>, <see cref="CoopSaveUpdate.ObjectPath"/>,
+    /// <see cref="CoopSaveUpdate.FsmName"/> and <see cref="CoopSaveUpdate.StateName"/> name it and what it went into.
+    /// Nothing is kept for a player in another room: these traps are saved nowhere and are back the next time their
+    /// room loads.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    WorldTrigger
 }

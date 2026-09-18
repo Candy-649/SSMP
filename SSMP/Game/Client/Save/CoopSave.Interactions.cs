@@ -422,6 +422,13 @@ internal partial class CoopSave {
             return;
         }
 
+        // Traps of the world ride along with this hook rather than putting a second one on the same method
+        try {
+            OnWorldTriggerSwitch(self, toState);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         CoopMechanism? mechanism = null;
         try {
             mechanism = GetMechanism(self);

@@ -785,6 +785,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.Interaction:
                 OnInteraction(player, update);
                 break;
+            case CoopSaveUpdateKind.WorldTrigger:
+                OnWorldTrigger(player, update);
+                break;
             case CoopSaveUpdateKind.WishChange:
                 OnWishChange(player, update);
                 break;
