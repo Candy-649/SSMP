@@ -54,6 +54,36 @@ internal partial class CoopSave {
     private const string ReturnCurrencyStateName = "Return Currency";
 
     /// <summary>
+    /// The sprite the mod already uses elsewhere to take a player off the screen without touching anything else about
+    /// them. It is a stray one-pixel sprite out of the game's own collection.
+    /// </summary>
+    private const string HiddenSpriteName = "wall_puff0004";
+
+    /// <summary>
+    /// The clip played on a body that was taken off the screen to bring it back, for the case where the player it
+    /// belongs to never sends another animation of their own.
+    /// </summary>
+    private const string IdleClipName = "Idle";
+
+    /// <summary>
+    /// The name of the FSM that plays a death out on the object the death spawns for it. Every one of the five of
+    /// those objects - the ordinary one, the cursed one, the non-lethal one, the memory one and the frost one -
+    /// carries one FSM by this name, which is what makes it the way to find the object at all.
+    /// </summary>
+    private const string DeathAnimFsmName = "Hero Death Anim";
+
+    /// <summary>
+    /// How long the screen takes to come back, in seconds.
+    /// </summary>
+    private const float RescueFadeTime = 0.5f;
+
+    /// <summary>
+    /// How long to wait for the death to finish playing itself out before the screen is brought back anyway, in
+    /// seconds. The death's own ending takes a little over four.
+    /// </summary>
+    private const float DeathEffectWaitTime = 10f;
+
+    /// <summary>
     /// How the wait of the local player ended.
     /// </summary>
     private enum RescueOutcome {
@@ -106,6 +136,18 @@ internal partial class CoopSave {
         /// How the wait ended, or <see cref="RescueOutcome.Waiting"/> while it has not.
         /// </summary>
         public RescueOutcome Outcome { get; set; } = RescueOutcome.Waiting;
+
+        /// <summary>
+        /// Whether the screen has been given back to the player since the death darkened it.
+        /// </summary>
+        public bool ScreenBack { get; set; }
+
+        /// <summary>
+        /// What was playing in the room when the player died, so that it can be put back on if they are pulled up.
+        /// A death changes the music to its own, and what normally changes it back is the loading of the room the
+        /// bench is in - which a player who never goes there never gets.
+        /// </summary>
+        public MusicCue? Music { get; set; }
     }
 
     /// <summary>
@@ -272,10 +314,12 @@ internal partial class CoopSave {
             yield break;
         }
 
-        // The wait is on, so the death's own playing-out has to go now rather than at the end of it. Left alone it
-        // holds a black screen over the whole wait, which hides the world, the cocoon and the line that explains
-        // what is happening - the wait becomes indistinguishable from the game having frozen.
-        ClearDeathSequence();
+        // The death is allowed to play its own ending out - it belongs to the game and it is worth seeing - and the
+        // screen is given back as soon as it is over, so that the rest of the wait is spent looking at the room, the
+        // cocoon and the line that explains what is happening rather than at nothing at all.
+        if (_rescue is { } started) {
+            MonoBehaviourUtil.Instance.StartCoroutine(BringScreenBackAfterDeath(started));
+        }
 
         // Running out of time is decided here rather than only frame by frame next door, because the update that runs
         // frame by frame sits behind early returns of its own: a marker that is gone for a moment is enough to stop it,
@@ -292,11 +336,22 @@ internal partial class CoopSave {
             yield return null;
         }
 
-        var rescued = _rescue is { Outcome: RescueOutcome.Rescued };
+        var waited = _rescue;
+        var rescued = waited is { Outcome: RescueOutcome.Rescued };
+        var screenBack = waited is { ScreenBack: true };
         EndRescueWait();
 
-        if (rescued && TryRevive(HeroController.instance)) {
+        if (rescued && waited != null && TryRevive(HeroController.instance, waited)) {
             yield break;
+        }
+
+        // The bench this death is about to take the player to is reached with the screen already black: the game
+        // leaves it that way on purpose across the load of the room it is in, and only fades back in once the player
+        // is standing there. Giving the screen back during the wait took that away, so it goes dark again here.
+        if (screenBack) {
+            ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), Color.black, RescueFadeTime);
+
+            yield return new WaitForSeconds(RescueFadeTime);
         }
 
         // Either the player gave up, or putting them back on their feet did not work, and a death that is left half
@@ -325,7 +380,12 @@ internal partial class CoopSave {
             return false;
         }
 
-        _rescue = new PendingRescue(scene, position);
+        var gameManager = global::GameManager.instance;
+        _rescue = new PendingRescue(scene, position) {
+            // Taken now, before the death has played any of itself out, so it is the music of the room rather than
+            // the music of the death
+            Music = gameManager == null ? null : gameManager.AudioManager.CurrentMusicCue
+        };
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.RescueOffer,
@@ -341,6 +401,14 @@ internal partial class CoopSave {
     /// Stops waiting to be pulled back up, and tells the partner so that the cocoon stops being shown to them.
     /// </summary>
     private void EndRescueWait() {
+        // Marked as over on the way out, not just dropped. What is watching the death play out so it can give the
+        // screen back holds on to this and asks it whether the wait is still on before it touches anything, and one
+        // way out of a wait - the room being loaded again underneath it - ends it from here without going anywhere
+        // near the outcome.
+        if (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
+            waiting.Outcome = RescueOutcome.Ended;
+        }
+
         _rescue = null;
         _rescueLeaveHeld = false;
         _uiManager.CoopPrompt.Hide();
@@ -354,35 +422,119 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes away the object the death spawned to play itself out, which is what darkens the screen.
+    /// The object the death spawned to play itself out, or null if it is no longer playing.
     ///
-    /// The death spawns it and activates it *before* its first yield - the exact point a held death stops at. Holding
-    /// the death stops the player being taken to their bench but takes nothing away, so that object carries on
-    /// playing the death out over a player who is not going anywhere. That is a black screen for as long as the wait
-    /// lasts: up to <see cref="RescueWaitTime"/> seconds of staring at nothing, unable to see the world, their own
-    /// cocoon, or the line telling them what is happening.
+    /// This used to be looked for by a <c>HeroDeathSequence</c> component, on the belief that every kind of death
+    /// carries one. It does not: of the five objects a death can spawn, exactly one has that component, and it is not
+    /// the one an ordinary death uses - so the search came back empty every single time and everything built on it
+    /// quietly did nothing. What all five do carry is one FSM named <see cref="DeathAnimFsmName"/>, which is the
+    /// thing that plays the death out, so that is what they are found by now.
     ///
-    /// Safe to do while the death is still held: the wait the game itself uses was read off this object into the
-    /// coroutine before the yield, so taking the object away afterwards cannot change it, and giving up still ends
-    /// through <c>GameManager.PlayerDead</c>, which does not need it either.
-    ///
-    /// Found by its component rather than by the prefab it came from, because a cursed, frost, memory or non-lethal
-    /// death each spawn a different prefab and every one of them carries this component. It came out of the game's
-    /// pool, so it goes back to the pool: destroying a pooled object leaves the pool believing it is still on loan.
+    /// Only objects that are switched on are found, which is exactly right: the death's own ending puts this object
+    /// back in the pool, and a pooled object is switched off. Finding nothing therefore means the death has already
+    /// played itself out.
     /// </summary>
-    private static void ClearDeathSequence() {
-        foreach (var sequence in UnityEngine.Object.FindObjectsByType<HeroDeathSequence>(FindObjectsSortMode.None)) {
-            if (sequence == null) {
-                continue;
-            }
-
-            try {
-                sequence.gameObject.Recycle();
-            } catch (Exception e) {
-                Logger.Warn($"Could not return the death sequence to the pool: {e.Message}");
-                UnityEngine.Object.Destroy(sequence.gameObject);
+    private static GameObject? FindDeathEffect() {
+        foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(FindObjectsSortMode.None)) {
+            if (fsm != null && fsm.FsmName == DeathAnimFsmName) {
+                return fsm.gameObject;
             }
         }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Takes away the object the death spawned to play itself out, so that it cannot darken the screen after the
+    /// player has been put back on their feet.
+    ///
+    /// Its last step sets the screen to black and puts itself back in the pool, and nothing in a held death ever
+    /// reaches the place where the game clears that again. A player pulled up before the death finished would
+    /// therefore be walking around for a second or two and then have the screen go black on them.
+    ///
+    /// It came out of the game's pool, so it goes back to the pool: destroying a pooled object leaves the pool
+    /// believing it is still on loan.
+    /// </summary>
+    private static void ClearDeathEffect() {
+        if (FindDeathEffect() is not { } effect) {
+            return;
+        }
+
+        try {
+            effect.Recycle();
+        } catch (Exception e) {
+            Logger.Warn($"Could not return the death effect to the pool: {e.Message}");
+            UnityEngine.Object.Destroy(effect);
+        }
+    }
+
+    /// <summary>
+    /// Gives the player their screen back after the death darkened it.
+    ///
+    /// A death ends with the whole screen black and the heads-up display slid away, and it stays that way on purpose:
+    /// the game leaves it black across the load of the room the bench is in and only fades back in once the player is
+    /// standing there. A held death never gets that far, so nobody ever fades anything back in - which is the black
+    /// screen the waiting player was left staring at, unable to see the world, their own cocoon, or the line telling
+    /// them what is happening.
+    /// </summary>
+    private static void RestoreScreen() {
+        // From whatever the screen is now rather than from black. A fade always starts by putting its first colour
+        // up, so a fade written as "from black" over a screen that happens not to be black blacks it out for the
+        // length of the fade - a blink that would be this feature's own doing.
+        ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), Color.clear, RescueFadeTime);
+
+        var cameras = GameCameras.instance;
+        if (cameras != null) {
+            // The death slid this away as it started
+            cameras.HUDIn();
+        }
+    }
+
+    /// <summary>
+    /// Puts the music of the room back on after a death changed it to its own.
+    ///
+    /// A death ends on its own music and the game changes it back by loading the room the bench is in. A player who
+    /// is pulled back up never loads anything, so without this they would walk out of their own death into a room
+    /// that has gone quiet, and stay in it until they left the room.
+    /// </summary>
+    /// <param name="rescue">The wait that is ending, which holds what was playing before the death.</param>
+    private static void RestoreMusic(PendingRescue rescue) {
+        var gameManager = global::GameManager.instance;
+        if (gameManager == null || rescue.Music == null) {
+            return;
+        }
+
+        var audio = gameManager.AudioManager;
+        if (audio.CurrentMusicCue != rescue.Music) {
+            audio.ApplyMusicCue(rescue.Music, 0f, 0f, false);
+        }
+    }
+
+    /// <summary>
+    /// Lets the death play its own ending out - the animation, the sound, the shake and the screen going black, all
+    /// of which is the game's and should be seen - and gives the screen back the moment it is over.
+    ///
+    /// Waits for the object rather than for a length of time, because the deaths do not all take the same length of
+    /// time, and puts a limit on the waiting anyway: the one thing that must never happen is a player left staring at
+    /// a black screen because something we expected to end did not.
+    /// </summary>
+    /// <param name="rescue">The wait this belongs to.</param>
+    private static IEnumerator BringScreenBackAfterDeath(PendingRescue rescue) {
+        var effect = FindDeathEffect();
+        var start = Time.unscaledTime;
+
+        while (effect != null && effect.activeInHierarchy && Time.unscaledTime - start < DeathEffectWaitTime) {
+            yield return null;
+        }
+
+        // Being pulled back up in the meantime gives the screen back by itself, and does it in the same breath as
+        // everything else about a rescue rather than after this has noticed
+        if (rescue.ScreenBack || rescue.Outcome != RescueOutcome.Waiting) {
+            yield break;
+        }
+
+        rescue.ScreenBack = true;
+        RestoreScreen();
     }
 
     /// <summary>
@@ -392,20 +544,34 @@ internal partial class CoopSave {
     /// by this point, so a rescue that left them there would send the player back for them anyway.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
+    /// <param name="rescue">The wait that is ending, which holds what the death took away.</param>
     /// <returns>Whether the player was put back on their feet.</returns>
-    private bool TryRevive(HeroController? hero) {
+    private bool TryRevive(HeroController? hero, PendingRescue rescue) {
         var playerData = PlayerData.instance;
         if (hero == null || playerData == null) {
             return false;
         }
 
         try {
-            // Again here as well as when the wait started, in case a death got held without going through that path
-            ClearDeathSequence();
+            // The screen comes first, and before the death effect is taken away: taking the effect away pulls the
+            // black it holds over the screen off in one step, and the fade is what makes that a fade. Whoever was
+            // pulled up after the death had already finished playing out has had their screen back for a while.
+            if (!rescue.ScreenBack) {
+                RestoreScreen();
+            }
+
+            ClearDeathEffect();
+            RestoreMusic(rescue);
 
             hero.gameObject.layer = 9;
             hero.renderer.enabled = true;
             hero.heroBox.HeroBoxNormal();
+
+            // The hit box of the player answers to two things: the collider that HeroBoxNormal switches back on, and
+            // one switch shared by the whole game that a death turns on and only the loading of a room ever turns off
+            // again. Leaving it on makes a player who was pulled back up unable to be touched by anything at all
+            // until they change rooms - which is not a mercy, it is the fight stopping to mean anything.
+            HeroBox.Inactive = false;
             // The death made the body kinematic so that it would stop where it fell. Rigidbody2D.isKinematic, which
             // the game's own respawn still writes, is obsolete in the Unity this game runs on, so the body type it
             // stands for is set instead - the file next door only gets away with the old one behind a blanket
@@ -444,6 +610,12 @@ internal partial class CoopSave {
                     hero.RegainControl();
                 }
             }
+
+            // Giving control back writes the state of the player straight into the field, without telling the part
+            // that decides which animation belongs to that state. Left alone it stays on the last thing it was told,
+            // which is the death - so a player who is pulled up and then stands still is still lying there dead on
+            // the screen of the other player. This is what the game's own respawn does about it.
+            hero.StartAnimationControlToIdle();
 
             Chat(Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。"));
             Logger.Info("Pulled back up after a death instead of going to the bench");
@@ -714,6 +886,63 @@ internal partial class CoopSave {
         }
 
         _rescueTarget = new RescueTarget(playerId, _partnerCocoonScene, cocoon);
+
+        // Their body is in the cocoon now, so it stops standing beside it. Nothing ever took it away before: the
+        // death that crosses over is an animation like any other, and the animation of a death simply stops on its
+        // last frame. Their own game hides their body the moment they die, and until a death could be held they
+        // were gone from the room a few seconds later anyway, so a body frozen mid-death was never on screen long
+        // enough to be noticed. A wait lasts up to three quarters of a minute.
+        SetPartnerBodyHidden(playerId, true);
+    }
+
+    /// <summary>
+    /// Takes the body of the partner off the screen while they are lying in their cocoon, and brings it back when
+    /// they are not.
+    ///
+    /// Hidden the way the mod hides a player everywhere else: the animation is stopped and the sprite is replaced by
+    /// one that cannot be seen. Nothing else about them is touched, so where they are, what they can be hit by and
+    /// everything the rest of the mod knows about them stays exactly as it was.
+    /// </summary>
+    /// <param name="playerId">The player whose body it is.</param>
+    /// <param name="hidden">Whether to take it off the screen.</param>
+    private void SetPartnerBodyHidden(ushort playerId, bool hidden) {
+        try {
+            if (!_playerData.TryGetValue(playerId, out var player)) {
+                return;
+            }
+
+            var body = player.PlayerObject;
+            if (body == null) {
+                return;
+            }
+
+            var animator = body.GetComponent<tk2dSpriteAnimator>();
+            if (animator == null) {
+                return;
+            }
+
+            if (hidden) {
+                var sprite = body.GetComponent<tk2dSprite>();
+                if (sprite == null) {
+                    return;
+                }
+
+                animator.Stop();
+                sprite.SetSprite(HiddenSpriteName);
+
+                return;
+            }
+
+            // Any animation of theirs puts their own sprite back, so this only has to cover the player who is put
+            // back on their feet and then stands perfectly still: their game would send nothing, and a body that
+            // was taken off the screen for the wait would stay that way.
+            var idle = animator.GetClipByName(IdleClipName);
+            if (idle != null) {
+                animator.Play(idle);
+            }
+        } catch (Exception e) {
+            LogRescueError(e);
+        }
     }
 
     /// <summary>
@@ -756,6 +985,11 @@ internal partial class CoopSave {
             if (target.Cocoon != null) {
                 UnityEngine.Object.Destroy(target.Cocoon);
             }
+
+            // Whatever took the cocoon away - they were pulled up, they gave up, or this player walked out of the
+            // room - their body belongs back on the screen. Anything they do puts it there by itself, so this only
+            // has to cover someone who does nothing at all.
+            SetPartnerBodyHidden(target.PlayerId, false);
 
             _rescueTarget = null;
         }
