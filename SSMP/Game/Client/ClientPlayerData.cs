@@ -1,5 +1,6 @@
 using SSMP.Api.Client;
 using SSMP.Internals;
+using SSMP.Util;
 using UnityEngine;
 
 namespace SSMP.Game.Client;
@@ -27,16 +28,10 @@ internal class ClientPlayerData : IClientPlayer {
     public GameObject? PlayerObject { get; set; }
 
     /// <summary>
-    /// The sequence number of the packet the last position taken for this player arrived in.
+    /// Which positions of this player are newer than the one they are standing at. Kept for as long as they are
+    /// known, across rooms: unlike an entity, a player is not built again on walking into one.
     /// </summary>
-    public ushort LastPositionSequence { get; set; }
-
-    /// <summary>
-    /// Whether a position has been taken for this player at all yet, which is what tells the first one from an older
-    /// one. Zero is a sequence number like any other - it comes round again every sixty-five thousand packets - so
-    /// it cannot stand for "none".
-    /// </summary>
-    public bool HasPositionSequence { get; set; }
+    public PositionSequence PositionSequence { get; } = new();
 
     /// <inheritdoc />
     public Team Team { get; set; }

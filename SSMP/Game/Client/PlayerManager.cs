@@ -288,14 +288,9 @@ internal class PlayerManager : IPlayerManager {
 
         // An older position arriving after a newer one is thrown away, or the player is put back over ground they
         // have already covered
-        var lastSequence = playerData.LastPositionSequence;
-        var hasSequence = playerData.HasPositionSequence;
-        if (!PositionSequencing.IsNewer(sequence, ref lastSequence, ref hasSequence)) {
+        if (!playerData.PositionSequence.Accepts(sequence)) {
             return;
         }
-
-        playerData.LastPositionSequence = lastSequence;
-        playerData.HasPositionSequence = hasSequence;
 
         var playerContainer = playerData.PlayerContainer;
         if (playerContainer) {

@@ -66,16 +66,9 @@ internal class Entity {
     private int _positionsHeldBack;
 
     /// <summary>
-    /// The sequence number of the packet the last position taken for this entity arrived in.
+    /// Which positions of this entity are newer than the one it is standing at.
     /// </summary>
-    private ushort _lastPositionSequence;
-
-    /// <summary>
-    /// Whether a position has been taken at all yet, which is what tells the first one from an older one. Zero is a
-    /// sequence number like any other - it comes round again every sixty-five thousand packets - so it cannot stand
-    /// for "none".
-    /// </summary>
-    private bool _hasPositionSequence;
+    private readonly PositionSequence _positionSequence = new();
 
     /// <summary>
     /// The ID of the entity.
@@ -1235,7 +1228,7 @@ internal class Entity {
         // An older position arriving after a newer one is thrown away: nothing below this transport orders what it
         // carries, so one that had to be sent again lands after ones sent later, and applying it puts the entity
         // back where it was that much earlier.
-        if (!PositionSequencing.IsNewer(sequence, ref _lastPositionSequence, ref _hasPositionSequence)) {
+        if (!_positionSequence.Accepts(sequence)) {
             return;
         }
 

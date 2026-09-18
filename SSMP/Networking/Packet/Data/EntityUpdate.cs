@@ -99,6 +99,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         Id = 0;
         UpdateTypes.Clear();
         Position = null!;
+        // Cleared with everything else, although what reads it is written not to trust it. These come out of a pool
+        // that hands back whatever was last put in it, and a leftover sequence number read as the newest position
+        // seen is what once left a room of enemies standing still for nine minutes at a time.
+        ReceivedSequence = 0;
         Scale.Reset();
         AnimationId = 0;
         AnimationWrapMode = 0;
