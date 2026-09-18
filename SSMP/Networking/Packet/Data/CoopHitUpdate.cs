@@ -106,5 +106,15 @@ internal enum CoopHitKind : byte {
     /// landed here. The hit itself is sent so that the effect it plays there is the one this hit really was, rather
     /// than a generic one guessed from a direction.
     /// </summary>
-    EnemyHitEffect
+    EnemyHitEffect,
+
+    /// <summary>
+    /// The answer of the scene host to a knockback of an enemy: whether it knocked that enemy back or not. The game
+    /// that sent the knockback is holding the positions of the enemy back until its own knockback shows in them, and
+    /// an answer of no is the only thing that can tell it to stop waiting for something that will never come.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    EnemyKnockbackAnswer
 }
