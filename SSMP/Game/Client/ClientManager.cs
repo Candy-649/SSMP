@@ -309,6 +309,7 @@ internal class ClientManager : IClientManager {
         );
         _fleaGameCoop = new FleaGameCoop(netClient, _entityManager, () => _coopSave.CheckedPartnerId);
         _coopSave.OnFleaGameScore = _fleaGameCoop.OnPartnerScore;
+        _coopSave.OnFleaGamesOutroReady = _fleaGameCoop.OnPartnerOutroReady;
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();

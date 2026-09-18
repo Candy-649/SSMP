@@ -317,6 +317,11 @@ internal partial class CoopSave {
     public Action<ClientPlayerData, CoopSaveUpdate>? OnFleaGameScore { get; set; }
 
     /// <summary>
+    /// Takes whether the partner has won every game of the festival.
+    /// </summary>
+    public Action<ClientPlayerData, CoopSaveUpdate>? OnFleaGamesOutroReady { get; set; }
+
+    /// <summary>
     /// Registers the hooks, which stay for as long as the game runs because the save menu is used before connecting.
     /// </summary>
     public void Initialize() {
@@ -830,6 +835,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.FleaGameScore:
                 OnFleaGameScore?.Invoke(player, update);
+                break;
+            case CoopSaveUpdateKind.FleaGamesOutroReady:
+                OnFleaGamesOutroReady?.Invoke(player, update);
                 break;
         }
     }

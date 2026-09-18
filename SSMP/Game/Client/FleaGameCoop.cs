@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
+using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -161,6 +162,21 @@ internal class FleaGameCoop {
     /// </summary>
     private bool _resetHeld;
 
+    /// <summary>
+    /// Whether the partner has won every game of the festival.
+    /// </summary>
+    private bool _partnerOutroReady;
+
+    /// <summary>
+    /// What the partner was last told about the local player having won every game, so it is only sent on a change.
+    /// </summary>
+    private bool? _sentOutroReady;
+
+    /// <summary>
+    /// Hook that keeps a character of the festival from taking both players on until both have won every game.
+    /// </summary>
+    private Hook? _outroReadyHook;
+
     public FleaGameCoop(NetClient netClient, EntityManager entityManager, Func<ushort?> getPartnerId) {
         _netClient = netClient;
         _entityManager = entityManager;
@@ -197,6 +213,15 @@ internal class FleaGameCoop {
         } else {
             _scoreBoardOnEnableHook = new Hook(boardMethod, OnScoreBoardEnable);
         }
+
+        var outroMethod = typeof(PlayerData).GetMethod("get_FleaGamesOutroReady", InstanceFlags);
+        if (outroMethod == null) {
+            Logger.Error("PlayerData does not declare FleaGamesOutroReady; the festival will end for one player");
+        } else {
+            _outroReadyHook = new Hook(outroMethod, OnFleaGamesOutroReady);
+        }
+
+        EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
     }
 
     /// <summary>
@@ -211,6 +236,14 @@ internal class FleaGameCoop {
 
         _scoreBoardOnEnableHook?.Dispose();
         _scoreBoardOnEnableHook = null;
+
+        _outroReadyHook?.Dispose();
+        _outroReadyHook = null;
+
+        EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
+
+        _partnerOutroReady = false;
+        _sentOutroReady = null;
 
         ForgetScores();
     }
@@ -374,6 +407,16 @@ internal class FleaGameCoop {
     /// Tells the partner how many fleas the local player has hit in the game being played.
     /// </summary>
     private void SendLocalScore() {
+        Send(CoopSaveUpdateKind.FleaGameScore, _localScore, (ushort) (IsLocalPlaying() ? 1 : 0));
+    }
+
+    /// <summary>
+    /// Sends something about the festival to the partner of the two-player save.
+    /// </summary>
+    /// <param name="kind">What is being told.</param>
+    /// <param name="key">The running count it carries, if any.</param>
+    /// <param name="part">The flag it carries, if any.</param>
+    private void Send(CoopSaveUpdateKind kind, ulong key, ushort part) {
         if (_getPartnerId() is not { } partnerId || !_netClient.IsConnected) {
             return;
         }
@@ -381,9 +424,9 @@ internal class FleaGameCoop {
         _netClient.UpdateManager.SetCoopSaveUpdate(
             new CoopSaveUpdate {
                 TargetId = partnerId,
-                Kind = CoopSaveUpdateKind.FleaGameScore,
-                Key = _localScore,
-                Part = (ushort) (IsLocalPlaying() ? 1 : 0)
+                Kind = kind,
+                Key = key,
+                Part = part
             }
         );
     }
@@ -410,6 +453,62 @@ internal class FleaGameCoop {
         return Object.FindObjectsByType<PlayMakerFSM>(FindObjectsInactive.Include, FindObjectsSortMode.None)
                      .Where(fsm => fsm.Fsm != null && fsm.Fsm.Name == name)
                      .ToArray();
+    }
+
+    /// <summary>
+    /// Takes whether the partner has won every game of the festival.
+    /// </summary>
+    /// <param name="player">The player who sent it.</param>
+    /// <param name="update">The update.</param>
+    public void OnPartnerOutroReady(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_getPartnerId() != player.Id) {
+            return;
+        }
+
+        _partnerOutroReady = update.Part != 0;
+    }
+
+    /// <summary>
+    /// Hook for whether the local player has won every game of the festival. What follows the festival is one
+    /// thing that happens to both players at once, in a place they are both standing in, and it can only happen
+    /// once, so it waits until both of them have earned it. Each still wins their games on their own.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The player data.</param>
+    /// <returns>Whether the festival may move on.</returns>
+    private bool OnFleaGamesOutroReady(Func<PlayerData, bool> orig, PlayerData self) {
+        var ready = orig(self);
+        if (!ready || _getPartnerId() == null) {
+            return ready;
+        }
+
+        return _partnerOutroReady;
+    }
+
+    /// <summary>
+    /// Tells the partner when the local player has won every game of the festival, or no longer has. Read from the
+    /// three games one by one rather than from the answer above, which this game's own hook has already changed.
+    /// </summary>
+    /// <param name="heroController">The hero controller that updated.</param>
+    private void OnHeroControllerUpdate(HeroController heroController) {
+        if (_getPartnerId() == null) {
+            return;
+        }
+
+        var playerData = PlayerData.instance;
+        if (playerData == null) {
+            return;
+        }
+
+        var ready = playerData.FleaGamesIsJugglingChampion &&
+                    playerData.FleaGamesIsBouncingChampion &&
+                    playerData.FleaGamesIsDodgingChampion;
+        if (_sentOutroReady == ready) {
+            return;
+        }
+
+        _sentOutroReady = ready;
+        Send(CoopSaveUpdateKind.FleaGamesOutroReady, 0, (ushort) (ready ? 1 : 0));
     }
 
     /// <summary>

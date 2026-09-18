@@ -463,5 +463,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    FleaGameScore
+    FleaGameScore,
+
+    /// <summary>
+    /// Whether the sender has won every game of the festival, which is what a character there waits for before
+    /// taking both players on to what follows. <see cref="CoopSaveUpdate.Part"/> is 1 for won and 0 for not.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    FleaGamesOutroReady
 }
