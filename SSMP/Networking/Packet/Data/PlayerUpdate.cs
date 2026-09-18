@@ -24,6 +24,13 @@ internal class PlayerUpdate : GenericClientData {
     public Vector2 Position { get; set; } = Vector2.Zero;
 
     /// <summary>
+    /// The sequence number of the packet this arrived in, filled in on reading rather than sent: it belongs to the
+    /// packet that carried it, and is kept here so that whoever applies the position can tell a newer one from an
+    /// older one on a transport that does not order what it carries.
+    /// </summary>
+    public ushort ReceivedSequence { get; set; }
+
+    /// <summary>
     /// The scale of the player.
     /// </summary>
     public bool Scale { get; set; }

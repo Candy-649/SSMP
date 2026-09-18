@@ -66,6 +66,18 @@ internal class Entity {
     private int _positionsHeldBack;
 
     /// <summary>
+    /// The sequence number of the packet the last position taken for this entity arrived in.
+    /// </summary>
+    private ushort _lastPositionSequence;
+
+    /// <summary>
+    /// Whether a position has been taken at all yet, which is what tells the first one from an older one. Zero is a
+    /// sequence number like any other - it comes round again every sixty-five thousand packets - so it cannot stand
+    /// for "none".
+    /// </summary>
+    private bool _hasPositionSequence;
+
+    /// <summary>
     /// The ID of the entity.
     /// </summary>
     public ushort Id { get; }
@@ -1218,7 +1230,20 @@ internal class Entity {
     /// Updates the position of the client entity.
     /// </summary>
     /// <param name="position">The new position.</param>
-    public void UpdatePosition(Math_Vector2 position) {
+    /// <param name="sequence">The sequence number of the packet it arrived in.</param>
+    public void UpdatePosition(Math_Vector2 position, ushort sequence) {
+        // An older position arriving after a newer one is thrown away. Nothing below this transport orders what it
+        // carries, so one that had to be sent again lands after ones sent later - and being applied, it puts the
+        // entity back where it was that much earlier. Compared the way sequence numbers have to be, by the sign of
+        // the difference in their own size, so that the step from the largest back to zero reads as one forward
+        // rather than as sixty-five thousand back.
+        if (_hasPositionSequence && (short) (sequence - _lastPositionSequence) <= 0) {
+            return;
+        }
+
+        _hasPositionSequence = true;
+        _lastPositionSequence = sequence;
+
         if (Object.Client == null || Object.Host == null) {
             //.Warn($"Cannot update position for entity ({Id}, {Type}), client or host object is null");
             return;

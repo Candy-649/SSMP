@@ -352,9 +352,14 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         TOutgoing packetToSend;
 
         lock (Lock) {
-            // Transports requiring sequencing: Configure sequence and ACK data
+            // Numbered for every transport, not only the ones this mod keeps reliable itself. The number is written
+            // into the packet either way, so this costs nothing, and without it there is no way at all to tell an
+            // older packet from a newer one on a transport that does not order what it carries - which is how an
+            // enemy ends up back where it was standing before a player hit it.
+            CurrentUpdatePacket.Sequence = _localSequence;
+
+            // Transports requiring sequencing: Configure ACK data
             if (_requiresSequencing) {
-                CurrentUpdatePacket.Sequence = _localSequence;
                 CurrentUpdatePacket.Ack = _remoteSequence;
                 // TODO: PopulateAckField is called while Lock is already held and still re-locks internally.
                 // TODO: Flatten this re-entrant lock boundary in a dedicated concurrency cleanup pass.

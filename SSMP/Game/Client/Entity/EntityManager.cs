@@ -198,7 +198,7 @@ internal class EntityManager {
         }
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Position))
-            entity.UpdatePosition(update.Position);
+            entity.UpdatePosition(update.Position, update.ReceivedSequence);
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Scale))
             entity.UpdateScale(update.Scale);

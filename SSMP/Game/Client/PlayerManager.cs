@@ -279,11 +279,22 @@ internal class PlayerManager : IPlayerManager {
     /// </summary>
     /// <param name="id">The ID of the player.</param>
     /// <param name="position">The new position of the player.</param>
-    public void UpdatePosition(ushort id, Math_Vector2 position) {
+    /// <param name="sequence">The sequence number of the packet it arrived in.</param>
+    public void UpdatePosition(ushort id, Math_Vector2 position, ushort sequence) {
         if (!_playerData.TryGetValue(id, out var playerData) || !playerData.IsInLocalScene) {
             // Logger.Info($"Tried to update position for ID {id} while player data did not exists");
             return;
         }
+
+        // An older position arriving after a newer one is thrown away, or the player is put back over ground they
+        // have already covered. Compared by the sign of the difference in the size the numbers are kept in, so that
+        // the step from the largest back to zero reads as one forward rather than as sixty-five thousand back.
+        if (playerData.HasPositionSequence && (short) (sequence - playerData.LastPositionSequence) <= 0) {
+            return;
+        }
+
+        playerData.HasPositionSequence = true;
+        playerData.LastPositionSequence = sequence;
 
         var playerContainer = playerData.PlayerContainer;
         if (playerContainer) {

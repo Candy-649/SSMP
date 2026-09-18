@@ -60,6 +60,18 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public Vector2 Position { get; set; }
 
     /// <summary>
+    /// The sequence number of the packet this arrived in, filled in on reading rather than sent: it is not part of
+    /// this at all, it belongs to the packet that carried it, and it is kept here so that whoever applies the
+    /// position can tell a newer one from an older one.
+    ///
+    /// Not every transport orders what it carries. Steam's relay delivers reliable and unreliable messages on one
+    /// channel and orders neither against the other, so a message held back while something before it was sent
+    /// again arrives after messages that were sent later - carrying, in this case, where an enemy was standing
+    /// before it was hit.
+    /// </summary>
+    public ushort ReceivedSequence { get; set; }
+
+    /// <summary>
     /// The scale data of the entity.
     /// </summary>
     public ScaleData Scale { get; set; }

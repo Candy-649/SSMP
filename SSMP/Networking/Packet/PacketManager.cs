@@ -118,8 +118,21 @@ internal class PacketManager {
 
     public void HandleClientUpdatePacket(ClientUpdatePacket packet) {
         UnpackPacketDataDict(
-            packet.GetPacketData(), (id, data) =>
-                _clientUpdateRegistry.Execute(id, handler => handler(data))
+            packet.GetPacketData(), (id, data) => {
+                // Which packet it came in, handed to whoever applies it. Positions are what this is for: an older
+                // one arriving after a newer one is visible on the screen, as an enemy back where it stood before
+                // it was hit, or as the other player snapping backwards over ground they had already covered.
+                switch (data) {
+                    case EntityUpdate entityUpdate:
+                        entityUpdate.ReceivedSequence = packet.Sequence;
+                        break;
+                    case PlayerUpdate playerUpdate:
+                        playerUpdate.ReceivedSequence = packet.Sequence;
+                        break;
+                }
+
+                _clientUpdateRegistry.Execute(id, handler => handler(data));
+            }
         );
 
         foreach (var pair in packet.GetAddonPacketData()) {

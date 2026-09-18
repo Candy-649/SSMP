@@ -1139,7 +1139,7 @@ internal class ClientManager : IClientManager {
     private void OnPlayerUpdate(PlayerUpdate playerUpdate) {
         // Update the values of the player objects in the packet
         if (playerUpdate.UpdateTypes.Contains(PlayerUpdateType.Position)) {
-            _playerManager.UpdatePosition(playerUpdate.Id, playerUpdate.Position);
+            _playerManager.UpdatePosition(playerUpdate.Id, playerUpdate.Position, playerUpdate.ReceivedSequence);
         }
 
         if (playerUpdate.UpdateTypes.Contains(PlayerUpdateType.Scale)) {

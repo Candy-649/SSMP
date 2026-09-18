@@ -26,6 +26,18 @@ internal class ClientPlayerData : IClientPlayer {
     /// <inheritdoc />
     public GameObject? PlayerObject { get; set; }
 
+    /// <summary>
+    /// The sequence number of the packet the last position taken for this player arrived in.
+    /// </summary>
+    public ushort LastPositionSequence { get; set; }
+
+    /// <summary>
+    /// Whether a position has been taken for this player at all yet, which is what tells the first one from an older
+    /// one. Zero is a sequence number like any other - it comes round again every sixty-five thousand packets - so
+    /// it cannot stand for "none".
+    /// </summary>
+    public bool HasPositionSequence { get; set; }
+
     /// <inheritdoc />
     public Team Team { get; set; }
 
