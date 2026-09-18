@@ -257,12 +257,67 @@ internal partial class CoopSave {
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
     private IEnumerator WrapDeath(IEnumerator death, bool nonLethal, bool frostDeath) {
         // A non-lethal death leaves no cocoon: the game skips that whole part of its own sequence, so there would be
-        // nothing for the partner to open and the player would wait for something that cannot come
-        if (nonLethal || !CanWaitForRescue()) {
+        // nothing for the partner to open and the player would wait for something that cannot come. It also takes
+        // nobody to a bench, so a player who is waiting is not told anything: whoever this is can still reach them.
+        if (nonLethal) {
+            return death;
+        }
+
+        if (!CanWaitForRescue()) {
+            TellPartnerNobodyIsComing();
+
             return death;
         }
 
         return HoldDeath(death);
+    }
+
+    /// <summary>
+    /// Tells a partner who is lying in their cocoon that nobody is coming, because the player who was to open it has
+    /// just died themselves.
+    ///
+    /// Two deaths means two benches - that is the rule - and this is the half of it that was missing. The death of
+    /// the second player already goes straight to their bench, because a player whose partner is waiting cannot wait
+    /// themselves, but the first player was never told and lay there until their wait ran out of time: watching an
+    /// empty room, with the enemies that killed them both still swinging at the spot they fell on.
+    /// </summary>
+    private void TellPartnerNobodyIsComing() {
+        try {
+            if (_partnerWaitingRescue is not { } playerId || GetCheckedPartner() is not { } partner ||
+                partner.Id != playerId) {
+                return;
+            }
+
+            Send(new CoopSaveUpdate {
+                TargetId = partner.Id,
+                Kind = CoopSaveUpdateKind.RescueLost
+            });
+
+            // Their cocoon goes now rather than when they answer: this player is on their way to a bench either way
+            RemoveRescueTarget();
+            _partnerWaitingRescue = null;
+        } catch (Exception e) {
+            LogRescueError(e);
+        }
+    }
+
+    /// <summary>
+    /// The partner died while this player was waiting to be pulled back up, so the wait ends and this player goes to
+    /// their bench as well.
+    /// </summary>
+    /// <param name="player">The player the update came from.</param>
+    private void OnRescueLost(ClientPlayerData player) {
+        if (_rescue is not { Outcome: RescueOutcome.Waiting } rescue || GetCheckedPartner()?.Id != player.Id) {
+            return;
+        }
+
+        rescue.Outcome = RescueOutcome.Ended;
+        Chat(
+            Lang.Pick(
+                $"{player.Username} died as well, so you are both going back to your bench.",
+                $"{player.Username} 也死了，两个人一起回长椅。"
+            )
+        );
     }
 
     /// <summary>

@@ -472,5 +472,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    FleaGamesOutroReady
+    FleaGamesOutroReady,
+
+    /// <summary>
+    /// The sender has died while the other player was waiting to be pulled back up, so there is nobody left to open
+    /// that cocoon and the wait ends. Both players go to their bench, which is the rule for two deaths.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    RescueLost
 }
