@@ -68,6 +68,12 @@ internal partial class CoopSave {
     private static FieldInfo? _persistentScenesField;
 
     /// <summary>
+    /// Whether reading the saved objects of the save failed, so that the reason is logged once rather than on every
+    /// poll of the world.
+    /// </summary>
+    private static bool _worldItemReadFailed;
+
+    /// <summary>
     /// The saved booleans of the world, as keys from <see cref="GetItemKey"/>.
     /// </summary>
     private HashSet<string>? _worldBools;
@@ -674,10 +680,27 @@ internal partial class CoopSave {
         }
 
         _persistentScenesField ??= collection.GetType().GetField("scenes", InstanceFlags);
-        if (_persistentScenesField?.GetValue(collection) is not Dictionary<string, Dictionary<string, PersistentItemData<bool>>> scenes) {
-            Logger.Warn("Could not read the saved objects of the save");
+        var scenesValue = _persistentScenesField?.GetValue(collection);
+        if (scenesValue is not Dictionary<string, Dictionary<string, PersistentItemData<bool>>> scenes) {
+            // This has been failing every time it runs, so it says which of the three ways it can fail this was:
+            // the field is gone, the game has not built the dictionary yet, or it is not the shape expected here.
+            // Guessing between them from the outside is what this line exists to stop.
+            if (!_worldItemReadFailed) {
+                _worldItemReadFailed = true;
+                Logger.Warn(
+                    "Could not read the saved objects of the save: " +
+                    (_persistentScenesField == null
+                        ? "the collection has no 'scenes' field"
+                        : scenesValue == null
+                            ? "'scenes' is null, so the game has not built it yet"
+                            : $"'scenes' is a {scenesValue.GetType().FullName}, which is not the expected shape")
+                );
+            }
+
             return result;
         }
+
+        _worldItemReadFailed = false;
 
         foreach (var scene in scenes) {
             foreach (var item in scene.Value.Values) {

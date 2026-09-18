@@ -1120,6 +1120,18 @@ internal class UiManager : IUiManager {
                      : $"'{eventSystem.gameObject.name}' using " +
                        $"{eventSystem.currentInputModule?.GetType().Name ?? "no input module"}")
              );
+
+             // That answered which event system is in charge, and the gamepad still cannot open a save with it. The
+             // game's own menu ends this screen by highlighting a slot and turning UI input back on, so the next
+             // thing to know is whether either actually took: a gamepad confirm needs something selected to send to,
+             // and the action it sends. Both are read here rather than reasoned about from the code, which has now
+             // been wrong about this three times.
+             var selected = eventSystem == null ? null : eventSystem.currentSelectedGameObject;
+             var submit = IH.inputActions?.MenuSubmit;
+             Logger.Info(
+                 $"Save selection has '{selected?.name ?? "nothing"}' selected, " +
+                 $"MenuSubmit is {(submit == null ? "unreadable" : submit.Enabled ? "enabled" : "disabled")}"
+             );
         } else {
              Logger.Error("UIManager instance is null, cannot go to profile menu");
              _isSlotSelectionActive = false;

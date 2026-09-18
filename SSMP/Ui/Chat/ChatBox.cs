@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Text;
 using GlobalEnums;
@@ -7,6 +8,7 @@ using SSMP.Game.Settings;
 using SSMP.Ui.Component;
 using SSMP.Util;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
@@ -300,6 +302,12 @@ internal class ChatBox : IChatBox {
         _chatInput.SetActive(true);
         _chatInput.Focus();
 
+        // Typing into this box shows nothing at all - no text, no caret - and the input method's own window sits in
+        // the corner of the screen, yet the message that Return sends does carry what was typed. So the keys arrive
+        // and only the drawing is missing. Which event system holds the field decides whether the per-frame update
+        // that draws the caret and the half-composed characters ever runs, and that cannot be read off the code.
+        MonoBehaviourUtil.Instance.StartCoroutine(LogChatInputState());
+
         InputHandler.Instance.StopMouseInput();
         InputHandler.Instance.PreventPause();
         SetEnabledHeroActions(false);
@@ -309,6 +317,43 @@ internal class ChatBox : IChatBox {
         // after a death, and a "j" asked the other player for a two-player save. Switching off the whole set rather
         // than the two keys by name means a key added later cannot be forgotten here.
         _modSettings.Keybinds.Enabled = false;
+    }
+
+    /// <summary>
+    /// Says what state the chat input is really in, because the box shows nothing while typing yet the message that
+    /// Return sends carries the text. Read once a frame after opening, since asking an input field for focus only
+    /// takes effect on the update after, and again a few seconds later, by which time there is something half-typed
+    /// to look at: an input method that never reaches the game leaves the composition empty in both samples, while
+    /// one that reaches it and is not drawn does not.
+    /// </summary>
+    private IEnumerator LogChatInputState() {
+        yield return null;
+        LogChatInputSample("just opened");
+
+        yield return new WaitForSecondsRealtime(4f);
+        if (IsOpen) {
+            LogChatInputSample("four seconds in");
+        }
+    }
+
+    /// <summary>
+    /// Writes one reading of the chat input's state.
+    /// </summary>
+    /// <param name="when">Which of the two readings this is.</param>
+    private void LogChatInputSample(string when) {
+        var eventSystem = EventSystem.current;
+        Logger.Info(
+            $"Chat input ({when}): " +
+            (eventSystem == null
+                ? "no event system at all"
+                : $"driven by '{eventSystem.gameObject.name}' using " +
+                  $"{eventSystem.currentInputModule?.GetType().Name ?? "no input module"}, " +
+                  $"selected '{eventSystem.currentSelectedGameObject?.name ?? "nothing"}'") +
+            $", focused: {_chatInput.IsFocused}" +
+            $", composition mode: {Input.imeCompositionMode}" +
+            $", composing: '{Input.compositionString}'" +
+            $", field holds: '{_chatInput.CurrentText}'"
+        );
     }
 
     /// <summary>

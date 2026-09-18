@@ -71,4 +71,15 @@ internal class ChatInputComponent : InputComponent {
     public void Focus() {
         InputField.ActivateInputField();
     }
+
+    /// <summary>
+    /// Whether the field believes it has the keyboard. Typing reaches the field - a message sent with Return arrives
+    /// with its text - while nothing is drawn in the box and no caret appears, so this says which half is wrong.
+    /// </summary>
+    public bool IsFocused => InputField.isFocused;
+
+    /// <summary>
+    /// The text the field currently holds, for telling "the box is empty" apart from "the box is not being drawn".
+    /// </summary>
+    public string CurrentText => InputField.text;
 }
