@@ -146,6 +146,17 @@ internal partial class CoopSave {
     private bool _helloKeyMismatchTold;
 
     /// <summary>
+    /// Whether a part of the partner's world progress that was turned away has already been reported, so that a
+    /// partner who keeps sending says it once rather than every couple of seconds.
+    /// </summary>
+    private bool _stateDropTold;
+
+    /// <summary>
+    /// Whether sending the world progress again has already been reported, for the same reason.
+    /// </summary>
+    private bool _stateResentTold;
+
+    /// <summary>
     /// How long a hello goes unanswered before it is sent again.
     /// </summary>
     private static readonly TimeSpan HelloRetryDelay = TimeSpan.FromSeconds(2);
@@ -166,6 +177,8 @@ internal partial class CoopSave {
         _stateSent = false;
         _stateReceived = false;
         _stateAdded = false;
+        _stateDropTold = false;
+        _stateResentTold = false;
         _stateParts.Clear();
         _sentWorldItems = [];
         _sentWishEntries = [];
@@ -201,11 +214,12 @@ internal partial class CoopSave {
             // of the three keys disagreed - which is what made two players wait with nothing to go on
             Logger.Info(
                 $"Starting a check with {partner.Username}: this save has the key '{LocalKey}', the pairing is " +
-                $"addressed to '{marker.PartnerKey}', and the server says they are '{partner.SaveKey}'"
+                $"addressed to '{marker.PartnerKey}', the server says they are '{partner.SaveKey}', and this " +
+                $"check is {_checkKey}"
             );
 
             SendHello(partner, marker, HelloStart);
-        } else if (!_partnerHello && DateTime.UtcNow - _lastHelloUtc >= HelloRetryDelay) {
+        } else if ((!_partnerHello || !_stateReceived) && DateTime.UtcNow - _lastHelloUtc >= HelloRetryDelay) {
             // The first hello is sent the moment the partner is there, which can be before their game has loaded the
             // save it belongs to. Their game drops a hello that early without a trace, and this used to be sent
             // exactly once, so a single early or lost hello left both players waiting for ever.
@@ -311,6 +325,7 @@ internal partial class CoopSave {
         if (update.PartCount == HelloAnswer) {
             if (update.Key == _checkKey && _checkPartnerId == player.Id) {
                 _partnerHello = true;
+                ResendWorldState(player);
             }
 
             return;
@@ -320,6 +335,7 @@ internal partial class CoopSave {
             // The same check, like when both players started one with the same key
             _partnerHello = true;
             SendHello(player, marker, HelloAnswer);
+            ResendWorldState(player);
             return;
         }
 
@@ -349,8 +365,33 @@ internal partial class CoopSave {
     /// added after the local save sent its own.
     /// </summary>
     private void OnWorldState(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkKey == 0 || update.Key != _checkKey || _checkPartnerId != player.Id || _stateReceived ||
-            GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+        if (_stateReceived) {
+            // Every part is already in. A partner who asks again lands here, which is not a problem
+            return;
+        }
+
+        string? turnedAway = null;
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+            turnedAway = "no save paired with theirs is loaded here";
+        } else if (_checkKey == 0) {
+            turnedAway = "no check is running here";
+        } else if (update.Key != _checkKey) {
+            turnedAway = $"it belongs to check {update.Key}, and this game is on check {_checkKey}";
+        } else if (_checkPartnerId != player.Id) {
+            turnedAway = "the check of this game is with someone else";
+        }
+
+        if (turnedAway != null) {
+            // This said nothing at all until now. A part turned away here used to be gone for good, so the player
+            // it was meant for waited for ever with no line anywhere saying why - which is the state two players
+            // ended up in and could not get out of. They are asked for again now, and it says when one is dropped.
+            if (!_stateDropTold) {
+                _stateDropTold = true;
+                Logger.Warn(
+                    $"Turned away part {update.Part} of the world progress of {player.Username}: {turnedAway}"
+                );
+            }
+
             return;
         }
 
@@ -468,7 +509,7 @@ internal partial class CoopSave {
     /// Sends the bosses that the local save has beaten, the saved objects of the world that are set in it, its wish log
     /// and its story flags.
     /// </summary>
-    private void SendWorldState(ClientPlayerData partner) {
+    private void SendWorldState(ClientPlayerData partner, bool again = false) {
         var defeats = GetDefeatRecords();
         var items = GetWorldItems();
         var wishes = GetWishEntries();
@@ -517,10 +558,37 @@ internal partial class CoopSave {
             Send(update);
         }
 
-        Logger.Info(
-            $"Sent world progress to {partner.Username}: {defeats.Count} beaten bosses, {items.Count} saved objects, " +
-            $"{wishes.Count} entries of the wish log and {storyFlags.Count} story flags in {partCount} parts"
-        );
+        if (!again) {
+            Logger.Info(
+                $"Sent world progress to {partner.Username}: {defeats.Count} beaten bosses, {items.Count} saved " +
+                $"objects, {wishes.Count} entries of the wish log and {storyFlags.Count} story flags in " +
+                $"{partCount} parts"
+            );
+        }
+    }
+
+    /// <summary>
+    /// Sends the world progress again to a partner who is still asking about this check. The progress used to go out
+    /// exactly once: a part that was turned away, or that never arrived, was never sent again, and the player left
+    /// waiting could not ask for it either, because the game that finished its own check stops looking at the check
+    /// at all. A hello that keeps arriving means they are still waiting, so it is answered with the progress too.
+    /// The parts are held by their number until they are all in, so sending them twice changes nothing.
+    /// </summary>
+    /// <param name="partner">The partner still asking about the check.</param>
+    private void ResendWorldState(ClientPlayerData partner) {
+        if (!_stateSent || _checkKey == 0) {
+            return;
+        }
+
+        if (!_stateResentTold) {
+            _stateResentTold = true;
+            Logger.Info(
+                $"Sending the world progress to {partner.Username} again, because they are still asking about " +
+                $"check {_checkKey}"
+            );
+        }
+
+        SendWorldState(partner, true);
     }
 
     /// <summary>
