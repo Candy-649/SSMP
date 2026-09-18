@@ -1250,14 +1250,18 @@ internal class Entity {
             return;
         }
 
-        // While a knockback of the local player is moving this enemy, every position the scene host sends was
+        // While a knockback of the local player is moving this enemy, the positions the scene host sends were
         // measured before it had even heard about the hit. Letting those through was the whole of the problem: the
-        // interpolation went on being told the enemy was standing where it had been, and the moment the knockback
-        // stopped being held it pulled the enemy straight back there - in front of a player who had just hit it, in
-        // a game where walking into an enemy hurts. They are counted and dropped instead, and the count goes with
-        // the first position that is taken afterwards so that the speed read out of it covers the right stretch of
-        // time rather than a single tick.
-        if (CoopHits.IsRecoilPredicted(Object.Client)) {
+        // interpolation went on being told the enemy was standing where it had been, and pulled it straight back
+        // there - in front of a player who had just hit it, in a game where walking into an enemy hurts. They are
+        // counted and dropped until one of them shows the knockback, and the count goes with the first position
+        // that is taken afterwards so that the speed read out of it covers the right stretch of time rather than a
+        // single tick.
+        if (!CoopHits.AcceptsPosition(
+                Object.Client,
+                new Vector2(unityPos.x, unityPos.y),
+                positionInterpolation.LastServerPosition
+            )) {
             _positionsHeldBack++;
 
             return;

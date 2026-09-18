@@ -73,6 +73,11 @@ internal class PredictiveInterpolation : MonoBehaviour {
     // The last authoritative position received from the server (used for velocity calculation)
     private Vector3 _lastServerPosition;
 
+    /// <summary>
+    /// The position last taken from the scene host, which a position that arrives is measured against.
+    /// </summary>
+    public Vector3 LastServerPosition => _lastServerPosition;
+
     // The current predicted position (integrated frame-by-frame)
     private Vector3 _logicalPosition;
 
