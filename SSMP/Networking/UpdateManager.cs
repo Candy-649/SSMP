@@ -23,6 +23,14 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private const int ConnectionTimeout = 5000;
 
     /// <summary>
+    /// How long a quiet connection is kept in total, in milliseconds, while the transport still says the session is
+    /// up. Several seconds of silence is ordinary on a relay between continents - one route change is enough - and
+    /// ending the game for it is worse than waiting a little. This is where waiting stops being reasonable even so,
+    /// which is what keeps a host that has frozen from holding the other player there for ever.
+    /// </summary>
+    private const int ConnectionTimeoutCeiling = 30000;
+
+    /// <summary>
     /// The MTU (maximum transfer unit) to use to send packets with. If the length of a packet exceeds this, we break
     /// it up into smaller packets before sending. This ensures that we control the breaking of packets in most
     /// cases and do not rely on smaller network devices for the breaking up as this could impact performance.
@@ -82,6 +90,12 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// Used to check for connection timeouts.
     /// </summary>
     private DateTime _lastReceiveTime;
+
+    /// <summary>
+    /// Whether this quiet stretch has already been reported, so that a link which goes quiet says so once rather
+    /// than on every pass of the send loop.
+    /// </summary>
+    private bool _timeoutGraceTold;
 
     /// <summary>
     /// Cached capability: whether the transport requires application-level sequencing.
@@ -281,6 +295,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         where TOtherPacketId : Enum {
         // Reset the connection timeout timer
         _lastReceiveTime = DateTime.UtcNow;
+        _timeoutGraceTold = false;
 
         // A transport without sequence numbers has nothing here to acknowledge: the packet that just arrived answers
         // nothing that was sent. Closing the round trip of the last sent sequence anyway, as this used to, timed the
@@ -509,12 +524,31 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
                 // Check for connection timeout
                 // We use DateTime.UtcNow which is consistent with _lastReceiveTime
-                if ((DateTime.UtcNow - _lastReceiveTime).TotalMilliseconds > ConnectionTimeout) {
-                    TimeoutEvent?.Invoke();
-                    // We don't break immediately, we might want to let the user decide via the event (e.g. disconnect)
-                    // usually the event handler will call Disconnect() which stops updates.
-                    // However, we must stop checking to avoid spamming the event in this loop.
-                    break;
+                var quietFor = (DateTime.UtcNow - _lastReceiveTime).TotalMilliseconds;
+                if (quietFor > ConnectionTimeout) {
+                    // Ask the transport before giving up on the other player. A relay between continents can stop
+                    // delivering for seconds at a time without the session being gone: one player was dropped in
+                    // the middle of a fight while the host's own log showed it sending throughout and Steam never
+                    // reported the session as failed. A transport that can answer this only reports a ping while
+                    // its session is connected, so a number here means the link is alive and the silence is the
+                    // network being slow rather than the game being over. The transports that cannot answer report
+                    // nothing, so they keep exactly the behaviour they had.
+                    var stillUp = quietFor < ConnectionTimeoutCeiling && _transportPing?.Invoke() >= 0;
+                    if (!stillUp) {
+                        TimeoutEvent?.Invoke();
+                        // We don't break immediately, we might want to let the user decide via the event (e.g. disconnect)
+                        // usually the event handler will call Disconnect() which stops updates.
+                        // However, we must stop checking to avoid spamming the event in this loop.
+                        break;
+                    }
+
+                    if (!_timeoutGraceTold) {
+                        _timeoutGraceTold = true;
+                        Logger.Info(
+                            $"Nothing has arrived for {quietFor / 1000:F1}s, but the transport still has the " +
+                            "session, so this is not being taken as a disconnect yet"
+                        );
+                    }
                 }
 
                 // Send Packet
