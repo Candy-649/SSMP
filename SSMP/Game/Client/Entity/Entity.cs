@@ -66,6 +66,12 @@ internal class Entity {
     private int _positionsHeldBack;
 
     /// <summary>
+    /// Whether a knockback of the local player was moving this entity on the last frame, which says when one has
+    /// just ended and the interpolation is about to take the entity over again.
+    /// </summary>
+    private bool _wasRecoilPredicted;
+
+    /// <summary>
     /// Which positions of this entity are newer than the one it is standing at.
     /// </summary>
     private readonly PositionSequence _positionSequence;
@@ -680,7 +686,17 @@ internal class Entity {
                 interpolation.AdaptToRTT(_netClient.UpdateManager.AverageRtt);
 
                 // A knockback from a hit of the local player moves the object until it ends, then it blends back
-                if (!CoopHits.IsRecoilPredicted(Object.Client)) {
+                var recoilPredicted = CoopHits.IsRecoilPredicted(Object.Client);
+                if (_wasRecoilPredicted && !recoilPredicted) {
+                    // Nothing wrote this object while the knockback ran, so the interpolation carried on predicting
+                    // from where the enemy stood before it. Picking that up again would put the enemy back there in
+                    // a single frame, which is the whole of what the knockback was held for, so where it is standing
+                    // now is handed over as what it should go on looking like.
+                    interpolation.KeepVisualPosition();
+                }
+
+                _wasRecoilPredicted = recoilPredicted;
+                if (!recoilPredicted) {
                     interpolation.ManualUpdate(Time.deltaTime);
                 }
             }

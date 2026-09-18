@@ -326,6 +326,21 @@ internal class PredictiveInterpolation : MonoBehaviour {
     }
 
     /// <summary>
+    /// Takes where the object is standing now as what it should go on looking like, so that the distance between
+    /// that and where the scene host has it is smoothed away rather than jumped.
+    ///
+    /// For the end of a knockback that the local game made up: while one is running, this is not driving the object
+    /// at all and its own idea of where the object is has gone on running without it. Picking that up again writes
+    /// the object straight back there in one frame, which is the jump the knockback was held for in the first place.
+    /// </summary>
+    public void KeepVisualPosition() {
+        EnsureTransformCached();
+
+        _visualOffset = _cachedTransform.position - _logicalPosition;
+        _visualOffsetVelocity = Vector3.zero;
+    }
+
+    /// <summary>
     /// Forces the position to the given position.
     /// </summary>
     /// <param name="position">Vector3 containing the position to snap to.</param>
