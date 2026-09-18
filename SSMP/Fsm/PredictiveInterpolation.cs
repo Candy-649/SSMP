@@ -214,8 +214,14 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// <summary>
     /// Updates the entity's position using the latest prediction state.
     /// </summary>
-    public void SetNewPosition(Vector3 newPos) {
-        SetNewState(newPos);
+    /// <param name="newPos">The new authoritative position.</param>
+    /// <param name="snapshotsSinceLast">
+    /// How many of the sender's ticks this position covers. One for an ordinary update; more when updates in between
+    /// were deliberately put aside, so that the speed worked out from the distance is not worked out against the
+    /// length of a single tick and come out several times too fast.
+    /// </param>
+    public void SetNewPosition(Vector3 newPos, int snapshotsSinceLast = 1) {
+        SetNewState(newPos, snapshotsSinceLast);
     }
 
     /// <summary>

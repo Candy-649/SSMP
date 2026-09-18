@@ -60,6 +60,12 @@ internal class Entity {
     private readonly bool _hasParent;
 
     /// <summary>
+    /// How many positions of the scene host have been put aside while a knockback of the local player moves this
+    /// entity, so that the first one taken afterwards is known to cover more than one tick of theirs.
+    /// </summary>
+    private int _positionsHeldBack;
+
+    /// <summary>
     /// The ID of the entity.
     /// </summary>
     public ushort Id { get; }
@@ -1229,7 +1235,21 @@ internal class Entity {
             return;
         }
 
-        positionInterpolation.SetNewPosition(unityPos);
+        // While a knockback of the local player is moving this enemy, every position the scene host sends was
+        // measured before it had even heard about the hit. Letting those through was the whole of the problem: the
+        // interpolation went on being told the enemy was standing where it had been, and the moment the knockback
+        // stopped being held it pulled the enemy straight back there - in front of a player who had just hit it, in
+        // a game where walking into an enemy hurts. They are counted and dropped instead, and the count goes with
+        // the first position that is taken afterwards so that the speed read out of it covers the right stretch of
+        // time rather than a single tick.
+        if (CoopHits.IsRecoilPredicted(Object.Client)) {
+            _positionsHeldBack++;
+
+            return;
+        }
+
+        positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + 1);
+        _positionsHeldBack = 0;
     }
 
     /// <summary>

@@ -46,6 +46,18 @@ internal class CoopHits {
     private const float MaxRecoilHoldTime = 0.35f;
 
     /// <summary>
+    /// How much longer than the round trip a knockback of an enemy that the scene host controls is held on for, in
+    /// seconds.
+    ///
+    /// A round trip on its own is too short, and being too short is the whole of the fault: the hit waits for the
+    /// next send of this game, crosses to the server and on to the scene host, waits for a send there, takes a frame
+    /// or two before the enemy has actually moved far enough for the move to be noticed and sent, and then comes all
+    /// the way back. Every one of those is a send tick or a frame on top of the round trip itself, and while they
+    /// pass the scene host keeps sending where the enemy was standing before any of it happened.
+    /// </summary>
+    private const float RecoilHoldMargin = 0.07f;
+
+    /// <summary>
     /// The types of objects whose hits are replayed: objects of the world that both players share. Objects that give
     /// the player who hits them something, that move that player, or that only react to hits, are left out.
     /// </summary>
@@ -520,20 +532,26 @@ internal class CoopHits {
             return;
         }
 
+        // The scene host gets it either way, since the knockback can also freeze the enemy or stop early here. Sent
+        // before anything is predicted, because a knockback that cannot be sent is one the scene host will never
+        // make: predicting that one only takes the enemy away from where it really is and puts it back afterwards.
+        var sent = SendKnockback(partnerId, entityId, direction, magnitude);
+
         // The enemy moves here until the knockback ends, unless the knockback doesn't move it at all
-        if (self.IsRecoiling && self.RecoilSpeedBase * magnitude > 0f) {
+        if (sent && self.IsRecoiling && self.RecoilSpeedBase * magnitude > 0f) {
             // This knockback reaches the scene host a trip from now, and the position it moves the enemy to takes
             // another trip to come back, so its position cannot show this knockback for a round trip yet. Holding
             // the prediction for that long keeps a short knockback from being corrected away against a position
             // that was measured before it ever happened.
             var now = Time.unscaledTime;
-            var roundTrip = Mathf.Clamp(_netClient.UpdateManager.AverageRtt / 1000f, 0f, MaxRecoilHoldTime);
+            var roundTrip = Mathf.Clamp(
+                _netClient.UpdateManager.AverageRtt / 1000f + RecoilHoldMargin,
+                0f,
+                MaxRecoilHoldTime
+            );
 
             PredictedRecoils[self] = new PredictedRecoil(now + roundTrip, now + MaxPredictedRecoilTime);
         }
-
-        // The scene host gets it either way, since the knockback can also freeze the enemy or stop early here
-        SendKnockback(partnerId, entityId, direction, magnitude);
     }
 
     /// <summary>
@@ -570,10 +588,11 @@ internal class CoopHits {
     /// <summary>
     /// Sends the knockback of a hit of the local player on an enemy that the scene host controls to the partner.
     /// </summary>
-    private void SendKnockback(ushort partnerId, ushort entityId, int direction, float magnitude) {
+    /// <returns>Whether it was sent, which is whether there is anyone there to make it happen.</returns>
+    private bool SendKnockback(ushort partnerId, ushort entityId, int direction, float magnitude) {
         if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
             !partner.IsInLocalScene) {
-            return;
+            return false;
         }
 
         using var stream = new MemoryStream();
@@ -588,6 +607,8 @@ internal class CoopHits {
             EntityId = entityId,
             Hit = stream.ToArray()
         });
+
+        return true;
     }
 
     /// <summary>
