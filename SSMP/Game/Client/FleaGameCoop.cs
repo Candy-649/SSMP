@@ -9,6 +9,7 @@ using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
+using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client;
 
@@ -52,6 +53,13 @@ internal class FleaGameCoop {
     /// Events that mean a game of the festival is starting over, so the counts of both players begin again.
     /// </summary>
     private static readonly string[] ResetEventNames = ["GAME BEGIN PLAY", "RESET FLEA GAMES"];
+
+    /// <summary>
+    /// Name of the state machine of a game that decides what to send out next. In one of the three games it makes
+    /// the game harder for every point scored; the other two never answer to a point at all, so telling all of them
+    /// is both simpler and safer than picking one out by name.
+    /// </summary>
+    private const string DirectorFsmName = "Game Specific Control";
 
     /// <summary>
     /// The entity types of the fleas that can be hit for points. The fleas that fly in before a game starts are left
@@ -105,6 +113,13 @@ internal class FleaGameCoop {
     /// How many fleas the partner has hit in the game being played.
     /// </summary>
     public int PartnerScore { get; private set; }
+
+    /// <summary>
+    /// How many of the partner's points the game that runs the fleas has already been told about. Only the game
+    /// that runs them makes them harder, and both players see the fleas it sends out, so a point the partner scores
+    /// has to reach it or the two of them would be playing the same fleas at different speeds.
+    /// </summary>
+    private int _partnerScoreFed;
 
     public FleaGameCoop(NetClient netClient, EntityManager entityManager, Func<ushort?> getPartnerId) {
         _netClient = netClient;
@@ -162,6 +177,40 @@ internal class FleaGameCoop {
         }
 
         PartnerScore = System.Math.Max(PartnerScore, (int) update.Key);
+
+        if (_entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
+            FeedPartnerPoints();
+        }
+    }
+
+    /// <summary>
+    /// Makes the game as hard for both players as the better of the two has earned. Only the game that runs the
+    /// fleas sends them out, so only it decides the difficulty, and its own player's points already reach it. This
+    /// hands it the partner's, without going near the score that each player keeps and saves for themselves.
+    /// </summary>
+    private void FeedPartnerPoints() {
+        if (_partnerScoreFed >= PartnerScore) {
+            return;
+        }
+
+        try {
+            var directors = Object.FindObjectsByType<PlayMakerFSM>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                                  .Where(fsm => fsm.Fsm is { Name: DirectorFsmName })
+                                  .ToArray();
+            if (directors.Length == 0) {
+                return;
+            }
+
+            for (; _partnerScoreFed < PartnerScore; _partnerScoreFed++) {
+                foreach (var director in directors) {
+                    if (director != null) {
+                        director.SendEvent(ScoreEventName);
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not pass on a point of the partner: {e.GetType()}, {e.Message}");
+        }
     }
 
     /// <summary>
@@ -234,6 +283,7 @@ internal class FleaGameCoop {
     /// </summary>
     private void ForgetScores() {
         PartnerScore = 0;
+        _partnerScoreFed = 0;
         if (_localScore == 0) {
             return;
         }
