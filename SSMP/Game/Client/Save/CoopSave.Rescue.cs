@@ -519,8 +519,14 @@ internal partial class CoopSave {
     /// a black screen because something we expected to end did not.
     /// </summary>
     /// <param name="rescue">The wait this belongs to.</param>
-    private static IEnumerator BringScreenBackAfterDeath(PendingRescue rescue) {
-        var effect = FindDeathEffect();
+    private IEnumerator BringScreenBackAfterDeath(PendingRescue rescue) {
+        GameObject? effect = null;
+        try {
+            effect = FindDeathEffect();
+        } catch (Exception e) {
+            LogRescueError(e);
+        }
+
         var start = Time.unscaledTime;
 
         while (effect != null && effect.activeInHierarchy && Time.unscaledTime - start < DeathEffectWaitTime) {
@@ -533,8 +539,14 @@ internal partial class CoopSave {
             yield break;
         }
 
-        rescue.ScreenBack = true;
-        RestoreScreen();
+        // Anything thrown in here would leave the screen black for the rest of the wait, which is the very thing
+        // this exists to stop, so it is caught and said out loud rather than ending the coroutine quietly.
+        try {
+            rescue.ScreenBack = true;
+            RestoreScreen();
+        } catch (Exception e) {
+            LogRescueError(e);
+        }
     }
 
     /// <summary>
