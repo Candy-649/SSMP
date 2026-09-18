@@ -679,12 +679,23 @@ internal partial class CoopSave {
             return result;
         }
 
-        _persistentScenesField ??= collection.GetType().GetField("scenes", InstanceFlags);
+        // The collection is a PersistentBoolCollection, which inherits 'scenes' from the generic base it derives from.
+        // Reflection never gives back a private field of a base class, so asking the type of the object alone found
+        // nothing every single time, and the read below gave up. Walk up to the class that declares the field.
+        if (_persistentScenesField == null) {
+            for (var type = collection.GetType(); type != null; type = type.BaseType) {
+                _persistentScenesField = type.GetField("scenes", InstanceFlags);
+                if (_persistentScenesField != null) {
+                    break;
+                }
+            }
+        }
+
         var scenesValue = _persistentScenesField?.GetValue(collection);
         if (scenesValue is not Dictionary<string, Dictionary<string, PersistentItemData<bool>>> scenes) {
-            // This has been failing every time it runs, so it says which of the three ways it can fail this was:
-            // the field is gone, the game has not built the dictionary yet, or it is not the shape expected here.
-            // Guessing between them from the outside is what this line exists to stop.
+            // This says which of the three ways it can fail this was: the field is gone, the game has not built the
+            // dictionary yet, or it is not the shape expected here. Guessing between them from the outside is what
+            // this exists to stop. It used to report the first one every time, which the lookup above now fixes.
             if (!_worldItemReadFailed) {
                 _worldItemReadFailed = true;
                 Logger.Warn(
