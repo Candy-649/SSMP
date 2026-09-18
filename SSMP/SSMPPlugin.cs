@@ -26,7 +26,11 @@ public partial class SSMPPlugin : BaseUnityPlugin {
     }
 
     private void Awake() {
-        Logging.Logger.Info($"Plugin {Name} ({Id}) has loaded!");
+        // BepInEx's own "Loading [SSMP x.y.z]" line is read from its plugin cache, which it throws away by the
+        // timestamp of the file - and every build unpacked from the npm package carries the same frozen
+        // timestamp, so that line can name a version that has not been on disk for days. This one comes from the
+        // assembly that is really running, and is the same wording the other player's build is compared against.
+        Logging.Logger.Info($"Plugin {Name} ({Id}) has loaded! Running build: {Game.SteamManager.LocalModVersion}");
 
         // Register the event to initialize SSMP once we enter the main menu.
         EventHooks.UIManagerUIGoToMainMenu += Initialize;
