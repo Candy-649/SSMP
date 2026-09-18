@@ -49,10 +49,13 @@ internal static class FontManager {
     /// The game's fonts are in compressed bundles, so their names cannot be known ahead of time.
     ///
     /// This used to be the single character 的, and that was not enough. The game loads the fonts of several
-    /// languages at once, and the first one that could draw 的 was a Japanese face: it has the shared characters and
-    /// not the simplified-only ones, so the wording came out drawn from two fonts at two sizes in the same line.
-    /// These are taken from the wording this mod actually shows, and include the simplified-only forms that tell
-    /// the two apart.
+    /// languages at once, and the first one that could draw 的 was a Japanese face, so the wording came out drawn
+    /// from two faces at two sizes in the same line. These are taken from the wording this mod actually shows.
+    ///
+    /// **This test can confirm a font and must never be trusted to reject one.** A dynamic font answers for every
+    /// character here, whether the face holds it or borrows it: RequestCharactersInTexture puts the borrowed glyph
+    /// in the atlas and HasCharacter reports what the atlas holds. The Japanese face passed all of these on both
+    /// players' machines. That is why the name check in FindChineseFont runs first and this only backs it up.
     /// </summary>
     private const string ChineseSample = "的匹配大厅直连身份房间创建浏览公开进入你们双人存档连接退出加入输入已经开好";
 
@@ -65,6 +68,36 @@ internal static class FontManager {
         "SimHei",
         "SimSun",
         "NSimSun"
+    ];
+
+    /// <summary>
+    /// Pieces of a font name that say it is the simplified Chinese face, in order of preference. The game loads the
+    /// fonts of several languages at once and hands them over in no useful order, so the first one that passes a
+    /// glyph test is not the right one: it was a Japanese face on both players' machines, while
+    /// NotoSerifCJKsc-Regular sat further down that very same list.
+    /// </summary>
+    private static readonly string[] ChineseFontNameHints = [
+        "cjksc",
+        "hanssc",
+        "hanserifsc",
+        "sanssc",
+        "serifsc"
+    ];
+
+    /// <summary>
+    /// Pieces of a font name that rule it out however promising the rest of the name looks. The traditional,
+    /// Japanese and Korean faces of the same families are loaded next to the simplified one and their names differ
+    /// by these few letters alone.
+    /// </summary>
+    private static readonly string[] ChineseFontNameAvoid = [
+        "cjktc",
+        "cjkjp",
+        "cjkkr",
+        "seriftc",
+        "sanstc",
+        "tc-",
+        "jp-",
+        "kr-"
     ];
 
     /// <summary>
@@ -117,16 +150,51 @@ internal static class FontManager {
 
         _searchedForChinese = true;
 
+        // By name first, and only then by asking a font what it can draw. Asking cannot tell these apart: the
+        // game's Chinese fonts are dynamic, so RequestCharactersInTexture makes Unity fill whatever the face
+        // itself lacks out of a fallback, and HasCharacter then answers yes for every character. That is the very
+        // thing that looks wrong on screen - the borrowed glyphs come from another face at another size, which is
+        // the "some characters are bigger than others" this is meant to stop. A Japanese face passed all of the
+        // test characters on both players' machines, so the test below can confirm a font but never reject one.
+        foreach (var hint in ChineseFontNameHints) {
+            foreach (var font in UnityEngine.Resources.FindObjectsOfTypeAll<Font>()) {
+                var name = font.name.ToLowerInvariant();
+                if (!name.Contains(hint)) {
+                    continue;
+                }
+
+                var avoided = false;
+                foreach (var avoid in ChineseFontNameAvoid) {
+                    if (name.Contains(avoid)) {
+                        avoided = true;
+                        break;
+                    }
+                }
+
+                if (avoided) {
+                    continue;
+                }
+
+                Logger.Info($"Drawing Chinese with the game's simplified Chinese font: {font.name}");
+                _chineseFont = font;
+
+                return _chineseFont;
+            }
+        }
+
         foreach (var font in UnityEngine.Resources.FindObjectsOfTypeAll<Font>()) {
             var missing = FirstCharacterMissing(font);
             if (missing != null) {
                 // Logged because which font is picked here decides whether the wording can be read at all, and
                 // nothing used to say why one was passed over or taken
-                Logger.Info($"Not drawing Chinese with the game's font '{font.name}': it has no '{missing}'");
+                Logger.Info(
+                    $"Not drawing Chinese with the game's font '{font.name}' (dynamic: {font.dynamic}): it has " +
+                    $"no '{missing}'"
+                );
                 continue;
             }
 
-            Logger.Info($"Drawing Chinese with the game's own font: {font.name}");
+            Logger.Info($"Drawing Chinese with the game's own font: {font.name} (dynamic: {font.dynamic})");
             _chineseFont = font;
 
             return _chineseFont;
