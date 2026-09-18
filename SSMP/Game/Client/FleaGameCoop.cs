@@ -4,6 +4,8 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
+using SSMP.Networking.Client;
+using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -19,11 +21,15 @@ namespace SSMP.Game.Client;
 /// scoring event lands on nothing. The game that controls them has the opposite problem in the same place, since a
 /// copy of the partner's attack is not allowed to tink at all, so it can never score for them either.
 ///
-/// The score of each player is theirs alone and their own game saves it, so nothing is shared here: this only fills
-/// the hole. In the game that does not control the fleas, a hit of the local player that really did tink a flea
-/// sends the scoring event to that game's own director, which then counts it, shows it and saves it exactly as it
-/// does when playing alone. The game that controls the fleas needs none of this and is left untouched, and so is
-/// playing alone.
+/// The score of each player is theirs alone and their own game saves it, so nothing is taken over here. In the game
+/// that does not control the fleas, a hit of the local player that really did tink a flea broadcasts the scoring
+/// event that its own fleas can no longer send, and from there that game counts it, shows it and saves it exactly
+/// as it does when playing alone. The game that controls the fleas needs none of that and is left untouched, and so
+/// is playing alone.
+///
+/// Both games do keep their own running count of the fleas they hit and tell the other, so that each player can be
+/// shown where the two of them stand. That count is sent as a total rather than as single points, so a lost or a
+/// repeated message cannot make it drift.
 ///
 /// Known limit: the game that does not control the fleas cannot see what state a flea is in, because the copy's
 /// state machine is off. It therefore counts a tink that the controlling game might not have counted, such as one
@@ -41,6 +47,11 @@ internal class FleaGameCoop {
     /// and the one that decides what to send out next, which in one of the three games gets harder for every point.
     /// </summary>
     private const string ScoreEventName = "SCORE";
+
+    /// <summary>
+    /// Events that mean a game of the festival is starting over, so the counts of both players begin again.
+    /// </summary>
+    private static readonly string[] ResetEventNames = ["GAME BEGIN PLAY", "RESET FLEA GAMES"];
 
     /// <summary>
     /// The entity types of the fleas that can be hit for points. The fleas that fly in before a game starts are left
@@ -61,6 +72,11 @@ internal class FleaGameCoop {
     private static readonly ConditionalWeakTable<TinkEffect, BoxedBool> ScoringFleaTinks = [];
 
     /// <summary>
+    /// The net client, for telling the partner how many fleas the local player has hit.
+    /// </summary>
+    private readonly NetClient _netClient;
+
+    /// <summary>
     /// The entity manager, which tells whether this game controls the entities of the scene.
     /// </summary>
     private readonly EntityManager _entityManager;
@@ -75,7 +91,23 @@ internal class FleaGameCoop {
     /// </summary>
     private Hook? _tinkEffectHitHook;
 
-    public FleaGameCoop(EntityManager entityManager, Func<ushort?> getPartnerId) {
+    /// <summary>
+    /// Hook that notices a game of the festival starting over.
+    /// </summary>
+    private Hook? _eventRegisterSendEventHook;
+
+    /// <summary>
+    /// How many fleas the local player has hit in the game being played.
+    /// </summary>
+    private ulong _localScore;
+
+    /// <summary>
+    /// How many fleas the partner has hit in the game being played.
+    /// </summary>
+    public int PartnerScore { get; private set; }
+
+    public FleaGameCoop(NetClient netClient, EntityManager entityManager, Func<ushort?> getPartnerId) {
+        _netClient = netClient;
         _entityManager = entityManager;
         _getPartnerId = getPartnerId;
     }
@@ -84,11 +116,24 @@ internal class FleaGameCoop {
     /// Registers the hooks of the flea games.
     /// </summary>
     public void RegisterHooks() {
-        var method = typeof(TinkEffect).GetMethod("Hit", InstanceFlags);
-        if (method == null) {
+        var hitMethod = typeof(TinkEffect).GetMethod("Hit", InstanceFlags);
+        if (hitMethod == null) {
             Logger.Error("TinkEffect does not declare Hit; the flea games were not hooked");
         } else {
-            _tinkEffectHitHook = new Hook(method, OnTinkEffectHit);
+            _tinkEffectHitHook = new Hook(hitMethod, OnTinkEffectHit);
+        }
+
+        var sendMethod = typeof(EventRegister).GetMethod(
+            "SendEvent",
+            BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            [typeof(string), typeof(GameObject)],
+            null
+        );
+        if (sendMethod == null) {
+            Logger.Error("EventRegister does not declare SendEvent; the flea game counts will not start over");
+        } else {
+            _eventRegisterSendEventHook = new Hook(sendMethod, OnEventRegisterSendEvent);
         }
     }
 
@@ -98,11 +143,31 @@ internal class FleaGameCoop {
     public void DeregisterHooks() {
         _tinkEffectHitHook?.Dispose();
         _tinkEffectHitHook = null;
+
+        _eventRegisterSendEventHook?.Dispose();
+        _eventRegisterSendEventHook = null;
+
+        ForgetScores();
     }
 
     /// <summary>
-    /// Hook for <see cref="TinkEffect.Hit"/>. In a game that does not control the fleas, a hit of the local player
-    /// that tinked one of them scores in this game, which the flea's own state machine cannot do while it is off.
+    /// Takes how many fleas the partner has hit. The update carries their total rather than a single point, so one
+    /// that arrives late or twice can only ever be ignored.
+    /// </summary>
+    /// <param name="player">The player who sent it.</param>
+    /// <param name="update">The update.</param>
+    public void OnPartnerScore(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_getPartnerId() != player.Id) {
+            return;
+        }
+
+        PartnerScore = System.Math.Max(PartnerScore, (int) update.Key);
+    }
+
+    /// <summary>
+    /// Hook for <see cref="TinkEffect.Hit"/>. A hit of the local player that tinked a flea counts for them, and in
+    /// a game that does not control the fleas it also scores, which the flea's own state machine cannot do while it
+    /// is off.
     /// </summary>
     /// <param name="orig">The original method.</param>
     /// <param name="self">The tink that was hit.</param>
@@ -120,13 +185,8 @@ internal class FleaGameCoop {
             return response;
         }
 
-        // Only a two-player save has a partner whose game could be running the fleas
+        // Only a two-player save has a partner to be shown against
         if (_getPartnerId() == null) {
-            return response;
-        }
-
-        // The game that controls the fleas already scores through their own state machines
-        if (!_entityManager.IsSceneRoleDetermined || _entityManager.IsSceneHost) {
             return response;
         }
 
@@ -136,14 +196,67 @@ internal class FleaGameCoop {
         }
 
         try {
-            if (IsScoringFlea(self)) {
-                SendScore();
+            if (!IsScoringFlea(self)) {
+                return response;
             }
+
+            // The game that controls the fleas already scores through their own state machines
+            if (!_entityManager.IsSceneHost) {
+                EventRegister.SendEvent(ScoreEventName, null);
+            }
+
+            _localScore++;
+            SendLocalScore();
         } catch (Exception e) {
             Logger.Warn($"Could not score a hit on a flea: {e.GetType()}, {e.Message}");
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Hook for <see cref="EventRegister.SendEvent(string, UnityEngine.GameObject)"/>, which notices a game of the
+    /// festival starting over so that the counts of both players do not carry into it.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="eventName">The event being sent.</param>
+    /// <param name="source">The object that sent it.</param>
+    private void OnEventRegisterSendEvent(Action<string, GameObject> orig, string eventName, GameObject source) {
+        orig(eventName, source);
+
+        if (eventName != null && Array.IndexOf(ResetEventNames, eventName) >= 0) {
+            ForgetScores();
+        }
+    }
+
+    /// <summary>
+    /// Begins both counts again, and tells the partner so that neither is left showing the last game.
+    /// </summary>
+    private void ForgetScores() {
+        PartnerScore = 0;
+        if (_localScore == 0) {
+            return;
+        }
+
+        _localScore = 0;
+        SendLocalScore();
+    }
+
+    /// <summary>
+    /// Tells the partner how many fleas the local player has hit in the game being played.
+    /// </summary>
+    private void SendLocalScore() {
+        if (_getPartnerId() is not { } partnerId || !_netClient.IsConnected) {
+            return;
+        }
+
+        _netClient.UpdateManager.SetCoopSaveUpdate(
+            new CoopSaveUpdate {
+                TargetId = partnerId,
+                Kind = CoopSaveUpdateKind.FleaGameScore,
+                Key = _localScore
+            }
+        );
     }
 
     /// <summary>
@@ -169,15 +282,5 @@ internal class FleaGameCoop {
 
         ScoringFleaTinks.Add(tink, new BoxedBool { Value = isScoringFlea });
         return isScoringFlea;
-    }
-
-    /// <summary>
-    /// Scores a point in the game that is being played, which counts it, shows it and saves it as it does alone.
-    /// This is what the flea itself does, so everything that listens hears it: the game that keeps the score, and
-    /// the one that sends out the next fleas and, in one of the three games, gets harder for every point scored.
-    /// A game that is not being played has nothing that answers to it.
-    /// </summary>
-    private static void SendScore() {
-        EventRegister.SendEvent(ScoreEventName, null);
     }
 }

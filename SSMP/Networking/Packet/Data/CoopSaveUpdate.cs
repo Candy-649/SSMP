@@ -453,5 +453,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender is no longer waiting to be pulled back up, because they went to their bench, they were pulled up, or
     /// nobody could reach them any more. The cocoon that the other game showed for them goes away again.
     /// </summary>
-    RescueEnd
+    RescueEnd,
+
+    /// <summary>
+    /// How many fleas the sender has hit in the game of the festival they are playing.
+    /// <see cref="CoopSaveUpdate.Key"/> is the running total rather than a single point, so a lost or repeated
+    /// update cannot make the other game count wrong: it only ever takes the larger of the two.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    FleaGameScore
 }

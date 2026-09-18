@@ -312,6 +312,11 @@ internal partial class CoopSave {
     public ushort? CheckedPartnerId => _checkedWith;
 
     /// <summary>
+    /// Takes how many fleas the partner has hit in the game of the festival they are playing.
+    /// </summary>
+    public Action<ClientPlayerData, CoopSaveUpdate>? OnFleaGameScore { get; set; }
+
+    /// <summary>
     /// Registers the hooks, which stay for as long as the game runs because the save menu is used before connecting.
     /// </summary>
     public void Initialize() {
@@ -822,6 +827,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.RescueEnd:
                 OnRescueEnd(player, update);
+                break;
+            case CoopSaveUpdateKind.FleaGameScore:
+                OnFleaGameScore?.Invoke(player, update);
                 break;
         }
     }
