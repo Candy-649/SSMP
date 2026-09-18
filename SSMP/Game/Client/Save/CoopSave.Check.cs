@@ -63,11 +63,6 @@ internal partial class CoopSave {
     private static HashSet<string>? _playerDataBoolNames;
 
     /// <summary>
-    /// The field of a collection of saved objects that holds them by scene.
-    /// </summary>
-    private static FieldInfo? _persistentScenesField;
-
-    /// <summary>
     /// Whether reading the saved objects of the save failed, so that the reason is logged once rather than on every
     /// poll of the world.
     /// </summary>
@@ -682,16 +677,12 @@ internal partial class CoopSave {
         // The collection is a PersistentBoolCollection, which inherits 'scenes' from the generic base it derives from.
         // Reflection never gives back a private field of a base class, so asking the type of the object alone found
         // nothing every single time, and the read below gave up. Walk up to the class that declares the field.
-        if (_persistentScenesField == null) {
-            for (var type = collection.GetType(); type != null; type = type.BaseType) {
-                _persistentScenesField = type.GetField("scenes", InstanceFlags);
-                if (_persistentScenesField != null) {
-                    break;
-                }
-            }
+        FieldInfo? scenesField = null;
+        for (var type = collection.GetType(); type != null && scenesField == null; type = type.BaseType) {
+            scenesField = type.GetField("scenes", InstanceFlags);
         }
 
-        var scenesValue = _persistentScenesField?.GetValue(collection);
+        var scenesValue = scenesField?.GetValue(collection);
         if (scenesValue is not Dictionary<string, Dictionary<string, PersistentItemData<bool>>> scenes) {
             // This says which of the three ways it can fail this was: the field is gone, the game has not built the
             // dictionary yet, or it is not the shape expected here. Guessing between them from the outside is what
@@ -700,7 +691,7 @@ internal partial class CoopSave {
                 _worldItemReadFailed = true;
                 Logger.Warn(
                     "Could not read the saved objects of the save: " +
-                    (_persistentScenesField == null
+                    (scenesField == null
                         ? "the collection has no 'scenes' field"
                         : scenesValue == null
                             ? "'scenes' is null, so the game has not built it yet"
