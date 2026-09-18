@@ -80,6 +80,13 @@ internal class FleaGameCoop {
     private static readonly ConditionalWeakTable<TinkEffect, BoxedBool> ScoringFleaTinks = [];
 
     /// <summary>
+    /// Reflected field with the text a badge of the score board draws its number into. A badge added at runtime has
+    /// none, so it is taken from the badge it was made from.
+    /// </summary>
+    private static readonly FieldInfo? BadgeScoreTextField =
+        typeof(ScoreBoardUIBadgeBase).GetField("scoreText", InstanceFlags);
+
+    /// <summary>
     /// The net client, for telling the partner how many fleas the local player has hit.
     /// </summary>
     private readonly NetClient _netClient;
@@ -103,6 +110,11 @@ internal class FleaGameCoop {
     /// Hook that notices a game of the festival starting over.
     /// </summary>
     private Hook? _eventRegisterSendEventHook;
+
+    /// <summary>
+    /// Hook that adds the partner's row when a score board appears.
+    /// </summary>
+    private Hook? _scoreBoardOnEnableHook;
 
     /// <summary>
     /// How many fleas the local player has hit in the game being played.
@@ -150,6 +162,13 @@ internal class FleaGameCoop {
         } else {
             _eventRegisterSendEventHook = new Hook(sendMethod, OnEventRegisterSendEvent);
         }
+
+        var boardMethod = typeof(ScoreBoardUI).GetMethod("OnEnable", InstanceFlags);
+        if (boardMethod == null) {
+            Logger.Error("ScoreBoardUI does not declare OnEnable; the partner's row was not added");
+        } else {
+            _scoreBoardOnEnableHook = new Hook(boardMethod, OnScoreBoardEnable);
+        }
     }
 
     /// <summary>
@@ -161,6 +180,9 @@ internal class FleaGameCoop {
 
         _eventRegisterSendEventHook?.Dispose();
         _eventRegisterSendEventHook = null;
+
+        _scoreBoardOnEnableHook?.Dispose();
+        _scoreBoardOnEnableHook = null;
 
         ForgetScores();
     }
@@ -310,6 +332,63 @@ internal class FleaGameCoop {
     }
 
     /// <summary>
+    /// Hook for the score board appearing, which gives the partner a row of their own on it. The board sorts the
+    /// rows it finds by their score, so the row places itself among the others rather than being put somewhere.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The score board.</param>
+    private void OnScoreBoardEnable(Action<ScoreBoardUI> orig, ScoreBoardUI self) {
+        orig(self);
+
+        if (_getPartnerId() == null) {
+            return;
+        }
+
+        try {
+            if (AddPartnerRow(self)) {
+                self.Refresh();
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not add the partner's row to the score board: {e.GetType()}, {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Gives the partner a row on a score board, made from the row that shows the local player's own score so that
+    /// it matches the others. Does nothing if it already has one.
+    /// </summary>
+    /// <param name="board">The score board.</param>
+    /// <returns>Whether a row was added.</returns>
+    private bool AddPartnerRow(ScoreBoardUI board) {
+        if (board.GetComponentInChildren<FleaPartnerScoreBadge>(true) != null) {
+            return false;
+        }
+
+        var hero = board.GetComponentInChildren<ScoreBoardUIBadgeHero>(true);
+        if (hero == null) {
+            return false;
+        }
+
+        var row = Object.Instantiate(hero.gameObject, hero.transform.parent);
+        row.name = "SSMP Partner Score";
+
+        // The copy is still the local player's row until its own badge is taken off it
+        foreach (var copied in row.GetComponents<ScoreBoardUIBadgeBase>()) {
+            Object.DestroyImmediate(copied);
+        }
+
+        var badge = row.AddComponent<FleaPartnerScoreBadge>();
+
+        // A badge draws its number into a text of its own object, which a badge added at runtime has no reference
+        // to, so it is taken from the row this one was copied from
+        BadgeScoreTextField?.SetValue(badge, BadgeScoreTextField.GetValue(hero));
+        badge.GetScore = () => PartnerScore;
+
+        row.SetActive(true);
+        return true;
+    }
+
+    /// <summary>
     /// Returns whether a tink belongs to a flea of a game that can be hit for points. The tinks sit below the flea,
     /// so its entry is looked for on the objects above them.
     /// </summary>
@@ -333,4 +412,22 @@ internal class FleaGameCoop {
         ScoringFleaTinks.Add(tink, new BoxedBool { Value = isScoringFlea });
         return isScoringFlea;
     }
+}
+
+/// <summary>
+/// A row of a score board of the festival that shows how many fleas the partner has hit. The board asks every row
+/// it finds for its score and puts them in order, so this one ranks itself against the local player and the
+/// characters already on the board without any of them being touched.
+/// </summary>
+internal class FleaPartnerScoreBadge : ScoreBoardUIBadgeBase {
+    /// <summary>
+    /// Gets how many fleas the partner has hit.
+    /// </summary>
+    public Func<int>? GetScore { get; set; }
+
+    /// <inheritdoc />
+    public override int Score => GetScore?.Invoke() ?? 0;
+
+    /// <inheritdoc />
+    public override bool IsVisible => GetScore != null;
 }
