@@ -45,10 +45,16 @@ internal static class FontManager {
     public static TMP_FontAsset InGameNameFont = null!;
 
     /// <summary>
-    /// A character no font without Chinese glyphs can draw, used to ask a font whether it is one rather than guessing
-    /// from its name. The game's fonts are in compressed bundles, so their names cannot be known ahead of time.
+    /// Characters this mod draws, used to ask a font whether it can draw them rather than guessing from its name.
+    /// The game's fonts are in compressed bundles, so their names cannot be known ahead of time.
+    ///
+    /// This used to be the single character 的, and that was not enough. The game loads the fonts of several
+    /// languages at once, and the first one that could draw 的 was a Japanese face: it has the shared characters and
+    /// not the simplified-only ones, so the wording came out drawn from two fonts at two sizes in the same line.
+    /// These are taken from the wording this mod actually shows, and include the simplified-only forms that tell
+    /// the two apart.
     /// </summary>
-    private const char ChineseSample = '的';
+    private const string ChineseSample = "的匹配大厅直连身份房间创建浏览公开进入你们双人存档连接退出加入输入已经开好";
 
     /// <summary>
     /// The fonts to ask Windows for if the game turns out to have none that can draw Chinese, in order of preference.
@@ -112,7 +118,11 @@ internal static class FontManager {
         _searchedForChinese = true;
 
         foreach (var font in UnityEngine.Resources.FindObjectsOfTypeAll<Font>()) {
-            if (!CanDrawChinese(font)) {
+            var missing = FirstCharacterMissing(font);
+            if (missing != null) {
+                // Logged because which font is picked here decides whether the wording can be read at all, and
+                // nothing used to say why one was passed over or taken
+                Logger.Info($"Not drawing Chinese with the game's font '{font.name}': it has no '{missing}'");
                 continue;
             }
 
@@ -124,7 +134,7 @@ internal static class FontManager {
 
         foreach (var name in ChineseOsFonts) {
             var font = Font.CreateDynamicFontFromOSFont(name, 16);
-            if (font == null || !CanDrawChinese(font)) {
+            if (font == null || FirstCharacterMissing(font) != null) {
                 continue;
             }
 
@@ -140,21 +150,28 @@ internal static class FontManager {
     }
 
     /// <summary>
-    /// Whether a font has the glyphs to draw Chinese. A font that answers by throwing is treated as one that cannot,
-    /// because asking is only worth doing while it cannot break showing the text at all.
+    /// The first character of <see cref="ChineseSample"/> a font cannot draw, or null if it can draw all of them. A
+    /// font that answers by throwing is treated as one that cannot draw the first, because asking is only worth
+    /// doing while it cannot break showing the text at all.
     /// </summary>
     /// <param name="font">The font to ask.</param>
-    /// <returns>Whether the font can draw Chinese.</returns>
-    private static bool CanDrawChinese(Font font) {
+    /// <returns>The first character the font lacks, or null if it lacks none.</returns>
+    private static char? FirstCharacterMissing(Font font) {
         try {
             // A dynamic font only builds the glyphs asked of it, so it has to be asked before it can answer.
             if (font.dynamic) {
-                font.RequestCharactersInTexture(ChineseSample.ToString());
+                font.RequestCharactersInTexture(ChineseSample);
             }
 
-            return font.HasCharacter(ChineseSample);
+            foreach (var character in ChineseSample) {
+                if (!font.HasCharacter(character)) {
+                    return character;
+                }
+            }
+
+            return null;
         } catch {
-            return false;
+            return ChineseSample[0];
         }
     }
 }
