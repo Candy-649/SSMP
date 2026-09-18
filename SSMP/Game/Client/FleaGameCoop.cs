@@ -6,9 +6,7 @@ using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Util;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
-using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client;
 
@@ -39,17 +37,8 @@ internal class FleaGameCoop {
     private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     /// <summary>
-    /// Name of the state machine that runs one of the games, counts the score and saves it.
-    /// </summary>
-    private const string MasterFsmName = "flea_game_master_control";
-
-    /// <summary>
-    /// State of the director in which a game is being played and accepts scoring events.
-    /// </summary>
-    private const string PlayingStateName = "Playing";
-
-    /// <summary>
-    /// Event that a flea sends to the director of its game when it was hit.
+    /// Event that a flea sends when it was hit. Every game listens for it: the one that counts and saves the score,
+    /// and the one that decides what to send out next, which in one of the three games gets harder for every point.
     /// </summary>
     private const string ScoreEventName = "SCORE";
 
@@ -86,11 +75,6 @@ internal class FleaGameCoop {
     /// </summary>
     private Hook? _tinkEffectHitHook;
 
-    /// <summary>
-    /// The directors of the games in the current scene, or null while they have not been looked up yet.
-    /// </summary>
-    private PlayMakerFSM[]? _masterFsms;
-
     public FleaGameCoop(EntityManager entityManager, Func<ushort?> getPartnerId) {
         _entityManager = entityManager;
         _getPartnerId = getPartnerId;
@@ -106,27 +90,14 @@ internal class FleaGameCoop {
         } else {
             _tinkEffectHitHook = new Hook(method, OnTinkEffectHit);
         }
-
-        SceneManager.activeSceneChanged += OnActiveSceneChanged;
     }
 
     /// <summary>
     /// Deregisters the hooks of the flea games.
     /// </summary>
     public void DeregisterHooks() {
-        SceneManager.activeSceneChanged -= OnActiveSceneChanged;
-
         _tinkEffectHitHook?.Dispose();
         _tinkEffectHitHook = null;
-
-        _masterFsms = null;
-    }
-
-    /// <summary>
-    /// Forgets the directors of the previous scene.
-    /// </summary>
-    private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
-        _masterFsms = null;
     }
 
     /// <summary>
@@ -202,19 +173,11 @@ internal class FleaGameCoop {
 
     /// <summary>
     /// Scores a point in the game that is being played, which counts it, shows it and saves it as it does alone.
+    /// This is what the flea itself does, so everything that listens hears it: the game that keeps the score, and
+    /// the one that sends out the next fleas and, in one of the three games, gets harder for every point scored.
+    /// A game that is not being played has nothing that answers to it.
     /// </summary>
-    private void SendScore() {
-        _masterFsms ??= Object.FindObjectsByType<PlayMakerFSM>(FindObjectsInactive.Include, FindObjectsSortMode.None)
-                              .Where(fsm => fsm.Fsm is { Name: MasterFsmName })
-                              .ToArray();
-
-        foreach (var fsm in _masterFsms) {
-            if (fsm == null || fsm.ActiveStateName != PlayingStateName) {
-                continue;
-            }
-
-            fsm.SendEvent(ScoreEventName);
-            return;
-        }
+    private static void SendScore() {
+        EventRegister.SendEvent(ScoreEventName, null);
     }
 }
