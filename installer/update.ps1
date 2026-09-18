@@ -18,6 +18,11 @@ param(
     # Skip the search and use this game folder. Handy when the game lives somewhere unusual.
     [string] $GameDir,
 
+    # Ask only these registries, instead of the mirror first and npm itself second. A mirror that answers from a
+    # stale cache is the one failure this script cannot tell apart from being up to date, so there has to be a
+    # way straight past it.
+    [string[]] $Registry,
+
     # Report what would happen and change nothing.
     [switch] $WhatIfOnly
 )
@@ -34,6 +39,7 @@ $Registries = @(
     'https://registry.npmmirror.com',
     'https://registry.npmjs.org'
 )
+if ($Registry) { $Registries = $Registry }
 
 function Write-Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Write-Ok($text) { Write-Host "    $text" -ForegroundColor Green }
@@ -114,15 +120,41 @@ try {
     Write-Step 'Asking what the newest build is'
     $meta = $null
     $usedRegistry = $null
+    $bestVersion = $null
     foreach ($registry in $Registries) {
-        $url = "$registry/$PackageName/latest"
+        # Both the query string and the headers are here on purpose. A CDN in front of a mirror can hold an old
+        # answer for this exact URL: one player's updater reported the version before last, and said it was
+        # already up to date, while the very same URL answered correctly from another network. Headers alone are
+        # not enough, because an edge is free to ignore them - but a URL it has never seen is always a miss.
+        $url = "$registry/$PackageName/latest?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
         try {
-            $meta = Invoke-RestMethod -Uri $url -UseBasicParsing -TimeoutSec 30
-            $usedRegistry = $registry
-            break
+            $answer = Invoke-RestMethod -Uri $url -UseBasicParsing -TimeoutSec 30 -Headers @{
+                'Cache-Control' = 'no-cache'
+                'Pragma'        = 'no-cache'
+            }
         } catch {
             Write-Warn2 "$registry did not answer ($($_.Exception.Message))"
+            continue
         }
+
+        # Every registry is asked and the newest answer wins, rather than the first one to reply. The order used
+        # to decide it, which quietly made each player depend on the route that suits the other: the mirror is
+        # the one that works from the mainland, but a player outside it was sent to the mirror first and was told
+        # by a stale cache that they were already up to date. Whichever side of the border you are on, the answer
+        # is now the newest one either registry has, and the tarball comes from that same answer.
+        $answerVersion = Get-ComparableVersion $answer.version
+        if (-not $answerVersion) {
+            Write-Warn2 "$registry gave a version this cannot read ('$($answer.version)')"
+            continue
+        }
+
+        if ($bestVersion -and $answerVersion -le $bestVersion) {
+            continue
+        }
+
+        $meta = $answer
+        $bestVersion = $answerVersion
+        $usedRegistry = $registry
     }
     if (-not $meta) {
         throw ("No registry answered, so there is nothing to compare against. Your network may be blocking`n" +
