@@ -1436,11 +1436,19 @@ internal class ClientManager : IClientManager {
                 _lastPositionStopwatch.Restart();
 
                 _netClient.UpdateManager.UpdatePlayerPosition(new Vector2(newPosition.x, newPosition.y));
+
+                // Which way the player is facing rides along with every position they send. On its own it is only
+                // ever sent on the frame it changes, in a packet that is not resent if it goes missing, and the
+                // other side takes it as an absolute rather than a flip - so a single lost packet leaves the player
+                // facing the wrong way for as long as they keep running that way, which is what walking backwards
+                // is. Sent with the position it corrects itself on the very next update. It costs one byte.
+                _netClient.UpdateManager.UpdatePlayerScale(heroTransform.localScale.x > 0);
             }
         }
 
         var newScale = heroTransform.localScale;
-        // If the scale changed since last check
+        // If the scale changed since last check. Still needed next to the line above: turning on the spot changes
+        // nothing about the position, so nothing would carry it.
         if (newScale != _lastScale) {
             _netClient.UpdateManager.UpdatePlayerScale(newScale.x > 0);
 
