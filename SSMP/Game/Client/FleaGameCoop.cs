@@ -62,6 +62,23 @@ internal class FleaGameCoop {
     private const string DirectorFsmName = "Game Specific Control";
 
     /// <summary>
+    /// Name of the state machine that runs one of the games, counts the score and saves it.
+    /// </summary>
+    private const string MasterFsmName = "flea_game_master_control";
+
+    /// <summary>
+    /// The states of a game that mean nobody is playing it. Whether the local player is in a game is read from the
+    /// game itself rather than from the events it sends, because one event name of a game is not told apart from
+    /// another's in what can be read of them.
+    /// </summary>
+    private static readonly string[] IdleStateNames = ["Init", "Inactive"];
+
+    /// <summary>
+    /// Event that puts every flea away again at the end of a game.
+    /// </summary>
+    private const string ResetEventName = "RESET FLEA GAMES";
+
+    /// <summary>
     /// The entity types of the fleas that can be hit for points. The fleas that fly in before a game starts are left
     /// out, since their state machine has no scoring state at all.
     /// </summary>
@@ -133,6 +150,17 @@ internal class FleaGameCoop {
     /// </summary>
     private int _partnerScoreFed;
 
+    /// <summary>
+    /// Whether the partner is still in a game of the festival.
+    /// </summary>
+    private bool _partnerPlaying;
+
+    /// <summary>
+    /// Whether putting the fleas away was held back because the partner was still playing, and so still has to
+    /// happen once they are finished too.
+    /// </summary>
+    private bool _resetHeld;
+
     public FleaGameCoop(NetClient netClient, EntityManager entityManager, Func<ushort?> getPartnerId) {
         _netClient = netClient;
         _entityManager = entityManager;
@@ -199,9 +227,29 @@ internal class FleaGameCoop {
         }
 
         PartnerScore = System.Math.Max(PartnerScore, (int) update.Key);
+        _partnerPlaying = update.Part != 0;
 
         if (_entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
             FeedPartnerPoints();
+            ReleaseHeldReset();
+        }
+    }
+
+    /// <summary>
+    /// Puts the fleas away after all, once neither player is in a game any more. Held back while the partner was
+    /// still playing, since they are watching these same fleas, and nothing else would ever do it afterwards.
+    /// </summary>
+    private void ReleaseHeldReset() {
+        if (!_resetHeld || _partnerPlaying || IsLocalPlaying()) {
+            return;
+        }
+
+        _resetHeld = false;
+
+        try {
+            EventRegister.SendEvent(ResetEventName, null);
+        } catch (Exception e) {
+            Logger.Warn($"Could not put the fleas away: {e.GetType()}, {e.Message}");
         }
     }
 
@@ -216,9 +264,7 @@ internal class FleaGameCoop {
         }
 
         try {
-            var directors = Object.FindObjectsByType<PlayMakerFSM>(FindObjectsInactive.Include, FindObjectsSortMode.None)
-                                  .Where(fsm => fsm.Fsm is { Name: DirectorFsmName })
-                                  .ToArray();
+            var directors = FindFsms(DirectorFsmName);
             if (directors.Length == 0) {
                 return;
             }
@@ -293,6 +339,15 @@ internal class FleaGameCoop {
     /// <param name="eventName">The event being sent.</param>
     /// <param name="source">The object that sent it.</param>
     private void OnEventRegisterSendEvent(Action<string, GameObject> orig, string eventName, GameObject source) {
+        // Putting the fleas away is what the game that runs them does when its own player is finished. The other
+        // player watches those same fleas, so doing it while they are still playing would reparent, stop and hide
+        // every flea in the middle of their game. It waits until they are finished too.
+        if (eventName == ResetEventName && _partnerPlaying && _getPartnerId() != null &&
+            _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
+            _resetHeld = true;
+            return;
+        }
+
         orig(eventName, source);
 
         if (eventName != null && Array.IndexOf(ResetEventNames, eventName) >= 0) {
@@ -306,11 +361,12 @@ internal class FleaGameCoop {
     private void ForgetScores() {
         PartnerScore = 0;
         _partnerScoreFed = 0;
-        if (_localScore == 0) {
-            return;
-        }
-
+        _partnerPlaying = false;
+        _resetHeld = false;
         _localScore = 0;
+
+        // Always told, even from nothing to nothing, because this is also how the partner hears that the local
+        // player is no longer in a game and that the fleas may be put away
         SendLocalScore();
     }
 
@@ -326,9 +382,34 @@ internal class FleaGameCoop {
             new CoopSaveUpdate {
                 TargetId = partnerId,
                 Kind = CoopSaveUpdateKind.FleaGameScore,
-                Key = _localScore
+                Key = _localScore,
+                Part = (ushort) (IsLocalPlaying() ? 1 : 0)
             }
         );
+    }
+
+    /// <summary>
+    /// Returns whether the local player is in a game of the festival.
+    /// </summary>
+    private static bool IsLocalPlaying() {
+        foreach (var master in FindFsms(MasterFsmName)) {
+            if (master != null && Array.IndexOf(IdleStateNames, master.ActiveStateName) < 0) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Finds the state machines of a given name in the scene, including the ones on objects that are switched off.
+    /// </summary>
+    /// <param name="name">The name of the state machine.</param>
+    /// <returns>The state machines found.</returns>
+    private static PlayMakerFSM[] FindFsms(string name) {
+        return Object.FindObjectsByType<PlayMakerFSM>(FindObjectsInactive.Include, FindObjectsSortMode.None)
+                     .Where(fsm => fsm.Fsm != null && fsm.Fsm.Name == name)
+                     .ToArray();
     }
 
     /// <summary>
