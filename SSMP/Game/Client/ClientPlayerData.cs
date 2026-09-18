@@ -31,7 +31,7 @@ internal class ClientPlayerData : IClientPlayer {
     /// Which positions of this player are newer than the one they are standing at. Kept for as long as they are
     /// known, across rooms: unlike an entity, a player is not built again on walking into one.
     /// </summary>
-    public PositionSequence PositionSequence { get; } = new();
+    public PositionSequence PositionSequence { get; } = new("a player");
 
     /// <inheritdoc />
     public Team Team { get; set; }

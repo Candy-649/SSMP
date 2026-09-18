@@ -68,7 +68,7 @@ internal class Entity {
     /// <summary>
     /// Which positions of this entity are newer than the one it is standing at.
     /// </summary>
-    private readonly PositionSequence _positionSequence = new();
+    private readonly PositionSequence _positionSequence;
 
     /// <summary>
     /// The ID of the entity.
@@ -183,6 +183,8 @@ internal class Entity {
         Id = id;
 
         Type = type;
+
+        _positionSequence = new PositionSequence($"entity {id} ({type})");
 
         _isControlled = true;
 

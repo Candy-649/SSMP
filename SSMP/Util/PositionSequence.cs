@@ -1,3 +1,5 @@
+using Logger = SSMP.Logging.Logger;
+
 namespace SSMP.Util;
 
 /// <summary>
@@ -52,6 +54,16 @@ internal sealed class PositionSequence {
     private int _refused;
 
     /// <summary>
+    /// What this follows the positions of, for the one line it ever writes.
+    /// </summary>
+    private readonly string _what;
+
+    /// <param name="what">What this follows the positions of, named for the log.</param>
+    public PositionSequence(string what) {
+        _what = what;
+    }
+
+    /// <summary>
     /// Whether to take this position, keeping the number to compare the next one against.
     /// </summary>
     /// <param name="sequence">The sequence number of the packet the position arrived in.</param>
@@ -75,6 +87,17 @@ internal sealed class PositionSequence {
                 _refused++;
 
                 return false;
+            }
+
+            // Said out loud, because nothing else can tell afterwards whether something stood still because its
+            // positions were being thrown away or because it was never sent any. A connection that is merely
+            // disordered cannot reach this: a whole second of positions in a row, every one of them behind the
+            // newest seen, only happens when the number being compared against was wrong to begin with.
+            if (_refused >= RefusalLimit) {
+                Logger.Warn(
+                    $"Refused a second of positions of {_what} in a row, so the numbering of them was wrong: " +
+                    $"taking {sequence} after {_last} and counting from it again"
+                );
             }
         }
 
