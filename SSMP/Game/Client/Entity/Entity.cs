@@ -72,6 +72,17 @@ internal class Entity {
     private bool _wasRecoilPredicted;
 
     /// <summary>
+    /// The last position the scene host sent for this entity, whether it was taken or held back, which the next one
+    /// is measured against.
+    /// </summary>
+    private Vector2 _lastSeenPosition;
+
+    /// <summary>
+    /// Whether the scene host has sent a position for this entity at all, without which there is no step to measure.
+    /// </summary>
+    private bool _hasSeenPosition;
+
+    /// <summary>
     /// Which positions of this entity are newer than the one it is standing at.
     /// </summary>
     private readonly PositionSequence _positionSequence;
@@ -1273,11 +1284,16 @@ internal class Entity {
         // counted and dropped until one of them shows the knockback, and the count goes with the first position
         // that is taken afterwards so that the speed read out of it covers the right stretch of time rather than a
         // single tick.
-        if (!CoopHits.AcceptsPosition(
-                Object.Client,
-                new Vector2(unityPos.x, unityPos.y),
-                positionInterpolation.LastServerPosition
-            )) {
+        // Every position is remembered, taken or not, because what says a knockback has reached the scene host is
+        // the size of one step of its positions. Measuring from where the enemy stood when it was hit would not: the
+        // wait can last a round trip, and an enemy that happens to be walking that way covers any distance given
+        // that long.
+        var arrived = new Vector2(unityPos.x, unityPos.y);
+        var step = _hasSeenPosition ? arrived - _lastSeenPosition : Vector2.zero;
+        _lastSeenPosition = arrived;
+        _hasSeenPosition = true;
+
+        if (!CoopHits.AcceptsPosition(Object.Client, step)) {
             _positionsHeldBack++;
 
             return;

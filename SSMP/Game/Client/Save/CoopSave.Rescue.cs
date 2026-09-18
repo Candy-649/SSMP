@@ -746,13 +746,28 @@ internal partial class CoopSave {
             // death froze part-way through, and it tells the FSMs of the hero that the death was called off. The
             // death told every one of them to cancel, and nothing else ever tells them otherwise - so without this a
             // player who was pulled back up walks, looks and swings, and touches nothing.
-            hero.HeroRespawned();
+            //
+            // Wrapped on its own because of what is on the other end of it: that event is handed to the whole stack
+            // of the hero's own FSMs and every one of them runs there and then. If any one of them throws, the
+            // rescue above it has already given the player their body, their health and their control back - and
+            // failing at this point would report the rescue as having failed and let the death carry on over the
+            // top of it, which is worse than anything this line can fix.
+            try {
+                hero.HeroRespawned();
+            } catch (Exception e) {
+                LogRescueError(e);
+            }
 
             // Giving control back writes the state of the player straight into the field, without telling the part
             // that decides which animation belongs to that state. Left alone it stays on the last thing it was told,
             // which is the death - so a player who is pulled up and then stands still is still lying there dead on
-            // the screen of the other player. This is what the game's own respawn does about it.
-            hero.StartAnimationControlToIdle();
+            // the screen of the other player. This is what the game's own respawn does about it. Wrapped for the
+            // same reason as above: standing in the wrong pose is not worth failing a rescue over.
+            try {
+                hero.StartAnimationControlToIdle();
+            } catch (Exception e) {
+                LogRescueError(e);
+            }
 
             Chat(Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。"));
             Logger.Info("Pulled back up after a death instead of going to the bench");

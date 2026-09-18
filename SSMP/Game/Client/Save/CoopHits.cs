@@ -34,37 +34,52 @@ internal class CoopHits {
 
     /// <summary>
     /// The longest that the positions of an enemy that the scene host controls are held back while a knockback of the
-    /// local player moves it, in seconds, when the positions never show that knockback.
+    /// local player moves it, in seconds, when nothing else ever ends the wait.
     ///
-    /// They should show it long before this: the wait ends the moment one of them has the enemy further along the way
-    /// it was knocked. This is only for the knockback that never arrives there at all - one the scene host refused
-    /// because the enemy was against a wall, was already recoiling faster, or died on the way - and it is short
-    /// because every part of it is time the enemy is standing somewhere nobody else agrees it is.
+    /// Nothing else ending it means the answer of the scene host never came at all, which takes the partner leaving
+    /// or the room changing under it. It is long on purpose. Everything that can really happen - the answer, and a
+    /// position that shows the knockback - arrives inside a round trip, and a round trip across the world plus the
+    /// ticks and frames on both sides is most of half a second before anything has gone wrong. A bound tight enough
+    /// to cut that short would throw the wait away exactly on the connections it was written for.
     /// </summary>
-    private const float MaxRecoilHoldTime = 0.4f;
+    private const float MaxRecoilHoldTime = 1f;
 
     /// <summary>
-    /// The longest that the positions of an enemy are held back once the scene host has said that it knocked that
-    /// enemy back, in seconds.
+    /// How much time an answer of yes from the scene host makes sure is left to wait in, in seconds.
     ///
-    /// Shorter than the wait before that answer, and for a reason: everything left once the answer is here is a
-    /// physics frame and a send tick on the side of the scene host, which are known lengths of time rather than a
-    /// trip across the world. A position that shows the knockback should be right behind the answer, so if none of
-    /// them does, its knockback was stopped by something after it started and there is nothing left to wait for.
+    /// It only ever adds. An answer of yes says the knockback is running over there and a position showing it is on
+    /// its way, so a wait that was about to run out gets enough room for it to arrive - but a wait with more than
+    /// this left keeps what it had. The first version of this cut the wait down to this length instead, which threw
+    /// away most of the time on exactly the slow connections where the position needs the longest to come back.
     /// </summary>
-    private const float AnsweredRecoilHoldTime = 0.15f;
+    private const float AnsweredRecoilHoldTime = 0.35f;
 
     /// <summary>
-    /// How far along the way it was knocked an enemy has to have moved, in units, before the positions of the scene
-    /// host are taken again.
+    /// The least that one step of the scene host's positions has to carry an enemy along the way it was knocked, in
+    /// units, before those positions are taken again.
     ///
     /// This replaced waiting for a round trip to pass, which could not be measured: the round trip that is known here
     /// is the one to the server, and the player who is hosting it has that one over a loopback, so for them it is
     /// nearly nothing while the trip that actually matters - to the other player and back - is the whole width of the
-    /// world. Waiting for the enemy to have moved asks the thing we actually want to know, and it asks it of the same
-    /// positions either player is looking at.
+    /// world. Asking the positions instead asks the thing we actually want to know, of the same positions either
+    /// player is looking at.
+    ///
+    /// It is one step rather than the distance from where the enemy was hit, because an enemy that happens to be
+    /// walking the way it was knocked covers any such distance by itself given long enough - and the wait can be a
+    /// round trip long. A knockback is not a walk: it is one large step. This is a floor under the size of that step
+    /// for the weakest knockbacks, and <see cref="RecoilStepShare"/> sets it from the knockback itself otherwise.
     /// </summary>
-    private const float MinRecoilProgress = 0.2f;
+    private const float MinRecoilStep = 0.1f;
+
+    /// <summary>
+    /// How much of the distance a knockback covers in one frame of physics a step of the scene host's positions has
+    /// to carry the enemy before those positions are taken again.
+    ///
+    /// Less than all of it, because a step of those positions is not lined up with a frame of physics and may hold
+    /// none of one or most of one. A small enemy is knocked at fifteen units a second and walks at about four, so
+    /// most of one frame of knockback is several times any step that walking makes.
+    /// </summary>
+    private const float RecoilStepShare = 0.6f;
 
     /// <summary>
     /// The direction of a knockback towards the right, as <see cref="Recoil.RecoilByDirection"/> takes it. The other
@@ -125,7 +140,14 @@ internal class CoopHits {
     /// <param name="axis">The way the enemy was knocked.</param>
     /// <param name="expiry">The time at which the prediction ends even if nothing ever shows the knockback.</param>
     /// <param name="id">The number this knockback was sent under.</param>
-    private readonly struct PredictedRecoil(Vector2 axis, float expiry, byte id) {
+    /// <param name="minStep">The least one step of the scene host's positions has to carry the enemy along it.</param>
+    private readonly struct PredictedRecoil(Vector2 axis, float expiry, byte id, float minStep) {
+        /// <summary>
+        /// The least that one step of the positions of the scene host has to carry the enemy along
+        /// <see cref="Axis"/> for that step to be this knockback rather than the enemy walking.
+        /// </summary>
+        public float MinStep { get; } = minStep;
+
         /// <summary>
         /// The number this knockback was sent under, which the answer of the scene host comes back with. Without it
         /// the answer to a knockback could end the wait for the next one, and hitting an enemy twice in a row is the
@@ -584,11 +606,13 @@ internal class CoopHits {
 
         // The enemy moves here until the positions of the scene host show the same knockback. One that doesn't move
         // it at all, and one that holds it still where it stands, have nothing for those positions to show.
-        if (sent && self.IsRecoiling && !self.FreezeInPlace && self.RecoilSpeedBase * magnitude > 0f) {
+        var speed = self.RecoilSpeedBase * magnitude;
+        if (sent && self.IsRecoiling && !self.FreezeInPlace && speed > 0f) {
             PredictedRecoils[self] = new PredictedRecoil(
                 RecoilAxis(direction),
                 Time.unscaledTime + MaxRecoilHoldTime,
-                id
+                id,
+                Mathf.Max(MinRecoilStep, speed * Time.fixedDeltaTime * RecoilStepShare)
             );
         }
     }
@@ -756,12 +780,14 @@ internal class CoopHits {
             return;
         }
 
-        // It was, so what is left is a physics frame and a send tick on that side rather than a trip across the
-        // world, and the position that shows it is close behind this
+        // It was, so the position that shows it is on its way and a wait about to run out is given room for it to
+        // arrive. Only ever room added: a wait with longer left than this keeps what it had, because how long the
+        // position still needs is a trip across the world and nothing here knows how long that is.
         PredictedRecoils[recoil.Component] = new PredictedRecoil(
             recoil.Prediction.Axis,
-            Time.unscaledTime + AnsweredRecoilHoldTime,
-            recoil.Prediction.Id
+            Mathf.Max(recoil.Prediction.Expiry, Time.unscaledTime + AnsweredRecoilHoldTime),
+            recoil.Prediction.Id,
+            recoil.Prediction.MinStep
         );
     }
 
@@ -857,15 +883,14 @@ internal class CoopHits {
     /// far enough along the way it was knocked is one that was measured after the knockback got there.
     /// </summary>
     /// <param name="clientObject">The client object of the entity.</param>
-    /// <param name="position">The position that arrived.</param>
-    /// <param name="lastTaken">The position last taken from the scene host, which the knockback moves away from.</param>
+    /// <param name="step">How far the enemy moved between the position before this one and this one.</param>
     /// <returns>Whether to take the position.</returns>
-    public static bool AcceptsPosition(GameObject clientObject, Vector2 position, Vector2 lastTaken) {
+    public static bool AcceptsPosition(GameObject clientObject, Vector2 step) {
         if (!TryGetPredictedRecoil(clientObject, out var recoil)) {
             return true;
         }
 
-        if (Vector2.Dot(position - lastTaken, recoil.Prediction.Axis) < MinRecoilProgress) {
+        if (Vector2.Dot(step, recoil.Prediction.Axis) < recoil.Prediction.MinStep) {
             return false;
         }
 

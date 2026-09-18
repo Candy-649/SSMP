@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -69,8 +70,24 @@ internal partial class CoopSave {
     private static readonly string[] BoulderWaitingStateNames = ["Idle", "Shake", "Idle Inert"];
 
     /// <summary>
+    /// The state a boulder is in while the room it is in is still starting up, which takes no events at all.
+    /// </summary>
+    private const string BoulderStartingStateName = "Init";
+
+    /// <summary>
+    /// How long the fall of a boulder is tried for, in seconds, while its copy here is still starting up.
+    /// </summary>
+    private const float WorldTriggerRetryTime = 2f;
+
+    /// <summary>
     /// Whether a boulder is being brought down because the partner brought theirs down, in which case its fall is not
     /// sent back to them.
+    ///
+    /// It covers the fall that starts the moment the event is sent, which is the ordinary one. A boulder that was
+    /// made inert first goes through a state in between and only starts falling on the frame after, by which time
+    /// this is false again and one needless fall is sent back. That one is harmless - the boulder it describes is
+    /// already falling over there, so nothing is done with it - but anything that lets a fallen boulder wait again
+    /// would turn it into the two games setting each other off for ever.
     /// </summary>
     private bool _replayingWorldTrigger;
 
@@ -113,27 +130,71 @@ internal partial class CoopSave {
             return;
         }
 
-        // Nothing is kept for a partner who is somewhere else: a boulder hangs there again the next time its room
-        // loads, so a fall that nobody here can see is a fall that never needed to happen here
-        var target = ScenePath.Find(update.ObjectPath, update.Scene);
-        if (target == null || !target.activeInHierarchy) {
-            return;
+        MonoBehaviourUtil.Instance.StartCoroutine(
+            BringBoulderDown(player.Username, update.Scene, update.ObjectPath, update.FsmName)
+        );
+    }
+
+    /// <summary>
+    /// Brings a boulder down, waiting for it if its room has only just loaded here.
+    /// </summary>
+    /// <param name="username">The name of the partner, for the log.</param>
+    /// <param name="scene">The scene the boulder is in.</param>
+    /// <param name="path">The path of the boulder in that scene.</param>
+    /// <param name="fsmName">The name of the FSM that runs it.</param>
+    private IEnumerator BringBoulderDown(string username, string scene, string path, string fsmName) {
+        var until = Time.unscaledTime + WorldTriggerRetryTime;
+
+        while (true) {
+            // Nothing is kept for a partner who is somewhere else: a boulder hangs there again the next time its
+            // room loads, so a fall that nobody here can see is a fall that never needed to happen here
+            var target = ScenePath.Find(path, scene);
+            if (target == null || !target.activeInHierarchy) {
+                yield break;
+            }
+
+            var starting = false;
+            foreach (var fsm in target.GetComponents<PlayMakerFSM>()) {
+                if (fsm == null || fsm.FsmName != fsmName) {
+                    continue;
+                }
+
+                if (IsWaitingBoulder(fsm)) {
+                    ReplayBoulderDrop(fsm, target.name, username);
+
+                    yield break;
+                }
+
+                starting |= fsm.ActiveStateName == BoulderStartingStateName;
+            }
+
+            // Both players walking into the same room at once is how this is met: the one who got there first walks
+            // under the boulder while the room of the other is still starting up, and a boulder that is still
+            // starting up takes no events at all. Giving up on it is not a small loss - a boulder is saved nowhere,
+            // so a fall dropped here never happens here, and the two of them walk out onto different ground.
+            if (!starting || Time.unscaledTime > until) {
+                yield break;
+            }
+
+            yield return null;
         }
+    }
 
-        foreach (var fsm in target.GetComponents<PlayMakerFSM>()) {
-            if (fsm == null || fsm.FsmName != update.FsmName || !IsWaitingBoulder(fsm)) {
-                continue;
-            }
-
-            _replayingWorldTrigger = true;
-            try {
-                fsm.SendEvent(BoulderDropEventName);
-                Logger.Info($"Brought down '{target.name}' the way {player.Username} did");
-            } catch (Exception e) {
-                Logger.Warn($"Could not bring down '{target.name}' the way the partner did: {e.Message}");
-            } finally {
-                _replayingWorldTrigger = false;
-            }
+    /// <summary>
+    /// Sends a waiting boulder the event that brings it down, without letting that fall go back to the partner.
+    /// </summary>
+    /// <param name="fsm">The FSM that runs the boulder.</param>
+    /// <param name="name">The name of the boulder, for the log.</param>
+    /// <param name="username">The name of the partner, for the log.</param>
+    private void ReplayBoulderDrop(PlayMakerFSM fsm, string name, string username) {
+        _replayingWorldTrigger = true;
+        try {
+            fsm.SendEvent(BoulderDropEventName);
+            Logger.Info($"Brought down '{name}' the way {username} did");
+        } catch (Exception e) {
+            Logger.Warn($"Could not bring down '{name}' the way the partner did: {e.Message}");
+        } finally {
+            _replayingWorldTrigger = false;
         }
     }
 
