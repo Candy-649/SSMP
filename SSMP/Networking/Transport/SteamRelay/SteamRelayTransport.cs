@@ -15,7 +15,7 @@ namespace SSMP.Networking.Transport.SteamRelay;
 /// own side. The old one left both to the server, so a player who could not be reached learned nothing at all and
 /// their log said nothing either - which is what made a failed game impossible to tell apart from a quiet one.
 /// </summary>
-internal sealed class SteamRelayTransport : IReliableTransport {
+internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTransport {
     /// <summary>
     /// Polling interval in milliseconds, matching the old transport's ~58Hz.
     /// </summary>
@@ -37,6 +37,9 @@ internal sealed class SteamRelayTransport : IReliableTransport {
 
     /// <inheritdoc />
     public int? Ping => _isLoopback ? 0 : SteamRelayMessaging.PingTo(_remoteSteamId);
+
+    /// <inheritdoc />
+    public bool SessionUp => _isLoopback || SteamRelayMessaging.SessionUp(_remoteSteamId);
 
     /// <inheritdoc />
     public int MaxPacketSize => SteamRelayMessaging.MaxPacketSize;

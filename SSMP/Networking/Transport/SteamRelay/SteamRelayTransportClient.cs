@@ -14,7 +14,7 @@ namespace SSMP.Networking.Transport.SteamRelay;
 /// that is what decides whether a reliable send stays reliable: the sender picks the reliable path by testing for
 /// this interface, and anything without it is quietly sent unreliably instead.
 /// </summary>
-internal class SteamRelayTransportClient : IReliableTransportClient {
+internal class SteamRelayTransportClient : IReliableTransportClient, ISessionStateTransport {
     /// <summary>
     /// The Steam ID of the player.
     /// </summary>
@@ -37,6 +37,9 @@ internal class SteamRelayTransportClient : IReliableTransportClient {
 
     /// <inheritdoc />
     public int? Ping => SteamRelayMessaging.PingTo(SteamId);
+
+    /// <inheritdoc />
+    public bool SessionUp => SteamRelayMessaging.SessionUp(SteamId);
 
     /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;

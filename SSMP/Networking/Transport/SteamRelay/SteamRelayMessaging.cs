@@ -91,6 +91,42 @@ internal static class SteamRelayMessaging {
     }
 
     /// <summary>
+    /// Whether the relay still has a link to a player, or is building one, as opposed to having closed it or given
+    /// up on it.
+    ///
+    /// Deliberately not <see cref="PingTo"/>. That answers "how far away are they", and says nothing at all in two
+    /// cases that have nothing to do with each other: there is no session, and there is a session whose round trip
+    /// the relay has not measured yet. Sending carries <c>AutoRestartBrokenSession</c>, so a session that breaks is
+    /// rebuilt by the next thing sent - and while that is happening there is a session, being connected, with no
+    /// round trip to report. Reading that as "they are gone" is what ended a game that was seconds from carrying on.
+    ///
+    /// Having no session at all counts as up for the same reason: it means the relay has not started rebuilding
+    /// one yet, and the send loop is about to make it. What counts as down is the relay saying it is over - the
+    /// other side closed it, or this machine could not make it work - which is answered at once, so a player whose
+    /// game really has gone is still noticed in seconds rather than in half a minute.
+    /// </summary>
+    /// <param name="steamId">The player to ask about.</param>
+    /// <returns>Whether there is a link, or the making of one.</returns>
+    public static bool SessionUp(ulong steamId) {
+        if (steamId == 0) {
+            return false;
+        }
+
+        // Hosting for yourself never leaves the machine
+        if (steamId == SteamUser.GetSteamID().m_SteamID) {
+            return true;
+        }
+
+        var identity = IdentityOf(steamId);
+        var state = SteamNetworkingMessages.GetSessionConnectionInfo(ref identity, out _, out _);
+
+        return state is ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_None
+            or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connecting
+            or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_FindingRoute
+            or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected;
+    }
+
+    /// <summary>
     /// Sends a buffer to a player over the relay network.
     /// </summary>
     /// <returns>Whether Steam accepted the message for sending.</returns>

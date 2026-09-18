@@ -56,6 +56,13 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private Func<int?>? _transportPing;
 
     /// <summary>
+    /// Asks the transport whether it still has a link to the other side, or null for a transport that cannot answer.
+    /// Kept apart from <see cref="_transportPing"/>: a link that is being rebuilt has no round trip to report yet,
+    /// and reading that as "there is no link" is what ended a game that was about to carry on.
+    /// </summary>
+    private Func<bool>? _transportSessionUp;
+
+    /// <summary>
     /// The reliability manager for packet loss detection and resending.
     /// Lazily initialized only when transport requires reliability.
     /// </summary>
@@ -153,6 +160,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             if (value == null) return;
 
             _transportPing = () => value.Ping;
+            _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             InitializeManagersIfNeeded();
@@ -169,6 +177,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             if (value == null) return;
 
             _transportPing = () => value.Ping;
+            _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             InitializeManagersIfNeeded();
@@ -529,12 +538,27 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                     // Ask the transport before giving up on the other player. A relay between continents can stop
                     // delivering for seconds at a time without the session being gone: one player was dropped in
                     // the middle of a fight while the host's own log showed it sending throughout and Steam never
-                    // reported the session as failed. A transport that can answer this only reports a ping while
-                    // its session is connected, so a number here means the link is alive and the silence is the
-                    // network being slow rather than the game being over. The transports that cannot answer report
-                    // nothing, so they keep exactly the behaviour they had.
-                    var stillUp = quietFor < ConnectionTimeoutCeiling && _transportPing?.Invoke() >= 0;
+                    // reported the session as failed.
+                    //
+                    // Asked about the session, not about the round trip. Asking for a round trip was the first
+                    // attempt at this and it dropped a player anyway, because a relay rebuilding a broken session
+                    // has a session and no measurement of it yet - which read as "there is no link" at the one
+                    // moment the link was coming back. The transports that cannot answer at all keep exactly the
+                    // behaviour they had.
+                    var sessionUp = _transportSessionUp?.Invoke() == true;
+                    var stillUp = quietFor < ConnectionTimeoutCeiling && sessionUp;
                     if (!stillUp) {
+                        // Which of the two it was, because nothing else in the log can tell them apart afterwards
+                        // and they call for opposite answers: one is a connection that really went away, the other
+                        // is this giving up on one that was merely slow.
+                        Logger.Info(
+                            sessionUp
+                                ? $"Nothing has arrived for {quietFor / 1000:F1}s, which is as long as a quiet " +
+                                  "connection is kept, so this counts as a disconnect"
+                                : $"Nothing has arrived for {quietFor / 1000:F1}s and the transport says the " +
+                                  "session is over, so this counts as a disconnect"
+                        );
+
                         TimeoutEvent?.Invoke();
                         // We don't break immediately, we might want to let the user decide via the event (e.g. disconnect)
                         // usually the event handler will call Disconnect() which stops updates.
