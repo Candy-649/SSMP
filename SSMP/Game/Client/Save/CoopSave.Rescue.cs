@@ -581,13 +581,50 @@ internal partial class CoopSave {
     /// <param name="rescue">The wait that is ending, which holds what was playing before the death.</param>
     private static void RestoreMusic(PendingRescue rescue) {
         var gameManager = global::GameManager.instance;
-        if (gameManager == null || rescue.Music == null) {
+        if (gameManager == null) {
             return;
         }
 
-        var audio = gameManager.AudioManager;
-        if (audio.CurrentMusicCue != rescue.Music) {
-            audio.ApplyMusicCue(rescue.Music, 0f, 0f, false);
+        if (rescue.Music != null) {
+            var audio = gameManager.AudioManager;
+            if (audio.CurrentMusicCue != rescue.Music) {
+                audio.ApplyMusicCue(rescue.Music, 0f, 0f, false);
+            }
+        }
+
+        RestoreAudioSnapshots(gameManager);
+    }
+
+    /// <summary>
+    /// Puts the sound of the room back the way the room itself says it should be.
+    ///
+    /// A death moves the whole mixer onto its own settings four separate times while it plays out - that muffled,
+    /// closing-in sound a death has - and what puts them back is the loading of the room the bench is in. A player
+    /// who is pulled back up loads nothing, so they stood up into a world that stayed muffled for as long as they
+    /// stayed in the room.
+    ///
+    /// Asking the room is the only honest answer available: what a mixer is currently set to cannot be read back,
+    /// so there is nothing to save when the wait starts the way the music is saved. These are the same five
+    /// settings the room applies to itself when it loads.
+    /// </summary>
+    /// <param name="gameManager">The game manager.</param>
+    private static void RestoreAudioSnapshots(global::GameManager gameManager) {
+        var sceneManager = gameManager.GetSceneManager();
+        var customSceneManager = sceneManager == null ? null : sceneManager.GetComponent<CustomSceneManager>();
+        if (customSceneManager == null) {
+            return;
+        }
+
+        foreach (var snapshot in new[] {
+                     customSceneManager.musicSnapshot,
+                     customSceneManager.atmosSnapshot,
+                     customSceneManager.enviroSnapshot,
+                     customSceneManager.actorSnapshot,
+                     customSceneManager.shadeSnapshot
+                 }) {
+            if (snapshot != null) {
+                snapshot.TransitionTo(RescueFadeTime);
+            }
         }
     }
 

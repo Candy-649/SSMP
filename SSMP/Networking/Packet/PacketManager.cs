@@ -129,6 +129,16 @@ internal class PacketManager {
                     case PlayerUpdate playerUpdate:
                         playerUpdate.ReceivedSequence = packet.Sequence;
                         break;
+                    case ClientPlayerAlreadyInScene alreadyInScene:
+                        // The state of everything already in a room on walking into it carries entity updates of its
+                        // own, one level down. They are as much a position as any other and they come out of a pool,
+                        // so leaving them unstamped hands them either nothing or the number of whatever they were
+                        // last used for.
+                        foreach (var entityUpdate in alreadyInScene.EntityUpdateList) {
+                            entityUpdate.ReceivedSequence = packet.Sequence;
+                        }
+
+                        break;
                 }
 
                 _clientUpdateRegistry.Execute(id, handler => handler(data));

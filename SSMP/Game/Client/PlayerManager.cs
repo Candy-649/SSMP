@@ -287,14 +287,15 @@ internal class PlayerManager : IPlayerManager {
         }
 
         // An older position arriving after a newer one is thrown away, or the player is put back over ground they
-        // have already covered. Compared by the sign of the difference in the size the numbers are kept in, so that
-        // the step from the largest back to zero reads as one forward rather than as sixty-five thousand back.
-        if (playerData.HasPositionSequence && (short) (sequence - playerData.LastPositionSequence) <= 0) {
+        // have already covered
+        var lastSequence = playerData.LastPositionSequence;
+        var hasSequence = playerData.HasPositionSequence;
+        if (!PositionSequencing.IsNewer(sequence, ref lastSequence, ref hasSequence)) {
             return;
         }
 
-        playerData.HasPositionSequence = true;
-        playerData.LastPositionSequence = sequence;
+        playerData.LastPositionSequence = lastSequence;
+        playerData.HasPositionSequence = hasSequence;
 
         var playerContainer = playerData.PlayerContainer;
         if (playerContainer) {
