@@ -3307,5 +3307,77 @@
     "fsm_names": [
       "grass ball control"
     ]
+  },
+  {
+    "base_object_name": "Bellflea Bouncer",
+    "type": "BellfleaBouncer",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Bellflea Bouncer",
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "Bellflea Bouncer Giant",
+    "type": "BellfleaBouncerGiant",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Bellflea Bouncer Giant",
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "Bellflea Juggler",
+    "type": "BellfleaJuggler",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Bellflea Juggler",
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "Bellflea Juggler Giant",
+    "type": "BellfleaJugglerGiant",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Bellflea Juggler Giant",
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "Bellflea Swooper",
+    "type": "BellfleaSwooper",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Bellflea Swooper",
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "Bellflea Game Start",
+    "type": "BellfleaGameStart",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Bellflea Game Start",
+    "fsm_names": [
+      "Control"
+    ]
   }
 ]
