@@ -213,6 +213,16 @@ internal partial class CoopSave {
     private RescueTarget? _rescueTarget;
 
     /// <summary>
+    /// The cocoon shown to the player who is lying in it, or null while none is.
+    ///
+    /// The game makes no such object at the moment of a death. A death writes down where the cocoon is and what it
+    /// holds, and the object itself is made when the room is next loaded - which is what a player walking back to
+    /// where they died sees. A held death never loads anything, so the player waiting to be pulled up was lying in
+    /// a cocoon that was nowhere on their screen.
+    /// </summary>
+    private GameObject? _rescueOwnCocoon;
+
+    /// <summary>
     /// The partner who is lying dead waiting to be pulled back up, or null while they are not. This is kept apart from
     /// <see cref="_rescueTarget"/> on purpose: that one only exists while their cocoon is in the room the local player
     /// is standing in, and a partner who died somewhere else is still in no position to pull anyone up.
@@ -447,9 +457,24 @@ internal partial class CoopSave {
             Scene = scene,
             Values = [position.x, position.y]
         });
+        // Shown to the player themselves as well, not only to the one who can open it. Watching the room you died in
+        // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting.
+        _rescueOwnCocoon = SpawnRescueCocoon(position, false);
+
         Logger.Info($"Waiting for {partner.Username} to open the cocoon in '{scene}'");
 
         return true;
+    }
+
+    /// <summary>
+    /// Takes away the cocoon the local player was shown of their own.
+    /// </summary>
+    private void RemoveOwnCocoon() {
+        if (_rescueOwnCocoon != null) {
+            UnityEngine.Object.Destroy(_rescueOwnCocoon);
+        }
+
+        _rescueOwnCocoon = null;
     }
 
     /// <summary>
@@ -466,6 +491,7 @@ internal partial class CoopSave {
 
         _rescue = null;
         _rescueLeaveHeld = false;
+        RemoveOwnCocoon();
         _uiManager.CoopPrompt.Hide();
 
         if (GetCheckedPartner() is { } partner) {
@@ -850,9 +876,10 @@ internal partial class CoopSave {
     /// parent" - no hit needed. With every FSM gone that step never ran, nothing was switched on, and the cocoon
     /// showed the form it has after it has already burst.
     /// </summary>
-    /// <param name="position">Where the partner died.</param>
+    /// <param name="position">Where the player died.</param>
+    /// <param name="openable">Whether hits on it count towards pulling the player in it back up.</param>
     /// <returns>The object, or null if it could not be made.</returns>
-    private GameObject? SpawnRescueCocoon(Vector2 position) {
+    private GameObject? SpawnRescueCocoon(Vector2 position, bool openable) {
         var gameManager = global::GameManager.instance;
         var sceneManager = gameManager == null ? null : gameManager.GetSceneManager();
         var prefab = sceneManager == null ? null : sceneManager.GetComponent<CustomSceneManager>()?.heroCorpsePrefab;
@@ -862,7 +889,13 @@ internal partial class CoopSave {
             return null;
         }
 
-        var cocoon = UnityEngine.Object.Instantiate(prefab, position, Quaternion.identity);
+        // The depth the game puts its own cocoon at, rather than zero: the position that travels is where the player
+        // fell, which is a place in the room and says nothing about what the cocoon should be drawn in front of.
+        var cocoon = UnityEngine.Object.Instantiate(
+            prefab,
+            new Vector3(position.x, position.y, prefab.transform.position.z),
+            Quaternion.identity
+        );
 
         // Only the root's "Break" FSM survives. The one on the "Core" child is called "Dissolve" and starts in
         // "Delay", which fades the cocoon out and leaves: keeping it would trade a cocoon that looks wrong for one
@@ -887,8 +920,12 @@ internal partial class CoopSave {
 
         cocoon.SetActive(true);
 
-        var hits = cocoon.AddComponent<RescueCocoonHits>();
-        hits.Hits = OnRescueCocoonHit;
+        // The one a player is shown of their own takes no hits. They are lying in it, they cannot swing at anything
+        // while they are, and the way out of it is the other player - not themselves.
+        if (openable) {
+            var hits = cocoon.AddComponent<RescueCocoonHits>();
+            hits.Hits = OnRescueCocoonHit;
+        }
 
         return cocoon;
     }
@@ -948,7 +985,7 @@ internal partial class CoopSave {
             return;
         }
 
-        if (SpawnRescueCocoon(_partnerCocoonPosition) is not { } cocoon) {
+        if (SpawnRescueCocoon(_partnerCocoonPosition, true) is not { } cocoon) {
             return;
         }
 
@@ -997,8 +1034,15 @@ internal partial class CoopSave {
                 animator.Stop();
                 sprite.SetSprite(HiddenSpriteName);
 
+                // Nothing should come looking for someone who is lying in a cocoon. This stops anything choosing
+                // them from here on; an enemy that had already fixed on them keeps swinging at the spot until it
+                // loses interest of its own accord, because the hold it has is kept somewhere this cannot reach.
+                PlayerTargetRegistry.UnregisterRemotePlayer(body);
+
                 return;
             }
+
+            PlayerTargetRegistry.RegisterRemotePlayer(body);
 
             // Any animation of theirs puts their own sprite back, so this only has to cover the player who is put
             // back on their feet and then stands perfectly still: their game would send nothing, and a body that
@@ -1038,6 +1082,7 @@ internal partial class CoopSave {
         }
 
         RemoveRescueTarget();
+        RemoveOwnCocoon();
         _partnerWaitingRescue = null;
         _partnerCocoonScene = "";
         _rescueLeaveHeld = false;
