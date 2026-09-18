@@ -139,6 +139,11 @@ internal class ClientManager : IClientManager {
     private readonly CoopHits _coopHits;
 
     /// <summary>
+    /// Scores the hits on the fleas of the festival games for the player whose game doesn't control them.
+    /// </summary>
+    private readonly FleaGameCoop _fleaGameCoop;
+
+    /// <summary>
     /// The FSM patcher instance.
     /// </summary>
     private readonly FsmPatcher _fsmPatcher;
@@ -302,6 +307,7 @@ internal class ClientManager : IClientManager {
         _coopHits = new CoopHits(
             netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedPartnerId
         );
+        _fleaGameCoop = new FleaGameCoop(_entityManager, () => _coopSave.CheckedPartnerId);
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -380,6 +386,7 @@ internal class ClientManager : IClientManager {
         _arenaCoop.RegisterHooks();
         _bossRoomCoop.RegisterHooks();
         _coopHits.RegisterHooks();
+        _fleaGameCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
         if (_fullSynchronisation) {
@@ -413,6 +420,7 @@ internal class ClientManager : IClientManager {
         _arenaCoop.DeregisterHooks();
         _bossRoomCoop.DeregisterHooks();
         _coopHits.DeregisterHooks();
+        _fleaGameCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
         if (_fullSynchronisation) {
