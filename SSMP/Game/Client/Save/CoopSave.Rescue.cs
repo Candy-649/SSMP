@@ -741,6 +741,13 @@ internal partial class CoopSave {
                 }
             }
 
+            // What the game itself runs when the hero is alive again. Everything above undoes the death by hand, one
+            // field at a time, and this is the half that cannot be written that way: it lets go of the swing the
+            // death froze part-way through, and it tells the FSMs of the hero that the death was called off. The
+            // death told every one of them to cancel, and nothing else ever tells them otherwise - so without this a
+            // player who was pulled back up walks, looks and swings, and touches nothing.
+            hero.HeroRespawned();
+
             // Giving control back writes the state of the player straight into the field, without telling the part
             // that decides which animation belongs to that state. Left alone it stays on the last thing it was told,
             // which is the death - so a player who is pulled up and then stands still is still lying there dead on
