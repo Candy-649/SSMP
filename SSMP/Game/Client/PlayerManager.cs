@@ -582,7 +582,12 @@ internal class PlayerManager : IPlayerManager {
         }
 
         if (textMeshObject) {
-            textMeshObject.text = name.ToUpper();
+            // The font is picked from the name and not once when the object is made, because the name arrives after
+            // it and a partner who calls themselves something the game's own font cannot draw would be a row of
+            // empty boxes over their head.
+            var drawn = name.ToUpper();
+            textMeshObject.font = Ui.Resources.FontManager.PickInGameNameFont(drawn);
+            textMeshObject.text = drawn;
             ChangeNameColor(textMeshObject, team);
         }
 

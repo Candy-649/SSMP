@@ -8,6 +8,15 @@ namespace SSMP.Game.Client;
 /// </summary>
 internal static class PlayerTargetRegistry {
     private static readonly HashSet<GameObject> RemotePlayerObjects = [];
+
+    /// <summary>
+    /// The players who are lying in a cocoon rather than standing.
+    ///
+    /// Kept by object, because a death this mod holds never reloads the room and the hero object goes on existing
+    /// the whole time a player lies there - which is why nothing used to take them off the list below, and why the
+    /// enemies in the room went on attacking the spot where they fell.
+    /// </summary>
+    private static readonly HashSet<GameObject> DownedPlayers = [];
     private static readonly List<GameObject> TrackedPlayersCache = [];
 
     /// <summary>
@@ -133,17 +142,43 @@ internal static class PlayerTargetRegistry {
     /// <returns>A pre-allocated list containing the local hero root and active registered remote player roots.</returns>
     public static List<GameObject> GetTrackedPlayers() {
         TrackedPlayersCache.Clear();
-        if (HeroController.instance != null) {
+        if (HeroController.instance != null && !IsPlayerDown(HeroController.instance.gameObject)) {
             TrackedPlayersCache.Add(HeroController.instance.gameObject);
         }
 
         foreach (var playerObject in RemotePlayerObjects) {
-            if (playerObject != null && playerObject.activeInHierarchy) {
+            if (playerObject != null && playerObject.activeInHierarchy && !IsPlayerDown(playerObject)) {
                 TrackedPlayersCache.Add(playerObject);
             }
         }
 
         return TrackedPlayersCache;
+    }
+
+    /// <summary>
+    /// Says whether a player is lying in a cocoon, so that nothing goes after them while they are down.
+    /// </summary>
+    /// <param name="player">The player object.</param>
+    /// <param name="down">Whether they are down.</param>
+    public static void SetPlayerDown(GameObject? player, bool down) {
+        if (player == null) {
+            return;
+        }
+
+        if (down) {
+            DownedPlayers.Add(player);
+        } else {
+            DownedPlayers.Remove(player);
+        }
+    }
+
+    /// <summary>
+    /// Whether a player is lying in a cocoon rather than standing.
+    /// </summary>
+    /// <param name="player">The player object.</param>
+    /// <returns><see langword="true"/> when they are down; otherwise <see langword="false"/>.</returns>
+    private static bool IsPlayerDown(GameObject player) {
+        return DownedPlayers.Count > 0 && DownedPlayers.Contains(player);
     }
 
     /// <summary>

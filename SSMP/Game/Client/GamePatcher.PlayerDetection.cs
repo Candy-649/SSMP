@@ -82,6 +82,27 @@ internal partial class GamePatcher {
     private static readonly ConditionalWeakTable<AlertRange, BoxedBool> NonAcquiringAlertRanges = [];
 
     /// <summary>
+    /// What was worked out about one alert range, and the parent it hung under when that was worked out.
+    /// </summary>
+    private sealed class EnemyAlertRangeNote {
+        /// <summary>
+        /// The parent the range hung under at the time.
+        /// </summary>
+        public Transform? Parent;
+
+        /// <summary>
+        /// Whether something that could be fought was above it then.
+        /// </summary>
+        public bool BelongsToAnEnemy;
+    }
+
+    /// <summary>
+    /// Which alert ranges hang off something that can be fought, kept so the walk up the parents happens once per
+    /// parent rather than every frame.
+    /// </summary>
+    private static readonly ConditionalWeakTable<AlertRange, EnemyAlertRangeNote> EnemyAlertRanges = [];
+
+    /// <summary>
     /// Cache mapping AlertRange instances to their CachedCollider to avoid frame-by-frame GetComponent allocations.
     /// Uses ConditionalWeakTable to prevent memory leaks from keeping alive AlertRange instances that should be GC'ed.
     /// </summary>
@@ -160,6 +181,58 @@ internal partial class GamePatcher {
     /// <param name="self">The alert range being queried.</param>
     /// <returns>True when the relevant tracked player is inside this alert range and visible; otherwise false.</returns>
     private static bool OnAlertRangeIsHeroInRange(AlertRange self) {
+        var answer = AnswerWhetherAPlayerIsInAlertRange(self);
+
+        // Said out loud when the answer is no while somebody is plainly standing there and can be seen, because
+        // that is the whole of this going wrong and it leaves nothing else behind: whatever asked simply carries on
+        // as though the room were empty. One line every few seconds is enough to catch it, and working out whether
+        // to write one costs as much as answering the question, so it is only worked out that often.
+        if (!answer && self != null && Time.unscaledTime >= _nextBlindRangeLogTime) {
+            var inside = GetNearestPlayerInsideAlertRange(self);
+            if (inside != null && HasLineOfSightToAlertRangeTarget(self, inside)) {
+                _nextBlindRangeLogTime = Time.unscaledTime + BlindRangeLogInterval;
+
+                var owner = GetEnemyTargetOwner(self.gameObject);
+                var approved = owner == null ? null : GetApprovedEnemyTarget(owner);
+                SSMP.Logging.Logger.Info(
+                    $"'{self.name}' under '{(self.transform.parent == null ? "nothing" : self.transform.parent.name)}' " +
+                    $"said nobody was there while {inside.name} stood in it and could be seen: belongs to an enemy " +
+                    $"{BelongsToAnEnemy(self)}, may pick a target {CanAcquireMultiplayerTarget(self)}, owner " +
+                    $"'{(owner == null ? "none" : owner.name)}', already going after " +
+                    $"'{(approved == null ? "nobody" : approved.name)}'"
+                );
+            }
+        }
+
+        return answer;
+    }
+
+    /// <summary>
+    /// How long to leave between lines about a range that says nobody is there while somebody is.
+    /// </summary>
+    private const float BlindRangeLogInterval = 3f;
+
+    /// <summary>
+    /// When the next line about a range that says nobody is there may be written.
+    /// </summary>
+    private static float _nextBlindRangeLogTime;
+
+    /// <summary>
+    /// Works out whether the player an alert range is about is inside it.
+    /// </summary>
+    /// <param name="self">The alert range being queried.</param>
+    /// <returns>True when the relevant tracked player is inside this alert range and visible; otherwise false.</returns>
+    private static bool AnswerWhetherAPlayerIsInAlertRange(AlertRange self) {
+        // A range with nothing that can be fought above it is not asking which of two players something should
+        // chase. It is a piece of the world - a barrel holding a trapped creature, a gate, a platform - asking
+        // whether anybody is standing there, and either player is an answer to that. Sent down the path below it
+        // was told "nobody" instead, every time and on both machines, because nothing ever approves a target for
+        // something that is not an enemy. That is silent: the swing lands, the state machine asks whether anyone
+        // is near enough to be worth opening for, hears no, and slides back to where it started leaving no mark.
+        if (!BelongsToAnEnemy(self)) {
+            return IsAnyPlayerInsideAlertRange(self);
+        }
+
         var owner = GetEnemyTargetOwner(self.gameObject);
         if (owner == null) {
             return false;
@@ -182,6 +255,62 @@ internal partial class GamePatcher {
         }
 
         return approvedTargetIsValid;
+    }
+
+    /// <summary>
+    /// Whether an alert range hangs off something that can be fought, rather than off a piece of the world.
+    ///
+    /// Written down the first time, because this is asked of every alert range every frame and walking up the
+    /// parents to find out costs more than the answer is worth. Nothing that is scenery today becomes an enemy.
+    /// </summary>
+    /// <param name="alertRange">The alert range to place.</param>
+    /// <returns>
+    /// <see langword="true"/> when something with health is above it; otherwise <see langword="false"/>.
+    /// </returns>
+    private static bool BelongsToAnEnemy(AlertRange alertRange) {
+        if (alertRange == null) {
+            return false;
+        }
+
+        // Worked out again whenever the range has been moved, because a good many enemies hand their ranges to
+        // something else as they start up - a range that follows the enemy around is no use for guarding a spot -
+        // and an answer from before the move would otherwise stand for the rest of the room.
+        var parent = alertRange.transform.parent;
+        if (EnemyAlertRanges.TryGetValue(alertRange, out var note) && note.Parent == parent) {
+            return note.BelongsToAnEnemy;
+        }
+
+        // Counting the ones that are switched off too, so that an enemy which happens to be away at the moment the
+        // question is first asked is not written down as scenery for the rest of the room.
+        var belongs = alertRange.GetComponentInParent<HealthManager>(true) != null;
+
+        if (note == null) {
+            EnemyAlertRanges.Add(
+                alertRange, new EnemyAlertRangeNote { Parent = parent, BelongsToAnEnemy = belongs }
+            );
+        } else {
+            note.Parent = parent;
+            note.BelongsToAnEnemy = belongs;
+        }
+
+        return belongs;
+    }
+
+    /// <summary>
+    /// Whether either player is standing inside an alert range and can be seen from it.
+    /// </summary>
+    /// <param name="alertRange">The alert range to test.</param>
+    /// <returns>
+    /// <see langword="true"/> when one of the players is there; otherwise <see langword="false"/>.
+    /// </returns>
+    private static bool IsAnyPlayerInsideAlertRange(AlertRange alertRange) {
+        if (alertRange == null) {
+            return false;
+        }
+
+        var player = GetNearestPlayerInsideAlertRange(alertRange);
+
+        return player != null && HasLineOfSightToAlertRangeTarget(alertRange, player);
     }
 
     /// <summary>

@@ -102,5 +102,14 @@ public enum ServerUpdatePacketId {
     /// <summary>
     /// A hit of the player in a two-player save, which the game of the other player replays.
     /// </summary>
-    CoopHitUpdate = 19
+    CoopHitUpdate = 19,
+
+    /// <summary>
+    /// A request to be told again who and what is in the room this player is in.
+    ///
+    /// The server says that once, when a player says they have entered a room, and until this there was no second
+    /// chance: a player whose game never heard it spent the rest of its stay in that room unable to see their
+    /// partner and deaf to everything the room contained, with no way back but leaving.
+    /// </summary>
+    SceneResyncRequest = 20
 }

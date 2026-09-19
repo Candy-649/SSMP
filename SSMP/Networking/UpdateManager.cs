@@ -151,6 +151,13 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     protected bool RequiresReliability { get; private set; } = true;
 
     /// <summary>
+    /// The largest message the transport underneath carries in one piece, which is what a longer packet is cut up
+    /// for. <see cref="PacketMtu"/> until a transport says otherwise, which is what every one of them used to be
+    /// given whatever it could actually carry.
+    /// </summary>
+    private int _transportMaxPacketSize = PacketMtu;
+
+    /// <summary>
     /// Gets or sets the transport for client-side communication.
     /// Captures transport capabilities when set.
     /// </summary>
@@ -163,6 +170,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
+            _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
             InitializeManagersIfNeeded();
         }
     }
@@ -180,6 +188,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
+            _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
             InitializeManagersIfNeeded();
         }
     }
@@ -445,25 +454,34 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// <param name="packet">The packet to send, which may be fragmented if too large.</param>
     /// <param name="isReliable">Whether the packet data needs to be delivered reliably.</param>
     private void SendWithFragmentation(Packet.Packet packet, bool isReliable) {
-        if (packet.Length <= PacketMtu) {
+        // What the transport underneath says it carries, rather than one size for all of them. A transport that
+        // takes the whole thing never reaches the loop below, which is the point: the pieces it would make carry no
+        // mark of their own, so the far end can only glue them back together in the order they arrive.
+        var mostInOnePiece = _transportMaxPacketSize;
+        if (packet.Length <= mostInOnePiece) {
             SendPacket(packet, isReliable);
             return;
         }
 
-        // Copy directly into fragment buffers, avoiding an intermediate ToArray() of the full packet
-        var remaining = packet.Length;
-        var offset = 0;
+        // Held for the whole run of pieces and not for each one on its own. The far end has nothing to tell one
+        // piece from another by, so anything that goes out between two of them is glued into the middle of this
+        // packet - and the sending is done from more than one thread.
+        lock (_transportSendLock) {
+            // Copy directly into fragment buffers, avoiding an intermediate ToArray() of the full packet
+            var remaining = packet.Length;
+            var offset = 0;
 
-        while (remaining > 0) {
-            var chunkSize = System.Math.Min(remaining, PacketMtu);
-            var fragment = new byte[chunkSize];
+            while (remaining > 0) {
+                var chunkSize = System.Math.Min(remaining, mostInOnePiece);
+                var fragment = new byte[chunkSize];
 
-            packet.CopyTo(fragment, 0, offset, chunkSize);
+                packet.CopyTo(fragment, 0, offset, chunkSize);
 
-            SendPacket(new Packet.Packet(fragment), isReliable);
+                SendPacket(new Packet.Packet(fragment), isReliable);
 
-            offset += chunkSize;
-            remaining -= chunkSize;
+                offset += chunkSize;
+                remaining -= chunkSize;
+            }
         }
     }
 

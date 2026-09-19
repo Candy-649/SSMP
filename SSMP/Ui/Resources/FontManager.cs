@@ -1,3 +1,4 @@
+using System;
 using TMProOld;
 using UnityEngine;
 using SSMP.Util;
@@ -38,11 +39,43 @@ internal static class FontManager {
     public static Font UIFontRegular => Lang.IsChinese ? FindChineseFont() ?? _latinFont : _latinFont;
 
     /// <summary>
-    /// The font used for usernames above player objects. Left as the game's own, which cannot draw Chinese either, so
-    /// a Chinese username still shows as boxes. Changing it means picking a different font for text this mod did not
-    /// introduce, which is worth doing on its own rather than as part of translating the mod.
+    /// The font used for usernames above player objects. The game's own, which cannot draw Chinese - a name it
+    /// cannot draw is handed to <see cref="InGameNameFallbackFont"/> instead, one whole name at a time.
     /// </summary>
     public static TMP_FontAsset InGameNameFont = null!;
+
+    /// <summary>
+    /// Whether a font for names the game's own cannot draw has been looked for yet.
+    /// </summary>
+    private static bool _searchedForNameFallback;
+
+    /// <summary>
+    /// The font found for names the game's own cannot draw, or null if there is none.
+    /// </summary>
+    private static TMP_FontAsset? _nameFallbackFont;
+
+    /// <summary>
+    /// Pieces of the name of a TextMeshPro font that say it can draw simplified Chinese, in order of preference.
+    /// Which of these the game has loaded depends on the language it is running in, so a player whose game is in
+    /// English may have none of them and falls through to a font built from whatever can draw Chinese at all.
+    /// </summary>
+    private static readonly string[] NameFallbackNameHints = [
+        "chinese",
+        "japanese",
+        "korean",
+        "cjk"
+    ];
+
+    /// <summary>
+    /// Pieces of the name of a TextMeshPro font that rule it out. The traditional faces sit next to the simplified
+    /// one under names that differ by these letters alone, and a title face is cut for headings rather than for a
+    /// name hanging over someone's head.
+    /// </summary>
+    private static readonly string[] NameFallbackNameAvoid = [
+        "trad",
+        "_tc",
+        "title"
+    ];
 
     /// <summary>
     /// Characters this mod draws, used to ask a font whether it can draw them rather than guessing from its name.
@@ -135,6 +168,118 @@ internal static class FontManager {
         if (InGameNameFont == null) {
             Logger.Error("In-game name font is missing!");
         }
+    }
+
+    /// <summary>
+    /// The font to draw one name in: the game's own where it can draw the whole name, and otherwise one that can.
+    ///
+    /// Picked for the whole name rather than per character, because a name drawn out of two faces comes out at two
+    /// sizes on one line - the very thing the search for a Chinese font below goes to lengths to avoid.
+    /// </summary>
+    /// <param name="name">The name as it will be drawn.</param>
+    /// <returns>The font to draw it in.</returns>
+    public static TMP_FontAsset PickInGameNameFont(string name) {
+        if (string.IsNullOrEmpty(name) || CanDrawWholeName(InGameNameFont, name)) {
+            return InGameNameFont;
+        }
+
+        return InGameNameFallbackFont ?? InGameNameFont;
+    }
+
+    /// <summary>
+    /// A font for names the game's own cannot draw. Looked for once, because a game that has none will not grow one.
+    /// </summary>
+    private static TMP_FontAsset? InGameNameFallbackFont {
+        get {
+            if (_searchedForNameFallback) {
+                return _nameFallbackFont;
+            }
+
+            _searchedForNameFallback = true;
+            _nameFallbackFont = FindNameFallbackFont();
+
+            return _nameFallbackFont;
+        }
+    }
+
+    /// <summary>
+    /// Whether a font holds every character of a name that is actually drawn.
+    /// </summary>
+    /// <param name="font">The font to ask.</param>
+    /// <param name="name">The name to draw.</param>
+    /// <returns><see langword="true"/> when it can draw all of them; otherwise <see langword="false"/>.</returns>
+    private static bool CanDrawWholeName(TMP_FontAsset font, string name) {
+        if (font == null) {
+            return true;
+        }
+
+        try {
+            foreach (var character in name) {
+                // Nothing is drawn for a space, and a font that has no space still draws the name around it
+                if (char.IsWhiteSpace(character)) {
+                    continue;
+                }
+
+                if (!font.HasCharacter(character)) {
+                    return false;
+                }
+            }
+        } catch (Exception e) {
+            // Treated as drawable, because a name in the wrong font is better than no name at all
+            Logger.Warn($"Could not ask '{font.name}' whether it can draw a name: {e.Message}");
+
+            return true;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Finds a font for names the game's own cannot draw.
+    /// </summary>
+    /// <returns>The font, or null if this machine has nothing that can draw them.</returns>
+    private static TMP_FontAsset? FindNameFallbackFont() {
+        // By name first, for the reason the search below gives: the game loads the faces of several languages at
+        // once and hands them over in no useful order, so the first one that can draw a character is not the right
+        // one.
+        foreach (var hint in NameFallbackNameHints) {
+            foreach (var asset in UnityEngine.Resources.FindObjectsOfTypeAll<TMP_FontAsset>()) {
+                if (asset == null) {
+                    continue;
+                }
+
+                var assetName = asset.name.ToLowerInvariant();
+                if (!assetName.Contains(hint)) {
+                    continue;
+                }
+
+                var avoided = false;
+                foreach (var avoid in NameFallbackNameAvoid) {
+                    if (assetName.Contains(avoid)) {
+                        avoided = true;
+                        break;
+                    }
+                }
+
+                if (avoided) {
+                    continue;
+                }
+
+                Logger.Info($"Drawing names the game's name font cannot with: {asset.name}");
+
+                return asset;
+            }
+        }
+
+        // Nothing can be built here to stand in. The mod's own wording falls back on a font asked of Windows, but
+        // that is a plain font and the text over a player's head is drawn by TextMeshPro, which takes only its own
+        // kind - and the version of it the game carries cannot make one at run time. So a machine whose game has
+        // loaded no face for these characters draws them as boxes, and this says which machine that was.
+        Logger.Error(
+            "Found no font for names the game's own font cannot draw, so they stay as boxes on this machine"
+        );
+
+        return null;
     }
 
     /// <summary>

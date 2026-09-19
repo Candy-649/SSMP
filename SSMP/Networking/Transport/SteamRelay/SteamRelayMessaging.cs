@@ -25,10 +25,24 @@ internal static class SteamRelayMessaging {
     public const int ServerToClientChannel = 1;
 
     /// <summary>
-    /// Largest packet this transport carries. Steam's relayed messaging allows far more, but the rest of the mod
-    /// splits its data for the old transport's limit and there is no reason to change that here.
+    /// Largest packet this transport carries, set so that nothing is ever cut up to go over it.
+    ///
+    /// It used to be 1200, to match the transport this one replaced, on the grounds that the rest of the mod was
+    /// splitting its data for that limit anyway. That was the wrong way round. The pieces a packet is cut into
+    /// carry no mark of their own - only the first one holds the length that says where the packet ends - so the
+    /// far end can do nothing but glue them together in the order they arrive. On this transport that order is not
+    /// something to rely on: reliable and unreliable messages travel here together and are not ordered against each
+    /// other, so an ordinary position update can land between two pieces of something important and be glued into
+    /// the middle of it. What comes out is a length read off the wrong bytes, and then every message that follows
+    /// is swallowed waiting for an end that never comes. That is how a player lost sight of their partner for a
+    /// whole session, and went deaf to the enemies in the room besides.
+    ///
+    /// Steam's relayed messaging carries far more than this in one piece and puts it back together itself, in
+    /// order, which is the thing being badly reinvented above. The number is one over what the mod's own framing
+    /// can produce - a packet longer than <see cref="ushort.MaxValue"/> throws where the length is written - so on
+    /// this transport the cutting-up path is not merely avoided but unreachable.
     /// </summary>
-    public const int MaxPacketSize = 1200;
+    public const int MaxPacketSize = ushort.MaxValue + 2;
 
     /// <summary>
     /// How many messages one drain of a channel takes at most.

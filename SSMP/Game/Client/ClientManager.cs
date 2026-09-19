@@ -210,6 +210,26 @@ internal class ClientManager : IClientManager {
     /// </summary>
     private bool _sceneHostDetermined;
 
+    /// <summary>
+    /// How long to wait after saying we have entered a room before asking again what is in it, in seconds.
+    /// </summary>
+    private const float SceneResyncWait = 2f;
+
+    /// <summary>
+    /// How many times to ask before giving up and saying so.
+    /// </summary>
+    private const int SceneResyncLimit = 5;
+
+    /// <summary>
+    /// When to ask again what is in this room, or -1 when there is nothing to wait for.
+    /// </summary>
+    private float _sceneResyncDueAt = -1f;
+
+    /// <summary>
+    /// How many times this room has been asked about since entering it.
+    /// </summary>
+    private int _sceneResyncsAsked;
+
     #endregion
 
     #region IClientManager properties
@@ -399,6 +419,7 @@ internal class ClientManager : IClientManager {
 
         // Register handlers for various things
         SceneManager.activeSceneChanged += OnSceneChange;
+        MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdateSceneResync;
         CustomHooks.HeroControllerStartAction += OnHeroControllerStart;
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
@@ -433,6 +454,7 @@ internal class ClientManager : IClientManager {
 
         // Deregister handlers for various things
         SceneManager.activeSceneChanged -= OnSceneChange;
+        MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdateSceneResync;
         CustomHooks.HeroControllerStartAction -= OnHeroControllerStart;
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
@@ -1051,6 +1073,7 @@ internal class ClientManager : IClientManager {
             // Whether there were players in the scene or not, we have now determined whether
             // we are the scene host
             _sceneHostDetermined = true;
+            _sceneResyncDueAt = -1f;
         }
     }
 
@@ -1131,6 +1154,38 @@ internal class ClientManager : IClientManager {
                 $"Exception thrown while invoking PlayerLeaveScene event:\n{e}"
             );
         }
+    }
+
+    /// <summary>
+    /// Asks again what is in this room when the answer to entering it never came.
+    ///
+    /// The server answers a player entering a room exactly once, and that one answer carries both the players who
+    /// are already there and whether this game is the one running the room. It is sent reliably, but reliably is not
+    /// the same as certainly, and losing it used to cost the whole stay: the partner was never drawn, because
+    /// nothing else ever creates them, and every update about the room was thrown away, because the flag that says
+    /// the room has been settled comes in that same answer. Two players who died at the same moment lost sight of
+    /// each other exactly this way.
+    /// </summary>
+    private void OnUpdateSceneResync() {
+        if (_sceneResyncDueAt < 0f || _sceneHostDetermined || !_netClient.IsConnected ||
+            Time.unscaledTime < _sceneResyncDueAt) {
+            return;
+        }
+
+        if (_sceneResyncsAsked >= SceneResyncLimit) {
+            _sceneResyncDueAt = -1f;
+            Logger.Warn(
+                "Never heard what is in this room, so the partner and everything in it stay unseen until it is left"
+            );
+
+            return;
+        }
+
+        _sceneResyncsAsked++;
+        _sceneResyncDueAt = Time.unscaledTime + SceneResyncWait;
+
+        Logger.Warn($"Nothing said what is in this room, so asking again (attempt {_sceneResyncsAsked})");
+        _netClient.UpdateManager.SetSceneResyncRequest();
     }
 
     /// <summary>
@@ -1492,6 +1547,11 @@ internal class ClientManager : IClientManager {
             scale.x > 0,
             animationClipId
         );
+
+        // An answer is owed to this, and until it arrives this game does not know who else is here or whether it is
+        // the one running the room
+        _sceneResyncDueAt = Time.unscaledTime + SceneResyncWait;
+        _sceneResyncsAsked = 0;
     }
 
     /// <summary>

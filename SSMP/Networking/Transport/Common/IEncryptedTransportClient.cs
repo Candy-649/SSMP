@@ -36,6 +36,15 @@ internal interface IEncryptedTransportClient {
     bool RequiresSequencing { get; }
 
     /// <summary>
+    /// The largest message this transport carries in one piece.
+    ///
+    /// A packet longer than this is cut into pieces to be sent, and the pieces carry no mark of their own: the far
+    /// end can only glue them back together in the order they arrive. So a transport that can carry the whole thing
+    /// says so here and is never asked to cut anything up.
+    /// </summary>
+    int MaxPacketSize { get; }
+
+    /// <summary>
     /// The round trip time to this client in milliseconds, as the transport itself measures it, or null when the
     /// transport cannot say.
     /// </summary>

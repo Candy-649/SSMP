@@ -35,6 +35,11 @@ internal class SteamRelayTransportClient : IReliableTransportClient, ISessionSta
     /// <inheritdoc />
     public bool RequiresSequencing => false;
 
+    /// <summary>
+    /// The largest message this carries in one piece. Large enough that a packet is never cut up on this transport.
+    /// </summary>
+    public int MaxPacketSize => SteamRelayMessaging.MaxPacketSize;
+
     /// <inheritdoc />
     public int? Ping => SteamRelayMessaging.PingTo(SteamId);
 

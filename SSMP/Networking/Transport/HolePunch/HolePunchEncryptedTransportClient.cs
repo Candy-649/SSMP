@@ -35,6 +35,11 @@ internal class HolePunchEncryptedTransportClient : IEncryptedTransportClient {
     /// <inheritdoc />
     public bool RequiresSequencing => true;
 
+    /// <summary>
+    /// The largest message this carries in one piece, which is what a longer packet is cut up for.
+    /// </summary>
+    public int MaxPacketSize => 1200;
+
     /// <inheritdoc />
     /// <remarks>This transport measures nothing of its own, so the round trip is timed from sequence numbers.</remarks>
     public int? Ping => null;

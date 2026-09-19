@@ -108,10 +108,6 @@ internal partial class CoopSave {
         /// </summary>
         public Collider2D? Platform { get; init; }
 
-        /// <summary>
-        /// The state of the FSM when the sync last looked, which tells rides that the FSM started by itself.
-        /// </summary>
-        public string? LastState { get; set; }
 
         /// <summary>
         /// The stop that the lift stood at when the sync last looked, or -1 while it moves.
@@ -180,7 +176,7 @@ internal partial class CoopSave {
                 if (Stop != stop) {
                     // Turning around goes through the state that picks the way, which also lets the lift carry the hero
                     IsDown.Value = stop == 1;
-                    SetState(LiftDirectionState);
+                    Fsm.SetState(LiftDirectionState);
                 }
 
                 return true;
@@ -191,7 +187,7 @@ internal partial class CoopSave {
             }
 
             IsDown.Value = stop == 1;
-            SetState(skippedDelay >= LiftBobSkip ? LiftDirectionState : LiftBobState);
+            Fsm.SetState(skippedDelay >= LiftBobSkip ? LiftDirectionState : LiftBobState);
             return IsMoving;
         }
 
@@ -200,7 +196,7 @@ internal partial class CoopSave {
             // A lift that is locked or didn't set itself up yet keeps its own state
             var state = stop == 1 ? "Start Up" : "Start Down";
             if ((IsStanding || IsMoving) && Fsm.GetState(state) != null) {
-                SetState(state);
+                Fsm.SetState(state);
             }
         }
 
@@ -212,16 +208,9 @@ internal partial class CoopSave {
 
             SetHeight(value);
             IsDown.Value = stop == 1;
-            SetState(LiftDirectionState);
+            Fsm.SetState(LiftDirectionState);
         }
 
-        /// <summary>
-        /// Sets the state of the FSM for the sync, which doesn't count as a ride that the FSM started by itself.
-        /// </summary>
-        private void SetState(string state) {
-            Fsm.SetState(state);
-            LastState = Fsm.ActiveStateName;
-        }
 
         /// <summary>
         /// Gets the height between the ends of the lift that tells at which end a player is.
@@ -393,10 +382,6 @@ internal partial class CoopSave {
     /// and remembers a stop that the lift left while the local hero stood there without riding it.
     /// </summary>
     private void UpdateFsmLiftRide(FsmLift lift, ClientPlayerData? partner) {
-        var state = lift.Fsm.ActiveStateName;
-        var last = lift.LastState;
-        lift.LastState = state;
-
         var hero = HeroController.instance;
         if (lift.IsStanding) {
             lift.StoodAt = lift.Stop;
@@ -412,13 +397,13 @@ internal partial class CoopSave {
             lift.DeclinedStop = -1;
         }
 
-        if (partner == null || last == null || state == null || last == state) {
-            return;
-        }
-
-        var started = LiftStandingStates.ContainsKey(last) && LiftRideStates.ContainsKey(state);
-        var turned = last is "Move Up" or "Move Down" && state is "Move Up" or "Move Down";
-        if (!started && !turned) {
+        // Any ride under way that the partner has not been told where it is going. This used to compare the state
+        // the lift was in a frame ago against a list of the states a ride begins from, which recognised a ride only
+        // when it began one particular way. It missed a lift being unlocked, a lift turning around through the state
+        // that picks a direction, and - the one that cost a room - a lift being put where the partner says theirs
+        // stands: doing that runs the lift's own state machine, inside that one call, far enough to set it off back
+        // towards whoever is standing below, so by the time anything looked it was several states past the list.
+        if (partner == null || !lift.IsMoving || lift.Stop == lift.ToldPartnerStop) {
             return;
         }
 
@@ -466,7 +451,6 @@ internal partial class CoopSave {
         if (lift != null) {
             lift.WasMoving = lift.IsMoving;
             if (lift is FsmLift fsmLift) {
-                fsmLift.LastState = fsm.ActiveStateName;
                 fsmLift.StoodAt = fsmLift.IsStanding ? fsmLift.Stop : -1;
             }
 

@@ -512,6 +512,7 @@ internal partial class CoopSave {
         // Shown to the player themselves as well, not only to the one who can open it. Watching the room you died in
         // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting.
         _rescueOwnCocoon = SpawnRescueCocoon(position, false);
+        SayTheLocalPlayerIsDown(true);
 
         Logger.Info($"Waiting for {partner.Username} to open the cocoon in '{scene}'");
 
@@ -527,6 +528,29 @@ internal partial class CoopSave {
         }
 
         _rescueOwnCocoon = null;
+        SayTheLocalPlayerIsDown(false);
+    }
+
+    /// <summary>
+    /// Says whether the local player is lying in a cocoon rather than standing.
+    ///
+    /// A death this mod holds never reloads the room, so the hero goes on existing where it fell for as long as the
+    /// player lies there - and the enemies in the room, which were never told any different, went on attacking that
+    /// spot. Tied to the cocoon rather than to the death, because the cocoon is there for exactly as long as the
+    /// player is down, however the wait ends.
+    /// </summary>
+    /// <param name="down">Whether the local player is down.</param>
+    private static void SayTheLocalPlayerIsDown(bool down) {
+        var hero = HeroController.instance;
+        if (hero == null) {
+            return;
+        }
+
+        PlayerTargetRegistry.SetPlayerDown(hero.gameObject, down);
+
+        if (down) {
+            GamePatcher.ForgetPlayerAsTarget(hero.gameObject);
+        }
     }
 
     /// <summary>
@@ -695,6 +719,62 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The beginning of the name of every state of the camera that shakes the screen until told to stop.
+    /// </summary>
+    private const string ShakingOnStateNamePrefix = "Rumbling";
+
+    /// <summary>
+    /// What the camera is waiting to hear before it stops shaking the screen.
+    /// </summary>
+    private const string StopShakingEvent = "StopRumble";
+
+    /// <summary>
+    /// The state the camera sits in when the screen has been told to hold still.
+    /// </summary>
+    private const string HoldingStillStateName = "CancelAllShake";
+
+    /// <summary>
+    /// What the camera is waiting to hear before it will shake the screen again.
+    /// </summary>
+    private const string ResumeShakingEvent = "RESUME SHAKE";
+
+    /// <summary>
+    /// Stops the screen shaking when the death left it shaking with nothing coming to stop it.
+    ///
+    /// The camera tells the two kinds of shake apart by how they end. The short ones count themselves out and stop.
+    /// The long ones - the ground going, the deep rumble under a death - do not: they run until something sends the
+    /// event that ends them, and the thing that sends it is further along the death than a held death ever gets. So
+    /// the screen was still shaking after the player was back on their feet, and would have gone on shaking until
+    /// they left the room.
+    ///
+    /// The other way round is covered as well, because it has the same shape: a screen told to hold still is waiting
+    /// on an event too, and being pulled up should not cost the player every shake for the rest of the room.
+    /// </summary>
+    private static void StopTheScreenShaking() {
+        try {
+            var shake = GameCameras.instance?.cameraShakeFSM;
+            if (shake == null) {
+                return;
+            }
+
+            var state = shake.ActiveStateName;
+            if (state == null) {
+                return;
+            }
+
+            if (state.StartsWith(ShakingOnStateNamePrefix, StringComparison.Ordinal)) {
+                shake.SendEvent(StopShakingEvent);
+                Logger.Info($"Stopped the screen shaking, which the death left in '{state}' with nothing to end it");
+            } else if (state == HoldingStillStateName) {
+                shake.SendEvent(ResumeShakingEvent);
+                Logger.Info("Let the screen shake again, which the death had switched off with nothing to switch on");
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not stop the screen shaking after the death: {e.Message}");
+        }
+    }
+
+    /// <summary>
     /// Gives the player their screen back after the death darkened it.
     ///
     /// A death ends with the whole screen black and the heads-up display slid away, and it stays that way on purpose:
@@ -837,6 +917,7 @@ internal partial class CoopSave {
 
             ClearDeathEffect();
             ClearStuckEffects();
+            StopTheScreenShaking();
             RestoreMusic(rescue);
 
             hero.gameObject.layer = 9;

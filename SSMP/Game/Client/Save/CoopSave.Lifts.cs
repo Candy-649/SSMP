@@ -261,6 +261,18 @@ internal partial class CoopSave {
         public bool WasMoving { get; set; }
 
         /// <summary>
+        /// The stop the partner has been told this lift is on its way to, or -1 when they have not been told of a
+        /// ride at all.
+        ///
+        /// This is what decides whether a ride is news. It replaced asking which state the lift was in a frame ago,
+        /// which only recognised a ride that began from one of a handful of named states and so missed every other
+        /// way one can begin - being unlocked, turning around through the state that picks a direction, and worst,
+        /// being put where the partner says the lift stands, which runs the lift's own state machine far enough
+        /// inside that one call to set it off again before anything looks.
+        /// </summary>
+        public int ToldPartnerStop { get; set; } = -1;
+
+        /// <summary>
         /// When the lift last arrived at a stop.
         /// </summary>
         public float ArrivedAt { get; set; } = float.NegativeInfinity;
@@ -522,6 +534,10 @@ internal partial class CoopSave {
         var moving = lift.IsMoving;
         if (lift.WasMoving && !moving) {
             lift.ArrivedAt = Time.unscaledTime;
+
+            // Nothing is on its way any more, so whatever the partner was told about is over and the next ride is
+            // news again whichever stop it goes to
+            lift.ToldPartnerStop = -1;
         }
 
         lift.WasMoving = moving;
@@ -642,6 +658,7 @@ internal partial class CoopSave {
     /// Sends a ride that started in the local game, or turned around, to the partner.
     /// </summary>
     private void SendLiftMove(SyncedLift lift, int stop, float fromY, ushort partnerId) {
+        lift.ToldPartnerStop = stop;
         Send(new CoopSaveUpdate {
             TargetId = partnerId,
             Kind = CoopSaveUpdateKind.LiftMove,

@@ -342,6 +342,10 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.SemiPersistentReset,
             OnSemiPersistentReset
         );
+        _packetManager.RegisterServerUpdatePacketHandler(
+            ServerUpdatePacketId.SceneResyncRequest,
+            OnSceneResyncRequest
+        );
         _packetManager.RegisterServerUpdatePacketHandler<BattleSceneUpdate>(
             ServerUpdatePacketId.BattleSceneUpdate,
             OnBattleSceneUpdate
@@ -404,6 +408,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDisconnect);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDeath);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SceneResyncRequest);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopSaveUpdate);
@@ -526,7 +531,12 @@ internal abstract class ServerManager : IServerManager {
     /// Method that handles a player entering a scene.
     /// </summary>
     /// <param name="playerData">The ServerPlayerData corresponding to the player.</param>
-    private void OnClientEnterScene(ServerPlayerData playerData) {
+    /// <param name="resync">
+    /// Whether this is the same arrival being answered again because the answer never reached the player, rather
+    /// than a fresh one. Nothing is decided over: the room keeps the host it has and the other player, who was told
+    /// the first time, is not told twice.
+    /// </param>
+    private void OnClientEnterScene(ServerPlayerData playerData, bool resync = false) {
         var enterSceneList = new List<ClientPlayerEnterScene>();
         var alreadyPlayersInScene = false;
 
@@ -539,14 +549,16 @@ internal abstract class ServerManager : IServerManager {
             // Send the packet to all clients on the new scene
             // to indicate that this client has entered their scene
             if (otherPlayerData.CurrentScene.Equals(playerData.CurrentScene)) {
-                Logger.Debug($"Sending EnterScene data to {key}");
+                if (!resync) {
+                    Logger.Debug($"Sending EnterScene data to {key}");
 
-                _netServer.GetUpdateManagerForClient(key)?.AddPlayerEnterSceneData(
-                    playerData.Id,
-                    playerData.Position ?? Vector2.Zero,
-                    playerData.Scale,
-                    playerData.AnimationId
-                );
+                    _netServer.GetUpdateManagerForClient(key)?.AddPlayerEnterSceneData(
+                        playerData.Id,
+                        playerData.Position ?? Vector2.Zero,
+                        playerData.Scale,
+                        playerData.AnimationId
+                    );
+                }
 
                 Logger.Debug($"Sending that {key} is already in scene to {playerData.Id}");
 
@@ -644,9 +656,14 @@ internal abstract class ServerManager : IServerManager {
                 reliableEntityUpdateList.Add(reliableEntityUpdate);
             }
 
-            var isReturningPreviousHost = playerData.LastHostedScene == playerData.CurrentScene;
-            var shouldDemoteCurrentHost = alreadyPlayersInScene && isReturningPreviousHost;
-            makeEnteringPlayerHost = !alreadyPlayersInScene || isReturningPreviousHost;
+            // Answering again decides nothing again: the room keeps whoever has been running it, and this player
+            // keeps whatever they already were. Running the choice a second time would hand the room to the player
+            // whose first answer went missing, taking it off the one that has been playing it all along.
+            var isReturningPreviousHost = !resync && playerData.LastHostedScene == playerData.CurrentScene;
+            var shouldDemoteCurrentHost = !resync && alreadyPlayersInScene && isReturningPreviousHost;
+            makeEnteringPlayerHost = resync
+                ? playerData.IsSceneHost
+                : !alreadyPlayersInScene || isReturningPreviousHost;
 
             if (shouldDemoteCurrentHost) {
                 var epoch = GetNextSceneHostEpoch(playerData.CurrentScene);
@@ -677,7 +694,10 @@ internal abstract class ServerManager : IServerManager {
                 playerData.IsSceneHost = true;
             }
 
-            playerData.LastHostedScene = null;
+            if (!resync) {
+                playerData.LastHostedScene = null;
+            }
+
             sceneHostEpoch = _sceneHostEpochs.GetOrAdd(playerData.CurrentScene, 0u);
         }
 
@@ -1263,9 +1283,10 @@ internal abstract class ServerManager : IServerManager {
             );
         }
 
-        // Now remove the client from the player data mapping
-        _playerData.TryRemove(id, out _);
-
+        // Taken out of the mapping by what is called next, and not here. Here was too early: the first thing it does
+        // is look the player up, so it found nothing, said so and gave up - on every disconnect there has ever been.
+        // What it gave up on was handing the scene host to whoever is left, telling the other player that this one
+        // has left the room, and letting go of the entity data of a room that now has nobody in it.
         HandlePlayerLeaveScene(id, true, timeout);
 
         try {
@@ -1327,6 +1348,30 @@ internal abstract class ServerManager : IServerManager {
             playerData.CurrentScene,
             otherId => { _netServer.GetUpdateManagerForClient(otherId)?.AddPlayerDeathData(id); }
         );
+    }
+
+    /// <summary>
+    /// Callback for when a player asks to be told again who and what is in the room they are in, because what was
+    /// sent when they entered it never reached them.
+    /// </summary>
+    /// <param name="id">The ID of the player asking.</param>
+    private void OnSceneResyncRequest(ushort id) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
+            Logger.Warn($"Asked to tell player with ID {id} about their room again, but they are not in mapping");
+
+            return;
+        }
+
+        if (string.IsNullOrEmpty(playerData.CurrentScene)) {
+            return;
+        }
+
+        Logger.Info(
+            $"Telling ({id}, {playerData.Username}) what is in '{playerData.CurrentScene}' again, because what was " +
+            "sent when they entered it never reached them"
+        );
+
+        OnClientEnterScene(playerData, true);
     }
 
     /// <summary>

@@ -371,6 +371,18 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
+    /// Asks to be told again who and what is in the room, in the current packet.
+    /// </summary>
+    public void SetSceneResyncRequest() {
+        lock (Lock) {
+            CurrentUpdatePacket.SetSendingPacketData(
+                ServerUpdatePacketId.SceneResyncRequest,
+                new ReliableEmptyData()
+            );
+        }
+    }
+
+    /// <summary>
     /// Set that the player rested at a bench or died, which respawns semi-persistent objects, in the current packet.
     /// </summary>
     public void SetSemiPersistentReset() {

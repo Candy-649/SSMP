@@ -103,6 +103,14 @@ internal partial class GamePatcher {
     private static readonly Dictionary<Type, FieldInfo[]> TargetedActionGameObjectFieldCache = new();
 
     /// <summary>
+    /// Cached reflected <see cref="FsmOwnerDefault"/> fields for target-consuming FSM action types.
+    ///
+    /// Separate because these are not a variable holding an object. They are the pair PlayMaker uses for "my owner,
+    /// or that one over there", and only the second half of that may be pointed anywhere.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> TargetedActionOwnerDefaultFieldCache = new();
+
+    /// <summary>
     /// Reflected private field storing the cached hero transform or controller used by <see cref="Walker"/>.
     /// </summary>
     private static readonly FieldInfo? WalkerHeroField =
@@ -296,6 +304,40 @@ internal partial class GamePatcher {
         EnemyTargetLocks.Clear();
         TargetOwnerCache.Clear();
         ClearNeedolinTargets();
+    }
+
+    /// <summary>
+    /// Takes a player away from every enemy that had settled on them.
+    ///
+    /// Leaving them off the list of people worth going after is not enough on its own: an enemy that has already
+    /// settled on someone holds on to them for a few seconds whatever the list says, which is deliberate - it is
+    /// what stops two enemies swapping between two players every frame - and here it would mean a few more seconds
+    /// of hitting a player who is already down.
+    /// </summary>
+    /// <param name="player">The player to take away.</param>
+    public static void ForgetPlayerAsTarget(GameObject? player) {
+        if (player == null) {
+            return;
+        }
+
+        List<int>? owners = null;
+        foreach (var pair in EnemyApprovedTargets) {
+            if (pair.Value == player) {
+                owners ??= [];
+                owners.Add(pair.Key);
+            }
+        }
+
+        if (owners == null) {
+            return;
+        }
+
+        foreach (var owner in owners) {
+            EnemyApprovedTargets.Remove(owner);
+            EnemyTargetLocks.Remove(owner);
+        }
+
+        Logger.Info($"{owners.Count} enemy(s) were going after a player who is now down, and have been let go");
     }
 
     /// <summary>
@@ -572,6 +614,30 @@ internal partial class GamePatcher {
 
             ReplaceFsmGameObjectFieldWithDirectTarget(action, field, fsmGameObject, approvedTarget);
         }
+
+        // Some actions do not keep the object they are about in a plain variable at all. They keep it in the pair
+        // PlayMaker uses for "my owner, or that one over there", and reading a position is the one of those that
+        // counts: it is how a thrown thing is aimed. Only fields are looked at above and that pair is not one, so an
+        // aim taken this way went on reading whichever player the room had settled on - which is one enemy facing
+        // one player while the rock it threw went at the other.
+        foreach (var field in GetFsmOwnerDefaultFields(action.GetType())) {
+            if (field.GetValue(action) is not FsmOwnerDefault owner) {
+                continue;
+            }
+
+            // Left alone when it means the owner: that is the enemy talking about itself, and pointing it at a
+            // player would have it read its own position as the player position.
+            if (owner.OwnerOption == OwnerDefaultOption.UseOwner) {
+                continue;
+            }
+
+            var ownerGameObject = owner.GameObject;
+            if (ownerGameObject == null || !CanRetargetFsmGameObjectField(action, field, ownerGameObject)) {
+                continue;
+            }
+
+            ReplaceOwnerDefaultWithDirectTarget(action, owner, ownerGameObject, approvedTarget);
+        }
     }
 
     /// <summary>
@@ -588,31 +654,7 @@ internal partial class GamePatcher {
         FsmGameObject fsmGameObject,
         GameObject approvedTarget
     ) {
-        var variableName = fsmGameObject.Name;
-
-        if (!string.IsNullOrEmpty(variableName) &&
-            variableName.Equals("Self", StringComparison.OrdinalIgnoreCase)) {
-            return;
-        }
-
-        var currentTarget = fsmGameObject.Value;
-
-        if (currentTarget == approvedTarget && string.IsNullOrEmpty(variableName)) {
-            return;
-        }
-
-        if (currentTarget != null &&
-            currentTarget != approvedTarget &&
-            IsSameEnemyOwner(action.Fsm?.GameObject, currentTarget)) {
-            return;
-        }
-
-        var isTargetVariable = !string.IsNullOrEmpty(variableName) && IsTargetVariableName(variableName);
-        var isHeroLikeValue =
-            currentTarget == null || currentTarget == approvedTarget ||
-            PlayerTargetRegistry.IsHeroLikeObject(currentTarget);
-
-        if (!isTargetVariable && !isHeroLikeValue) {
+        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget)) {
             return;
         }
 
@@ -623,6 +665,69 @@ internal partial class GamePatcher {
         );
 
         _targetsWrittenIntoActions++;
+    }
+
+    /// <summary>
+    /// Points the second half of an owner-or-this-one pair at the approved target.
+    /// </summary>
+    /// <param name="action">The action that owns the pair.</param>
+    /// <param name="owner">The pair to write into.</param>
+    /// <param name="fsmGameObject">What the pair currently points at.</param>
+    /// <param name="approvedTarget">The approved multiplayer target.</param>
+    private static void ReplaceOwnerDefaultWithDirectTarget(
+        FsmStateAction action,
+        FsmOwnerDefault owner,
+        FsmGameObject fsmGameObject,
+        GameObject approvedTarget
+    ) {
+        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget)) {
+            return;
+        }
+
+        owner.GameObject = new FsmGameObject {
+            Value = approvedTarget
+        };
+
+        _targetsWrittenIntoActions++;
+    }
+
+    /// <summary>
+    /// Whether what an action is currently pointed at should be replaced with the approved target.
+    /// </summary>
+    /// <param name="action">The action being retargeted.</param>
+    /// <param name="fsmGameObject">What the action currently points at.</param>
+    /// <param name="approvedTarget">The approved multiplayer target.</param>
+    /// <returns><see langword="true"/> when it should be written; otherwise <see langword="false"/>.</returns>
+    private static bool ShouldWriteDirectTarget(
+        FsmStateAction action,
+        FsmGameObject fsmGameObject,
+        GameObject approvedTarget
+    ) {
+        var variableName = fsmGameObject.Name;
+
+        if (!string.IsNullOrEmpty(variableName) &&
+            variableName.Equals("Self", StringComparison.OrdinalIgnoreCase)) {
+            return false;
+        }
+
+        var currentTarget = fsmGameObject.Value;
+
+        if (currentTarget == approvedTarget && string.IsNullOrEmpty(variableName)) {
+            return false;
+        }
+
+        if (currentTarget != null &&
+            currentTarget != approvedTarget &&
+            IsSameEnemyOwner(action.Fsm?.GameObject, currentTarget)) {
+            return false;
+        }
+
+        var isTargetVariable = !string.IsNullOrEmpty(variableName) && IsTargetVariableName(variableName);
+        var isHeroLikeValue =
+            currentTarget == null || currentTarget == approvedTarget ||
+            PlayerTargetRegistry.IsHeroLikeObject(currentTarget);
+
+        return isTargetVariable || isHeroLikeValue;
     }
 
     /// <summary>
@@ -703,6 +808,31 @@ internal partial class GamePatcher {
 
         var result = fsmGameObjectFields.ToArray();
         TargetedActionGameObjectFieldCache[actionType] = result;
+
+        return result;
+    }
+
+    /// <summary>
+    /// Gets all instance fields of an FSM action type that hold an owner-or-this-one pair.
+    /// </summary>
+    /// <param name="actionType">The FSM action type to inspect.</param>
+    /// <returns>The reflected <see cref="FsmOwnerDefault"/> fields for this action type.</returns>
+    private static FieldInfo[] GetFsmOwnerDefaultFields(Type actionType) {
+        if (TargetedActionOwnerDefaultFieldCache.TryGetValue(actionType, out var cachedFields)) {
+            return cachedFields;
+        }
+
+        var fields = actionType.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        var ownerDefaultFields = new List<FieldInfo>();
+
+        foreach (var field in fields) {
+            if (typeof(FsmOwnerDefault).IsAssignableFrom(field.FieldType)) {
+                ownerDefaultFields.Add(field);
+            }
+        }
+
+        var result = ownerDefaultFields.ToArray();
+        TargetedActionOwnerDefaultFieldCache[actionType] = result;
 
         return result;
     }

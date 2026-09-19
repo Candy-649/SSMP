@@ -57,6 +57,11 @@ internal partial class CoopSave {
                 // The ride of the partner started a moment ago, which the wait before the lift moves makes up for
                 moved = lift.Move(stop, inside, (float) _netClient.UpdateManager.AverageRtt / 2000f);
                 lift.WasMoving = lift.IsMoving;
+                if (moved) {
+                    // Their ride, so they are not told about it again. Only once it was really taken: a ride that
+                    // was refused would otherwise silence a later ride of ours that happens to go the same way.
+                    lift.ToldPartnerStop = stop;
+                }
             } finally {
                 _liftReplaying = false;
             }
@@ -146,6 +151,9 @@ internal partial class CoopSave {
                 lift.Unlock();
                 moved = lift.Move(stop, inside, 0f);
                 lift.WasMoving = lift.IsMoving;
+                if (moved) {
+                    lift.ToldPartnerStop = stop;
+                }
             } catch (Exception e) {
                 LogLiftError(e);
 
@@ -267,9 +275,19 @@ internal partial class CoopSave {
                             : lift.Stop != stop || Mathf.Abs(lift.StateValue - value) > lift.StateTolerance) {
                         lift.JoinRide(stop, value);
                     }
-                } else if (lift.IsMoving || lift.Stop != stop ||
-                           Mathf.Abs(lift.StateValue - value) > lift.StateTolerance) {
-                    lift.PlaceAt(stop, value);
+
+                    // Their lift is on its way there, so that much they know
+                    lift.ToldPartnerStop = stop;
+                } else {
+                    if (lift.IsMoving || lift.Stop != stop ||
+                        Mathf.Abs(lift.StateValue - value) > lift.StateTolerance) {
+                        lift.PlaceAt(stop, value);
+                    }
+
+                    // Their lift stands still, so they know of no ride at all - and putting this one where theirs
+                    // stands can set it off, because that runs the lift's own state machine as far as it will go.
+                    // A ride that begins that way is this game's, and they have to be told.
+                    lift.ToldPartnerStop = -1;
                 }
 
                 lift.WasMoving = lift.IsMoving;
