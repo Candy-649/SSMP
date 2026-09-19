@@ -39,6 +39,17 @@ internal partial class CoopSave {
     private static readonly string[] CollapseStateNames = ["Antic", "Break"];
 
     /// <summary>
+    /// States that a door which is broken open by being hit has, and which a collapsing part of the world does not.
+    ///
+    /// The same event brings both of them down and the one it leaves them in is called the same thing, so all that is
+    /// needed is a second way of recognising the family. A door counts its hits rather than waiting to be walked
+    /// under, so it has the state that works out which side it was hit from, and no state for the moment before it
+    /// falls. Across the whole game these two states together pick out exactly the two doors of this kind and
+    /// nothing else.
+    /// </summary>
+    private static readonly string[] BrokenDoorStateNames = ["Hit Pos Check", "Break"];
+
+    /// <summary>
     /// The saved objects of the world in the loaded scenes, with their scenes, IDs and keys.
     /// </summary>
     private readonly List<(PersistentBoolItem Item, string Scene, string Id, string Key)> _loadedWorldItems = [];
@@ -417,7 +428,17 @@ internal partial class CoopSave {
             return false;
         }
 
-        foreach (var stateName in CollapseStateNames) {
+        return HasAllStates(fsm, CollapseStateNames) || HasAllStates(fsm, BrokenDoorStateNames);
+    }
+
+    /// <summary>
+    /// Whether an FSM has every one of the given states.
+    /// </summary>
+    /// <param name="fsm">The FSM to look in.</param>
+    /// <param name="stateNames">The states it must all have.</param>
+    /// <returns>Whether it has all of them.</returns>
+    private static bool HasAllStates(PlayMakerFSM fsm, string[] stateNames) {
+        foreach (var stateName in stateNames) {
             if (fsm.GetStateOrNull(stateName) == null) {
                 return false;
             }
