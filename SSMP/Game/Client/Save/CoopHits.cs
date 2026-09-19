@@ -478,6 +478,10 @@ internal class CoopHits {
             return;
         }
 
+        // Read before the knockback, because what it reads afterwards is the whole of how this tells whether the
+        // knockback happened at all
+        var recoilBefore = self.recoilTimeRemaining;
+
         orig(self, direction, magnitude);
 
         if (!isClientCopy) {
@@ -494,7 +498,13 @@ internal class CoopHits {
         // nothing to protect from the scene host's positions when nothing happened. Waiting anyway would be worse
         // than the fault this is here to fix: the local knockback has not moved the enemy, the interpolation is held
         // off while a number is outstanding, and the enemy would stand perfectly still for a whole round trip.
-        var id = self.IsRecoiling && !self.FreezeInPlace && self.RecoilSpeedBase * magnitude > 0f
+        //
+        // The clock it runs on is what says so, rather than whether it is recoiling. Asking whether it is recoiling
+        // cannot tell a knockback that just landed from one still running from the swing before it, and in the
+        // middle of a combo that is the usual state - so every refused hit of a combo opened a wait of its own for
+        // a knockback that never happened. The clock is only ever wound back up by a knockback that was taken, and
+        // nothing winds it down between here and there.
+        var id = self.recoilTimeRemaining > recoilBefore && self.recoilSpeed > 0f
             ? entity.BeginAnticipation()
             : (byte) 0;
 
@@ -621,7 +631,11 @@ internal class CoopHits {
         }
 
         recoil.RecoilByDirection(direction, magnitude);
-        entity.NoteAnticipation(id);
+
+        // What is left on the knockback's clock is how much longer this game goes on carrying the enemy along, and
+        // the player waiting on this is told nothing until then. They have already watched their own copy go the
+        // whole way; a position from the first moment of the same knockback would only pull it back to the start.
+        entity.NoteAnticipation(id, recoil.recoilTimeRemaining);
     }
 
     /// <summary>

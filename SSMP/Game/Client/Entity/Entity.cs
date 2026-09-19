@@ -102,6 +102,12 @@ internal class Entity {
     private uint _pendingSinceStep;
 
     /// <summary>
+    /// When what <see cref="_pendingAnticipation"/> stands for has finished happening here, so that what is sent
+    /// from then on has the whole of it in it rather than the first moment of it.
+    /// </summary>
+    private float _pendingSettledAt;
+
+    /// <summary>
     /// The number of the last thing a scene client did to this entity which what the scene host sends now has in it.
     /// </summary>
     private byte _incorporatedAnticipation;
@@ -127,12 +133,24 @@ internal class Entity {
     /// still on its way there and back, at the very most.
     ///
     /// Only reached when the scene host never says anything about it at all, which takes it leaving or the room
-    /// changing under it: everything that can really happen comes back inside a round trip, answered or refused. It
-    /// is a whole second because a bound tight enough to cut a round trip short would throw the wait away on exactly
-    /// the connections it was written for, and because nothing worse than an entity standing still for a moment is
-    /// on the other side of it.
+    /// changing under it: everything that can really happen comes back inside a round trip and however long it takes
+    /// to happen over there, answered or refused. It is this long because a bound tight enough to cut that short
+    /// would throw the wait away on exactly the connections it was written for, and because nothing worse than an
+    /// entity standing still for a moment is on the other side of it. It has to be longer than a round trip plus
+    /// <see cref="AnticipationSettleCap"/>, which is the longest anything answered can take.
     /// </summary>
-    private const float AnticipationHoldTime = 1f;
+    private const float AnticipationHoldTime = 1.5f;
+
+    /// <summary>
+    /// The longest the scene host waits for something a scene client did to finish happening before saying it has
+    /// it, in seconds.
+    ///
+    /// Long enough for the longest knockback in the game, which is what this waits out in practice. It is a cap and
+    /// not a wait: what is really waited for is the thing itself ending, and this only keeps one that never ends -
+    /// an enemy held in place, a component that went away underneath it - from keeping the other player waiting on
+    /// an answer that is never coming.
+    /// </summary>
+    private const float AnticipationSettleCap = 0.5f;
 
     /// <summary>
     /// How many positions of an entity are sent whether it has moved or not once the scene host has taken in
@@ -152,7 +170,7 @@ internal class Entity {
     /// not forever, so that a fight does not leave every enemy in the room carrying a byte that says something
     /// nobody is listening for any more.
     /// </summary>
-    private const float AnticipationStampTime = 2f;
+    private const float AnticipationStampTime = 2.5f;
 
     /// <summary>
     /// The ID of the entity.
@@ -787,11 +805,19 @@ internal class Entity {
             entityComponent.OnUpdate();
         }
 
-        // Something a scene client did to this entity has now had a step of physics to take effect, so from here on
-        // what is sent has it in it and may say so. A step is what is waited for rather than a frame, because almost
-        // nothing in this game moves outside one: the frame that starts a knockback leaves the enemy standing
-        // exactly where it was hit, and saying it had taken that knockback in would be worse than saying nothing.
-        if (_pendingAnticipation != 0 && MonoBehaviourUtil.FixedStep > _pendingSinceStep) {
+        // Something a scene client did to this entity has now finished happening here, so from here on what is sent
+        // has the whole of it in it and may say so.
+        //
+        // Both halves of that wait are needed, and the second one is the one that was missing. A step of physics is
+        // the least that anything set in motion needs, since almost nothing in this game moves outside one and the
+        // frame that starts a knockback leaves the enemy standing exactly where it was hit. But a knockback is not a
+        // shove either: the game sweeps the enemy along at a steady speed over tens of steps, and one step in it has
+        // gone a twentieth of the way. Saying "I have this" there hands the other player a position from the very
+        // start of a knockback that their own game finished a round trip ago, so their enemy slides most of a
+        // knockback back towards them, and then out again as the rest of the sweep arrives behind it. That is the
+        // darting about, and it is why this waits for the end of what was done rather than the beginning of it.
+        if (_pendingAnticipation != 0 && MonoBehaviourUtil.FixedStep > _pendingSinceStep &&
+            Time.unscaledTime >= _pendingSettledAt) {
             _incorporatedAnticipation = _pendingAnticipation;
             _pendingAnticipation = 0;
             _anticipationSendsLeft = AnticipationForcedSends;
@@ -1377,16 +1403,23 @@ internal class Entity {
 
     /// <summary>
     /// Notes that the scene host has been told of something a scene client did to this entity, which what it sends
-    /// will have in it a step of physics from now.
+    /// will have the whole of in it once a step of physics and the time it takes to happen have gone by.
     /// </summary>
     /// <param name="anticipation">The number it was sent under.</param>
-    public void NoteAnticipation(byte anticipation) {
+    /// <param name="settleTime">
+    /// How much longer what was done goes on moving the entity here, in seconds. The player waiting on this has
+    /// already watched their own copy do the whole of it, so anything said before then only sends them back into
+    /// the middle of it. Nothing that takes no time waits at all, and nothing waits longer than
+    /// <see cref="AnticipationSettleCap"/> however long it says it takes.
+    /// </param>
+    public void NoteAnticipation(byte anticipation, float settleTime = 0f) {
         if (anticipation == 0) {
             return;
         }
 
         _pendingAnticipation = anticipation;
         _pendingSinceStep = MonoBehaviourUtil.FixedStep;
+        _pendingSettledAt = Time.unscaledTime + Mathf.Min(settleTime, AnticipationSettleCap);
     }
 
     /// <summary>
