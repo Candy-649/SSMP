@@ -94,6 +94,12 @@ internal partial class CoopSave {
     public Action? TakeControlFromSharedDialogue { get; set; }
 
     /// <summary>
+    /// Ends shared dialogue that is shown to the local player, counting it as read and closing its box, so that
+    /// something that has to have the box to itself can have it, or null.
+    /// </summary>
+    public Action? EndSharedDialogue { get; set; }
+
+    /// <summary>
     /// The deliveries whose item broke for the local player during this session, by wish. The partner delivering such a
     /// delivery rewards the local player too, also when the break completed the wish without a reward, as long as the
     /// wish stayed as the break left it.

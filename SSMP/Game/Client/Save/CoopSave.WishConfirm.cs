@@ -953,9 +953,23 @@ internal partial class CoopSave {
             if (now - pending.Started > WishConfirmTimeout) {
                 _pendingConfirmAsk = null;
                 SendConfirmAnswer(pending.PartnerId, pending.Update.Key, false);
-            } else if (_partnerConfirm == null && CanShowConfirmNow()) {
-                _pendingConfirmAsk = null;
-                ShowPartnerConfirm(pending.PartnerId, pending.PartnerName, pending.Update);
+            } else if (_partnerConfirm == null) {
+                // A line of dialogue the partner shared holds the one box this question can be asked in, and between
+                // the two of them it is the question that costs something. Left alone the line waits out its own
+                // time, and then this waits out its own, and the partner is told no for a wish they have been
+                // standing in front of the whole while. So the line gives way.
+                if (IsReadingSharedDialogue?.Invoke() == true && !CanShowConfirmNow()) {
+                    Logger.Info(
+                        $"Ending the shared dialogue, so that the question {pending.PartnerName} is waiting on can " +
+                        "be asked here"
+                    );
+                    EndSharedDialogue?.Invoke();
+                }
+
+                if (CanShowConfirmNow()) {
+                    _pendingConfirmAsk = null;
+                    ShowPartnerConfirm(pending.PartnerId, pending.PartnerName, pending.Update);
+                }
             }
         }
     }

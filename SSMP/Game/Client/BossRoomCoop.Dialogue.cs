@@ -34,7 +34,7 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// How long, in seconds, a boss waits for other players to read its dialogue before it continues anyway.
     /// </summary>
-    private const float DialogueTimeout = 90f;
+    private const float DialogueTimeout = 20f;
 
     /// <summary>
     /// The longest a player is held while reading dialogue that the scene host shared, in seconds, however unread it
@@ -43,9 +43,9 @@ internal partial class BossRoomCoop {
     /// Shorter than <see cref="DialogueTimeout"/> so that a reader gives up before the player who shared it does,
     /// which is the order that ends with both of them free. Long enough for anyone to read one box, and no longer:
     /// a player held here has no control and no pause menu, so every second past what it takes to read is a second
-    /// of a game that can only be killed.
+    /// of a game that can only be killed. It was a minute, and a minute of that per line is not a game.
     /// </summary>
-    private const float SharedDialogueReadTime = 60f;
+    private const float SharedDialogueReadTime = 12f;
 
     /// <summary>
     /// How long, in seconds, shared dialogue may take to open before it counts as ended.
@@ -408,6 +408,22 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        // A player who is in a conversation of their own is not shown this one. There is one box, and it is theirs:
+        // opening over it would take away what they are reading, and holding this line behind it keeps the player
+        // who shared it standing still for as long as that conversation runs. Their own conversation is also the
+        // one that fits where they are - two players at different points of the same wish are not even being told
+        // the same words - so the line is answered as read and let go.
+        //
+        // Only when the box is not already ours. Line after line of the same shared conversation arrives while the
+        // one before it is up, and those are what this is for.
+        if (_shownDialogue == null && IsDialogueRunning() == true) {
+            Logger.Info(
+                "Shared dialogue arrived while this player was in a conversation of their own, so it counts as read"
+            );
+            SendDialogueDone(update);
+            return;
+        }
+
         _dialogueQueue.Enqueue(update);
         ShowNextDialogue();
     }
@@ -476,6 +492,32 @@ internal partial class BossRoomCoop {
 
             TakeHeroControl();
         }
+    }
+
+    /// <summary>
+    /// Ends shared dialogue that the local player is being shown, counting it as read and closing its box, for
+    /// something that has to have that box to itself and matters more than a line of dialogue.
+    /// </summary>
+    /// <returns>Whether there was any to end.</returns>
+    public bool EndSharedDialogueNow() {
+        if (_shownDialogue == null) {
+            return false;
+        }
+
+        // Closed rather than only let go of. Letting go gives the player back their legs, but the box stays on the
+        // screen and the game goes on calling itself busy - and the box is the one thing every question in the game
+        // has to have to itself, so leaving it open is how one line of dialogue ends up refusing a wish.
+        if (IsDialogueRunning() == true) {
+            try {
+                DialogueBox.EndConversation();
+            } catch (Exception e) {
+                Logger.Error($"Could not close the box of the dialogue that the other player shared:\n{e}");
+            }
+        }
+
+        OnSharedDialogueEnded(_shownDialogueId);
+
+        return true;
     }
 
     /// <summary>
@@ -941,27 +983,48 @@ internal partial class BossRoomCoop {
                 }
 
                 RemoveGoneReaders(dialogue);
-                if (dialogue.Waiting.Count > 0 && Time.unscaledTime - dialogue.StartTime <= DialogueTimeout) {
+                var waited = Time.unscaledTime - dialogue.StartTime;
+                if (dialogue.Waiting.Count > 0 && waited <= DialogueTimeout) {
                     continue;
                 }
 
+                // Said apart, because which of the two it was is the whole of what a log of this can tell anyone:
+                // one is the pair of them reading a line together, and the other is one of them standing still for
+                // the whole wait over a line the other never saw.
                 _sharedDialogues.Remove(fsm);
-                Logger.Info($"The other players finished the dialogue of '{GetPath(fsm)}', continuing it");
+                if (dialogue.Waiting.Count > 0) {
+                    Logger.Warn(
+                        $"{dialogue.Waiting.Count} player(s) never finished the dialogue of '{GetPath(fsm)}' in " +
+                        $"{waited:0.0}s, continuing it without them"
+                    );
+                } else {
+                    Logger.Info(
+                        $"The other players finished the dialogue of '{GetPath(fsm)}' in {waited:0.0}s, continuing it"
+                    );
+                }
+
                 fsm.Event(ConversationEndEventName);
             }
         }
 
-        // Dialogue that couldn't open, or that closed without calling back, doesn't keep the scene host waiting.
+        // Dialogue that couldn't open, or that closed without calling back, doesn't keep the player who shared it
+        // waiting.
         //
-        // The second half of this is the one that has to be time. Asking the game whether its box is still up
-        // answers "yes" for a box that is stuck as surely as for one being read, and it answers neither when it
-        // cannot be read at all - so on its own it is no way out, and there was none. Whatever is really happening,
-        // a player cannot be left standing there: no line of dialogue is worth this long, and every second past it
-        // is a second of a game with no pause menu.
-        if (_shownDialogue != null && Time.unscaledTime - _shownDialogueTime > DialogueOpenTime &&
-            (IsDialogueRunning() == false || Time.unscaledTime - _shownDialogueTime > SharedDialogueReadTime)) {
-            Logger.Info("The dialogue that the scene host shared closed without ending, or was never got through");
-            OnSharedDialogueEnded(_shownDialogueId);
+        // The second of these is the one that has to be time. Asking the game whether its box is still up answers
+        // "yes" for a box that is stuck as surely as for one being read, and it answers neither when it cannot be
+        // read at all - so on its own it is no way out, and there was none. Whatever is really happening, a player
+        // cannot be left standing there: no line of dialogue is worth this long, and every second past it is a
+        // second of a game with no pause menu. The two are told apart in the log, because which one fires says
+        // which half of this is going wrong.
+        if (_shownDialogue != null && Time.unscaledTime - _shownDialogueTime > DialogueOpenTime) {
+            var waited = Time.unscaledTime - _shownDialogueTime;
+            if (IsDialogueRunning() == false) {
+                Logger.Info($"The shared dialogue box closed without ending, after {waited:0.0}s");
+                OnSharedDialogueEnded(_shownDialogueId);
+            } else if (waited > SharedDialogueReadTime) {
+                Logger.Warn($"The shared dialogue was never got through in {waited:0.0}s, so it counts as read");
+                EndSharedDialogueNow();
+            }
         }
 
         ShowNextDialogue();
