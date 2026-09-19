@@ -37,6 +37,24 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
     [SerializeField] private float minServerDeltaTime = 1.0f / 128.0f; // ~7ms
 
+    /// <summary>
+    /// The longest <see cref="serverDeltaTime"/> may be measured to be, in seconds.
+    ///
+    /// It is what the tick was set to before anything measured it, so the measurement can only ever shorten it. That
+    /// matters: too long a tick reads every speed as slower than it is, which lags, and too short a tick reads them
+    /// as faster, which overshoots and then has to be pulled back. Lagging is the side to err on, so the guess stands
+    /// as the ceiling.
+    /// </summary>
+    private const float MaxServerDeltaTime = 1.0f / 20.0f;
+
+    /// <summary>
+    /// How much of each gap between two positions goes into <see cref="serverDeltaTime"/>.
+    ///
+    /// Small, because one gap says almost nothing - a position is only sent when something moves, and the way it
+    /// travels drops what it cannot deliver - while a hundred of them say it exactly.
+    /// </summary>
+    private const float ServerDeltaTimeLearnRate = 0.05f;
+
     [Header("Smoothing Weights")] [SerializeField, Range(0f, 1f)]
     private float velocityBlendFactor = 0.7f;
 
@@ -258,6 +276,21 @@ internal class PredictiveInterpolation : MonoBehaviour {
         // 3. Time Safety
         var now = Time.time;
         float actualDeltaTime;
+
+        // How often positions really arrive, measured rather than set. What it was set to was a guess at twenty a
+        // second, and they come about sixty times a second - so every speed read off two of them came out near a
+        // third of what it really was, and everything followed its own position from a little behind.
+        //
+        // Only gaps between two positions that came one after the other are measured, and only those that could be
+        // one tick at all. A gap longer than the ceiling is something that had nothing to say in between, since
+        // nothing sends a position while it stands still; a gap shorter than the floor is two that arrived together
+        // after one of them was held up. Neither is a tick, and neither is counted.
+        if (snapshotsSinceLast == 1 && _lastUpdateTime > 0f) {
+            var gap = now - _lastUpdateTime;
+            if (gap >= minServerDeltaTime && gap <= MaxServerDeltaTime) {
+                serverDeltaTime += (gap - serverDeltaTime) * ServerDeltaTimeLearnRate;
+            }
+        }
 
         if (snapshotsSinceLast > 0) {
             actualDeltaTime = snapshotsSinceLast * serverDeltaTime;
