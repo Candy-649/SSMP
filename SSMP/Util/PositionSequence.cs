@@ -64,11 +64,30 @@ internal sealed class PositionSequence {
     }
 
     /// <summary>
+    /// The most packets a gap between two positions may be counted as.
+    ///
+    /// The count is what the gap is divided by to read a speed out of it, so counting too many reads the thing as
+    /// slower than it is and leaves it trailing, and counting too few reads it as faster and throws it ahead. Past a
+    /// few packets the reading is worthless either way, and trailing is the side to be wrong on, so the count stops
+    /// here and everything longer is treated the same.
+    /// </summary>
+    private const int LongestGap = 8;
+
+    /// <summary>
     /// Whether to take this position, keeping the number to compare the next one against.
     /// </summary>
     /// <param name="sequence">The sequence number of the packet the position arrived in.</param>
+    /// <param name="gap">
+    /// How many packets this position covers: one when it came in the very next packet after the last one taken, more
+    /// when the ones in between were lost. One whenever there is nothing to work it out from.
+    ///
+    /// Positions travel in packets that are not sent again when they are lost, and until this was counted every gap
+    /// was taken for a single packet - so a position that had covered three packets' worth of ground was read as
+    /// having covered it in one, and everything it was doing came out three times as fast as it was.
+    /// </param>
     /// <returns>Whether the position is newer than the last one taken.</returns>
-    public bool Accepts(ushort sequence) {
+    public bool Accepts(ushort sequence, out int gap) {
+        gap = 1;
         // Zero is what a position carries when nothing stamped it with the packet it came in - one that travelled
         // inside another kind of update, or one out of the pool that was never written to. There is nothing to
         // compare, so it is taken and nothing is remembered from it. The one real packet in every sixty-five
@@ -98,6 +117,10 @@ internal sealed class PositionSequence {
                     $"Refused a second of positions of {_what} in a row, so the numbering of them was wrong: " +
                     $"taking {sequence} after {_last} and counting from it again"
                 );
+            } else if (difference > 1) {
+                // Only where the numbering has been believed all along. Where it has just been given up on, the
+                // difference is the size of whatever went wrong with it and says nothing about how long this took.
+                gap = difference > LongestGap ? LongestGap : difference;
             }
         }
 

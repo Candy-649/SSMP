@@ -60,8 +60,12 @@ internal class Entity {
     private readonly bool _hasParent;
 
     /// <summary>
-    /// How many positions of the scene host have been put aside while a knockback of the local player moves this
-    /// entity, so that the first one taken afterwards is known to cover more than one tick of theirs.
+    /// How many packets' worth of the scene host's positions have been put aside while a knockback of the local
+    /// player moves this entity, so that the first position taken afterwards is known to cover more than one tick of
+    /// theirs.
+    ///
+    /// Counted in packets rather than in positions, because the positions lost on the way were never here to be
+    /// counted and they cover ground just the same.
     /// </summary>
     private int _positionsHeldBack;
 
@@ -1487,7 +1491,7 @@ internal class Entity {
         // An older position arriving after a newer one is thrown away: nothing below this transport orders what it
         // carries, so one that had to be sent again lands after ones sent later, and applying it puts the entity
         // back where it was that much earlier.
-        if (!_positionSequence.Accepts(sequence)) {
+        if (!_positionSequence.Accepts(sequence, out var packetsCovered)) {
             return;
         }
 
@@ -1515,12 +1519,12 @@ internal class Entity {
         // with the first position taken afterwards so that the speed read out of it covers the right stretch of
         // time rather than a single tick.
         if (!AcceptsWhileAnticipating(anticipation)) {
-            _positionsHeldBack++;
+            _positionsHeldBack += packetsCovered;
 
             return;
         }
 
-        positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + 1);
+        positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + packetsCovered);
         _positionsHeldBack = 0;
     }
 

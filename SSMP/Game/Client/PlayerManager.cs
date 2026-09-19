@@ -288,7 +288,7 @@ internal class PlayerManager : IPlayerManager {
 
         // An older position arriving after a newer one is thrown away, or the player is put back over ground they
         // have already covered
-        if (!playerData.PositionSequence.Accepts(sequence)) {
+        if (!playerData.PositionSequence.Accepts(sequence, out var packetsCovered)) {
             return;
         }
 
@@ -296,7 +296,7 @@ internal class PlayerManager : IPlayerManager {
         if (playerContainer) {
             var unityPosition = new Vector3(position.X, position.Y);
 
-            playerContainer.GetComponent<PredictiveInterpolation>().SetNewPosition(unityPosition);
+            playerContainer.GetComponent<PredictiveInterpolation>().SetNewPosition(unityPosition, packetsCovered);
         }
     }
 

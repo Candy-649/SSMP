@@ -292,6 +292,18 @@ internal class PredictiveInterpolation : MonoBehaviour {
             }
         }
 
+        // A gap counted in packets is only a gap in time while one packet is one tick, which is the ordinary case but
+        // not every case: a large message that has to be cut into pieces sends several packets where there would
+        // usually be one, and the numbering counts them all. Left alone, a burst of those would be read as a long
+        // silence and everything moving through it would be read as crawling. The clock cannot be argued with, so it
+        // is the ceiling: however many packets went by, no more time passed than has passed.
+        if (snapshotsSinceLast > 1 && _lastUpdateTime > 0f && serverDeltaTime > 0f) {
+            var ticksOnTheClock = Mathf.CeilToInt((now - _lastUpdateTime) / serverDeltaTime);
+            if (ticksOnTheClock >= 1 && snapshotsSinceLast > ticksOnTheClock) {
+                snapshotsSinceLast = ticksOnTheClock;
+            }
+        }
+
         if (snapshotsSinceLast > 0) {
             actualDeltaTime = snapshotsSinceLast * serverDeltaTime;
         } else {
