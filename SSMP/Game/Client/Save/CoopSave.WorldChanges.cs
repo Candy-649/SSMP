@@ -1,5 +1,7 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -455,6 +457,19 @@ internal partial class CoopSave {
                     continue;
                 }
 
+                // What actually answers a nail. Its own Hit refuses outright when nothing is registered with it, and
+                // a state machine registers itself only while the state holding the action is the one it is in - so
+                // this number being zero is the whole of "the swing does nothing", with no mark left anywhere.
+                var handlers = -1;
+                if (fsm.TryGetComponent<ReceivedDamageProxy>(out var proxy)) {
+                    var field = typeof(ReceivedDamageProxy).GetField(
+                        "handlers", BindingFlags.Instance | BindingFlags.NonPublic
+                    );
+                    if (field?.GetValue(proxy) is ICollection set) {
+                        handlers = set.Count;
+                    }
+                }
+
                 var collider = fsm.GetComponent<Collider2D>();
                 var colliders = fsm.GetComponentsInChildren<Collider2D>(true);
                 var awake = 0;
@@ -467,8 +482,9 @@ internal partial class CoopSave {
                 Logger.Info(
                     $"'{fsm.gameObject.name}' ({fsm.FsmName}) is sitting in '{fsm.ActiveStateName}', switched " +
                     $"{(fsm.gameObject.activeInHierarchy ? "on" : "off")}, its own collider " +
-                    $"{(collider == null ? "missing" : collider.enabled ? "on" : "off")}, and {awake} of " +
-                    $"{colliders.Length} collider(s) under it able to be touched"
+                    $"{(collider == null ? "missing" : collider.enabled ? "on" : "off")}, {awake} of " +
+                    $"{colliders.Length} collider(s) under it able to be touched, and " +
+                    $"{(handlers < 0 ? "nothing at all that answers a nail" : $"{handlers} thing(s) listening for a nail")}"
                 );
             }
         } catch (Exception e) {
