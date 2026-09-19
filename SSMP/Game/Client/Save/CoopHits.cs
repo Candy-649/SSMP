@@ -488,11 +488,19 @@ internal class CoopHits {
         // how the enemy stops being pulled back to where it was hit: until that number comes back, every position
         // from over there was measured before the hit had arrived, and after it they all have the hit in them.
         //
-        // Taken before the knockback is sent so that it goes with it, and only kept if it was sent: a knockback that
-        // cannot be sent is one the scene host will never make, and waiting for it to come back would hold the enemy
-        // away from where it really is for the whole of the timeout.
-        var id = entity.BeginAnticipation();
-        if (!SendKnockback(partnerId, entity.Id, direction, magnitude, id)) {
+        // Only taken when the knockback really did move the enemy here. The method above has six ways of doing
+        // nothing at all - the enemy already recoiling harder, one that holds it still where it stands, and each of
+        // the four directions being blocked, which is what a downward knockback into the ground is - and there is
+        // nothing to protect from the scene host's positions when nothing happened. Waiting anyway would be worse
+        // than the fault this is here to fix: the local knockback has not moved the enemy, the interpolation is held
+        // off while a number is outstanding, and the enemy would stand perfectly still for a whole round trip.
+        var id = self.IsRecoiling && !self.FreezeInPlace && self.RecoilSpeedBase * magnitude > 0f
+            ? entity.BeginAnticipation()
+            : (byte) 0;
+
+        // Sent whatever happened here, since the scene host may be able to knock the enemy back when this game
+        // could not. A number of zero is one that nothing is waiting on, and the scene host answers it with nothing.
+        if (!SendKnockback(partnerId, entity.Id, direction, magnitude, id) && id != 0) {
             entity.EndAnticipation();
         }
     }

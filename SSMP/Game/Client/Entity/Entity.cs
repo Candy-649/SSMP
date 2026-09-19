@@ -107,6 +107,17 @@ internal class Entity {
     private byte _incorporatedAnticipation;
 
     /// <summary>
+    /// How many more positions are sent for this entity whether it has moved or not, to carry what the scene host
+    /// has taken in to a player who is waiting on it.
+    /// </summary>
+    private int _anticipationSendsLeft;
+
+    /// <summary>
+    /// Until when what the scene host has taken in is sent beside the positions of this entity.
+    /// </summary>
+    private float _anticipationStampUntil;
+
+    /// <summary>
     /// Which positions of this entity are newer than the one it is standing at.
     /// </summary>
     private readonly PositionSequence _positionSequence;
@@ -122,6 +133,26 @@ internal class Entity {
     /// on the other side of it.
     /// </summary>
     private const float AnticipationHoldTime = 1f;
+
+    /// <summary>
+    /// How many positions of an entity are sent whether it has moved or not once the scene host has taken in
+    /// something a scene client did to it.
+    ///
+    /// One would do if nothing were ever lost. Positions travel by the way that drops what it cannot deliver, and
+    /// an enemy that the scene host held still - against a wall, or one that is knocked back by standing still -
+    /// sends nothing else of its own afterwards, so a single lost one costs the other player the whole of their
+    /// wait. A handful of them is a few dozen bytes.
+    /// </summary>
+    private const int AnticipationForcedSends = 5;
+
+    /// <summary>
+    /// How long what the scene host has taken in is sent beside the positions of an entity, in seconds.
+    ///
+    /// Longer than <see cref="AnticipationHoldTime"/>, so that nobody can still be waiting on it when it stops, and
+    /// not forever, so that a fight does not leave every enemy in the room carrying a byte that says something
+    /// nobody is listening for any more.
+    /// </summary>
+    private const float AnticipationStampTime = 2f;
 
     /// <summary>
     /// The ID of the entity.
@@ -760,12 +791,17 @@ internal class Entity {
         // what is sent has it in it and may say so. A step is what is waited for rather than a frame, because almost
         // nothing in this game moves outside one: the frame that starts a knockback leaves the enemy standing
         // exactly where it was hit, and saying it had taken that knockback in would be worse than saying nothing.
-        var anticipationTaken = false;
         if (_pendingAnticipation != 0 && MonoBehaviourUtil.FixedStep > _pendingSinceStep) {
             _incorporatedAnticipation = _pendingAnticipation;
             _pendingAnticipation = 0;
-            anticipationTaken = true;
+            _anticipationSendsLeft = AnticipationForcedSends;
+            _anticipationStampUntil = Time.unscaledTime + AnticipationStampTime;
         }
+
+        // Sent more than once, because a position travels by the way that drops what it cannot deliver and an enemy
+        // that is standing still gives no second chance of its own: one forced position, lost, and the player
+        // waiting on it waits out their whole timeout instead. Several in a row cost a few dozen bytes.
+        var anticipationTaken = _anticipationSendsLeft > 0;
 
         var transform = Object.Host.transform;
 
@@ -773,10 +809,15 @@ internal class Entity {
         if (transform.hasChanged || anticipationTaken) {
             var newPosition = _hasParent ? transform.localPosition : transform.position;
 
-            // A position is sent even when the entity has not moved, the one time this is newly true, because the
-            // player waiting on it has nothing else to wait for. It is also the whole of the answer when the scene
-            // host did nothing with what they sent - it went nowhere, and here is where it really is.
+            // A position is sent even when the entity has not moved, for as long as there are forced ones left,
+            // because the player waiting on it has nothing else to wait for. It is also the whole of the answer
+            // when the scene host did nothing with what they sent - the knockback went nowhere, and this is where
+            // the enemy really is and always was.
             if (newPosition != _lastPosition || anticipationTaken) {
+                if (_anticipationSendsLeft > 0) {
+                    _anticipationSendsLeft--;
+                }
+
                 _lastPosition = newPosition;
 
                 _netClient.UpdateManager.UpdateEntityPosition(
@@ -784,10 +825,9 @@ internal class Entity {
                     new Math_Vector2(newPosition.x, newPosition.y)
                 );
 
-                // Sent beside every position rather than only when it changes: a position may travel by the way
-                // that drops what it cannot deliver, and one dropped stamp that is never sent again is a player
-                // waiting out the whole of their timeout for something that already happened.
-                if (_incorporatedAnticipation != 0) {
+                // Beside every position for a while rather than only the once, for the same reason as above, and
+                // then not at all: nobody can still be waiting on it by then, since waiting gives up long before.
+                if (_incorporatedAnticipation != 0 && Time.unscaledTime < _anticipationStampUntil) {
                     _netClient.UpdateManager.UpdateEntityAnticipation(Id, _incorporatedAnticipation);
                 }
             }
@@ -1357,6 +1397,8 @@ internal class Entity {
         _outstandingAnticipation = 0;
         _pendingAnticipation = 0;
         _incorporatedAnticipation = 0;
+        _anticipationSendsLeft = 0;
+        _anticipationStampUntil = 0f;
         _wasAnticipating = false;
     }
 
@@ -1376,9 +1418,11 @@ internal class Entity {
     /// Whether a position of the scene host may be taken while the local game is waiting for it to take in something
     /// the local player did to this entity.
     ///
-    /// Everything uncertain here answers yes. A position that is a little old costs a little smoothing; a position
-    /// refused that should have been taken stops the entity dead, and there is no way back from that except a
-    /// timeout - a room of enemies once stood still for nine minutes on the wrong side of a gate like this one.
+    /// A position that says nothing is refused while there is something to wait for, because the whole point is
+    /// that the ones sent before the scene host heard say nothing. So the only way out that does not depend on the
+    /// scene host answering is the wait giving up, and that is why it gives up at all: a position that is a little
+    /// old costs a little smoothing, while positions refused forever stop the entity dead, and a room of enemies
+    /// once stood still for nine minutes on the wrong side of a gate like this one.
     /// </summary>
     /// <param name="anticipation">What the scene host said it had taken in, or null if it said nothing.</param>
     private bool AcceptsWhileAnticipating(byte? anticipation) {
