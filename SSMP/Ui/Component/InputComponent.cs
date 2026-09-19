@@ -130,6 +130,7 @@ internal class InputComponent : Component, IInputComponent {
         placeholderTextComponent.font = font;
         placeholderTextComponent.fontSize = fontSize;
         placeholderTextComponent.alignment = TextAnchor.MiddleCenter;
+        placeholderTextComponent.verticalOverflow = VerticalWrapMode.Overflow;
         // Make the color white with opacity so it is clearly different from inputted text
         placeholderTextComponent.color = new Color(1f, 1f, 1f, 0.5f);
 
@@ -145,6 +146,17 @@ internal class InputComponent : Component, IInputComponent {
         Text.fontSize = fontSize;
         Text.alignment = TextAnchor.MiddleCenter;
         Text.color = Color.white;
+
+        // Unity would otherwise draw nothing at all rather than draw a line taller than this box. That default is
+        // survivable in a language whose letters are short and fatal in one whose letters are not: the simplified
+        // Chinese face the game keeps needs about a sixth more height than the chat's box has, so the whole line was
+        // thrown away and the box stayed empty while the field behind it held every character that was typed.
+        //
+        // It takes the caret with it, and the caret takes more than it looks: where an input method puts its own
+        // window is written in one place only, at the end of the code that lays the caret out, behind a check that
+        // there is a line at all. So a line that is never generated leaves that at nothing, and nothing means the
+        // corner of the screen - which is why typing here looked like software from before anyone thought about it.
+        Text.verticalOverflow = VerticalWrapMode.Overflow;
 
         // Set the transform parent to the InputComponent gameObject
         textObject.transform.SetParent(GameObject.transform, false);
