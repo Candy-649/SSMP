@@ -6,6 +6,7 @@ using GlobalEnums;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
 using TeamCherry.Localization;
+using Logger = SSMP.Logging.Logger;
 
 // ReSharper disable NotAccessedField.Local
 
@@ -177,8 +178,38 @@ public static class EventHooks {
 
     /// <summary>
     /// Event that is called when HeroController.Update is called.
+    ///
+    /// The one event that everything waiting on something hangs off, so its listeners are called one at a time and
+    /// one that throws does not take the rest of them down with it. Its list is kept rather than asked for, since
+    /// asking builds an array and this runs every frame.
     /// </summary>
-    public static event Action<HeroController>? HeroControllerUpdate;
+    public static event Action<HeroController>? HeroControllerUpdate {
+        add {
+            _heroControllerUpdate += value;
+            _heroControllerUpdateListeners = _heroControllerUpdate?.GetInvocationList() ?? [];
+        }
+        remove {
+            _heroControllerUpdate -= value;
+            _heroControllerUpdateListeners = _heroControllerUpdate?.GetInvocationList() ?? [];
+        }
+    }
+
+    /// <summary>
+    /// Backing field for <see cref="HeroControllerUpdate"/>.
+    /// </summary>
+    private static Action<HeroController>? _heroControllerUpdate;
+
+    /// <summary>
+    /// The listeners of <see cref="HeroControllerUpdate"/>, kept apart so that calling them one at a time costs
+    /// nothing per frame.
+    /// </summary>
+    private static Delegate[] _heroControllerUpdateListeners = [];
+
+    /// <summary>
+    /// Which listeners of <see cref="HeroControllerUpdate"/> have thrown, so that one that throws every frame is
+    /// said once rather than sixty times a second.
+    /// </summary>
+    private static readonly HashSet<string> FailedHeroControllerUpdates = [];
 
     /// <summary>
     /// Event that executes when HeroController.Die is called
@@ -515,7 +546,22 @@ public static class EventHooks {
     private static void OnHeroControllerUpdate(Action<HeroController> orig, HeroController self) {
         orig(self);
 
-        HeroControllerUpdate?.Invoke(self);
+        // One at a time, because this is the heartbeat of the whole mod. Nearly everything that ever has to let a
+        // player go again hangs off this event - the end of a wait for the other player, the end of a line of
+        // dialogue nobody can close, the end of a ride - and calling them the ordinary way hands an exception in any
+        // one of them straight out to the game. Every listener after that one would then never run again, so a fault
+        // in the first of them could leave a player standing still for the rest of the session with nothing in the
+        // log to say why.
+        foreach (var listener in _heroControllerUpdateListeners) {
+            try {
+                ((Action<HeroController>) listener)(self);
+            } catch (Exception e) {
+                var what = $"{listener.Method.DeclaringType?.Name}#{listener.Method.Name}";
+                if (FailedHeroControllerUpdates.Add(what)) {
+                    Logger.Error($"'{what}' threw on a frame, and the rest of the mod went on without it:\n{e}");
+                }
+            }
+        }
     }
 
     private static IEnumerator OnHeroControllerDie(
