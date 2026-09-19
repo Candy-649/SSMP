@@ -1,7 +1,10 @@
 using System;
+using System.Collections;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
 
@@ -43,6 +46,7 @@ internal partial class CoopSave {
 
             var hero = HeroController.instance;
             var inside = hero != null && lift.ContainsHero(hero);
+            bool moved;
             _liftReplaying = true;
             try {
                 lift.Unlock();
@@ -51,10 +55,19 @@ internal partial class CoopSave {
                 }
 
                 // The ride of the partner started a moment ago, which the wait before the lift moves makes up for
-                lift.Move(stop, inside, (float) _netClient.UpdateManager.AverageRtt / 2000f);
+                moved = lift.Move(stop, inside, (float) _netClient.UpdateManager.AverageRtt / 2000f);
                 lift.WasMoving = lift.IsMoving;
             } finally {
                 _liftReplaying = false;
+            }
+
+            // A ride that could not be played is the two lifts parting company, and nothing here ever asked again:
+            // the partner sends a ride once, and from then on their lift is at one end and this one at the other,
+            // with no way back but leaving the room. A lift refuses only while it is locked, starting up or already
+            // part way through something, so it is worth asking again for a moment.
+            if (!moved) {
+                Logger.Info($"The lift '{update.ObjectPath}' could not take the ride of {player.Username} yet");
+                MonoBehaviourUtil.Instance.StartCoroutine(RetryLiftMove(lift, stop, player.Username));
             }
         } catch (Exception e) {
             LogLiftError(e);
@@ -109,6 +122,51 @@ internal partial class CoopSave {
     /// <summary>
     /// Sends the state of the lifts of the current room to a partner who entered it.
     /// </summary>
+    /// <summary>
+    /// Asks a lift again to take a ride of the partner that it could not take at once, for a moment.
+    /// </summary>
+    /// <param name="lift">The lift.</param>
+    /// <param name="stop">The stop the partner rode to.</param>
+    /// <param name="username">The name of the partner, for the log.</param>
+    private IEnumerator RetryLiftMove(SyncedLift lift, int stop, string username) {
+        var until = Time.unscaledTime + LiftMoveRetryTime;
+
+        while (Time.unscaledTime < until) {
+            yield return null;
+
+            if (lift.Stop == stop) {
+                yield break;
+            }
+
+            var hero = HeroController.instance;
+            var inside = hero != null && lift.ContainsHero(hero);
+            bool moved;
+            _liftReplaying = true;
+            try {
+                lift.Unlock();
+                moved = lift.Move(stop, inside, 0f);
+                lift.WasMoving = lift.IsMoving;
+            } catch (Exception e) {
+                LogLiftError(e);
+
+                yield break;
+            } finally {
+                _liftReplaying = false;
+            }
+
+            if (moved) {
+                Logger.Info($"The lift took the ride of {username} after all");
+
+                yield break;
+            }
+        }
+
+        Logger.Warn(
+            $"A lift never took the ride of {username}, so the two games have it at different stops until the room " +
+            "is left"
+        );
+    }
+
     private void OnLiftStateRequest(ClientPlayerData player, CoopSaveUpdate update) {
         if (_checkedWith != player.Id || update.Scene != SceneManager.GetActiveScene().name) {
             return;

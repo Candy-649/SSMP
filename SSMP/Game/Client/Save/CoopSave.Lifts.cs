@@ -41,6 +41,16 @@ internal partial class CoopSave {
     private const float LiftStateRequestDelay = 0.5f;
 
     /// <summary>
+    /// How long is left between saying that lifts could not be synced, in seconds.
+    /// </summary>
+    private const float LiftErrorLogTime = 10f;
+
+    /// <summary>
+    /// How long a lift is asked again to take a ride of the partner that it could not take at once, in seconds.
+    /// </summary>
+    private const float LiftMoveRetryTime = 2f;
+
+    /// <summary>
     /// How long a game that asked for the state of the lifts of its room doesn't decide about them, in seconds, unless
     /// the state arrives first.
     /// </summary>
@@ -101,6 +111,11 @@ internal partial class CoopSave {
     /// Whether an error of lifts was logged, so that it isn't logged every frame.
     /// </summary>
     private bool _liftFailed;
+
+    /// <summary>
+    /// When the last error of lifts was said.
+    /// </summary>
+    private float _liftFailedAt;
 
     /// <summary>
     /// A lift that the sync keeps in the same place in both games. Its stops count from 0.
@@ -346,13 +361,20 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Logs the first error of lifts.
+    /// Logs an error of lifts, at most every <see cref="LiftErrorLogTime"/> seconds.
+    ///
+    /// Said again rather than once ever. One throw in here stops every lift in the room from being updated at all,
+    /// every frame, for as long as it keeps throwing - and saying it once left that looking like a single stray
+    /// line in the log rather than the thing that had stopped everything.
     /// </summary>
     private void LogLiftError(Exception e) {
-        if (!_liftFailed) {
-            _liftFailed = true;
-            Logger.Error($"Could not sync a lift of the two-player save:\n{e}");
+        if (_liftFailed && Time.unscaledTime - _liftFailedAt < LiftErrorLogTime) {
+            return;
         }
+
+        _liftFailed = true;
+        _liftFailedAt = Time.unscaledTime;
+        Logger.Error($"Could not sync a lift of the two-player save:\n{e}");
     }
 
     /// <summary>
@@ -672,7 +694,17 @@ internal partial class CoopSave {
             inside = lift.ContainsHero(hero);
         }
 
-        return call.Inside ? inside : !inside && lift.IsAtStop(call.Stop, position);
+        // A partner standing on their own lift is taken at their word. Their game looked at their own hero and their
+        // own lift and said so; asking whether their body is inside the lift over here asks about a different lift,
+        // and the one moment that matters is the moment the two lifts are not in the same place. That is exactly
+        // when this was answering no: they rode up, this lift stayed down, and from then on every call they sent
+        // was thrown away on the grounds that they were not standing on a lift they were nowhere near - forever,
+        // because nothing ever asks twice. Stepping onto a lift is one event, sent once, and never sent again.
+        if (call.Inside) {
+            return !call.ByPartner || inside || partner is { IsInLocalScene: true };
+        }
+
+        return !inside && lift.IsAtStop(call.Stop, position);
     }
 
     /// <summary>
