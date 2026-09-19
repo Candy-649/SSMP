@@ -15,6 +15,10 @@ namespace SSMP.Game.Client;
 /// so the HP itself is left alone. Instead, the damage that enemies take is divided by the health multiplier. With two
 /// players an enemy takes 2/3 of the damage, which needs as many hits as 1.5 times the HP. The fraction lost to
 /// rounding carries over to the enemy's next hit, so the total stays the same.
+///
+/// One thing is left out of it: a blow that would kill an untouched creature outright still kills it. Creatures built
+/// to die to a single hit of a particular weapon are used that way by the game, and some wishes only work if they do.
+/// Since it is asked only of a creature at full health, nothing that takes more than one hit is made any easier.
 /// </summary>
 internal class EnemyHealthCoop {
     /// <summary>
@@ -134,6 +138,18 @@ internal class EnemyHealthCoop {
     private int ScaleDamage(HealthManager healthManager, int damage) {
         var multiplier = GetHealthMultiplier();
         if (damage <= 0 || multiplier <= 1f) {
+            return damage;
+        }
+
+        // A blow that was meant to kill outright still does. Some creatures are built to die to one hit of a
+        // particular weapon, and some wishes are written around that being true - so scaling that one hit down turns
+        // something that was designed as a single action into a fight, or into something that cannot be done at all.
+        //
+        // Only a full-strength blow on a creature that has not been touched counts. Nothing else is made easier by
+        // it: a creature that takes three hits alone still takes five together, because by the second hit it is no
+        // longer whole and this is not asked again. It is only the one that was never meant to take more than one
+        // that is left alone.
+        if (healthManager.initHp > 0 && healthManager.hp >= healthManager.initHp && damage >= healthManager.hp) {
             return damage;
         }
 
