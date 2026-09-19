@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Hooks;
 using SSMP.Networking.Packet.Data;
@@ -601,6 +602,99 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The value of <see cref="AutoRecycleSelf.afterEvent"/> that has the effect taken away by a timer running out.
+    /// </summary>
+    private const int EffectEndedByTimer = 0;
+
+    /// <summary>
+    /// The value of <see cref="AutoRecycleSelf.afterEvent"/> that has the effect taken away when its animation stops.
+    /// </summary>
+    private const int EffectEndedByAnimation = 1;
+
+    /// <summary>
+    /// The value of <see cref="AutoRecycleSelf.afterEvent"/> that has nothing take the effect away at all.
+    /// </summary>
+    private const int EffectEndedByNothing = 2;
+
+    /// <summary>
+    /// Whether an effect that is playing now has any way of ending itself.
+    ///
+    /// Read from <c>AutoRecycleSelf.RecycleUpdate</c>, which is one switch over <see cref="AutoRecycleSelf.afterEvent"/>
+    /// and nothing else. The names of that enumeration are not in the game's own libraries for us to write here, so
+    /// the numbers stand, and what each of them does is written next to it.
+    ///
+    /// The two values not named here count frames instead, and are left alone: an effect counting frames is an
+    /// effect that is going to end, and this is not the place to decide it has waited long enough.
+    /// </summary>
+    /// <param name="recycler">The effect to judge.</param>
+    /// <returns>Whether it can still put itself back in the pool.</returns>
+    private static bool CanEffectEndItself(AutoRecycleSelf recycler) {
+        return (int) recycler.afterEvent switch {
+            // A timer that was never started never runs out, and the branch reads the flag before the clock
+            EffectEndedByTimer => recycler.recycleTimerRunning,
+            // Likewise: without an animator there is no animation to end
+            EffectEndedByAnimation => recycler.hasTk2dAnimator,
+            EffectEndedByNothing => false,
+            _ => true
+        };
+    }
+
+    /// <summary>
+    /// Takes away the effects that were playing when the player died and that nothing will ever take away by itself.
+    ///
+    /// Every effect the game draws from its pool carries an <see cref="AutoRecycleSelf"/> saying what ends it: a
+    /// timer, the end of an animation, a count of frames - or, for one of the values, nothing at all. The ones ended
+    /// by nothing are not a mistake and are not leaks. They are held up by the one thing that clears all of them at
+    /// once, which is the change of room: <c>GameManager.SetupGameRefs</c> hands
+    /// <c>AutoRecycleSelf.RecycleActiveRecyclers</c> to <c>NextSceneWillActivate</c>, and that recycles every effect
+    /// that is playing, whatever it says about itself. A pooled effect outlives the unloading of a scene - the pool it
+    /// belongs to is not part of the scene - so without that hook they would follow the player into the next room.
+    ///
+    /// An ordinary death changes rooms, so an ordinary death clears them. A death that is held for the other player to
+    /// answer never changes rooms, and so it never clears them: whatever was covering the player when they died is
+    /// still covering them when they are pulled back up, and stays there until they walk out of the room. That was the
+    /// screen full of smoke.
+    ///
+    /// Only the ones with no way of ending themselves are taken, not the whole list the room change takes. Everything
+    /// else was going to be gone within a second or two on its own, and taking it as well would mean answering a death
+    /// by wiping the room - including whatever the other player has in the air at that moment.
+    /// </summary>
+    private static void ClearStuckEffects() {
+        var stuck = new List<AutoRecycleSelf>();
+
+        // Copied before any of it is touched, because putting one back in the pool takes it out of this same list
+        try {
+            foreach (var recycler in AutoRecycleSelf.activeRecyclers) {
+                if (recycler != null && !CanEffectEndItself(recycler)) {
+                    stuck.Add(recycler);
+                }
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not look over the effects the death left playing: {e.Message}");
+
+            return;
+        }
+
+        var cleared = 0;
+        foreach (var recycler in stuck) {
+            try {
+                if (recycler == null) {
+                    continue;
+                }
+
+                recycler.ForceRecycle();
+                cleared++;
+            } catch (Exception e) {
+                Logger.Warn($"Could not return an effect the death left playing to the pool: {e.Message}");
+            }
+        }
+
+        if (cleared > 0) {
+            Logger.Info($"Took away {cleared} effect(s) the death left playing that nothing would have ended");
+        }
+    }
+
+    /// <summary>
     /// Gives the player their screen back after the death darkened it.
     ///
     /// A death ends with the whole screen black and the heads-up display slid away, and it stays that way on purpose:
@@ -742,6 +836,7 @@ internal partial class CoopSave {
             }
 
             ClearDeathEffect();
+            ClearStuckEffects();
             RestoreMusic(rescue);
 
             hero.gameObject.layer = 9;
