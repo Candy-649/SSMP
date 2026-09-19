@@ -359,7 +359,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>
     /// <param name="anticipation">The number of the last thing the scene host has taken in.</param>
-    public void UpdateEntityAnticipation(ushort entityId, ushort anticipation) {
+    public void UpdateEntityAnticipation(ushort entityId, byte anticipation) {
         lock (Lock) {
             var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ClientUpdatePacketId.EntityUpdate);
             entityUpdate!.UpdateTypes.Add(EntityUpdateType.Anticipation);

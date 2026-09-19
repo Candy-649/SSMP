@@ -197,8 +197,15 @@ internal class EntityManager {
             return false;
         }
 
+        // The stamp travels beside the position it describes rather than on its own, so it is read out here and
+        // handed over with it. An update that carries none says nothing either way, which is not the same as saying
+        // the scene host has taken nothing in.
+        var anticipation = update.UpdateTypes.Contains(EntityUpdateType.Anticipation)
+            ? update.Anticipation
+            : (byte?) null;
+
         if (update.UpdateTypes.Contains(EntityUpdateType.Position))
-            entity.UpdatePosition(update.Position, update.ReceivedSequence);
+            entity.UpdatePosition(update.Position, update.ReceivedSequence, anticipation);
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Scale))
             entity.UpdateScale(update.Scale);

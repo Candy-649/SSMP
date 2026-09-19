@@ -66,26 +66,62 @@ internal class Entity {
     private int _positionsHeldBack;
 
     /// <summary>
-    /// Whether a knockback of the local player was moving this entity on the last frame, which says when one has
-    /// just ended and the interpolation is about to take the entity over again.
+    /// Whether something the local player did to this entity was still waiting to come back from the scene host on
+    /// the last frame, which says when one has just stopped and the interpolation is about to take the entity over
+    /// again.
     /// </summary>
-    private bool _wasRecoilPredicted;
+    private bool _wasAnticipating;
 
     /// <summary>
-    /// The last position the scene host sent for this entity, whether it was taken or held back, which the next one
-    /// is measured against.
+    /// The number the next thing the local player does to this entity before telling the scene host goes under.
+    /// Zero is kept for "nothing", so it is skipped when the count comes round.
     /// </summary>
-    private Vector2 _lastSeenPosition;
+    private byte _nextAnticipation;
 
     /// <summary>
-    /// Whether the scene host has sent a position for this entity at all, without which there is no step to measure.
+    /// The number of the last thing the local player did to this entity that the scene host has not said it has
+    /// taken in yet, or zero when there is nothing to wait for.
     /// </summary>
-    private bool _hasSeenPosition;
+    private byte _outstandingAnticipation;
+
+    /// <summary>
+    /// When the wait for <see cref="_outstandingAnticipation"/> is given up on, whatever the scene host has said.
+    /// </summary>
+    private float _outstandingExpiry;
+
+    /// <summary>
+    /// The number of the last thing a scene client did to this entity that the scene host has been told about but
+    /// which nothing it has sent since can show yet, or zero when there is none.
+    /// </summary>
+    private byte _pendingAnticipation;
+
+    /// <summary>
+    /// The step of physics the game was on when <see cref="_pendingAnticipation"/> was taken in. Nothing set in
+    /// motion has moved until a step after that one.
+    /// </summary>
+    private uint _pendingSinceStep;
+
+    /// <summary>
+    /// The number of the last thing a scene client did to this entity which what the scene host sends now has in it.
+    /// </summary>
+    private byte _incorporatedAnticipation;
 
     /// <summary>
     /// Which positions of this entity are newer than the one it is standing at.
     /// </summary>
     private readonly PositionSequence _positionSequence;
+
+    /// <summary>
+    /// How long the positions of the scene host are held back while something the local player did to this entity is
+    /// still on its way there and back, at the very most.
+    ///
+    /// Only reached when the scene host never says anything about it at all, which takes it leaving or the room
+    /// changing under it: everything that can really happen comes back inside a round trip, answered or refused. It
+    /// is a whole second because a bound tight enough to cut a round trip short would throw the wait away on exactly
+    /// the connections it was written for, and because nothing worse than an entity standing still for a moment is
+    /// on the other side of it.
+    /// </summary>
+    private const float AnticipationHoldTime = 1f;
 
     /// <summary>
     /// The ID of the entity.
@@ -696,18 +732,19 @@ internal class Entity {
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
                 interpolation.AdaptToRTT(_netClient.UpdateManager.AverageRtt);
 
-                // A knockback from a hit of the local player moves the object until it ends, then it blends back
-                var recoilPredicted = CoopHits.IsRecoilPredicted(Object.Client);
-                if (_wasRecoilPredicted && !recoilPredicted) {
-                    // Nothing wrote this object while the knockback ran, so the interpolation carried on predicting
-                    // from where the enemy stood before it. Picking that up again would put the enemy back there in
-                    // a single frame, which is the whole of what the knockback was held for, so where it is standing
-                    // now is handed over as what it should go on looking like.
+                // While something the local player did to this entity is still on its way to the scene host and
+                // back, what the local game did is what moves it, and the interpolation stays out of the way
+                var anticipating = IsAnticipating();
+                if (_wasAnticipating && !anticipating) {
+                    // Nothing wrote this object while that was going on, so the interpolation carried on predicting
+                    // from where the entity stood before any of it. Picking that up again would put it back there in
+                    // a single frame, which is the whole of what the wait was for, so where it is standing now is
+                    // handed over as what it should go on looking like.
                     interpolation.KeepVisualPosition();
                 }
 
-                _wasRecoilPredicted = recoilPredicted;
-                if (!recoilPredicted) {
+                _wasAnticipating = anticipating;
+                if (!anticipating) {
                     interpolation.ManualUpdate(Time.deltaTime);
                 }
             }
@@ -719,18 +756,40 @@ internal class Entity {
             entityComponent.OnUpdate();
         }
 
+        // Something a scene client did to this entity has now had a step of physics to take effect, so from here on
+        // what is sent has it in it and may say so. A step is what is waited for rather than a frame, because almost
+        // nothing in this game moves outside one: the frame that starts a knockback leaves the enemy standing
+        // exactly where it was hit, and saying it had taken that knockback in would be worse than saying nothing.
+        var anticipationTaken = false;
+        if (_pendingAnticipation != 0 && MonoBehaviourUtil.FixedStep > _pendingSinceStep) {
+            _incorporatedAnticipation = _pendingAnticipation;
+            _pendingAnticipation = 0;
+            anticipationTaken = true;
+        }
+
         var transform = Object.Host.transform;
 
         // Unity already tracks transform mutations; avoid re-reading and comparing position/scale on quiet frames.
-        if (transform.hasChanged) {
+        if (transform.hasChanged || anticipationTaken) {
             var newPosition = _hasParent ? transform.localPosition : transform.position;
-            if (newPosition != _lastPosition) {
+
+            // A position is sent even when the entity has not moved, the one time this is newly true, because the
+            // player waiting on it has nothing else to wait for. It is also the whole of the answer when the scene
+            // host did nothing with what they sent - it went nowhere, and here is where it really is.
+            if (newPosition != _lastPosition || anticipationTaken) {
                 _lastPosition = newPosition;
 
                 _netClient.UpdateManager.UpdateEntityPosition(
                     Id,
                     new Math_Vector2(newPosition.x, newPosition.y)
                 );
+
+                // Sent beside every position rather than only when it changes: a position may travel by the way
+                // that drops what it cannot deliver, and one dropped stamp that is never sent again is a player
+                // waiting out the whole of their timeout for something that already happened.
+                if (_incorporatedAnticipation != 0) {
+                    _netClient.UpdateManager.UpdateEntityAnticipation(Id, _incorporatedAnticipation);
+                }
             }
 
             const float epsilon = 0.0001f;
@@ -1027,6 +1086,9 @@ internal class Entity {
     /// Initializes the entity when the client user is the scene host.
     /// </summary>
     public void InitializeHost(uint sceneHostEpoch = 0) {
+        // Nothing said under the numbering of a game that is no longer the one answering means anything here
+        ResetAnticipation();
+
         Object.Host.SetActive(_originalIsActive);
 
         // Also update the last active variable to account for this potential change
@@ -1057,6 +1119,8 @@ internal class Entity {
     /// host has been determined.
     /// </summary>
     public void InitializeClient(uint sceneHostEpoch = 0) {
+        ResetAnticipation();
+
         _isSceneHostDetermined = true;
 
         // Deregister the hook for updating the active value of the host object
@@ -1072,6 +1136,8 @@ internal class Entity {
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
+        ResetAnticipation();
+
         //Logger.Info($"Making entity ({Id}, {Type}) a host entity");
 
         // If the client object is null, we don't have to care about doing anything for the host object anymore
@@ -1249,11 +1315,98 @@ internal class Entity {
     }
 
     /// <summary>
+    /// Takes the number for something the local player is about to do to this entity before the scene host has heard
+    /// of it, and starts waiting for the scene host to say it has taken it in.
+    /// </summary>
+    /// <returns>The number to send with it.</returns>
+    public byte BeginAnticipation() {
+        // Zero is kept for "nothing", so the count goes round to one rather than to it
+        _nextAnticipation = (byte) (_nextAnticipation == byte.MaxValue ? 1 : _nextAnticipation + 1);
+        _outstandingAnticipation = _nextAnticipation;
+        _outstandingExpiry = Time.unscaledTime + AnticipationHoldTime;
+
+        return _outstandingAnticipation;
+    }
+
+    /// <summary>
+    /// Stops waiting on the last number taken, for something that turned out not to be done after all.
+    /// </summary>
+    public void EndAnticipation() {
+        _outstandingAnticipation = 0;
+    }
+
+    /// <summary>
+    /// Notes that the scene host has been told of something a scene client did to this entity, which what it sends
+    /// will have in it a step of physics from now.
+    /// </summary>
+    /// <param name="anticipation">The number it was sent under.</param>
+    public void NoteAnticipation(byte anticipation) {
+        if (anticipation == 0) {
+            return;
+        }
+
+        _pendingAnticipation = anticipation;
+        _pendingSinceStep = MonoBehaviourUtil.FixedStep;
+    }
+
+    /// <summary>
+    /// Forgets both sides of this, for an entity that is changing hands or starting again. A number from before the
+    /// change means nothing after it: the game that would have answered it is not the one answering now.
+    /// </summary>
+    private void ResetAnticipation() {
+        _outstandingAnticipation = 0;
+        _pendingAnticipation = 0;
+        _incorporatedAnticipation = 0;
+        _wasAnticipating = false;
+    }
+
+    /// <summary>
+    /// Whether something the local player did to this entity is still waiting to come back from the scene host,
+    /// giving up on it once it has waited longer than anything can take.
+    /// </summary>
+    private bool IsAnticipating() {
+        if (_outstandingAnticipation != 0 && Time.unscaledTime > _outstandingExpiry) {
+            _outstandingAnticipation = 0;
+        }
+
+        return _outstandingAnticipation != 0;
+    }
+
+    /// <summary>
+    /// Whether a position of the scene host may be taken while the local game is waiting for it to take in something
+    /// the local player did to this entity.
+    ///
+    /// Everything uncertain here answers yes. A position that is a little old costs a little smoothing; a position
+    /// refused that should have been taken stops the entity dead, and there is no way back from that except a
+    /// timeout - a room of enemies once stood still for nine minutes on the wrong side of a gate like this one.
+    /// </summary>
+    /// <param name="anticipation">What the scene host said it had taken in, or null if it said nothing.</param>
+    private bool AcceptsWhileAnticipating(byte? anticipation) {
+        if (!IsAnticipating()) {
+            return true;
+        }
+
+        // Compared by the sign of the difference in the size the numbers are kept in, so that the step from the
+        // largest back round to one reads as one forward rather than as the whole way back
+        if (anticipation is { } stamp && stamp != 0 && (sbyte) (stamp - _outstandingAnticipation) >= 0) {
+            _outstandingAnticipation = 0;
+
+            return true;
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Updates the position of the client entity.
     /// </summary>
     /// <param name="position">The new position.</param>
     /// <param name="sequence">The sequence number of the packet it arrived in.</param>
-    public void UpdatePosition(Math_Vector2 position, ushort sequence) {
+    /// <param name="anticipation">
+    /// How far the scene host had got through what the local player did to this entity when it sent this, or null if
+    /// it didn't say.
+    /// </param>
+    public void UpdatePosition(Math_Vector2 position, ushort sequence, byte? anticipation) {
         // An older position arriving after a newer one is thrown away: nothing below this transport orders what it
         // carries, so one that had to be sent again lands after ones sent later, and applying it puts the entity
         // back where it was that much earlier.
@@ -1277,23 +1430,14 @@ internal class Entity {
             return;
         }
 
-        // While a knockback of the local player is moving this enemy, the positions the scene host sends were
-        // measured before it had even heard about the hit. Letting those through was the whole of the problem: the
-        // interpolation went on being told the enemy was standing where it had been, and pulled it straight back
-        // there - in front of a player who had just hit it, in a game where walking into an enemy hurts. They are
-        // counted and dropped until one of them shows the knockback, and the count goes with the first position
-        // that is taken afterwards so that the speed read out of it covers the right stretch of time rather than a
-        // single tick.
-        // Every position is remembered, taken or not, because what says a knockback has reached the scene host is
-        // the size of one step of its positions. Measuring from where the enemy stood when it was hit would not: the
-        // wait can last a round trip, and an enemy that happens to be walking that way covers any distance given
-        // that long.
-        var arrived = new Vector2(unityPos.x, unityPos.y);
-        var step = _hasSeenPosition ? arrived - _lastSeenPosition : Vector2.zero;
-        _lastSeenPosition = arrived;
-        _hasSeenPosition = true;
-
-        if (!CoopHits.AcceptsPosition(Object.Client, step)) {
+        // While something the local player did to this entity is still on its way to the scene host and back, the
+        // positions it sends were measured before it had even heard. Letting those through was the whole of the
+        // problem: the interpolation went on being told the enemy was standing where it had been, and pulled it
+        // straight back there - in front of a player who had just hit it, in a game where walking into an enemy
+        // hurts. They are counted and dropped until the scene host says it has taken that in, and the count goes
+        // with the first position taken afterwards so that the speed read out of it covers the right stretch of
+        // time rather than a single tick.
+        if (!AcceptsWhileAnticipating(anticipation)) {
             _positionsHeldBack++;
 
             return;

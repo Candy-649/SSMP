@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 using GlobalEnums;
@@ -31,71 +32,6 @@ internal class CoopHits {
     /// Binding flags for the instance methods that are hooked.
     /// </summary>
     private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-
-    /// <summary>
-    /// The longest that the positions of an enemy that the scene host controls are held back while a knockback of the
-    /// local player moves it, in seconds, when nothing else ever ends the wait.
-    ///
-    /// Nothing else ending it means the answer of the scene host never came at all, which takes the partner leaving
-    /// or the room changing under it. It is long on purpose. Everything that can really happen - the answer, and a
-    /// position that shows the knockback - arrives inside a round trip, and a round trip across the world plus the
-    /// ticks and frames on both sides is most of half a second before anything has gone wrong. A bound tight enough
-    /// to cut that short would throw the wait away exactly on the connections it was written for.
-    /// </summary>
-    private const float MaxRecoilHoldTime = 1f;
-
-    /// <summary>
-    /// How much time an answer of yes from the scene host makes sure is left to wait in, in seconds.
-    ///
-    /// It only ever adds. An answer of yes says the knockback is running over there and a position showing it is on
-    /// its way, so a wait that was about to run out gets enough room for it to arrive - but a wait with more than
-    /// this left keeps what it had. The first version of this cut the wait down to this length instead, which threw
-    /// away most of the time on exactly the slow connections where the position needs the longest to come back.
-    /// </summary>
-    private const float AnsweredRecoilHoldTime = 0.35f;
-
-    /// <summary>
-    /// The least that one step of the scene host's positions has to carry an enemy along the way it was knocked, in
-    /// units, before those positions are taken again.
-    ///
-    /// This replaced waiting for a round trip to pass, which could not be measured: the round trip that is known here
-    /// is the one to the server, and the player who is hosting it has that one over a loopback, so for them it is
-    /// nearly nothing while the trip that actually matters - to the other player and back - is the whole width of the
-    /// world. Asking the positions instead asks the thing we actually want to know, of the same positions either
-    /// player is looking at.
-    ///
-    /// It is one step rather than the distance from where the enemy was hit, because an enemy that happens to be
-    /// walking the way it was knocked covers any such distance by itself given long enough - and the wait can be a
-    /// round trip long. A knockback is not a walk: it is one large step. This is a floor under the size of that step
-    /// for the weakest knockbacks, and <see cref="RecoilStepShare"/> sets it from the knockback itself otherwise.
-    /// </summary>
-    private const float MinRecoilStep = 0.1f;
-
-    /// <summary>
-    /// How much of the distance a knockback covers in one frame of physics a step of the scene host's positions has
-    /// to carry the enemy before those positions are taken again.
-    ///
-    /// Less than all of it, because a step of those positions is not lined up with a frame of physics and may hold
-    /// none of one or most of one. A small enemy is knocked at fifteen units a second and walks at about four, so
-    /// most of one frame of knockback is several times any step that walking makes.
-    /// </summary>
-    private const float RecoilStepShare = 0.6f;
-
-    /// <summary>
-    /// The direction of a knockback towards the right, as <see cref="Recoil.RecoilByDirection"/> takes it. The other
-    /// three follow anticlockwise, which is how the game's own blocked-direction checks read them.
-    /// </summary>
-    private const int RecoilRight = 0;
-
-    /// <summary>
-    /// The direction of a knockback upwards.
-    /// </summary>
-    private const int RecoilUp = 1;
-
-    /// <summary>
-    /// The direction of a knockback towards the left.
-    /// </summary>
-    private const int RecoilLeft = 2;
 
     /// <summary>
     /// The types of objects whose hits are replayed: objects of the world that both players share. Objects that give
@@ -133,51 +69,6 @@ internal class CoopHits {
     /// Whether hits on objects of a type are replayed, for the types that were looked up.
     /// </summary>
     private static readonly Dictionary<Type, bool> IsReplayedByType = new();
-
-    /// <summary>
-    /// A knockback of an enemy that the scene host controls which the local game predicts.
-    /// </summary>
-    /// <param name="axis">The way the enemy was knocked.</param>
-    /// <param name="expiry">The time at which the prediction ends even if nothing ever shows the knockback.</param>
-    /// <param name="id">The number this knockback was sent under.</param>
-    /// <param name="minStep">The least one step of the scene host's positions has to carry the enemy along it.</param>
-    private readonly struct PredictedRecoil(Vector2 axis, float expiry, byte id, float minStep) {
-        /// <summary>
-        /// The least that one step of the positions of the scene host has to carry the enemy along
-        /// <see cref="Axis"/> for that step to be this knockback rather than the enemy walking.
-        /// </summary>
-        public float MinStep { get; } = minStep;
-
-        /// <summary>
-        /// The number this knockback was sent under, which the answer of the scene host comes back with. Without it
-        /// the answer to a knockback could end the wait for the next one, and hitting an enemy twice in a row is the
-        /// ordinary way of hitting it.
-        /// </summary>
-        public byte Id { get; } = id;
-
-        /// <summary>
-        /// The way the enemy was knocked, as a unit vector. A position of the scene host that has the enemy far
-        /// enough along it is one that was measured after the knockback reached there, which is the only thing that
-        /// tells the two apart: every position sent before it has the enemy still standing where it was hit.
-        /// </summary>
-        public Vector2 Axis { get; } = axis;
-
-        /// <summary>
-        /// The time at which the prediction ends even if no position ever shows the knockback.
-        /// </summary>
-        public float Expiry { get; } = expiry;
-    }
-
-    /// <summary>
-    /// The knockbacks of enemies that the scene host controls which the local game predicts.
-    /// </summary>
-    private static readonly Dictionary<Recoil, PredictedRecoil> PredictedRecoils = new();
-
-    /// <summary>
-    /// The number the next knockback sent to the scene host goes under, so that its answer can be told from the
-    /// answer to the one before it. It goes round at 256, which is further back than any answer can still arrive.
-    /// </summary>
-    private static byte _nextKnockbackId;
 
     /// <summary>
     /// The net client for sending hits.
@@ -307,7 +198,6 @@ internal class CoopHits {
         _hooks.Clear();
         _isReplaying = false;
         _hitContext = HitContext.None;
-        PredictedRecoils.Clear();
 
         if (_hitSource != null) {
             Object.Destroy(_hitSource);
@@ -338,11 +228,6 @@ internal class CoopHits {
 
         if (update.Kind == CoopHitKind.EnemyHitEffect) {
             ApplyHitEffect(update);
-            return;
-        }
-
-        if (update.Kind == CoopHitKind.EnemyKnockbackAnswer) {
-            OnKnockbackAnswer(update);
             return;
         }
 
@@ -549,10 +434,11 @@ internal class CoopHits {
         // here would be a second hit that never happened. What a copy used to do was take the whole hit and put the
         // health back afterwards, which left behind everything a hit does apart from health - the event it sends to
         // the enemy's own state machine, and the rounding that the co-op damage split carries to the next hit.
-        ushort enemyId = 0;
+        Entity.Entity? enemyEntity = null;
         var isEnemyEntity = responder is Component enemyComponent &&
                             enemyComponent.TryGetComponent<HealthManager>(out _) &&
-                            TryGetEntity(enemyComponent.gameObject, out enemyId, out _);
+                            TryGetEntity(enemyComponent.gameObject, out enemyEntity, out _);
+        var enemyId = enemyEntity?.Id ?? 0;
 
         if (isEnemyEntity && isRemote) {
             return IHitResponder.Response.None;
@@ -583,7 +469,7 @@ internal class CoopHits {
     /// </summary>
     private void OnRecoilByDirection(Action<Recoil, int, float> orig, Recoil self, int direction, float magnitude) {
         if (_hitContext == HitContext.None || _getPartnerId() is not { } partnerId ||
-            !TryGetEntity(self.gameObject, out var entityId, out var isClientCopy)) {
+            !TryGetEntity(self.gameObject, out var entity, out var isClientCopy)) {
             orig(self, direction, magnitude);
             return;
         }
@@ -598,22 +484,16 @@ internal class CoopHits {
             return;
         }
 
-        // The scene host gets it either way, since the knockback can also freeze the enemy or stop early here. Sent
-        // before anything is predicted, because a knockback that cannot be sent is one the scene host will never
-        // make: predicting that one only takes the enemy away from where it really is and puts it back afterwards.
-        var id = _nextKnockbackId++;
-        var sent = SendKnockback(partnerId, entityId, direction, magnitude, id);
-
-        // The enemy moves here until the positions of the scene host show the same knockback. One that doesn't move
-        // it at all, and one that holds it still where it stands, have nothing for those positions to show.
-        var speed = self.RecoilSpeedBase * magnitude;
-        if (sent && self.IsRecoiling && !self.FreezeInPlace && speed > 0f) {
-            PredictedRecoils[self] = new PredictedRecoil(
-                RecoilAxis(direction),
-                Time.unscaledTime + MaxRecoilHoldTime,
-                id,
-                Mathf.Max(MinRecoilStep, speed * Time.fixedDeltaTime * RecoilStepShare)
-            );
+        // The number goes on the knockback and comes back on the positions of the scene host, which is the whole of
+        // how the enemy stops being pulled back to where it was hit: until that number comes back, every position
+        // from over there was measured before the hit had arrived, and after it they all have the hit in them.
+        //
+        // Taken before the knockback is sent so that it goes with it, and only kept if it was sent: a knockback that
+        // cannot be sent is one the scene host will never make, and waiting for it to come back would hold the enemy
+        // away from where it really is for the whole of the timeout.
+        var id = entity.BeginAnticipation();
+        if (!SendKnockback(partnerId, entity.Id, direction, magnitude, id)) {
+            entity.EndAnticipation();
         }
     }
 
@@ -621,23 +501,27 @@ internal class CoopHits {
     /// Finds the entity whose host or client object is the given object.
     /// </summary>
     /// <param name="gameObject">The object.</param>
-    /// <param name="entityId">The ID of the entity.</param>
+    /// <param name="found">The entity.</param>
     /// <param name="isClientCopy">Whether the object is the client object, which the scene host controls.</param>
     /// <returns>Whether the object belongs to an entity.</returns>
-    private bool TryGetEntity(GameObject gameObject, out ushort entityId, out bool isClientCopy) {
-        entityId = 0;
+    private bool TryGetEntity(
+        GameObject gameObject,
+        [NotNullWhen(true)] out Entity.Entity? found,
+        out bool isClientCopy
+    ) {
+        found = null;
         isClientCopy = false;
 
         try {
             foreach (var entity in _entityManager.ActiveEntities) {
                 if (entity.Object.Client == gameObject) {
-                    entityId = entity.Id;
+                    found = entity;
                     isClientCopy = true;
                     return true;
                 }
 
                 if (entity.Object.Host == gameObject) {
-                    entityId = entity.Id;
+                    found = entity;
                     return true;
                 }
             }
@@ -649,13 +533,28 @@ internal class CoopHits {
     }
 
     /// <summary>
+    /// Finds the entity with the given ID.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity.</param>
+    /// <returns>The entity, or null if no entity in the scene has that ID.</returns>
+    private Entity.Entity? FindEntity(ushort entityId) {
+        foreach (var entity in _entityManager.ActiveEntities) {
+            if (entity.Id == entityId) {
+                return entity;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Sends the knockback of a hit of the local player on an enemy that the scene host controls to the partner.
     /// </summary>
     /// <param name="partnerId">The ID of the partner.</param>
     /// <param name="entityId">The ID of the entity that was knocked back.</param>
     /// <param name="direction">The way it was knocked.</param>
     /// <param name="magnitude">How hard it was knocked.</param>
-    /// <param name="id">The number to send it under, which its answer comes back with.</param>
+    /// <param name="id">The number to send it under, which comes back stamped on the positions that have it.</param>
     /// <returns>Whether it was sent, which is whether there is anyone there to make it happen.</returns>
     private bool SendKnockback(ushort partnerId, ushort entityId, int direction, float magnitude, byte id) {
         if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
@@ -698,97 +597,23 @@ internal class CoopHits {
             return;
         }
 
-        // Every way out of here answers, the ones that do nothing most of all. The game that sent this is holding
-        // the positions of that enemy back until its knockback shows in them, and a knockback nobody applied is the
-        // one case where it would wait for something that is never coming.
-        if (!_entityManager.IsSceneHost) {
-            AnswerKnockback(update.PlayerId, update.EntityId, id, false);
+        if (!_entityManager.IsSceneHost || FindEntity(update.EntityId) is not { } entity) {
             return;
         }
 
-        GameObject? enemy = null;
-        foreach (var entity in _entityManager.ActiveEntities) {
-            if (entity.Id == update.EntityId) {
-                enemy = entity.Object.Host;
-                break;
-            }
-        }
-
+        // Every way out from here notes the number, the ways that do nothing most of all. The game that sent this
+        // is holding the positions of that enemy back until this number comes back to it, and a knockback nobody
+        // applied is the one case where it would wait for something that is never coming - so it is sent back with
+        // the next position, which is where the enemy really is and always was.
+        var enemy = entity.Object.Host;
         if (enemy == null || !enemy.activeInHierarchy || !enemy.TryGetComponent<Recoil>(out var recoil) ||
             enemy.TryGetComponent<HealthManager>(out var healthManager) && healthManager.GetIsDead()) {
-            AnswerKnockback(update.PlayerId, update.EntityId, id, false);
+            entity.NoteAnticipation(id);
             return;
         }
 
         recoil.RecoilByDirection(direction, magnitude);
-
-        // What the enemy is doing once that returns is the only honest answer: a direction that is blocked, a
-        // knockback weaker than one already running, and one that holds the enemy still where it stands all come
-        // back out of it having moved nothing.
-        AnswerKnockback(update.PlayerId, update.EntityId, id, recoil.IsRecoiling && !recoil.FreezeInPlace);
-    }
-
-    /// <summary>
-    /// Tells the partner whether the knockback they sent was applied to the enemy here. Their game holds the
-    /// positions of that enemy back until its knockback shows in one of them, and this is the only thing that can
-    /// tell it when no knockback happened at all.
-    /// </summary>
-    /// <param name="partnerId">The ID of the partner who sent the knockback.</param>
-    /// <param name="entityId">The ID of the entity it was for.</param>
-    /// <param name="id">The number the knockback was sent under.</param>
-    /// <param name="applied">Whether the enemy was knocked back here.</param>
-    private void AnswerKnockback(ushort partnerId, ushort entityId, byte id, bool applied) {
-        if (!_netClient.IsConnected) {
-            return;
-        }
-
-        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
-            TargetId = partnerId,
-            Kind = CoopHitKind.EnemyKnockbackAnswer,
-            EntityId = entityId,
-            Hit = [id, applied ? (byte) 1 : (byte) 0]
-        });
-    }
-
-    /// <summary>
-    /// The scene host said whether it knocked an enemy back the way a hit of the local player did here.
-    /// </summary>
-    private void OnKnockbackAnswer(CoopHitUpdate update) {
-        if (update.Hit.Length < 2) {
-            return;
-        }
-
-        GameObject? clientObject = null;
-        foreach (var entity in _entityManager.ActiveEntities) {
-            if (entity.Id == update.EntityId) {
-                clientObject = entity.Object.Client;
-                break;
-            }
-        }
-
-        // An answer to an earlier knockback of the same enemy is thrown away rather than let to end the wait for the
-        // one running now, since hitting an enemy twice in a row is the ordinary way of hitting it
-        if (clientObject == null || !TryGetPredictedRecoil(clientObject, out var recoil) ||
-            recoil.Prediction.Id != update.Hit[0]) {
-            return;
-        }
-
-        // Nothing was knocked back there, so no position can ever show it and there is nothing left to wait for. The
-        // enemy goes back to standing where the scene host says it does, which is where it really is.
-        if (update.Hit[1] == 0) {
-            PredictedRecoils.Remove(recoil.Component);
-            return;
-        }
-
-        // It was, so the position that shows it is on its way and a wait about to run out is given room for it to
-        // arrive. Only ever room added: a wait with longer left than this keeps what it had, because how long the
-        // position still needs is a trip across the world and nothing here knows how long that is.
-        PredictedRecoils[recoil.Component] = new PredictedRecoil(
-            recoil.Prediction.Axis,
-            Mathf.Max(recoil.Prediction.Expiry, Time.unscaledTime + AnsweredRecoilHoldTime),
-            recoil.Prediction.Id,
-            recoil.Prediction.MinStep
-        );
+        entity.NoteAnticipation(id);
     }
 
     /// <summary>
@@ -849,94 +674,6 @@ internal class CoopHits {
 
         hit.Source = GetHitSource(source);
         receiver.ReceiveHitEffect(hit);
-    }
-
-    /// <summary>
-    /// The unit vector of a direction that <see cref="Recoil.RecoilByDirection"/> was given.
-    /// </summary>
-    private static Vector2 RecoilAxis(int direction) {
-        return direction switch {
-            RecoilUp => Vector2.up,
-            RecoilLeft => Vector2.left,
-            RecoilRight => Vector2.right,
-            _ => Vector2.down
-        };
-    }
-
-    /// <summary>
-    /// Whether the given client object of an entity moves with a knockback that a hit of the local player started, so
-    /// that its position is its own rather than the one the scene host last sent.
-    /// </summary>
-    public static bool IsRecoilPredicted(GameObject clientObject) {
-        return TryGetPredictedRecoil(clientObject, out _);
-    }
-
-    /// <summary>
-    /// Whether a position that the scene host sent for an enemy may be taken, which it may not while a knockback of
-    /// the local player is moving that enemy and the position doesn't show that knockback yet.
-    ///
-    /// Every position the scene host sends between the hit and the knockback arriving there has the enemy standing
-    /// where it was hit. Taking one of those pulls the enemy straight back into the player who just hit it, in a game
-    /// where walking into an enemy hurts. Waiting for a fixed time instead was the first attempt and it cannot work:
-    /// the only round trip this game can measure is its own one to the server, which for the player hosting it is a
-    /// loopback and nearly nothing. So the wait ends on the positions themselves - the first one that has the enemy
-    /// far enough along the way it was knocked is one that was measured after the knockback got there.
-    /// </summary>
-    /// <param name="clientObject">The client object of the entity.</param>
-    /// <param name="step">How far the enemy moved between the position before this one and this one.</param>
-    /// <returns>Whether to take the position.</returns>
-    public static bool AcceptsPosition(GameObject clientObject, Vector2 step) {
-        if (!TryGetPredictedRecoil(clientObject, out var recoil)) {
-            return true;
-        }
-
-        if (Vector2.Dot(step, recoil.Prediction.Axis) < recoil.Prediction.MinStep) {
-            return false;
-        }
-
-        PredictedRecoils.Remove(recoil.Component);
-
-        return true;
-    }
-
-    /// <summary>
-    /// Finds the knockback that the local game predicts for the client object of an entity, dropping the ones that
-    /// ran out of time along the way.
-    /// </summary>
-    /// <param name="clientObject">The client object of the entity.</param>
-    /// <param name="found">The component the knockback belongs to and the knockback itself.</param>
-    /// <returns>Whether a knockback is predicted for the object.</returns>
-    private static bool TryGetPredictedRecoil(
-        GameObject clientObject,
-        out (Recoil Component, PredictedRecoil Prediction) found
-    ) {
-        found = default;
-        if (PredictedRecoils.Count == 0) {
-            return false;
-        }
-
-        List<Recoil>? ended = null;
-        var predicted = false;
-        var now = Time.unscaledTime;
-        foreach (var pair in PredictedRecoils) {
-            if (pair.Key == null || now > pair.Value.Expiry) {
-                (ended ??= []).Add(pair.Key!);
-                continue;
-            }
-
-            if (pair.Key.gameObject == clientObject) {
-                found = (pair.Key, pair.Value);
-                predicted = true;
-            }
-        }
-
-        if (ended != null) {
-            foreach (var recoil in ended) {
-                PredictedRecoils.Remove(recoil);
-            }
-        }
-
-        return predicted;
     }
 
     /// <summary>

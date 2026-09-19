@@ -75,7 +75,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     /// How far the scene host has got through what a scene client did to this entity before telling it, sent only
     /// while there is something to be waiting on. See <see cref="EntityUpdateType.Anticipation"/>.
     /// </summary>
-    public ushort Anticipation { get; set; }
+    public byte Anticipation { get; set; }
 
     /// <summary>
     /// The scale data of the entity.
@@ -190,7 +190,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         }
 
         if (UpdateTypes.Contains(EntityUpdateType.Anticipation)) {
-            Anticipation = packet.ReadUShort();
+            Anticipation = packet.ReadByte();
         }
     }
 

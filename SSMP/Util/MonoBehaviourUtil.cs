@@ -27,8 +27,19 @@ internal class MonoBehaviourUtil : MonoBehaviour {
         Instance = this;
     }
 
+    /// <summary>
+    /// How many steps of physics the game has taken. What it is for is telling whether something set in motion has
+    /// had a chance to move yet: a great deal of the game only moves in a step of physics, so the frame that starts
+    /// a movement still has everything standing exactly where it was.
+    /// </summary>
+    public static uint FixedStep { get; private set; }
+
     public void Update() {
         OnUpdateEvent?.Invoke();
+    }
+
+    public void FixedUpdate() {
+        FixedStep++;
     }
 
     /// <summary>
