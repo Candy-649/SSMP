@@ -156,7 +156,47 @@ internal partial class GamePatcher {
             return;
         }
 
-        EnemyApprovedTargets[owner.GetInstanceID()] = target;
+        var id = owner.GetInstanceID();
+        var changed = !EnemyApprovedTargets.TryGetValue(id, out var last) || last != target;
+
+        EnemyApprovedTargets[id] = target;
+
+        if (changed) {
+            SayWhoAnEnemyGoesAfter(owner, target);
+        }
+    }
+
+    /// <summary>
+    /// How many times an action of a state machine has had the object it aims at written into it.
+    ///
+    /// Said in the same line as the target, because the two failures look identical from outside the game and this is
+    /// the only thing that tells them apart: a target that is never chosen, and a target that is chosen and then
+    /// never reaches the thing that would act on it.
+    /// </summary>
+    private static int _targetsWrittenIntoActions;
+
+    /// <summary>
+    /// Writes down which of the two players an enemy has just turned its attention to.
+    ///
+    /// Here because the whole of this - choosing between two players, holding the choice, handing it to everything
+    /// that asks an enemy who it is after - cannot be seen from the outside at all. An enemy going for whoever is
+    /// nearest and an enemy that never chose anything and is simply looking at the player whose game it is look
+    /// exactly the same on the screen of that player. This says which it was.
+    /// </summary>
+    /// <param name="owner">The enemy that chose.</param>
+    /// <param name="target">What it chose.</param>
+    private static void SayWhoAnEnemyGoesAfter(GameObject owner, GameObject target) {
+        try {
+            var hero = HeroController.instance;
+            var isLocal = hero != null && target == hero.gameObject;
+
+            Logger.Info(
+                $"{owner.name} now goes after {(isLocal ? "the local player" : $"the partner ({target.name})")}, " +
+                $"and {_targetsWrittenIntoActions} target(s) have been written into actions so far"
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not say who an enemy goes after: {e.Message}");
+        }
     }
 
     /// <summary>
@@ -543,6 +583,8 @@ internal partial class GamePatcher {
                 Value = approvedTarget
             }
         );
+
+        _targetsWrittenIntoActions++;
     }
 
     /// <summary>
