@@ -1,7 +1,13 @@
 [
   {
     "type": "GetPosition",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_fsm": true
+  },
+  {
+    "type": "GetXDistance",
+    "update_field": "everyFrame",
+    "targeted_fsm": true
   },
   {
     "type": "GetVelocity2d",
