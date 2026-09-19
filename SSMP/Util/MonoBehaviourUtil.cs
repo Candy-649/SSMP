@@ -18,6 +18,16 @@ internal class MonoBehaviourUtil : MonoBehaviour {
     /// </summary>
     public event Action? OnUpdateEvent;
 
+    /// <summary>
+    /// Event that is executed each Unity late update tick, which is the last thing that happens before the frame is
+    /// drawn.
+    ///
+    /// For the things that must not be seen even once. Anything undone in the ordinary update is undone before the
+    /// rest of the frame runs, so whatever ran after it has the rest of the frame to do it again and be drawn doing
+    /// it. Nothing runs after this.
+    /// </summary>
+    public event Action? OnLateUpdateEvent;
+
     public void Awake() {
         if (Instance != null) {
             Destroy(this);
@@ -36,6 +46,10 @@ internal class MonoBehaviourUtil : MonoBehaviour {
 
     public void Update() {
         OnUpdateEvent?.Invoke();
+    }
+
+    public void LateUpdate() {
+        OnLateUpdateEvent?.Invoke();
     }
 
     public void FixedUpdate() {

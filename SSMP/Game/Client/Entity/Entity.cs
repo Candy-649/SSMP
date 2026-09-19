@@ -345,6 +345,7 @@ internal class Entity {
 
         // Register an update event to send position updates and check for certain value changes
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent += OnLateUpdate;
 
         _animator = new HostClientPair<tk2dSpriteAnimator> {
             Host = Object.Host.GetComponent<tk2dSpriteAnimator>(),
@@ -751,6 +752,52 @@ internal class Entity {
     }
 
     /// <summary>
+    /// Puts the room's own copy of this entity back to sleep if something has switched it on while the other game is
+    /// the one running it.
+    ///
+    /// That copy never moves - nothing runs it - so it stands exactly where the room left it, which is where the
+    /// creature was when the room loaded. Switched on for even one frame, what a player sees is the creature
+    /// appearing at the place it started from and vanishing again. Two players have reported that on a long list of
+    /// creatures with nothing in common, which is what it looks like: it has nothing to do with the creature.
+    ///
+    /// Called both in the ordinary update and in the late one. The ordinary one is not enough on its own: whatever
+    /// switches it on can run after that and still have the whole rest of the frame to be drawn in. Nothing runs
+    /// after the late one.
+    /// </summary>
+    private void HideTheRoomsOwnCopy() {
+        if (Object.Host == null || !Object.Host.activeSelf) {
+            return;
+        }
+
+        if (!_isSceneHostDetermined) {
+            _originalIsActive = true;
+        }
+
+        // Said out loud, throttled, because nothing else can tell afterwards whether a creature that appeared where
+        // it started was this or something else entirely
+        if (Time.unscaledTime >= _nextHostActiveLogTime) {
+            _nextHostActiveLogTime = Time.unscaledTime + HostActiveLogInterval;
+
+            SSMP.Logging.Logger.Info(
+                $"The room's own '{Object.Host.name}' switched itself back on while the other game is running " +
+                $"it{(_isSceneHostDetermined ? "" : ", before it was settled who runs the room")}, putting it back " +
+                "to sleep"
+            );
+        }
+
+        Object.Host.SetActive(false);
+    }
+
+    /// <summary>
+    /// Callback method for the last thing that happens before a frame is drawn.
+    /// </summary>
+    private void OnLateUpdate() {
+        if (_isControlled) {
+            HideTheRoomsOwnCopy();
+        }
+    }
+
+    /// <summary>
     /// Callback method for handling updates.
     /// </summary>
     [SuppressMessage("ReSharper", "CompareOfFloatsByEqualityOperator")]
@@ -776,32 +823,8 @@ internal class Entity {
             return;
         }
 
-        var hostObjectActive = Object.Host.activeSelf;
-
         if (_isControlled) {
-            if (hostObjectActive) {
-                if (!_isSceneHostDetermined) {
-                    _originalIsActive = true;
-                }
-
-                // Said out loud now, throttled, because this is the one moment where a player can see two of the same
-                // creature: the one the room came with, standing wherever it was left with nothing running it, and
-                // the one that follows what the other game is doing. It is put back to sleep here within the frame,
-                // so if two were ever seen at once, either this happened and something switched it on again straight
-                // away, or it was never this and the second one came from somewhere else. Nothing else can tell them
-                // apart afterwards.
-                if (Time.unscaledTime >= _nextHostActiveLogTime) {
-                    _nextHostActiveLogTime = Time.unscaledTime + HostActiveLogInterval;
-
-                    SSMP.Logging.Logger.Info(
-                        $"The room's own '{Object.Host.name}' switched itself back on while the other game is " +
-                        $"running it{(_isSceneHostDetermined ? "" : ", before it was settled who runs the room")}, " +
-                        "putting it back to sleep"
-                    );
-                }
-
-                Object.Host.SetActive(false);
-            }
+            HideTheRoomsOwnCopy();
 
             if (Object.Client != null &&
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
@@ -1890,6 +1913,7 @@ internal class Entity {
     /// </summary>
     public void Destroy() {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
 
         _spriteAnimatorPlayHook?.Dispose();
         _spriteAnimatorPlayHook = null;
