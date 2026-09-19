@@ -489,6 +489,8 @@ internal class CoopHits {
             return IHitResponder.Response.None;
         }
 
+        SayWhatWasHit(responder, hit, isRemote, isEnemyEntity);
+
         // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is
         var lastContext = _hitContext;
         _hitContext = isRemote ? HitContext.Remote : hit.IsHeroDamage ? HitContext.Local : HitContext.None;
@@ -503,6 +505,52 @@ internal class CoopHits {
             return response;
         } finally {
             _hitContext = lastContext;
+        }
+    }
+
+    /// <summary>
+    /// When each thing that is neither an enemy nor one of the replayed kinds may next say that it was hit, by its
+    /// name, so that swinging at grass cannot fill the log.
+    /// </summary>
+    private static readonly Dictionary<string, float> NextHitLogTime = new();
+
+    /// <summary>
+    /// The shortest time between two lines about hitting the same thing, in seconds.
+    /// </summary>
+    private const float HitLogInterval = 1f;
+
+    /// <summary>
+    /// Writes down a hit on something that is neither an enemy both games keep nor one of the kinds whose hits are
+    /// carried over - which is everything else in a room that answers a nail.
+    ///
+    /// For the things that can be hit alone and cannot be hit together. Such an object is not turned away anywhere
+    /// here and the hit is handed straight to it, so if it never reacts, either the hit never reached this at all -
+    /// and the swing is being stopped somewhere before it - or it reached it and the object refused it for a reason
+    /// of its own. Those are very different faults and nothing currently tells them apart.
+    /// </summary>
+    /// <param name="responder">What is being hit.</param>
+    /// <param name="hit">The hit.</param>
+    /// <param name="isRemote">Whether this is a copy of the partner's swing.</param>
+    /// <param name="isEnemyEntity">Whether it is an enemy both games keep a copy of.</param>
+    private static void SayWhatWasHit(IHitResponder responder, HitInstance hit, bool isRemote, bool isEnemyEntity) {
+        if (isEnemyEntity || responder is not Component component) {
+            return;
+        }
+
+        try {
+            var name = component.gameObject.name;
+            if (NextHitLogTime.TryGetValue(name, out var next) && Time.unscaledTime < next) {
+                return;
+            }
+
+            NextHitLogTime[name] = Time.unscaledTime + HitLogInterval;
+
+            Logger.Info(
+                $"A hit reached '{name}' ({component.GetType().Name}) for {hit.DamageDealt} damage, " +
+                $"{(isRemote ? "from a copy of the partner's swing" : "from this player")}"
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not say what was hit: {e.Message}");
         }
     }
 
