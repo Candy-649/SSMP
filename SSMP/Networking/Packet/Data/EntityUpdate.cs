@@ -72,6 +72,12 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public ushort ReceivedSequence { get; set; }
 
     /// <summary>
+    /// How far the scene host has got through what a scene client did to this entity before telling it, sent only
+    /// while there is something to be waiting on. See <see cref="EntityUpdateType.Anticipation"/>.
+    /// </summary>
+    public ushort Anticipation { get; set; }
+
+    /// <summary>
     /// The scale data of the entity.
     /// </summary>
     public ScaleData Scale { get; set; }
@@ -103,6 +109,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         // that hands back whatever was last put in it, and a leftover sequence number read as the newest position
         // seen is what once left a room of enemies standing still for nine minutes at a time.
         ReceivedSequence = 0;
+        Anticipation = 0;
         Scale.Reset();
         AnimationId = 0;
         AnimationWrapMode = 0;
@@ -143,6 +150,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
             packet.Write(AnimationId);
             packet.Write(AnimationWrapMode);
         }
+
+        if (UpdateTypes.Contains(EntityUpdateType.Anticipation)) {
+            packet.Write(Anticipation);
+        }
     }
 
     /// <inheritdoc />
@@ -176,6 +187,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         if (UpdateTypes.Contains(EntityUpdateType.Animation)) {
             AnimationId = packet.ReadByte();
             AnimationWrapMode = packet.ReadByte();
+        }
+
+        if (UpdateTypes.Contains(EntityUpdateType.Anticipation)) {
+            Anticipation = packet.ReadUShort();
         }
     }
 
@@ -1041,5 +1056,16 @@ internal enum EntityUpdateType {
     Animation,
     Active,
     Data,
-    HostFsm
+    HostFsm,
+
+    /// <summary>
+    /// How far the scene host has got through the things a scene client did to this entity before telling it. The
+    /// client plays some of those out at once - a knockback most of all - and every update the scene host sent
+    /// before it heard about one has the entity as it was beforehand. This is what tells those apart from the
+    /// updates that have it, without either side having to guess how long the trip between them takes.
+    ///
+    /// Only sent for a while after the scene host has been told something, since the rest of the time there is
+    /// nothing for anyone to be waiting on.
+    /// </summary>
+    Anticipation
 }

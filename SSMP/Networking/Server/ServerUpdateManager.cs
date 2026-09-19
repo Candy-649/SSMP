@@ -355,6 +355,19 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Update how far the scene host has got through what a scene client did to an entity before telling it.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity.</param>
+    /// <param name="anticipation">The number of the last thing the scene host has taken in.</param>
+    public void UpdateEntityAnticipation(ushort entityId, ushort anticipation) {
+        lock (Lock) {
+            var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ClientUpdatePacketId.EntityUpdate);
+            entityUpdate!.UpdateTypes.Add(EntityUpdateType.Anticipation);
+            entityUpdate.Anticipation = anticipation;
+        }
+    }
+
+    /// <summary>
     /// Update an entity's scale in the packet.
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>

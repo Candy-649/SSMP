@@ -942,6 +942,22 @@ internal abstract class ServerManager : IServerManager {
             entityData.Position = entityUpdate.Position;
         }
 
+        // Not kept for players who walk in later, unlike the position: this says how far the scene host has got
+        // through what somebody else asked of the entity, which is nothing to a player who asked for none of it.
+        // With two players there is only ever the one of them to send it to.
+        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Anticipation)) {
+            SendDataInSameScene(
+                id,
+                playerData.CurrentScene,
+                otherId => {
+                    _netServer.GetUpdateManagerForClient(otherId)?.UpdateEntityAnticipation(
+                        entityUpdate.Id,
+                        entityUpdate.Anticipation
+                    );
+                }
+            );
+        }
+
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Scale)) {
             SendDataInSameScene(
                 id,
