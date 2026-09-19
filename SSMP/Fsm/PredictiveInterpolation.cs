@@ -1,4 +1,5 @@
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Fsm;
 
@@ -222,11 +223,15 @@ internal class PredictiveInterpolation : MonoBehaviour {
         }
 
         // 4. Apply Final State - direct position set
-        _cachedTransform.position = new Vector3(
+        var applied = new Vector3(
             px + _visualOffset.x,
             py + _visualOffset.y,
             pz + _visualOffset.z
         );
+
+        SayItMovedALongWay("what it was predicted to be doing", _cachedTransform.position, applied);
+
+        _cachedTransform.position = applied;
     }
 
     /// <summary>
@@ -381,11 +386,57 @@ internal class PredictiveInterpolation : MonoBehaviour {
     }
 
     /// <summary>
+    /// How far something may be moved in one go before it is worth writing down, in units.
+    ///
+    /// About the width of a player. Below that nobody can see a jump at all; above it, it is the thing being
+    /// reported as an enemy appearing somewhere it is not.
+    /// </summary>
+    private const float BigMoveDistance = 1.5f;
+
+    /// <summary>
+    /// The shortest time between two lines about the same object, in seconds, so that one thing moving badly for a
+    /// second cannot fill the log.
+    /// </summary>
+    private const float BigMoveLogInterval = 0.5f;
+
+    /// <summary>
+    /// When this object may next say that it was moved a long way.
+    /// </summary>
+    private float _nextBigMoveLogTime;
+
+    /// <summary>
+    /// Writes down that this object was moved further in one go than anyone could miss, and what did it.
+    ///
+    /// Here because nothing else can see it. An enemy that appears on the wrong side of a player for three frames and
+    /// is back before anyone can look leaves no trace at all: its health is right, its state is right, and the only
+    /// wrong thing about it was where it was standing, which nothing writes down. This does.
+    /// </summary>
+    /// <param name="what">What moved it.</param>
+    /// <param name="from">Where it was.</param>
+    /// <param name="to">Where it was put.</param>
+    private void SayItMovedALongWay(string what, Vector3 from, Vector3 to) {
+        var distance = (to - from).magnitude;
+        if (distance < BigMoveDistance || Time.unscaledTime < _nextBigMoveLogTime) {
+            return;
+        }
+
+        _nextBigMoveLogTime = Time.unscaledTime + BigMoveLogInterval;
+
+        Logger.Info(
+            $"{name} was moved {distance:0.00} by {what}, from ({from.x:0.00}, {from.y:0.00}) to " +
+            $"({to.x:0.00}, {to.y:0.00}); it was going ({_velocity.x:0.0}, {_velocity.y:0.0}) and the last position " +
+            $"of it arrived {_timeSinceLastPacket * 1000f:0} ms ago"
+        );
+    }
+
+    /// <summary>
     /// Forces the position to the given position.
     /// </summary>
     /// <param name="position">Vector3 containing the position to snap to.</param>
     private void ForceSnap(Vector3 position) {
         EnsureTransformCached();
+
+        SayItMovedALongWay("being put straight there", _cachedTransform.position, position);
 
         _lastServerPosition = position;
         _logicalPosition = position;

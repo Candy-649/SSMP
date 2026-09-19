@@ -70,6 +70,17 @@ internal class Entity {
     private int _positionsHeldBack;
 
     /// <summary>
+    /// The shortest time between two lines about the room's own copy of this entity switching itself back on, in
+    /// seconds, so that one that does it every frame cannot fill the log.
+    /// </summary>
+    private const float HostActiveLogInterval = 2f;
+
+    /// <summary>
+    /// When this entity may next say that the room's own copy of it switched itself back on.
+    /// </summary>
+    private float _nextHostActiveLogTime;
+
+    /// <summary>
     /// Whether something the local player did to this entity was still waiting to come back from the scene host on
     /// the last frame, which says when one has just stopped and the interpolation is about to take the entity over
     /// again.
@@ -770,12 +781,23 @@ internal class Entity {
         if (_isControlled) {
             if (hostObjectActive) {
                 if (!_isSceneHostDetermined) {
-                    //Logger.Info(
-                    //    $"Entity '{Object.Host.name}' host object became active, but scene host is not determined yet, re-disabling for now"
-                    //);
                     _originalIsActive = true;
-                } else {
-                    //Logger.Info($"Entity '{Object.Host.name}' host object became active, re-disabling");
+                }
+
+                // Said out loud now, throttled, because this is the one moment where a player can see two of the same
+                // creature: the one the room came with, standing wherever it was left with nothing running it, and
+                // the one that follows what the other game is doing. It is put back to sleep here within the frame,
+                // so if two were ever seen at once, either this happened and something switched it on again straight
+                // away, or it was never this and the second one came from somewhere else. Nothing else can tell them
+                // apart afterwards.
+                if (Time.unscaledTime >= _nextHostActiveLogTime) {
+                    _nextHostActiveLogTime = Time.unscaledTime + HostActiveLogInterval;
+
+                    SSMP.Logging.Logger.Info(
+                        $"The room's own '{Object.Host.name}' switched itself back on while the other game is " +
+                        $"running it{(_isSceneHostDetermined ? "" : ", before it was settled who runs the room")}, " +
+                        "putting it back to sleep"
+                    );
                 }
 
                 Object.Host.SetActive(false);
