@@ -778,8 +778,20 @@ internal partial class CoopSave {
             // belongs to this player and is done by their own game, so none of it depends on a hit crossing over
             hero.CocoonBroken();
 
-            // Half of the maximum, rounded down, but never nothing: waking up already dead would be absurd
-            playerData.health = Mathf.Max(1, playerData.maxHealth / 2);
+            // Half of the maximum, rounded down, but never nothing: waking up already dead would be absurd.
+            //
+            // Given the game's own way rather than written into the number, because the number is only half of what
+            // health is here. The row of masks in the corner is not drawn from the field - it is redrawn when the
+            // game says health has changed - so writing the field left a player standing up with health they had no
+            // way of seeing, and a corner that still said they were dead. Writing it is kept for the case where
+            // there is nothing to add, which cannot happen to someone who has just died but costs nothing to hold.
+            var health = Mathf.Max(1, playerData.maxHealth / 2);
+            var missing = health - playerData.health;
+            if (missing > 0) {
+                hero.AddHealth(missing);
+            } else {
+                playerData.health = health;
+            }
 
             hero.AddInvulnerabilitySource(RescueInvulnerability);
             MonoBehaviourUtil.Instance.StartCoroutine(EndRescueInvulnerability(hero));
