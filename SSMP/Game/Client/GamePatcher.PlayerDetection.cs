@@ -294,6 +294,7 @@ internal partial class GamePatcher {
 
         if (owner != null) {
             EnemyApprovedTargets.Remove(owner.GetInstanceID());
+            EnemyTargetLocks.Remove(owner.GetInstanceID());
         }
 
         return null;

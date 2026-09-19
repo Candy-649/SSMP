@@ -35,6 +35,26 @@ internal partial class GamePatcher {
     private static readonly Dictionary<int, GameObject> EnemyApprovedTargets = new();
 
     /// <summary>
+    /// How long an enemy stays with the player it has just turned to, in seconds, before the nearer of the two can
+    /// take it away again.
+    ///
+    /// Without this an enemy re-decides every time it is asked, and with two players in a room it is asked
+    /// constantly: one fight of a few enemies changed its mind twenty-one times, one enemy eleven of them. What that
+    /// looks like is an enemy that cannot commit to either player and does nothing well to either of them.
+    ///
+    /// Three seconds because that is roughly what the games that solved this first settled on - Doom holds a target
+    /// for a hundred tics, which is just under three - and because it is long enough to see a whole attack out, which
+    /// is the thing the changing of minds was interrupting.
+    /// </summary>
+    private const float TargetLockTime = 3f;
+
+    /// <summary>
+    /// When each enemy's hold on the player it turned to runs out, by the same key as
+    /// <see cref="EnemyApprovedTargets"/>.
+    /// </summary>
+    private static readonly Dictionary<int, float> EnemyTargetLocks = new();
+
+    /// <summary>
     /// Cached resolved enemy target owner per GameObject instance ID to avoid deep transform parent lookups.
     /// </summary>
     private static readonly Dictionary<int, GameObject> TargetOwnerCache = new();
@@ -162,6 +182,10 @@ internal partial class GamePatcher {
         EnemyApprovedTargets[id] = target;
 
         if (changed) {
+            // Only on a change. Set every time it is approved, and an enemy that is asked about the same player five
+            // times a second would hold a lock that never runs out and could never turn to the other one at all.
+            EnemyTargetLocks[id] = Time.unscaledTime + TargetLockTime;
+
             SayWhoAnEnemyGoesAfter(owner, target);
         }
     }
@@ -256,6 +280,7 @@ internal partial class GamePatcher {
     /// </summary>
     private static void ClearTargetCaches() {
         EnemyApprovedTargets.Clear();
+        EnemyTargetLocks.Clear();
         TargetOwnerCache.Clear();
         ClearNeedolinTargets();
     }
@@ -712,6 +737,14 @@ internal partial class GamePatcher {
             return true;
         }
 
+        // Held to the player it turned to for a moment, so that being asked again does not mean deciding again. This
+        // is only ever reached while the player it is holding to is still there and still in sight: a target that has
+        // died, left or gone out of sight never gets this far, it is taken away before anything is asked.
+        if (EnemyTargetLocks.TryGetValue(owner.GetInstanceID(), out var lockedUntil) &&
+            Time.unscaledTime < lockedUntil) {
+            return false;
+        }
+
         var ownerPosition = (Vector2) owner.transform.position;
         var approvedDistance = ((Vector2) approvedTarget.transform.position - ownerPosition).sqrMagnitude;
         var candidateDistance = ((Vector2) candidateTarget.transform.position - ownerPosition).sqrMagnitude;
@@ -821,6 +854,7 @@ internal partial class GamePatcher {
         if (obj == null) return;
         var instanceId = obj.GetInstanceID();
         EnemyApprovedTargets.Remove(instanceId);
+        EnemyTargetLocks.Remove(instanceId);
         TargetOwnerCache.Remove(instanceId);
         SongTargets.Remove(instanceId);
         PendingSongTargets.Remove(instanceId);
