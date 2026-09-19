@@ -185,6 +185,18 @@ internal class CoopHits {
             ),
             new Action<Action<Recoil, int, float>, Recoil, int, float>(OnRecoilByDirection)
         );
+        AddHook(
+            typeof(HeroController).GetMethod(
+                nameof(HeroController.NailHitEnemy),
+                InstanceFlags,
+                null,
+                [typeof(HealthManager), typeof(HitInstance)],
+                null
+            ),
+            new Action<Action<HeroController, HealthManager, HitInstance>, HeroController, HealthManager, HitInstance>(
+                OnNailHitEnemy
+            )
+        );
     }
 
     /// <summary>
@@ -376,6 +388,33 @@ internal class CoopHits {
         }
 
         orig(self, amount, heroEffect, source, forceCanBindEffect);
+    }
+
+    /// <summary>
+    /// Hook for <see cref="HeroController.NailHitEnemy"/>, which keeps a replayed hit, or the copy of a swing of the
+    /// partner, from paying the local player for landing it.
+    ///
+    /// This is what the health of an enemy calls on the player who hit it, and everything it hands out it hands to
+    /// <see cref="HeroController.instance"/> - healing on a hit, the time a crest's own state is kept alive for, the
+    /// effect that goes with it. In a game with one player that is the only player there is.
+    ///
+    /// Enemies that both games keep a copy of never reach it from a copy of the partner's swing, because such a copy
+    /// is turned away before it touches them at all. Enemies that are not kept in step are a different matter: each
+    /// game runs its own, and the copy of the swing is exactly what makes the one here take the same hit as the one
+    /// over there. That is wanted. What is not wanted is that it pays for it twice - once over there to the player
+    /// who really swung, and once here to the player who did not.
+    /// </summary>
+    private void OnNailHitEnemy(
+        Action<HeroController, HealthManager, HitInstance> orig,
+        HeroController self,
+        HealthManager target,
+        HitInstance hit
+    ) {
+        if (_isReplaying || _hitContext == HitContext.Remote) {
+            return;
+        }
+
+        orig(self, target, hit);
     }
 
     /// <summary>
