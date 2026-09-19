@@ -831,18 +831,24 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether an FSM runs key dialogue of the local player or turns in a delivery, which the partner reads too.
+    /// Whether an FSM turns in a delivery, which the partner reads too.
+    ///
+    /// Key dialogue is no longer among these, and that is the point of it. Copying each line into a box on the other
+    /// player's screen never made them part of the conversation - it froze them in front of a copy while their own
+    /// character stood there unspoken to, and it held the one dialogue box the game has, which is the box every
+    /// question about a wish has to be asked in. Both players walk up to the character and talk to it themselves now.
+    /// A delivery still crosses, because there the partner is brought to it rather than talking at all.
     /// </summary>
     public bool IsSharedTalk(Fsm fsm) {
-        return _wishTalk is { } talk && (talk.IsKey || talk.IsDelivery) && talk.IsTalkFsm(fsm);
+        return _wishTalk is { IsDelivery: true } talk && talk.IsTalkFsm(fsm);
     }
 
     /// <summary>
-    /// Whether the end of dialogue that the partner reads too waits for them: only key dialogue does, since a delivery
-    /// never waits.
+    /// Whether the end of dialogue that the partner reads too waits for them. Nothing does any more: only key
+    /// dialogue ever did, and that is each player's own now.
     /// </summary>
     public bool HoldsSharedTalkEnd(Fsm fsm) {
-        return _wishTalk is { IsKey: true } talk && talk.IsTalkFsm(fsm);
+        return false;
     }
 
     /// <summary>
@@ -954,18 +960,16 @@ internal partial class CoopSave {
         var allowed = true;
         try {
             if (_everChecked && GetCurrentMarker() is { } marker) {
-                if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == self) {
-                    Chat(
-                        self is QuestBoardInteractable
-                            ? Lang.Pick(
-                                $"{GetPartnerName()} is using this board right now.",
-                                $"{GetPartnerName()} 正在用这块板子。"
-                            )
-                            : Lang.Pick(
-                                $"{GetPartnerName()} is talking to them right now.",
-                                $"{GetPartnerName()} 正在和他们说话。"
-                            )
-                    );
+                // Only a board. Two players may talk to the same character at the same time, and for a wish they
+                // have to: each of them is asked by their own game, in their own conversation, and a wish is only
+                // taken when both have said yes at their own prompt. Turning one of them away from the character
+                // would be turning them away from the question. A board is different - there is one of it, and what
+                // is pinned to it changes as it is used - so that one still waits its turn.
+                if (self is QuestBoardInteractable && _partnerTalk?.Npc is { } partnerNpc && partnerNpc == self) {
+                    Chat(Lang.Pick(
+                        $"{GetPartnerName()} is using this board right now.",
+                        $"{GetPartnerName()} 正在用这块板子。"
+                    ));
                     allowed = false;
                 } else if (self is PlayMakerNPC npc) {
                     allowed = TryStartWishTalk(npc, marker);

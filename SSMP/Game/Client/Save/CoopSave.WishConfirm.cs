@@ -177,6 +177,15 @@ internal partial class CoopSave {
     private PendingAsk? _pendingConfirmAsk;
 
     /// <summary>
+    /// The wish the partner is standing at their own box waiting to be agreed on, or null.
+    ///
+    /// A wish is not shown to them in a box of ours. Both players walk up to the character themselves and both are
+    /// asked by the game, in their own conversation, in their own box - and this is only the word that the other one
+    /// has already said yes at theirs. Nothing is taken until both of them have.
+    /// </summary>
+    private PartnerWishWait? _partnerWishWait;
+
+    /// <summary>
     /// Whether the hero was stopped so that the local player could answer about the partner. The box opens while they
     /// are free to move, which the game never does on its own, so it is taken here and given back after.
     /// </summary>
@@ -287,6 +296,22 @@ internal partial class CoopSave {
             return;
         }
 
+        // The two yeses have met. Both players walked up to the character themselves, both were asked by their own
+        // game, and both said yes - so there is nothing left to wait for: the partner is told, and this press runs
+        // now rather than being held for an answer that has already come.
+        if (GetAskWish(ask) is { } meeting && _partnerWishWait is { } partnerAt &&
+            partnerAt.Kind == meeting.Kind && partnerAt.Wish == meeting.Wish) {
+            _partnerWishWait = null;
+            SendConfirmAnswer(partnerAt.PartnerId, partnerAt.Key, true);
+            Chat(Lang.Pick(
+                $"You both agreed, so it is done.",
+                $"你们都同意了，成立。"
+            ));
+            Logger.Info($"Both players agreed at their own box about {what}, so it goes through");
+            orig(self);
+            return;
+        }
+
         // The side a box was last answered on is never forgotten by the game, and closing a box runs the answer of
         // that side. Holding skips the real button, so that side would still say yes from some earlier prompt and any
         // close at all would pay. Cleared here, a box that is closed instead of answered says no and pays nothing.
@@ -294,13 +319,19 @@ internal partial class CoopSave {
 
         // Nothing has been taken: the box pays only once the real button runs, which is what the partner agreeing does
         _wishConfirm = new HeldConfirm(
-            ask.TargetId, ask.Key, GetLivePrompt(), self, BoxCurrentYesField?.GetValue(self), () => orig(self), what
+            ask.TargetId, ask.Key, GetLivePrompt(), self, BoxCurrentYesField?.GetValue(self), () => orig(self), what,
+            GetWishKey(GetAskWish(ask))
         );
         Send(ask);
-        Chat(Lang.Pick(
-            $"{GetPartnerName()} has to agree to this too. Answer no to take it back.",
-            $"{GetPartnerName()} 也要同意才行。选「否」就可以收回。"
-        ));
+        Chat(GetAskWish(ask) != null
+            ? Lang.Pick(
+                $"{GetPartnerName()} has to say yes at their own prompt too. Answer no to take it back.",
+                $"{GetPartnerName()} 也要在他们自己的选项上选「是」才行。选「否」就可以收回。"
+            )
+            : Lang.Pick(
+                $"{GetPartnerName()} has to agree to this too. Answer no to take it back.",
+                $"{GetPartnerName()} 也要同意才行。选「否」就可以收回。"
+            ));
         Logger.Info($"Held the button about {what} until the partner agrees");
     }
 
@@ -313,11 +344,58 @@ internal partial class CoopSave {
             if (_wishConfirm is { } held && ReferenceEquals(held.Box, self)) {
                 CancelHeldConfirm("You took it back.", HeldEnd.LeaveAlone);
             }
+
+            // Said no at this player's own box, which is the answer the partner is standing at theirs waiting for.
+            // Without this they would wait out their whole time for a no that was already given.
+            if (_partnerWishWait is { } waiting && IsPromptAboutWish(self, waiting)) {
+                _partnerWishWait = null;
+                SendConfirmAnswer(waiting.PartnerId, waiting.Key, false);
+                Chat(Lang.Pick(
+                    $"You said no, so {waiting.PartnerName} doesn't get it either.",
+                    $"你选了「否」，所以 {waiting.PartnerName} 那边也不会成立。"
+                ));
+            }
         } catch (Exception e) {
             LogWishTalkError(e);
         }
 
         orig(self);
+    }
+
+    /// <summary>
+    /// Whether the box being answered is the one about the wish the partner is waiting on.
+    /// </summary>
+    private bool IsPromptAboutWish(YesNoBox box, PartnerWishWait waiting) {
+        var prompt = GetLivePrompt();
+        if (prompt == null || !IsWishPrompt(prompt, box)) {
+            return false;
+        }
+
+        var what = "";
+        var ask = GetWishConfirmAsk(prompt, ref what);
+
+        return GetAskWish(ask) is { } wish && wish.Kind == waiting.Kind && wish.Wish == waiting.Wish;
+    }
+
+    /// <summary>
+    /// What a wish and the thing being done to it are matched on between the two players, or an empty string for
+    /// something that is not about a wish.
+    /// </summary>
+    private static string GetWishKey((string Kind, string Wish)? asked) {
+        return asked is { } wish ? wish.Kind + "\n" + wish.Wish : "";
+    }
+
+    /// <summary>
+    /// The wish an ask is about, or null when it is not about one.
+    /// </summary>
+    private static (string Kind, string Wish)? GetAskWish(CoopSaveUpdate? ask) {
+        if (ask == null || ask.Records.Count == 0 || ask.WishNames.Count == 0) {
+            return null;
+        }
+
+        var kind = ask.Records[0];
+
+        return kind is WishConfirmAccept or WishConfirmTurnIn ? (kind, ask.WishNames[0]) : null;
     }
 
     /// <summary>
@@ -675,6 +753,29 @@ internal partial class CoopSave {
     /// over a box they have open themselves, so one that arrives at a bad moment waits for a better one.
     /// </summary>
     private void QueuePartnerConfirm(ClientPlayerData player, CoopSaveUpdate update) {
+        // A wish this save has already taken, or already turned in, is not a question. A wish belongs to both saves -
+        // that is the whole reason both players are asked about one - so once this save has it there is nothing left
+        // to agree to and nothing anyone could sensibly refuse. Asking anyway is worse than pointless: it puts a box
+        // in front of this player for something they did an hour ago, and if it cannot be shown to them at all, the
+        // partner standing at the character is told no and cannot take a wish this save already holds. Which is
+        // exactly what happened to the player who went away and came back to find their partner had taken it.
+        if (IsWishThisSaveAlreadyHas(update)) {
+            SendConfirmAnswer(player.Id, update.Key, true);
+            Logger.Info(
+                $"Agreed to the wish of {player.Username} without asking, because this save already has it"
+            );
+            return;
+        }
+
+        // A wish is never put in front of this player in a box of ours. Both of them walk up to the character
+        // themselves, both are asked by their own game in their own conversation, and both answer their own box -
+        // which is the whole of what makes it their decision rather than a copy of somebody else's. All that crosses
+        // the wire is the word that one of them has said yes, and this remembers it until the other reaches theirs.
+        if (GetAskWish(update) is { } asked) {
+            TakeWishWait(player, update, asked);
+            return;
+        }
+
         // One at a time, so that a second prompt can't replace the one being read or the one waiting. A local
         // button that is itself waiting would keep the box for the whole timeout, so that is refused at once too
         // rather than left to make both players wait it out.
@@ -699,6 +800,71 @@ internal partial class CoopSave {
         }
 
         ShowPartnerConfirm(player.Id, player.Username, update);
+    }
+
+    /// <summary>
+    /// Takes in that the partner said yes at their own box about a wish, and matches it against a yes this player
+    /// has already given at theirs.
+    /// </summary>
+    private void TakeWishWait(ClientPlayerData player, CoopSaveUpdate update, (string Kind, string Wish) asked) {
+        var wishKey = GetWishKey(asked);
+
+        // This player got there first and has been standing at their own box waiting for exactly this. Both of them
+        // have now said yes at their own prompt, which is the whole of what was being waited for, so both go
+        // through: this one is let out of its hold and the partner is told.
+        if (_wishConfirm is { } held && held.WishKey == wishKey) {
+            SendConfirmAnswer(player.Id, update.Key, true);
+            AnswerHeldConfirm(held.Key, true, Lang.Pick(
+                $"{player.Username} said yes at their own prompt too, so it is done.",
+                $"{player.Username} 也在他们自己的选项上选了「是」，成立。"
+            ));
+
+            return;
+        }
+
+        // One at a time. The one already waiting is answered rather than forgotten, or it would stand at its box
+        // until its own time ran out over a question nobody was listening for any more.
+        if (_partnerWishWait is { } older) {
+            SendConfirmAnswer(older.PartnerId, older.Key, false);
+        }
+
+        _partnerWishWait = new PartnerWishWait(player.Id, player.Username, update.Key, asked.Kind, asked.Wish);
+        Chat(asked.Kind == WishConfirmAccept
+            ? Lang.Pick(
+                $"{player.Username} said yes to taking this wish. Say yes at your own prompt and you both take it.",
+                $"{player.Username} 在他们那边选了接下这个愿望。你走到自己的选项上也选「是」，就一起接下。"
+            )
+            : Lang.Pick(
+                $"{player.Username} said yes to handing this wish in. Say yes at your own prompt too.",
+                $"{player.Username} 在他们那边同意交付这个愿望了。你也在自己的选项上选「是」。"
+            ));
+        Logger.Info($"{player.Username} is waiting at their own box about the wish '{asked.Wish}' ({asked.Kind})");
+    }
+
+    /// <summary>
+    /// Whether a question of the partner is one this save has answered by living: a wish it has already taken, when
+    /// they are taking it, or one it has already turned in, when they are turning it in.
+    ///
+    /// Only wishes. What the story takes for good is asked about every time, because that is a thing being spent and
+    /// two players spending it are spending it twice.
+    /// </summary>
+    private static bool IsWishThisSaveAlreadyHas(CoopSaveUpdate update) {
+        if (update.Records.Count == 0 || update.WishNames.Count == 0) {
+            return false;
+        }
+
+        var playerData = PlayerData.instance;
+        if (playerData == null) {
+            return false;
+        }
+
+        var wish = playerData.QuestCompletionData.GetData(update.WishNames[0]);
+
+        return update.Records[0] switch {
+            WishConfirmAccept => wish.IsAccepted || wish.IsCompleted,
+            WishConfirmTurnIn => wish.IsCompleted,
+            _ => false
+        };
     }
 
     /// <summary>
@@ -949,6 +1115,17 @@ internal partial class CoopSave {
             SendConfirmAnswer(shown.PartnerId, shown.Key, false);
         }
 
+        // A partner standing at their own box is not waited on forever. They are told no, and this player is told
+        // why, since from their side nothing visible ever happened at all.
+        if (_partnerWishWait is { } wishWait && now - wishWait.Started > WishConfirmTimeout) {
+            _partnerWishWait = null;
+            SendConfirmAnswer(wishWait.PartnerId, wishWait.Key, false);
+            Chat(Lang.Pick(
+                $"You didn't get to the same prompt in time, so {wishWait.PartnerName} didn't take it.",
+                $"你没有及时走到同一个选项，所以 {wishWait.PartnerName} 那边没有接下。"
+            ));
+        }
+
         if (_pendingConfirmAsk is { } pending) {
             if (now - pending.Started > WishConfirmTimeout) {
                 _pendingConfirmAsk = null;
@@ -992,6 +1169,13 @@ internal partial class CoopSave {
             ? HeldEnd.PressNo
             : HeldEnd.Silence;
 
+        // A partner standing at their own box is answered too, for the same reason: this game is not going to be
+        // able to reach the same prompt any more.
+        if (_partnerWishWait is { } wishWait) {
+            _partnerWishWait = null;
+            SendConfirmAnswer(wishWait.PartnerId, wishWait.Key, false);
+        }
+
         // A question that never got its turn is answered as well, or the one who asked sits out their whole timeout
         // waiting on something that was dropped here without a word
         if (_pendingConfirmAsk is { } queued) {
@@ -1019,7 +1203,7 @@ internal partial class CoopSave {
     private sealed class HeldConfirm {
         public HeldConfirm(
             ushort partnerId, ulong key, YesNoAction? action, YesNoBox box, object? callback, Action proceed,
-            string what
+            string what, string wish
         ) {
             PartnerId = partnerId;
             Key = key;
@@ -1028,7 +1212,15 @@ internal partial class CoopSave {
             Callback = callback;
             Proceed = proceed;
             What = what;
+            WishKey = wish;
         }
+
+        /// <summary>
+        /// The wish this is about and what is being done with it, or an empty string when it is not about a wish at
+        /// all. It is what the two players are matched on: the same wish, the same thing done to it, answered at
+        /// each of their own boxes.
+        /// </summary>
+        public string WishKey { get; }
 
         /// <summary>
         /// Who was asked, and who is told when this ends. Kept here rather than read from the pairing, which can be
@@ -1069,6 +1261,49 @@ internal partial class CoopSave {
 
         /// <summary>
         /// When the answer started waiting.
+        /// </summary>
+        public float Started { get; } = Time.unscaledTime;
+    }
+
+    /// <summary>
+    /// A wish the partner has said yes to at their own box, waiting for the local player to say yes at theirs.
+    /// </summary>
+    private sealed class PartnerWishWait {
+        public PartnerWishWait(ushort partnerId, string partnerName, ulong key, string kind, string wish) {
+            PartnerId = partnerId;
+            PartnerName = partnerName;
+            Key = key;
+            Kind = kind;
+            Wish = wish;
+        }
+
+        /// <summary>
+        /// The player waiting, who is answered.
+        /// </summary>
+        public ushort PartnerId { get; }
+
+        /// <summary>
+        /// Their name, for what is said to the local player.
+        /// </summary>
+        public string PartnerName { get; }
+
+        /// <summary>
+        /// The key their answer comes back with.
+        /// </summary>
+        public ulong Key { get; }
+
+        /// <summary>
+        /// Whether they are taking the wish or turning it in, so that saying yes to one is not taken for the other.
+        /// </summary>
+        public string Kind { get; }
+
+        /// <summary>
+        /// The wish itself.
+        /// </summary>
+        public string Wish { get; }
+
+        /// <summary>
+        /// When they started waiting.
         /// </summary>
         public float Started { get; } = Time.unscaledTime;
     }
