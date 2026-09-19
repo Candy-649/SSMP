@@ -315,6 +315,15 @@ internal static partial class EntityFsmActions {
         }
 
         if (parent == null) {
+            // Something let out into the world is not part of the entity any more, so it is given back its own
+            // physics. Every rigid body under an entity is made kinematic when its copy is built, so that the copy
+            // is moved by what arrives over the network rather than drifting off on its own - and that reaches the
+            // children too, including the things the creature is carrying. One of those let go of afterwards was
+            // then a thing with no gravity and no contacts: it could not fall, and it could not land, because the
+            // test for having hit the ground is a collision and a kinematic body reports none. What it was given at
+            // the moment it was thrown simply carried it away, and it never came down.
+            RestoreOwnPhysics(gameObject);
+
             var fsms = gameObject.GetComponents<PlayMakerFSM>();
             foreach (var fsm in fsms) {
                 if (fsm.Fsm.Name.Equals("destroy_if_gameobject_null")) {
@@ -322,6 +331,18 @@ internal static partial class EntityFsmActions {
 
                     //Logger.Debug($"De-parented object contained \"{fsm.Fsm.Name}\" FSM, removing it");
                 }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gives an object let out of an entity its own physics back, so that what the world does to it happens.
+    /// </summary>
+    /// <param name="gameObject">The object that was let go of.</param>
+    private static void RestoreOwnPhysics(GameObject gameObject) {
+        foreach (var rigidbody in gameObject.GetComponentsInChildren<Rigidbody2D>(true)) {
+            if (rigidbody != null && rigidbody.bodyType == RigidbodyType2D.Kinematic) {
+                rigidbody.bodyType = RigidbodyType2D.Dynamic;
             }
         }
     }

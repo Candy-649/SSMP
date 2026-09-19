@@ -230,16 +230,31 @@ internal class EntityManager {
             return false;
         }
 
+        // What one player did to something that belongs to each of them alone is not carried to the other on the way
+        // into a room.
+        //
+        // The server keeps whether each thing in a room is still there and how much health it has, and hands all of
+        // it to whoever walks in afterwards. For nearly everything that is what should happen: an enemy the other
+        // player killed is dead, and walking in should not raise it. But a creature carrying something that belongs
+        // to one player is not shared - this mod gives each of them their own copy of it - and handing over "that
+        // one is gone" took it away from a player who had never had it. One of them went through the room first, and
+        // the other could not get theirs at all: not by walking in, not by being made the one who runs the room,
+        // which reads the state of the copy it was just told to switch off.
+        //
+        // Only what was stored is turned away. While both of them are standing there it still behaves as one
+        // creature, so neither of them sees the other fighting nothing.
+        var isPersonal = alreadyInSceneUpdate && entity.Type == EntityType.Aknid;
+
         // Active state and host FSM are driven by the scene host; clients are consumers only.
         if (!IsSceneHost) {
-            if (update.UpdateTypes.Contains(EntityUpdateType.Active))
+            if (update.UpdateTypes.Contains(EntityUpdateType.Active) && !isPersonal)
                 entity.UpdateIsActive(update.IsActive);
 
             if (update.UpdateTypes.Contains(EntityUpdateType.HostFsm))
                 entity.UpdateHostFsmData(update.HostFsmData);
         }
 
-        if (update.UpdateTypes.Contains(EntityUpdateType.Data))
+        if (update.UpdateTypes.Contains(EntityUpdateType.Data) && !isPersonal)
             entity.UpdateData(update.GenericData, alreadyInSceneUpdate);
 
         return true;
