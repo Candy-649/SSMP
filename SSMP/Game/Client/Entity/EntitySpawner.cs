@@ -36,6 +36,16 @@ internal static class EntitySpawner {
         GameObject clientObject,
         List<PlayMakerFSM> clientFsms
     ) {
+        // Where a thrown thing is put until the first position of it arrives from the game that threw it.
+        //
+        // This was the origin of the world, which is a real place in the room and usually one both players can see.
+        // Every throw therefore put the thing at that corner for as long as it took a position to cross the border,
+        // and the thing then jumped from there to where it really was. Standing it next to a creature of the kind
+        // that throws it is not exactly right - there may be several of them in a room and this is whichever one was
+        // found first - but it is wrong by the width of a room at the very worst instead of by wherever the corner
+        // happens to be, and the first position puts it right either way.
+        var startPosition = clientObject != null ? clientObject.transform.position : Vector3.zero;
+
         if (spawnedType == EntityType.GrassBall) {
             IEnumerable<PlayMakerFSM> sourceFsms = clientObject != null
                 ? clientObject.GetComponentsInChildren<PlayMakerFSM>(true)
@@ -53,7 +63,7 @@ internal static class EntitySpawner {
                         };
 
                         if (prefab != null && prefab.name.Equals("Grass Ball", StringComparison.OrdinalIgnoreCase)) {
-                            return prefab.Spawn(Vector3.zero, Quaternion.identity);
+                            return prefab.Spawn(startPosition, Quaternion.identity);
                         }
                     }
                 }
@@ -64,7 +74,7 @@ internal static class EntitySpawner {
                     continue;
                 }
 
-                return prefab.Spawn(Vector3.zero, Quaternion.identity);
+                return prefab.Spawn(startPosition, Quaternion.identity);
             }
         }
 
