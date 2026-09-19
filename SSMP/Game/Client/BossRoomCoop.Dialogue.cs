@@ -397,14 +397,21 @@ internal partial class BossRoomCoop {
     /// Shows dialogue that a boss of the scene host started to the local player.
     /// </summary>
     private void OnDialogueStarted(BossRoomUpdate update) {
+        // Every way out of here says so. Nothing about what the reading side of this did ever reached a log, so a
+        // player standing still with a line of dialogue on their screen and a player standing still with nothing
+        // both left exactly the same trace: none at all.
+        var what = $"'{update.Path}' ({update.FromState})";
+
         // Key dialogue of a two-player save comes from the partner, who may not host the scene
         if (!update.IsSharedTalk && _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
+            Logger.Info($"Not showing the shared dialogue of {what}: this game hosts the scene it belongs to");
             return;
         }
 
         var key = GetDialogueKey(update);
         if ((_shownDialogue != null && GetDialogueKey(_shownDialogue) == key) ||
             _dialogueQueue.Any(queued => GetDialogueKey(queued) == key)) {
+            Logger.Info($"Not showing the shared dialogue of {what} again: it is already shown or waiting");
             return;
         }
 
@@ -418,12 +425,13 @@ internal partial class BossRoomCoop {
         // one before it is up, and those are what this is for.
         if (_shownDialogue == null && IsDialogueRunning() == true) {
             Logger.Info(
-                "Shared dialogue arrived while this player was in a conversation of their own, so it counts as read"
+                $"The shared dialogue of {what} counts as read: this player is in a conversation of their own"
             );
             SendDialogueDone(update);
             return;
         }
 
+        Logger.Info($"Taking in the shared dialogue of {what}, with {_dialogueQueue.Count} already waiting");
         _dialogueQueue.Enqueue(update);
         ShowNextDialogue();
     }
@@ -443,7 +451,14 @@ internal partial class BossRoomCoop {
         while (_shownDialogue == null && _dialogueQueue.Count > 0 && IsDialogueRunning() != true) {
             var update = _dialogueQueue.Dequeue();
             var text = GetDialogueText(update);
-            if (string.IsNullOrEmpty(text) || SceneManager.GetActiveScene().name != update.SceneName) {
+            var scene = SceneManager.GetActiveScene().name;
+            if (string.IsNullOrEmpty(text) || scene != update.SceneName) {
+                Logger.Info(
+                    $"The shared dialogue of '{update.Path}' counts as read without being shown: " +
+                    (string.IsNullOrEmpty(text)
+                        ? $"it has no text here (sheet '{update.DialogueSheet}', key '{update.DialogueKey}')"
+                        : $"it belongs to '{update.SceneName}' and this game is in '{scene}'")
+                );
                 SendDialogueDone(update);
                 continue;
             }
@@ -490,6 +505,7 @@ internal partial class BossRoomCoop {
                 continue;
             }
 
+            Logger.Info($"Showing the shared dialogue of '{update.Path}' ({text.Length} characters)");
             TakeHeroControl();
         }
     }
