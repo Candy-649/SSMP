@@ -355,7 +355,7 @@ internal class CoopHits {
 
     /// <summary>
     /// Hook for <see cref="HeroController.AddSilk(int, bool, SilkSpool.SilkAddSource, bool)"/>, which keeps a replayed
-    /// hit from giving the local player silk.
+    /// hit, or the copy of a swing of the partner, from giving the local player silk.
     /// </summary>
     private void OnAddSilk(
         Action<HeroController, int, bool, SilkSpool.SilkAddSource, bool> orig,
@@ -365,7 +365,13 @@ internal class CoopHits {
         SilkSpool.SilkAddSource source,
         bool forceCanBindEffect
     ) {
-        if (_isReplaying) {
+        // The second of these is what a silk barrier is paid out of. The copy of the partner's swing is a real swing
+        // here, and the things it is allowed to touch take its hit for real: that is how the barrier the two of them
+        // are cutting through comes down for both of them, which is what it is for. What it must not do is pay. The
+        // silk is handed out by the barrier itself, a piece at a time as it is cut, so one player cutting paid both
+        // of them - and it cannot be taken out of the barrier, since the barrier here is the same one the player
+        // whose swing it really is will cut through themselves.
+        if (_isReplaying || _hitContext == HitContext.Remote) {
             return;
         }
 
