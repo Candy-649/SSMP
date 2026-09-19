@@ -4,6 +4,7 @@ using HutongGames.PlayMaker.Actions;
 using SSMP.Hooks;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
+using GlobalSettings;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -191,14 +192,64 @@ internal partial class CoopSave {
         /// </summary>
         public Action? Hits;
 
+        /// <summary>
+        /// The frame an effect was last played on, so that an attack which lands twice in one frame does not stack
+        /// two of them. The game's own hit effects keep the same guard.
+        /// </summary>
+        private int _lastEffectFrame = -1;
+
         /// <inheritdoc/>
         public IHitResponder.HitResponse Hit(HitInstance damageInstance) {
             Hits?.Invoke();
+            PlayHitEffect(damageInstance);
 
             // Not None. That is the answer for "there was nothing there", so the nail passes straight through with
             // no impact, no sound and nothing to bounce off - which is why hitting the cocoon felt like hitting air
             // and a downward strike would not pogo. GenericHit is what something solid but undamageable answers.
             return IHitResponder.Response.GenericHit;
+        }
+
+        /// <summary>
+        /// Plays what the game plays when a hit lands on something that takes no damage from it: the shake the
+        /// controller rumbles along with, and the spark, thrown the way the blow was.
+        ///
+        /// It has to be done here because nothing else will. Every hit effect in this game is played by the health
+        /// of the thing that was hit - it is <c>HealthManager.TakeDamage</c> that asks the effects to play, through
+        /// the receiver written into each enemy - and a cocoon has no health and is no enemy. So the swing landed,
+        /// and counted, and looked and felt like nothing at all.
+        ///
+        /// What is played is the game's own, not an imitation: both come from the one set of effects the whole game
+        /// shares for a hit that does no damage, which is exactly what a hit on this is. The stronger effects are no
+        /// use here - each enemy carries its own, written into it one by one, and a cocoon has none to carry.
+        /// </summary>
+        private void PlayHitEffect(HitInstance hit) {
+            if (_lastEffectFrame == Time.frameCount) {
+                return;
+            }
+
+            _lastEffectFrame = Time.frameCount;
+
+            try {
+                Effects.WeakHitEffectShake.DoShake(this, true);
+
+                if (Effects.WeakHitEffectPrefab is not { } spark) {
+                    return;
+                }
+
+                // Zero is what the game passes here, and there is no name for it to pass: the answer is the angle
+                // the blow came in at, which is what the spark is turned to.
+                var angle = hit.GetHitDirectionAsAngle((HitInstance.TargetType) 0);
+
+                // Where the thing is rather than where its feet are. A cocoon is drawn from the ground up, so its
+                // own position is the bottom of it, and a spark struck there would go off under the blow.
+                var at = GetComponentInChildren<Collider2D>() is { } body
+                    ? (Vector3) body.bounds.center
+                    : transform.position;
+
+                spark.Spawn(at, Quaternion.Euler(0f, 0f, angle));
+            } catch (Exception e) {
+                Logger.Warn($"Could not play the effect of a hit on the cocoon of the partner: {e.Message}");
+            }
         }
     }
 
