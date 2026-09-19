@@ -267,6 +267,7 @@ internal partial class CoopSave {
         try {
             if (_loadedWorldItemsDirty) {
                 FindLoadedWorldItems();
+                SayWhatTheTrappedCreaturesAreDoing();
             }
 
             CoopSaveUpdate? update = null;
@@ -429,6 +430,50 @@ internal partial class CoopSave {
         }
 
         return HasAllStates(fsm, CollapseStateNames) || HasAllStates(fsm, BrokenDoorStateNames);
+    }
+
+    /// <summary>
+    /// The start of the name of the things that hold a small creature until a player breaks them open.
+    /// </summary>
+    private const string TrappedCreatureNamePrefix = "Flea Rescue";
+
+    /// <summary>
+    /// Writes down what each of the things holding a trapped creature in this room is doing, the once, as the room
+    /// settles.
+    ///
+    /// For a thing that answers a nail alone and does not answer one in a two-player game. There are two quite
+    /// different ways that can happen and the hit itself cannot tell them apart: the thing is not waiting to be hit
+    /// at all - already counted as opened, or stopped somewhere before it ever starts waiting - or it is waiting and
+    /// something is stopping the swing from arriving. What state it is sitting in, and whether it has anything to be
+    /// hit on, says which. Both this and the line written when a hit arrives are needed, because it is the absence
+    /// of the second that has to be explained.
+    /// </summary>
+    private static void SayWhatTheTrappedCreaturesAreDoing() {
+        try {
+            foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(FindObjectsSortMode.None)) {
+                if (fsm == null || !fsm.gameObject.name.StartsWith(TrappedCreatureNamePrefix, StringComparison.Ordinal)) {
+                    continue;
+                }
+
+                var collider = fsm.GetComponent<Collider2D>();
+                var colliders = fsm.GetComponentsInChildren<Collider2D>(true);
+                var awake = 0;
+                foreach (var other in colliders) {
+                    if (other != null && other.enabled && other.gameObject.activeInHierarchy) {
+                        awake++;
+                    }
+                }
+
+                Logger.Info(
+                    $"'{fsm.gameObject.name}' ({fsm.FsmName}) is sitting in '{fsm.ActiveStateName}', switched " +
+                    $"{(fsm.gameObject.activeInHierarchy ? "on" : "off")}, its own collider " +
+                    $"{(collider == null ? "missing" : collider.enabled ? "on" : "off")}, and {awake} of " +
+                    $"{colliders.Length} collider(s) under it able to be touched"
+                );
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not say what the trapped creatures are doing: {e.Message}");
+        }
     }
 
     /// <summary>
