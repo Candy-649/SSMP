@@ -24,10 +24,23 @@ internal partial class GamePatcher {
     private const float EnemyRetargetIntervalSeconds = 0.2f;
 
     /// <summary>
-    /// Squared-distance bias used before switching an enemy from its current approved target to a new candidate target.
-    /// Higher values make target switching less twitchy.
+    /// How much nearer the other player has to be, as a share of the distance to the one an enemy is already after,
+    /// before it turns to them. A fifth nearer.
+    ///
+    /// A share rather than a fixed amount, because a fixed one was added to the **square** of the distance and so
+    /// meant less and less the further away the enemy was. Four units of it is a real margin at two units' distance
+    /// and half a percent at twenty, which is why a flyer far from both players changed its mind six hundred and
+    /// sixty times in one session: the two distances crossed each other constantly and there was nothing to stop it
+    /// following them. A share is the same margin at every distance.
     /// </summary>
-    private const float TargetSwitchDistanceBias = 4f;
+    private const float TargetSwitchNearerShare = 0.2f;
+
+    /// <summary>
+    /// <see cref="TargetSwitchNearerShare"/> as it is compared: distances are kept squared to avoid a square root on
+    /// every check, so the share has to be squared with them.
+    /// </summary>
+    private const float TargetSwitchNearerShareSquared =
+        (1f - TargetSwitchNearerShare) * (1f - TargetSwitchNearerShare);
 
     /// <summary>
     /// Approved multiplayer target per enemy owner instance ID.
@@ -749,7 +762,7 @@ internal partial class GamePatcher {
         var approvedDistance = ((Vector2) approvedTarget.transform.position - ownerPosition).sqrMagnitude;
         var candidateDistance = ((Vector2) candidateTarget.transform.position - ownerPosition).sqrMagnitude;
 
-        return candidateDistance + TargetSwitchDistanceBias < approvedDistance;
+        return candidateDistance < approvedDistance * TargetSwitchNearerShareSquared;
     }
 
     /// <summary>
