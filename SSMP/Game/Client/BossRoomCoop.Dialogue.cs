@@ -34,7 +34,18 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// How long, in seconds, a boss waits for other players to read its dialogue before it continues anyway.
     /// </summary>
-    private const float DialogueTimeout = 180f;
+    private const float DialogueTimeout = 90f;
+
+    /// <summary>
+    /// The longest a player is held while reading dialogue that the scene host shared, in seconds, however unread it
+    /// still looks.
+    ///
+    /// Shorter than <see cref="DialogueTimeout"/> so that a reader gives up before the player who shared it does,
+    /// which is the order that ends with both of them free. Long enough for anyone to read one box, and no longer:
+    /// a player held here has no control and no pause menu, so every second past what it takes to read is a second
+    /// of a game that can only be killed.
+    /// </summary>
+    private const float SharedDialogueReadTime = 60f;
 
     /// <summary>
     /// How long, in seconds, shared dialogue may take to open before it counts as ended.
@@ -424,7 +435,6 @@ internal partial class BossRoomCoop {
             _shownDialogue = update;
             _shownDialogueTime = Time.unscaledTime;
             var dialogueId = ++_shownDialogueId;
-            TakeHeroControl();
 
             var options = new DialogueBox.DisplayOptions {
                 ShowDecorators = !update.HideDecorators,
@@ -447,7 +457,24 @@ internal partial class BossRoomCoop {
             } catch (Exception e) {
                 Logger.Error($"Could not show the dialogue that the scene host shared:\n{e}");
                 OnSharedDialogueEnded(dialogueId);
+                continue;
             }
+
+            // Control is taken only once the box is really up, and never before it. The game's own
+            // StartConversation returns without a word when the box it draws into does not exist - no error, no
+            // exception, nothing to catch - and taking control first turned that silence into a game that could
+            // only be killed: this player standing still with nothing to read, and the player who shared it waiting
+            // for word that this one had finished reading, which could now never come.
+            if (IsDialogueRunning() != true) {
+                Logger.Warn(
+                    "The dialogue that the scene host shared did not open, so it counts as read rather than " +
+                    "leaving both players waiting on it"
+                );
+                OnSharedDialogueEnded(dialogueId);
+                continue;
+            }
+
+            TakeHeroControl();
         }
     }
 
@@ -924,10 +951,16 @@ internal partial class BossRoomCoop {
             }
         }
 
-        // Dialogue that couldn't open, or that closed without calling back, doesn't keep the scene host waiting
+        // Dialogue that couldn't open, or that closed without calling back, doesn't keep the scene host waiting.
+        //
+        // The second half of this is the one that has to be time. Asking the game whether its box is still up
+        // answers "yes" for a box that is stuck as surely as for one being read, and it answers neither when it
+        // cannot be read at all - so on its own it is no way out, and there was none. Whatever is really happening,
+        // a player cannot be left standing there: no line of dialogue is worth this long, and every second past it
+        // is a second of a game with no pause menu.
         if (_shownDialogue != null && Time.unscaledTime - _shownDialogueTime > DialogueOpenTime &&
-            IsDialogueRunning() == false) {
-            Logger.Info("The dialogue that the scene host shared closed without ending");
+            (IsDialogueRunning() == false || Time.unscaledTime - _shownDialogueTime > SharedDialogueReadTime)) {
+            Logger.Info("The dialogue that the scene host shared closed without ending, or was never got through");
             OnSharedDialogueEnded(_shownDialogueId);
         }
 
@@ -981,6 +1014,16 @@ internal partial class BossRoomCoop {
     /// players continue without them if they are still there, like after disconnecting. Shown dialogue ends by itself.
     /// </summary>
     private void ClearDialogues() {
+        // What the local player was reading goes with the rest of it. Nothing else ever let go of this: a player who
+        // changed rooms, or whose connection ended, while shared dialogue was open kept the control it had taken
+        // from them, and kept it for good. The count is stepped on so that a callback arriving afterwards finds
+        // nothing of its own left to end.
+        if (_shownDialogue != null) {
+            _shownDialogue = null;
+            _shownDialogueId++;
+            GiveHeroControlBack();
+        }
+
         var heldDialogues = _sharedDialogues
             .Where(pair => pair.Value.EndHeld)
             .Select(pair => (Fsm: pair.Key, pair.Value.StateName))

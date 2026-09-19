@@ -154,6 +154,11 @@ internal partial class BossRoomCoop {
     private readonly HashSet<Fsm> _scannedFsms = [];
 
     /// <summary>
+    /// The steps of the per-frame update that have thrown, so that each one is only said once.
+    /// </summary>
+    private readonly HashSet<string> _failedUpdateSteps = [];
+
+    /// <summary>
     /// The FSMs of the current scene with triggers that start rooms.
     /// </summary>
     private readonly HashSet<Fsm> _startFsms = [];
@@ -372,6 +377,14 @@ internal partial class BossRoomCoop {
         // Players hear that a teammate waits for them wherever they are
         if (update.Kind == BossRoomUpdateKind.Waiting) {
             OnTeammateWaiting();
+            return;
+        }
+
+        // Word that a player finished reading is taken wherever they are now. It is stamped with the scene they were
+        // in when they sent it, and a player who reads the last line and walks out of the room in the same breath
+        // would otherwise never be heard - leaving whoever shared it standing there for the whole of the timeout.
+        if (update.Kind == BossRoomUpdateKind.DialogueDone) {
+            OnDialogueDone(update);
             return;
         }
 
@@ -828,17 +841,38 @@ internal partial class BossRoomCoop {
         var previousPosition = _lastHeroPosition ?? position;
         _lastHeroPosition = position;
 
+        // Every step is run on its own. This is the one place that ends a wait which has taken a player's control
+        // away, and a player without control has no pause menu either - so a step that throws must not be allowed to
+        // take the steps after it down with it. That is how a held death once became a game that could only be
+        // killed, and the same shape was waiting here.
         if (IsHoldActive()) {
-            ScanScene();
-            UpdateArrivals(previousPosition, position);
+            RunUpdateStep(ScanScene, nameof(ScanScene));
+            RunUpdateStep(() => UpdateArrivals(previousPosition, position), nameof(UpdateArrivals));
         }
 
-        ReleaseHeldStarts();
-        UpdateDialogues();
-        UpdateEventStarts();
-        UpdateRoomWaits();
-        CheckStartedRooms();
-        ClosePendingGates(previousPosition, position);
+        RunUpdateStep(ReleaseHeldStarts, nameof(ReleaseHeldStarts));
+        RunUpdateStep(UpdateDialogues, nameof(UpdateDialogues));
+        RunUpdateStep(UpdateEventStarts, nameof(UpdateEventStarts));
+        RunUpdateStep(UpdateRoomWaits, nameof(UpdateRoomWaits));
+        RunUpdateStep(CheckStartedRooms, nameof(CheckStartedRooms));
+        RunUpdateStep(() => ClosePendingGates(previousPosition, position), nameof(ClosePendingGates));
+    }
+
+    /// <summary>
+    /// Runs one step of the per-frame update, keeping what it throws to itself.
+    /// </summary>
+    /// <param name="step">The step.</param>
+    /// <param name="what">The name of the step, for the one line it writes if it throws.</param>
+    private void RunUpdateStep(Action step, string what) {
+        try {
+            step();
+        } catch (Exception e) {
+            // Said once rather than every frame: a step that throws usually throws again immediately, and a line a
+            // frame would bury the rest of the log within seconds
+            if (_failedUpdateSteps.Add(what)) {
+                Logger.Error($"'{what}' threw, and the rest of the update went on without it:\n{e}");
+            }
+        }
     }
 
     /// <summary>
