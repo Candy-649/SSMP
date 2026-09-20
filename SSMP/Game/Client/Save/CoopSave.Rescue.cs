@@ -31,6 +31,12 @@ internal partial class CoopSave {
     private const float RescueWaitTime = 45f;
 
     /// <summary>
+    /// The name of the partner whose hits could still pull the local player back up, remembered so that the line
+    /// shown during a wait can name them even on a frame when the rest of the two-player save update does not run.
+    /// </summary>
+    private string? _rescuePartnerName;
+
+    /// <summary>
     /// The source of the short invulnerability of a player who was just pulled back up, so that the hit that killed
     /// them cannot land again in the same instant on half the health.
     /// </summary>
@@ -294,11 +300,6 @@ internal partial class CoopSave {
     private Vector2 _partnerCocoonPosition;
 
     /// <summary>
-    /// Whether the give-up key was held on the previous frame, so that holding it counts once.
-    /// </summary>
-    private bool _rescueLeaveHeld;
-
-    /// <summary>
     /// Whether a failure of this has been logged already.
     /// </summary>
     private bool _rescueFailed;
@@ -443,12 +444,30 @@ internal partial class CoopSave {
         // and then this would hold the death for as long as the game runs. A held death has already switched the pause
         // menu off, so there would be nothing left to do about it but kill the game. This loop is the one thing that is
         // certainly still running while a death is held, so the way out that must always work lives in it.
+        var leaveHeld = false;
+
         while (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
             if (Time.unscaledTime - waiting.StartTime >= RescueWaitTime) {
                 waiting.Outcome = RescueOutcome.Ended;
 
                 break;
             }
+
+            // The line and the way out live here for the same reason the time limit does: this is the one thing that
+            // is certainly still running while a death is held. They used to live next door, behind those early
+            // returns, so a player could be left staring at a cocoon with nothing on screen telling them anything and
+            // no way out but to sit through the whole wait.
+            ShowTheWayOutOfTheWait(waiting);
+
+            var leaveNow = _modSettings.Keybinds.CoopLeave.IsPressed;
+            if (leaveNow && !leaveHeld) {
+                Logger.Info("Gave up waiting to be pulled back up and went to the bench");
+                waiting.Outcome = RescueOutcome.Ended;
+
+                break;
+            }
+
+            leaveHeld = leaveNow;
 
             yield return null;
         }
@@ -566,7 +585,6 @@ internal partial class CoopSave {
         }
 
         _rescue = null;
-        _rescueLeaveHeld = false;
         RemoveOwnCocoon();
         _uiManager.CoopPrompt.Hide();
 
@@ -724,6 +742,16 @@ internal partial class CoopSave {
     private const string ShakingOnStateNamePrefix = "Rumbling";
 
     /// <summary>
+    /// The name of the one state of that FSM in which the screen is not being shaken at all.
+    /// </summary>
+    private const string RestingStateName = "Normal";
+
+    /// <summary>
+    /// The event that ends a shake which runs for a set time rather than until it is told to stop.
+    /// </summary>
+    private const string DoneShakingEvent = "DoneShaking";
+
+    /// <summary>
     /// What the camera is waiting to hear before it stops shaking the screen.
     /// </summary>
     private const string StopShakingEvent = "StopRumble";
@@ -750,6 +778,11 @@ internal partial class CoopSave {
     /// The other way round is covered as well, because it has the same shape: a screen told to hold still is waiting
     /// on an event too, and being pulled up should not cost the player every shake for the rest of the room.
     /// </summary>
+    /// <remarks>
+    /// The states that rumble leave only on <see cref="StopShakingEvent"/>, the ones that shake for a set time leave
+    /// only on <see cref="DoneShakingEvent"/>, and the state they all rest in answers to neither - so both are sent
+    /// and the resting state alone is left alone.
+    /// </remarks>
     private static void StopTheScreenShaking() {
         try {
             var shake = GameCameras.instance?.cameraShakeFSM;
@@ -762,16 +795,51 @@ internal partial class CoopSave {
                 return;
             }
 
-            if (state.StartsWith(ShakingOnStateNamePrefix, StringComparison.Ordinal)) {
-                shake.SendEvent(StopShakingEvent);
-                Logger.Info($"Stopped the screen shaking, which the death left in '{state}' with nothing to end it");
-            } else if (state == HoldingStillStateName) {
+            // Every state that shakes the screen leaves on one of two events and on nothing else: the ones that
+            // rumble on and on until told to stop, and the ones that shake for a while and announce their own end.
+            // Both are sent, because the state resting between them has no answer to either and a death can leave
+            // the screen in one of them just as easily as in the other.
+            if (state == HoldingStillStateName) {
                 shake.SendEvent(ResumeShakingEvent);
                 Logger.Info("Let the screen shake again, which the death had switched off with nothing to switch on");
+            } else if (state != RestingStateName) {
+                shake.SendEvent(StopShakingEvent);
+                shake.SendEvent(DoneShakingEvent);
+
+                Logger.Info(
+                    $"Told the screen to stop shaking, which the death left in '{state}' with nothing to end it; " +
+                    $"it is now in '{shake.ActiveStateName}'"
+                );
             }
         } catch (Exception e) {
             Logger.Warn($"Could not stop the screen shaking after the death: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// Puts the line on screen that says what the wait is and how to leave it.
+    /// </summary>
+    /// <param name="rescue">The death being waited on.</param>
+    private void ShowTheWayOutOfTheWait(PendingRescue rescue) {
+        var partnerName = string.IsNullOrEmpty(_rescuePartnerName)
+            ? Lang.Pick("your teammate", "队友")
+            : _rescuePartnerName;
+
+        _uiManager.CoopPrompt.Show(
+            rescue.Hits > 0
+                ? Lang.Pick(
+                    $"{partnerName} is breaking you out ({rescue.Hits}/{RescueHits}). " +
+                    $"Press {LeaveKeyName} to go to your bench instead",
+                    $"{partnerName} 正在打你的茧（{rescue.Hits}/{RescueHits}）。" +
+                    $"按 {LeaveKeyName} 直接回长椅"
+                )
+                : Lang.Pick(
+                    $"Waiting for {partnerName} to break you out. " +
+                    $"Press {LeaveKeyName} to go to your bench instead",
+                    $"等 {partnerName} 来打破你的茧。" +
+                    $"按 {LeaveKeyName} 直接回长椅"
+                )
+        );
     }
 
     /// <summary>
@@ -1059,28 +1127,9 @@ internal partial class CoopSave {
                     return;
                 }
 
-                _uiManager.CoopPrompt.Show(
-                    rescue.Hits > 0
-                        ? Lang.Pick(
-                            $"{partner.Username} is breaking you out ({rescue.Hits}/{RescueHits}). " +
-                            $"Press {LeaveKeyName} to go to your bench instead",
-                            $"{partner.Username} 正在打你的茧（{rescue.Hits}/{RescueHits}）。" +
-                            $"按 {LeaveKeyName} 直接回长椅"
-                        )
-                        : Lang.Pick(
-                            $"Waiting for {partner.Username} to break you out. " +
-                            $"Press {LeaveKeyName} to go to your bench instead",
-                            $"等 {partner.Username} 来打破你的茧。" +
-                            $"按 {LeaveKeyName} 直接回长椅"
-                        )
-                );
-
-                var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
-                if (leaveHeld && !_rescueLeaveHeld) {
-                    rescue.Outcome = RescueOutcome.Ended;
-                }
-
-                _rescueLeaveHeld = leaveHeld;
+                // Only remembered here. Showing the line and reading the key that gives up on the wait both happen in
+                // the wait itself, which is the one thing that keeps running while a death is held
+                _rescuePartnerName = partner.Username;
 
                 return;
             }
@@ -1383,7 +1432,6 @@ internal partial class CoopSave {
         RemoveOwnCocoon();
         _partnerWaitingRescue = null;
         _partnerCocoonScene = "";
-        _rescueLeaveHeld = false;
         _uiManager.CoopPrompt.Hide();
     }
 
