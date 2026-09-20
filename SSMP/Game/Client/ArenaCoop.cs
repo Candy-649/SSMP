@@ -196,6 +196,17 @@ internal class ArenaCoop {
     private readonly List<GameObject> _paidWaveStarts = [];
 
     /// <summary>
+    /// Where each enemy of a wave stood when its wave called it out, for putting back one that ended up somewhere it
+    /// can never be reached.
+    /// </summary>
+    private readonly Dictionary<GameObject, Vector3> _waveEnemyPlaces = new();
+
+    /// <summary>
+    /// The enemies already put back together, so that a battle which stays stuck is not fought over every half minute.
+    /// </summary>
+    private readonly HashSet<GameObject> _putBackEnemies = [];
+
+    /// <summary>
     /// The arena that this game is changing for another player, or null.
     /// </summary>
     private BattleScene? _remoteTarget;
@@ -570,12 +581,16 @@ internal class ArenaCoop {
         }
 
         foreach (Transform child in wave.transform) {
+            _waveEnemyPlaces[child.gameObject] = child.position;
+
             if (!CanHearTheWave(child.gameObject) && _owedWaveStarts.Add(child.gameObject)) {
                 Logger.Info(
                     $"Enemy '{child.name}' could not hear its wave call it out, and is owed the call until it is " +
                     "switched on again"
                 );
             }
+
+            SayWhatAnEnemyIsMadeOf(child, "as its wave calls it out");
         }
     }
 
@@ -877,6 +892,8 @@ internal class ArenaCoop {
                     $"{(touched == null ? "no collider" : touched.enabled ? "yes" : "NO")}, " +
                     $"{(body == null ? "no body" : body.bodyType + $", going {body.linearVelocity}")}"
                 );
+
+                PutBackAnEnemyNobodyCanReach(child, health, seen, touched, body);
             }
         }
     }
@@ -914,6 +931,76 @@ internal class ArenaCoop {
         }
 
         return gaveUp;
+    }
+
+    /// <summary>
+    /// Writes down what an enemy is made of at a moment worth remembering: where it stands, whether it is drawn,
+    /// whether it can be touched, and what each of its FSMs is doing. An enemy that turns out to be unreachable later
+    /// was turned that way at some point, and only two lines apart can say whether it was already so when its wave
+    /// called it, or became so afterwards.
+    /// </summary>
+    private static void SayWhatAnEnemyIsMadeOf(Transform child, string moment) {
+        var seen = child.GetComponent<Renderer>();
+        var touched = child.GetComponent<Collider2D>();
+        var states = string.Join(
+            ", ",
+            child.GetComponents<PlayMakerFSM>().Select(fsm => $"{fsm.FsmName} in {fsm.ActiveStateName}")
+        );
+
+        Logger.Info(
+            $"Enemy '{child.name}' {moment}: at {child.position}, " +
+            $"{(child.gameObject.activeInHierarchy ? "on" : "off")}, drawn: " +
+            $"{(seen == null ? "no renderer" : seen.enabled ? "yes" : "NO")}, touchable: " +
+            $"{(touched == null ? "no collider" : touched.enabled ? "yes" : "NO")}" +
+            $"{(states.Length == 0 ? "" : ", " + states)}"
+        );
+    }
+
+    /// <summary>
+    /// Puts back together an enemy of a running wave that is alive but cannot be touched, so that the battle can be
+    /// won at all.
+    /// An enemy whose collider was switched off cannot be hit, and the states an enemy attacks from leave only on
+    /// touching the ground, so it can never come down either. It stays alive, it stays counted, and every player is
+    /// then shut in a room with a battle that no amount of fighting can finish. This is not a guess about what an
+    /// enemy is waiting for: an enemy of a wave that started, still has its health, has gone half a minute without a
+    /// single enemy in the battle dying, and has no collider, is one that nothing in the game will ever reach.
+    /// It is given back the body its wave gave it - seen, touchable, standing still - in the place it stood when its
+    /// wave called it out, and only once. Nothing else about it is touched, and only the game that runs the enemies
+    /// does this.
+    /// </summary>
+    private void PutBackAnEnemyNobodyCanReach(
+        Transform child,
+        HealthManager? health,
+        Renderer? seen,
+        Collider2D? touched,
+        Rigidbody2D? body
+    ) {
+        if (IsFollower() || health == null || health.hp <= 0 || !child.gameObject.activeInHierarchy) {
+            return;
+        }
+
+        if (touched == null || touched.enabled || !_putBackEnemies.Add(child.gameObject)) {
+            return;
+        }
+
+        Logger.Warn(
+            $"      putting '{child.name}' back together: it is alive and counts, but nothing can touch it, so this " +
+            "battle could never be won"
+        );
+
+        touched.enabled = true;
+
+        if (seen != null) {
+            seen.enabled = true;
+        }
+
+        if (body != null) {
+            body.linearVelocity = Vector2.zero;
+        }
+
+        if (_waveEnemyPlaces.TryGetValue(child.gameObject, out var place)) {
+            child.position = place;
+        }
     }
 
     /// <summary>
@@ -1142,6 +1229,8 @@ internal class ArenaCoop {
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _arenas.Clear();
         _owedWaveStarts.Clear();
+        _waveEnemyPlaces.Clear();
+        _putBackEnemies.Clear();
         _remoteTarget = null;
     }
 
