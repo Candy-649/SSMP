@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using TMProOld;
 using UnityEngine;
 using SSMP.Util;
@@ -40,19 +41,19 @@ internal static class FontManager {
 
     /// <summary>
     /// The font used for usernames above player objects. The game's own, which cannot draw Chinese - a name it
-    /// cannot draw is handed to <see cref="InGameNameFallbackFont"/> instead, one whole name at a time.
+    /// cannot draw is handed to one of <see cref="NameFallbackFonts"/> instead.
     /// </summary>
     public static TMP_FontAsset InGameNameFont = null!;
 
     /// <summary>
-    /// Whether a font for names the game's own cannot draw has been looked for yet.
+    /// The faces found for names the game's own font cannot draw, or null until they have been looked for.
     /// </summary>
-    private static bool _searchedForNameFallback;
+    private static TMP_FontAsset[]? _nameFallbackFonts;
 
     /// <summary>
-    /// The font found for names the game's own cannot draw, or null if there is none.
+    /// The faces that already have the others hung off them, so that it is done once each.
     /// </summary>
-    private static TMP_FontAsset? _nameFallbackFont;
+    private static readonly HashSet<TMP_FontAsset> FacesLeaningOnOthers = [];
 
     /// <summary>
     /// Pieces of the name of a TextMeshPro font that say it can draw simplified Chinese, in order of preference.
@@ -171,115 +172,171 @@ internal static class FontManager {
     }
 
     /// <summary>
-    /// The font to draw one name in: the game's own where it can draw the whole name, and otherwise one that can.
+    /// The font to draw one name in: the game's own where it can draw the whole name, and otherwise whichever of
+    /// the game's other faces can draw the most of it.
     ///
-    /// Picked for the whole name rather than per character, because a name drawn out of two faces comes out at two
-    /// sizes on one line - the very thing the search for a Chinese font below goes to lengths to avoid.
+    /// Chosen against the name in hand rather than once and for all, because the game's faces are cut down to the
+    /// characters the game itself shows and a player's name is not something it ever showed. A face that holds one
+    /// name may hold none of the next. Where no single face holds all of a name, the rest are hung off the one that
+    /// holds the most and TextMeshPro takes each character from whichever of them has it.
     /// </summary>
     /// <param name="name">The name as it will be drawn.</param>
     /// <returns>The font to draw it in.</returns>
     public static TMP_FontAsset PickInGameNameFont(string name) {
-        if (string.IsNullOrEmpty(name) || CanDrawWholeName(InGameNameFont, name)) {
+        if (string.IsNullOrEmpty(name) || CountMissing(InGameNameFont, name) == 0) {
             return InGameNameFont;
         }
 
-        return InGameNameFallbackFont ?? InGameNameFont;
-    }
-
-    /// <summary>
-    /// A font for names the game's own cannot draw. Looked for once, because a game that has none will not grow one.
-    /// </summary>
-    private static TMP_FontAsset? InGameNameFallbackFont {
-        get {
-            if (_searchedForNameFallback) {
-                return _nameFallbackFont;
+        TMP_FontAsset? best = null;
+        var fewestMissing = int.MaxValue;
+        foreach (var candidate in NameFallbackFonts) {
+            var missing = CountMissing(candidate, name);
+            if (missing >= fewestMissing) {
+                continue;
             }
 
-            _searchedForNameFallback = true;
-            _nameFallbackFont = FindNameFallbackFont();
+            fewestMissing = missing;
+            best = candidate;
 
-            return _nameFallbackFont;
+            if (missing == 0) {
+                break;
+            }
         }
+
+        if (best == null) {
+            return InGameNameFont;
+        }
+
+        if (fewestMissing > 0) {
+            LeanOnTheOtherFaces(best, name, fewestMissing);
+        }
+
+        return best;
     }
 
     /// <summary>
-    /// Whether a font holds every character of a name that is actually drawn.
+    /// How many characters of a name a font has no glyph for. Whitespace is not counted: nothing is drawn for it,
+    /// and a face that has no space still draws the name around it.
     /// </summary>
     /// <param name="font">The font to ask.</param>
     /// <param name="name">The name to draw.</param>
-    /// <returns><see langword="true"/> when it can draw all of them; otherwise <see langword="false"/>.</returns>
-    private static bool CanDrawWholeName(TMP_FontAsset font, string name) {
+    /// <returns>How many characters it lacks, or none when asking it threw.</returns>
+    private static int CountMissing(TMP_FontAsset font, string name) {
         if (font == null) {
-            return true;
+            return 0;
         }
 
+        var missing = 0;
         try {
             foreach (var character in name) {
-                // Nothing is drawn for a space, and a font that has no space still draws the name around it
                 if (char.IsWhiteSpace(character)) {
                     continue;
                 }
 
                 if (!font.HasCharacter(character)) {
-                    return false;
+                    missing++;
                 }
             }
         } catch (Exception e) {
-            // Treated as drawable, because a name in the wrong font is better than no name at all
+            // Treated as drawable, because a name in the wrong face is better than no name at all
             Logger.Warn($"Could not ask '{font.name}' whether it can draw a name: {e.Message}");
 
-            return true;
+            return 0;
         }
 
-        return true;
+        return missing;
     }
 
     /// <summary>
-    /// Finds a font for names the game's own cannot draw.
+    /// Hangs every other face off one, so that TextMeshPro can take a character the first lacks from a later one.
+    ///
+    /// Done once per face and only when a name needs it. It adds to what a face can draw and takes nothing away, so
+    /// the game's own text is either unchanged or a box less.
     /// </summary>
-    /// <returns>The font, or null if this machine has nothing that can draw them.</returns>
-    private static TMP_FontAsset? FindNameFallbackFont() {
-        // By name first, for the reason the search below gives: the game loads the faces of several languages at
-        // once and hands them over in no useful order, so the first one that can draw a character is not the right
-        // one.
-        foreach (var hint in NameFallbackNameHints) {
-            foreach (var asset in UnityEngine.Resources.FindObjectsOfTypeAll<TMP_FontAsset>()) {
-                if (asset == null) {
-                    continue;
-                }
-
-                var assetName = asset.name.ToLowerInvariant();
-                if (!assetName.Contains(hint)) {
-                    continue;
-                }
-
-                var avoided = false;
-                foreach (var avoid in NameFallbackNameAvoid) {
-                    if (assetName.Contains(avoid)) {
-                        avoided = true;
-                        break;
-                    }
-                }
-
-                if (avoided) {
-                    continue;
-                }
-
-                Logger.Info($"Drawing names the game's name font cannot with: {asset.name}");
-
-                return asset;
-            }
+    /// <param name="face">The face to hang the others off.</param>
+    /// <param name="name">The name that needed it, for the one line this writes.</param>
+    /// <param name="missing">How many characters that face lacked.</param>
+    private static void LeanOnTheOtherFaces(TMP_FontAsset face, string name, int missing) {
+        if (!FacesLeaningOnOthers.Add(face)) {
+            return;
         }
 
-        // Nothing can be built here to stand in. The mod's own wording falls back on a font asked of Windows, but
-        // that is a plain font and the text over a player's head is drawn by TextMeshPro, which takes only its own
-        // kind - and the version of it the game carries cannot make one at run time. So a machine whose game has
-        // loaded no face for these characters draws them as boxes, and this says which machine that was.
-        Logger.Error(
-            "Found no font for names the game's own font cannot draw, so they stay as boxes on this machine"
-        );
+        try {
+            face.fallbackFontAssets ??= [];
+            foreach (var other in NameFallbackFonts) {
+                if (other != null && other != face && !face.fallbackFontAssets.Contains(other)) {
+                    face.fallbackFontAssets.Add(other);
+                }
+            }
 
-        return null;
+            Logger.Info(
+                $"No face the game has loaded holds all of '{name}' - '{face.name}' is short of {missing} of it, " +
+                "so the others are hung off it to fill the rest in"
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not hang the other faces off '{face.name}': {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// The faces to draw names the game's own name font cannot, in the order they are preferred. Looked for once,
+    /// because a game that has none will not grow one.
+    /// </summary>
+    private static TMP_FontAsset[] NameFallbackFonts {
+        get {
+            if (_nameFallbackFonts != null) {
+                return _nameFallbackFonts;
+            }
+
+            var preferred = new List<TMP_FontAsset>();
+            var rest = new List<TMP_FontAsset>();
+
+            foreach (var hint in NameFallbackNameHints) {
+                foreach (var asset in UnityEngine.Resources.FindObjectsOfTypeAll<TMP_FontAsset>()) {
+                    if (asset == null || preferred.Contains(asset) || rest.Contains(asset)) {
+                        continue;
+                    }
+
+                    var assetName = asset.name.ToLowerInvariant();
+                    if (!assetName.Contains(hint)) {
+                        continue;
+                    }
+
+                    var avoided = false;
+                    foreach (var avoid in NameFallbackNameAvoid) {
+                        if (assetName.Contains(avoid)) {
+                            avoided = true;
+                            break;
+                        }
+                    }
+
+                    // The ones named against are still kept, at the back. They are the wrong face to draw a whole
+                    // name in, but a character the right face lacks has to come from somewhere.
+                    (avoided ? rest : preferred).Add(asset);
+                }
+            }
+
+            preferred.AddRange(rest);
+            _nameFallbackFonts = preferred.ToArray();
+
+            if (_nameFallbackFonts.Length == 0) {
+                // Nothing can be built to stand in: the text over a player's head is drawn by TextMeshPro, which
+                // takes only its own kind of font, and the version of it the game carries cannot make one at run
+                // time. So this machine draws these names as boxes, and this says so.
+                Logger.Error(
+                    "Found no face for names the game's own font cannot draw, so they stay as boxes on this machine"
+                );
+            } else {
+                var names = new List<string>();
+                foreach (var asset in _nameFallbackFonts) {
+                    names.Add(asset.name);
+                }
+
+                Logger.Info($"Faces for names the game's name font cannot draw: {string.Join(", ", names)}");
+            }
+
+            return _nameFallbackFonts;
+        }
     }
 
     /// <summary>
