@@ -1225,8 +1225,11 @@ internal class Entity {
             return;
         }
 
-        // If the host client is determined already we skip (although this hook should have been deregistered
-        if (_isSceneHostDetermined) {
+        // While the other game is running this creature, the room's own copy of it is held asleep every frame, and
+        // anything that switches it back on only makes it flash on screen for the frame in between. It cannot be its
+        // own doing - a sleeping object runs nothing - so it is something else in the room reaching over, and that is
+        // turned away here rather than fought frame by frame.
+        if (_isSceneHostDetermined && !_isControlled) {
             orig(self);
             return;
         }
@@ -1287,10 +1290,8 @@ internal class Entity {
 
         _isSceneHostDetermined = true;
 
-        // Deregister the hook for updating the active value of the host object
-        _activateGameObjectHook?.Dispose();
-        _activateGameObjectHook = null;
-
+        // The hook stays while the other game runs this creature: it is what keeps the room's own copy from being
+        // switched on behind our back and flashing on screen. It goes when this game takes the creature over.
         foreach (var component in _components.Values) {
             component.InitializeClient(sceneHostEpoch);
         }
@@ -2029,6 +2030,9 @@ internal class Entity {
 
         _objectPoolRecycleHook?.Dispose();
         _objectPoolRecycleHook = null;
+
+        _activateGameObjectHook?.Dispose();
+        _activateGameObjectHook = null;
 
         foreach (var component in _components.Values.Distinct()) {
             component.Destroy();

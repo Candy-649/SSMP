@@ -31,6 +31,13 @@ internal partial class CoopSave {
     private const float RescueWaitTime = 45f;
 
     /// <summary>
+    /// How long, in seconds, at the start of a wait during which the key that gives up on it is not listened to at
+    /// all. A death happens in the middle of a fight, and the first moments after one are the likeliest to carry a
+    /// press that was meant for something else entirely.
+    /// </summary>
+    private const float LeaveKeyDeadTime = 0.5f;
+
+    /// <summary>
     /// The name of the partner whose hits could still pull the local player back up, remembered so that the line
     /// shown during a wait can name them even on a frame when the rest of the two-player save update does not run.
     /// </summary>
@@ -444,7 +451,9 @@ internal partial class CoopSave {
         // and then this would hold the death for as long as the game runs. A held death has already switched the pause
         // menu off, so there would be nothing left to do about it but kill the game. This loop is the one thing that is
         // certainly still running while a death is held, so the way out that must always work lives in it.
-        var leaveHeld = false;
+        // Seeded with what the key is doing right now rather than with "not held". A player dies in the middle of
+        // doing things, and a key that was already down when they died is not them asking to give up on being saved.
+        var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
 
         while (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
             if (Time.unscaledTime - waiting.StartTime >= RescueWaitTime) {
@@ -460,7 +469,7 @@ internal partial class CoopSave {
             ShowTheWayOutOfTheWait(waiting);
 
             var leaveNow = _modSettings.Keybinds.CoopLeave.IsPressed;
-            if (leaveNow && !leaveHeld) {
+            if (leaveNow && !leaveHeld && Time.unscaledTime - waiting.StartTime >= LeaveKeyDeadTime) {
                 Logger.Info("Gave up waiting to be pulled back up and went to the bench");
                 waiting.Outcome = RescueOutcome.Ended;
 
