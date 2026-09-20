@@ -503,18 +503,18 @@ internal partial class CoopSave {
     /// <param name="nonLethal">Whether the death was non-lethal.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
     private IEnumerator WrapDeath(IEnumerator death, bool nonLethal, bool frostDeath) {
+        // Before anything is decided about this death, including the deaths this mod then keeps its hands off. One
+        // of those is a death that is not lethal, and from the player's chair a death that is not lethal is dying
+        // and coming back to life by itself - which is exactly the thing that was reported and that no line in
+        // either log could be matched to, because this used to sit below the return.
+        SayWhatTheDeathFound(nonLethal, frostDeath);
+
         // A non-lethal death leaves no cocoon: the game skips that whole part of its own sequence, so there would be
         // nothing for the partner to open and the player would wait for something that cannot come. It also takes
         // nobody to a bench, so a player who is waiting is not told anything: whoever this is can still reach them.
         if (nonLethal) {
             return death;
         }
-
-        // What the player was when they died, because a death that follows another one too closely to have been
-        // dealt by anything is a different problem from a death that something dealt, and from the outside the two
-        // look exactly alike. Invulnerability lasts two seconds after standing up, so anything under that was not a
-        // hit, whatever it looked like.
-        SayWhatTheDeathFound(frostDeath);
 
         if (!CanWaitForRescue()) {
             TellPartnerNobodyIsComing();
@@ -532,8 +532,9 @@ internal partial class CoopSave {
     /// <summary>
     /// Writes down what the player was when this death reached them.
     /// </summary>
+    /// <param name="nonLethal">Whether the death was non-lethal, which this mod leaves entirely alone.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
-    private void SayWhatTheDeathFound(bool frostDeath) {
+    private void SayWhatTheDeathFound(bool nonLethal, bool frostDeath) {
         try {
             var hero = HeroController.instance;
             var playerData = PlayerData.instance;
@@ -546,6 +547,7 @@ internal partial class CoopSave {
                 $"{(playerData == null ? "?" : playerData.health.ToString())}/" +
                 $"{(playerData == null ? "?" : playerData.maxHealth.ToString())} health, " +
                 $"by the room: {(hero == null ? "?" : hero.cState.hazardDeath.ToString())}, " +
+                $"non-lethal: {nonLethal}, " +
                 $"by frost: {frostDeath}, " +
                 $"already dead: {(hero == null ? "?" : hero.cState.dead.ToString())}, " +
                 $"at {(hero == null ? "?" : hero.transform.position.ToString())}"
