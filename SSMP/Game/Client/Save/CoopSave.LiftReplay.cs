@@ -352,7 +352,25 @@ internal partial class CoopSave {
                 interpolation.SetPredictionEnabled(false);
             }
         } else if ((position - lift.AvatarPlaced).sqrMagnitude > 0.0001f) {
-            // A position from the partner moved the avatar, which lags behind a moving lift along its way
+            // A position from the partner moved the avatar, which lags behind a moving lift along its way.
+            //
+            // Stepping off is looked for across the lift and not along it, for that same reason: along the way it
+            // travels, a position that has merely fallen behind looks exactly like one that has left, and reading
+            // the first as the second would throw a passenger off every time the lift got going. Across it there is
+            // no lag to confuse, so a partner whose position has moved off the side of the lift really has.
+            //
+            // Nothing looked at all before this, and once the avatar was holding on it never let go: a partner who
+            // stepped off a rising lift went on rising beside it, because the one axis their own position was still
+            // believed on was the one they had walked along.
+            var across = lift.MovesSideways
+                ? new Vector3(lift.AvatarPlaced.x, position.y, position.z)
+                : new Vector3(position.x, lift.AvatarPlaced.y, position.z);
+            if (!lift.Contains(across)) {
+                EndAvatarRide(lift);
+
+                return;
+            }
+
             var offset = position - liftPosition;
             lift.AvatarOffset = Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime ? offset :
                 lift.MovesSideways ? new Vector3(lift.AvatarOffset.x, offset.y, offset.z) :
