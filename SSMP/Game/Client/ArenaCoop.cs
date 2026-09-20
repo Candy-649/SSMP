@@ -41,6 +41,23 @@ internal class ArenaCoop {
     private const string OpenGatesEvent = "BG OPEN";
 
     /// <summary>
+    /// The events that an arena and its waves send their enemies to set them up and then to send them at the players,
+    /// in the order in which the game sends them.
+    /// </summary>
+    private static readonly string[] EnemyWakeEvents = ["BATTLE", "BATTLE START"];
+
+    /// <summary>
+    /// How many wake events in a row one enemy is given, so that an enemy which only waits for the next event after
+    /// hearing one still comes out, without ever looping.
+    /// </summary>
+    private const int MaxWakeEvents = 4;
+
+    /// <summary>
+    /// How long, in seconds, between the looks over a running battle for an enemy that never heard its wave start.
+    /// </summary>
+    private const float WakeCheckInterval = 2f;
+
+    /// <summary>
     /// Names of the arena methods that count enemies or end waves. Players who follow the scene host skip them, since
     /// the scene host sends them the number of enemies and the waves.
     /// </summary>
@@ -329,6 +346,7 @@ internal class ArenaCoop {
 
             if (state.Started) {
                 Logger.Info($"Continuing arena '{state.Path}' as the scene host");
+                WakeTheEnemiesThatNeverHeardTheirWave(battleScene, state, true);
                 SendRunning(battleScene, state);
             } else if (state.LockedIn) {
                 // The previous scene host left before it started the battle, while the local player is behind the gates
@@ -523,12 +541,21 @@ internal class ArenaCoop {
 
     /// <summary>
     /// Applies the state of the scene host for a player who follows it. For the scene host, sends the number of enemies
-    /// whenever it changes, so that the next scene host can continue the battle.
+    /// whenever it changes, so that the next scene host can continue the battle, and keeps an eye out for an enemy that
+    /// never heard its wave start.
     /// </summary>
     private void OnUpdate(Action<BattleScene> orig, BattleScene self) {
         orig(self);
 
-        if (!_arenas.TryGetValue(self, out var state) || !IsOtherPlayerInScene()) {
+        if (!_arenas.TryGetValue(self, out var state)) {
+            return;
+        }
+
+        if (!IsFollower()) {
+            CheckForEnemiesThatNeverHeardTheirWave(self, state);
+        }
+
+        if (!IsOtherPlayerInScene()) {
             return;
         }
 
@@ -643,6 +670,110 @@ internal class ArenaCoop {
                 battleScene.StartCoroutine(routine);
             }
         });
+    }
+
+    /// <summary>
+    /// Looks over the waves that are running for an enemy that is still waiting to hear that its wave started, and
+    /// tells it. Nothing in the game would ever end a wave that one of its enemies never came out for, and the enemy
+    /// that missed it has no timer to fall back on, so this is the only way back out of it. It runs for the player
+    /// whose game runs the enemies, and only while the mod is running the room for both players.
+    /// </summary>
+    private void CheckForEnemiesThatNeverHeardTheirWave(BattleScene battleScene, ArenaState state) {
+        if (!_netClient.IsConnected || !_isFullSynchronisation() || !state.Started || state.Ended ||
+            Time.unscaledTime < state.NextWakeCheck || IsCompleted(battleScene)) {
+            return;
+        }
+
+        state.NextWakeCheck = Time.unscaledTime + WakeCheckInterval;
+
+        WakeTheEnemiesThatNeverHeardTheirWave(battleScene, state, false);
+    }
+
+    /// <summary>
+    /// Tells the enemies of the waves that are already running to come out, if they are still waiting to hear that
+    /// their wave started.
+    /// A player who follows the scene host keeps the room's own copy of every enemy switched off, so the wave events
+    /// that their own arena sends while it follows are swallowed: PlayMaker drops an event sent to a GameObject that is
+    /// off and never delivers it afterwards. An enemy that lies in wait for that event has no timer to fall back on, so
+    /// once this game takes the room over, that enemy stays buried, cannot be killed, and the wave never ends for
+    /// anyone. Only an enemy whose current state listens for one of the events is told, so an enemy that is already
+    /// fighting hears nothing.
+    /// </summary>
+    /// <param name="battleScene">The arena.</param>
+    /// <param name="state">The co-op state of the arena.</param>
+    /// <param name="loud">
+    /// Whether to say something about an enemy that is switched off, which is worth saying once when the room changes
+    /// hands but not over and over while the battle runs.
+    /// </param>
+    private static void WakeTheEnemiesThatNeverHeardTheirWave(BattleScene battleScene, ArenaState state, bool loud) {
+        if (WavesField!.GetValue(battleScene) is not IList waves) {
+            return;
+        }
+
+        for (var waveNumber = 0; waveNumber <= state.Wave && waveNumber < waves.Count; waveNumber++) {
+            if (waves[waveNumber] is not BattleWave wave || wave == null) {
+                continue;
+            }
+
+            foreach (Transform child in wave.transform) {
+                if (!child.gameObject.activeInHierarchy) {
+                    // An enemy that was killed is switched off and says nothing; one that still has its health is a
+                    // hole that nothing here can fill, since an event never reaches an object that is off
+                    var health = child.GetComponent<HealthManager>();
+                    if (loud && health != null && health.hp > 0) {
+                        Logger.Warn(
+                            $"Enemy '{child.name}' of wave {waveNumber} in arena '{state.Path}' is switched off with " +
+                            $"{health.hp} health left while its wave runs, so it cannot hear that the wave started"
+                        );
+                    }
+
+                    continue;
+                }
+
+                foreach (var fsm in child.GetComponents<PlayMakerFSM>()) {
+                    for (var sent = 0; sent < MaxWakeEvents; sent++) {
+                        var waitedFor = GetWakeEventWaitedFor(fsm);
+                        if (waitedFor == null) {
+                            break;
+                        }
+
+                        Logger.Info(
+                            $"Enemy '{child.name}' of wave {waveNumber} in arena '{state.Path}' never heard " +
+                            $"'{waitedFor}', telling it now"
+                        );
+
+                        var stateBefore = fsm.Fsm.ActiveStateName;
+                        fsm.Fsm.Event(waitedFor);
+
+                        // An event that PlayMaker only takes in on its own next turn leaves the state where it was, and
+                        // sending the same one again would do nothing but fill its queue
+                        if (fsm.Fsm.ActiveStateName == stateBefore) {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// The wake event that the current state of an FSM is waiting for, or null if it waits for none of them.
+    /// </summary>
+    private static string? GetWakeEventWaitedFor(PlayMakerFSM fsm) {
+        var activeState = fsm.Fsm?.ActiveState;
+        if (activeState == null) {
+            return null;
+        }
+
+        foreach (var transition in activeState.Transitions ?? []) {
+            foreach (var wakeEvent in EnemyWakeEvents) {
+                if (transition.EventName == wakeEvent) {
+                    return wakeEvent;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -922,6 +1053,12 @@ internal class ArenaCoop {
         /// waiting for it.
         /// </summary>
         public float? RequestTime;
+
+        /// <summary>
+        /// The time from which this game looks over the running waves again for an enemy that never heard its wave
+        /// start.
+        /// </summary>
+        public float NextWakeCheck;
 
         public ArenaState(string path) {
             Path = path;
