@@ -356,6 +356,65 @@ internal partial class CoopSave {
     private void RegisterRescueHooks() {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
         _deathAnnouncementHook = HoldBackTheNewsOfADeath();
+        _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
+    }
+
+    /// <summary>
+    /// The hook on the other way a player can die.
+    /// </summary>
+    private Hook? _hazardRespawnHook;
+
+    /// <summary>
+    /// Says when the room itself kills the player and puts them straight back.
+    ///
+    /// Only <c>HeroController.Die</c> is wrapped by this mod, and lava, spikes and falls do not go through it: they
+    /// take their health, darken the screen and set the player down again at the room's own mark, all without ever
+    /// calling it. To the player that is dying and coming back to life; in the log it was nothing at all, and a
+    /// player saying they kept dying and reviving could not be matched to a single line. It changes nothing - the
+    /// game does this by itself and should - it only stops being invisible.
+    /// </summary>
+    private Hook? WatchForTheRoomPuttingThePlayerBack() {
+        try {
+            var method = typeof(HeroController).GetMethod(
+                "HazardRespawn",
+                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+            );
+
+            if (method == null) {
+                Logger.Warn("Could not find how the room puts a player back, so those deaths stay unsaid");
+
+                return null;
+            }
+
+            return new Hook(
+                method,
+                (Func<Func<HeroController, IEnumerator>, HeroController, IEnumerator>) OnRoomPutThePlayerBack
+            );
+        } catch (Exception e) {
+            Logger.Error($"Could not watch for the room putting a player back:\n{e}");
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Writes down a death the room dealt and undid by itself.
+    /// </summary>
+    /// <param name="orig">The original call.</param>
+    /// <param name="self">The hero controller.</param>
+    private static IEnumerator OnRoomPutThePlayerBack(Func<HeroController, IEnumerator> orig, HeroController self) {
+        try {
+            var playerData = PlayerData.instance;
+            Logger.Info(
+                "The room itself killed the player and is putting them straight back: from " +
+                $"{self.transform.position} to {(playerData == null ? "?" : playerData.hazardRespawnLocation.ToString())}, " +
+                $"with {(playerData == null ? "?" : playerData.health.ToString())} health left"
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not write down the room putting the player back: {e.Message}");
+        }
+
+        return orig(self);
     }
 
     /// <summary>
