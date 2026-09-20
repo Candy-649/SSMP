@@ -85,6 +85,11 @@ internal class ArenaCoop {
     private const float QuietBattleReportDelay = 30f;
 
     /// <summary>
+    /// The event a wave sends its enemies to call them out at the players.
+    /// </summary>
+    private const string WaveStartEvent = "BATTLE START";
+
+    /// <summary>
     /// Reflected field with the camera locks that an arena turns on when it locks in the local player.
     /// </summary>
     private static readonly FieldInfo? CamLocksField = typeof(BattleScene).GetField("camLocks", InstanceFlags);
@@ -181,6 +186,16 @@ internal class ArenaCoop {
     private readonly List<Hook> _hooks = [];
 
     /// <summary>
+    /// The enemies that were switched off at the moment their wave called them out, and are still owed that call.
+    /// </summary>
+    private readonly HashSet<GameObject> _owedWaveStarts = [];
+
+    /// <summary>
+    /// Reused while paying the enemies that are owed a wave start, so that the set is not written while it is read.
+    /// </summary>
+    private readonly List<GameObject> _paidWaveStarts = [];
+
+    /// <summary>
     /// The arena that this game is changing for another player, or null.
     /// </summary>
     private BattleScene? _remoteTarget;
@@ -253,6 +268,7 @@ internal class ArenaCoop {
 
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
         _arenas.Clear();
+        _owedWaveStarts.Clear();
         _remoteTarget = null;
     }
 
@@ -527,6 +543,8 @@ internal class ArenaCoop {
     /// since the scene host sends it.
     /// </summary>
     private void OnWaveStarted(WaveStartedOrig orig, BattleWave self, bool activateEnemies, ref int currentEnemies) {
+        NoteTheEnemiesThatCannotHearTheirWave(self);
+
         if (!IsFollower()) {
             orig(self, activateEnemies, ref currentEnemies);
         } else {
@@ -535,6 +553,89 @@ internal class ArenaCoop {
         }
 
         TakeTheRewardsOffTheCopiesOfAWave(self);
+    }
+
+    /// <summary>
+    /// Writes down the enemies of a wave whose object is switched off just as the wave calls them out, so that the
+    /// call can be handed to them once they are switched on again.
+    /// A wave calls its enemies out with a single PlayMaker event, and **PlayMaker throws away an event sent to an
+    /// object that is off and never hands it over afterwards**. An enemy that lies in wait for that call has nothing
+    /// else to wake it: it stays buried, cannot be seen or hit, and still counts towards its wave, so the battle can
+    /// never be won by anyone. This game switches the room's own copy of every enemy off whenever the other game is
+    /// running them, and again for a moment while a room is being taken in, which is exactly when the call can fall.
+    /// </summary>
+    private void NoteTheEnemiesThatCannotHearTheirWave(BattleWave wave) {
+        if (wave == null) {
+            return;
+        }
+
+        foreach (Transform child in wave.transform) {
+            if (!CanHearTheWave(child.gameObject) && _owedWaveStarts.Add(child.gameObject)) {
+                Logger.Info(
+                    $"Enemy '{child.name}' could not hear its wave call it out, and is owed the call until it is " +
+                    "switched on again"
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an enemy is in a state to hear an event at all: switched on, with an FSM that is running. PlayMaker
+    /// throws an event away in either case, and it is gone for good.
+    /// </summary>
+    private static bool CanHearTheWave(GameObject enemy) {
+        if (!enemy.activeInHierarchy) {
+            return false;
+        }
+
+        foreach (var fsm in enemy.GetComponents<PlayMakerFSM>()) {
+            if (fsm.enabled && fsm.Fsm is { Started: true }) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Hands the call of their wave to the enemies that could not hear it when it was made, as soon as each of them is
+    /// switched on again. Nothing is made up here: it is the same event the wave itself sent, to the same enemy, once.
+    /// </summary>
+    private void PayTheWaveStartsThatAreOwed() {
+        if (_owedWaveStarts.Count == 0) {
+            return;
+        }
+
+        _paidWaveStarts.Clear();
+
+        foreach (var enemy in _owedWaveStarts) {
+            if (enemy == null) {
+                // Destroyed in Unity's sense, which is not null to the compiler, so it is still a key to take out
+                _paidWaveStarts.Add(enemy!);
+                continue;
+            }
+
+            if (!CanHearTheWave(enemy)) {
+                continue;
+            }
+
+            _paidWaveStarts.Add(enemy);
+
+            Logger.Info(
+                $"Enemy '{enemy.name}' was switched off when its wave called it out, and is being told now that it is " +
+                "switched on again"
+            );
+
+            foreach (var fsm in enemy.GetComponents<PlayMakerFSM>()) {
+                fsm.Fsm.Event(WaveStartEvent);
+            }
+        }
+
+        foreach (var enemy in _paidWaveStarts) {
+            _owedWaveStarts.Remove(enemy);
+        }
+
+        _paidWaveStarts.Clear();
     }
 
     /// <summary>
@@ -578,6 +679,10 @@ internal class ArenaCoop {
 
         if (!_arenas.TryGetValue(self, out var state)) {
             return;
+        }
+
+        if (state.Started && !state.Ended && !IsCompleted(self)) {
+            PayTheWaveStartsThatAreOwed();
         }
 
         WatchForABattleThatStopped(self, state);
@@ -1023,6 +1128,7 @@ internal class ArenaCoop {
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _arenas.Clear();
+        _owedWaveStarts.Clear();
         _remoteTarget = null;
     }
 
