@@ -339,6 +339,10 @@ internal partial class CoopSave {
             return death;
         }
 
+        // Before the death has run a single frame of itself, so that anything it is still showing afterwards can be
+        // told apart from what the room was already showing
+        NoteWhatIsOnAroundThePlayer();
+
         return HoldDeath(death);
     }
 
@@ -822,6 +826,123 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// How many leftovers are worth naming before the line stops being readable.
+    /// </summary>
+    private const int MostLeftoversWorthNaming = 25;
+
+    /// <summary>
+    /// Everything around the player that was already switched on when the death began.
+    /// </summary>
+    private static HashSet<GameObject>? _whatWasOnBeforeTheDeath;
+
+    /// <summary>
+    /// The two things a death draws on: the player, who carries their own effects around with them, and the cameras,
+    /// which carry the screen's.
+    /// </summary>
+    private static IEnumerable<GameObject> WhereADeathDraws() {
+        var hero = HeroController.instance;
+        if (hero != null) {
+            yield return hero.gameObject;
+        }
+
+        var cameras = GameCameras.instance;
+        if (cameras != null) {
+            yield return cameras.gameObject;
+        }
+    }
+
+    /// <summary>
+    /// Everything switched on around the player at this moment.
+    /// </summary>
+    private static HashSet<GameObject> WhatIsOnAroundThePlayer() {
+        var on = new HashSet<GameObject>();
+
+        foreach (var root in WhereADeathDraws()) {
+            foreach (var child in root.GetComponentsInChildren<Transform>(true)) {
+                if (child.gameObject.activeInHierarchy) {
+                    on.Add(child.gameObject);
+                }
+            }
+        }
+
+        return on;
+    }
+
+    /// <summary>
+    /// Writes down what was switched on around the player before the death began playing.
+    ///
+    /// A death is a sequence that switches things on at its start and off again at its end, and a held death never
+    /// reaches its end. Which things those are cannot be guessed from a report that says only how many were dealt
+    /// with, so the only honest way to name one is to know what was there beforehand.
+    /// </summary>
+    private static void NoteWhatIsOnAroundThePlayer() {
+        try {
+            _whatWasOnBeforeTheDeath = WhatIsOnAroundThePlayer();
+        } catch (Exception e) {
+            _whatWasOnBeforeTheDeath = null;
+
+            Logger.Warn($"Could not write down what was on around the player before the death: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Names whatever the death switched on around the player and is still drawing.
+    /// </summary>
+    /// <param name="when">Which moment this is being asked at, for the log to say.</param>
+    private static void SayWhatTheDeathLeftSwitchedOn(string when) {
+        try {
+            if (_whatWasOnBeforeTheDeath == null) {
+                return;
+            }
+
+            var left = new List<string>();
+            foreach (var thing in WhatIsOnAroundThePlayer()) {
+                if (_whatWasOnBeforeTheDeath.Contains(thing)) {
+                    continue;
+                }
+
+                // Only what actually puts something on the screen: a death switches plenty of bookkeeping on as
+                // well, and a list nobody can read through is the same as no list at all.
+                var drawn = thing.GetComponent<Renderer>();
+                if (drawn == null || !drawn.enabled) {
+                    continue;
+                }
+
+                left.Add(PathOf(thing.transform));
+            }
+
+            if (left.Count == 0) {
+                Logger.Info($"The death left nothing of its own drawing around the player, {when}");
+
+                return;
+            }
+
+            left.Sort(StringComparer.Ordinal);
+
+            Logger.Info(
+                $"The death switched these on around the player and they are still drawing, {when} " +
+                $"({left.Count}): " +
+                string.Join(", ", left.Count > MostLeftoversWorthNaming ? left.GetRange(0, MostLeftoversWorthNaming) : left)
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not look over what the death left around the player: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Where something sits in the world, written out in full so that it can be found again.
+    /// </summary>
+    /// <param name="thing">The object to name.</param>
+    private static string PathOf(Transform thing) {
+        var path = thing.name;
+        for (var parent = thing.parent; parent != null; parent = parent.parent) {
+            path = parent.name + "/" + path;
+        }
+
+        return path;
+    }
+
+    /// <summary>
     /// The beginning of the name of every state of the camera that shakes the screen until told to stop.
     /// </summary>
     private const string ShakingOnStateNamePrefix = "Rumbling";
@@ -951,6 +1072,7 @@ internal partial class CoopSave {
         // The black over the screen is not the only dark a death leaves. Fading that off in front of plates still
         // drawn shut around the player only reveals the plates.
         OpenTheDarknessAroundTheHero();
+        SayWhatTheDeathLeftSwitchedOn("with the screen just given back");
     }
 
     /// <summary>
@@ -1164,6 +1286,10 @@ internal partial class CoopSave {
             } catch (Exception e) {
                 LogRescueError(e);
             }
+
+            // Asked again here and not only when the screen came back, because this is the moment the player is
+            // walking around looking at whatever is left, and everything the rescue itself undoes has now run
+            SayWhatTheDeathLeftSwitchedOn("with the player back on their feet");
 
             Chat(Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。"));
             Logger.Info("Pulled back up after a death instead of going to the bench");
