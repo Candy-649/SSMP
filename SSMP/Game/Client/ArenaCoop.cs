@@ -864,6 +864,19 @@ internal class ArenaCoop {
                     $"{(health == null ? "no health of its own" : health.hp + " health")}" +
                     $"{(states.Length == 0 ? "" : " and " + states)}"
                 );
+
+                // Where it is and what it is made of, because an enemy that cannot be seen, cannot be hit and cannot
+                // land is one whose body was left switched off, and none of that can be told apart afterwards
+                var body = child.GetComponent<Rigidbody2D>();
+                var seen = child.GetComponent<Renderer>();
+                var touched = child.GetComponent<Collider2D>();
+
+                Logger.Warn(
+                    $"      at {child.position}, drawn: " +
+                    $"{(seen == null ? "no renderer" : seen.enabled ? "yes" : "NO")}, touchable: " +
+                    $"{(touched == null ? "no collider" : touched.enabled ? "yes" : "NO")}, " +
+                    $"{(body == null ? "no body" : body.bodyType + $", going {body.linearVelocity}")}"
+                );
             }
         }
     }
