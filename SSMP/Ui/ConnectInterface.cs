@@ -734,7 +734,8 @@ internal class ConnectInterface {
         _waitingRoomPanel = new WaitingRoomPanel(
             _backgroundGroup,
             new Vector2(InitialX, currentY),
-            new Vector2(ContentWidth, 280f)
+            new Vector2(ContentWidth, 280f + WaitingRoomPanel.NameSettingsHeight),
+            _modSettings
         );
         _waitingRoomPanel.SetOnInvite(() => {
                 if (!SteamManager.IsInitialized || _waitingRoomLobbyId == default) {

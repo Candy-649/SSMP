@@ -292,7 +292,8 @@ internal class ClientManager : IClientManager {
 
         _playerData = new Dictionary<ushort, ClientPlayerData>();
 
-        _playerManager = new PlayerManager(serverSettings, netClient, _playerData);
+        _playerManager = new PlayerManager(serverSettings, modSettings, netClient, _playerData);
+        _modSettings.ChangedEvent += OnModSettingChanged;
         _animationManager = new AnimationManager(netClient, _playerManager, serverSettings, _playerData);
         _mapManager = new MapManager(netClient, serverSettings);
 
@@ -1186,6 +1187,19 @@ internal class ClientManager : IClientManager {
 
         Logger.Warn($"Nothing said what is in this room, so asking again (attempt {_sceneResyncsAsked})");
         _netClient.UpdateManager.SetSceneResyncRequest();
+    }
+
+    /// <summary>
+    /// Callback for when something about the settings of this machine changed, so that a choice about how this
+    /// player's own name is drawn takes effect where it was made rather than the next time the game starts.
+    /// </summary>
+    /// <param name="settingName">The name of what changed.</param>
+    private void OnModSettingChanged(string settingName) {
+        if (settingName is nameof(Settings.ModSettings.BoldOwnName)
+            or nameof(Settings.ModSettings.ColourOwnName)
+            or nameof(Settings.ModSettings.OwnNameColour)) {
+            _playerManager.RedrawOwnName();
+        }
     }
 
     /// <summary>

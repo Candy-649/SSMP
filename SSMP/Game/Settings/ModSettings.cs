@@ -72,6 +72,50 @@ internal class ModSettings : IModSettings {
     } = true;
 
     /// <summary>
+    /// Whether to draw this player's own name heavier than it is drawn otherwise.
+    ///
+    /// Both this and <see cref="ColourOwnName"/> touch only the name over this player's own head, and only on this
+    /// machine. Nothing about them is sent anywhere: how one player picks themselves out of a fight is no business
+    /// of the other's, and the two do not have to agree.
+    /// </summary>
+    public bool BoldOwnName {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(BoldOwnName));
+        }
+    } = true;
+
+    /// <summary>
+    /// Whether to draw this player's own name in <see cref="OwnNameColour"/> instead of white.
+    /// </summary>
+    public bool ColourOwnName {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(ColourOwnName));
+        }
+    } = true;
+
+    /// <summary>
+    /// What colour to draw this player's own name in: yellow, green, cyan, orange or red.
+    ///
+    /// A word rather than a number, so that it can be read and changed in this file by hand. Chosen rather than
+    /// handed out by joining order, because a colour that moves is worse than no colour: a player who has learnt to
+    /// follow one has to learn again every time it changes.
+    /// </summary>
+    public string OwnNameColour {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(OwnNameColour));
+        }
+    } = "yellow";
+
+    /// <summary>
     /// Set of addon names for addons that are disabled by the user.
     /// </summary>
     // ReSharper disable once AutoPropertyCanBeMadeGetOnly.Global

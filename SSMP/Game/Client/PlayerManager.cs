@@ -51,6 +51,42 @@ internal class PlayerManager : IPlayerManager {
     private readonly ServerSettings _serverSettings;
 
     /// <summary>
+    /// The settings of this machine, which say how this player's own name is drawn.
+    /// </summary>
+    private readonly Settings.ModSettings _modSettings;
+
+    /// <summary>
+    /// The colours a player may draw their own name in.
+    ///
+    /// Red, white and green are left out of the defaults on purpose: the game already says things with them - white
+    /// is the flash of something being hit, red is damage, green is poison - and a name that borrows one of those
+    /// reads as the game saying something. They are still here for anyone who wants them, except white, which is
+    /// what the name is when none of this is on.
+    /// </summary>
+    internal static readonly Dictionary<string, Color> OwnNameColours = new(StringComparer.OrdinalIgnoreCase) {
+        ["yellow"] = new Color(1f, 0.9f, 0.2f),
+        ["green"] = new Color(0.3f, 1f, 0.4f),
+        ["cyan"] = new Color(0.3f, 0.9f, 1f),
+        ["orange"] = new Color(1f, 0.6f, 0.15f),
+        ["red"] = new Color(1f, 0.35f, 0.35f)
+    };
+
+    /// <summary>
+    /// The colours a player may draw their own name in, in the order they are offered. A dictionary does not
+    /// promise an order and this is shown as a row of them, which has to look the same every time it is opened.
+    /// </summary>
+    internal static readonly string[] OwnNameColourNames = ["yellow", "green", "cyan", "orange", "red"];
+
+    /// <summary>
+    /// How wide the black edge around a name is normally, and how wide it is when the name is drawn heavier.
+    ///
+    /// The edge does more than the weight of the letters does: the font is a thin one, and against a busy dark
+    /// background thin letters disappear whatever weight they are drawn at, while an edge holds them apart from
+    /// whatever is behind them.
+    /// </summary>
+    private const float NameOutline = 0.2f, BoldNameOutline = 0.4f;
+
+    /// <summary>
     /// The net client for accessing average RTT.
     /// </summary>
     private readonly NetClient _netClient;
@@ -96,10 +132,12 @@ internal class PlayerManager : IPlayerManager {
 
     public PlayerManager(
         ServerSettings serverSettings,
+        Settings.ModSettings modSettings,
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData
     ) {
         _serverSettings = serverSettings;
+        _modSettings = modSettings;
         _netClient = netClient;
 
         _skinManager = new SkinManager();
@@ -589,6 +627,7 @@ internal class PlayerManager : IPlayerManager {
             textMeshObject.font = Ui.Resources.FontManager.PickInGameNameFont(drawn);
             textMeshObject.text = drawn;
             ChangeNameColor(textMeshObject, team);
+            DrawOwnNameApart(textMeshObject, playerContainer);
         }
 
         nameObject.SetActive(_serverSettings.DisplayNames);
@@ -758,6 +797,54 @@ internal class PlayerManager : IPlayerManager {
 
         // Also reset our local players skin
         _skinManager.ResetLocalPlayerSkin();
+    }
+
+    /// <summary>
+    /// Draws the name over this player's own head apart from the other, if they asked for that.
+    ///
+    /// Two players of the same character are the same handful of pixels in a fight, and the name is the only thing
+    /// that differs - but it is set in a thin face that a dark, busy screen swallows. So the weight and the colour
+    /// are each their own choice: one is about being able to read the name at all, the other about telling at a
+    /// glance which of the two is you.
+    ///
+    /// Only ever this player's own name, and only on this machine. The other player's name is left exactly as it
+    /// was, which is what makes the rule work: the one that stands out is you.
+    /// </summary>
+    /// <param name="textMeshObject">The name to draw.</param>
+    /// <param name="playerContainer">What the name hangs over, which says whose it is.</param>
+    private void DrawOwnNameApart(TextMeshPro textMeshObject, GameObject playerContainer) {
+        var hero = HeroController.instance;
+        if (hero == null || hero.gameObject != playerContainer) {
+            return;
+        }
+
+        textMeshObject.outlineWidth = _modSettings.BoldOwnName ? BoldNameOutline : NameOutline;
+        textMeshObject.fontStyle = _modSettings.BoldOwnName ? FontStyles.Bold : FontStyles.Normal;
+
+        if (_modSettings.ColourOwnName &&
+            OwnNameColours.TryGetValue(_modSettings.OwnNameColour ?? "", out var colour)) {
+            textMeshObject.color = colour;
+        }
+    }
+
+    /// <summary>
+    /// Draws the name over this player's own head again, after they changed how they want it drawn.
+    /// </summary>
+    public void RedrawOwnName() {
+        var hero = HeroController.instance;
+        if (hero == null || hero.gameObject == null) {
+            return;
+        }
+
+        var nameObject = hero.gameObject.FindGameObjectInChildren(UsernameObjectName);
+        if (nameObject == null || !nameObject.TryGetComponent<TextMeshPro>(out var textMeshObject)) {
+            return;
+        }
+
+        // Put back what the team says first, so that turning the colour off returns the name to what it would have
+        // been rather than leaving the last colour on it
+        ChangeNameColor(textMeshObject, LocalPlayerTeam);
+        DrawOwnNameApart(textMeshObject, hero.gameObject);
     }
 
     /// <summary>
