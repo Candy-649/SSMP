@@ -425,11 +425,26 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the partner is here and on their feet, which is what makes a death of the local player something the
-    /// room should not act on yet. A partner lying in a cocoon is not fighting anything.
+    /// Whether anybody in this room is still on their feet, which is what makes a death here something the room
+    /// should not act on yet.
     /// </summary>
+    /// <remarks>
+    /// Both players are asked about, not only the partner. A death announces itself on the game of whoever died, and
+    /// the death of the partner is played out here as well, so this is reached both ways round: once for the player
+    /// sitting at this screen and once for the one who is not. Asking only about the partner got the second case
+    /// right by accident and the first case wrong - a partner lying in a cocoon would have let the room be told the
+    /// fight was over while the player at this screen was still in the middle of it.
+    /// </remarks>
     private bool SomebodyIsStillFightingHere() {
-        return GetCheckedPartner() is { } partner && partner.IsInLocalScene && _partnerWaitingRescue != partner.Id;
+        if (GetCheckedPartner() is not { } partner || !partner.IsInLocalScene) {
+            return false;
+        }
+
+        var hero = HeroController.instance;
+        var localPlayerIsUp = hero != null && !hero.cState.dead;
+        var partnerIsUp = _partnerWaitingRescue != partner.Id;
+
+        return localPlayerIsUp || partnerIsUp;
     }
 
     /// <summary>
