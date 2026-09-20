@@ -359,8 +359,18 @@ internal partial class CoopSave {
         try {
             if (_partnerWaitingRescue is not { } playerId || GetCheckedPartner() is not { } partner ||
                 partner.Id != playerId) {
+                // Two players who both die and are both left lying there is exactly what this exists to stop, so
+                // which of these three it was is worth a line
+                Logger.Info(
+                    "Not telling anybody that nobody is coming: " +
+                    $"waiting partner: {_partnerWaitingRescue?.ToString() ?? "none"}, " +
+                    $"checked partner: {GetCheckedPartner()?.Id.ToString() ?? "none"}"
+                );
+
                 return;
             }
+
+            Logger.Info($"Telling {partner.Username} that nobody is coming, because this player has died as well");
 
             Send(new CoopSaveUpdate {
                 TargetId = partner.Id,
@@ -386,6 +396,7 @@ internal partial class CoopSave {
         }
 
         rescue.Outcome = RescueOutcome.Ended;
+        Logger.Info($"{player.Username} died as well, so this wait is over and both go to their benches");
         Chat(
             Lang.Pick(
                 $"{player.Username} died as well, so you are both going back to your bench.",
@@ -461,6 +472,7 @@ internal partial class CoopSave {
 
         while (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
             if (Time.unscaledTime - waiting.StartTime >= RescueWaitTime) {
+                Logger.Info("Waited the whole time to be pulled back up and nobody came, going to the bench");
                 waiting.Outcome = RescueOutcome.Ended;
 
                 break;
@@ -488,11 +500,17 @@ internal partial class CoopSave {
         var waited = _rescue;
         var rescued = waited is { Outcome: RescueOutcome.Rescued };
         var screenBack = waited is { ScreenBack: true };
+
+        // Said here because this is the one place that knows which of the ways out of a wait was taken, and a player
+        // left standing in neither their own body nor at their bench has no way of telling us which it was
+        Logger.Info($"The wait to be pulled back up is over as '{waited?.Outcome}', with the screen back: {screenBack}");
         EndRescueWait();
 
         if (rescued && waited != null && TryRevive(HeroController.instance, waited)) {
             yield break;
         }
+
+        Logger.Info("Letting the death finish and take the player to their bench");
 
         // The bench this death is about to take the player to is reached with the screen already black: the game
         // leaves it that way on purpose across the load of the room it is in, and only fades back in once the player
