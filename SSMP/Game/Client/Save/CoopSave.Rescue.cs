@@ -163,6 +163,26 @@ internal partial class CoopSave {
         /// bench is in - which a player who never goes there never gets.
         /// </summary>
         public MusicCue? Music { get; set; }
+
+        /// <summary>
+        /// What names this death apart from every other one, so that what the partner says about opening a cocoon
+        /// can be told to be about this cocoon and not the last one.
+        ///
+        /// These messages are resent until they arrive and are never dropped in favour of a newer one, which is
+        /// right for them - none of them may be lost - but it means one written about a death that is already over
+        /// can still turn up afterwards. Without a name on it, the last hit of the last cocoon opened the next one
+        /// the moment it appeared, which in a room that kills a player where they stand is a loop with no way out.
+        /// </summary>
+        public ulong Key { get; set; }
+
+        /// <summary>
+        /// Whether what killed the player was the room rather than a creature - lava, spikes, a fall.
+        ///
+        /// It decides where they are put when they are pulled back up. Everywhere else that is where they fell, which
+        /// is what makes being pulled up worth anything; here it is the inside of the thing that killed them, and
+        /// they would die again in the time it takes to stand up.
+        /// </summary>
+        public bool KilledByTheRoom { get; set; }
     }
 
     /// <summary>
@@ -194,6 +214,12 @@ internal partial class CoopSave {
         /// How many hits it has taken.
         /// </summary>
         public int Hits { get; set; }
+
+        /// <summary>
+        /// What the player who is waiting called this death of theirs, sent back with every hit so that a hit cannot
+        /// be taken as being about a later death of the same player.
+        /// </summary>
+        public ulong Key { get; set; }
     }
 
     /// <summary>
@@ -273,6 +299,12 @@ internal partial class CoopSave {
     private PendingRescue? _rescue;
 
     /// <summary>
+    /// The name given to the last death of the local player that waited to be pulled back up. Every death takes the
+    /// next one, so that what the partner says about one cocoon is never taken as being about another.
+    /// </summary>
+    private ulong _lastRescueKey;
+
+    /// <summary>
     /// The cocoon of the partner that the local player can open, or null while they are not waiting.
     /// </summary>
     private RescueTarget? _rescueTarget;
@@ -305,6 +337,11 @@ internal partial class CoopSave {
     /// Where in that room their cocoon is.
     /// </summary>
     private Vector2 _partnerCocoonPosition;
+
+    /// <summary>
+    /// What the partner called the death their cocoon belongs to, sent back with every hit on it.
+    /// </summary>
+    private ulong _partnerRescueKey;
 
     /// <summary>
     /// Whether a failure of this has been logged already.
@@ -548,16 +585,20 @@ internal partial class CoopSave {
         }
 
         var gameManager = global::GameManager.instance;
+        var hero = HeroController.instance;
         _rescue = new PendingRescue(scene, position) {
             // Taken now, before the death has played any of itself out, so it is the music of the room rather than
             // the music of the death
-            Music = gameManager == null ? null : gameManager.AudioManager.CurrentMusicCue
+            Music = gameManager == null ? null : gameManager.AudioManager.CurrentMusicCue,
+            Key = ++_lastRescueKey,
+            KilledByTheRoom = hero != null && hero.cState.hazardDeath
         };
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.RescueOffer,
             Scene = scene,
-            Values = [position.x, position.y]
+            Values = [position.x, position.y],
+            Key = _rescue.Key
         });
         // Shown to the player themselves as well, not only to the one who can open it. Watching the room you died in
         // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting.
@@ -1233,6 +1274,17 @@ internal partial class CoopSave {
             hero.rb2d.bodyType = RigidbodyType2D.Dynamic;
             hero.AffectedByGravity(true);
 
+            // Put back on their feet where they fell is the whole point of this everywhere else. Where the room
+            // itself did the killing it is the one place that cannot be done: that spot is the inside of the lava,
+            // the spikes or the drop, and a player put back into it dies again before they can move - which is a
+            // death, a cocoon, a rescue and a death again, with nothing either player can do to break out of it.
+            // The game keeps a place of its own for exactly this, which is where it would have put them itself.
+            if (rescue.KilledByTheRoom) {
+                var safe = playerData.hazardRespawnLocation;
+                Logger.Info($"The room itself did the killing, so standing back up happens at {safe} instead");
+                hero.transform.position = safe;
+            }
+
             hero.cState.dead = false;
             hero.cState.isFrostDeath = false;
             hero.cState.onGround = true;
@@ -1399,6 +1451,7 @@ internal partial class CoopSave {
         _partnerWaitingRescue = player.Id;
         _partnerCocoonScene = update.Scene;
         _partnerCocoonPosition = new Vector2(update.Values[0], update.Values[1]);
+        _partnerRescueKey = update.Key;
 
         Chat(
             SceneUtil.GetCurrentSceneName() == update.Scene
@@ -1423,6 +1476,17 @@ internal partial class CoopSave {
     /// <param name="update">The update.</param>
     private void OnRescueHit(ClientPlayerData player, CoopSaveUpdate update) {
         if (_rescue is not { Outcome: RescueOutcome.Waiting } rescue || GetCheckedPartner()?.Id != player.Id) {
+            return;
+        }
+
+        // A hit about some earlier death of this player is not a hit on the cocoon lying here now. These messages
+        // are resent until they arrive and are never dropped for a newer one, so one written about a death that is
+        // already over can still turn up - and taken at face value it opened this cocoon the instant it appeared.
+        if (update.Key != rescue.Key) {
+            Logger.Info(
+                $"Ignoring a hit on a cocoon of an earlier death ({update.Key}), this one being {rescue.Key}"
+            );
+
             return;
         }
 
@@ -1545,7 +1609,8 @@ internal partial class CoopSave {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.RescueHit,
             Part = (ushort) target.Hits,
-            PartCount = RescueHits
+            PartCount = RescueHits,
+            Key = target.Key
         });
 
         if (target.Hits >= RescueHits) {
@@ -1569,7 +1634,7 @@ internal partial class CoopSave {
             return;
         }
 
-        _rescueTarget = new RescueTarget(playerId, _partnerCocoonScene, cocoon);
+        _rescueTarget = new RescueTarget(playerId, _partnerCocoonScene, cocoon) { Key = _partnerRescueKey };
 
         // Their body is in the cocoon now, so it stops standing beside it. Nothing ever took it away before: the
         // death that crosses over is an animation like any other, and the animation of a death simply stops on its
