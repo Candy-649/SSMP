@@ -293,6 +293,13 @@ internal class Entity {
     /// </summary>
     private bool _putFsmsBackWhereTheyWere;
 
+    /// <summary>
+    /// Where each host FSM was standing the last time this mod switched the object off, or null for one that had not
+    /// started yet. It is kept apart from the FSM snapshots, which on a scene client hold what the other game says its
+    /// own copy is doing and must not be written over with what this room's sleeping copy was doing.
+    /// </summary>
+    private string?[]? _statesWhenWeSwitchedOff;
+
     public Entity(
         NetClient netClient,
         ushort id,
@@ -440,6 +447,7 @@ internal class Entity {
             }
         }
 
+        RememberWhereTheHostFsmsAre();
         Object.Host.SetActive(false);
         Object.Client.SetActive(false);
 
@@ -790,7 +798,33 @@ internal class Entity {
             );
         }
 
+        RememberWhereTheHostFsmsAre();
         Object.Host.SetActive(false);
+    }
+
+    /// <summary>
+    /// Writes down where each host FSM is standing, just before this mod switches the object off.
+    /// PlayMaker starts an FSM over from the beginning when its object comes back on, and an FSM's variables survive
+    /// that while its place does not. A creature that decided once and for all what it was - hiding itself and putting
+    /// the answer in a variable so that it would not decide twice - reads that answer again after being started over,
+    /// takes the other road this time, and walks off with the body it had already put away and that nothing else will
+    /// ever give back.
+    /// </summary>
+    private void RememberWhereTheHostFsmsAre() {
+        if (_fsms.Host.Count == 0) {
+            return;
+        }
+
+        _statesWhenWeSwitchedOff ??= new string?[_fsms.Host.Count];
+
+        for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count && fsmIndex < _statesWhenWeSwitchedOff.Length; fsmIndex++) {
+            var fsm = _fsms.Host[fsmIndex];
+            if (fsm == null || !fsm.Fsm.Started || string.IsNullOrEmpty(fsm.ActiveStateName)) {
+                continue;
+            }
+
+            _statesWhenWeSwitchedOff[fsmIndex] = fsm.ActiveStateName;
+        }
     }
 
     /// <summary>
@@ -1279,13 +1313,26 @@ internal class Entity {
             return;
         }
 
+        // Only a creature whose body was put away and left that way is put back. One that can still be seen and hit
+        // is none of this mod's business, however far its FSM was started over: it can go on living its own life.
+        var seen = Object.Host.GetComponent<Renderer>();
+        var touched = Object.Host.GetComponent<Collider2D>();
+        if ((seen == null || seen.enabled) && (touched == null || touched.enabled)) {
+            return;
+        }
+
         for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count && fsmIndex < _fsmSnapshots.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
             if (fsm == null) {
                 continue;
             }
 
-            var wanted = _fsmSnapshots[fsmIndex].CurrentState;
+            // Where it stood when we switched it off comes first: the snapshot is taken as the room is taken in,
+            // which for a creature whose FSMs had not started yet says nothing at all
+            var wanted = _statesWhenWeSwitchedOff != null && fsmIndex < _statesWhenWeSwitchedOff.Length
+                ? _statesWhenWeSwitchedOff[fsmIndex] ?? _fsmSnapshots[fsmIndex].CurrentState
+                : _fsmSnapshots[fsmIndex].CurrentState;
+
             if (string.IsNullOrEmpty(wanted) || wanted == fsm.ActiveStateName || wanted == fsm.Fsm.StartState) {
                 continue;
             }
