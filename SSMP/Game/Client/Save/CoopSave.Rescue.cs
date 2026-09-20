@@ -726,22 +726,98 @@ internal partial class CoopSave {
             return;
         }
 
-        var cleared = 0;
+        var cleared = new List<string>();
         foreach (var recycler in stuck) {
             try {
                 if (recycler == null) {
                     continue;
                 }
 
+                cleared.Add(recycler.name);
                 recycler.ForceRecycle();
-                cleared++;
             } catch (Exception e) {
                 Logger.Warn($"Could not return an effect the death left playing to the pool: {e.Message}");
             }
         }
 
-        if (cleared > 0) {
-            Logger.Info($"Took away {cleared} effect(s) the death left playing that nothing would have ended");
+        if (cleared.Count > 0) {
+            // By name, because something a player can see is still there afterwards cannot be told from something
+            // that was never here at all unless what was taken away is written down
+            Logger.Info(
+                $"Took away {cleared.Count} effect(s) the death left playing that nothing would have ended: " +
+                string.Join(", ", cleared)
+            );
+        }
+
+    }
+
+    /// <summary>
+    /// The name of the FSM on the hero that holds the dark plates around them.
+    /// </summary>
+    private const string DarknessFsmName = "Darkness Control";
+
+    /// <summary>
+    /// The state a death puts that FSM into, which has no way out of its own.
+    /// </summary>
+    private const string DarknessDeathStateName = "Death";
+
+    /// <summary>
+    /// What that FSM is waiting to hear before it opens the plates again.
+    /// </summary>
+    private const string DarknessOpenEvent = "HERO RESPAWNED";
+
+    /// <summary>
+    /// Opens the dark plates a death closed around the player.
+    ///
+    /// The hero carries the vignette of the game on them: two plates larger than the screen with the player's own
+    /// place cut out of the middle, which is how a dark room is drawn. A death draws them closed, and the state it
+    /// does that in is a dead end - it has no transition of its own at all, and the only ways out of it are events
+    /// the game sends while respawning. A held death never respawns, so the plates stayed closed for the whole wait,
+    /// over a screen this mod had just deliberately given back: a dark cloud around a player who could otherwise see
+    /// the room, their cocoon and their teammate coming.
+    ///
+    /// The event sent is the one whose state grows the plates back to the size the room itself asked for, so a dark
+    /// room stays as dark as it was rather than being thrown open by a death.
+    /// </summary>
+    /// <remarks>
+    /// Sent to that one FSM rather than announced to everything that listens for it: this is undoing one piece of a
+    /// death that is still being waited out, not declaring the player alive.
+    /// </remarks>
+    private static void OpenTheDarknessAroundTheHero() {
+        try {
+            var hero = HeroController.instance;
+            if (hero == null) {
+                return;
+            }
+
+            PlayMakerFSM? darkness = null;
+            foreach (var fsm in hero.GetComponentsInChildren<PlayMakerFSM>(true)) {
+                if (fsm.FsmName == DarknessFsmName) {
+                    darkness = fsm;
+
+                    break;
+                }
+            }
+
+            if (darkness == null) {
+                Logger.Info("The hero has no plates to draw the dark with, so the death left none of them closed");
+
+                return;
+            }
+
+            // Said either way, because the whole difficulty of a thing left on the screen is telling what it was:
+            // silence here would only mean the next report is another guess.
+            var state = darkness.ActiveStateName;
+            if (state != DarknessDeathStateName) {
+                Logger.Info($"The dark plates around the player were in '{state}', so the death left them open");
+
+                return;
+            }
+
+            darkness.SendEvent(DarknessOpenEvent);
+            Logger.Info($"Opened the dark plates the death closed around the player; they are now in '{darkness.ActiveStateName}'");
+        } catch (Exception e) {
+            Logger.Warn($"Could not open the dark plates the death closed around the player: {e.Message}");
         }
     }
 
@@ -871,6 +947,10 @@ internal partial class CoopSave {
             // The death slid this away as it started
             cameras.HUDIn();
         }
+
+        // The black over the screen is not the only dark a death leaves. Fading that off in front of plates still
+        // drawn shut around the player only reveals the plates.
+        OpenTheDarknessAroundTheHero();
     }
 
     /// <summary>
