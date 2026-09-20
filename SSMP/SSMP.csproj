@@ -39,7 +39,7 @@
         version as the last one is indistinguishable from it, which is what made the old fixed 0.3.1.0 useless
         to compare against. Kept ahead of upstream's own 0.3.1.0 because this copy is a fork, not a patch of it.
         -->
-        <Version>0.4.34.0</Version>
+        <Version>0.4.35.0</Version>
         <PackageId>Silksong.SSMP</PackageId>
     </PropertyGroup>
 

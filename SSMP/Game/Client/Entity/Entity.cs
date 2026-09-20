@@ -799,7 +799,52 @@ internal class Entity {
         }
 
         RememberWhereTheHostFsmsAre();
+        AskTheRoomsOwnCopyToSayWhoWakesIt();
         Object.Host.SetActive(false);
+    }
+
+    /// <summary>
+    /// Puts a listener on the room's own copy that says, once, what switched it back on.
+    ///
+    /// The action PlayMaker uses to switch an object on is already turned away while the other game runs a creature,
+    /// so whatever is doing this reaches the object another way, and by the time this mod notices it the frame is
+    /// over and there is nothing left to look at. A listener on the object itself runs inside the call that wakes it,
+    /// so the one place that can name the caller is there.
+    /// </summary>
+    private void AskTheRoomsOwnCopyToSayWhoWakesIt() {
+        try {
+            if (Object.Host.GetComponent<SaysWhoWakesIt>() != null) {
+                return;
+            }
+
+            // Adding it wakes it up in the sense Unity means, so it is armed only afterwards: the one line it is
+            // allowed should be about whoever wakes the creature, not about this
+            Object.Host.AddComponent<SaysWhoWakesIt>().Armed = true;
+        } catch (Exception e) {
+            SSMP.Logging.Logger.Warn($"Could not ask '{Object.Host.name}' to say who wakes it: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Says once, from inside the call that does it, what switched this object back on.
+    /// </summary>
+    private sealed class SaysWhoWakesIt : MonoBehaviour {
+        /// <summary>
+        /// Whether this has anything to say yet. False until the object it was put on has finished being added to.
+        /// </summary>
+        public bool Armed;
+
+        private void OnEnable() {
+            if (!Armed) {
+                return;
+            }
+
+            Armed = false;
+
+            SSMP.Logging.Logger.Info(
+                $"The room's own '{name}' was switched back on by:\n{new System.Diagnostics.StackTrace(1, true)}"
+            );
+        }
     }
 
     /// <summary>

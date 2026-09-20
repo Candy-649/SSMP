@@ -873,17 +873,21 @@ internal partial class CoopSave {
     /// <param name="action">The action the prompt is about.</param>
     /// <returns>The name to show.</returns>
     private static string PromptKeyName(PlayerAction action) {
+        var binding = action.GetKeyOrMouseBinding();
+        var key = InputHandler.KeyOrMouseBinding.IsNone(binding) ? null : binding.Key.ToString();
+
         var inputHandler = InputHandler.Instance;
         if (inputHandler != null && inputHandler.activeGamepadType != GamepadType.NONE) {
             var button = action.GetControllerButtonBinding();
             if (button != InputControlType.None) {
-                return ButtonName(button);
+                // Both of them, because holding a pad does not mean the keyboard has gone away, and a player who
+                // cannot find a button on their pad has no way of guessing that a key would have done instead. The
+                // one that was shown alone was the stick pressed in, which is the hardest of them all to find.
+                return key == null ? ButtonName(button) : $"{key} / {ButtonName(button)}";
             }
         }
 
-        var binding = action.GetKeyOrMouseBinding();
-
-        return InputHandler.KeyOrMouseBinding.IsNone(binding) ? "the co-op key" : binding.Key.ToString();
+        return key ?? "the co-op key";
     }
 
     /// <summary>
