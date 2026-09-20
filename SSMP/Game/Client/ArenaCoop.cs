@@ -7,6 +7,8 @@ using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
+using SSMP.Ui;
+using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
@@ -41,23 +43,6 @@ internal class ArenaCoop {
     private const string OpenGatesEvent = "BG OPEN";
 
     /// <summary>
-    /// The events that an arena and its waves send their enemies to set them up and then to send them at the players,
-    /// in the order in which the game sends them.
-    /// </summary>
-    private static readonly string[] EnemyWakeEvents = ["BATTLE", "BATTLE START"];
-
-    /// <summary>
-    /// How many wake events in a row one enemy is given, so that an enemy which only waits for the next event after
-    /// hearing one still comes out, without ever looping.
-    /// </summary>
-    private const int MaxWakeEvents = 4;
-
-    /// <summary>
-    /// How long, in seconds, between the looks over a running battle for an enemy that never heard its wave start.
-    /// </summary>
-    private const float WakeCheckInterval = 2f;
-
-    /// <summary>
     /// Names of the arena methods that count enemies or end waves. Players who follow the scene host skip them, since
     /// the scene host sends them the number of enemies and the waves.
     /// </summary>
@@ -85,6 +70,19 @@ internal class ArenaCoop {
     /// Reflected field with the waves of an arena.
     /// </summary>
     private static readonly FieldInfo? WavesField = typeof(BattleScene).GetField("waves", InstanceFlags);
+
+    /// <summary>
+    /// Reflected field that tells whether a wave takes the rewards off the enemies it starts.
+    /// </summary>
+    private static readonly FieldInfo? ClearDeathDropsField =
+        typeof(BattleWave).GetField("clearDeathDrops", InstanceFlags);
+
+    /// <summary>
+    /// How long, in seconds, a battle goes without a single enemy dying before this game writes down what every enemy
+    /// of the waves that are running is doing. A battle that can no longer be won looks exactly like this, and nothing
+    /// else afterwards can tell which enemy it was waiting for.
+    /// </summary>
+    private const float QuietBattleReportDelay = 30f;
 
     /// <summary>
     /// Reflected field with the camera locks that an arena turns on when it locks in the local player.
@@ -346,7 +344,6 @@ internal class ArenaCoop {
 
             if (state.Started) {
                 Logger.Info($"Continuing arena '{state.Path}' as the scene host");
-                WakeTheEnemiesThatNeverHeardTheirWave(battleScene, state, true);
                 SendRunning(battleScene, state);
             } else if (state.LockedIn) {
                 // The previous scene host left before it started the battle, while the local player is behind the gates
@@ -532,17 +529,49 @@ internal class ArenaCoop {
     private void OnWaveStarted(WaveStartedOrig orig, BattleWave self, bool activateEnemies, ref int currentEnemies) {
         if (!IsFollower()) {
             orig(self, activateEnemies, ref currentEnemies);
+        } else {
+            var ignoredEnemies = currentEnemies;
+            orig(self, activateEnemies, ref ignoredEnemies);
+        }
+
+        TakeTheRewardsOffTheCopiesOfAWave(self);
+    }
+
+    /// <summary>
+    /// Takes the rewards off the copies of the enemies of a wave that the other player's game runs.
+    /// A wave that takes the rewards off its enemies does it to the room's own copy of each of them when the wave
+    /// starts, but the copy that stands in for an enemy of the other player's game was made when the room loaded, long
+    /// before that, and keeps the rewards it was born with. Whoever follows the other player kills that copy, so the
+    /// arena paid out for them and not for the player whose game ran the enemies.
+    /// </summary>
+    private void TakeTheRewardsOffTheCopiesOfAWave(BattleWave wave) {
+        if (ClearDeathDropsField?.GetValue(wave) is not true || wave == null) {
             return;
         }
 
-        var ignoredEnemies = currentEnemies;
-        orig(self, activateEnemies, ref ignoredEnemies);
+        foreach (var entity in _entityManager.ActiveEntities) {
+            var roomsOwn = entity.Object.Host;
+            var copy = entity.Object.Client;
+            if (roomsOwn == null || copy == null || roomsOwn.transform.parent != wave.transform) {
+                continue;
+            }
+
+            var health = copy.GetComponent<HealthManager>();
+            if (health == null) {
+                continue;
+            }
+
+            health.SetGeoSmall(0);
+            health.SetGeoMedium(0);
+            health.SetGeoLarge(0);
+            health.SetShellShards(0);
+            health.ClearItemDropsBattleScene();
+        }
     }
 
     /// <summary>
     /// Applies the state of the scene host for a player who follows it. For the scene host, sends the number of enemies
-    /// whenever it changes, so that the next scene host can continue the battle, and keeps an eye out for an enemy that
-    /// never heard its wave start.
+    /// whenever it changes, so that the next scene host can continue the battle.
     /// </summary>
     private void OnUpdate(Action<BattleScene> orig, BattleScene self) {
         orig(self);
@@ -551,9 +580,7 @@ internal class ArenaCoop {
             return;
         }
 
-        if (!IsFollower()) {
-            CheckForEnemiesThatNeverHeardTheirWave(self, state);
-        }
+        WatchForABattleThatStopped(self, state);
 
         if (!IsOtherPlayerInScene()) {
             return;
@@ -673,39 +700,43 @@ internal class ArenaCoop {
     }
 
     /// <summary>
-    /// Looks over the waves that are running for an enemy that is still waiting to hear that its wave started, and
-    /// tells it. Nothing in the game would ever end a wave that one of its enemies never came out for, and the enemy
-    /// that missed it has no timer to fall back on, so this is the only way back out of it. It runs for the player
-    /// whose game runs the enemies, and only while the mod is running the room for both players.
+    /// Watches a battle that is running, and writes down what every enemy of the waves that started is doing once it
+    /// has gone a long while without a single enemy dying. A battle that can no longer be won ends up standing still
+    /// behind closed gates, and afterwards nothing can tell which enemy it was waiting for or what it was waiting to
+    /// hear. This only reads and says; it never touches the battle.
     /// </summary>
-    private void CheckForEnemiesThatNeverHeardTheirWave(BattleScene battleScene, ArenaState state) {
+    private void WatchForABattleThatStopped(BattleScene battleScene, ArenaState state) {
         if (!_netClient.IsConnected || !_isFullSynchronisation() || !state.Started || state.Ended ||
-            Time.unscaledTime < state.NextWakeCheck || IsCompleted(battleScene)) {
+            IsCompleted(battleScene)) {
+            state.QuietSince = null;
             return;
         }
 
-        state.NextWakeCheck = Time.unscaledTime + WakeCheckInterval;
+        var enemies = GetCurrentEnemies(battleScene);
+        if (state.QuietSince == null || enemies != state.WatchedEnemies) {
+            state.WatchedEnemies = enemies;
+            state.QuietSince = Time.unscaledTime;
+            return;
+        }
 
-        WakeTheEnemiesThatNeverHeardTheirWave(battleScene, state, false);
+        if (Time.unscaledTime - state.QuietSince.Value < QuietBattleReportDelay) {
+            return;
+        }
+
+        state.QuietSince = Time.unscaledTime;
+        SayWhatTheWavesAreDoing(battleScene, state, enemies);
     }
 
     /// <summary>
-    /// Tells the enemies of the waves that are already running to come out, if they are still waiting to hear that
-    /// their wave started.
-    /// A player who follows the scene host keeps the room's own copy of every enemy switched off, so the wave events
-    /// that their own arena sends while it follows are swallowed: PlayMaker drops an event sent to a GameObject that is
-    /// off and never delivers it afterwards. An enemy that lies in wait for that event has no timer to fall back on, so
-    /// once this game takes the room over, that enemy stays buried, cannot be killed, and the wave never ends for
-    /// anyone. Only an enemy whose current state listens for one of the events is told, so an enemy that is already
-    /// fighting hears nothing.
+    /// Writes down what every enemy of the waves that started is doing, one line each.
     /// </summary>
-    /// <param name="battleScene">The arena.</param>
-    /// <param name="state">The co-op state of the arena.</param>
-    /// <param name="loud">
-    /// Whether to say something about an enemy that is switched off, which is worth saying once when the room changes
-    /// hands but not over and over while the battle runs.
-    /// </param>
-    private static void WakeTheEnemiesThatNeverHeardTheirWave(BattleScene battleScene, ArenaState state, bool loud) {
+    private void SayWhatTheWavesAreDoing(BattleScene battleScene, ArenaState state, int enemies) {
+        Logger.Warn(
+            $"Arena '{state.Path}' has been on wave {state.Wave} with {enemies} enemy(s) left for " +
+            $"{QuietBattleReportDelay:0} seconds without one dying, as " +
+            $"{(IsFollower() ? "a player following the other game" : "the player whose game runs the enemies")}"
+        );
+
         if (WavesField!.GetValue(battleScene) is not IList waves) {
             return;
         }
@@ -716,64 +747,55 @@ internal class ArenaCoop {
             }
 
             foreach (Transform child in wave.transform) {
-                if (!child.gameObject.activeInHierarchy) {
-                    // An enemy that was killed is switched off and says nothing; one that still has its health is a
-                    // hole that nothing here can fill, since an event never reaches an object that is off
-                    var health = child.GetComponent<HealthManager>();
-                    if (loud && health != null && health.hp > 0) {
-                        Logger.Warn(
-                            $"Enemy '{child.name}' of wave {waveNumber} in arena '{state.Path}' is switched off with " +
-                            $"{health.hp} health left while its wave runs, so it cannot hear that the wave started"
-                        );
-                    }
+                var health = child.GetComponent<HealthManager>();
+                var states = string.Join(
+                    ", ",
+                    child.GetComponents<PlayMakerFSM>().Select(fsm => $"{fsm.FsmName} is in {fsm.ActiveStateName}")
+                );
 
-                    continue;
-                }
-
-                foreach (var fsm in child.GetComponents<PlayMakerFSM>()) {
-                    for (var sent = 0; sent < MaxWakeEvents; sent++) {
-                        var waitedFor = GetWakeEventWaitedFor(fsm);
-                        if (waitedFor == null) {
-                            break;
-                        }
-
-                        Logger.Info(
-                            $"Enemy '{child.name}' of wave {waveNumber} in arena '{state.Path}' never heard " +
-                            $"'{waitedFor}', telling it now"
-                        );
-
-                        var stateBefore = fsm.Fsm.ActiveStateName;
-                        fsm.Fsm.Event(waitedFor);
-
-                        // An event that PlayMaker only takes in on its own next turn leaves the state where it was, and
-                        // sending the same one again would do nothing but fill its queue
-                        if (fsm.Fsm.ActiveStateName == stateBefore) {
-                            break;
-                        }
-                    }
-                }
+                Logger.Warn(
+                    $"  wave {waveNumber}: '{child.name}' is " +
+                    $"{(child.gameObject.activeInHierarchy ? "on" : "off")} with " +
+                    $"{(health == null ? "no health of its own" : health.hp + " health")}" +
+                    $"{(states.Length == 0 ? "" : " and " + states)}"
+                );
             }
         }
     }
 
     /// <summary>
-    /// The wake event that the current state of an FSM is waiting for, or null if it waits for none of them.
+    /// What the local player is told when the gates of an arena open because they gave up on the battle.
     /// </summary>
-    private static string? GetWakeEventWaitedFor(PlayMakerFSM fsm) {
-        var activeState = fsm.Fsm?.ActiveState;
-        if (activeState == null) {
-            return null;
-        }
+    private static string GaveUpMessage => Lang.Pick(
+        "The gates are open. The battle carries on for whoever stays in.",
+        "门开了。留在里面的人还在打。"
+    );
 
-        foreach (var transition in activeState.Transitions ?? []) {
-            foreach (var wakeEvent in EnemyWakeEvents) {
-                if (transition.EventName == wakeEvent) {
-                    return wakeEvent;
-                }
+    /// <summary>
+    /// Opens the gates of the arenas the local player is locked into, without ending the battle for anyone else.
+    /// It is the way out of a battle that cannot be won any more.
+    /// </summary>
+    /// <returns>Whether any gates were opened.</returns>
+    public bool GiveUpBattle() {
+        var gaveUp = false;
+
+        foreach (var pair in _arenas) {
+            var battleScene = pair.Key;
+            var state = pair.Value;
+            if (!state.LockedIn || battleScene == null || IsCompleted(battleScene)) {
+                continue;
             }
+
+            gaveUp = true;
+            Logger.Info($"Opening the gates of arena '{state.Path}', since the local player gave up on it");
+            Release(battleScene, state);
         }
 
-        return null;
+        if (gaveUp) {
+            UiManager.InternalChatBox.AddMessage(GaveUpMessage);
+        }
+
+        return gaveUp;
     }
 
     /// <summary>
@@ -1055,10 +1077,15 @@ internal class ArenaCoop {
         public float? RequestTime;
 
         /// <summary>
-        /// The time from which this game looks over the running waves again for an enemy that never heard its wave
-        /// start.
+        /// The number of enemies the battle was last seen with, for telling a battle that stands still from one that
+        /// is being fought.
         /// </summary>
-        public float NextWakeCheck;
+        public int WatchedEnemies = int.MinValue;
+
+        /// <summary>
+        /// The time since which the number of enemies has not changed, or null if the battle is not running.
+        /// </summary>
+        public float? QuietSince;
 
         public ArenaState(string path) {
             Path = path;
