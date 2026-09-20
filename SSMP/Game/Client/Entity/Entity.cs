@@ -288,6 +288,11 @@ internal class Entity {
     /// </summary>
     private readonly List<FsmSnapshot> _fsmSnapshots;
 
+    /// <summary>
+    /// Whether the host FSMs still have to be put back where they were before this game took the room in.
+    /// </summary>
+    private bool _putFsmsBackWhereTheyWere;
+
     public Entity(
         NetClient netClient,
         ushort id,
@@ -802,6 +807,11 @@ internal class Entity {
     /// </summary>
     [SuppressMessage("ReSharper", "CompareOfFloatsByEqualityOperator")]
     private void OnUpdate() {
+        if (_putFsmsBackWhereTheyWere) {
+            _putFsmsBackWhereTheyWere = false;
+            PutHostFsmsBackWhereTheyWere();
+        }
+
         if (Object.Host == null) {
             if (_lastIsActive) {
                 // If the host object was active, but now it null (or destroyed in Unity), we can send
@@ -1206,6 +1216,11 @@ internal class Entity {
 
         Object.Host.SetActive(_originalIsActive);
 
+        // Switching the object back on makes PlayMaker start its FSMs over, so anything they had already done is
+        // left done with no way back. It cannot be put right in the same breath, because PlayMaker has not started
+        // them yet; it is done on the next turn instead.
+        _putFsmsBackWhereTheyWere = true;
+
         // Also update the last active variable to account for this potential change
         // Otherwise we might trigger the update sending of activity twice
         _lastIsActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
@@ -1244,6 +1259,53 @@ internal class Entity {
 
         foreach (var component in _components.Values) {
             component.InitializeClient(sceneHostEpoch);
+        }
+    }
+
+    /// <summary>
+    /// Puts the host FSMs back where they were when this game took the entity in, for the ones that had already
+    /// moved on by then.
+    /// This mod switches every entity off while a room settles which game runs it, and switching a GameObject back
+    /// on makes PlayMaker start its FSMs over from the beginning. For an FSM that had not done anything yet that
+    /// costs nothing. For one that had, it costs everything: a creature that lies in wait puts its own look, its
+    /// own collider and its own weight away first, and the only state that gives them back is the one it reaches by
+    /// coming out. Started over, it never passes that state again, and spends the rest of the room walking around
+    /// as something no player can see, touch or kill - while still being counted.
+    /// Only the states that were left behind are put back, and as in a handover, only the actions that are meant to
+    /// run again are run.
+    /// </summary>
+    private void PutHostFsmsBackWhereTheyWere() {
+        if (Object.Host == null || !Object.Host.activeInHierarchy) {
+            return;
+        }
+
+        for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count && fsmIndex < _fsmSnapshots.Count; fsmIndex++) {
+            var fsm = _fsms.Host[fsmIndex];
+            if (fsm == null) {
+                continue;
+            }
+
+            var wanted = _fsmSnapshots[fsmIndex].CurrentState;
+            if (string.IsNullOrEmpty(wanted) || wanted == fsm.ActiveStateName || wanted == fsm.Fsm.StartState) {
+                continue;
+            }
+
+            var state = fsm.GetStateOrNull(wanted);
+            if (state == null) {
+                continue;
+            }
+
+            SSMP.Logging.Logger.Info(
+                $"'{Object.Host.name}' had its FSM '{fsm.FsmName}' at '{wanted}' before this game took the room in, " +
+                $"and starting it over left it at '{fsm.ActiveStateName}'; putting it back"
+            );
+
+            var oldActions = state.Actions;
+            state.Actions = oldActions.Where(a =>
+                ActionRegistry.IsActionContinuous(a) || ActionRegistry.IsActionTransferSafeSetup(a)
+            ).ToArray();
+            fsm.SetState(wanted);
+            state.Actions = oldActions;
         }
     }
 
