@@ -447,6 +447,12 @@ internal partial class CoopSave {
             return death;
         }
 
+        // What the player was when they died, because a death that follows another one too closely to have been
+        // dealt by anything is a different problem from a death that something dealt, and from the outside the two
+        // look exactly alike. Invulnerability lasts two seconds after standing up, so anything under that was not a
+        // hit, whatever it looked like.
+        SayWhatTheDeathFound(frostDeath);
+
         if (!CanWaitForRescue()) {
             TellPartnerNobodyIsComing();
 
@@ -458,6 +464,32 @@ internal partial class CoopSave {
         NoteWhatIsOnAroundThePlayer();
 
         return HoldDeath(death);
+    }
+
+    /// <summary>
+    /// Writes down what the player was when this death reached them.
+    /// </summary>
+    /// <param name="frostDeath">Whether the death was caused by frost.</param>
+    private void SayWhatTheDeathFound(bool frostDeath) {
+        try {
+            var hero = HeroController.instance;
+            var playerData = PlayerData.instance;
+            var since = _lastStoodBackUpTime > 0f
+                ? $"{Time.unscaledTime - _lastStoodBackUpTime:0.00}s after standing up"
+                : "having not been pulled up before";
+
+            Logger.Info(
+                $"A death reached the player {since}, with " +
+                $"{(playerData == null ? "?" : playerData.health.ToString())}/" +
+                $"{(playerData == null ? "?" : playerData.maxHealth.ToString())} health, " +
+                $"by the room: {(hero == null ? "?" : hero.cState.hazardDeath.ToString())}, " +
+                $"by frost: {frostDeath}, " +
+                $"already dead: {(hero == null ? "?" : hero.cState.dead.ToString())}, " +
+                $"at {(hero == null ? "?" : hero.transform.position.ToString())}"
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not write down what the death found: {e.Message}");
+        }
     }
 
     /// <summary>
@@ -537,33 +569,8 @@ internal partial class CoopSave {
             return false;
         }
 
-        // Dying again within seconds of standing up means standing up put the player somewhere that kills them, and
-        // offering the same thing again only asks their teammate to do it again for the same end. Whatever the place
-        // is - the inside of the lava, the drop they fell down, something still swinging where they lie - the one
-        // thing that certainly breaks out of it is the bench, which is where a death went before any of this existed.
-        var sinceStandingUp = Time.unscaledTime - _lastStoodBackUpTime;
-        if (_lastStoodBackUpTime > 0f && sinceStandingUp < ShortestTimeWorthPullingUpAgain) {
-            Logger.Info(
-                $"Died again {sinceStandingUp:0.0}s after being pulled back up, so this death goes to the bench " +
-                "rather than asking for the same thing again"
-            );
-            Chat(
-                Lang.Pick(
-                    "You died again right away, so this one goes to your bench.",
-                    "刚站起来就又死了，这次直接回长椅。"
-                )
-            );
-
-            return false;
-        }
-
         return true;
     }
-
-    /// <summary>
-    /// How soon after being pulled back up a death counts as the same death happening again, in seconds.
-    /// </summary>
-    private const float ShortestTimeWorthPullingUpAgain = 6f;
 
     /// <summary>
     /// When the local player was last pulled back up, in unscaled seconds, or 0 if they never were.
