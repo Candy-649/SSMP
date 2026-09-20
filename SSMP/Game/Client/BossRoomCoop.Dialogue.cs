@@ -485,7 +485,14 @@ internal partial class BossRoomCoop {
                 DialogueBox.StartConversation(
                     text,
                     null,
-                    update.OverrideContinue,
+                    // Never the sender's own answer to this, however it was written. It decides whether the last
+                    // line of a box shows the mark that says "press to go on", and a box without it answers to no
+                    // button at all: the game's own Update leaves without looking at the input unless the box is
+                    // still printing or waiting. The object that shared it closes its own box from its FSM, which is
+                    // why it can do without the mark. The player reading a copy of it has no such FSM, so a box
+                    // shared without the mark is one they cannot get out of, and the whole room stands waiting on
+                    // them for as long as the reading is allowed to take.
+                    false,
                     options,
                     () => OnSharedDialogueEnded(dialogueId),
                     () => OnSharedDialogueEnded(dialogueId)
