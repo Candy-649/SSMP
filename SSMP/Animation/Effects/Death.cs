@@ -36,6 +36,15 @@ internal class Death : AnimationEffect {
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
+        // Said out loud, because this is the only place a death of the other player leaves any mark at all on this
+        // game. Their own game can miss it entirely - a death that is not lethal, and a death the room itself deals,
+        // both go through without a word - so when one player says they watched the other die over and over, this
+        // is the line that can agree with them.
+        Logger.Info(
+            $"The death of the other player is being played out here, at {playerObject.transform.position}" +
+            (effectInfo is [1] ? ", by frost" : "")
+        );
+
         // Play frost death if applicable (effect info contains a single byte with the value '1')
         if (effectInfo is [1]) {
             MonoBehaviourUtil.Instance.StartCoroutine(PlayFrostDeath(playerObject));
