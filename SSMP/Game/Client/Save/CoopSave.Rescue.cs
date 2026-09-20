@@ -405,12 +405,22 @@ internal partial class CoopSave {
     /// <summary>
     /// Lets the news of a death through only when there is nobody left in the room it would be news to.
     /// </summary>
+    /// <remarks>
+    /// Decided by the very thing that decides where this death is going: a death that can still wait to be pulled
+    /// back up is not the end of anything, and a death that cannot is the one that goes to the bench, which is the
+    /// same as saying both players are down. Keeping one answer rather than two means the boss and the bench can
+    /// never disagree about whether the fight is over.
+    ///
+    /// Only the death of the player at this screen ever reaches here. The death of the partner is played out as
+    /// particles and a cocoon and nothing else - it never puts up the object that carries this announcement - so
+    /// there is no second case to get right.
+    /// </remarks>
     /// <param name="orig">The original call.</param>
     /// <param name="eventName">The announcement.</param>
     /// <param name="excludeTarget">What is not to be told, which is the caller's own business.</param>
     private void OnDeathAnnounced(Action<string, GameObject> orig, string eventName, GameObject excludeTarget) {
         try {
-            if (eventName == DeathAnnouncement && SomebodyIsStillFightingHere()) {
+            if (eventName == DeathAnnouncement && CanWaitForRescue()) {
                 Logger.Info("Not telling the room the player died, because their teammate is still fighting in it");
 
                 return;
@@ -424,34 +434,7 @@ internal partial class CoopSave {
         orig(eventName, excludeTarget);
     }
 
-    /// <summary>
-    /// Whether anybody in this room is still on their feet, which is what makes a death here something the room
-    /// should not act on yet.
-    /// </summary>
-    /// <remarks>
-    /// Asked of the same register the creatures of the room ask when they choose who to go after, rather than of
-    /// anything written for this: a player who goes down is taken out of it, by
-    /// <see cref="SayTheLocalPlayerIsDown"/> for the one at this screen and by
-    /// <see cref="SetPartnerBodyHidden"/> for the other, so what it holds already means exactly "still standing
-    /// here". Alone, it holds only the player themselves, and a death of theirs tells the room as it always did.
-    ///
-    /// The one thing it cannot know yet is the death being announced right now: a player is taken out of it when
-    /// their cocoon is laid, which is a moment after their death has told the room. So their own death is counted
-    /// here rather than waited for.
-    /// </remarks>
-    private static bool SomebodyIsStillFightingHere() {
-        var hero = HeroController.instance;
 
-        foreach (var player in PlayerTargetRegistry.GetTrackedPlayers()) {
-            if (hero != null && ReferenceEquals(player, hero.gameObject) && hero.cState.dead) {
-                continue;
-            }
-
-            return true;
-        }
-
-        return false;
-    }
 
     /// <summary>
     /// Holds a death of the local player before it takes them to their bench, so that the partner has a chance to pull
