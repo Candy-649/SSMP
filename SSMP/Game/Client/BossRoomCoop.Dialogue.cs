@@ -247,7 +247,12 @@ internal partial class BossRoomCoop {
         update.IsSharedTalk = isSharedTalk;
         Logger.Info($"Sharing the dialogue of '{GetPath(fsm)}' with the other players in the scene");
         var dialogue = new SharedDialogue(state.Name, update, Time.unscaledTime) {
-            HoldsEnd = !isSharedTalk || _holdsSharedTalkEnd(fsm)
+            // A boss no longer stands still between its own lines while the other player reads them. Key dialogue of
+            // a two-player save settled this shape first: both players read the same thing, each at their own pace,
+            // and what waits for the pair of them is the one step that cannot be taken twice - there the button that
+            // agrees to something, here walking into the fight. Holding every line instead put one player in front
+            // of a frozen boss being told to wait for someone they could not see.
+            HoldsEnd = isSharedTalk && _holdsSharedTalkEnd(fsm)
         };
         _sharedDialogues[fsm] = dialogue;
         ShareDialogue(dialogue);
@@ -685,7 +690,7 @@ internal partial class BossRoomCoop {
         }
 
         var readiness = GetFightReadiness(fsm);
-        if (!readiness.Local) {
+        if (!readiness.Local && !StillReadingWhatTheFightWaitsFor()) {
             readiness.Local = true;
             Send(BossRoomUpdateKind.Ready, fsm, "", "", "");
         }
@@ -918,7 +923,7 @@ internal partial class BossRoomCoop {
     private void PassUnreachableFight(Fsm fsm, RoomArrivals readiness) {
         var gameObject = fsm.GameObject;
         if (readiness.Local || _startedFights.Contains(fsm) || gameObject == null ||
-            !gameObject.activeInHierarchy || fsm.ActiveState == null) {
+            !gameObject.activeInHierarchy || fsm.ActiveState == null || StillReadingWhatTheFightWaitsFor()) {
             return;
         }
 
@@ -930,6 +935,17 @@ internal partial class BossRoomCoop {
         readiness.Local = true;
         Logger.Info($"The room '{GetPath(fsm)}' can't get to its fight for the local player, so nobody waits for it");
         Send(BossRoomUpdateKind.Ready, fsm, "", "", "");
+    }
+
+    /// <summary>
+    /// Whether the local player still has lines of a boss to get through that were shared with them.
+    ///
+    /// This is what the fight waits for now that the lines themselves no longer wait for anybody. A player who is
+    /// still reading has not got to the fight, however far the room of the player who read it first has come, and
+    /// saying so is the whole of what keeps the pair of them together.
+    /// </summary>
+    private bool StillReadingWhatTheFightWaitsFor() {
+        return _shownDialogue != null || _dialogueQueue.Count > 0;
     }
 
     /// <summary>

@@ -1,7 +1,9 @@
 using System;
+using System.Reflection;
 using System.Collections;
 using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
+using MonoMod.RuntimeDetour;
 using SSMP.Hooks;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -353,6 +355,81 @@ internal partial class CoopSave {
     /// </summary>
     private void RegisterRescueHooks() {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
+        _deathAnnouncementHook = HoldBackTheNewsOfADeath();
+    }
+
+    /// <summary>
+    /// What a death of the player announces to everything in the room that answers to one. Fifty-seven objects in the
+    /// game listen for it and almost all of them are bosses; nothing on the player themselves does, so holding it
+    /// back takes nothing away from the death itself.
+    /// </summary>
+    private const string DeathAnnouncement = "HORNET DEATH";
+
+    /// <summary>
+    /// The hook on the one call that carries that announcement.
+    /// </summary>
+    private Hook? _deathAnnouncementHook;
+
+    /// <summary>
+    /// Stops one player's death from telling the room the fight is over while the other player is still in it.
+    ///
+    /// A boss that hears this stops fighting and celebrates, and what ends the celebration is the loading of the room
+    /// the bench is in. In two players that room is never loaded while one of them is still standing, so the boss
+    /// stood there celebrating over a player who was being pulled back up, and the one still fighting had nothing
+    /// left to fight. Held back, the boss simply carries on with whoever is left.
+    /// </summary>
+    private Hook? HoldBackTheNewsOfADeath() {
+        try {
+            var method = typeof(EventRegister).GetMethod(
+                nameof(EventRegister.SendEvent),
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                [typeof(string), typeof(GameObject)],
+                null
+            );
+
+            if (method == null) {
+                Logger.Error("Could not find how a death tells the room, so a boss will celebrate over one player");
+
+                return null;
+            }
+
+            return new Hook(method, (Action<Action<string, GameObject>, string, GameObject>) OnDeathAnnounced);
+        } catch (Exception e) {
+            Logger.Error($"Could not hold back the news of a death:\n{e}");
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Lets the news of a death through only when there is nobody left in the room it would be news to.
+    /// </summary>
+    /// <param name="orig">The original call.</param>
+    /// <param name="eventName">The announcement.</param>
+    /// <param name="excludeTarget">What is not to be told, which is the caller's own business.</param>
+    private void OnDeathAnnounced(Action<string, GameObject> orig, string eventName, GameObject excludeTarget) {
+        try {
+            if (eventName == DeathAnnouncement && SomebodyIsStillFightingHere()) {
+                Logger.Info("Not telling the room the player died, because their teammate is still fighting in it");
+
+                return;
+            }
+        } catch (Exception e) {
+            // Whatever goes wrong in deciding this, the game's own call has to happen: the alternative is a death
+            // that half the room never hears about for a reason that was never about the room
+            Logger.Warn($"Could not decide whether to hold back the news of a death: {e.Message}");
+        }
+
+        orig(eventName, excludeTarget);
+    }
+
+    /// <summary>
+    /// Whether the partner is here and on their feet, which is what makes a death of the local player something the
+    /// room should not act on yet. A partner lying in a cocoon is not fighting anything.
+    /// </summary>
+    private bool SomebodyIsStillFightingHere() {
+        return GetCheckedPartner() is { } partner && partner.IsInLocalScene && _partnerWaitingRescue != partner.Id;
     }
 
     /// <summary>
@@ -456,8 +533,42 @@ internal partial class CoopSave {
         }
 
         // Both players dead means nobody is left to open a cocoon, so this one goes to the bench the way it always did
-        return _partnerWaitingRescue != partner.Id;
+        if (_partnerWaitingRescue == partner.Id) {
+            return false;
+        }
+
+        // Dying again within seconds of standing up means standing up put the player somewhere that kills them, and
+        // offering the same thing again only asks their teammate to do it again for the same end. Whatever the place
+        // is - the inside of the lava, the drop they fell down, something still swinging where they lie - the one
+        // thing that certainly breaks out of it is the bench, which is where a death went before any of this existed.
+        var sinceStandingUp = Time.unscaledTime - _lastStoodBackUpTime;
+        if (_lastStoodBackUpTime > 0f && sinceStandingUp < ShortestTimeWorthPullingUpAgain) {
+            Logger.Info(
+                $"Died again {sinceStandingUp:0.0}s after being pulled back up, so this death goes to the bench " +
+                "rather than asking for the same thing again"
+            );
+            Chat(
+                Lang.Pick(
+                    "You died again right away, so this one goes to your bench.",
+                    "刚站起来就又死了，这次直接回长椅。"
+                )
+            );
+
+            return false;
+        }
+
+        return true;
     }
+
+    /// <summary>
+    /// How soon after being pulled back up a death counts as the same death happening again, in seconds.
+    /// </summary>
+    private const float ShortestTimeWorthPullingUpAgain = 6f;
+
+    /// <summary>
+    /// When the local player was last pulled back up, in unscaled seconds, or 0 if they never were.
+    /// </summary>
+    private float _lastStoodBackUpTime;
 
     /// <summary>
     /// Plays the death out to the point where the cocoon has been placed, holds there while the partner has a chance
@@ -1360,6 +1471,8 @@ internal partial class CoopSave {
             // Asked again here and not only when the screen came back, because this is the moment the player is
             // walking around looking at whatever is left, and everything the rescue itself undoes has now run
             SayWhatTheDeathLeftSwitchedOn("with the player back on their feet");
+
+            _lastStoodBackUpTime = Time.unscaledTime;
 
             Chat(Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。"));
             Logger.Info("Pulled back up after a death instead of going to the bench");
