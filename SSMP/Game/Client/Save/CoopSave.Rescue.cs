@@ -429,22 +429,28 @@ internal partial class CoopSave {
     /// should not act on yet.
     /// </summary>
     /// <remarks>
-    /// Both players are asked about, not only the partner. A death announces itself on the game of whoever died, and
-    /// the death of the partner is played out here as well, so this is reached both ways round: once for the player
-    /// sitting at this screen and once for the one who is not. Asking only about the partner got the second case
-    /// right by accident and the first case wrong - a partner lying in a cocoon would have let the room be told the
-    /// fight was over while the player at this screen was still in the middle of it.
+    /// Asked of the same register the creatures of the room ask when they choose who to go after, rather than of
+    /// anything written for this: a player who goes down is taken out of it, by
+    /// <see cref="SayTheLocalPlayerIsDown"/> for the one at this screen and by
+    /// <see cref="SetPartnerBodyHidden"/> for the other, so what it holds already means exactly "still standing
+    /// here". Alone, it holds only the player themselves, and a death of theirs tells the room as it always did.
+    ///
+    /// The one thing it cannot know yet is the death being announced right now: a player is taken out of it when
+    /// their cocoon is laid, which is a moment after their death has told the room. So their own death is counted
+    /// here rather than waited for.
     /// </remarks>
-    private bool SomebodyIsStillFightingHere() {
-        if (GetCheckedPartner() is not { } partner || !partner.IsInLocalScene) {
-            return false;
+    private static bool SomebodyIsStillFightingHere() {
+        var hero = HeroController.instance;
+
+        foreach (var player in PlayerTargetRegistry.GetTrackedPlayers()) {
+            if (hero != null && ReferenceEquals(player, hero.gameObject) && hero.cState.dead) {
+                continue;
+            }
+
+            return true;
         }
 
-        var hero = HeroController.instance;
-        var localPlayerIsUp = hero != null && !hero.cState.dead;
-        var partnerIsUp = _partnerWaitingRescue != partner.Id;
-
-        return localPlayerIsUp || partnerIsUp;
+        return false;
     }
 
     /// <summary>
