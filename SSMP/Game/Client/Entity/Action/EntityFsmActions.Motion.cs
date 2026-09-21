@@ -452,6 +452,23 @@ internal static partial class EntityFsmActions {
         action.itweenType = "move";
 
         iTween.MoveBy(gameObject, args);
+        StopTweenOnExit(action, gameObject, "move");
+    }
+
+    /// <summary>
+    /// Stops a replayed tween when the scene host's FSM leaves its state, as the game's iTweenFsmAction.OnExitiTween
+    /// does unless it is told not to (IL: a stopOnExit left unset stops it too).
+    /// </summary>
+    private static void StopTweenOnExit(iTweenFsmAction action, GameObject gameObject, string tweenType) {
+        if (!UndoesOnExit(action)) {
+            return;
+        }
+
+        UndoOnExit(action, () => {
+            if (gameObject != null) {
+                iTween.Stop(gameObject, tweenType);
+            }
+        });
     }
 
     #endregion
@@ -515,6 +532,7 @@ internal static partial class EntityFsmActions {
                 (action.realTime.IsNone ? 0 : action.realTime.Value ? 1 : 0) > 0
             )
         );
+        StopTweenOnExit(action, gameObject, "scale");
     }
 
     #endregion

@@ -40,9 +40,23 @@ internal static partial class EntityFsmActions {
             return;
         }
 
+        var emission = action.emission.Value;
 #pragma warning disable CS0618
-        particleSystem.enableEmission = action.emission.Value;
+        particleSystem.enableEmission = emission;
 #pragma warning restore CS0618
+
+        // For the length of the state only, as the game does it (see ActivateGameObject)
+        if (action.resetOnExit) {
+            UndoOnExit(action, () => {
+                if (particleSystem == null) {
+                    return;
+                }
+
+#pragma warning disable CS0618
+                particleSystem.enableEmission = !emission;
+#pragma warning restore CS0618
+            });
+        }
     }
 
     #endregion
@@ -314,10 +328,29 @@ internal static partial class EntityFsmActions {
             }
         }
 
-        if (action.recursive.Value) {
-            SetActiveRecursively(gameObject, action.activate.Value);
+        var activate = action.activate.Value;
+        var recursive = action.recursive.Value;
+        if (recursive) {
+            SetActiveRecursively(gameObject, activate);
         } else {
-            gameObject.SetActive(action.activate.Value);
+            gameObject.SetActive(activate);
+        }
+
+        // For the length of the state only, as the game does it: 6530 such switches in the creatures' own FSMs, and the
+        // other way again was never sent, so everything they switch on for one attack stayed on here
+        if (action.resetOnExit) {
+            var switched = gameObject;
+            UndoOnExit(action, () => {
+                if (switched == null) {
+                    return;
+                }
+
+                if (recursive) {
+                    SetActiveRecursively(switched, !activate);
+                } else {
+                    switched.SetActive(!activate);
+                }
+            });
         }
     }
 

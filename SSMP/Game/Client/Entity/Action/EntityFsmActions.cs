@@ -256,6 +256,35 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// Whether an action undoes itself when its state is left: switches an object or collider back, stops a particle
+    /// emission or a tween. Checked in the game's own OnExit of each (IL).
+    /// </summary>
+    internal static bool UndoesOnExit(FsmStateAction action) => action switch {
+        ActivateGameObject activate => activate.resetOnExit,
+        ActivateGameObjectDelay activateDelay => activateDelay.resetOnExit,
+        SetCollider collider => collider.resetOnExit,
+        SetPolygonCollider polygonCollider => polygonCollider.resetOnExit,
+        SetParticleEmission emission => emission.resetOnExit,
+        iTweenFsmAction tween => tween.stopOnExit.IsNone || tween.stopOnExit.Value,
+        _ => false
+    };
+
+    /// <summary>
+    /// Undoes a replayed action once the scene host's FSM has left the state it was done in, as the action does itself
+    /// in the game when told to (see <see cref="UndoesOnExit"/>). Only the doing was ever sent, never the undoing, so
+    /// what a creature switched on for one attack stayed on here for good.
+    /// </summary>
+    /// <param name="action">The replayed action.</param>
+    /// <param name="undo">What the action does when its state is left.</param>
+    private static void UndoOnExit(FsmStateAction action, System.Action undo) {
+        new ActionInState {
+            Fsm = action.Fsm,
+            StateName = action.State.Name,
+            ExitAction = undo
+        }.Register();
+    }
+
+    /// <summary>
     /// Checks whether the given game object is in the entity registry and can thus be registered as an entity in
     /// the system.
     /// </summary>
