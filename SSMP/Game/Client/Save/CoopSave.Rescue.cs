@@ -689,6 +689,7 @@ internal partial class CoopSave {
         // Seeded with what the key is doing right now rather than with "not held". A player dies in the middle of
         // doing things, and a key that was already down when they died is not them asking to give up on being saved.
         var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
+        var padButtonWasDown = IsPadButtonDown(_modSettings.Keybinds.CoopLeave, out _);
 
         while (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
             if (Time.unscaledTime - waiting.StartTime >= RescueWaitTime) {
@@ -703,6 +704,25 @@ internal partial class CoopSave {
             // returns, so a player could be left staring at a cocoon with nothing on screen telling them anything and
             // no way out but to sit through the whole wait.
             ShowTheWayOutOfTheWait(waiting);
+
+            // Every press of the pad button is written down as it happens, whatever comes of it. A wait that ran out
+            // with no line in it could not be told apart from a player who never pressed anything, and a player who
+            // pressed the way out and was not let out cannot tell us whether the press never reached the game,
+            // arrived while the chat had the keys, or came too early to count.
+            var padButtonDown = IsPadButtonDown(_modSettings.Keybinds.CoopLeave, out var pad);
+            if (padButtonDown && !padButtonWasDown) {
+                var into = Time.unscaledTime - waiting.StartTime;
+                Logger.Info(
+                    $"The pad button that gives up on the wait went down on '{pad}' {into:0.0}s into it, " +
+                    (!_modSettings.Keybinds.Enabled
+                        ? "while the chat has the keys of this mod switched off"
+                        : into < LeaveKeyDeadTime
+                            ? "too early into the wait to count"
+                            : "with the keys of this mod listening")
+                );
+            }
+
+            padButtonWasDown = padButtonDown;
 
             var leaveNow = _modSettings.Keybinds.CoopLeave.IsPressed;
             if (leaveNow && !leaveHeld && Time.unscaledTime - waiting.StartTime >= LeaveKeyDeadTime) {

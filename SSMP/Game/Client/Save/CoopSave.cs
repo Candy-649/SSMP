@@ -891,16 +891,35 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The name a player would recognise for a gamepad button. Pressing a stick down is called L3 and R3 on the pads
-    /// someone is likely to be holding, which is not what the button is called in the game's own list.
+    /// The name a player would recognise for a gamepad button, and for the two that are a stick rather than a button,
+    /// what to do with it. Pressing a stick in is called L3 and R3 on the pads someone is likely to be holding, which
+    /// is not what the button is called in the game's own list - and the name on its own was still not enough. A pad
+    /// of the other make has no button printed L3 at all, and "press the stick down" was taken as pushing it towards
+    /// the player: a direction, which is bound to nothing here, so the player pushed and nothing happened.
     /// </summary>
     /// <param name="button">The button.</param>
     /// <returns>The name to show.</returns>
     private static string ButtonName(InputControlType button) => button switch {
-        InputControlType.LeftStickButton => "L3",
-        InputControlType.RightStickButton => "R3",
+        InputControlType.LeftStickButton => Lang.Pick("L3 (click the left stick in)", "L3（把左摇杆按进去）"),
+        InputControlType.RightStickButton => Lang.Pick("R3 (click the right stick in)", "R3（把右摇杆按进去）"),
         _ => button.ToString()
     };
+
+    /// <summary>
+    /// Whether the gamepad button of an action is down right now on the pad the game is reading, asked of the pad
+    /// itself rather than of the action. The action goes quiet while the chat has the keys, so on its own it cannot
+    /// tell a press that never reached the game from one that arrived while nothing was listening.
+    /// </summary>
+    /// <param name="action">The action whose button to ask about.</param>
+    /// <param name="device">The name of the pad that was asked.</param>
+    /// <returns>Whether that button is down.</returns>
+    private static bool IsPadButtonDown(PlayerAction action, out string device) {
+        var pad = InputManager.ActiveDevice;
+        device = pad.Name;
+
+        var button = action.GetControllerButtonBinding();
+        return button != InputControlType.None && pad.GetControl(button).IsPressed;
+    }
 
     /// <summary>
     /// Whether the key that agrees to a two-player save was already down last frame.
