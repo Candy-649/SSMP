@@ -266,6 +266,30 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The path of an object from the object an FSM runs on, as <see cref="Transform.Find(string)"/> takes it: empty
+    /// for that object itself, or null for an object that is not under it.
+    /// </summary>
+    /// <param name="owner">The object the FSM runs on.</param>
+    /// <param name="target">The object to name.</param>
+    private static string? PathFromOwner(GameObject? owner, GameObject target) {
+        if (owner == null) {
+            return null;
+        }
+
+        var names = new List<string>();
+        for (var current = target.transform; current != null; current = current.parent) {
+            if (current == owner.transform) {
+                names.Reverse();
+                return string.Join("/", names);
+            }
+
+            names.Add(current.name);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Method to call the spawn event externally. TODO: refactor this into something more appropriate
     /// </summary>
     /// <param name="details">The spawn details for the event.</param>
