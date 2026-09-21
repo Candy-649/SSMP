@@ -757,6 +757,9 @@ internal class Entity {
         networkData.Packet.Write((byte) hookedEntityAction.StateIndex);
         networkData.Packet.Write((byte) hookedEntityAction.ActionIndex);
 
+        // Which of its parts the action worked on, when a variable holds it (read back before the action's own data)
+        EntityFsmActions.WriteSubject(networkData, self);
+
         // Only if the GetNetworkDataFromAction method returns true do we add the entity data
         // for sending
         if (EntityFsmActions.GetNetworkDataFromAction(networkData, self)) {
@@ -2000,6 +2003,7 @@ internal class Entity {
                 //    $"Received entity network data for FSM: {fsm.Fsm.Name}, {state.Name}, {actionIndex} ({action.GetType()})"
                 //);
 
+                EntityFsmActions.ReadSubject(data, action);
                 EntityFsmActions.ApplyNetworkDataFromAction(data, action);
 
                 continue;

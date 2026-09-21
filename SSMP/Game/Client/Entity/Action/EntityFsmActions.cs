@@ -365,6 +365,93 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The variables holding the objects an action works on - its object parameter, the object it sends an event to
+    /// and the parent it puts something under - in the order of its fields, leaving out any that is its owner or an
+    /// object named directly. They follow from the action's own settings, which are the same in both games, so both
+    /// ends agree on which objects are named in the data.
+    /// </summary>
+    private static List<FsmGameObject> SubjectVariables(FsmStateAction action) {
+        var variables = new List<FsmGameObject>();
+        if (ReadsWithoutActing.Contains(action.GetType().Name)) {
+            return variables;
+        }
+
+        foreach (var field in GetSubjectFields(action.GetType())) {
+            if (field.Name is not ("gameObject" or "eventTarget" or "parent")) {
+                continue;
+            }
+
+            var value = field.GetValue(action);
+            var owner = value switch {
+                FsmOwnerDefault ownerDefault => ownerDefault,
+                FsmEventTarget {
+                    target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM
+                } eventTarget => eventTarget.gameObject,
+                _ => null
+            };
+
+            var variable = owner != null
+                ? owner.OwnerOption == OwnerDefaultOption.SpecifyGameObject ? owner.GameObject : null
+                : value as FsmGameObject;
+            if (variable is { UseVariable: true }) {
+                variables.Add(variable);
+            }
+        }
+
+        return variables;
+    }
+
+    /// <summary>
+    /// Writes, ahead of an action's own data, which objects the action worked on when they are held in variables: for
+    /// each, 0 for none, 1 and its path for a part of the creature, 2 for an object anywhere else.
+    ///
+    /// The creature's FSM fills such variables in while it runs - which spray to use, which of its parts to light, which
+    /// of them an event is for - and the scene client's copy never runs, so there the variable stayed empty and the
+    /// action did nothing. Going through the game's data found 3792 of them in 106 kinds of creature: sprays, particle
+    /// effects, sounds, events to their own parts, colliders of parts switched on and off, parts put under another
+    /// (which an empty parent turned into parts dropped loose into the room). A part is named by its path under the
+    /// creature, which is the same on the copy; anything else is left to the copy's own variable.
+    /// </summary>
+    public static void WriteSubject(EntityNetworkData data, FsmStateAction action) {
+        foreach (var variable in SubjectVariables(action)) {
+            var subject = variable.Value;
+            if (subject == null) {
+                data.Packet.Write((byte) 0);
+                continue;
+            }
+
+            var path = PathFromOwner(action.Fsm.GameObject, subject);
+            if (path == null) {
+                data.Packet.Write((byte) 2);
+                continue;
+            }
+
+            data.Packet.Write((byte) 1);
+            data.Packet.Write(path);
+        }
+    }
+
+    /// <summary>
+    /// Reads what <see cref="WriteSubject"/> wrote and puts the objects into the copy's own variables, so that the
+    /// action finds them there as it would in the game that runs the creature.
+    /// </summary>
+    public static void ReadSubject(EntityNetworkData data, FsmStateAction action) {
+        foreach (var variable in SubjectVariables(action)) {
+            switch (data.Packet.ReadByte()) {
+                case 0:
+                    variable.Value = null;
+                    break;
+                case 1:
+                    var path = data.Packet.ReadString();
+                    var owner = action.Fsm?.GameObject;
+                    var named = owner == null ? null : path.Length == 0 ? owner.transform : owner.transform.Find(path);
+                    variable.Value = named == null ? null : named.gameObject;
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
     /// Whether an action undoes itself when its state is left: switches an object or collider back, stops a particle
     /// emission or a tween. Checked in the game's own OnExit of each (IL).
     /// </summary>

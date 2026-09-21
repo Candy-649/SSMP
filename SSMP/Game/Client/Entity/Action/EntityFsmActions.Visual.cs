@@ -284,38 +284,13 @@ internal static partial class EntityFsmActions {
             return false;
         }
 
-        if (IsObjectInRegistry(gameObject)) {
-            return false;
-        }
-
-        // Which object it was, by its path from the object the FSM runs on, for the scene client to find under its
-        // own copy (see the apply below). Nothing is sent for an object that is not under it.
-        var path = PathFromOwner(action.Fsm.GameObject, gameObject);
-        data.Packet.Write(path != null);
-        if (path != null) {
-            data.Packet.Write(path);
-        }
-
-        return true;
+        return !IsObjectInRegistry(gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, ActivateGameObject action) {
+        // An object held in a variable has already been named by the scene host (see ReadSubject)
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
-
-        // What the action switches is often held in a variable its FSM fills in while it runs - which spray to use,
-        // which child to show - and the client copy's FSM never runs, so here that variable was empty and the switch
-        // went nowhere: the scene client never saw a crawler's spray that the scene host saw every time. The path the
-        // scene host sent names the same object under this copy.
-        if (data != null && data.Packet.ReadBool()) {
-            var path = data.Packet.ReadString();
-            var owner = action.Fsm.GameObject;
-            var named = owner == null ? null : path.Length == 0 ? owner.transform : owner.transform.Find(path);
-            if (named != null) {
-                gameObject = named.gameObject;
-            }
-        }
-
         if (gameObject == null) {
             return;
         }
