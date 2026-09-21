@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using GlobalEnums;
+using MonoMod.RuntimeDetour;
 using SSMP.Api.Client;
 using SSMP.Game.Settings;
 using SSMP.Hooks;
@@ -245,6 +246,17 @@ internal class UiManager : IUiManager {
     private bool _isSlotSelectionActive;
 
     /// <summary>
+    /// Whether the save selection opened from the multiplayer menu is on screen and waiting for a save to be chosen.
+    /// Narrower than <see cref="_isSlotSelectionActive"/>, which stays set while a chosen save loads.
+    /// </summary>
+    private bool _saveMenuAwaitingChoice;
+
+    /// <summary>
+    /// The hook on the one method every menu button of the game answers a cancel with.
+    /// </summary>
+    private Hook? _menuCancelHook;
+
+    /// <summary>
     /// Whether the save slot selection is open for hosting, where the chosen save loads before the server starts and
     /// before any other player can connect.
     /// </summary>
@@ -402,6 +414,53 @@ internal class UiManager : IUiManager {
     private void RegisterMenuHooks() {
         EventHooks.UIManagerUIGoToMainMenu += TryAddMultiplayerScreen;
         EventHooks.UIManagerReturnToMainMenu += OnReturnToMainMenu;
+        _menuCancelHook = HookMenuCancel();
+    }
+
+    /// <summary>
+    /// Takes a cancel on the save selection opened from the multiplayer menu back to the multiplayer menu, the way
+    /// the back button of that screen already does.
+    ///
+    /// A cancel from a gamepad or a keyboard goes to whatever is selected, which on that screen is a save slot, and a
+    /// slot answers it the way the game's own save selection does: by going to the main menu. That leaves this menu
+    /// believing a save is still being chosen, so the next request to choose one was quietly ignored. It never came
+    /// up only because every cancel on that screen used to be thrown away along with every confirm.
+    /// </summary>
+    private Hook? HookMenuCancel() {
+        try {
+            var method = typeof(MenuSelectable).GetMethod(nameof(MenuSelectable.OnCancel), [typeof(BaseEventData)]);
+            if (method == null) {
+                Logger.Warn("Could not find how a menu button answers a cancel, so one leaves the save selection " +
+                            "for the main menu");
+                return null;
+            }
+
+            return new Hook(
+                method,
+                (Action<Action<MenuSelectable, BaseEventData>, MenuSelectable, BaseEventData>) OnMenuCancel
+            );
+        } catch (Exception e) {
+            Logger.Error($"Could not hook how a menu button answers a cancel:\n{e}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Answers a cancel on a save slot or the back button of the save selection opened from the multiplayer menu
+    /// with that screen's own way back, and leaves every other cancel to the game - including the ones inside a
+    /// slot, such as the prompt that asks whether to clear it.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The menu button that was cancelled on.</param>
+    /// <param name="eventData">The event.</param>
+    private void OnMenuCancel(Action<MenuSelectable, BaseEventData> orig, MenuSelectable self, BaseEventData eventData) {
+        if (_saveMenuAwaitingChoice && _isSlotSelectionActive && self.interactable &&
+            (self is SaveSlotButton || self.gameObject == FindSaveMenuBackButton())) {
+            OnSaveMenuBackPressed();
+            return;
+        }
+
+        orig(self, eventData);
     }
 
     #endregion
@@ -910,7 +969,10 @@ internal class UiManager : IUiManager {
     /// <summary>
     /// Callback for when a save slot is selected (new game or continue).
     /// </summary>
-    private void OnSaveSlotSelected() => _saveSlotSelectedAction?.Invoke(true);
+    private void OnSaveSlotSelected() {
+        _saveMenuAwaitingChoice = false;
+        _saveSlotSelectedAction?.Invoke(true);
+    }
 
     #endregion
 
@@ -1101,12 +1163,21 @@ internal class UiManager : IUiManager {
     /// </summary>
     private IEnumerator GoToSaveMenu() {
         HideMultiplayerMenu();
-        yield return UM.HideCurrentMenu();
-        
+
+        // No HideCurrentMenu first - that was why a gamepad could move between the saves and never open one. It only
+        // knows the menus under the main one. For the main menu, which is what the game still believes is showing
+        // behind the multiplayer one, it marks the menus as fading and returns without ever taking the mark down
+        // again. The game's menu input module drops every confirm and every cancel while that mark is up, and moving
+        // is the one thing it does not check the mark for. GoToProfileMenu hides whatever it is coming from by
+        // itself, and leaves the main menu out of HideCurrentMenu for exactly this reason.
+
         // Safety check before verifying game UI state
         if (UM != null) {
              yield return UM.GoToProfileMenu();
              OverrideSaveMenuBackButton();
+
+             // Only now, because the game takes input away for the whole of the way in and gives it back at the end
+             _saveMenuAwaitingChoice = true;
 
              // Which event system drives this screen decides whether a gamepad can open a save at all. The game's own
              // one asks the gamepad properly; a plain Unity one does not treat the confirm the same way, and this is
@@ -1130,7 +1201,8 @@ internal class UiManager : IUiManager {
              var submit = IH.inputActions?.MenuSubmit;
              Logger.Info(
                  $"Save selection has '{selected?.name ?? "nothing"}' selected, " +
-                 $"MenuSubmit is {(submit == null ? "unreadable" : submit.Enabled ? "enabled" : "disabled")}"
+                 $"MenuSubmit is {(submit == null ? "unreadable" : submit.Enabled ? "enabled" : "disabled")}, " +
+                 $"menus marked as fading: {UM.IsFadingMenu}"
              );
         } else {
              Logger.Error("UIManager instance is null, cannot go to profile menu");
@@ -1169,6 +1241,7 @@ internal class UiManager : IUiManager {
     /// Handles back button press in save menu.
     /// </summary>
     private void OnSaveMenuBackPressed() {
+        _saveMenuAwaitingChoice = false;
         UnregisterSaveSlotHooks();
         _isSlotSelectionActive = false;
         _saveSlotSelectedAction?.Invoke(false);
@@ -1223,7 +1296,9 @@ internal class UiManager : IUiManager {
     /// Handles pause key press to return to main menu.
     /// </summary>
     private void HandlePauseKey() {
-        UM.StartCoroutine(UM.HideCurrentMenu());
+        // UIGoToMainMenu hides the menu it is leaving by itself. Hiding it here as well did nothing for the main menu,
+        // which is what the game believes is behind this one, except leave the menus marked as fading for good - and
+        // with that mark up, the main menu took no confirm from a gamepad or a keyboard at all.
         UM.UIGoToMainMenu();
         HideMultiplayerMenu();
     }
