@@ -1403,6 +1403,61 @@ internal class Entity {
     }
 
     /// <summary>
+    /// Switches the room's own copy on when this game takes a creature over, without PlayMaker starting over the FSMs
+    /// that were just given the state the other game's copy was in.
+    ///
+    /// PlayMaker starts an FSM over from its first state whenever its object is switched on (RestartOnEnable, which
+    /// is on for nearly every FSM in the game), and the object is switched on only after the states are set. So every
+    /// handover threw them away and the creature took its very first road again from wherever the copy had got to -
+    /// seen as a flyer that had been chasing a player vanishing the moment the other player left. PlayMaker keeps the
+    /// active state when the setting is off (Fsm.OnEnable, checked in IL), so for the moment of switching on it is
+    /// turned off for those FSMs and put back straight after. One that never started is started by PlayMaker on the
+    /// next frame in the state it was given, rather than in its first one.
+    /// </summary>
+    /// <param name="active">Whether the copy is to be switched on at all.</param>
+    /// <param name="resumed">Per host FSM, whether it was given the other game's state.</param>
+    private void SwitchOnWithoutStartingOver(bool active, bool[] resumed) {
+        var restarts = new bool[_fsms.Host.Count];
+        for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
+            var fsm = _fsms.Host[fsmIndex].Fsm;
+            restarts[fsmIndex] = fsm.RestartOnEnable;
+            if (fsmIndex < resumed.Length && resumed[fsmIndex]) {
+                fsm.RestartOnEnable = false;
+            }
+        }
+
+        try {
+            Object.Host.SetActive(active);
+        } finally {
+            for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
+                _fsms.Host[fsmIndex].Fsm.RestartOnEnable = restarts[fsmIndex];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Says, once per creature and handover, what this game took over: where it stands, whether it can be seen and
+    /// hit, and which state each FSM goes on from. A creature that vanishes when a room changes hands leaves nothing
+    /// else behind to tell what happened to it.
+    /// </summary>
+    private void SayWhatWasTakenOver() {
+        try {
+            var seen = Object.Host.GetComponent<Renderer>();
+            var touched = Object.Host.GetComponent<Collider2D>();
+            var states = string.Join(", ", _fsms.Host.Select(fsm => $"{fsm.FsmName}: {fsm.ActiveStateName}"));
+
+            SSMP.Logging.Logger.Info(
+                $"Took over '{Object.Host.name}' at {Object.Host.transform.position}, " +
+                $"on: {Object.Host.activeInHierarchy}, " +
+                $"drawn: {(seen == null ? "-" : seen.enabled.ToString())}, " +
+                $"touchable: {(touched == null ? "-" : touched.enabled.ToString())}, going on in {states}"
+            );
+        } catch (Exception e) {
+            SSMP.Logging.Logger.Warn($"Could not say what was taken over: {e.Message}");
+        }
+    }
+
+    /// <summary>
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
@@ -1510,6 +1565,10 @@ internal class Entity {
 
         //Logger.Debug("  Restoring FSM states from snapshots");
 
+        // Which FSMs were given the state the other game's copy was in, so that switching the object on below does
+        // not start just those over
+        var resumed = new bool[_fsms.Host.Count];
+
         for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
             var snapshot = _fsmSnapshots[fsmIndex];
@@ -1541,6 +1600,7 @@ internal class Entity {
             state.Actions = newActions;
             fsm.SetState(snapshot.CurrentState);
             state.Actions = oldActions;
+            resumed[fsmIndex] = true;
         }
 
         // We need to set the isKinematic property of rigid bodies to ensure physics work again after enabling
@@ -1573,7 +1633,8 @@ internal class Entity {
 
         var clientActive = Object.Client.activeSelf;
         Object.Client.SetActive(false);
-        Object.Host.SetActive(clientActive);
+        SwitchOnWithoutStartingOver(clientActive, resumed);
+        SayWhatWasTakenOver();
 
         //Logger.Debug($"  Set Active of host object to: {clientActive}, disabling client object");
 
