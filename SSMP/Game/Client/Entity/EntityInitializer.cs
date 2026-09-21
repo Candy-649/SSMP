@@ -51,10 +51,28 @@ internal static class EntityInitializer {
     ];
 
     /// <summary>
+    /// The states among <see cref="InitStateNames"/> that are not setting up at all in this game, but a creature
+    /// behaving: "Dormant" is where a creature hides itself away (renderer and collider off, parts switched off, even
+    /// moved out of the way) until something wakes it, and "Pause" is as often a wait between two attacks as a first
+    /// frame. Replayed on a creature that is up and about, they put it back into hiding.
+    /// </summary>
+    private static readonly string[] BehaviourStateNames = [
+        "dormant",
+        "pause",
+        "init pause",
+        "opened"
+    ];
+
+    /// <summary>
     /// Initialize the FSM of a client entity by finding initialize states and executing the actions in those states.
     /// </summary>
     /// <param name="fsm">The FSM to initialize.</param>
-    public static void InitializeFsm(PlayMakerFSM fsm) {
+    /// <param name="takingOver">Whether this is the room's own copy of a creature that this game takes over from the
+    /// other game, which has been running it all along. Only what the copy never did for itself is done then: the
+    /// variables it looks things up into, and the rest of the first state's setting up. How it looks and whether it
+    /// hides is what the other game's copy is doing right now, and that has already been carried over.</param>
+    /// <param name="currentState">When taking over, the state the other game's copy of this FSM is in now.</param>
+    public static void InitializeFsm(PlayMakerFSM fsm, bool takingOver = false, string? currentState = null) {
         // Create a list of states to initialize later
         var statesToInit = new List<FsmState>();
         // Keep track of the indices where the individual initialization states begin in our final list
@@ -83,6 +101,10 @@ internal static class EntityInitializer {
         foreach (var state in statesToInit) {
             Logger.Debug($"Found initialization state: {state.Name}, executing actions");
 
+            // Hiding or waiting is only done again for a creature that is still hiding or waiting
+            var leftBehind = Array.IndexOf(BehaviourStateNames, state.Name.ToLower()) != -1 &&
+                             state.Name != currentState;
+
             // Go over each action and try to execute it by applying empty data to it
             foreach (var action in state.Actions) {
                 if (!action.Enabled) {
@@ -97,6 +119,10 @@ internal static class EntityInitializer {
                     continue;
                 }
 
+                if (takingOver && !IsWantedWhenTakingOver(action, leftBehind)) {
+                    continue;
+                }
+
                 if (action.Fsm == null) {
                     Logger.Error($"FSM in action for state '{state.Name}', action '{action.GetType()}' is null");
                     continue;
@@ -107,6 +133,57 @@ internal static class EntityInitializer {
                 EntityFsmActions.ApplyNetworkDataFromAction(null, action);
             }
         }
+    }
+
+    /// <summary>
+    /// Whether an action of a first state is still to be done to the room's own copy of a creature this game takes
+    /// over. Every handover used to do all of them to a creature in the middle of whatever it was doing: 29 kinds of
+    /// creature, several bosses among them, hide themselves in their "Dormant" state - renderer and collider off, made
+    /// weightless, some of them moved far out of the room or back to where they started - and doing that state again
+    /// made them vanish or turn invisible for both players while they went on fighting: a flyer throwing rocks out of
+    /// thin air. The first states proper did the same on a smaller scale: turned creatures round to face one way, set
+    /// some untouchable.
+    /// </summary>
+    /// <param name="action">The action of the first state.</param>
+    /// <param name="leftBehind">Whether the state is one of <see cref="BehaviourStateNames"/> that the creature is
+    /// not in now.</param>
+    private static bool IsWantedWhenTakingOver(FsmStateAction action, bool leftBehind) {
+        // Looking things up into variables is what the copy, which never ran, is missing; it changes nothing
+        if (ActionRegistry.IsActionTransferSafeSetup(action)) {
+            return true;
+        }
+
+        if (leftBehind) {
+            return false;
+        }
+
+        if (IsCarriedOver(action)) {
+            return false;
+        }
+
+        // The game undoes these when it leaves the state, which it did long ago or does now without them: done here,
+        // they would stay
+        return !EntityFsmActions.UndoesOnExit(action);
+    }
+
+    /// <summary>
+    /// Whether an action sets something about the creature itself that the other game's copy has now and that has
+    /// already been put on this copy: where it stands and its size and facing (just before the FSMs are started), and
+    /// whether it can be seen and touched (the renderer and collider data, which reaches this copy too).
+    /// </summary>
+    private static bool IsCarriedOver(FsmStateAction action) {
+        var owner = action.Fsm.GameObject;
+        return action switch {
+            SetPosition position => action.Fsm.GetOwnerDefaultTarget(position.gameObject) == owner,
+            SetScale scale => action.Fsm.GetOwnerDefaultTarget(scale.gameObject) == owner,
+            SetMeshRenderer meshRenderer => action.Fsm.GetOwnerDefaultTarget(meshRenderer.gameObject) == owner,
+            // The collider data is about the first collider on the creature
+            SetPolygonCollider polygon => action.Fsm.GetOwnerDefaultTarget(polygon.gameObject) == owner &&
+                                          owner.GetComponent<Collider2D>() == owner.GetComponent<PolygonCollider2D>(),
+            SetCircleCollider circle => action.Fsm.GetOwnerDefaultTarget(circle.gameObject) == owner &&
+                                        owner.GetComponent<Collider2D>() == owner.GetComponent<CircleCollider2D>(),
+            _ => false
+        };
     }
 
     /// <summary>

@@ -1533,10 +1533,12 @@ internal class Entity {
 
             //Logger.Debug($"    Restoring variables for FSM: {fsm.Fsm.Name}");
 
-            // Force initialize the host FSM, since it might have been disabled before initializing
-            EntityInitializer.InitializeFsm(fsm);
-
             var snapshot = _fsmSnapshots[fsmIndex];
+
+            // Force initialize the host FSM, since it might have been disabled before initializing. Only the setting
+            // up it never did: the other game's copy has been hiding, showing and moving this creature all along, and
+            // doing a first state's hiding again made it invisible for both players while it went on fighting
+            EntityInitializer.InitializeFsm(fsm, takingOver: true, currentState: snapshot.CurrentState);
 
             for (var i = 0; i < snapshot.Floats.Length; i++) {
                 fsm.FsmVariables.FloatVariables[i].Value = snapshot.Floats[i];
