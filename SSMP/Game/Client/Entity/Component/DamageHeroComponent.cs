@@ -110,7 +110,15 @@ internal class DamageHeroComponent : EntityComponent {
             if (i < _hostDamageHeroes.Length && _hostDamageHeroes[i] != null &&
                 _hostDamageHeroes[i].gameObject != null) {
                 _hostDamageHeroes[i].damageDealt = damageDealt;
-                _hostDamageHeroes[i].gameObject.SetActive(active);
+
+                // A creature that deals damage with its own body is its own first entry here, and while the other
+                // game runs it, the room's own copy of it is asleep. Switching that on woke the whole creature at the
+                // place it started from until the entity put it back to sleep, which is the creature flashing there
+                // every time any of its damage changed. Whether it is awake is the entity's business; the parts below
+                // it can follow along while it sleeps.
+                if (_hostDamageHeroes[i].gameObject != GameObject.Host) {
+                    _hostDamageHeroes[i].gameObject.SetActive(active);
+                }
             }
 
             if (i < _clientDamageHeroes.Length && _clientDamageHeroes[i] != null &&
