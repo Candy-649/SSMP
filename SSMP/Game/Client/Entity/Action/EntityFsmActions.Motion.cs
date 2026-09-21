@@ -578,7 +578,9 @@ internal static partial class EntityFsmActions {
             return;
         }
 
-        collider.enabled = data == null ? action.active.Value : data.Packet.ReadBool();
+        var active = data == null ? action.active.Value : data.Packet.ReadBool();
+        collider.enabled = active;
+        ResetColliderOnExit(action, action.resetOnExit, collider, active);
     }
 
     #endregion
@@ -631,11 +633,47 @@ internal static partial class EntityFsmActions {
 
         var collider = gameObject.GetComponent<PolygonCollider2D>();
         if (collider != null) {
-            collider.enabled = data == null ? action.active.Value : data.Packet.ReadBool();
+            var active = data == null ? action.active.Value : data.Packet.ReadBool();
+            collider.enabled = active;
+            ResetColliderOnExit(action, action.resetOnExit, collider, active);
         }
     }
 
     #endregion
+
+    /// <summary>
+    /// Does for a replayed collider switch what the action itself does when its state is left: switches the collider
+    /// the other way again, once the scene host's FSM has moved on from the state the switch was made in.
+    ///
+    /// Only the switch was ever sent, never the switching back, so on the scene client a collider that is meant to be
+    /// live for one state stayed live for good. The worst of them is a grab: a boss that switches on the box of a
+    /// grab for the length of one attack left it on here after the first time, and it caught the player every time
+    /// they came near her, took a mask, held them in the wounded pose and let go, only to catch them again at once.
+    /// </summary>
+    /// <param name="action">The action that was replayed.</param>
+    /// <param name="resetOnExit">Whether the action switches the collider back when its state is left.</param>
+    /// <param name="collider">The collider it switched.</param>
+    /// <param name="active">What it switched the collider to.</param>
+    private static void ResetColliderOnExit(
+        HutongGames.PlayMaker.FsmStateAction action,
+        bool resetOnExit,
+        Collider2D collider,
+        bool active
+    ) {
+        if (!resetOnExit) {
+            return;
+        }
+
+        new ActionInState {
+            Fsm = action.Fsm,
+            StateName = action.State.Name,
+            ExitAction = () => {
+                if (collider != null) {
+                    collider.enabled = !active;
+                }
+            }
+        }.Register();
+    }
 
     #region MoveLiftChain
 
