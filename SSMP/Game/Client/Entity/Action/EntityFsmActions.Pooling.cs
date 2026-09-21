@@ -1,8 +1,10 @@
 using System.Collections;
+using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 using Random = UnityEngine.Random;
 
 // ReSharper disable UnusedMember.Local
@@ -50,6 +52,8 @@ internal static partial class EntityFsmActions {
                 euler = action.rotation.Value;
         }
 
+        SayIfThrownUnseen(action, position, "on the game that runs it");
+
         data.Packet.Write(position.x);
         data.Packet.Write(position.y);
         data.Packet.Write(position.z);
@@ -78,8 +82,51 @@ internal static partial class EntityFsmActions {
             return;
         }
 
+        SayIfThrownUnseen(action, position, "on the game that watches it");
+
         var spawnedObject = action.gameObject.Value.Spawn(position, Quaternion.Euler(euler));
         action.storeObject.Value = spawnedObject;
+    }
+
+    /// <summary>
+    /// The creatures already named for throwing something while they could not be seen, so that each one is named
+    /// once rather than on every throw.
+    /// </summary>
+    private static readonly HashSet<int> NamedForThrowingUnseen = [];
+
+    /// <summary>
+    /// Says, once per creature, that it threw something from a place where it could not be seen: switched off, not
+    /// drawn, or standing somewhere else entirely. A player saw a flyer throw rocks at them that was nowhere to be
+    /// seen, and the log could not tell which of those it was, nor on which of the two games.
+    /// </summary>
+    /// <param name="action">The action doing the throwing.</param>
+    /// <param name="from">Where the thrown thing appears.</param>
+    /// <param name="where">Which of the two games this is, as it should read in the log.</param>
+    private static void SayIfThrownUnseen(SpawnObjectFromGlobalPool action, Vector3 from, string where) {
+        try {
+            var thrower = action.Fsm?.GameObject;
+            if (thrower == null || NamedForThrowingUnseen.Contains(thrower.GetInstanceID())) {
+                return;
+            }
+
+            var body = thrower.GetComponent<Renderer>();
+            var drawn = body == null || body.enabled;
+            var distance = Vector2.Distance(thrower.transform.position, from);
+            if (thrower.activeInHierarchy && drawn && distance <= 6f) {
+                return;
+            }
+
+            NamedForThrowingUnseen.Add(thrower.GetInstanceID());
+
+            var thrown = action.gameObject?.Value;
+            Logger.Info(
+                $"'{thrower.name}' threw '{(thrown == null ? "nothing" : thrown.name)}' {where} while it could not " +
+                $"be seen there: on: {thrower.activeInHierarchy}, drawn: {(body == null ? "-" : body.enabled.ToString())}, " +
+                $"standing at {thrower.transform.position}, {distance:0.0} away from where it threw from, {from}"
+            );
+        } catch (System.Exception e) {
+            Logger.Warn($"Could not say whether a throw was seen: {e.Message}");
+        }
     }
 
     #endregion
