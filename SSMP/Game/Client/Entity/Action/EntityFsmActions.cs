@@ -235,6 +235,11 @@ internal static partial class EntityFsmActions {
             );
         }
 
+        if (ActsOnTheLocalPlayer(action)) {
+            SayItWasKeptOffThePlayer(action);
+            return;
+        }
+
         try {
             methodInfo.Invoke(
                 null,
@@ -253,6 +258,110 @@ internal static partial class EntityFsmActions {
                 e = e.InnerException;
             }
         }
+    }
+
+    /// <summary>
+    /// The types that only read the object they are given - look something up in it, take its position, aim at it or
+    /// store it in a variable - so that being given the player character does nothing to it.
+    /// </summary>
+    private static readonly HashSet<string> ReadsWithoutActing = [
+        "FindChild", "GetChild", "GetParent", "GetRandomChild", "GetOwner", "GetHero", "FindGameObject",
+        "FindAlertRange", "GetPosition", "SetGameObject", "SpawnObjectFromGlobalPool", "FireAtTarget"
+    ];
+
+    /// <summary>
+    /// The parameters of each action type that name the object it works on, by type.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> SubjectFields = new();
+
+    /// <summary>
+    /// The creatures' actions already named for being kept off the local player, so each is named once.
+    /// </summary>
+    private static readonly HashSet<string> NamedForKeepingOffThePlayer = [];
+
+    /// <summary>
+    /// Whether a replayed action works on the local player's own character, or on something the character carries.
+    ///
+    /// Such an action was about the player character of the game that runs the creature. The FSM variable that holds
+    /// "the player" is filled in on this copy too, with this game's own character, so replaying it here grabbed,
+    /// froze, hid, turned, threw and animated whoever was standing in the room with the player it was really about -
+    /// wherever they stood. Going through every such action in the game's data found about a thousand, in forty kinds
+    /// of creature: a boss catching the scene host sent the scene client's character into the wounded pose too, a
+    /// creature hiding the player it swallowed hid the scene client as well, and one that ends a grab by cancelling
+    /// what the player is doing cancelled the scene client's healing, sprinting and skills. Nothing about the local
+    /// player is decided by the other game: what can touch them is this game's own copies of the creature's parts,
+    /// which run here.
+    /// </summary>
+    /// <param name="action">The action about to be replayed.</param>
+    private static bool ActsOnTheLocalPlayer(FsmStateAction action) {
+        if (action.Fsm == null || ReadsWithoutActing.Contains(action.GetType().Name)) {
+            return false;
+        }
+
+        var hero = HeroController.instance;
+        if (hero == null) {
+            return false;
+        }
+
+        foreach (var field in GetSubjectFields(action.GetType())) {
+            var target = field.GetValue(action) switch {
+                FsmOwnerDefault owner => action.Fsm.GetOwnerDefaultTarget(owner),
+                FsmGameObject gameObject => gameObject.Value,
+                FsmEventTarget {
+                    target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM
+                } eventTarget => action.Fsm.GetOwnerDefaultTarget(eventTarget.gameObject),
+                _ => null
+            };
+
+            if (target != null && target.transform.IsChildOf(hero.transform)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The fields of an action type that name the object it works on: the object it acts on, the parent it puts
+    /// something under, and the object it sends an event to.
+    /// </summary>
+    private static FieldInfo[] GetSubjectFields(Type type) {
+        if (SubjectFields.TryGetValue(type, out var fields)) {
+            return fields;
+        }
+
+        var found = new List<FieldInfo>();
+        foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance)) {
+            if (field.Name is not ("gameObject" or "parent" or "target" or "eventTarget")) {
+                continue;
+            }
+
+            if (field.FieldType == typeof(FsmOwnerDefault) || field.FieldType == typeof(FsmGameObject) ||
+                field.FieldType == typeof(FsmEventTarget)) {
+                found.Add(field);
+            }
+        }
+
+        fields = found.ToArray();
+        SubjectFields[type] = fields;
+        return fields;
+    }
+
+    /// <summary>
+    /// Says, once per kind of action in a state, that an action about the other player's character was not done to
+    /// the local one.
+    /// </summary>
+    private static void SayItWasKeptOffThePlayer(FsmStateAction action) {
+        var key = $"{action.Fsm?.Name}/{action.State?.Name}/{action.GetType().Name}";
+        if (!NamedForKeepingOffThePlayer.Add(key)) {
+            return;
+        }
+
+        var owner = action.Fsm?.GameObject;
+        Logger.Info(
+            $"Not doing '{(owner == null ? "?" : owner.name)}'s {action.GetType().Name} in '{action.State?.Name}' to " +
+            "the local player: it was about the other player's character"
+        );
     }
 
     /// <summary>
