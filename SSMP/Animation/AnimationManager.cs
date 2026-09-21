@@ -1886,8 +1886,12 @@ internal class AnimationManager {
         Logger.Debug("Client has died, sending PlayerDeath data");
 
         // Let the server know that we have died
+        // Whether it was lethal goes with it. This is sent for every death the game has, and a death that is not
+        // lethal is the player being knocked down and getting up again - no cocoon is left, so the other player
+        // should not be shown one being spun.
         byte[] effectInfo = [
-            (byte)(frostDeath ? 1 : 0)
+            (byte)(frostDeath ? 1 : 0),
+            (byte)(nonLethal ? 1 : 0)
         ];
         _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.Death, 0, effectInfo);
     }

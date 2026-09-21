@@ -36,23 +36,28 @@ internal class Death : AnimationEffect {
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
+        // Read one at a time rather than matched as a whole, so that the two answers stay separate and a message
+        // from a game that only had the first of them to send still means what it meant
+        var byFrost = effectInfo is { Length: > 0 } && effectInfo[0] == 1;
+        var nonLethal = effectInfo is { Length: > 1 } && effectInfo[1] == 1;
+
         // Said out loud, because this is the only place a death of the other player leaves any mark at all on this
         // game. Their own game can miss it entirely - a death that is not lethal, and a death the room itself deals,
         // both go through without a word - so when one player says they watched the other die over and over, this
         // is the line that can agree with them.
         Logger.Info(
             $"The death of the other player is being played out here, at {playerObject.transform.position}" +
-            (effectInfo is [1] ? ", by frost" : "")
+            (byFrost ? ", by frost" : "") +
+            (nonLethal ? ", and it was not a lethal one" : "")
         );
 
-        // Play frost death if applicable (effect info contains a single byte with the value '1')
-        if (effectInfo is [1]) {
+        if (byFrost) {
             MonoBehaviourUtil.Instance.StartCoroutine(PlayFrostDeath(playerObject));
             return;
-        } 
+        }
 
         // Otherwise just play the normal animation
-        MonoBehaviourUtil.Instance.StartCoroutine(PlayDeath(playerObject));
+        MonoBehaviourUtil.Instance.StartCoroutine(PlayDeath(playerObject, nonLethal));
     }
 
     /// <summary>
@@ -136,7 +141,8 @@ internal class Death : AnimationEffect {
     /// Plays the normal death animation.
     /// </summary>
     /// <param name="playerObject">The GameObject representing the player.</param>
-    private static IEnumerator PlayDeath(GameObject playerObject) {
+    /// <param name="nonLethal">Whether the death left no cocoon behind, so none is spun here either.</param>
+    private static IEnumerator PlayDeath(GameObject playerObject, bool nonLethal) {
         // Get/create a death particle system
         if (!CreateParticles(playerObject, out var particles)) {
             yield break;
@@ -154,6 +160,14 @@ internal class Death : AnimationEffect {
         // Disable leak particle emission after time, then spawn black particles
         yield return new WaitForSeconds(4);
         emission.enabled = false;
+
+        // A death that was not lethal leaves nothing behind to be opened, so the spinning of a cocoon over it would
+        // be telling the other player something that is not true - they would go looking for a cocoon that is not
+        // there, and for a player who is already back on their feet
+        if (nonLethal) {
+            yield break;
+        }
+
         SpawnCocoonParticles(playerObject);
     }
 
