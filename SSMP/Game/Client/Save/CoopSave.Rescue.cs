@@ -430,6 +430,23 @@ internal partial class CoopSave {
     private Hook? _deathAnnouncementHook;
 
     /// <summary>
+    /// Whether the death being played out now can wait for the partner to pull the player back up, decided once, when
+    /// the death starts.
+    ///
+    /// The announcement used to ask again when it went out, but by then the second of two deaths has already told the
+    /// waiting partner that nobody is coming, and that clears the very thing the question looks at. Asked again, the
+    /// second death looked like a first one, so the room never heard of either and a boss never had two deaths to
+    /// celebrate.
+    /// </summary>
+    private bool _deathCanWait;
+
+    /// <summary>
+    /// Whether the announcement of the current death was held back, and what it was to leave out, so that it can
+    /// still go out if the partner dies as well while this player is waiting.
+    /// </summary>
+    private (bool Held, GameObject? ExcludeTarget) _heldDeathAnnouncement;
+
+    /// <summary>
     /// Stops one player's death from telling the room the fight is over while the other player is still in it.
     ///
     /// A boss that hears this stops fighting and celebrates, and what ends the celebration is the loading of the room
@@ -479,8 +496,9 @@ internal partial class CoopSave {
     /// <param name="excludeTarget">What is not to be told, which is the caller's own business.</param>
     private void OnDeathAnnounced(Action<string, GameObject> orig, string eventName, GameObject excludeTarget) {
         try {
-            if (eventName == DeathAnnouncement && CanWaitForRescue()) {
+            if (eventName == DeathAnnouncement && _deathCanWait) {
                 Logger.Info("Not telling the room the player died, because their teammate is still fighting in it");
+                _heldDeathAnnouncement = (true, excludeTarget);
 
                 return;
             }
@@ -509,6 +527,10 @@ internal partial class CoopSave {
         // either log could be matched to, because this used to sit below the return.
         SayWhatTheDeathFound(nonLethal, frostDeath);
 
+        // Before telling a waiting partner anything, because that changes the answer
+        _deathCanWait = CanWaitForRescue();
+        _heldDeathAnnouncement = default;
+
         // A non-lethal death leaves no cocoon: the game skips that whole part of its own sequence, so there would be
         // nothing for the partner to open and the player would wait for something that cannot come. It also takes
         // nobody to a bench, so a player who is waiting is not told anything: whoever this is can still reach them.
@@ -516,7 +538,7 @@ internal partial class CoopSave {
             return death;
         }
 
-        if (!CanWaitForRescue()) {
+        if (!_deathCanWait) {
             TellPartnerNobodyIsComing();
 
             return death;
@@ -608,12 +630,37 @@ internal partial class CoopSave {
 
         rescue.Outcome = RescueOutcome.Ended;
         Logger.Info($"{player.Username} died as well, so this wait is over and both go to their benches");
+        AnnounceTheHeldBackDeath();
         Chat(
             Lang.Pick(
                 $"{player.Username} died as well, so you are both going back to your bench.",
                 $"{player.Username} 也死了，两个人一起回长椅。"
             )
         );
+    }
+
+    /// <summary>
+    /// Tells the room about this player's death after all, now that the partner has died too.
+    ///
+    /// Only the game that runs a creature can make it act on the news, and the one that died first had held it
+    /// back. When that was the game running the boss, the second death was only ever heard by a copy of the boss
+    /// that does nothing by itself, so a boss that had killed them both never celebrated.
+    /// </summary>
+    private void AnnounceTheHeldBackDeath() {
+        if (!_heldDeathAnnouncement.Held) {
+            return;
+        }
+
+        var excludeTarget = _heldDeathAnnouncement.ExcludeTarget;
+        _heldDeathAnnouncement = default;
+        _deathCanWait = false;
+
+        try {
+            Logger.Info("Telling the room the player died after all, because their teammate has died as well");
+            EventRegister.SendEvent(DeathAnnouncement, excludeTarget);
+        } catch (Exception e) {
+            LogRescueError(e);
+        }
     }
 
     /// <summary>
