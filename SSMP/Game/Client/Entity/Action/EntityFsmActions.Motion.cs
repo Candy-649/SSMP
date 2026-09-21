@@ -668,11 +668,48 @@ internal static partial class EntityFsmActions {
             Fsm = action.Fsm,
             StateName = action.State.Name,
             ExitAction = () => {
-                if (collider != null) {
-                    collider.enabled = !active;
+                if (collider == null) {
+                    return;
+                }
+
+                collider.enabled = !active;
+
+                if (active) {
+                    LetGoOfTheLocalPlayer(collider.gameObject);
                 }
             }
         }.Register();
+    }
+
+    /// <summary>
+    /// Lets the local player out of the wounded pose that a grab by this object put them in, now that the attack the
+    /// grab belonged to is over in the scene host's game.
+    ///
+    /// On the scene client such a grab cannot be finished: the flurry and the last blow that end it belong to the
+    /// creature's own FSM, which only runs in the other game. Nothing but the pose's own four seconds let the player
+    /// go, so they stood frozen long after the attack was gone. The game ends a grab it does not finish the way a boss
+    /// does when she is knocked out of one: the grab box goes off and the player is sent WOUND END.
+    /// </summary>
+    /// <param name="grabber">The object whose grab box just closed.</param>
+    private static void LetGoOfTheLocalPlayer(GameObject grabber) {
+        var hero = HeroController.instance;
+        if (hero == null) {
+            return;
+        }
+
+        foreach (var fsm in hero.GetComponents<PlayMakerFSM>()) {
+            if (fsm.FsmName != "Roar and Wound States") {
+                continue;
+            }
+
+            if (fsm.ActiveStateName != "Wound Start" || fsm.FsmVariables.FindFsmGameObject("Wound Sender")?.Value != grabber) {
+                return;
+            }
+
+            SSMP.Logging.Logger.Info($"Letting the player go from the grab of '{grabber.name}', whose attack is over");
+            fsm.SendEvent("WOUND END");
+            return;
+        }
     }
 
     #region MoveLiftChain
