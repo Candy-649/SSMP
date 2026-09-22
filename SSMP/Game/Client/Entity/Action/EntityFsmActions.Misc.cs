@@ -340,4 +340,32 @@ internal static partial class EntityFsmActions {
     }
 
     #endregion
+
+    #region SetDarknessLevel
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetDarknessLevel action) {
+        if (action.SetLevel.IsNone) {
+            return false;
+        }
+
+        data.Packet.Write(action.SetLevel.Value);
+
+        return true;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action. The dark of a room is drawn around each player's own character, so when a
+    /// creature changes how dark the room is in the game of the scene host, it changes around the local player too.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetDarknessLevel action) {
+        var level = data.Packet.ReadInt();
+        DarknessRegion.SetDarknessLevel(level);
+        Logger.Info(
+            $"'{action.Fsm.GameObjectName}' set the darkness of the room to {level} in the scene host's game, " +
+            "and here too"
+        );
+    }
+
+    #endregion
 }
