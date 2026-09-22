@@ -2,6 +2,8 @@ using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
+using UnityEngine.Audio;
+using Logger = SSMP.Logging.Logger;
 using Random = UnityEngine.Random;
 
 // ReSharper disable UnusedMember.Local
@@ -387,6 +389,58 @@ internal static partial class EntityFsmActions {
             PitchMax = action.pitchMax.Value,
             Volume = action.volume.Value
         }.SpawnAndPlayOneShot(GetAudioPlayerPrefab(action), GetAudioEventPosition(action), (System.Action) null);
+    }
+
+    #endregion
+
+    #region ApplyMusicCue
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, ApplyMusicCue action) {
+        return true;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action. Each game plays its own music, so the music that a boss starts when its
+    /// fight begins played only in the game of the scene host, and whoever came into the room second fought it without
+    /// any. The cue and its timing are read off this copy's own action, which holds the same ones: every such action
+    /// in the game names its cue and times directly rather than through a variable.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, ApplyMusicCue action) {
+        var gameManager = global::GameManager.instance;
+        if (action.musicCue.Value is not MusicCue musicCue || musicCue == null || gameManager == null) {
+            return;
+        }
+
+        gameManager.AudioManager.ApplyMusicCue(musicCue, action.delayTime.Value, action.transitionTime.Value, false);
+        Logger.Info(
+            $"'{action.Fsm.GameObjectName}' started the music '{musicCue.name}' in the scene host's game, and here too"
+        );
+    }
+
+    #endregion
+
+    #region TransitionToAudioSnapshot
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, TransitionToAudioSnapshot action) {
+        return true;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action: the mix that goes with the music, like the room going quiet for a boss,
+    /// which each game likewise sets only for itself.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, TransitionToAudioSnapshot action) {
+        if (action.snapshot.Value is not AudioMixerSnapshot snapshot || snapshot == null) {
+            return;
+        }
+
+        snapshot.TransitionTo(action.transitionTime.Value);
+        Logger.Info(
+            $"'{action.Fsm.GameObjectName}' changed the sound mix to '{snapshot.name}' in the scene host's game, " +
+            "and here too"
+        );
     }
 
     #endregion

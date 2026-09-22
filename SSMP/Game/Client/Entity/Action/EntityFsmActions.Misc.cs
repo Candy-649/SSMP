@@ -31,6 +31,19 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region DisplayBossTitle
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData _, DisplayBossTitle __) => true;
+
+    /// <summary>
+    /// Applies network data to the FSM action. The name of a boss comes up when its fight begins, and only in the game
+    /// that runs the boss, so whoever came into the room second never saw it. It only shows the name on screen.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData _, DisplayBossTitle action) => action.OnEnter();
+
+    #endregion
+
     #region SetTag
 
     /// <summary>Builds network data from the FSM action.</summary>

@@ -46,8 +46,13 @@ internal static class EntityInitializer {
     private static readonly Type[] ToSkipTypes = [
         typeof(Tk2dPlayAnimation),
         typeof(HutongGames.PlayMaker.Actions.ActivateAllChildren),
-        typeof(SetCollider) // TODO: test whether this has effects on other entities during host transfer (this was
+        typeof(SetCollider), // TODO: test whether this has effects on other entities during host transfer (this was
         // added for battle gates)
+        // The music of the whole game rather than anything about the creature. The other game's copy only plays what
+        // lies on the way it went - a boss that is already beaten never passes the music it waits in - and a player
+        // in the room when it does hears it from the replay
+        typeof(ApplyMusicCue),
+        typeof(TransitionToAudioSnapshot)
     ];
 
     /// <summary>
