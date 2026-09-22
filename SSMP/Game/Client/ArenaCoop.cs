@@ -43,6 +43,16 @@ internal class ArenaCoop {
     private const string OpenGatesEvent = "BG OPEN";
 
     /// <summary>
+    /// The event that the interact button sends to the FSM of what it was pressed on.
+    /// </summary>
+    private const string InteractEvent = "INTERACT";
+
+    /// <summary>
+    /// The arena method that an FSM calls with a message to start the battle itself.
+    /// </summary>
+    private const string StartBattleMessage = "StartBattle";
+
+    /// <summary>
     /// Names of the arena methods that count enemies or end waves. Players who follow the scene host skip them, since
     /// the scene host sends them the number of enemies and the waves.
     /// </summary>
@@ -797,6 +807,58 @@ internal class ArenaCoop {
         if (polygonCollider != null) {
             polygonCollider.enabled = polygonEnabled;
         }
+
+        ApplyStarterDarkness(battleScene);
+    }
+
+    /// <summary>
+    /// Makes the room as dark as the start of the battle made it for the player who started it.
+    ///
+    /// Some arenas start from the interact button: the FSM of what the player pressed it on calls the arena's
+    /// StartBattle itself, and in one of them the same state lights up the dark room. That FSM only runs in the game of
+    /// the player who pressed the button, and the dark is drawn around each player's own character, so the room stayed
+    /// dark for everyone else in it. Only the darkness is taken over: the rest of such a state belongs to the player who
+    /// pressed the button, and some of them also close the way in, which stays open for a player who hasn't come in.
+    /// </summary>
+    private static void ApplyStarterDarkness(BattleScene battleScene) {
+        var fsms = Object.FindObjectsByType<PlayMakerFSM>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        foreach (var fsm in fsms) {
+            // A starter that isn't waiting for the button any more ran here, and changed the darkness itself
+            var transitions = fsm.Fsm.ActiveState?.Transitions;
+            if (transitions == null || !transitions.Any(transition => transition.EventName == InteractEvent)) {
+                continue;
+            }
+
+            foreach (var state in fsm.FsmStates) {
+                if (!state.Actions.Any(action => IsStartBattleMessage(fsm, action, battleScene))) {
+                    continue;
+                }
+
+                foreach (var action in state.Actions) {
+                    if (action is HutongGames.PlayMaker.Actions.SetDarknessLevel { Enabled: true } darkness &&
+                        !darkness.SetLevel.IsNone) {
+                        DarknessRegion.SetDarknessLevel(darkness.SetLevel.Value);
+                        Logger.Info(
+                            $"Arena '{battleScene.name}' started for another player, so the room is as dark here as " +
+                            $"'{fsm.gameObject.name}' made it for them ({darkness.SetLevel.Value})"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an FSM action is the message that starts the battle of the given arena.
+    /// </summary>
+    private static bool IsStartBattleMessage(
+        PlayMakerFSM fsm,
+        HutongGames.PlayMaker.FsmStateAction action,
+        BattleScene battleScene
+    ) {
+        return action is HutongGames.PlayMaker.Actions.SendMessage { Enabled: true } message &&
+               message.functionCall?.FunctionName == StartBattleMessage &&
+               fsm.Fsm.GetOwnerDefaultTarget(message.gameObject) == battleScene.gameObject;
     }
 
     /// <summary>
