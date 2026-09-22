@@ -185,6 +185,12 @@ internal partial class CoopSave {
         /// they would die again in the time it takes to stand up.
         /// </summary>
         public bool KilledByTheRoom { get; set; }
+
+        /// <summary>
+        /// Whether the wait ended because the partner went down as well, which makes this one of two deaths rather than
+        /// a death of one player that the other lived through.
+        /// </summary>
+        public bool PartnerDown { get; set; }
     }
 
     /// <summary>
@@ -357,12 +363,53 @@ internal partial class CoopSave {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
         _deathAnnouncementHook = HoldBackTheNewsOfADeath();
         _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
+        _timePassesHook = CreateHook(
+            typeof(global::GameManager).GetMethod("TimePasses", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<global::GameManager>, global::GameManager>(OnTimePasses)
+        );
+    }
+
+    /// <summary>
+    /// Keeps the world where it is for a death that the partner lived through.
+    ///
+    /// A death is the game's main way of letting time pass: once the save is written and just before the player is
+    /// taken to their bench, <c>GameManager.PlayerDead</c> calls this, and it moves characters on, rolls whether
+    /// some of them are out, and ends what only lasts a few rooms. In a two-player save only both players going down
+    /// counts as time passing - one of them waking at a bench while the other is still out there has not made any time
+    /// pass for the world the two of them share. Being pulled back up never gets here at all. Leaving the game and the
+    /// other callers are untouched.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The game manager.</param>
+    private void OnTimePasses(Action<global::GameManager> orig, global::GameManager self) {
+        if (_deathPassesNoTime) {
+            _deathPassesNoTime = false;
+
+            if (HeroController.instance is { } hero && hero.cState.dead) {
+                Logger.Info("Not letting time pass for this death: the teammate is still standing");
+
+                return;
+            }
+        }
+
+        orig(self);
     }
 
     /// <summary>
     /// The hook on the other way a player can die.
     /// </summary>
     private Hook? _hazardRespawnHook;
+
+    /// <summary>
+    /// The hook on the game moving its world on after a death.
+    /// </summary>
+    private Hook? _timePassesHook;
+
+    /// <summary>
+    /// Whether the death that is on its way to the bench is one the partner lived through, so the world does not move
+    /// on for it. Set when a held death is let go to the bench, and used up by the one call that moves the world on.
+    /// </summary>
+    private bool _deathPassesNoTime;
 
     /// <summary>
     /// Says when the room itself kills the player and puts them straight back.
@@ -530,6 +577,7 @@ internal partial class CoopSave {
         // Before telling a waiting partner anything, because that changes the answer
         _deathCanWait = CanWaitForRescue();
         _heldDeathAnnouncement = default;
+        _deathPassesNoTime = false;
 
         // A non-lethal death leaves no cocoon: the game skips that whole part of its own sequence, so there would be
         // nothing for the partner to open and the player would wait for something that cannot come. It also takes
@@ -629,6 +677,7 @@ internal partial class CoopSave {
         }
 
         rescue.Outcome = RescueOutcome.Ended;
+        rescue.PartnerDown = true;
         Logger.Info($"{player.Username} died as well, so this wait is over and both go to their benches");
         AnnounceTheHeldBackDeath();
         Chat(
@@ -797,7 +846,13 @@ internal partial class CoopSave {
             yield break;
         }
 
-        Logger.Info("Letting the death finish and take the player to their bench");
+        // Time only passes when both players are down. A partner who is still connected and did not go down as well
+        // lived through this death, whether this player gave up, ran out of time or could not be stood back up
+        _deathPassesNoTime = waited is not { PartnerDown: true } && GetCheckedPartner() != null;
+        Logger.Info(
+            "Letting the death finish and take the player to their bench, " +
+            (_deathPassesNoTime ? "without time passing: the teammate is still standing" : "with time passing")
+        );
 
         // The bench this death is about to take the player to is reached with the screen already black: the game
         // leaves it that way on purpose across the load of the room it is in, and only fades back in once the player
@@ -1695,6 +1750,15 @@ internal partial class CoopSave {
         RemoveRescueTarget();
 
         if (update.Values.Count < 2) {
+            return;
+        }
+
+        // Both went down before either heard about the other, so each is lying there waiting for someone who cannot
+        // come. Two deaths are two benches in whichever order the news arrives: this wait ends here, and the partner's
+        // game ends theirs the same way when this player's cocoon reaches it
+        if (_rescue is { Outcome: RescueOutcome.Waiting }) {
+            OnRescueLost(player);
+
             return;
         }
 
