@@ -798,5 +798,7 @@ internal enum AnimationClip {
     WitchTentacles,
     ShamanCancel,
     BindInterrupt,
-    Bench
+    Bench,
+    HeroChildEffect,
+    TauntVoice
 }

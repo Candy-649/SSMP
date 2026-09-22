@@ -720,7 +720,11 @@ internal class AnimationManager {
         { AnimationClip.ToolStraightPin, new StraightPin() },
         { AnimationClip.ToolThreefoldPin, new ThreefoldPin() },
         { AnimationClip.ToolLongpin, new Longpin() },
-        { AnimationClip.ToolTacks, new Tacks() }
+        { AnimationClip.ToolTacks, new Tacks() },
+
+        // Parts of the hero that the game switches on and off, and what the hero says as it taunts
+        { AnimationClip.HeroChildEffect, HeroChildEffects.Instance },
+        { AnimationClip.TauntVoice, new TauntVoice() }
     };
 
     #endregion
@@ -1171,6 +1175,13 @@ internal class AnimationManager {
         CreateSkillHooks();
         CreateToolHooks();
 
+        HeroChildEffects.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildEffect, effectInfo));
+        if (hc.silkSpecialFSM != null) {
+            TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));
+        } else {
+            Logger.Warn("Unable to find Silk Skill FSM to hook the taunt.");
+        }
+
         // Find bind FSM
         var heroFsms = hc.GetComponents<PlayMakerFSM>();
 
@@ -1235,6 +1246,19 @@ internal class AnimationManager {
     }
 
     #endregion
+
+    /// <summary>
+    /// Sends a sub-animation of the local hero, whose effect info says all there is to it, to the other players.
+    /// </summary>
+    /// <param name="clip">The sub-animation.</param>
+    /// <param name="effectInfo">Its effect info.</param>
+    private void SendSubAnimation(AnimationClip clip, byte[] effectInfo) {
+        if (!_netClient.IsConnected) {
+            return;
+        }
+
+        _netClient.UpdateManager.UpdatePlayerAnimation(clip, 0, effectInfo);
+    }
 
     #region Silk Skill Hooks
 
