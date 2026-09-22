@@ -104,14 +104,23 @@ internal class HeroChildEffects : AnimationEffect {
 
     /// <summary>
     /// Starts watching the parts of the local hero, which may be a new hero or the same one again.
+    ///
+    /// This runs when the game first asks for the hero, which can be while the hero is still being made: one of its
+    /// own parts asks from its Awake, before the hero's own set-up has run. An exception thrown here comes out of
+    /// that part's Awake and leaves the part unset.
     /// </summary>
     /// <param name="hero">The local hero.</param>
     /// <param name="send">Sends the effect info of a change to the other players.</param>
     public static void Watch(HeroController hero, Action<byte[]> send) {
         Array.Clear(LocalMask, 0, MaskLength);
 
+        // The transform of the object, not HeroController.transform: the hero keeps a field of that name that hides
+        // the component's own, and fills it in only in its set-up. Read before that it is null, and the exception
+        // it threw came out of the Awake of the down attack that asked for the hero first, which then never hooked
+        // its hits: it bounced off nothing and struck nothing it has to strike itself, like the partner's cocoon.
+        var heroTransform = hero.gameObject.transform;
         for (var i = 0; i < Paths.Length; i++) {
-            var part = hero.transform.Find(Paths[i]);
+            var part = heroTransform.Find(Paths[i]);
             if (part == null) {
                 Logger.Warn($"The hero has no part '{Paths[i]}' to show to other players");
                 continue;
