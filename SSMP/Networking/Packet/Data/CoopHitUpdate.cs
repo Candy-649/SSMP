@@ -106,5 +106,13 @@ internal enum CoopHitKind : byte {
     /// landed here. The hit itself is sent so that the effect it plays there is the one this hit really was, rather
     /// than a generic one guessed from a direction.
     /// </summary>
-    EnemyHitEffect
+    EnemyHitEffect,
+
+    /// <summary>
+    /// An enemy, found by the ID of its entity, that blocked a hit, whose block the other game shows.
+    ///
+    /// A blocked hit is not a wound. It only strikes a spark off the enemy and clinks, and showing it over there as
+    /// the effect of a hit that landed had the enemy bleeding every time it guarded.
+    /// </summary>
+    EnemyBlockEffect
 }

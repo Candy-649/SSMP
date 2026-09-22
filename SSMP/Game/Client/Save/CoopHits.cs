@@ -243,6 +243,11 @@ internal class CoopHits {
             return;
         }
 
+        if (update.Kind == CoopHitKind.EnemyBlockEffect) {
+            ApplyBlockEffect(update);
+            return;
+        }
+
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
         if (type == null || !typeof(IHitResponder).IsAssignableFrom(type) || !IsReplayed(type)) {
             return;
@@ -497,9 +502,10 @@ internal class CoopHits {
         try {
             var response = responder.Hit(hit);
 
-            // Nothing of this hit happens in the partner's game any more, so what it looked like is sent to them
+            // Nothing of this hit happens in the partner's game any more, so what it looked like is sent to them. A hit
+            // that the enemy blocked showed only the spark of the block here, and that is what goes, not a wound.
             if (isEnemyEntity && hit.IsHeroDamage && response.response != IHitResponder.Response.None) {
-                SendHitEffect(partnerId, enemyId, hit);
+                SendHitEffect(partnerId, enemyId, hit, response.response == IHitResponder.Response.Invincible);
             }
 
             return response;
@@ -738,7 +744,8 @@ internal class CoopHits {
     /// <param name="partnerId">The ID of the partner.</param>
     /// <param name="entityId">The ID of the entity that was hit.</param>
     /// <param name="hit">The hit, which decides which effect is played.</param>
-    private void SendHitEffect(ushort partnerId, ushort entityId, HitInstance hit) {
+    /// <param name="blocked">Whether the enemy blocked the hit rather than took it.</param>
+    private void SendHitEffect(ushort partnerId, ushort entityId, HitInstance hit, bool blocked) {
         if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
             !partner.IsInLocalScene) {
             return;
@@ -746,7 +753,7 @@ internal class CoopHits {
 
         _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
             TargetId = partnerId,
-            Kind = CoopHitKind.EnemyHitEffect,
+            Kind = blocked ? CoopHitKind.EnemyBlockEffect : CoopHitKind.EnemyHitEffect,
             EntityId = entityId,
             Hit = WriteHit(hit)
         });
@@ -758,17 +765,7 @@ internal class CoopHits {
     /// </summary>
     /// <param name="update">The update of the partner's hit.</param>
     private void ApplyHitEffect(CoopHitUpdate update) {
-        GameObject? enemy = null;
-        foreach (var entity in _entityManager.ActiveEntities) {
-            if (entity.Id == update.EntityId) {
-                // The scene host watches its own object, and everyone else the copy that follows it
-                enemy = _entityManager.IsSceneHost ? entity.Object.Host : entity.Object.Client;
-                break;
-            }
-        }
-
-        if (enemy == null || !enemy.activeInHierarchy ||
-            !enemy.TryGetComponent<HealthManager>(out var healthManager) || healthManager.GetIsDead()) {
+        if (FindHitEnemy(update.EntityId) is not { } healthManager) {
             return;
         }
 
@@ -789,6 +786,117 @@ internal class CoopHits {
 
         hit.Source = GetHitSource(source);
         receiver.ReceiveHitEffect(hit);
+    }
+
+    /// <summary>
+    /// Plays what a hit of the partner looked like that an enemy blocked: the spark where it struck and the clink,
+    /// placed the way the enemy's own blocked hit places them. The rest of a blocked hit - the enemy's state machine
+    /// hearing of it, the knockback of the player who struck and the shake of their screen - belongs to the game where
+    /// it happened, and is left out.
+    /// </summary>
+    /// <param name="update">The update of the partner's hit.</param>
+    private void ApplyBlockEffect(CoopHitUpdate update) {
+        if (FindHitEnemy(update.EntityId) is not { } healthManager) {
+            return;
+        }
+
+        // The game plays one block at a time for an enemy, and none at all for the ones that never clink
+        if (healthManager.tinkTimer > 0f || healthManager.GetComponent<DontClinkGates>() != null) {
+            return;
+        }
+
+        if (!TryReadHit(update.Hit, out var hit, out var source)) {
+            Logger.Warn($"Could not read the blocked hit of the partner on entity {update.EntityId}");
+            return;
+        }
+
+        healthManager.tinkTimer = 0.1f;
+        if (healthManager.PreventInvincibleEffect || healthManager.blockHitPrefab == null) {
+            return;
+        }
+
+        hit.Source = GetHitSource(source);
+        var enemy = healthManager.transform;
+        var direction = DirectionUtils.GetCardinalDirection(hit.GetActualDirection(enemy, default));
+        GetBlockEffectPlace(healthManager, hit.Source.transform.position, direction, out var position, out var angle);
+
+        var spark = healthManager.blockHitPrefab.Spawn();
+        spark.transform.position = position;
+        spark.transform.eulerAngles = new Vector3(0f, 0f, angle);
+
+        if (!healthManager.hasAlternateInvincibleSound) {
+            healthManager.regularInvincibleAudio.SpawnAndPlayOneShot(healthManager.audioPlayerPrefab, enemy.position);
+        } else if (healthManager.alternateInvincibleSound != null &&
+                   healthManager.TryGetComponent<AudioSource>(out var audioSource)) {
+            audioSource.PlayOneShot(healthManager.alternateInvincibleSound);
+        }
+    }
+
+    /// <summary>
+    /// Where the spark of a blocked hit goes and which way it faces, as the game works it out: on the side of the
+    /// enemy's box that the hit came from, level with where it came from.
+    /// </summary>
+    private static void GetBlockEffectPlace(
+        HealthManager healthManager,
+        Vector3 source,
+        int direction,
+        out Vector2 position,
+        out float angle
+    ) {
+        var enemy = healthManager.transform.position;
+        position = enemy;
+        angle = 0f;
+
+        var box = healthManager.boxCollider != null
+            ? healthManager.boxCollider
+            : healthManager.GetComponent<BoxCollider2D>();
+        if (box == null) {
+            return;
+        }
+
+        var left = enemy.x + box.offset.x - box.size.x * 0.5f;
+        var right = enemy.x + box.offset.x + box.size.x * 0.5f;
+        var bottom = enemy.y + box.offset.y - box.size.y * 0.5f;
+        var top = enemy.y + box.offset.y + box.size.y * 0.5f;
+        switch (direction) {
+            case 0:
+                position = new Vector2(left, source.y);
+                break;
+            case 1:
+                position = new Vector2(source.x, Mathf.Max(source.y, bottom));
+                angle = 90f;
+                break;
+            case 2:
+                position = new Vector2(right, source.y);
+                angle = 180f;
+                break;
+            case 3:
+                position = new Vector2(Mathf.Clamp(source.x, left, right), Mathf.Min(source.y, top));
+                angle = 270f;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// The health of the enemy that a hit effect of the partner is about, or null when it is gone or dead here.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity of the enemy.</param>
+    private HealthManager? FindHitEnemy(ushort entityId) {
+        GameObject? enemy = null;
+        foreach (var entity in _entityManager.ActiveEntities) {
+            if (entity.Id == entityId) {
+                // The scene host watches its own object, and everyone else the copy that follows it
+                enemy = _entityManager.IsSceneHost ? entity.Object.Host : entity.Object.Client;
+                break;
+            }
+        }
+
+        if (enemy == null || !enemy.activeInHierarchy ||
+            !enemy.TryGetComponent<HealthManager>(out var healthManager) || healthManager.GetIsDead()) {
+            return null;
+        }
+
+        return healthManager;
     }
 
     /// <summary>
