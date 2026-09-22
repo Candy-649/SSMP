@@ -31,6 +31,14 @@ internal class PlayerManager : IPlayerManager {
     private const string PlayerObjectPrefabName = "Player Prefab";
 
     /// <summary>
+    /// The depth that the character of another player is drawn at. The camera orders sprites by depth alone and draws
+    /// the nearer one on top, and the game holds its own hero at 0.004 every frame, so at the depth of 0 that the
+    /// positions of other players come in at, their character was drawn over the player's own. Just behind the hero,
+    /// it keeps the place among everything else in the room that the other player's own hero has in their game.
+    /// </summary>
+    private const float PlayerObjectDepth = 0.0041f;
+
+    /// <summary>
     /// The name (and prefix) of the game object for player containers.
     /// </summary>
     private const string PlayerContainerName = "Player Container";
@@ -241,6 +249,7 @@ internal class PlayerManager : IPlayerManager {
         );
 
         playerPrefab.transform.SetParent(_playerContainerPrefab.transform);
+        playerPrefab.transform.localPosition = new Vector3(0f, 0f, PlayerObjectDepth);
 
         // Now we need to copy over a lot of variables from the local player object
         var localPlayerObject = HeroController.instance.gameObject;
