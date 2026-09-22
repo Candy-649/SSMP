@@ -493,5 +493,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    WorldTrigger
+    WorldTrigger,
+
+    /// <summary>
+    /// How the race of the sender against the racer of the room goes, in a race that both players run together.
+    /// <see cref="CoopSaveUpdate.PartCount"/> says what happened: the sender is at the start line, won, or is out, and
+    /// <see cref="CoopSaveUpdate.Scene"/> names the room.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    Race
 }

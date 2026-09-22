@@ -459,6 +459,7 @@ internal partial class CoopSave {
         UpdateWishTalk(partner);
         UpdateDeliverySummon(hero, partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateRescue(hero, partner != null && _checkedWith == partner.Id ? partner : null);
+        UpdateRaces(partner != null && _checkedWith == partner.Id ? partner : null);
 
         if (partner != null && _checkedWith == partner.Id) {
             UpdateCheckedPlayTime(marker);
@@ -533,7 +534,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Keeps a waiting hero seated by holding back the events that make them get up from the bench.
+    /// Keeps a waiting hero seated by holding back the events that make them get up from the bench, and holds the
+    /// events of a race that wait for the partner.
     /// </summary>
     private void OnProcessEvent(
         Action<Fsm, FsmEvent, FsmEventData> orig,
@@ -544,6 +546,16 @@ internal partial class CoopSave {
         if (_held && fsmEvent != null && GetUpEventNames.Contains(fsmEvent.Name) && self.Name == BenchFsmName &&
             self.ActiveStateName == BenchRestingStateName) {
             return;
+        }
+
+        if (_raceFsm != null && fsmEvent != null) {
+            try {
+                if (HoldsRaceEvent(self, fsmEvent)) {
+                    return;
+                }
+            } catch (Exception e) {
+                LogRaceError(e);
+            }
         }
 
         orig(self, fsmEvent!, eventData);
@@ -583,6 +595,7 @@ internal partial class CoopSave {
         ResetDeliveries();
         ResetStoryItems();
         ResetRescue();
+        ResetRaces();
     }
 
     /// <summary>
@@ -609,6 +622,7 @@ internal partial class CoopSave {
         OnLiftSceneChanged();
         OnDeliverySceneChanged();
         OnRescueSceneChanged();
+        ResetRaces();
     }
 
     /// <summary>
@@ -826,6 +840,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WishConfirm:
                 OnWishConfirm(player, update);
+                break;
+            case CoopSaveUpdateKind.Race:
+                OnRace(player, update);
                 break;
             case CoopSaveUpdateKind.RescueOffer:
                 OnRescueOffer(player, update);

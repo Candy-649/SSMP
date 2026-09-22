@@ -429,6 +429,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // And races, before the switch, so that a try that starts is followed before anything it goes on to
+        try {
+            OnRaceSwitch(self, toState);
+        } catch (Exception e) {
+            LogRaceError(e);
+        }
+
         CoopMechanism? mechanism = null;
         try {
             mechanism = GetMechanism(self);

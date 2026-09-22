@@ -167,8 +167,9 @@ internal partial class CoopSave {
         try {
             CoopSaveUpdate? update = null;
             foreach (var pair in playerData.QuestCompletionData.Enumerate()) {
-                // A wish that dialogue changes goes to the partner with what the dialogue took and gave
-                if (!IsHeldByWishTalk(pair.Key)) {
+                // A wish that dialogue changes goes to the partner with what the dialogue took and gave, and one of
+                // a race that runs goes once it is over
+                if (!IsHeldByWishTalk(pair.Key) && !IsHeldByRace(pair.Key)) {
                     AddWishChange(ref update, partner, _knownWishes, pair.Key, PackCompletion(pair.Value));
                 }
             }

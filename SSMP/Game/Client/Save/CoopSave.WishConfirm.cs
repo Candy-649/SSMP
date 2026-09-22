@@ -18,6 +18,9 @@ namespace SSMP.Game.Client.Save;
 /// the partner is asked the same question; their answer runs the held one. A refusal answers no, so the dialogue takes
 /// the path it takes whenever a player declines, and nothing else has to know that two of them were asked.
 ///
+/// A racer asking whether to start a race is one of them too, because both players run it together: see
+/// <c>CoopSave.Races</c>.
+///
 /// The hold sits on the button rather than on the answer, because the box pays before it answers: the box wraps the
 /// yes it is given so that it takes the currency, locks the tools and takes the items first, and only then runs the
 /// wrapped yes, which is what sends the event to the FSM. Holding the event would therefore hold an answer whose price
@@ -77,6 +80,12 @@ internal partial class CoopSave {
     /// A prompt that uses up items that the story takes from both players.
     /// </summary>
     private const string WishConfirmItem = "item";
+
+    /// <summary>
+    /// A prompt that starts a race against the racer of a room, which both players run together. Like a wish, both of
+    /// them say yes at their own prompt.
+    /// </summary>
+    private const string WishConfirmRace = "race";
 
     /// <summary>
     /// The field with the dialogue box of the game.
@@ -303,10 +312,12 @@ internal partial class CoopSave {
             partnerAt.Kind == meeting.Kind && partnerAt.Wish == meeting.Wish) {
             _partnerWishWait = null;
             SendConfirmAnswer(partnerAt.PartnerId, partnerAt.Key, true);
-            Chat(Lang.Pick(
-                $"You both agreed, so it is done.",
-                $"你们都同意了，成立。"
-            ));
+            Chat(meeting.Kind == WishConfirmRace
+                ? Lang.Pick("You both said yes, so you race together.", "你们都选了「是」，一起跑。")
+                : Lang.Pick(
+                    $"You both agreed, so it is done.",
+                    $"你们都同意了，成立。"
+                ));
             Logger.Info($"Both players agreed at their own box about {what}, so it goes through");
             orig(self);
             return;
@@ -323,7 +334,13 @@ internal partial class CoopSave {
             GetWishKey(GetAskWish(ask))
         );
         Send(ask);
-        Chat(GetAskWish(ask) != null
+        Chat(GetAskWish(ask) is { Kind: WishConfirmRace }
+            ? Lang.Pick(
+                $"The race starts once {GetPartnerName()} talks to the racer and says yes too. " +
+                "Answer no to take it back.",
+                $"等 {GetPartnerName()} 也去跟对手说话、选「是」，比赛才会开始。选「否」就可以收回。"
+            )
+            : GetAskWish(ask) != null
             ? Lang.Pick(
                 $"{GetPartnerName()} has to say yes at their own prompt too. Answer no to take it back.",
                 $"{GetPartnerName()} 也要在他们自己的选项上选「是」才行。选「否」就可以收回。"
@@ -367,12 +384,16 @@ internal partial class CoopSave {
     /// </summary>
     private bool IsPromptAboutWish(YesNoBox box, PartnerWishWait waiting) {
         var prompt = GetLivePrompt();
-        if (prompt == null || !IsWishPrompt(prompt, box)) {
+        if (prompt == null) {
             return false;
         }
 
         var what = "";
-        var ask = GetWishConfirmAsk(prompt, ref what);
+        var ask = IsRacePrompt(prompt, box)
+            ? CreateRaceConfirm(prompt, ref what)
+            : IsWishPrompt(prompt, box)
+                ? GetWishConfirmAsk(prompt, ref what)
+                : null;
 
         return GetAskWish(ask) is { } wish && wish.Kind == waiting.Kind && wish.Wish == waiting.Wish;
     }
@@ -395,7 +416,7 @@ internal partial class CoopSave {
 
         var kind = ask.Records[0];
 
-        return kind is WishConfirmAccept or WishConfirmTurnIn ? (kind, ask.WishNames[0]) : null;
+        return kind is WishConfirmAccept or WishConfirmTurnIn or WishConfirmRace ? (kind, ask.WishNames[0]) : null;
     }
 
     /// <summary>
@@ -433,6 +454,12 @@ internal partial class CoopSave {
     /// </summary>
     private CoopSaveUpdate? GetConfirmAsk(YesNoAction? action, YesNoBox box, out string what) {
         what = "";
+
+        // Before the wishes, because the first race is asked in the box that accepts its wish. Whichever box each of
+        // the two players is shown, what they agree on is starting a race against the same racer.
+        if (action != null && IsRacePrompt(action, box)) {
+            return CreateRaceConfirm(action, ref what);
+        }
 
         // Both kinds of box are their own single instance and can be open at the same time, so a prompt is only taken
         // for the one on screen when the box is the kind that prompt opens
@@ -591,10 +618,20 @@ internal partial class CoopSave {
                     QueuePartnerConfirm(player, update);
                     break;
                 case WishConfirmYes:
-                    AnswerHeldConfirm(update.Key, true, $"{player.Username} agreed.");
+                    AnswerHeldConfirm(update.Key, true, IsRaceHold(update.Key)
+                        ? Lang.Pick(
+                            $"{player.Username} said yes too, so you race together.",
+                            $"{player.Username} 也选了「是」，一起跑。"
+                        )
+                        : $"{player.Username} agreed.");
                     break;
                 case WishConfirmNo:
-                    AnswerHeldConfirm(update.Key, false, $"{player.Username} didn't agree, so nothing was taken.");
+                    AnswerHeldConfirm(update.Key, false, IsRaceHold(update.Key)
+                        ? Lang.Pick(
+                            $"{player.Username} didn't say yes, so the race didn't start.",
+                            $"{player.Username} 没有选「是」，比赛没有开始。"
+                        )
+                        : $"{player.Username} didn't agree, so nothing was taken.");
                     break;
                 case WishConfirmGone:
                     if (_pendingConfirmAsk is { } waiting && waiting.Update.Key == update.Key) {
@@ -814,10 +851,15 @@ internal partial class CoopSave {
         // through: this one is let out of its hold and the partner is told.
         if (_wishConfirm is { } held && held.WishKey == wishKey) {
             SendConfirmAnswer(player.Id, update.Key, true);
-            AnswerHeldConfirm(held.Key, true, Lang.Pick(
-                $"{player.Username} said yes at their own prompt too, so it is done.",
-                $"{player.Username} 也在他们自己的选项上选了「是」，成立。"
-            ));
+            AnswerHeldConfirm(held.Key, true, asked.Kind == WishConfirmRace
+                ? Lang.Pick(
+                    $"{player.Username} said yes too, so you race together.",
+                    $"{player.Username} 也选了「是」，一起跑。"
+                )
+                : Lang.Pick(
+                    $"{player.Username} said yes at their own prompt too, so it is done.",
+                    $"{player.Username} 也在他们自己的选项上选了「是」，成立。"
+                ));
 
             return;
         }
@@ -829,15 +871,20 @@ internal partial class CoopSave {
         }
 
         _partnerWishWait = new PartnerWishWait(player.Id, player.Username, update.Key, asked.Kind, asked.Wish);
-        Chat(asked.Kind == WishConfirmAccept
-            ? Lang.Pick(
+        Chat(asked.Kind switch {
+            WishConfirmRace => Lang.Pick(
+                $"{player.Username} wants to start a race. Talk to the racer and say yes too, and you both run.",
+                $"{player.Username} 想开始比赛。你也去跟对手说话、选「是」，就一起跑。"
+            ),
+            WishConfirmAccept => Lang.Pick(
                 $"{player.Username} said yes to taking this wish. Say yes at your own prompt and you both take it.",
                 $"{player.Username} 在他们那边选了接下这个愿望。你走到自己的选项上也选「是」，就一起接下。"
-            )
-            : Lang.Pick(
+            ),
+            _ => Lang.Pick(
                 $"{player.Username} said yes to handing this wish in. Say yes at your own prompt too.",
                 $"{player.Username} 在他们那边同意交付这个愿望了。你也在自己的选项上选「是」。"
-            ));
+            )
+        });
         Logger.Info($"{player.Username} is waiting at their own box about the wish '{asked.Wish}' ({asked.Kind})");
     }
 
@@ -1105,7 +1152,12 @@ internal partial class CoopSave {
     private void UpdateWishConfirm() {
         var now = Time.unscaledTime;
         if (_wishConfirm is { } held && now - held.Started > WishConfirmTimeout) {
-            CancelHeldConfirm($"{GetPartnerName()} didn't answer, so nothing was taken.", HeldEnd.PressNo);
+            CancelHeldConfirm(IsRaceHold(held.Key)
+                ? Lang.Pick(
+                    $"{GetPartnerName()} didn't say yes in time, so the race didn't start.",
+                    $"{GetPartnerName()} 没有及时选「是」，比赛没有开始。"
+                )
+                : $"{GetPartnerName()} didn't answer, so nothing was taken.", HeldEnd.PressNo);
         }
 
         if (_partnerConfirm is { } shown && now - shown.Started > WishConfirmTimeout) {
@@ -1120,10 +1172,15 @@ internal partial class CoopSave {
         if (_partnerWishWait is { } wishWait && now - wishWait.Started > WishConfirmTimeout) {
             _partnerWishWait = null;
             SendConfirmAnswer(wishWait.PartnerId, wishWait.Key, false);
-            Chat(Lang.Pick(
-                $"You didn't get to the same prompt in time, so {wishWait.PartnerName} didn't take it.",
-                $"你没有及时走到同一个选项，所以 {wishWait.PartnerName} 那边没有接下。"
-            ));
+            Chat(wishWait.Kind == WishConfirmRace
+                ? Lang.Pick(
+                    $"You didn't say yes to the racer in time, so the race of {wishWait.PartnerName} didn't start.",
+                    $"你没有及时去跟对手说话选「是」，所以 {wishWait.PartnerName} 那边的比赛没有开始。"
+                )
+                : Lang.Pick(
+                    $"You didn't get to the same prompt in time, so {wishWait.PartnerName} didn't take it.",
+                    $"你没有及时走到同一个选项，所以 {wishWait.PartnerName} 那边没有接下。"
+                ));
         }
 
         if (_pendingConfirmAsk is { } pending) {
