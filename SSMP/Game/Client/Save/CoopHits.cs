@@ -496,6 +496,12 @@ internal class CoopHits {
 
         SayWhatWasHit(responder, hit, isRemote, isEnemyEntity);
 
+        // Where the enemy stood as the hit landed, which is what the direction of a hit that spreads out from its
+        // source is worked out against
+        var enemyPosition = isEnemyEntity && responder is Component hitComponent
+            ? hitComponent.transform.position
+            : (Vector3?) null;
+
         // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is
         var lastContext = _hitContext;
         _hitContext = isRemote ? HitContext.Remote : hit.IsHeroDamage ? HitContext.Local : HitContext.None;
@@ -505,7 +511,9 @@ internal class CoopHits {
             // Nothing of this hit happens in the partner's game any more, so what it looked like is sent to them. A hit
             // that the enemy blocked showed only the spark of the block here, and that is what goes, not a wound.
             if (isEnemyEntity && hit.IsHeroDamage && response.response != IHitResponder.Response.None) {
-                SendHitEffect(partnerId, enemyId, hit, response.response == IHitResponder.Response.Invincible);
+                SendHitEffect(
+                    partnerId, enemyId, hit, response.response == IHitResponder.Response.Invincible, enemyPosition
+                );
             }
 
             return response;
@@ -745,7 +753,14 @@ internal class CoopHits {
     /// <param name="entityId">The ID of the entity that was hit.</param>
     /// <param name="hit">The hit, which decides which effect is played.</param>
     /// <param name="blocked">Whether the enemy blocked the hit rather than took it.</param>
-    private void SendHitEffect(ushort partnerId, ushort entityId, HitInstance hit, bool blocked) {
+    /// <param name="enemyPosition">Where the enemy stood as the hit landed.</param>
+    private void SendHitEffect(
+        ushort partnerId,
+        ushort entityId,
+        HitInstance hit,
+        bool blocked,
+        Vector3? enemyPosition
+    ) {
         if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
             !partner.IsInLocalScene) {
             return;
@@ -755,7 +770,7 @@ internal class CoopHits {
             TargetId = partnerId,
             Kind = blocked ? CoopHitKind.EnemyBlockEffect : CoopHitKind.EnemyHitEffect,
             EntityId = entityId,
-            Hit = WriteHit(hit)
+            Hit = WriteHit(hit, hit.CircleDirection ? enemyPosition : null)
         });
     }
 
@@ -784,6 +799,7 @@ internal class CoopHits {
             return;
         }
 
+        PlaceAroundEnemy(ref source, healthManager.transform);
         hit.Source = GetHitSource(source);
         receiver.ReceiveHitEffect(hit);
     }
@@ -809,6 +825,8 @@ internal class CoopHits {
             Logger.Warn($"Could not read the blocked hit of the partner on entity {update.EntityId}");
             return;
         }
+
+        PlaceAroundEnemy(ref source, healthManager.transform);
 
         healthManager.tinkTimer = 0.1f;
         if (healthManager.PreventInvincibleEffect || healthManager.blockHitPrefab == null) {
@@ -1055,7 +1073,10 @@ internal class CoopHits {
     /// <summary>
     /// Writes a hit to bytes, with the state of the object that it came from.
     /// </summary>
-    private static byte[] WriteHit(HitInstance hit) {
+    /// <param name="hit">The hit.</param>
+    /// <param name="enemyPosition">For a hit that goes the way from its source to the enemy, where the enemy stood.
+    /// </param>
+    private static byte[] WriteHit(HitInstance hit, Vector3? enemyPosition = null) {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
 
@@ -1114,9 +1135,28 @@ internal class CoopHits {
         writer.Write(hit.IsNailTag);
         writer.Write(hit.IgnoreNailPosition);
         writer.Write(hit.IsHarpoon);
+        writer.Write(enemyPosition.HasValue);
+        writer.Write(enemyPosition?.x ?? 0f);
+        writer.Write(enemyPosition?.y ?? 0f);
+        writer.Write(enemyPosition?.z ?? 0f);
 
         writer.Flush();
         return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Puts the source of a hit that spreads out from it where it was from the enemy in the partner's game, rather than
+    /// where it was in the world. Such a hit goes the way from its source to the enemy, and the enemy never stands in
+    /// quite the same spot in both games: a burst that pulls enemies onto itself has the source almost inside the
+    /// enemy, where the smallest difference turns the spray of the wound around - up out of the head here while it
+    /// went sideways over there.
+    /// </summary>
+    /// <param name="source">The state of the source that was read, whose position is moved.</param>
+    /// <param name="enemy">The enemy here.</param>
+    private static void PlaceAroundEnemy(ref HitSourceState source, Transform enemy) {
+        if (source.EnemyPosition is { } enemyThere) {
+            source.Position = enemy.position + (source.Position - enemyThere);
+        }
     }
 
     /// <summary>
@@ -1181,6 +1221,9 @@ internal class CoopHits {
             hit.IsNailTag = reader.ReadBoolean();
             hit.IgnoreNailPosition = reader.ReadBoolean();
             hit.IsHarpoon = reader.ReadBoolean();
+            var hasEnemyPosition = reader.ReadBoolean();
+            var enemyPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            source.EnemyPosition = hasEnemyPosition ? enemyPosition : null;
 
             hit.SilkGeneration = HitSilkGeneration.None;
             return true;
@@ -1237,5 +1280,11 @@ internal class CoopHits {
         /// The velocity of that body.
         /// </summary>
         public Vector2 Velocity;
+
+        /// <summary>
+        /// For a hit that goes the way from its source to the enemy, where the enemy stood in the game of the player
+        /// who struck, or null.
+        /// </summary>
+        public Vector3? EnemyPosition;
     }
 }
