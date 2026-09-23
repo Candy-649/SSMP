@@ -803,5 +803,9 @@ internal enum AnimationClip {
     TauntVoice,
 
     // A tool whose thing flies off by itself once thrown, with the tool and the throw in the effect info
-    ToolThrown
+    ToolThrown,
+
+    // A clip that a part of the hero with an animation of its own plays, and particles on the hero that start or stop
+    HeroPartClip,
+    HeroChildParticle
 }

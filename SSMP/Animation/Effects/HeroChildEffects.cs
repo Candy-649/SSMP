@@ -24,7 +24,8 @@ internal class HeroChildEffects : AnimationEffect {
     /// network, so new ones go at the end. Left out are the parts that another effect already plays, the parts that
     /// could hurt, touch or be noticed by anything in the room (damagers, colliders, state machines, noise makers),
     /// the parts that show or hide by what the local player has equipped, and the parts of the local player's own view
-    /// (the light around the hero and the dark of a room).
+    /// (the light around the hero and the dark of a room). The parts with animations of their own play what the hero's
+    /// parts play by <see cref="HeroPartClips"/>.
     /// </summary>
     private static readonly string[] Paths = [
         "Effects/Taunt Thread",
@@ -88,8 +89,23 @@ internal class HeroChildEffects : AnimationEffect {
         "Tool Effects/Pt ScrewAttack Poison Trail",
         "Tool Effects/Pt ScrewAttack Poison Impact",
         "Tool Effects/Amplify_Effect",
-        "Tool Effects/Rosary Cannon Point/Shoot Effect"
+        "Tool Effects/Rosary Cannon Point/Shoot Effect",
+
+        // The stand-in that the game shows in place of the hero's own sprite for the tools that need a pose of their
+        // own, what goes on top of it, and what those tools show around it
+        StandInPath,
+        "Tool Effects/Tool Hornet Poison Screw Attack",
+        "Tool Effects/WebShot Effects/Gun Sprite",
+        "Tool Effects/WebShot Effects/Spit Effect S",
+        "Tool Effects/WebShot Effects/Spit Effect W",
+        "Tool Effects/WebShot Effects/Flash S",
+        "Tool Effects/WebShot_antic_effect"
     ];
+
+    /// <summary>
+    /// The path of the stand-in for the hero's own sprite: while it is on, the game hides the hero's own sprite.
+    /// </summary>
+    private const string StandInPath = "Tool Effects/Tool Hornet";
 
     /// <summary>
     /// The number of bytes that one bit for each watched part takes.
@@ -162,7 +178,7 @@ internal class HeroChildEffects : AnimationEffect {
 
         var changed = effectInfo[0];
         var on = effectInfo[1] == 1;
-        var part = GetCopy(playerObject, changed, on);
+        var part = GetCopy(playerObject, Paths[changed], on);
         if (part != null) {
             if (on) {
                 Restart(part);
@@ -180,7 +196,7 @@ internal class HeroChildEffects : AnimationEffect {
             }
 
             if ((effectInfo[2 + i / 8] & (1 << (i % 8))) == 0) {
-                var copy = GetCopy(playerObject, i, false);
+                var copy = GetCopy(playerObject, Paths[i], false);
                 if (copy != null && copy.activeSelf) {
                     copy.SetActive(false);
                 }
@@ -193,11 +209,43 @@ internal class HeroChildEffects : AnimationEffect {
                 continue;
             }
 
-            var other = GetCopy(playerObject, i, true);
+            var other = GetCopy(playerObject, Paths[i], true);
             if (other != null && !other.activeSelf) {
                 Restart(other);
             }
         }
+
+        ShowBodyUnlessStoodIn(playerObject);
+    }
+
+    /// <summary>
+    /// Switches off every copied part on the character of another player and shows its own sprite, for a character
+    /// that leaves the room: it may come back, or be used for another player, long after the change that would have
+    /// switched its parts off.
+    /// </summary>
+    /// <param name="playerObject">The character of the other player.</param>
+    public static void ResetCopies(GameObject playerObject) {
+        foreach (var path in Paths) {
+            var copy = GetCopy(playerObject, path, false);
+            if (copy != null && copy.activeSelf) {
+                copy.SetActive(false);
+            }
+        }
+
+        ShowBodyUnlessStoodIn(playerObject);
+    }
+
+    /// <summary>
+    /// Hides the own sprite of the character of another player while the copy of the stand-in is on, as the game hides
+    /// the hero's own sprite while its stand-in shows, and shows it otherwise.
+    /// </summary>
+    private static void ShowBodyUnlessStoodIn(GameObject playerObject) {
+        if (!playerObject.TryGetComponent<MeshRenderer>(out var body)) {
+            return;
+        }
+
+        var standIn = GetCopy(playerObject, StandInPath, false);
+        body.enabled = standIn == null || !standIn.activeSelf;
     }
 
     /// <summary>
@@ -226,15 +274,15 @@ internal class HeroChildEffects : AnimationEffect {
     }
 
     /// <summary>
-    /// The copy of a watched part on the character of another player, at the same place under it as the part is under
-    /// the local hero, made from the local hero's own part when it is not there yet.
+    /// The copy of a part of the hero on the character of another player, at the same place under it as the part is
+    /// under the local hero, made from the local hero's own part when it is not there yet.
     /// </summary>
     /// <param name="playerObject">The character of the other player.</param>
-    /// <param name="index">The index of the part.</param>
+    /// <param name="path">The path of the part under the hero.</param>
     /// <param name="create">Whether to make the copy when there is none yet.</param>
     /// <returns>The copy, or null when there is none and none could or should be made.</returns>
-    private static GameObject? GetCopy(GameObject playerObject, int index, bool create) {
-        var names = Paths[index].Split('/');
+    public static GameObject? GetCopy(GameObject playerObject, string path, bool create) {
+        var names = path.Split('/');
         var hero = HeroController.instance;
         var original = hero != null ? hero.transform : null;
         var current = playerObject.transform;

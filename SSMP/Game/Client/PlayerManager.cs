@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using SSMP.Animation.Effects;
 using SSMP.Api.Client;
 using SSMP.Fsm;
 using SSMP.Game.Client.Skin;
@@ -499,6 +500,10 @@ internal class PlayerManager : IPlayerManager {
             if (child.name != PlayerObjectPrefabName) {
                 continue;
             }
+
+            // The copied parts of the hero stay, and must not show on whoever the character is used for next
+            HeroChildEffects.ResetCopies(child.gameObject);
+            HeroChildParticles.ResetCopies(child.gameObject);
 
             foreach (Transform grandChild in child) {
                 if (grandChild.name is "Attacks" or "Effects" or "Spells") {

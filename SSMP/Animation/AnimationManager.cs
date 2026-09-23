@@ -723,9 +723,12 @@ internal class AnimationManager {
         { AnimationClip.ToolTacks, new Tacks() },
         { AnimationClip.ToolThrown, new ThrownTool() },
 
-        // Parts of the hero that the game switches on and off, and what the hero says as it taunts
+        // Parts of the hero that the game switches on and off, what they play and start, and what the hero says as it
+        // taunts
         { AnimationClip.HeroChildEffect, HeroChildEffects.Instance },
-        { AnimationClip.TauntVoice, new TauntVoice() }
+        { AnimationClip.TauntVoice, new TauntVoice() },
+        { AnimationClip.HeroPartClip, HeroPartClips.Instance },
+        { AnimationClip.HeroChildParticle, HeroChildParticles.Instance }
     };
 
     #endregion
@@ -1181,6 +1184,8 @@ internal class AnimationManager {
         CreateToolHooks();
 
         HeroChildEffects.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildEffect, effectInfo));
+        HeroPartClips.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroPartClip, effectInfo));
+        HeroChildParticles.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildParticle, effectInfo));
         if (hc.silkSpecialFSM != null) {
             TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));
         } else {
