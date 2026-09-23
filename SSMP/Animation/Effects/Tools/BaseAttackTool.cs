@@ -77,6 +77,6 @@ internal abstract class BaseAttackTool : DamageAnimationEffect {
     /// <param name="effectInfo">The effect info sent over the network.</param>
     /// <returns>True if the player is on a wall, false otherwise.</returns>
     protected static bool EffectIsOnWall(byte[]? effectInfo) {
-        return effectInfo != null && effectInfo.Length > 2 && effectInfo[2] == 1;
+        return effectInfo != null && effectInfo.Length > 1 && effectInfo[1] == 1;
     }
 }
