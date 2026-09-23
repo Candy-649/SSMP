@@ -487,7 +487,14 @@ internal static partial class EntityFsmActions {
     /// <param name="gameObject">The game object to check for.</param>
     /// <returns>true if the given game object is in the entity registry; otherwise false.</returns>
     private static bool IsObjectInRegistry(GameObject gameObject) {
-        return EntityRegistry.TryGetEntry(gameObject, out _);
+        if (!EntityRegistry.TryGetEntry(gameObject, out var entry)) {
+            return false;
+        }
+
+        // What a creature throws is often named after it, so the registry takes it for the creature, but it is not
+        // an entity, and what is done to it is done again on the other game like anything else: the turning of each
+        // spine a floater grows, for one, which is what points them out in every direction
+        return EntitySpawner.IsSpawnedAsEntity(gameObject, entry.Type) || EntityProcessor.IsRegistered(gameObject);
     }
 
     /// <summary>

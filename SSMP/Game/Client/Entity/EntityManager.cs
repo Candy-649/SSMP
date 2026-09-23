@@ -401,6 +401,17 @@ internal class EntityManager {
             return true;
         }
 
+        if (!EntityRegistry.TryGetEntry(details.GameObject, out var spawnedEntry)) {
+            return false;
+        }
+
+        // Only what the other game can make from a spawn message is made an entity here. One it could not make threw
+        // over there, and took everything else it was being told about the room down with it: whoever walked into a
+        // room after a floater had grown its spines never saw the creatures, the partner or anything else in it.
+        if (!EntitySpawner.CanSpawn(spawnedEntry.Type)) {
+            return EntitySpawner.IsSpawnedAsEntity(details.GameObject, spawnedEntry.Type);
+        }
+
         var processor = new EntityProcessor {
             GameObject = details.GameObject,
             IsSceneHost = IsSceneHost,

@@ -23,6 +23,27 @@ internal static class EntitySpawner {
     // private static GameObject _collectorBaldurPrefab;
 
     /// <summary>
+    /// Whether the other game can make an entity of the given type from a spawn message alone, which is only what
+    /// <see cref="SpawnEntityGameObject"/> knows how to make: a grass ball.
+    /// </summary>
+    /// <param name="spawnedType">The type of the spawned entity.</param>
+    public static bool CanSpawn(EntityType spawnedType) => spawnedType == EntityType.GrassBall;
+
+    /// <summary>
+    /// Whether something that was just spawned, and that the registry takes for an entity of the given type, is kept
+    /// out of the ordinary way of showing a spawn on the other game, which is doing the spawning action over there.
+    /// What the other game can make from a spawn message is made there as an entity. A creature it cannot make stays
+    /// in the game it was spawned in, since a copy made the ordinary way would go its own way unseen by this one. What
+    /// a creature throws is not kept out: its spines, sickles and bombs are often named after it - "Spine Floater
+    /// Spine" - so the registry takes them for the creature itself, but they are thrown like anything else.
+    /// </summary>
+    /// <param name="gameObject">The spawned object, or the prefab it is spawned from.</param>
+    /// <param name="type">The type the registry takes it for.</param>
+    public static bool IsSpawnedAsEntity(GameObject gameObject, EntityType type) {
+        return CanSpawn(type) || gameObject.GetComponent<HealthManager>() != null;
+    }
+
+    /// <summary>
     /// Spawn the game object for an entity with the given type that is spawned from the other given type.
     /// </summary>
     /// <param name="spawningType">The type of the entity that spawns the new entity.</param>
