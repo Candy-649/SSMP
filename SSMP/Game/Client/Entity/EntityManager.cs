@@ -44,6 +44,11 @@ internal class EntityManager {
     /// </summary>
     private Hook? _findGameObjectHook;
 
+    /// <summary>
+    /// Detour hook for the screen starting to shake, to end the shakes that a copy of a creature starts here.
+    /// </summary>
+    private Hook? _cameraShakeHook;
+
     // Both flags are set together in InitializeSceneHost / InitializeSceneClient.
     public bool IsSceneHost { get; private set; }
 
@@ -93,6 +98,11 @@ internal class EntityManager {
             ),
             OnFindGameObject
         );
+
+        _cameraShakeHook = new Hook(
+            typeof(CameraManagerReference).GetMethod(nameof(CameraManagerReference.DoShake)),
+            OnCameraShake
+        );
     }
 
     /// <summary>
@@ -108,6 +118,9 @@ internal class EntityManager {
 
         _findGameObjectHook?.Dispose();
         _findGameObjectHook = null;
+
+        _cameraShakeHook?.Dispose();
+        _cameraShakeHook = null;
 
         ClearEntities();
     }
@@ -506,5 +519,78 @@ internal class EntityManager {
         }
 
         Logger.Debug("  Name did not match any entity");
+    }
+
+    /// <summary>
+    /// Ends a shake of the screen that does not end by itself once the part of a creature's copy that started it
+    /// goes.
+    ///
+    /// Some shakes run until something tells them to stop. On a scene client the parts of a creature's copy run by
+    /// themselves, and a part that catches this player starts such a shake here. What stops it is the creature's
+    /// own FSM, which runs in the scene host's game and not here, so the screen shook until the room changed. The
+    /// scene host switches that part off when the move is over, which is carried over, so it ends here then too.
+    /// </summary>
+    private void OnCameraShake(
+        Action<CameraManagerReference, ICameraShake, Object, bool, bool, bool> orig,
+        CameraManagerReference self,
+        ICameraShake shake,
+        Object source,
+        bool doFreeze,
+        bool vibrate,
+        bool sendWorldForce
+    ) {
+        orig(self, shake, source, doFreeze, vibrate, sendWorldForce);
+
+        if (shake == null || shake.CanFinish) return;
+
+        var part = source switch {
+            GameObject gameObject => gameObject,
+            UnityEngine.Component component => component.gameObject,
+            _ => null
+        };
+        if (part == null || !IsPartOfACopy(part.transform)) return;
+
+        part.AddComponent<EndShakeWhenGone>().Watch(self, shake);
+    }
+
+    /// <summary>
+    /// Whether the object is the copy of an entity, or a part of one. Copies only run while the scene host runs the
+    /// entity.
+    /// </summary>
+    /// <param name="part">The object.</param>
+    private bool IsPartOfACopy(Transform part) {
+        for (var current = part; current != null; current = current.parent) {
+            foreach (var entity in _entities.Values) {
+                if (entity.Object.Client == current.gameObject) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Ends a shake of the screen when the object it is on is switched off, or goes with its room.
+    /// </summary>
+    private sealed class EndShakeWhenGone : MonoBehaviour {
+        private CameraManagerReference? _camera;
+        private ICameraShake? _shake;
+
+        /// <summary>
+        /// Starts watching the object, to end the given shake when it goes.
+        /// </summary>
+        public void Watch(CameraManagerReference camera, ICameraShake shake) {
+            _camera = camera;
+            _shake = shake;
+        }
+
+        private void OnDisable() {
+            if (_camera != null && _shake != null) {
+                _camera.CancelShake(_shake);
+            }
+
+            Destroy(this);
+        }
     }
 }
