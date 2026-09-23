@@ -625,6 +625,16 @@ internal class Entity {
             //addedComponentsString += " Collider";
         }
 
+        var hostBody = Object.Host.GetComponent<Rigidbody2D>();
+        if (hostBody != null) {
+            _components[EntityComponentType.BodyType] = new BodyTypeComponent(
+                _netClient,
+                Id,
+                Object,
+                hostBody
+            );
+        }
+
         var hostDamageHeroes = Object.Host.GetComponentsInChildren<DamageHero>(true);
         var clientDamageHeroes = Object.Client.GetComponentsInChildren<DamageHero>(true);
         if (hostDamageHeroes.Length > 0 && clientDamageHeroes.Length > 0) {
@@ -1447,13 +1457,15 @@ internal class Entity {
         try {
             var seen = Object.Host.GetComponent<Renderer>();
             var touched = Object.Host.GetComponent<Collider2D>();
+            var body = Object.Host.GetComponent<Rigidbody2D>();
             var states = string.Join(", ", _fsms.Host.Select(fsm => $"{fsm.FsmName}: {fsm.ActiveStateName}"));
 
             SSMP.Logging.Logger.Info(
                 $"Took over '{Object.Host.name}' at {Object.Host.transform.position}, " +
                 $"on: {Object.Host.activeInHierarchy}, " +
                 $"drawn: {(seen == null ? "-" : seen.enabled.ToString())}, " +
-                $"touchable: {(touched == null ? "-" : touched.enabled.ToString())}, going on in {states}"
+                $"touchable: {(touched == null ? "-" : touched.enabled.ToString())}, " +
+                $"body: {(body == null ? "-" : body.bodyType.ToString())}, going on in {states}"
             );
         } catch (Exception e) {
             SSMP.Logging.Logger.Warn($"Could not say what was taken over: {e.Message}");
@@ -1493,17 +1505,11 @@ internal class Entity {
         } else {
             //Logger.Debug("  Entity has no parent, calculating transform");
 
-            var clientPos = Object.Client.transform.localPosition;
-            var parentPos = Vector3.zero;
-            if (Object.Host.transform.parent != null) {
-                parentPos = Object.Host.transform.parent.position;
-            }
-
-            var newPosX = clientPos.x - parentPos.x;
-            var newPosY = clientPos.y - parentPos.y;
-            var newPosZ = clientPos.z - parentPos.z;
-
-            Object.Host.transform.localPosition = _lastPosition = new Vector3(newPosX, newPosY, newPosZ);
+            // Where the copy stands is where the room's own creature must stand. Worked out by hand from the position
+            // of its parent alone, this left out the parent's scale: a crawler on a platform scaled a little narrower
+            // was put down almost half a unit from the ledge it had been crawling on, and circled in the air after.
+            Object.Host.transform.position = Object.Client.transform.position;
+            _lastPosition = Object.Host.transform.position;
 
             // Since the scale of the client object is the entire scale we have and the host object scale can be in a
             // hierarchy, we need to calculate what the new local scale of the host will be to match the client scale
@@ -1608,15 +1614,9 @@ internal class Entity {
             resumed[fsmIndex] = true;
         }
 
-        // We need to set the isKinematic property of rigid bodies to ensure physics work again after enabling
-        // the host object. In Hornet 1 this is necessary because another state sets this property normally in the
-        // fight. See the "Wake" or "Refight Ready" state of the "Control" FSM on Hornet 1.
-        // For the Mantis Lord and City Elevator entity, this should never be disabled, since they are always kinematic.
-        var rigidBody = Object.Host.GetComponent<Rigidbody2D>();
-        if (rigidBody != null) {
-            //Logger.Debug("  Resetting isKinematic of Rigidbody to ensure physics work for host object");
-            rigidBody.isKinematic = false;
-        }
+        // The body is left the kind it is, which is the kind the other game last said the creature left it as
+        // (BodyTypeComponent). Making every body move by physics here pushed a crawler that is built to hug the
+        // walls it crawls on away from them.
 
         _isControlled = false;
 
