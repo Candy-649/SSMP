@@ -24,9 +24,11 @@ internal class HeroChildEffects : AnimationEffect {
     /// The watched parts, by their path under the hero. Their place in this list is what they are known by over the
     /// network, so new ones go at the end. Left out are the parts that another effect already plays, the parts that
     /// could hurt, touch or be noticed by anything in the room (damagers, colliders, state machines, noise makers),
-    /// the parts that show or hide by what the local player has equipped, and the parts of the local player's own view
-    /// (the light around the hero and the dark of a room). The parts with animations of their own play what the hero's
-    /// parts play by <see cref="HeroPartClips"/>.
+    /// the parts that show or hide by what the local player has equipped, the parts of the local player's own view
+    /// (the light around the hero and the dark of a room), and what the game shows when the hero is hit, which is for
+    /// the player who was hit alone: the dark burst of a hit at low health, half a screen wide and drawn over
+    /// everything, flashed on the other player's screen as if it were theirs. The parts with animations of their own
+    /// play what the hero's parts play by <see cref="HeroPartClips"/>.
     /// </summary>
     private static readonly string[] Paths = [
         "Effects/Taunt Thread",
@@ -65,8 +67,6 @@ internal class HeroChildEffects : AnimationEffect {
         "Effects/Swimp Bonk Effect",
         "Effects/Wall Bump/NeedleThrow Effect",
         "Effects/Wall Bump/Particle System",
-        "Effects/Damage Effect/low health hit effect",
-        "Effects/Damage Effect/Frost Dmg Pt",
         "Special Attacks/Sphere Flash",
         "Special Attacks/Silk Charge WallBonk/Slam Effect",
         "Special Attacks/Super Jump Needle Stick",
