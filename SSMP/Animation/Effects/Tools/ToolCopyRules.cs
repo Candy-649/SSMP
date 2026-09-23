@@ -27,6 +27,45 @@ internal static class ToolCopyRules {
     ];
 
     /// <summary>
+    /// The things that the hero's own handling of their tools spawns, rather than throws, that are copied, by the name
+    /// of their prefab: what those tools shoot, set down or leave behind, and the effects they make around the hero.
+    /// </summary>
+    public static readonly HashSet<string> HeroToolSpawns = [
+        "WebShot Bullet",
+        "WebShot Bullet A",
+        "WebShot Casing F",
+        "WebShot Casing A",
+        "WebShot Casing W",
+        "White Flash R",
+        "Geo Small Projectile",
+        "Tool Lightning Rod",
+        "Silk Snare",
+        "Silk Snare Poison",
+        "Silk Snare Cartridge",
+        "Silk Snare Set Effect",
+        "Silk Snare Set Effect Poison Variant",
+        "Weaver_snare_dive_effect",
+        "Weaver_snare_dive_effect_poison",
+        "Tool SyringeEmpty",
+        "Drill Down Black Rock Hit",
+        "Blue_Health_Overblue_burst",
+        "Soft Land Effect",
+        "Jump Effects"
+    ];
+
+    /// <summary>
+    /// The things that stay with the hero while they last, by the name of their prefab, which the copy does with the
+    /// character of the thrower.
+    /// </summary>
+    public static readonly HashSet<string> FollowsHero = [
+        "Silk Snare Set Effect",
+        "Silk Snare Set Effect Poison Variant",
+        "Weaver_snare_dive_effect",
+        "Weaver_snare_dive_effect_poison",
+        "Blue_Health_Overblue_burst"
+    ];
+
+    /// <summary>
     /// The events of the bombs that come from anything but the room: an enemy, the attacks that knock them about, or a
     /// boss or a hazard that blows them up or away.
     /// </summary>
@@ -87,6 +126,26 @@ internal static class ToolCopyRules {
         },
         ["Tool Lightning Bola"] = new() {
             ["Control"] = ["DAMAGED ENEMY", "BREAK", "SWALLOW", "TORNADO"]
+        },
+        ["Tool Lightning Rod"] = new() {
+            ["Control"] = ["NAIL STRIKE", "TORNADO", "LAVA"]
+        },
+        ["WebShot Bullet"] = new() {
+            ["Break On Tink"] = ["DAMAGER TINKED"]
+        },
+        ["WebShot Bullet A"] = new() {
+            ["Break On Tink"] = ["DAMAGER TINKED"]
+        }
+    };
+
+    /// <summary>
+    /// The numbers that a state machine of a thing had when it changed state for a reason that only the thrower's game
+    /// knows of, which the copy decides by afterwards, by the name of the prefab of the thing and the name of the
+    /// state machine. The rod turns the way the thrower's attack struck it.
+    /// </summary>
+    private static readonly Dictionary<string, Dictionary<string, string[]>> CarriedFloats = new() {
+        ["Tool Lightning Rod"] = new() {
+            ["Control"] = ["Hit Direction"]
         }
     };
 
@@ -98,7 +157,10 @@ internal static class ToolCopyRules {
         ["Curve Claw"] = ClawState.Instance,
         ["Curve Claw Upgraded"] = ClawState.Instance,
         ["Hero Shakra Ring"] = RingState.Instance,
-        ["Clockwork Hatchling"] = FlierState.Instance
+        ["Clockwork Hatchling"] = FlierState.Instance,
+        ["Geo Small Projectile"] = PelletState.Instance,
+        ["Silk Snare"] = SnareState.Instance,
+        ["Silk Snare Poison"] = SnareState.Instance
     };
 
     /// <summary>
@@ -134,5 +196,18 @@ internal static class ToolCopyRules {
         return ThrowerEvents.TryGetValue(prefabName, out var fsms) && fsms.TryGetValue(fsmName, out var events)
             ? events
             : null;
+    }
+
+    /// <summary>
+    /// The names of the numbers of a state machine of a copied thing that go with its changes of state from the
+    /// thrower's game, in the order they are sent.
+    /// </summary>
+    /// <param name="prefabName">The name of the prefab of the thing.</param>
+    /// <param name="fsmName">The name of the state machine.</param>
+    /// <returns>The names, or none.</returns>
+    public static string[] GetCarriedFloats(string prefabName, string fsmName) {
+        return CarriedFloats.TryGetValue(prefabName, out var fsms) && fsms.TryGetValue(fsmName, out var names)
+            ? names
+            : [];
     }
 }

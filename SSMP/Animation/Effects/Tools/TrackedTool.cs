@@ -42,10 +42,10 @@ internal class TrackedTool : MonoBehaviour {
     private readonly List<byte[]> _held = [];
 
     /// <summary>
-    /// The state changes that go at the end of the frame, by the index of the state machine and the state, once the
-    /// state they change to has done what it does as it starts.
+    /// The state changes that go at the end of the frame, by the index of the state machine and the state, with the
+    /// numbers that go with them, once the state they change to has done what it does as it starts.
     /// </summary>
-    private readonly List<(byte Fsm, string State)> _changes = [];
+    private readonly List<(byte Fsm, string State, float[] Floats)> _changes = [];
 
     /// <summary>
     /// Whether the state of the thing, which its own code moves, goes to the partner as soon as it has settled.
@@ -124,11 +124,12 @@ internal class TrackedTool : MonoBehaviour {
     }
 
     /// <summary>
-    /// Sends a state change at the end of the frame.
+    /// Sends a state change at the end of the frame, with the numbers of the state machine as they were when it
+    /// changed.
     /// </summary>
-    public void QueueStateChange(byte fsmIndex, string state) {
+    public void QueueStateChange(byte fsmIndex, string state, float[] floats) {
         if (Live) {
-            _changes.Add((fsmIndex, state));
+            _changes.Add((fsmIndex, state, floats));
         }
     }
 
@@ -186,8 +187,8 @@ internal class TrackedTool : MonoBehaviour {
         }
 
         var snapshot = ToolSnapshot.Of(gameObject);
-        foreach (var (fsmIndex, state) in _changes) {
-            Post(ToolMessages.WriteState(Id, fsmIndex, state, snapshot));
+        foreach (var (fsmIndex, state, floats) in _changes) {
+            Post(ToolMessages.WriteState(Id, fsmIndex, state, snapshot, floats));
         }
 
         _changes.Clear();

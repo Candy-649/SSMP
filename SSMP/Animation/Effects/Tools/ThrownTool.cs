@@ -33,7 +33,7 @@ internal class ThrownTool : BaseAttackTool {
             var key = (playerObject.GetInstanceID(), reader.ReadByte());
             switch (kind) {
                 case ToolMessageKind.Spawn:
-                    Spawn(key, reader);
+                    Spawn(playerObject, key, reader);
                     break;
                 case ToolMessageKind.State:
                     ChangeState(key, reader);
@@ -45,8 +45,9 @@ internal class ThrownTool : BaseAttackTool {
                     Move(key, reader);
                     break;
                 case ToolMessageKind.Break:
+                    var how = reader.ReadByte();
                     if (Copies.TryGetValue(key, out var broken) && broken != null) {
-                        ToolCopyRules.GetState(broken.PrefabName)?.Break(broken.gameObject);
+                        ToolCopyRules.GetState(broken.PrefabName)?.Break(broken.gameObject, how);
                     }
 
                     break;
@@ -56,6 +57,9 @@ internal class ThrownTool : BaseAttackTool {
                     }
 
                     Copies.Remove(key);
+                    break;
+                case ToolMessageKind.Beam:
+                    BeamShot.Play(playerObject, reader);
                     break;
             }
         } catch (IOException) {
@@ -68,14 +72,8 @@ internal class ThrownTool : BaseAttackTool {
     /// <summary>
     /// Makes the copy of a thing that the partner threw.
     /// </summary>
-    private static void Spawn((int, byte) key, BinaryReader reader) {
-        var spawn = new ToolSpawn {
-            PrefabName = reader.ReadString(),
-            Poisoned = reader.ReadBoolean(),
-            Scale = new Vector2(reader.ReadSingle(), reader.ReadSingle()),
-            Snapshot = ToolSnapshot.Read(reader)
-        };
-        spawn.Extra = reader.ReadBytes(reader.ReadByte());
+    private static void Spawn(GameObject playerObject, (int, byte) key, BinaryReader reader) {
+        var spawn = ToolMessages.ReadSpawn(reader);
 
         // A thing whose state goes all the time sends this again and again, for a copy that is already there
         if (Copies.TryGetValue(key, out var old) && old != null && old.PrefabName == spawn.PrefabName) {
@@ -102,7 +100,7 @@ internal class ThrownTool : BaseAttackTool {
 
         var copy = Object.Instantiate(
             ToolCopies.GetCopyPrefab(prefab),
-            spawn.Snapshot.Position,
+            new Vector3(spawn.Snapshot.Position.x, spawn.Snapshot.Position.y, spawn.Z),
             Quaternion.Euler(0f, 0f, spawn.Snapshot.Rotation)
         );
         copy.name = prefab.name;
@@ -120,23 +118,33 @@ internal class ThrownTool : BaseAttackTool {
 
         copy.SetActive(true);
         ToolCopies.PrepareCopy(copy, spawn.Poisoned);
+        var state = ToolCopyRules.GetState(spawn.PrefabName);
+        state?.PrepareCopy(copy, spawn.Poisoned);
         ToolCopies.LeaveToThrower(copy, spawn.PrefabName, marker);
         spawn.Snapshot.ApplyTo(copy);
         if (spawn.Extra.Length > 0) {
-            ToolCopyRules.GetState(spawn.PrefabName)?.Apply(copy, spawn.Extra);
+            state?.Apply(copy, spawn.Extra);
+        }
+
+        if (spawn.Follows) {
+            copy.AddComponent<FollowPlayer>().Follow(playerObject.transform, spawn.Offset);
         }
 
         Copies[key] = marker;
     }
 
     /// <summary>
-    /// Changes the state of a state machine of a copy the way it changed for the thrower's thing, and puts the copy
-    /// where the thing was after it.
+    /// Changes the state of a state machine of a copy the way it changed for the thrower's thing, with the numbers the
+    /// thrower's had, and puts the copy where the thing was after it.
     /// </summary>
     private static void ChangeState((int, byte) key, BinaryReader reader) {
         var fsmIndex = reader.ReadByte();
         var state = reader.ReadString();
         var snapshot = ToolSnapshot.Read(reader);
+        var floats = new float[reader.ReadByte()];
+        for (var i = 0; i < floats.Length; i++) {
+            floats[i] = reader.ReadSingle();
+        }
 
         if (!Copies.TryGetValue(key, out var copy) || copy == null) {
             return;
@@ -147,7 +155,16 @@ internal class ThrownTool : BaseAttackTool {
             return;
         }
 
-        fsms[fsmIndex].Fsm.SetState(state);
+        var fsm = fsms[fsmIndex];
+        var names = ToolCopyRules.GetCarriedFloats(copy.PrefabName, fsm.FsmName);
+        for (var i = 0; i < names.Length && i < floats.Length; i++) {
+            var variable = fsm.FsmVariables.FindFsmFloat(names[i]);
+            if (variable != null) {
+                variable.Value = floats[i];
+            }
+        }
+
+        fsm.Fsm.SetState(state);
         snapshot.ApplyTo(copy.gameObject);
     }
 
@@ -219,5 +236,43 @@ internal class ThrownTool : BaseAttackTool {
     /// </summary>
     public static void MarkRemote(GameObject copy) {
         FixRemoteAttack(copy);
+    }
+}
+
+/// <summary>
+/// Keeps a copy of a thing that stays with the hero of the thrower, like an effect around them, with the character of
+/// the thrower here.
+/// </summary>
+internal class FollowPlayer : MonoBehaviour {
+    /// <summary>
+    /// The character of the thrower.
+    /// </summary>
+    private Transform? _target;
+
+    /// <summary>
+    /// Where the thing is from the character.
+    /// </summary>
+    private Vector2 _offset;
+
+    /// <summary>
+    /// Puts the thing where it is from the character, and keeps it there.
+    /// </summary>
+    public void Follow(Transform target, Vector2 offset) {
+        _target = target;
+        _offset = offset;
+        Move();
+    }
+
+    private void LateUpdate() {
+        Move();
+    }
+
+    private void Move() {
+        if (_target == null) {
+            return;
+        }
+
+        var position = _target.position;
+        transform.position = new Vector3(position.x + _offset.x, position.y + _offset.y, transform.position.z);
     }
 }

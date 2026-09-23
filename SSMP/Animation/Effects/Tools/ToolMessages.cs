@@ -35,7 +35,12 @@ internal enum ToolMessageKind : byte {
     /// <summary>
     /// The thing is gone.
     /// </summary>
-    End
+    End,
+
+    /// <summary>
+    /// The hero fired a shot that strikes at once, which is no thing of its own: see <see cref="BeamShot"/>.
+    /// </summary>
+    Beam
 }
 
 /// <summary>
@@ -137,6 +142,11 @@ internal struct ToolSpawn {
     public Vector2 Scale;
 
     /// <summary>
+    /// How far in front of or behind the rest it is drawn.
+    /// </summary>
+    public float Z;
+
+    /// <summary>
     /// Where it is and how it moves.
     /// </summary>
     public ToolSnapshot Snapshot;
@@ -145,6 +155,16 @@ internal struct ToolSpawn {
     /// What else a copy of this kind of thing needs to start the way it started, or empty.
     /// </summary>
     public byte[] Extra;
+
+    /// <summary>
+    /// Whether it stays with the hero of the thrower.
+    /// </summary>
+    public bool Follows;
+
+    /// <summary>
+    /// Where it is from the hero of the thrower, for a thing that stays with them.
+    /// </summary>
+    public Vector2 Offset;
 }
 
 /// <summary>
@@ -163,17 +183,45 @@ internal static class ToolMessages {
         writer.Write(spawn.Poisoned);
         writer.Write(spawn.Scale.x);
         writer.Write(spawn.Scale.y);
+        writer.Write(spawn.Z);
         spawn.Snapshot.Write(writer);
         writer.Write((byte) spawn.Extra.Length);
         writer.Write(spawn.Extra);
+        writer.Write(spawn.Follows);
+        if (spawn.Follows) {
+            writer.Write(spawn.Offset.x);
+            writer.Write(spawn.Offset.y);
+        }
+
         writer.Flush();
         return stream.ToArray();
     }
 
     /// <summary>
-    /// Writes a message that a state machine of a thing changed state.
+    /// Reads a message that a thing is on its way, from after its kind and number.
     /// </summary>
-    public static byte[] WriteState(byte id, byte fsmIndex, string state, ToolSnapshot snapshot) {
+    public static ToolSpawn ReadSpawn(BinaryReader reader) {
+        var spawn = new ToolSpawn {
+            PrefabName = reader.ReadString(),
+            Poisoned = reader.ReadBoolean(),
+            Scale = new Vector2(reader.ReadSingle(), reader.ReadSingle()),
+            Z = reader.ReadSingle(),
+            Snapshot = ToolSnapshot.Read(reader)
+        };
+        spawn.Extra = reader.ReadBytes(reader.ReadByte());
+        spawn.Follows = reader.ReadBoolean();
+        if (spawn.Follows) {
+            spawn.Offset = new Vector2(reader.ReadSingle(), reader.ReadSingle());
+        }
+
+        return spawn;
+    }
+
+    /// <summary>
+    /// Writes a message that a state machine of a thing changed state, with the numbers of it that the copy decides by
+    /// afterwards.
+    /// </summary>
+    public static byte[] WriteState(byte id, byte fsmIndex, string state, ToolSnapshot snapshot, float[] floats) {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
         writer.Write((byte) ToolMessageKind.State);
@@ -181,6 +229,11 @@ internal static class ToolMessages {
         writer.Write(fsmIndex);
         writer.Write(state);
         snapshot.Write(writer);
+        writer.Write((byte) floats.Length);
+        foreach (var value in floats) {
+            writer.Write(value);
+        }
+
         writer.Flush();
         return stream.ToArray();
     }

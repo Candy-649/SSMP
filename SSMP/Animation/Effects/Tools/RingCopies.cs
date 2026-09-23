@@ -42,6 +42,10 @@ internal class RingState : IToolState {
     }
 
     /// <inheritdoc/>
+    public void PrepareCopy(GameObject copy, bool poisoned) {
+    }
+
+    /// <inheritdoc/>
     public bool IsSettled(GameObject thing) {
         return true;
     }
@@ -96,7 +100,7 @@ internal class RingState : IToolState {
     }
 
     /// <inheritdoc/>
-    public void Break(GameObject copy) {
+    public void Break(GameObject copy, byte how) {
         var cog = GetCog(copy);
         if (copy.TryGetComponent<ToolRing>(out var ring) && (cog == null || !cog.gameObject.activeSelf)) {
             BreakMethod?.Invoke(ring, null);

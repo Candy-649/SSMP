@@ -223,6 +223,18 @@ internal static class ToolCopies {
             new Action<Action<ToolRing>, ToolRing>(OnRingBreak)
         );
         AddHook(
+            typeof(SimpleProjectile).GetMethod("DidHit", InstanceFlags, null, [typeof(Collision2D)], null),
+            new Action<Action<SimpleProjectile, Collision2D>, SimpleProjectile, Collision2D>(OnPelletHit)
+        );
+        AddHook(
+            typeof(SilkSnare).GetMethod("Blast", InstanceFlags, null, Type.EmptyTypes, null),
+            new Func<Func<SilkSnare, IEnumerator>, SilkSnare, IEnumerator>(OnSnareBurst)
+        );
+        AddHook(
+            typeof(SilkSnare).GetMethod("End", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<SilkSnare>, SilkSnare>(OnSnareFade)
+        );
+        AddHook(
             typeof(Fsm).GetMethod("OnTriggerEnter2D", InstanceFlags, null, [typeof(Collider2D)], null),
             new Action<Action<Fsm, Collider2D>, Fsm, Collider2D>(OnFsmTrigger)
         );
@@ -362,17 +374,23 @@ internal static class ToolCopies {
 
     /// <summary>
     /// Writes the message that tells the partner of a thing as it is now. A thing that its own code moves goes with its
-    /// state once it has set itself up, and otherwise sets itself up for the partner too.
+    /// state once it has set itself up, and otherwise sets itself up for the partner too. A thing that stays with the
+    /// hero goes with where it is from them.
     /// </summary>
     private static byte[] WriteSpawn(TrackedTool tracked) {
         var thing = tracked.gameObject;
+        var transform = thing.transform;
         var state = ToolCopyRules.GetState(tracked.PrefabName);
+        var hero = ToolCopyRules.FollowsHero.Contains(tracked.PrefabName) ? HeroController.SilentInstance : null;
         return ToolMessages.WriteSpawn(tracked.Id, new ToolSpawn {
             PrefabName = tracked.PrefabName,
             Poisoned = Gameplay.PoisonPouchTool.IsEquipped,
-            Scale = thing.transform.localScale,
+            Scale = transform.lossyScale,
+            Z = transform.position.z,
             Snapshot = ToolSnapshot.Of(thing),
-            Extra = state != null && state.IsSettled(thing) ? state.Write(thing) : []
+            Extra = state != null && state.IsSettled(thing) ? state.Write(thing) : [],
+            Follows = hero != null,
+            Offset = hero != null ? (Vector2) (transform.position - hero.transform.position) : Vector2.zero
         });
     }
 
@@ -433,10 +451,23 @@ internal static class ToolCopies {
         var changed = orig(self, transition!, isGlobal);
         if (changed && eventName != null && LocalFsms.TryGetValue(self, out var local) &&
             local.Events.Contains(eventName)) {
-            local.Tool.QueueStateChange(local.Index, transition!.ToState);
+            local.Tool.QueueStateChange(local.Index, transition!.ToState, ReadCarriedFloats(self, local.Tool));
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// Reads the numbers of a state machine of a followed thing that go with its changes of state.
+    /// </summary>
+    private static float[] ReadCarriedFloats(Fsm fsm, TrackedTool tracked) {
+        var names = ToolCopyRules.GetCarriedFloats(tracked.PrefabName, fsm.Name);
+        var floats = new float[names.Length];
+        for (var i = 0; i < names.Length; i++) {
+            floats[i] = fsm.Variables.FindFsmFloat(names[i])?.Value ?? 0f;
+        }
+
+        return floats;
     }
 
     /// <summary>
@@ -534,6 +565,52 @@ internal static class ToolCopies {
     }
 
     /// <summary>
+    /// Has a pellet take a hit: a pellet of the local player, which then sends the way its chances went, and never a
+    /// copy of the partner's pellet by itself, which goes the way the thrower's went.
+    /// </summary>
+    private static void OnPelletHit(
+        Action<SimpleProjectile, Collision2D> orig,
+        SimpleProjectile self,
+        Collision2D collision
+    ) {
+        if (IsThrowerCopy(self.gameObject) && !PelletState.IsApplying) {
+            return;
+        }
+
+        orig(self, collision);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.QueueMotion();
+        }
+    }
+
+    /// <summary>
+    /// Sends that the local player's snare bursts, which an enemy that walked into it set off.
+    /// </summary>
+    private static IEnumerator OnSnareBurst(Func<SilkSnare, IEnumerator> orig, SilkSnare self) {
+        var burst = orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Break, tracked.Id, SnareState.Burst));
+        }
+
+        return burst;
+    }
+
+    /// <summary>
+    /// Fades a snare: the local player's snare, which then sends it, and never a copy of the partner's snare by itself,
+    /// which fades when the thrower's does rather than when this player rests or sets a snare next to it.
+    /// </summary>
+    private static void OnSnareFade(Action<SilkSnare> orig, SilkSnare self) {
+        if (IsThrowerCopy(self.gameObject) && !SnareState.IsApplying) {
+            return;
+        }
+
+        orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Break, tracked.Id, SnareState.Fade));
+        }
+    }
+
+    /// <summary>
     /// Whether something is part of a copy of a thing of the partner's that the thrower's game keeps up to date.
     /// </summary>
     public static bool IsThrowerCopy(GameObject gameObject) {
@@ -546,9 +623,9 @@ internal static class ToolCopies {
     #region Spawning
 
     /// <summary>
-    /// Catches what the hero throws, marks what the local player's tools spawn as theirs, and has the copies of the
-    /// partner's tools spawn their own private copies of things. Other copies of the partner's attacks are left to
-    /// spawn as they always have.
+    /// Catches what the hero throws, marks what the local player's tools spawn as theirs and follows what the hero's
+    /// handling of their tools spawns, and has the copies of the partner's tools spawn their own private copies of
+    /// things. Other copies of the partner's attacks are left to spawn as they always have.
     /// </summary>
     private static GameObject OnSpawn(
         SpawnMethod orig,
@@ -579,10 +656,15 @@ internal static class ToolCopies {
                 var poisoned = copy!.Poisoned;
                 spawned.AddComponentIfNotPresent<RemoteToolCopy>().Poisoned = poisoned;
                 PrepareCopy(spawned, poisoned);
-            } else if (owner != null && spawned.GetComponentInChildren<Collider2D>(true) != null &&
-                       IsLocalToolSpawner(owner)) {
+            } else if (owner != null) {
                 // Only something that can be touched can be set off; a sound or a puff of dust is left unmarked
-                spawned.AddComponentIfNotPresent<LocalToolComponent>();
+                if (spawned.GetComponentInChildren<Collider2D>(true) != null && IsLocalToolSpawner(owner)) {
+                    spawned.AddComponentIfNotPresent<LocalToolComponent>();
+                }
+
+                if (IsHeroToolsFsm() && ToolCopyRules.HeroToolSpawns.Contains(prefab!.name)) {
+                    Track(spawned, prefab.name);
+                }
             }
         } catch (Exception e) {
             Logger.Warn($"Could not sort out whose '{spawned.name}' was spawned: {e.Message}");
@@ -596,10 +678,13 @@ internal static class ToolCopies {
     /// uses their tools.
     /// </summary>
     private static bool IsLocalToolSpawner(GameObject owner) {
-        if (LocalToolComponent.IsLocalTool(owner)) {
-            return true;
-        }
+        return LocalToolComponent.IsLocalTool(owner) || IsHeroToolsFsm();
+    }
 
+    /// <summary>
+    /// Whether the FSM that runs now is the one of the local hero that uses their tools.
+    /// </summary>
+    private static bool IsHeroToolsFsm() {
         var hero = HeroController.SilentInstance;
         return hero != null && hero.toolsFSM != null && FsmExecutionStack.ExecutingFsm == hero.toolsFSM.Fsm;
     }
@@ -626,7 +711,8 @@ internal static class ToolCopies {
     }
 
     /// <summary>
-    /// The prefab of a copied thing by its name, from the things that the copied tools throw.
+    /// The prefab of a copied thing by its name, from the things that the copied tools throw and that the hero's
+    /// handling of their tools spawns.
     /// </summary>
     /// <param name="name">The name of the prefab.</param>
     /// <returns>The prefab, or null if there is no copied thing of that name.</returns>
@@ -640,7 +726,7 @@ internal static class ToolCopies {
 
     /// <summary>
     /// Finds the prefabs of the copied things: what each copied tool throws, in either of its states for a tool that
-    /// can be switched between two.
+    /// can be switched between two, and what the hero's handling of their tools spawns.
     /// </summary>
     private static Dictionary<string, GameObject> FindPrefabs() {
         var prefabs = new Dictionary<string, GameObject>();
@@ -662,7 +748,43 @@ internal static class ToolCopies {
             }
         }
 
+        AddHeroToolPrefabs(prefabs);
         return prefabs;
+    }
+
+    /// <summary>
+    /// Adds the prefabs of the copied things that the hero's handling of their tools spawns, which its actions name
+    /// outright; a variable of it may hold something that was spawned from one, which is never a prefab.
+    /// </summary>
+    private static void AddHeroToolPrefabs(Dictionary<string, GameObject> prefabs) {
+        var hero = HeroController.SilentInstance;
+        var states = hero != null && hero.toolsFSM != null ? hero.toolsFSM.Fsm?.States : null;
+        if (states == null) {
+            return;
+        }
+
+        foreach (var state in states) {
+            if (state?.Actions == null) {
+                continue;
+            }
+
+            foreach (var action in state.Actions) {
+                if (action == null) {
+                    continue;
+                }
+
+                foreach (var field in action.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public)) {
+                    var prefab = field.GetValue(action) switch {
+                        FsmGameObject { UseVariable: false } named => named.Value,
+                        GameObject gameObject => gameObject,
+                        _ => null
+                    };
+                    if (prefab != null && ToolCopyRules.HeroToolSpawns.Contains(prefab.name)) {
+                        AddPrefab(prefabs, prefab);
+                    }
+                }
+            }
+        }
     }
 
     /// <summary>

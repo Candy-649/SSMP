@@ -16,6 +16,14 @@ internal interface IToolState {
     void PrepareCopyPrefab(GameObject copyPrefab);
 
     /// <summary>
+    /// Sets up a new copy once it is switched on, for what the thing does by itself as it starts that a copy must not
+    /// do, or does the way of the local player rather than the thrower.
+    /// </summary>
+    /// <param name="copy">The copy.</param>
+    /// <param name="poisoned">Whether the thrower has the pouch that poisons their tools.</param>
+    void PrepareCopy(GameObject copy, bool poisoned);
+
+    /// <summary>
     /// Whether the thing has taken the change in full, so that its state can be sent. A thing may only settle on its
     /// next physics step.
     /// </summary>
@@ -34,7 +42,9 @@ internal interface IToolState {
     /// <summary>
     /// Breaks a copy as the thrower's thing broke.
     /// </summary>
-    void Break(GameObject copy);
+    /// <param name="copy">The copy.</param>
+    /// <param name="how">How the thing broke, for a thing that can break in more than one way.</param>
+    void Break(GameObject copy, byte how);
 }
 
 /// <summary>
@@ -79,6 +89,10 @@ internal class ClawState : IToolState {
 
     /// <inheritdoc/>
     public void PrepareCopyPrefab(GameObject copyPrefab) {
+    }
+
+    /// <inheritdoc/>
+    public void PrepareCopy(GameObject copy, bool poisoned) {
     }
 
     /// <inheritdoc/>
@@ -158,7 +172,7 @@ internal class ClawState : IToolState {
     }
 
     /// <inheritdoc/>
-    public void Break(GameObject copy) {
+    public void Break(GameObject copy, byte how) {
         if (copy.TryGetComponent<ToolBoomerang>(out var claws) &&
             Convert.ToInt32(StateField?.GetValue(claws) ?? BrokenState) != BrokenState) {
             claws.Break();

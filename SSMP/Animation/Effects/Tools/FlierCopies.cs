@@ -53,6 +53,10 @@ internal class FlierState : IToolState {
     }
 
     /// <inheritdoc/>
+    public void PrepareCopy(GameObject copy, bool poisoned) {
+    }
+
+    /// <inheritdoc/>
     public bool IsSettled(GameObject thing) {
         return true;
     }
@@ -125,7 +129,7 @@ internal class FlierState : IToolState {
     }
 
     /// <inheritdoc/>
-    public void Break(GameObject copy) {
+    public void Break(GameObject copy, byte how) {
     }
 
     /// <summary>

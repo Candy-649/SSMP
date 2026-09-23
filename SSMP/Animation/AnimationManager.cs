@@ -1186,6 +1186,7 @@ internal class AnimationManager {
         HeroChildEffects.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildEffect, effectInfo));
         HeroPartClips.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroPartClip, effectInfo));
         HeroChildParticles.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildParticle, effectInfo));
+        BeamShot.Watch(hc, OnToolMessage);
         if (hc.silkSpecialFSM != null) {
             TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));
         } else {
