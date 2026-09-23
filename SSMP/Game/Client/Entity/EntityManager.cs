@@ -170,19 +170,25 @@ internal class EntityManager {
             return;
         }
 
-        // Any entity of the same type works as a template - FSMs and components are identical across instances.
-        var templateEntity = _entities.Values.FirstOrDefault(e => e.Type == spawningType);
-        if (templateEntity == null) {
-            Logger.Warn("Could not find entity with same type for spawning");
-            return;
+        // Any entity of the spawning type that spawns something of the spawned type works as a template: the thing is
+        // made from what the template's FSMs spawn
+        GameObject? spawnedObject = null;
+        foreach (var templateEntity in _entities.Values.Where(e => e.Type == spawningType)) {
+            spawnedObject = EntitySpawner.SpawnEntityGameObject(
+                spawningType,
+                spawnedType,
+                templateEntity.Object.Client,
+                templateEntity.GetClientFsms()
+            );
+            if (spawnedObject != null) {
+                break;
+            }
         }
 
-        var spawnedObject = EntitySpawner.SpawnEntityGameObject(
-            spawningType,
-            spawnedType,
-            templateEntity.Object.Client,
-            templateEntity.GetClientFsms()
-        );
+        if (spawnedObject == null) {
+            Logger.Warn($"Nothing of type {spawningType} here spawns a {spawnedType}, so entity {id} is not made");
+            return;
+        }
 
         var processor = new EntityProcessor {
             GameObject = spawnedObject,
@@ -394,7 +400,8 @@ internal class EntityManager {
     /// Callback method for when a game object is spawned from an existing entity.
     /// </summary>
     /// <param name="details">The entity spawn details containing how the entity was spawned.</param>
-    /// <returns>Whether an entity was registered from this spawn.</returns>
+    /// <returns>Whether the spawn is kept from being done again on the other game by doing the spawning action
+    /// there: true for what is made an entity, and for a creature that stays in the game it was spawned in.</returns>
     private bool OnGameObjectSpawned(EntitySpawnDetails details) {
         if (_entities.Values.Any(e => e.Object.Host == details.GameObject)) {
             Logger.Debug("Spawned object was already a registered entity");
@@ -405,11 +412,23 @@ internal class EntityManager {
             return false;
         }
 
-        // Only what the other game can make from a spawn message is made an entity here. One it could not make threw
-        // over there, and took everything else it was being told about the room down with it: whoever walked into a
-        // room after a floater had grown its spines never saw the creatures, the partner or anything else in it.
-        if (!EntitySpawner.CanSpawn(spawnedEntry.Type)) {
-            return EntitySpawner.IsSpawnedAsEntity(details.GameObject, spawnedEntry.Type);
+        // What a creature throws is often named after it - "Spine Floater Spine" - so the registry takes it for the
+        // creature, but it is thrown on the other game like anything else, by doing the spawning action there
+        if (!EntitySpawner.IsSpawnedAsEntity(details.GameObject, spawnedEntry.Type)) {
+            return false;
+        }
+
+        // A creature is made an entity only in the game that runs the creature that spawned it, and only when the
+        // other game can make the same one from a spawn message; otherwise it stays in the game it was spawned in.
+        // One the other game could not make threw over there, and took everything else it was being told about the
+        // room down with it: whoever walked into a room after a floater had grown its spines never saw the creatures,
+        // the partner or anything else in it. In a game that does not run the room it would be a copy that is
+        // switched off and never moved by anything.
+        if (!IsSceneHost ||
+            details.Type != EntitySpawnType.FsmAction ||
+            !EntityRegistry.TryGetEntry(details.Action.Fsm.GameObject, out var entry) ||
+            !EntitySpawner.CanSpawn(details.Action, spawnedEntry.Type)) {
+            return true;
         }
 
         var processor = new EntityProcessor {
@@ -420,21 +439,6 @@ internal class EntityManager {
         }.Process();
 
         if (!processor.Success) return false;
-
-        if (!IsSceneHost) {
-            Logger.Warn("Game object was spawned while not scene host, this shouldn't happen");
-            return false;
-        }
-
-        if (details.Type != EntitySpawnType.FsmAction) {
-            Logger.Error($"Invalid EntitySpawnDetails type: {details.Type}");
-            return false;
-        }
-
-        if (!EntityRegistry.TryGetEntry(details.Action.Fsm.GameObject, out var entry)) {
-            Logger.Warn("Could not find registry entry for spawning type of object");
-            return false;
-        }
 
         var topLevel = processor.Entities[0];
         Logger.Info(

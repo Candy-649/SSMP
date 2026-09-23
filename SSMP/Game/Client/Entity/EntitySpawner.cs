@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using UnityEngine;
 
@@ -23,11 +24,68 @@ internal static class EntitySpawner {
     // private static GameObject _collectorBaldurPrefab;
 
     /// <summary>
-    /// Whether the other game can make an entity of the given type from a spawn message alone, which is only what
-    /// <see cref="SpawnEntityGameObject"/> knows how to make: a grass ball.
+    /// Whether the other game can make what the given action just spawned from a spawn message alone, which says no
+    /// more than what kind of creature spawned what kind of entity. The other game looks for it among what its own
+    /// copy of a creature of the spawning kind spawns (<see cref="FindPrefab"/>), so it makes the same thing only when
+    /// that finds the very thing this action spawned. A grass ball is always found, by its name if need be.
     /// </summary>
+    /// <param name="action">The action that spawned it.</param>
+    /// <param name="spawnedType">The type the registry takes the spawned object for.</param>
+    public static bool CanSpawn(FsmStateAction action, EntityType spawnedType) {
+        if (spawnedType == EntityType.GrassBall) {
+            return true;
+        }
+
+        var spawned = PrefabOf(action, out _)?.Value;
+        return spawned != null &&
+               FindPrefab(action.Fsm.GameObject.GetComponents<PlayMakerFSM>(), spawnedType, out _) == spawned;
+    }
+
+    /// <summary>
+    /// The first thing that one of the given FSMs spawns and that is made an entity of the given type when spawned.
+    /// Only a thing an action names itself counts, not one it takes from a variable: the creature can change the
+    /// variable while it runs, and the other game's copy of it, which does not run, would find something else there.
+    /// </summary>
+    /// <param name="fsms">The FSMs of the spawning creature.</param>
     /// <param name="spawnedType">The type of the spawned entity.</param>
-    public static bool CanSpawn(EntityType spawnedType) => spawnedType == EntityType.GrassBall;
+    /// <param name="pooled">Whether it is taken from the object pool rather than made anew.</param>
+    /// <returns>The prefab, or null if none of the FSMs spawns one.</returns>
+    public static GameObject? FindPrefab(IEnumerable<PlayMakerFSM> fsms, EntityType spawnedType, out bool pooled) {
+        foreach (var fsm in fsms) {
+            foreach (var state in fsm.FsmStates) {
+                foreach (var action in state.Actions) {
+                    var field = PrefabOf(action, out pooled);
+                    var prefab = field is { UseVariable: false } ? field.Value : null;
+                    if (prefab != null &&
+                        EntityRegistry.TryGetEntry(prefab, out var entry) &&
+                        entry.Type == spawnedType &&
+                        IsSpawnedAsEntity(prefab, spawnedType)) {
+                        return prefab;
+                    }
+                }
+            }
+        }
+
+        pooled = false;
+        return null;
+    }
+
+    /// <summary>
+    /// The parameter of a spawning action that holds what it spawns, or null for an action that spawns nothing.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="pooled">Whether what it spawns is taken from the object pool rather than made anew.</param>
+    private static FsmGameObject? PrefabOf(FsmStateAction action, out bool pooled) {
+        pooled = action is not CreateObject;
+        return action switch {
+            CreateObject create => create.gameObject,
+            SpawnObjectFromGlobalPool spawn => spawn.gameObject,
+            FlingObjectsFromGlobalPool fling => fling.gameObject,
+            FlingObjectsFromGlobalPoolVel fling => fling.gameObject,
+            FlingObjectsFromGlobalPoolTime fling => fling.gameObject,
+            _ => null
+        };
+    }
 
     /// <summary>
     /// Whether something that was just spawned, and that the registry takes for an entity of the given type, is kept
@@ -40,7 +98,7 @@ internal static class EntitySpawner {
     /// <param name="gameObject">The spawned object, or the prefab it is spawned from.</param>
     /// <param name="type">The type the registry takes it for.</param>
     public static bool IsSpawnedAsEntity(GameObject gameObject, EntityType type) {
-        return CanSpawn(type) || gameObject.GetComponent<HealthManager>() != null;
+        return type == EntityType.GrassBall || gameObject.GetComponent<HealthManager>() != null;
     }
 
     /// <summary>
@@ -50,8 +108,9 @@ internal static class EntitySpawner {
     /// <param name="spawnedType">The type of the spawned entity.</param>
     /// <param name="clientObject">The client game object from the spawning entity.</param>
     /// <param name="clientFsms">The list of client FSMs from the spawning entity.</param>
-    /// <returns>The game object for the spawned entity.</returns>
-    public static GameObject SpawnEntityGameObject(
+    /// <returns>The game object for the spawned entity, or null if the spawning entity spawns nothing of that type.
+    /// </returns>
+    public static GameObject? SpawnEntityGameObject(
         EntityType spawningType, 
         EntityType spawnedType,
         GameObject clientObject,
@@ -97,6 +156,15 @@ internal static class EntitySpawner {
 
                 return prefab.Spawn(startPosition, Quaternion.identity);
             }
+        }
+
+        // Anything else is looked for among what the spawning creature's own FSMs spawn, which is where the game that
+        // spawned it made sure it would be found (CanSpawn)
+        var creature = FindPrefab(clientFsms, spawnedType, out var pooled);
+        if (creature != null) {
+            return pooled
+                ? creature.Spawn(startPosition, Quaternion.identity)
+                : UnityEngine.Object.Instantiate(creature, startPosition, Quaternion.identity);
         }
 
         // Logger.Info($"Trying to spawn entity game object for: {spawningType}, {spawnedType}");
@@ -241,9 +309,8 @@ internal static class EntitySpawner {
         // }
         //
         // Logger.Warn($"No implementation for spawning entity game object: {spawningType}, {spawnedType}");
-        //
-        // return null;
-        throw new NotImplementedException();
+
+        return null;
     }
 
     // private static GameObject SpawnFromCreateObject(CreateObject action) {
