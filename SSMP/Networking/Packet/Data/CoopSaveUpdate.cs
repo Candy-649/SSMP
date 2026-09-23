@@ -54,7 +54,8 @@ internal class CoopSaveUpdate : IPacketData {
     /// call of a lift, 1 if the sender is inside it. For the state of a lift, 1 while it moves. For driving a carriage,
     /// 1 while the sender holds its button. For a delivery that broke, 0 when it broke for the sender, 1 when the sender
     /// still carries theirs and 2 when the sender doesn't either. For dialogue about wishes, how many of its changes of
-    /// wishes went to the other player before, which come again for what the dialogue changed afterwards.
+    /// wishes went to the other player before, which come again for what the dialogue changed afterwards. For a hatch,
+    /// 1 while the sender keeps it open and 0 once they don't.
     /// </summary>
     public ushort PartCount { get; set; }
 
@@ -123,12 +124,12 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For an interaction, the scene of the object that the sender used. For a lift, the scene of the lift. For a
-    /// delivery, the scene of the character that takes it in.
+    /// delivery, the scene of the character that takes it in. For a hatch, the scene of the hatch.
     /// </summary>
     public string Scene { get; set; } = "";
 
     /// <summary>
-    /// For an interaction or a lift, the path of the object in its scene.
+    /// For an interaction, a lift or a hatch, the path of the object in its scene.
     /// </summary>
     public string ObjectPath { get; set; } = "";
 
@@ -147,13 +148,14 @@ internal class CoopSaveUpdate : IPacketData {
     /// <summary>
     /// For a lift, where it was when the update was sent: its height, or for a carriage the part of its way, its
     /// speed and the direction that it speeds up to. For bringing the other player to a delivery, where the sender
-    /// stands.
+    /// stands. For a hatch that the sender keeps open, which way it opened.
     /// </summary>
     public List<float> Values { get; set; } = [];
 
     /// <summary>
     /// Names that a kind of update carries as a set, like the boss scenes that the save of the sender has
-    /// unlocked. They only ever get added, so both games take the union of them.
+    /// unlocked. They only ever get added, so both games take the union of them. For a hatch over a way out of the
+    /// room, the scene that the way leads to and the door of that scene that it comes in at, in that order.
     /// </summary>
     public List<string> Names { get; set; } = [];
 
@@ -503,5 +505,17 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    Race
+    Race,
+
+    /// <summary>
+    /// The sender keeps a hatch open that closes by itself a moment after the last one left it, by opening it or by
+    /// standing in it, or no longer does. <see cref="CoopSaveUpdate.PartCount"/> is 1 while they keep it open and 0
+    /// once they don't, and <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name it.
+    /// For a hatch over a way out of the room, <see cref="CoopSaveUpdate.Names"/> says where that way comes in, so
+    /// that a game in the next room keeps the hatch at the other end of the pipe open.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    Trapdoor
 }

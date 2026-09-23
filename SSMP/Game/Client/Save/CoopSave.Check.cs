@@ -195,6 +195,7 @@ internal partial class CoopSave {
         _checkPlayTime = null;
         _flagSequences.Clear();
         _wishSequences.Clear();
+        ResetTrapdoors();
     }
 
     /// <summary>

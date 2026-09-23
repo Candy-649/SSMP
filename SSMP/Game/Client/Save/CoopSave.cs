@@ -351,6 +351,7 @@ internal partial class CoopSave {
         RegisterLiftHooks();
         RegisterStoryItemHooks();
         RegisterRescueHooks();
+        RegisterTrapdoorHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -468,6 +469,7 @@ internal partial class CoopSave {
             UpdateWishes(partner);
             UpdateStoryFlags(partner);
             UpdateLifts(partner);
+            UpdateTrapdoors();
             ReleaseHold(hero);
             return;
         }
@@ -801,6 +803,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WorldTrigger:
                 OnWorldTrigger(player, update);
+                break;
+            case CoopSaveUpdateKind.Trapdoor:
+                OnTrapdoor(player, update);
                 break;
             case CoopSaveUpdateKind.WishChange:
                 OnWishChange(player, update);
