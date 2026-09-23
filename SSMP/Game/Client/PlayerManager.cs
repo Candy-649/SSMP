@@ -502,10 +502,12 @@ internal class PlayerManager : IPlayerManager {
                 continue;
             }
 
-            // The copied parts of the hero stay, and must not show on whoever the character is used for next, and the
-            // things that the player's tools left in the room are gone with the room
+            // The copied parts of the hero and the look of the player's needle stay, and must not show on whoever
+            // the character is used for next, and the things that the player's tools left in the room are gone with
+            // the room
             HeroChildEffects.ResetCopies(child.gameObject);
             HeroChildParticles.ResetCopies(child.gameObject);
+            ImbuedNail.Stop(child.gameObject);
             ThrownTool.RemoveCopies(child.gameObject);
 
             foreach (Transform grandChild in child) {

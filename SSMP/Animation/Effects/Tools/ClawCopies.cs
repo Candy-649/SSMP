@@ -20,8 +20,9 @@ internal interface IToolState {
     /// do, or does the way of the local player rather than the thrower.
     /// </summary>
     /// <param name="copy">The copy.</param>
+    /// <param name="character">The character of the thrower.</param>
     /// <param name="poisoned">Whether the thrower has the pouch that poisons their tools.</param>
-    void PrepareCopy(GameObject copy, bool poisoned);
+    void PrepareCopy(GameObject copy, GameObject character, bool poisoned);
 
     /// <summary>
     /// Whether the thing has taken the change in full, so that its state can be sent. A thing may only settle on its
@@ -92,7 +93,7 @@ internal class ClawState : IToolState {
     }
 
     /// <inheritdoc/>
-    public void PrepareCopy(GameObject copy, bool poisoned) {
+    public void PrepareCopy(GameObject copy, GameObject character, bool poisoned) {
     }
 
     /// <inheritdoc/>

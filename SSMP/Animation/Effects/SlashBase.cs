@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using GlobalSettings;
+using SSMP.Animation.Effects.Tools;
 using SSMP.Fsm;
 using SSMP.Util;
 using SSMP.Internals;
@@ -208,7 +209,12 @@ internal abstract class SlashBase : ParryableEffect {
 
         FixRemoteAttack(slashObj);
 
-        // TODO: nail imbued from NailAttackBase
+        // The look of a needle that has taken on an element, or none: the slash is made from the local hero's own,
+        // which has the look of the local hero's needle while it slashes
+        var element = slashEffects.Contains(SlashEffect.Flintslate) ? NailElements.Fire
+            : slashEffects.Contains(SlashEffect.FlintslatePollip) ? NailElements.Poison
+            : NailElements.None;
+        ImbuedNail.PlaySlash(slashObj, element, dir);
     }
 
     /// <summary>

@@ -40,7 +40,12 @@ internal enum ToolMessageKind : byte {
     /// <summary>
     /// The hero fired a shot that strikes at once, which is no thing of its own: see <see cref="BeamShot"/>.
     /// </summary>
-    Beam
+    Beam,
+
+    /// <summary>
+    /// The hero's needle took on an element or lost it: see <see cref="ImbuedNail"/>.
+    /// </summary>
+    Imbue
 }
 
 /// <summary>

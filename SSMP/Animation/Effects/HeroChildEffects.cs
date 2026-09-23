@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using SSMP.Internals;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -108,6 +109,15 @@ internal class HeroChildEffects : AnimationEffect {
     private const string StandInPath = "Tool Effects/Tool Hornet";
 
     /// <summary>
+    /// The watched parts that the game switches on together with a flash of the hero's whole sprite, by their path,
+    /// with that flash.
+    /// </summary>
+    private static readonly Dictionary<string, Action<SpriteFlash>> Flashes = new() {
+        ["Tool Effects/Syringe Flash"] = flash => flash.flashHealBlue(),
+        ["Tool Effects/Syringe Flash poison"] = flash => flash.flashHealPoison()
+    };
+
+    /// <summary>
     /// The number of bytes that one bit for each watched part takes.
     /// </summary>
     private static readonly int MaskLength = (Paths.Length + 7) / 8;
@@ -185,6 +195,11 @@ internal class HeroChildEffects : AnimationEffect {
             } else {
                 part.SetActive(false);
             }
+        }
+
+        if (on && Flashes.TryGetValue(Paths[changed], out var flash) &&
+            playerObject.TryGetComponent<SpriteFlash>(out var spriteFlash)) {
+            flash(spriteFlash);
         }
 
         // What the changes that got lost on the way would have done. A part that is off there is off here. A part

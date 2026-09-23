@@ -53,7 +53,7 @@ internal class FlierState : IToolState {
     }
 
     /// <inheritdoc/>
-    public void PrepareCopy(GameObject copy, bool poisoned) {
+    public void PrepareCopy(GameObject copy, GameObject character, bool poisoned) {
     }
 
     /// <inheritdoc/>

@@ -61,6 +61,9 @@ internal class ThrownTool : BaseAttackTool {
                 case ToolMessageKind.Beam:
                     BeamShot.Play(playerObject, reader);
                     break;
+                case ToolMessageKind.Imbue:
+                    ImbuedNail.Play(playerObject, reader);
+                    break;
             }
         } catch (IOException) {
             Logger.Warn("Could not read a message about a tool of the partner");
@@ -119,7 +122,7 @@ internal class ThrownTool : BaseAttackTool {
         copy.SetActive(true);
         ToolCopies.PrepareCopy(copy, spawn.Poisoned);
         var state = ToolCopyRules.GetState(spawn.PrefabName);
-        state?.PrepareCopy(copy, spawn.Poisoned);
+        state?.PrepareCopy(copy, playerObject, spawn.Poisoned);
         ToolCopies.LeaveToThrower(copy, spawn.PrefabName, marker);
         spawn.Snapshot.ApplyTo(copy);
         if (spawn.Extra.Length > 0) {

@@ -50,7 +50,9 @@ internal static class ToolCopyRules {
         "Drill Down Black Rock Hit",
         "Blue_Health_Overblue_burst",
         "Soft Land Effect",
-        "Jump Effects"
+        "Jump Effects",
+        "Flint Effects",
+        "Flint Effects Poison"
     ];
 
     /// <summary>
@@ -160,7 +162,9 @@ internal static class ToolCopyRules {
         ["Clockwork Hatchling"] = FlierState.Instance,
         ["Geo Small Projectile"] = PelletState.Instance,
         ["Silk Snare"] = SnareState.Instance,
-        ["Silk Snare Poison"] = SnareState.Instance
+        ["Silk Snare Poison"] = SnareState.Instance,
+        ["Flint Effects"] = FlintState.Instance,
+        ["Flint Effects Poison"] = FlintState.Instance
     };
 
     /// <summary>

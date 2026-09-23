@@ -235,6 +235,18 @@ internal static class ToolCopies {
             new Action<Action<SilkSnare>, SilkSnare>(OnSnareFade)
         );
         AddHook(
+            typeof(FlintUseEffects).GetMethod("SetPt2", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<FlintUseEffects>, FlintUseEffects>(OnFlintFlareUp)
+        );
+        AddHook(
+            typeof(FlintUseEffects).GetMethod("SetEnd", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<FlintUseEffects>, FlintUseEffects>(OnFlintDieDown)
+        );
+        AddHook(
+            typeof(HeroNailImbuement).GetMethod("SetElement", InstanceFlags, null, [typeof(NailElements)], null),
+            new Action<Action<HeroNailImbuement, NailElements>, HeroNailImbuement, NailElements>(OnImbue)
+        );
+        AddHook(
             typeof(Fsm).GetMethod("OnTriggerEnter2D", InstanceFlags, null, [typeof(Collider2D)], null),
             new Action<Action<Fsm, Collider2D>, Fsm, Collider2D>(OnFsmTrigger)
         );
@@ -593,6 +605,38 @@ internal static class ToolCopies {
         }
 
         return burst;
+    }
+
+    /// <summary>
+    /// Sends that the sparks of the local hero's flint flare up.
+    /// </summary>
+    private static void OnFlintFlareUp(Action<FlintUseEffects> orig, FlintUseEffects self) {
+        orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Break, tracked.Id, FlintState.FlareUp));
+        }
+    }
+
+    /// <summary>
+    /// Sends that the sparks of the local hero's flint die down.
+    /// </summary>
+    private static void OnFlintDieDown(Action<FlintUseEffects> orig, FlintUseEffects self) {
+        orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Break, tracked.Id, FlintState.DieDown));
+        }
+    }
+
+    /// <summary>
+    /// Sends that the local hero's needle took on an element or lost it, which only the local hero has.
+    /// </summary>
+    private static void OnImbue(
+        Action<HeroNailImbuement, NailElements> orig,
+        HeroNailImbuement self,
+        NailElements element
+    ) {
+        orig(self, element);
+        MessageReady?.Invoke(ImbuedNail.Write(element));
     }
 
     /// <summary>

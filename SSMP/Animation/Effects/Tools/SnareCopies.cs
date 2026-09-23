@@ -57,7 +57,7 @@ internal class SnareState : IToolState {
     }
 
     /// <inheritdoc/>
-    public void PrepareCopy(GameObject copy, bool poisoned) {
+    public void PrepareCopy(GameObject copy, GameObject character, bool poisoned) {
         foreach (var snare in copy.GetComponentsInChildren<SilkSnare>(true)) {
             // What a snare does a frame after it appears is end the snares right next to it, which here are this
             // player's own; it has played the look of appearing by then already

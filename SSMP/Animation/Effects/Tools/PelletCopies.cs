@@ -40,7 +40,7 @@ internal class PelletState : IToolState {
     }
 
     /// <inheritdoc/>
-    public void PrepareCopy(GameObject copy, bool poisoned) {
+    public void PrepareCopy(GameObject copy, GameObject character, bool poisoned) {
         // A pellet reads the pouch of the local player as it starts, for the look it shatters with
         foreach (var pellet in copy.GetComponentsInChildren<SimpleProjectile>(true)) {
             IsPoisonField?.SetValue(pellet, poisoned);
