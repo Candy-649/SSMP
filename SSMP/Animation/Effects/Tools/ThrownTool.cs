@@ -77,6 +77,18 @@ internal class ThrownTool : BaseAttackTool {
         };
         spawn.Extra = reader.ReadBytes(reader.ReadByte());
 
+        // A thing whose state goes all the time sends this again and again, for a copy that is already there
+        if (Copies.TryGetValue(key, out var old) && old != null && old.PrefabName == spawn.PrefabName) {
+            spawn.Snapshot.ApplyTo(old.gameObject);
+            var scale = old.transform.localScale;
+            old.transform.localScale = new Vector3(spawn.Scale.x, spawn.Scale.y, scale.z);
+            if (spawn.Extra.Length > 0) {
+                ToolCopyRules.GetState(spawn.PrefabName)?.Apply(old.gameObject, spawn.Extra);
+            }
+
+            return;
+        }
+
         var prefab = ToolCopies.FindPrefab(spawn.PrefabName);
         if (prefab == null) {
             Logger.Warn($"There is no tool thing '{spawn.PrefabName}' to show for the partner");
@@ -84,7 +96,7 @@ internal class ThrownTool : BaseAttackTool {
         }
 
         // A number comes round again only long after the thing that had it is gone
-        if (Copies.TryGetValue(key, out var old) && old != null) {
+        if (old != null) {
             Object.Destroy(old.gameObject);
         }
 

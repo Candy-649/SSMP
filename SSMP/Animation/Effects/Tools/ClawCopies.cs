@@ -11,6 +11,11 @@ namespace SSMP.Animation.Effects.Tools;
 /// </summary>
 internal interface IToolState {
     /// <summary>
+    /// Changes what the copies of the thing are made from, for what a copy of it must not do by itself.
+    /// </summary>
+    void PrepareCopyPrefab(GameObject copyPrefab);
+
+    /// <summary>
     /// Whether the thing has taken the change in full, so that its state can be sent. A thing may only settle on its
     /// next physics step.
     /// </summary>
@@ -71,6 +76,10 @@ internal class ClawState : IToolState {
     private static readonly FieldInfo? LerpTimeField = typeof(ToolBoomerang).GetField("damageVelocityLerpTime", Flags);
     private static readonly FieldInfo? CurrentLerpTimeField =
         typeof(ToolBoomerang).GetField("currentDamageVelocityLerpTime", Flags);
+
+    /// <inheritdoc/>
+    public void PrepareCopyPrefab(GameObject copyPrefab) {
+    }
 
     /// <inheritdoc/>
     public bool IsSettled(GameObject thing) {

@@ -21,7 +21,9 @@ internal static class ToolCopyRules {
         "Cogwork Saw",
         "Pimpilo",
         "Dustpilo",
-        "Lightning Rod"
+        "Lightning Rod",
+        "Shakra Ring",
+        "Cogwork Flier"
     ];
 
     /// <summary>
@@ -94,8 +96,26 @@ internal static class ToolCopyRules {
     /// </summary>
     private static readonly Dictionary<string, IToolState> States = new() {
         ["Curve Claw"] = ClawState.Instance,
-        ["Curve Claw Upgraded"] = ClawState.Instance
+        ["Curve Claw Upgraded"] = ClawState.Instance,
+        ["Hero Shakra Ring"] = RingState.Instance,
+        ["Clockwork Hatchling"] = FlierState.Instance
     };
+
+    /// <summary>
+    /// The things whose state the thrower's game sends all the time rather than when it changes, by the name of their
+    /// prefab, with the seconds between two sends.
+    /// </summary>
+    private static readonly Dictionary<string, float> StreamIntervals = new() {
+        ["Clockwork Hatchling"] = 0.1f
+    };
+
+    /// <summary>
+    /// The seconds between two sends of the state of a thing whose state goes all the time, or 0 for a thing whose
+    /// state goes when it changes.
+    /// </summary>
+    public static float GetStreamInterval(string prefabName) {
+        return StreamIntervals.TryGetValue(prefabName, out var interval) ? interval : 0f;
+    }
 
     /// <summary>
     /// The state of a copied thing that is moved by its own code, or null for a thing that is not.

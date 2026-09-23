@@ -53,10 +53,22 @@ internal class TrackedTool : MonoBehaviour {
     private bool _motionPending;
 
     /// <summary>
+    /// The seconds until the state of a thing whose state goes all the time goes again.
+    /// </summary>
+    private float _streamTimer;
+
+    /// <summary>
     /// Called with each message about the thing once it may go to the partner.
     /// </summary>
     [NonSerialized]
     public Action<byte[]>? Send;
+
+    /// <summary>
+    /// Writes the message that tells the partner of the thing, which a thing whose state goes all the time sends
+    /// again and again, so that it also makes the partner's copy when there is none yet.
+    /// </summary>
+    [NonSerialized]
+    public Func<byte[]>? WriteSpawn;
 
     /// <summary>
     /// Called when the thing is gone, so that nothing is kept about it.
@@ -74,6 +86,7 @@ internal class TrackedTool : MonoBehaviour {
         Damagers = GetComponentsInChildren<DamageEnemies>(true);
         _announced = false;
         _motionPending = false;
+        _streamTimer = ToolCopyRules.GetStreamInterval(prefabName);
         _held.Clear();
         _changes.Clear();
     }
@@ -131,6 +144,25 @@ internal class TrackedTool : MonoBehaviour {
     private void LateUpdate() {
         SendStateChanges();
         SendMotion();
+        Stream();
+    }
+
+    /// <summary>
+    /// Sends the thing again if its state goes all the time and the time for it has come.
+    /// </summary>
+    private void Stream() {
+        var interval = ToolCopyRules.GetStreamInterval(PrefabName);
+        if (!_announced || interval <= 0f || WriteSpawn == null) {
+            return;
+        }
+
+        _streamTimer -= Time.deltaTime;
+        if (_streamTimer > 0f) {
+            return;
+        }
+
+        _streamTimer = interval;
+        Post(WriteSpawn());
     }
 
     /// <summary>

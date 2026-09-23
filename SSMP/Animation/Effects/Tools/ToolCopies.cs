@@ -207,6 +207,22 @@ internal static class ToolCopies {
             new Action<Action<ToolBoomerang>, ToolBoomerang>(OnClawsBreak)
         );
         AddHook(
+            typeof(ToolRing).GetMethod("OnCollisionEnter2D", InstanceFlags, null, [typeof(Collision2D)], null),
+            new Action<Action<ToolRing, Collision2D>, ToolRing, Collision2D>(OnRingCollision)
+        );
+        AddHook(
+            typeof(ToolRing).GetMethod("OnDamagedEnemy", InstanceFlags, null, [typeof(GameObject)], null),
+            new Action<Action<ToolRing, GameObject>, ToolRing, GameObject>(OnRingDamagedEnemy)
+        );
+        AddHook(
+            typeof(ToolRing).GetMethod("TinkBounce", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ToolRing>, ToolRing>(OnRingTinkBounce)
+        );
+        AddHook(
+            typeof(ToolRing).GetMethod("Break", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ToolRing>, ToolRing>(OnRingBreak)
+        );
+        AddHook(
             typeof(Fsm).GetMethod("OnTriggerEnter2D", InstanceFlags, null, [typeof(Collider2D)], null),
             new Action<Action<Fsm, Collider2D>, Fsm, Collider2D>(OnFsmTrigger)
         );
@@ -301,6 +317,7 @@ internal static class ToolCopies {
         // The pool can hand out a thing that is still out, when there are too many of it
         tracked.End();
         tracked.Send = message => MessageReady?.Invoke(message);
+        tracked.WriteSpawn = () => WriteSpawn(tracked);
         tracked.Ended = Forget;
         tracked.Begin(++_lastId, prefabName);
 
@@ -337,20 +354,26 @@ internal static class ToolCopies {
         }
 
         try {
-            // A thing that its own code moves goes with its state once it has set itself up, and otherwise sets itself
-            // up for the partner too
-            var thing = tracked.gameObject;
-            var state = ToolCopyRules.GetState(tracked.PrefabName);
-            tracked.Announce(ToolMessages.WriteSpawn(id, new ToolSpawn {
-                PrefabName = tracked.PrefabName,
-                Poisoned = Gameplay.PoisonPouchTool.IsEquipped,
-                Scale = thing.transform.localScale,
-                Snapshot = ToolSnapshot.Of(thing),
-                Extra = state != null && state.IsSettled(thing) ? state.Write(thing) : []
-            }));
+            tracked.Announce(WriteSpawn(tracked));
         } catch (Exception e) {
             Logger.Warn($"Could not send the '{tracked.PrefabName}' of the local player to the partner: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// Writes the message that tells the partner of a thing as it is now. A thing that its own code moves goes with its
+    /// state once it has set itself up, and otherwise sets itself up for the partner too.
+    /// </summary>
+    private static byte[] WriteSpawn(TrackedTool tracked) {
+        var thing = tracked.gameObject;
+        var state = ToolCopyRules.GetState(tracked.PrefabName);
+        return ToolMessages.WriteSpawn(tracked.Id, new ToolSpawn {
+            PrefabName = tracked.PrefabName,
+            Poisoned = Gameplay.PoisonPouchTool.IsEquipped,
+            Scale = thing.transform.localScale,
+            Snapshot = ToolSnapshot.Of(thing),
+            Extra = state != null && state.IsSettled(thing) ? state.Write(thing) : []
+        });
     }
 
     /// <summary>
@@ -451,6 +474,59 @@ internal static class ToolCopies {
     /// Sends that the local player's claws broke, which they may do because they left the local player's view.
     /// </summary>
     private static void OnClawsBreak(Action<ToolBoomerang> orig, ToolBoomerang self) {
+        orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Break, tracked.Id));
+        }
+    }
+
+    /// <summary>
+    /// Bounces a ring off a wall: the local player's ring, which then sends where it goes, and never a copy of the
+    /// partner's ring, which takes every bounce from the thrower's game and meanwhile stops at the wall.
+    /// </summary>
+    private static void OnRingCollision(Action<ToolRing, Collision2D> orig, ToolRing self, Collision2D collision) {
+        if (IsThrowerCopy(self.gameObject)) {
+            return;
+        }
+
+        orig(self, collision);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.QueueMotion();
+        }
+    }
+
+    /// <summary>
+    /// Bounces a ring off an enemy it hit, like <see cref="OnRingCollision"/>.
+    /// </summary>
+    private static void OnRingDamagedEnemy(Action<ToolRing, GameObject> orig, ToolRing self, GameObject enemy) {
+        if (IsThrowerCopy(self.gameObject)) {
+            return;
+        }
+
+        orig(self, enemy);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.QueueMotion();
+        }
+    }
+
+    /// <summary>
+    /// Bounces a ring back off something that turned it away, like <see cref="OnRingCollision"/>.
+    /// </summary>
+    private static void OnRingTinkBounce(Action<ToolRing> orig, ToolRing self) {
+        if (IsThrowerCopy(self.gameObject)) {
+            return;
+        }
+
+        orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.QueueMotion();
+        }
+    }
+
+    /// <summary>
+    /// Sends that the local player's ring broke.
+    /// </summary>
+    private static void OnRingBreak(Action<ToolRing> orig, ToolRing self) {
         orig(self);
         if (self.TryGetComponent<TrackedTool>(out var tracked)) {
             tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Break, tracked.Id));
@@ -610,6 +686,7 @@ internal static class ToolCopies {
 
         copyPrefab = MakeCopyPrefab(prefab);
         copyPrefab.SetActive(false);
+        ToolCopyRules.GetState(prefab.name)?.PrepareCopyPrefab(copyPrefab);
         CopyPrefabs[prefab] = copyPrefab;
         return copyPrefab;
     }
