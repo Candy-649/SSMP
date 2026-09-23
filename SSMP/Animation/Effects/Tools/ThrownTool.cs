@@ -21,6 +21,11 @@ internal class ThrownTool : BaseAttackTool {
     /// </summary>
     private static readonly Dictionary<(int Player, byte Id), RemoteToolCopy> Copies = new();
 
+    /// <summary>
+    /// The seconds that a new copy is kept whatever the list of what is out says.
+    /// </summary>
+    private const float LiveListGrace = 1.5f;
+
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         if (effectInfo == null || effectInfo.Length < 2) {
@@ -64,6 +69,9 @@ internal class ThrownTool : BaseAttackTool {
                 case ToolMessageKind.Imbue:
                     ImbuedNail.Play(playerObject, reader);
                     break;
+                case ToolMessageKind.LiveList:
+                    KeepLive(playerObject, reader);
+                    break;
             }
         } catch (IOException) {
             Logger.Warn("Could not read a message about a tool of the partner");
@@ -78,8 +86,10 @@ internal class ThrownTool : BaseAttackTool {
     private static void Spawn(GameObject playerObject, (int, byte) key, BinaryReader reader) {
         var spawn = ToolMessages.ReadSpawn(reader);
 
-        // A thing whose state goes all the time sends this again and again, for a copy that is already there
-        if (Copies.TryGetValue(key, out var old) && old != null && old.PrefabName == spawn.PrefabName) {
+        // A thing whose state goes all the time sends this again and again, for a copy that is already there; any
+        // other copy under the number is of a thing that is gone, whose end got lost on the way
+        if (Copies.TryGetValue(key, out var old) && old != null && old.PrefabName == spawn.PrefabName &&
+            ToolCopyRules.GetStreamInterval(spawn.PrefabName) > 0f) {
             spawn.Snapshot.ApplyTo(old.gameObject);
             var scale = old.transform.localScale;
             old.transform.localScale = new Vector3(spawn.Scale.x, spawn.Scale.y, scale.z);
@@ -113,6 +123,7 @@ internal class ThrownTool : BaseAttackTool {
         marker.Poisoned = spawn.Poisoned;
         marker.FromThrower = true;
         marker.PrefabName = spawn.PrefabName;
+        marker.SpawnTime = Time.time;
         marker.Destroyed = gone => {
             if (Copies.TryGetValue(key, out var current) && current == gone) {
                 Copies.Remove(key);
@@ -167,8 +178,55 @@ internal class ThrownTool : BaseAttackTool {
             }
         }
 
+        // A copy made this frame has not started its state machine yet, which would then enter the state a second
+        // time as it starts; and what the state spawns as it starts comes out where the thrower's thing was
+        if (!fsm.Fsm.Started) {
+            fsm.Fsm.Start();
+        }
+
+        snapshot.ApplyTo(copy.gameObject);
         fsm.Fsm.SetState(state);
         snapshot.ApplyTo(copy.gameObject);
+    }
+
+    /// <summary>
+    /// Takes away the copies of a player's things that are gone in their game but whose end got lost on the way, and
+    /// puts the look of their needle's element right. A copy only just made is left alone, as the list may have been
+    /// written before its thing came out.
+    /// </summary>
+    private static void KeepLive(GameObject playerObject, BinaryReader reader) {
+        ImbuedNail.Keep(playerObject, (NailElements) reader.ReadByte());
+
+        var live = new HashSet<byte>();
+        for (var count = reader.ReadByte(); count > 0; count--) {
+            live.Add(reader.ReadByte());
+        }
+
+        var player = playerObject.GetInstanceID();
+        List<(int, byte)>? gone = null;
+        foreach (var pair in Copies) {
+            if (pair.Key.Player != player || live.Contains(pair.Key.Id)) {
+                continue;
+            }
+
+            if (pair.Value != null) {
+                if (Time.time - pair.Value.SpawnTime < LiveListGrace) {
+                    continue;
+                }
+
+                Object.Destroy(pair.Value.gameObject);
+            }
+
+            (gone ??= []).Add(pair.Key);
+        }
+
+        if (gone == null) {
+            return;
+        }
+
+        foreach (var key in gone) {
+            Copies.Remove(key);
+        }
     }
 
     /// <summary>

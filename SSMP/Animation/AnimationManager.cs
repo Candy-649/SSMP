@@ -869,6 +869,7 @@ internal class AnimationManager {
 
         ToolCopies.Install();
         ToolCopies.MessageReady += OnToolMessage;
+        MonoBehaviourUtil.Instance.OnUpdateEvent += ToolCopies.Tick;
 
         // Register a callback so we know when the dash has finished
         // On.HeroController.CancelDash += HeroControllerOnCancelDash;
@@ -901,6 +902,7 @@ internal class AnimationManager {
 
         ToolItemManager.BoundAttackToolUsed -= AttackToolUsed;
         ToolCopies.MessageReady -= OnToolMessage;
+        MonoBehaviourUtil.Instance.OnUpdateEvent -= ToolCopies.Tick;
 
         // Remove listener for benching
         var eventRegister = HeroController.SilentInstance?.gameObject.GetComponents<EventRegister>().FirstOrDefault(r => r.SubscribedEvent == "BENCHREST START");

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.IO;
 using UnityEngine;
 
@@ -45,7 +46,13 @@ internal enum ToolMessageKind : byte {
     /// <summary>
     /// The hero's needle took on an element or lost it: see <see cref="ImbuedNail"/>.
     /// </summary>
-    Imbue
+    Imbue,
+
+    /// <summary>
+    /// Which things of the thrower's tools are out and which element their needle has, every so often, which puts right
+    /// what a lost message left behind.
+    /// </summary>
+    LiveList
 }
 
 /// <summary>
@@ -256,6 +263,28 @@ internal static class ToolMessages {
         writer.Write(state);
         writer.Flush();
         return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Writes the list of which things of the thrower's tools are out, by their number, and which element the needle
+    /// has.
+    /// </summary>
+    public static byte[] WriteLiveList(NailElements element, ICollection<byte> ids) {
+        var count = ids.Count < byte.MaxValue ? ids.Count : byte.MaxValue;
+        var message = new byte[4 + count];
+        message[0] = (byte) ToolMessageKind.LiveList;
+        message[2] = (byte) element;
+        message[3] = (byte) count;
+        var i = 4;
+        foreach (var id in ids) {
+            if (i == message.Length) {
+                break;
+            }
+
+            message[i++] = id;
+        }
+
+        return message;
     }
 
     /// <summary>

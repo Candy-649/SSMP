@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Reflection;
+using TeamCherry.NestedFadeGroup;
 using UnityEngine;
 
 namespace SSMP.Animation.Effects.Tools;
@@ -34,6 +35,7 @@ internal class SnareState : IToolState {
     private static readonly FieldInfo? ActiveSnaresField = typeof(SilkSnare).GetField(
         "_activeSnares", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic
     );
+    private static readonly FieldInfo? FoundHeroField = typeof(SilkSnare).GetField("foundHero", Flags);
     private static readonly MethodInfo? BlastMethod = typeof(SilkSnare).GetMethod("Blast", Flags);
     private static readonly MethodInfo? EndMethod = typeof(SilkSnare).GetMethod("End", Flags);
 
@@ -68,6 +70,10 @@ internal class SnareState : IToolState {
 
             // And this player's own snares, as they appear, leave it alone
             (ActiveSnaresField?.GetValue(null) as IList)?.Remove(snare);
+
+            // Its glow goes by how near the thrower is, not this player's hero, which it found as it appeared
+            FoundHeroField?.SetValue(snare, false);
+            snare.gameObject.AddComponent<SnareGlow>().Follow(snare, character.transform);
         }
     }
 
@@ -108,5 +114,55 @@ internal class SnareState : IToolState {
         } finally {
             IsApplying = false;
         }
+    }
+}
+
+/// <summary>
+/// Fades the glow of a copy of the partner's snare by how near the thrower's character is, the way the thrower's own
+/// snare fades by how near the thrower is: in full close by, not at all from further off, and in between on the way.
+/// </summary>
+internal class SnareGlow : MonoBehaviour {
+    private const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+    private static readonly FieldInfo? GroundField = typeof(SilkSnare).GetField("groundFadeGroup", Flags);
+    private static readonly FieldInfo? DistantField = typeof(SilkSnare).GetField("distantGroundFadeGroup", Flags);
+    private static readonly FieldInfo? FullRadiusField = typeof(SilkSnare).GetField("fullEffectRadiusSqr", Flags);
+    private static readonly FieldInfo? FalloffRadiusField = typeof(SilkSnare).GetField("falloffRadiusSqr", Flags);
+
+    private Transform? _character;
+    private NestedFadeGroupBase? _ground;
+    private NestedFadeGroupBase? _distant;
+    private float _fullRadiusSqr;
+    private float _falloffRadiusSqr;
+
+    /// <summary>
+    /// Starts fading the glow of the snare by how near the character is.
+    /// </summary>
+    public void Follow(SilkSnare snare, Transform character) {
+        _character = character;
+        _ground = GroundField?.GetValue(snare) as NestedFadeGroupBase;
+        _distant = DistantField?.GetValue(snare) as NestedFadeGroupBase;
+        _fullRadiusSqr = FullRadiusField?.GetValue(snare) is float full ? full : 0f;
+        _falloffRadiusSqr = FalloffRadiusField?.GetValue(snare) is float falloff ? falloff : 0f;
+        LateUpdate();
+    }
+
+    private void LateUpdate() {
+        if (_character == null || _ground == null || _distant == null) {
+            return;
+        }
+
+        var distanceSqr = ((Vector2) _character.position - (Vector2) transform.position).sqrMagnitude;
+        float near;
+        if (distanceSqr >= _falloffRadiusSqr) {
+            near = 0f;
+        } else if (distanceSqr <= _fullRadiusSqr) {
+            near = 1f;
+        } else {
+            near = 1f - (distanceSqr - _fullRadiusSqr) / (_falloffRadiusSqr - _fullRadiusSqr);
+        }
+
+        _ground.AlphaSelf = near;
+        _distant.AlphaSelf = 1f - near;
     }
 }

@@ -27,9 +27,10 @@ internal static class ImbuedNail {
     private static readonly FieldInfo? UseHeroField = typeof(FollowTransform).GetField("useHero", Flags);
 
     /// <summary>
-    /// The flash and the embers or bubbles of the players whose needle has an element, by their character.
+    /// The element, the flash and the embers or bubbles of the players whose needle has an element, by their character.
     /// </summary>
-    private static readonly Dictionary<int, (SpriteFlash.FlashHandle Flash, GameObject? Particles)> Imbued = new();
+    private static readonly
+        Dictionary<int, (NailElements Element, SpriteFlash.FlashHandle Flash, GameObject? Particles)> Imbued = new();
 
     /// <summary>
     /// Writes the message that the local hero's needle took on an element, or lost it.
@@ -44,7 +45,28 @@ internal static class ImbuedNail {
     /// <param name="playerObject">The character of the player.</param>
     /// <param name="reader">The message, from after its kind and number.</param>
     public static void Play(GameObject playerObject, BinaryReader reader) {
-        var element = (NailElements) reader.ReadByte();
+        Show(playerObject, (NailElements) reader.ReadByte());
+    }
+
+    /// <summary>
+    /// Shows the element that the needle of another player has, if it is not what shows already: for a message about
+    /// it that got lost, or a character that came into the room later.
+    /// </summary>
+    /// <param name="playerObject">The character of the player.</param>
+    /// <param name="element">The element of the needle, or none.</param>
+    public static void Keep(GameObject playerObject, NailElements element) {
+        var shown = Imbued.TryGetValue(playerObject.GetInstanceID(), out var imbued)
+            ? imbued.Element
+            : NailElements.None;
+        if (shown != element) {
+            Show(playerObject, element);
+        }
+    }
+
+    /// <summary>
+    /// Shows on the character of another player the element that their needle has, from its start, or none.
+    /// </summary>
+    private static void Show(GameObject playerObject, NailElements element) {
         Stop(playerObject);
 
         var config = GetConfig(element);
@@ -94,7 +116,7 @@ internal static class ImbuedNail {
             }
         }
 
-        Imbued[playerObject.GetInstanceID()] = (handle, particles);
+        Imbued[playerObject.GetInstanceID()] = (element, handle, particles);
     }
 
     /// <summary>

@@ -23,6 +23,7 @@ internal class RingState : IToolState {
     private static readonly FieldInfo? EnemyRangeField = typeof(ToolRing).GetField("enemyRange", Flags);
     private static readonly MethodInfo? StopMethod = typeof(ToolRing).GetMethod("Stop", Flags);
     private static readonly MethodInfo? BreakMethod = typeof(ToolRing).GetMethod("Break", Flags);
+    private static readonly MethodInfo? CheckPoisonMethod = typeof(ToolRing).GetMethod("CheckPoison", Flags);
 
     /// <inheritdoc/>
     public void PrepareCopyPrefab(GameObject copyPrefab) {
@@ -43,6 +44,10 @@ internal class RingState : IToolState {
 
     /// <inheritdoc/>
     public void PrepareCopy(GameObject copy, GameObject character, bool poisoned) {
+        // Switched off, the ring never takes on the look of the pouch as it starts, which it does as the thrower here
+        if (copy.TryGetComponent<ToolRing>(out var ring)) {
+            CheckPoisonMethod?.Invoke(ring, null);
+        }
     }
 
     /// <inheritdoc/>

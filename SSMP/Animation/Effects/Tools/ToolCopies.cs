@@ -156,6 +156,30 @@ internal static class ToolCopies {
     private static byte _lastId;
 
     /// <summary>
+    /// The numbers of the things of the local player's tools that are out, which no new thing may take: the partner
+    /// knows a thing by its number, and some things stay out long after hundreds of others came and went.
+    /// </summary>
+    private static readonly HashSet<byte> LiveIds = [];
+
+    /// <summary>
+    /// The seconds between two lists of what of the local player's tools is out and which element the needle has. The
+    /// messages about the things are not sure to arrive, and the list puts right on the other screens what a lost one
+    /// left there: a copy of a thing that is gone here, or the look of an element that the needle lost.
+    /// </summary>
+    private const float LiveListInterval = 1f;
+
+    /// <summary>
+    /// The seconds until the next list of what is out.
+    /// </summary>
+    private static float _liveListTimer;
+
+    /// <summary>
+    /// Whether the poison pouch counts as equipped while a copy of the partner's thing checks for it, which is the
+    /// thrower's pouch rather than the local player's; null outside such a check.
+    /// </summary>
+    private static bool? _pouchOverride;
+
+    /// <summary>
     /// Whether the local player runs the enemies of the room, which is where a copy can pull them.
     /// </summary>
     public static Func<bool>? IsSceneHost { get; set; }
@@ -233,6 +257,18 @@ internal static class ToolCopies {
         AddHook(
             typeof(SilkSnare).GetMethod("End", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<SilkSnare>, SilkSnare>(OnSnareFade)
+        );
+        AddHook(
+            typeof(ToolItem).GetMethod("get_IsEquipped", InstanceFlags, null, Type.EmptyTypes, null),
+            new Func<Func<ToolItem, bool>, ToolItem, bool>(OnIsEquipped)
+        );
+        AddHook(
+            typeof(ToolBoomerang).GetMethod("CheckPoison", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ToolBoomerang>, ToolBoomerang>(OnClawsCheckPoison)
+        );
+        AddHook(
+            typeof(ToolRing).GetMethod("CheckPoison", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ToolRing>, ToolRing>(OnRingCheckPoison)
         );
         AddHook(
             typeof(FlintUseEffects).GetMethod("SetPt2", InstanceFlags, null, Type.EmptyTypes, null),
@@ -343,7 +379,8 @@ internal static class ToolCopies {
         tracked.Send = message => MessageReady?.Invoke(message);
         tracked.WriteSpawn = () => WriteSpawn(tracked);
         tracked.Ended = Forget;
-        tracked.Begin(++_lastId, prefabName);
+        tracked.Begin(NextId(), prefabName);
+        LiveIds.Add(tracked.Id);
 
         var fsms = thing.GetComponentsInChildren<PlayMakerFSM>(true);
         for (var i = 0; i < fsms.Length; i++) {
@@ -366,6 +403,19 @@ internal static class ToolCopies {
     }
 
     /// <summary>
+    /// The next number that no thing of the local player's tools that is out has.
+    /// </summary>
+    private static byte NextId() {
+        for (var i = 0; i < 256; i++) {
+            if (!LiveIds.Contains(++_lastId)) {
+                return _lastId;
+            }
+        }
+
+        return ++_lastId;
+    }
+
+    /// <summary>
     /// Tells the partner of a thing once it is on its way. Waiting for the next frame lets the thing start first, which
     /// some of them do with a random push or spin of their own, or with the speed that the hero's tool gives them after
     /// spawning them, so the copy takes all of it over as it is.
@@ -379,6 +429,13 @@ internal static class ToolCopies {
 
         try {
             tracked.Announce(WriteSpawn(tracked));
+
+            // A thing that sets itself up on its first physics step may not have had one yet; its state goes as soon
+            // as it has, before the copy sets itself up its own way
+            var state = ToolCopyRules.GetState(tracked.PrefabName);
+            if (state != null && !state.IsSettled(tracked.gameObject)) {
+                tracked.QueueMotion();
+            }
         } catch (Exception e) {
             Logger.Warn($"Could not send the '{tracked.PrefabName}' of the local player to the partner: {e.Message}");
         }
@@ -410,6 +467,8 @@ internal static class ToolCopies {
     /// Stops following a thing that is gone.
     /// </summary>
     private static void Forget(TrackedTool tracked) {
+        LiveIds.Remove(tracked.Id);
+
         List<Fsm>? gone = null;
         foreach (var pair in LocalFsms) {
             if (pair.Value.Tool == tracked) {
@@ -424,6 +483,21 @@ internal static class ToolCopies {
         foreach (var fsm in gone) {
             LocalFsms.Remove(fsm);
         }
+    }
+
+    /// <summary>
+    /// Sends the list of what of the local player's tools is out, and the element of the needle, every so often.
+    /// </summary>
+    public static void Tick() {
+        _liveListTimer -= Time.unscaledDeltaTime;
+        if (_liveListTimer > 0f) {
+            return;
+        }
+
+        _liveListTimer = LiveListInterval;
+        var hero = HeroController.SilentInstance;
+        var element = hero != null ? hero.NailImbuement.CurrentElement : NailElements.None;
+        MessageReady?.Invoke(ToolMessages.WriteLiveList(element, LiveIds));
     }
 
     /// <summary>
@@ -480,6 +554,50 @@ internal static class ToolCopies {
         }
 
         return floats;
+    }
+
+    /// <summary>
+    /// Answers whether a tool is equipped, with the thrower's pouch while a copy of the partner's thing checks for it.
+    /// </summary>
+    private static bool OnIsEquipped(Func<ToolItem, bool> orig, ToolItem self) {
+        if (_pouchOverride is { } poisoned && self == Gameplay.PoisonPouchTool) {
+            return poisoned;
+        }
+
+        return orig(self);
+    }
+
+    /// <summary>
+    /// Has claws take the look of the pouch that poisons them: the local player's pouch for their own claws, and the
+    /// thrower's for a copy of the partner's.
+    /// </summary>
+    private static void OnClawsCheckPoison(Action<ToolBoomerang> orig, ToolBoomerang self) {
+        CheckPoisonAs(self.gameObject, () => orig(self));
+    }
+
+    /// <summary>
+    /// Has a ring take the look of the pouch that poisons it, like <see cref="OnClawsCheckPoison"/>.
+    /// </summary>
+    private static void OnRingCheckPoison(Action<ToolRing> orig, ToolRing self) {
+        CheckPoisonAs(self.gameObject, () => orig(self));
+    }
+
+    /// <summary>
+    /// Runs a check of a thing for the poison pouch, as the thrower if the thing is a copy of the partner's.
+    /// </summary>
+    private static void CheckPoisonAs(GameObject thing, Action check) {
+        var copy = thing.GetComponentInParent<RemoteToolCopy>(true);
+        if (copy == null || !copy.FromThrower) {
+            check();
+            return;
+        }
+
+        _pouchOverride = copy.Poisoned;
+        try {
+            check();
+        } finally {
+            _pouchOverride = null;
+        }
     }
 
     /// <summary>
@@ -1156,6 +1274,11 @@ internal class RemoteToolCopy : MonoBehaviour {
     /// The name of the prefab of the thing that the copy is of.
     /// </summary>
     public string PrefabName { get; set; } = "";
+
+    /// <summary>
+    /// When the copy was made, in the time of this game.
+    /// </summary>
+    public float SpawnTime { get; set; }
 
     /// <summary>
     /// The state machines of the copy whose changes for reasons that only the thrower's game knows of come from there.
