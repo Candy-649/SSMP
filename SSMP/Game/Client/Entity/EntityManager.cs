@@ -288,6 +288,17 @@ internal class EntityManager {
         // Boss/boss-defeated scenes share a name prefix with the base scene; skip unrelated additively-loaded scenes.
         if (!scene.name.StartsWith(activeScene) || scene.name.Equals(activeScene)) return;
 
+        // The room the player is walking into is loaded beside this one before it takes over, and many rooms are
+        // named after the room next to them with a letter added. Taken for a part of this room, its creatures were
+        // registered here first, and a scene client registers creatures by putting them to sleep. When the room
+        // took over, they were registered again and read as asleep from the start, so whoever came in first ran
+        // the room with its creatures switched off, for both players. They are found when the room takes over.
+        var gameManager = global::GameManager.instance;
+        if (gameManager != null && scene.name == gameManager.nextSceneName) {
+            Logger.Info($"Scene loaded ({scene.name}) is the room being entered, not a part of this one");
+            return;
+        }
+
         Logger.Info($"Additional scene loaded ({scene.name}), looking for entities");
         FindEntitiesInScene(scene, lateLoad: true);
         DrainPendingUpdates();
