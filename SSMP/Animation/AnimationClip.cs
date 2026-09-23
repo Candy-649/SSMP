@@ -800,5 +800,8 @@ internal enum AnimationClip {
     BindInterrupt,
     Bench,
     HeroChildEffect,
-    TauntVoice
+    TauntVoice,
+
+    // A tool whose thing flies off by itself once thrown, with the tool and the throw in the effect info
+    ToolThrown
 }

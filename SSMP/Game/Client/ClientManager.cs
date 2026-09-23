@@ -4,6 +4,7 @@ using System.Diagnostics;
 using GlobalEnums;
 using Steamworks;
 using SSMP.Animation;
+using SSMP.Animation.Effects.Tools;
 using SSMP.Api.Client;
 using SSMP.Api.Server;
 using SSMP.Eventing;
@@ -298,6 +299,7 @@ internal class ClientManager : IClientManager {
         _mapManager = new MapManager(netClient, serverSettings);
 
         _entityManager = new EntityManager(netClient);
+        ToolCopies.IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost;
 
         _saveManager = new SaveManager(netClient, _entityManager);
 

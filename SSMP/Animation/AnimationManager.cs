@@ -721,6 +721,7 @@ internal class AnimationManager {
         { AnimationClip.ToolThreefoldPin, new ThreefoldPin() },
         { AnimationClip.ToolLongpin, new Longpin() },
         { AnimationClip.ToolTacks, new Tacks() },
+        { AnimationClip.ToolThrown, new ThrownTool() },
 
         // Parts of the hero that the game switches on and off, and what the hero says as it taunts
         { AnimationClip.HeroChildEffect, HeroChildEffects.Instance },
@@ -863,6 +864,9 @@ internal class AnimationManager {
 
         EventHooks.UseLavaBell += OnMagmaBell;
 
+        ToolCopies.Install();
+        ToolCopies.ToolThrown += OnToolThrown;
+
         // Register a callback so we know when the dash has finished
         // On.HeroController.CancelDash += HeroControllerOnCancelDash;
 
@@ -893,6 +897,7 @@ internal class AnimationManager {
         EventHooks.UseLavaBell -= OnMagmaBell;
 
         ToolItemManager.BoundAttackToolUsed -= AttackToolUsed;
+        ToolCopies.ToolThrown -= OnToolThrown;
 
         // Remove listener for benching
         var eventRegister = HeroController.SilentInstance?.gameObject.GetComponents<EventRegister>().FirstOrDefault(r => r.SubscribedEvent == "BENCHREST START");
@@ -1551,6 +1556,18 @@ internal class AnimationManager {
         }
 
         ToolItemManager.BoundAttackToolUsed += AttackToolUsed;
+    }
+
+    /// <summary>
+    /// Sends a tool that the local player threw, whose thing flies off by itself, for the other players to see.
+    /// </summary>
+    /// <param name="info">What the thing looked like a moment after it left the hand.</param>
+    private void OnToolThrown(ThrowInfo info) {
+        if (!_netClient.IsConnected) {
+            return;
+        }
+
+        _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.ToolThrown, 0, info.Write());
     }
 
     /// <summary>

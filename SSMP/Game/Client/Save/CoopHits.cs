@@ -7,6 +7,7 @@ using GlobalEnums;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
+using SSMP.Animation.Effects.Tools;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -454,6 +455,12 @@ internal class CoopHits {
         }
 
         var isRemote = RemoteAttackComponent.IsRemoteAttack(damager.gameObject);
+
+        // A thrown tool is set off by the attacks of the player who threw it only, in the game and here: the copies
+        // of the partner's attacks leave this player's tools alone, and this player's attacks leave the partner's
+        if (responder is Component struck && ToolCopies.IsForeignToolHit(struck.gameObject, damager.gameObject)) {
+            return IHitResponder.Response.None;
+        }
 
         // A cocoon that a death leaves behind belongs to the player who died and to their save alone: breaking one
         // hands that player back the money it holds and clears what their save keeps of it. Both games spawn one
