@@ -868,7 +868,7 @@ internal class AnimationManager {
         EventHooks.UseLavaBell += OnMagmaBell;
 
         ToolCopies.Install();
-        ToolCopies.ToolThrown += OnToolThrown;
+        ToolCopies.MessageReady += OnToolMessage;
 
         // Register a callback so we know when the dash has finished
         // On.HeroController.CancelDash += HeroControllerOnCancelDash;
@@ -900,7 +900,7 @@ internal class AnimationManager {
         EventHooks.UseLavaBell -= OnMagmaBell;
 
         ToolItemManager.BoundAttackToolUsed -= AttackToolUsed;
-        ToolCopies.ToolThrown -= OnToolThrown;
+        ToolCopies.MessageReady -= OnToolMessage;
 
         // Remove listener for benching
         var eventRegister = HeroController.SilentInstance?.gameObject.GetComponents<EventRegister>().FirstOrDefault(r => r.SubscribedEvent == "BENCHREST START");
@@ -1564,15 +1564,15 @@ internal class AnimationManager {
     }
 
     /// <summary>
-    /// Sends a tool that the local player threw, whose thing flies off by itself, for the other players to see.
+    /// Sends a message about a thing that a tool of the local player threw or spawned, for the other players to see.
     /// </summary>
-    /// <param name="info">What the thing looked like a moment after it left the hand.</param>
-    private void OnToolThrown(ThrowInfo info) {
+    /// <param name="message">The message, as the effect info of the animation.</param>
+    private void OnToolMessage(byte[] message) {
         if (!_netClient.IsConnected) {
             return;
         }
 
-        _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.ToolThrown, 0, info.Write());
+        _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.ToolThrown, 0, message);
     }
 
     /// <summary>

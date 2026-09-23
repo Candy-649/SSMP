@@ -19,11 +19,12 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
 /// Keeps each thrown tool with the player who threw it. The partner's tools are shown here as copies that only look
-/// the part: the thrower's game does the hits and sends what they looked like. For that, a copy has to stay out of this
-/// game in every other way too - it must not freeze or shake this player's screen, count against this player's own
-/// tools, read this player's equipment, or spawn anything that hits as this player's own. And in the game, only the
-/// player who threw a tool can set it off with an attack; here that holds both ways, for the partner's copies and the
-/// attacks of this player, and for this player's own tools and the copies of the partner's attacks.
+/// the part: the thrower's game does the hits, and sends what the copy can't work out by itself. For that, a copy has
+/// to stay out of this game in every other way too - it must not freeze or shake this player's screen, make a noise
+/// that enemies hear, count against this player's own tools or spend them, read this player's equipment, write this
+/// player's data, or spawn anything that hits as this player's own. And in the game, only the player who threw a tool
+/// can set it off with an attack; here that holds both ways, for the partner's copies and the attacks of this player,
+/// and for this player's own tools and the copies of the partner's attacks.
 /// </summary>
 internal static class ToolCopies {
     /// <summary>
@@ -32,35 +33,56 @@ internal static class ToolCopies {
     private const int HeroAttackLayer = (int) GlobalEnums.PhysLayers.HERO_ATTACK;
 
     /// <summary>
-    /// The tools whose thrown things are sent to the partner and shown there by <see cref="ThrownTool"/>. Each one is
-    /// only added once what its thing does has been gone through: some of them come back to the hero or follow them
-    /// around, which a copy must do with the thrower instead.
+    /// The binding flags of the instance members that are looked up.
     /// </summary>
-    private static readonly HashSet<string> CopiedTools = [
-        "Sting Shard"
+    private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+
+    /// <summary>
+    /// The binding flags of the static members that are looked up.
+    /// </summary>
+    private const BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
+
+    /// <summary>
+    /// The prefixes of the names of the FSM actions that a copy must not run: they shake or flash the screen or the
+    /// controller of this player, freeze this game for a moment, or make a noise that the enemies of this game hear.
+    /// </summary>
+    private static readonly string[] QuietActionPrefixes = [
+        "FreezeMoment",
+        "DoCameraShake",
+        "SendCameraShake",
+        "ScreenFlash",
+        "PlayVibration",
+        "CreateNoise"
     ];
 
     /// <summary>
     /// The tool that the hero is about to throw.
     /// </summary>
     private static readonly FieldInfo? WillThrowToolField =
-        typeof(HeroController).GetField("willThrowTool", BindingFlags.Instance | BindingFlags.NonPublic);
+        typeof(HeroController).GetField("willThrowTool", InstanceFlags);
 
     /// <summary>
     /// The tool that a limiter counts, which it counts against the local player's own number of them.
     /// </summary>
     private static readonly FieldInfo? LimiterToolField =
-        typeof(ToolItemLimiter).GetField("representingTool", BindingFlags.Instance | BindingFlags.NonPublic);
+        typeof(ToolItemLimiter).GetField("representingTool", InstanceFlags);
 
     /// <summary>
-    /// Breaks the thing that a limiter belongs to, the way the game breaks the oldest one of too many.
+    /// What a damager calls when a hit of it lands on an enemy, which is what its thing reacts to.
     /// </summary>
-    private static readonly MethodInfo? LimiterBreakMethod =
-        typeof(ToolItemLimiter).GetMethod("Break", BindingFlags.Instance | BindingFlags.NonPublic);
+    private static readonly FieldInfo? DamagedEnemyField =
+        typeof(DamageEnemies).GetField("DamagedEnemy", InstanceFlags);
 
     /// <summary>
-    /// The events that checks of the equipment had before a copy was made to answer them the thrower's way, since a
-    /// pooled copy is used again for a thrower with other equipment.
+    /// The two states of a tool that can be switched between, each with a thing of its own to throw.
+    /// </summary>
+    private static readonly FieldInfo?[] ToggleStateFields = [
+        typeof(ToolItemToggleState).GetField("offState", InstanceFlags),
+        typeof(ToolItemToggleState).GetField("onState", InstanceFlags)
+    ];
+
+    /// <summary>
+    /// The events that checks of the equipment had before a copy was made to answer them the thrower's way.
     /// </summary>
     private static readonly ConditionalWeakTable<CheckIfToolEquipped, FsmEvent[]> CheckEvents = new();
 
@@ -77,9 +99,36 @@ internal static class ToolCopies {
     private static readonly Dictionary<GameObject, GameObject> CopyPrefabs = new();
 
     /// <summary>
+    /// The state machines of the things of the local player's tools that are followed, with the thing, the index of the
+    /// state machine in it and the events of it that only this game can know of.
+    /// </summary>
+    private static readonly Dictionary<Fsm, (TrackedTool Tool, byte Index, HashSet<string> Events)> LocalFsms = new();
+
+    /// <summary>
+    /// The damagers of the things of the local player's tools that are watched for landed hits, which the pool keeps
+    /// and hands out again.
+    /// </summary>
+    private static readonly ConditionalWeakTable<DamageEnemies, object> WatchedDamagers = new();
+
+    /// <summary>
+    /// The state machines of the copies of the partner's things, with the events that only come from the thrower.
+    /// </summary>
+    private static readonly Dictionary<Fsm, HashSet<string>> CopyFsms = new();
+
+    /// <summary>
     /// The hooks, which stay for as long as the game runs.
     /// </summary>
     private static readonly List<Hook> Hooks = [];
+
+    /// <summary>
+    /// The prefabs of the copied things, by their name, or null until they are needed.
+    /// </summary>
+    private static Dictionary<string, GameObject>? _prefabs;
+
+    /// <summary>
+    /// The names of the prefabs that were looked for and are not there, so that they are not looked for again.
+    /// </summary>
+    private static readonly HashSet<string> MissingPrefabs = [];
 
     /// <summary>
     /// Whether the hooks are in place.
@@ -102,15 +151,19 @@ internal static class ToolCopies {
     private static GameObject? _thrown;
 
     /// <summary>
+    /// The number of the last thing that was followed.
+    /// </summary>
+    private static byte _lastId;
+
+    /// <summary>
     /// Whether the local player runs the enemies of the room, which is where a copy can pull them.
     /// </summary>
     public static Func<bool>? IsSceneHost { get; set; }
 
     /// <summary>
-    /// Called with what a tool that the local player threw looked like a moment after it left their hand, for the
-    /// partner to show a copy of.
+    /// Called with each message about a thing of the local player's tools, for the partner.
     /// </summary>
-    public static event Action<ThrowInfo>? ToolThrown;
+    public static event Action<byte[]>? MessageReady;
 
     /// <summary>
     /// Puts the hooks in place, once.
@@ -122,17 +175,14 @@ internal static class ToolCopies {
 
         _installed = true;
 
-        const BindingFlags instanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
-        const BindingFlags staticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
-
         AddHook(
-            typeof(HeroController).GetMethod("ThrowTool", instanceFlags, null, [typeof(bool)], null),
+            typeof(HeroController).GetMethod("ThrowTool", InstanceFlags, null, [typeof(bool)], null),
             new Action<Action<HeroController, bool>, HeroController, bool>(OnThrowTool)
         );
         AddHook(
             typeof(ObjectPool).GetMethod(
                 "Spawn",
-                staticFlags,
+                StaticFlags,
                 null,
                 [typeof(GameObject), typeof(Transform), typeof(Vector3), typeof(Quaternion), typeof(bool)],
                 null
@@ -140,22 +190,39 @@ internal static class ToolCopies {
             new Func<SpawnMethod, GameObject, Transform, Vector3, Quaternion, bool, GameObject>(OnSpawn)
         );
         AddHook(
-            typeof(Fsm).GetMethod("OnTriggerEnter2D", instanceFlags, null, [typeof(Collider2D)], null),
+            typeof(Fsm).GetMethod("DoTransition", InstanceFlags, null, [typeof(FsmTransition), typeof(bool)], null),
+            new Func<Func<Fsm, FsmTransition, bool, bool>, Fsm, FsmTransition, bool, bool>(OnDoTransition)
+        );
+        AddHook(
+            typeof(ToolBoomerang).GetMethod("Hit", InstanceFlags, null, [typeof(HitInstance)], null),
+            new Func<Func<ToolBoomerang, HitInstance, IHitResponder.HitResponse>, ToolBoomerang, HitInstance,
+                IHitResponder.HitResponse>(OnClawsHit)
+        );
+        AddHook(
+            typeof(ToolBoomerang).GetMethod("Tinked", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ToolBoomerang>, ToolBoomerang>(OnClawsTinked)
+        );
+        AddHook(
+            typeof(ToolBoomerang).GetMethod("Break", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ToolBoomerang>, ToolBoomerang>(OnClawsBreak)
+        );
+        AddHook(
+            typeof(Fsm).GetMethod("OnTriggerEnter2D", InstanceFlags, null, [typeof(Collider2D)], null),
             new Action<Action<Fsm, Collider2D>, Fsm, Collider2D>(OnFsmTrigger)
         );
         AddHook(
-            typeof(Fsm).GetMethod("OnTriggerStay2D", instanceFlags, null, [typeof(Collider2D)], null),
+            typeof(Fsm).GetMethod("OnTriggerStay2D", InstanceFlags, null, [typeof(Collider2D)], null),
             new Action<Action<Fsm, Collider2D>, Fsm, Collider2D>(OnFsmTrigger)
         );
         AddHook(
             typeof(PlayMakerProxyBase).GetMethod(
-                "DoTrigger2DEventCallback", instanceFlags, null, [typeof(Collider2D)], null
+                "DoTrigger2DEventCallback", InstanceFlags, null, [typeof(Collider2D)], null
             ),
             new Action<Action<PlayMakerProxyBase, Collider2D>, PlayMakerProxyBase, Collider2D>(OnProxyTrigger)
         );
         AddHook(
             typeof(CustomPlayMakerTriggerStay2D).GetMethod(
-                "OnTriggerStay2D", instanceFlags, null, [typeof(Collider2D)], null
+                "OnTriggerStay2D", InstanceFlags, null, [typeof(Collider2D)], null
             ),
             new Action<Action<CustomPlayMakerTriggerStay2D, Collider2D>, CustomPlayMakerTriggerStay2D, Collider2D>(
                 OnCustomStayTrigger
@@ -190,20 +257,21 @@ internal static class ToolCopies {
         }
     }
 
-    #region The local player's throws
+    #region The local player's tools
 
     /// <summary>
-    /// Catches the thing that the hero throws, for the tools in <see cref="CopiedTools"/>.
+    /// Catches the thing that the hero throws, for the tools in <see cref="ToolCopyRules.ThrownTools"/>.
     /// </summary>
     private static void OnThrowTool(Action<HeroController, bool> orig, HeroController self, bool isAutoThrow) {
-        ToolItem? tool = null;
+        GameObject? prefab = null;
         try {
-            tool = WillThrowToolField?.GetValue(self) as ToolItem;
-            _throwPrefab = tool != null && CopiedTools.Contains(tool.name) ? tool.Usage.ThrowPrefab : null;
+            var tool = WillThrowToolField?.GetValue(self) as ToolItem;
+            prefab = tool != null && ToolCopyRules.ThrownTools.Contains(tool.name) ? tool.Usage.ThrowPrefab : null;
         } catch (Exception e) {
             Logger.Warn($"Could not see which tool the hero throws: {e.Message}");
         }
 
+        _throwPrefab = prefab;
         _thrown = null;
         try {
             orig(self, isAutoThrow);
@@ -213,48 +281,188 @@ internal static class ToolCopies {
 
         var thrown = _thrown;
         _thrown = null;
-        if (thrown == null || tool == null) {
+        if (thrown == null || prefab == null) {
             return;
         }
 
         thrown.AddComponentIfNotPresent<LocalToolComponent>();
-        MonoBehaviourUtil.Instance.StartCoroutine(SendThrow(tool, thrown));
+        Track(thrown, prefab.name);
     }
 
     /// <summary>
-    /// Tells the partner about a thrown tool once it is on its way. Waiting for the next frame lets the thing start
-    /// first, which some of them do with a random push or spin of their own, so the copy takes both over as they are.
+    /// Starts following a thing of a tool of the local player: gives it a number, tells the partner of it once it is on
+    /// its way, and from then on sends what the partner's copy can't work out by itself.
     /// </summary>
-    private static IEnumerator SendThrow(ToolItem tool, GameObject thrown) {
+    /// <param name="thing">The thing.</param>
+    /// <param name="prefabName">The name of its prefab.</param>
+    private static void Track(GameObject thing, string prefabName) {
+        var tracked = thing.AddComponentIfNotPresent<TrackedTool>();
+
+        // The pool can hand out a thing that is still out, when there are too many of it
+        tracked.End();
+        tracked.Send = message => MessageReady?.Invoke(message);
+        tracked.Ended = Forget;
+        tracked.Begin(++_lastId, prefabName);
+
+        var fsms = thing.GetComponentsInChildren<PlayMakerFSM>(true);
+        for (var i = 0; i < fsms.Length; i++) {
+            var events = ToolCopyRules.GetThrowerEvents(prefabName, fsms[i].FsmName);
+            if (events != null && fsms[i].Fsm != null) {
+                LocalFsms[fsms[i].Fsm] = (tracked, (byte) i, events);
+            }
+        }
+
+        foreach (var damager in tracked.Damagers) {
+            if (WatchedDamagers.TryGetValue(damager, out _)) {
+                continue;
+            }
+
+            WatchedDamagers.Add(damager, damager);
+            damager.DamagedEnemy += () => OnLocalDamagedEnemy(damager);
+        }
+
+        MonoBehaviourUtil.Instance.StartCoroutine(Announce(tracked, tracked.Id));
+    }
+
+    /// <summary>
+    /// Tells the partner of a thing once it is on its way. Waiting for the next frame lets the thing start first, which
+    /// some of them do with a random push or spin of their own, or with the speed that the hero's tool gives them after
+    /// spawning them, so the copy takes all of it over as it is.
+    /// </summary>
+    private static IEnumerator Announce(TrackedTool tracked, byte id) {
         yield return null;
 
-        if (thrown == null || !thrown.activeInHierarchy || ToolThrown == null) {
+        if (tracked == null || !tracked.Live || tracked.Id != id) {
             yield break;
         }
 
         try {
-            // The number of these that may be out at once, which the game works out the same way when it breaks the
-            // oldest one of too many
-            var usage = tool.Usage;
-            var maxActive = usage.UseAltForQuickSling && Gameplay.QuickSlingTool.IsEquipped
-                ? usage.MaxActiveAlt
-                : usage.MaxActive;
-
-            var transform = thrown.transform;
-            var body = thrown.GetComponent<Rigidbody2D>();
-            ToolThrown.Invoke(new ThrowInfo {
-                ToolName = tool.name,
+            // A thing that its own code moves goes with its state once it has set itself up, and otherwise sets itself
+            // up for the partner too
+            var thing = tracked.gameObject;
+            var state = ToolCopyRules.GetState(tracked.PrefabName);
+            tracked.Announce(ToolMessages.WriteSpawn(id, new ToolSpawn {
+                PrefabName = tracked.PrefabName,
                 Poisoned = Gameplay.PoisonPouchTool.IsEquipped,
-                MaxActive = maxActive,
-                Position = transform.position,
-                Rotation = transform.eulerAngles.z,
-                Scale = transform.localScale,
-                Velocity = body != null ? body.linearVelocity : Vector2.zero,
-                AngularVelocity = body != null ? body.angularVelocity : 0f
-            });
+                Scale = thing.transform.localScale,
+                Snapshot = ToolSnapshot.Of(thing),
+                Extra = state != null && state.IsSettled(thing) ? state.Write(thing) : []
+            }));
         } catch (Exception e) {
-            Logger.Warn($"Could not send the thrown '{tool.name}' to the partner: {e.Message}");
+            Logger.Warn($"Could not send the '{tracked.PrefabName}' of the local player to the partner: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// Stops following a thing that is gone.
+    /// </summary>
+    private static void Forget(TrackedTool tracked) {
+        List<Fsm>? gone = null;
+        foreach (var pair in LocalFsms) {
+            if (pair.Value.Tool == tracked) {
+                (gone ??= []).Add(pair.Key);
+            }
+        }
+
+        if (gone == null) {
+            return;
+        }
+
+        foreach (var fsm in gone) {
+            LocalFsms.Remove(fsm);
+        }
+    }
+
+    /// <summary>
+    /// Sends that a damager of a followed thing landed a hit on an enemy.
+    /// </summary>
+    private static void OnLocalDamagedEnemy(DamageEnemies damager) {
+        if (damager == null) {
+            return;
+        }
+
+        var tracked = damager.GetComponentInParent<TrackedTool>();
+        if (tracked == null || !tracked.Live) {
+            return;
+        }
+
+        var index = Array.IndexOf(tracked.Damagers, damager);
+        if (index >= 0) {
+            tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Hit, tracked.Id, (byte) index));
+        }
+    }
+
+    /// <summary>
+    /// Makes a change of state. A change of a followed thing for a reason that only this game knows of goes to the
+    /// partner, and the same change of a copy of the partner's thing is left to the thrower's game, which sends it.
+    /// </summary>
+    private static bool OnDoTransition(
+        Func<Fsm, FsmTransition, bool, bool> orig,
+        Fsm self,
+        FsmTransition transition,
+        bool isGlobal
+    ) {
+        var eventName = transition?.FsmEvent?.Name;
+        if (eventName != null && CopyFsms.TryGetValue(self, out var copyEvents) && copyEvents.Contains(eventName)) {
+            return false;
+        }
+
+        var changed = orig(self, transition!, isGlobal);
+        if (changed && eventName != null && LocalFsms.TryGetValue(self, out var local) &&
+            local.Events.Contains(eventName)) {
+            local.Tool.QueueStateChange(local.Index, transition!.ToState);
+        }
+
+        return changed;
+    }
+
+    /// <summary>
+    /// Sends the flight of the local player's claws after a hit on them sent them off another way.
+    /// </summary>
+    private static IHitResponder.HitResponse OnClawsHit(
+        Func<ToolBoomerang, HitInstance, IHitResponder.HitResponse> orig,
+        ToolBoomerang self,
+        HitInstance hit
+    ) {
+        var response = orig(self, hit);
+        if (response.response != IHitResponder.Response.None && self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.QueueMotion();
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// Knocks claws back off a blocking enemy: the local player's claws, which then send their flight, and never a
+    /// copy of the partner's claws, which takes it from the thrower's game.
+    /// </summary>
+    private static void OnClawsTinked(Action<ToolBoomerang> orig, ToolBoomerang self) {
+        if (IsThrowerCopy(self.gameObject)) {
+            return;
+        }
+
+        orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.QueueMotion();
+        }
+    }
+
+    /// <summary>
+    /// Sends that the local player's claws broke, which they may do because they left the local player's view.
+    /// </summary>
+    private static void OnClawsBreak(Action<ToolBoomerang> orig, ToolBoomerang self) {
+        orig(self);
+        if (self.TryGetComponent<TrackedTool>(out var tracked)) {
+            tracked.Post(ToolMessages.WriteSimple(ToolMessageKind.Break, tracked.Id));
+        }
+    }
+
+    /// <summary>
+    /// Whether something is part of a copy of a thing of the partner's that the thrower's game keeps up to date.
+    /// </summary>
+    public static bool IsThrowerCopy(GameObject gameObject) {
+        var copy = gameObject.GetComponentInParent<RemoteToolCopy>(true);
+        return copy != null && copy.FromThrower;
     }
 
     #endregion
@@ -342,10 +550,59 @@ internal static class ToolCopies {
     }
 
     /// <summary>
-    /// Gets what the copies of a thrown tool are made from, making it the first time. It stays switched off, so every
+    /// The prefab of a copied thing by its name, from the things that the copied tools throw.
+    /// </summary>
+    /// <param name="name">The name of the prefab.</param>
+    /// <returns>The prefab, or null if there is no copied thing of that name.</returns>
+    public static GameObject? FindPrefab(string name) {
+        if (_prefabs == null || !_prefabs.ContainsKey(name) && MissingPrefabs.Add(name)) {
+            _prefabs = FindPrefabs();
+        }
+
+        return _prefabs.TryGetValue(name, out var prefab) ? prefab : null;
+    }
+
+    /// <summary>
+    /// Finds the prefabs of the copied things: what each copied tool throws, in either of its states for a tool that
+    /// can be switched between two.
+    /// </summary>
+    private static Dictionary<string, GameObject> FindPrefabs() {
+        var prefabs = new Dictionary<string, GameObject>();
+        foreach (var tool in ToolItemManager.GetAllTools()) {
+            if (tool == null || !ToolCopyRules.ThrownTools.Contains(tool.name)) {
+                continue;
+            }
+
+            AddPrefab(prefabs, tool.Usage.ThrowPrefab);
+            if (tool is not ToolItemToggleState) {
+                continue;
+            }
+
+            foreach (var stateField in ToggleStateFields) {
+                var state = stateField?.GetValue(tool);
+                var usage = state?.GetType().GetField("Usage", InstanceFlags)?.GetValue(state);
+                var throwPrefab = usage?.GetType().GetField("ThrowPrefab", InstanceFlags)?.GetValue(usage);
+                AddPrefab(prefabs, throwPrefab as GameObject);
+            }
+        }
+
+        return prefabs;
+    }
+
+    /// <summary>
+    /// Adds a prefab by its name, if there is one.
+    /// </summary>
+    private static void AddPrefab(Dictionary<string, GameObject> prefabs, GameObject? prefab) {
+        if (prefab != null) {
+            prefabs[prefab.name] = prefab;
+        }
+    }
+
+    /// <summary>
+    /// Gets what the copies of a thrown thing are made from, making it the first time. It stays switched off, so every
     /// copy made from it starts switched off and can be set up before anything in it runs.
     /// </summary>
-    /// <param name="prefab">The prefab that the game throws.</param>
+    /// <param name="prefab">The prefab of the thing.</param>
     public static GameObject GetCopyPrefab(GameObject prefab) {
         if (CopyPrefabs.TryGetValue(prefab, out var copyPrefab) && copyPrefab != null) {
             return copyPrefab;
@@ -359,7 +616,10 @@ internal static class ToolCopies {
 
     /// <summary>
     /// Makes a copy of a prefab that belongs to the partner: it is marked as theirs, counts against none of the local
-    /// player's tools and can't hurt the local player.
+    /// player's tools and can't hurt the local player. Taken out of it is what would reach into this game: what breaks
+    /// it by this player's view, spends this player's tools, makes a noise, deals its damage by any other way than a
+    /// hit, ends the local player's own dust clouds, or lets this player's attacks knock it about. Switched off rather
+    /// than taken out is what shakes the screen, since the animation events that call it still find it.
     /// </summary>
     private static GameObject MakeCopyPrefab(GameObject prefab) {
         if (_holder == null) {
@@ -378,21 +638,43 @@ internal static class ToolCopies {
             LimiterToolField?.SetValue(limiter, null);
         }
 
-        foreach (var damageHero in copyPrefab.GetComponentsInChildren<DamageHero>(true)) {
-            Object.DestroyImmediate(damageHero);
+        RemoveAll<DamageHero>(copyPrefab);
+        RemoveAll<FreezeMomentOnEnable>(copyPrefab);
+        RemoveAll<ToolBreakRangeHandler>(copyPrefab);
+        RemoveAll<ToolUsageCounter>(copyPrefab);
+        RemoveAll<NoiseMaker>(copyPrefab);
+        RemoveAll<TagDamager>(copyPrefab);
+        RemoveAll<DustpiloExplosion>(copyPrefab);
+        RemoveAll<TinkEffect>(copyPrefab);
+
+        foreach (var shaker in copyPrefab.GetComponentsInChildren<CameraControlAnimationEvents>(true)) {
+            shaker.enabled = false;
         }
 
-        foreach (var freeze in copyPrefab.GetComponentsInChildren<FreezeMomentOnEnable>(true)) {
-            Object.DestroyImmediate(freeze);
+        foreach (var shaker in copyPrefab.GetComponentsInChildren<CameraShakeOnEnable>(true)) {
+            shaker.enabled = false;
+        }
+
+        foreach (var vibration in copyPrefab.GetComponentsInChildren<VibrationPlayer>(true)) {
+            vibration.enabled = false;
         }
 
         return copyPrefab;
     }
 
     /// <summary>
+    /// Takes every component of a type out of an object and its children.
+    /// </summary>
+    private static void RemoveAll<T>(GameObject gameObject) where T : Component {
+        foreach (var component in gameObject.GetComponentsInChildren<T>(true)) {
+            Object.DestroyImmediate(component);
+        }
+    }
+
+    /// <summary>
     /// Sets up a copy of something of the partner's once it is switched on: the thrower's equipment instead of this
-    /// player's, nothing that freezes or shakes this player's screen, writes this player's data or hurts them, and a
-    /// pull on enemies only where this game runs them.
+    /// player's, nothing that freezes or shakes this player's screen, makes a noise, writes this player's data or hurts
+    /// them, and a pull on enemies only where this game runs them.
     /// </summary>
     /// <param name="copy">The copy.</param>
     /// <param name="poisoned">Whether the thrower has the pouch that poisons their tools.</param>
@@ -416,6 +698,43 @@ internal static class ToolCopies {
     }
 
     /// <summary>
+    /// Leaves the changes of state of a copy that only the thrower's game can know of to the thrower's game.
+    /// </summary>
+    /// <param name="copy">The copy.</param>
+    /// <param name="prefabName">The name of the prefab of the thing it copies.</param>
+    /// <param name="marker">The marker of the copy, which keeps what is left to the thrower until it is gone.</param>
+    public static void LeaveToThrower(GameObject copy, string prefabName, RemoteToolCopy marker) {
+        foreach (var fsm in copy.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            var events = ToolCopyRules.GetThrowerEvents(prefabName, fsm.FsmName);
+            if (events == null || fsm.Fsm == null) {
+                continue;
+            }
+
+            CopyFsms[fsm.Fsm] = events;
+            marker.Fsms.Add(fsm.Fsm);
+        }
+    }
+
+    /// <summary>
+    /// Forgets the state machines of a copy that is gone.
+    /// </summary>
+    public static void ForgetCopy(RemoteToolCopy marker) {
+        foreach (var fsm in marker.Fsms) {
+            CopyFsms.Remove(fsm);
+        }
+
+        marker.Fsms.Clear();
+    }
+
+    /// <summary>
+    /// Has a damager of a copy react to a hit that the thrower's thing landed, as the thing reacts to it: the thing
+    /// may slow down, bounce or break.
+    /// </summary>
+    public static void LandHit(DamageEnemies damager) {
+        (DamagedEnemyField?.GetValue(damager) as Action)?.Invoke();
+    }
+
+    /// <summary>
     /// Switches off what an FSM of a copy would do to this player rather than show, and answers its checks of the
     /// equipment the way of the thrower.
     /// </summary>
@@ -433,15 +752,18 @@ internal static class ToolCopies {
 
             foreach (var action in state.Actions) {
                 switch (action) {
-                    case FreezeMoment:
-                    case FreezeMomentV2:
-                    case DoCameraShake:
+                    case null:
+                        break;
                     case DamageHeroDirectly:
                     case SetDamageHeroAmount:
                     case ToolItemStatesLiquidReportBottleBroken:
                         action.Enabled = false;
                         break;
                     case SendEventByName send when send.sendEvent?.Value?.Contains("Shake") == true:
+                        action.Enabled = false;
+                        break;
+                    // An explosion in water reports a kill of the creatures in it to the journal of the local player
+                    case CallMethodProper call when call.behaviour?.Value == "MaggotRegion":
                         action.Enabled = false;
                         break;
                     case CheckIfToolEquipped check when check.Tool?.Value == Gameplay.PoisonPouchTool:
@@ -452,7 +774,7 @@ internal static class ToolCopies {
                         action.Enabled = false;
                         break;
                     default:
-                        if (action != null && WritesPlayerData(action)) {
+                        if (IsQuieted(action) || WritesPlayerData(action)) {
                             action.Enabled = false;
                         }
 
@@ -460,6 +782,20 @@ internal static class ToolCopies {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Whether an FSM action shakes or flashes something of this player, freezes this game or makes a noise.
+    /// </summary>
+    private static bool IsQuieted(FsmStateAction action) {
+        var name = action.GetType().Name;
+        foreach (var prefix in QuietActionPrefixes) {
+            if (name.StartsWith(prefix, StringComparison.Ordinal)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -486,19 +822,6 @@ internal static class ToolCopies {
                name.StartsWith("AddPlayerData", StringComparison.Ordinal);
     }
 
-    /// <summary>
-    /// Breaks a copy the way the game breaks the oldest one of too many of a tool.
-    /// </summary>
-    public static void BreakCopy(GameObject copy) {
-        foreach (var limiter in copy.GetComponentsInChildren<ToolItemLimiter>(true)) {
-            try {
-                LimiterBreakMethod?.Invoke(limiter, null);
-            } catch (Exception e) {
-                Logger.Warn($"Could not break the partner's '{copy.name}': {e.Message}");
-            }
-        }
-    }
-
     #endregion
 
     #region Setting tools off
@@ -518,11 +841,16 @@ internal static class ToolCopies {
     }
 
     /// <summary>
-    /// Whether something that a hit reaches is a tool of one player while the hit comes from the other.
+    /// Whether something that a hit reaches is a tool of one player while the hit comes from the other, or a copy that
+    /// takes whatever hits it from the thrower's game.
     /// </summary>
     /// <param name="struck">What the hit reaches.</param>
     /// <param name="attacker">What the hit comes from.</param>
     public static bool IsForeignToolHit(GameObject struck, GameObject attacker) {
+        if (IsThrowerCopy(struck)) {
+            return true;
+        }
+
         var struckIsCopy = RemoteAttackComponent.IsRemoteAttack(struck);
         if (!struckIsCopy && !LocalToolComponent.IsLocalTool(struck)) {
             return false;
@@ -567,11 +895,38 @@ internal static class ToolCopies {
 }
 
 /// <summary>
-/// Marks a copy of a thing that the partner threw, with what it needs from the thrower's game.
+/// Marks a copy of a thing of the partner's, with what it needs from the thrower's game.
 /// </summary>
 internal class RemoteToolCopy : MonoBehaviour {
     /// <summary>
     /// Whether the thrower has the pouch that poisons their tools.
     /// </summary>
     public bool Poisoned { get; set; }
+
+    /// <summary>
+    /// Whether the copy is of a thing that the thrower's game keeps up to date, rather than of something that such a
+    /// copy spawned, which runs by itself.
+    /// </summary>
+    public bool FromThrower { get; set; }
+
+    /// <summary>
+    /// The name of the prefab of the thing that the copy is of.
+    /// </summary>
+    public string PrefabName { get; set; } = "";
+
+    /// <summary>
+    /// The state machines of the copy whose changes for reasons that only the thrower's game knows of come from there.
+    /// </summary>
+    public List<Fsm> Fsms { get; } = [];
+
+    /// <summary>
+    /// Called when the copy is gone.
+    /// </summary>
+    [NonSerialized]
+    public Action<RemoteToolCopy>? Destroyed;
+
+    private void OnDestroy() {
+        ToolCopies.ForgetCopy(this);
+        Destroyed?.Invoke(this);
+    }
 }
