@@ -37,11 +37,12 @@ internal class RoomCreatures {
     private readonly Dictionary<EntityType, Maker?> _makers = new();
 
     /// <summary>
-    /// What the room made before the server said which game runs it. The room makes its creatures as it starts and
-    /// the answer takes a round trip to the server, so this is nearly always all of them. The scene host makes them
-    /// entities then, and the scene client takes its own away, since the scene host's come in their place.
+    /// What the room made before the server said which game runs it, and whether each was switched on. The room makes
+    /// its creatures as it starts and the answer takes a round trip to the server, so this is nearly always all of
+    /// them. They are held switched off until then, as the room's own creatures are (see <see cref="Entity"/>), and
+    /// only the scene host's are switched on and made entities; the others are taken away (<see cref="Settle"/>).
     /// </summary>
-    private readonly List<GameObject> _madeBeforeTheRoomWasSettled = [];
+    private readonly List<(GameObject Creature, bool WasActive)> _madeBeforeTheRoomWasSettled = [];
 
     /// <summary>
     /// Detour hook for the FSM action that makes an object from a prefab.
@@ -127,30 +128,23 @@ internal class RoomCreatures {
     }
 
     /// <summary>
-    /// Makes entities of what the room made before this game was told that it runs the room.
+    /// Settles what the room made before the server said which game runs it: in the scene host's game it is switched
+    /// back on and made entities, and in the other game it is taken away, since the scene host's come in its place.
     /// </summary>
-    public void OnSceneHost() {
-        foreach (var creature in _madeBeforeTheRoomWasSettled) {
-            if (creature != null) {
-                Share(creature);
-            }
-        }
-
-        _madeBeforeTheRoomWasSettled.Clear();
-    }
-
-    /// <summary>
-    /// Takes away what the room made before this game was told that the other game runs the room, since the
-    /// creatures that the room made in the scene host's game come in their place.
-    /// </summary>
-    public void OnSceneClient() {
-        foreach (var creature in _madeBeforeTheRoomWasSettled) {
+    /// <param name="share">Whether this game runs the room.</param>
+    public void Settle(bool share) {
+        foreach (var (creature, wasActive) in _madeBeforeTheRoomWasSettled) {
             if (creature == null) {
                 continue;
             }
 
-            Logger.Info($"Taking away '{creature.name}', which the room made here: the scene host's game sends one");
-            Object.Destroy(creature);
+            if (share) {
+                creature.SetActive(wasActive);
+                Share(creature);
+            } else {
+                Logger.Info($"Taking away '{creature.name}', which the room made here: the scene host's game sends it");
+                Object.Destroy(creature);
+            }
         }
 
         _madeBeforeTheRoomWasSettled.Clear();
@@ -205,8 +199,12 @@ internal class RoomCreatures {
             return;
         }
 
+        // Held switched off until it is settled which game runs the room. A creature that ran here in the meantime
+        // could get hold of the player - one hides the player's character and holds on until its own FSM lets go - and
+        // then be taken away, or started over when it is made an entity, with the player never let go of
         if (!_entityManager.IsSceneRoleDetermined) {
-            _madeBeforeTheRoomWasSettled.Add(creature);
+            _madeBeforeTheRoomWasSettled.Add((creature, creature.activeSelf));
+            creature.SetActive(false);
             return;
         }
 

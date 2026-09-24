@@ -143,7 +143,7 @@ internal class EntityManager {
         IsSceneHost = true;
         foreach (var entity in _entities.Values) entity.InitializeHost(sceneHostEpoch);
         _sceneRoleDetermined = true;
-        _roomCreatures.OnSceneHost();
+        _roomCreatures.Settle(share: true);
         DrainPendingUpdates();
     }
 
@@ -155,7 +155,7 @@ internal class EntityManager {
         IsSceneHost = false;
         foreach (var entity in _entities.Values) entity.InitializeClient(sceneHostEpoch);
         _sceneRoleDetermined = true;
-        _roomCreatures.OnSceneClient();
+        _roomCreatures.Settle(share: false);
         DrainPendingUpdates();
     }
 
