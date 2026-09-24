@@ -517,5 +517,27 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    Trapdoor
+    Trapdoor,
+
+    /// <summary>
+    /// Where the lava that chases the players in the room of the sender is in their game, and where they last stood
+    /// safely, sent a few times a second while it chases. <see cref="CoopSaveUpdate.Scene"/> names the room,
+    /// <see cref="CoopSaveUpdate.Sequence"/> tells the newest apart, and <see cref="CoopSaveUpdate.Values"/> holds how
+    /// high the lava is, how fast it rises, whether it is after anyone (1 or 0), whether there is a safe place (1 or
+    /// 0), and that place.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    LavaChase,
+
+    /// <summary>
+    /// The lava that chases the players was set down below the sender for a burn in their game, which does not run
+    /// the room, so the game that does sets its own down the same way. <see cref="CoopSaveUpdate.Values"/> holds how
+    /// high it was set down and for how many seconds it holds there.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    LavaChaseSetDown
 }

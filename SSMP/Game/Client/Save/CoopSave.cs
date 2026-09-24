@@ -460,6 +460,8 @@ internal partial class CoopSave {
         UpdateWishTalk(partner);
         UpdateDeliverySummon(hero, partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateRescue(hero, partner != null && _checkedWith == partner.Id ? partner : null);
+        UpdateLavaChase(hero, partner != null && _checkedWith == partner.Id ? partner : null);
+        UpdateChaseStandUp(partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateRaces(partner != null && _checkedWith == partner.Id ? partner : null);
 
         if (partner != null && _checkedWith == partner.Id) {
@@ -624,6 +626,7 @@ internal partial class CoopSave {
         OnLiftSceneChanged();
         OnDeliverySceneChanged();
         OnRescueSceneChanged();
+        OnLavaChaseSceneChanged(newScene);
         ResetRaces();
     }
 
@@ -860,6 +863,12 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.RescueLost:
                 OnRescueLost(player);
+                break;
+            case CoopSaveUpdateKind.LavaChase:
+                OnLavaChase(player, update);
+                break;
+            case CoopSaveUpdateKind.LavaChaseSetDown:
+                OnLavaChaseSetDown(player, update);
                 break;
             case CoopSaveUpdateKind.FleaGameScore:
                 OnFleaGameScore?.Invoke(player, update);

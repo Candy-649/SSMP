@@ -187,6 +187,17 @@ internal partial class CoopSave {
         /// a death of one player that the other lived through.
         /// </summary>
         public bool PartnerDown { get; set; }
+
+        /// <summary>
+        /// Whether the player died while a lava was chasing the two of them, which leaves no cocoon: they stand up
+        /// beside the partner a few seconds later instead (see <see cref="UpdateChaseStandUp"/>).
+        /// </summary>
+        public bool Chase { get; set; }
+
+        /// <summary>
+        /// Where the partner said to stand up, for a death in the chase, or null to stand up where they fell.
+        /// </summary>
+        public Vector2? StandAt { get; set; }
     }
 
     /// <summary>
@@ -359,6 +370,7 @@ internal partial class CoopSave {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
         _deathAnnouncementHook = HoldBackTheNewsOfADeath();
         _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
+        _burnHook = WatchForBurns();
         _timePassesHook = CreateHook(
             typeof(global::GameManager).GetMethod("TimePasses", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<global::GameManager>, global::GameManager>(OnTimePasses)
@@ -441,13 +453,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Writes down a death the room dealt and undid by itself.
+    /// Writes down a death the room dealt and undid by itself, and for a burn in the chase of a lava, puts the player
+    /// back beside the partner (<see cref="OnBurn"/>).
     /// </summary>
     /// <param name="orig">The original call.</param>
     /// <param name="self">The hero controller.</param>
-    private static IEnumerator OnRoomPutThePlayerBack(Func<HeroController, IEnumerator> orig, HeroController self) {
+    private IEnumerator OnRoomPutThePlayerBack(Func<HeroController, IEnumerator> orig, HeroController self) {
         try {
             var playerData = PlayerData.instance;
+            TakeBurnRedirect(playerData);
             Logger.Info(
                 "The room itself killed the player and is putting them straight back: from " +
                 $"{self.transform.position} to {(playerData == null ? "?" : playerData.hazardRespawnLocation.ToString())}, " +
@@ -885,24 +899,36 @@ internal partial class CoopSave {
             return false;
         }
 
+        // In the chase of a lava nobody can come back for a cocoon: the lava is already over where the player fell.
+        // They stand up beside the partner instead, the way a game made for two brings a player back.
+        var chase = IsChaseWithPartner(partner);
+
         var gameManager = global::GameManager.instance;
         _rescue = new PendingRescue(scene, position) {
             // Taken now, before the death has played any of itself out, so it is the music of the room rather than
             // the music of the death
             Music = gameManager == null ? null : gameManager.AudioManager.CurrentMusicCue,
-            Key = ++_lastRescueKey
+            Key = ++_lastRescueKey,
+            Chase = chase
         };
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.RescueOffer,
             Scene = scene,
-            Values = [position.x, position.y],
+            Values = chase ? [position.x, position.y, 1f] : [position.x, position.y],
             Key = _rescue.Key
         });
+        SayTheLocalPlayerIsDown(true);
+
+        if (chase) {
+            Logger.Info($"Died in the chase of the lava in '{scene}', so standing up beside {partner.Username} soon");
+
+            return true;
+        }
+
         // Shown to the player themselves as well, not only to the one who can open it. Watching the room you died in
         // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting.
         _rescueOwnCocoon = SpawnRescueCocoon(position, false);
-        SayTheLocalPlayerIsDown(true);
 
         Logger.Info($"Waiting for {partner.Username} to open the cocoon in '{scene}'");
 
@@ -1389,6 +1415,15 @@ internal partial class CoopSave {
             ? Lang.Pick("your teammate", "队友")
             : _rescuePartnerName;
 
+        if (rescue.Chase) {
+            _uiManager.CoopPrompt.Show(Lang.Pick(
+                $"You will stand up beside {partnerName} in a moment. Press {LeaveKeyName} to go to your bench instead",
+                $"马上会在 {partnerName} 身边站起来。按 {LeaveKeyName} 直接回长椅"
+            ));
+
+            return;
+        }
+
         _uiManager.CoopPrompt.Show(
             rescue.Hits > 0
                 ? Lang.Pick(
@@ -1582,7 +1617,12 @@ internal partial class CoopSave {
             // What the death left behind cannot tell this. The game marks a death by the room (cState.hazardDeath)
             // only on the way back to that place after a hit the player lives through; the hit that takes the last
             // of the health goes straight to the death without it (HeroController.TakeDamage).
-            if (IsInOrOverTheRoomsHarm(hero.transform.position)) {
+            // Beside the partner, for a death in the chase: a place their game picked as clear of the lava, while the
+            // game's own mark is usually under it by now
+            if (rescue.StandAt is { } standAt) {
+                Logger.Info($"Standing back up beside the partner at {standAt}");
+                hero.transform.position = new Vector3(standAt.x, standAt.y, hero.transform.position.z);
+            } else if (IsInOrOverTheRoomsHarm(hero.transform.position)) {
                 var safe = playerData.hazardRespawnLocation;
                 Logger.Info(
                     $"Standing back up at {safe} instead of {hero.transform.position}, which is in or over lava, " +
@@ -1816,6 +1856,14 @@ internal partial class CoopSave {
         _partnerCocoonPosition = new Vector2(update.Values[0], update.Values[1]);
         _partnerRescueKey = update.Key;
 
+        // A death in the chase of a lava leaves no cocoon to show, now or on walking into that room later
+        if (update.Values.Count >= 3 && update.Values[2] > 0f) {
+            _partnerCocoonScene = "";
+            OnChaseDeath(player, update);
+
+            return;
+        }
+
         Chat(
             SceneUtil.GetCurrentSceneName() == update.Scene
                 ? Lang.Pick(
@@ -1855,6 +1903,11 @@ internal partial class CoopSave {
 
         rescue.Hits = update.Part;
         if (update.Part >= (update.PartCount == 0 ? RescueHits : update.PartCount)) {
+            // A death in the chase is stood up beside the partner, at the place their game picked
+            if (update.Values.Count >= 2) {
+                rescue.StandAt = new Vector2(update.Values[0], update.Values[1]);
+            }
+
             rescue.Outcome = RescueOutcome.Rescued;
         }
     }
@@ -1868,6 +1921,8 @@ internal partial class CoopSave {
         if (_partnerWaitingRescue == player.Id) {
             _partnerWaitingRescue = null;
         }
+
+        ForgetChaseDeath(player.Id);
 
         if (_rescueTarget is { } target && target.PlayerId == player.Id) {
             RemoveRescueTarget();
@@ -2091,6 +2146,11 @@ internal partial class CoopSave {
 
         RemoveRescueTarget();
         RemoveOwnCocoon();
+        if (_chaseHiddenPartner is { } hidden) {
+            ForgetChaseDeath(hidden);
+        }
+
+        _chaseStandUp = null;
         _partnerWaitingRescue = null;
         _partnerCocoonScene = "";
         _uiManager.CoopPrompt.Hide();
