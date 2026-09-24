@@ -183,15 +183,6 @@ internal partial class CoopSave {
         public ulong Key { get; set; }
 
         /// <summary>
-        /// Whether what killed the player was the room rather than a creature - lava, spikes, a fall.
-        ///
-        /// It decides where they are put when they are pulled back up. Everywhere else that is where they fell, which
-        /// is what makes being pulled up worth anything; here it is the inside of the thing that killed them, and
-        /// they would die again in the time it takes to stand up.
-        /// </summary>
-        public bool KilledByTheRoom { get; set; }
-
-        /// <summary>
         /// Whether the wait ended because the partner went down as well, which makes this one of two deaths rather than
         /// a death of one player that the other lived through.
         /// </summary>
@@ -895,13 +886,11 @@ internal partial class CoopSave {
         }
 
         var gameManager = global::GameManager.instance;
-        var hero = HeroController.instance;
         _rescue = new PendingRescue(scene, position) {
             // Taken now, before the death has played any of itself out, so it is the music of the room rather than
             // the music of the death
             Music = gameManager == null ? null : gameManager.AudioManager.CurrentMusicCue,
-            Key = ++_lastRescueKey,
-            KilledByTheRoom = hero != null && hero.cState.hazardDeath
+            Key = ++_lastRescueKey
         };
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
@@ -1584,19 +1573,20 @@ internal partial class CoopSave {
             hero.rb2d.bodyType = RigidbodyType2D.Dynamic;
             hero.AffectedByGravity(true);
 
-            // Put back on their feet where they fell is the whole point of this everywhere else. Where the room
-            // itself did the killing it is the one place that cannot be done: that spot is the inside of the lava,
-            // the spikes or the drop, and a player put back into it dies again before they can move - which is a
-            // death, a cocoon, a rescue and a death again, with nothing either player can do to break out of it.
-            // The game keeps a place of its own for exactly this, which is where it would have put them itself.
-            // A creature can kill a player over the same lava too, in the middle of a jump across it. Standing up
-            // there is falling straight in, and lava takes two masks - all that a rescue gives back of five.
-            var overTheRoomsHarm = !rescue.KilledByTheRoom && IsOverTheRoomsHarm(hero.transform.position);
-            if (rescue.KilledByTheRoom || overTheRoomsHarm) {
+            // Put back on their feet where they fell is the whole point of this everywhere else. Where that spot is
+            // in lava, spikes or a drop, or over one, it is the one place that cannot be done: a player put back there
+            // falls straight in - a creature can kill a player in the middle of a jump across lava - and lava takes
+            // two masks, all that a rescue gives back of five. The game keeps a place of its own for exactly this,
+            // which is where it would have put them itself.
+            //
+            // What the death left behind cannot tell this. The game marks a death by the room (cState.hazardDeath)
+            // only on the way back to that place after a hit the player lives through; the hit that takes the last
+            // of the health goes straight to the death without it (HeroController.TakeDamage).
+            if (IsInOrOverTheRoomsHarm(hero.transform.position)) {
                 var safe = playerData.hazardRespawnLocation;
                 Logger.Info(
-                    $"Standing back up at {safe} instead of {hero.transform.position}: " +
-                    (overTheRoomsHarm ? "below it is lava, spikes or a pit" : "the room itself did the killing")
+                    $"Standing back up at {safe} instead of {hero.transform.position}, which is in or over lava, " +
+                    "spikes or a drop"
                 );
                 hero.transform.position = safe;
             }
@@ -1691,11 +1681,21 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the first thing below the given place is something of the room that hurts - lava, spikes, a pit -
-    /// rather than ground the player can stand on, so that a player stood up there falls straight into it.
+    /// Whether the given place is inside something of the room that hurts - lava, spikes, a drop - or has one as the
+    /// first thing below it rather than ground the player can stand on, so that a player stood up there falls
+    /// straight into it.
     /// </summary>
     /// <param name="position">Where the player would stand up.</param>
-    private static bool IsOverTheRoomsHarm(Vector2 position) {
+    private static bool IsInOrOverTheRoomsHarm(Vector2 position) {
+        // Inside is asked on its own. This game's physics settings keep a query from seeing a collider it starts in
+        // (queriesStartInColliders is off), so the look below would pass the lava the player is sunk in and find the
+        // floor under it
+        var inside = new List<Collider2D>();
+        Physics2D.OverlapPoint(position, new ContactFilter2D().NoFilter(), inside);
+        if (inside.Exists(IsTheRoomsHarm)) {
+            return true;
+        }
+
         var hits = new List<RaycastHit2D>();
         Physics2D.Raycast(position, Vector2.down, new ContactFilter2D().NoFilter(), hits, Mathf.Infinity);
 
@@ -1706,7 +1706,7 @@ internal partial class CoopSave {
             var collider = hit.collider;
             var isGround = !collider.isTrigger &&
                            !Physics2D.GetIgnoreLayerCollision(PlayerLayer, collider.gameObject.layer);
-            var isHarm = collider.TryGetComponent<DamageHero>(out var damage) && IsTheRoomsHarm(damage.hazardType);
+            var isHarm = IsTheRoomsHarm(collider);
             if ((isGround || isHarm) && hit.distance < nearest) {
                 nearest = hit.distance;
                 harm = isHarm;
@@ -1717,13 +1717,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a kind of harm belongs to the room rather than to a creature: every kind that the game answers by
-    /// putting the player back at the last safe place, which is all but a creature's attack and an explosion
-    /// (HeroController.TakeDamage).
+    /// Whether a collider hurts the player for the room rather than for a creature. The game reads the harm off the
+    /// collider's own object (HeroBox.CheckForDamage), and answers every kind of it but a creature's attack and an
+    /// explosion by putting the player back at the last safe place (HeroController.TakeDamage).
     /// </summary>
-    private static bool IsTheRoomsHarm(GlobalEnums.HazardType type) {
-        return type is not (GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or
-            GlobalEnums.HazardType.EXPLOSION);
+    private static bool IsTheRoomsHarm(Collider2D collider) {
+        return collider.TryGetComponent<DamageHero>(out var damage) && damage.hazardType is not (
+            GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or GlobalEnums.HazardType.EXPLOSION);
     }
 
     /// <summary>
