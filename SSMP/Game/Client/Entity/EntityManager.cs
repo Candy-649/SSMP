@@ -49,6 +49,11 @@ internal class EntityManager {
     /// </summary>
     private Hook? _cameraShakeHook;
 
+    /// <summary>
+    /// The creatures that the room makes rather than a creature, which only the scene host's game makes.
+    /// </summary>
+    private readonly RoomCreatures _roomCreatures;
+
     // Both flags are set together in InitializeSceneHost / InitializeSceneClient.
     public bool IsSceneHost { get; private set; }
 
@@ -71,6 +76,7 @@ internal class EntityManager {
         _netClient = netClient;
         _entities = new Dictionary<ushort, Entity>();
         _pendingUpdates = new Queue<BaseEntityUpdate>();
+        _roomCreatures = new RoomCreatures(netClient, this);
     }
 
     /// <summary>
@@ -103,6 +109,8 @@ internal class EntityManager {
             typeof(CameraManagerReference).GetMethod(nameof(CameraManagerReference.DoShake)),
             OnCameraShake
         );
+
+        _roomCreatures.RegisterHooks();
     }
 
     /// <summary>
@@ -122,6 +130,8 @@ internal class EntityManager {
         _cameraShakeHook?.Dispose();
         _cameraShakeHook = null;
 
+        _roomCreatures.DeregisterHooks();
+
         ClearEntities();
     }
 
@@ -133,6 +143,7 @@ internal class EntityManager {
         IsSceneHost = true;
         foreach (var entity in _entities.Values) entity.InitializeHost(sceneHostEpoch);
         _sceneRoleDetermined = true;
+        _roomCreatures.OnSceneHost();
         DrainPendingUpdates();
     }
 
@@ -144,6 +155,7 @@ internal class EntityManager {
         IsSceneHost = false;
         foreach (var entity in _entities.Values) entity.InitializeClient(sceneHostEpoch);
         _sceneRoleDetermined = true;
+        _roomCreatures.OnSceneClient();
         DrainPendingUpdates();
     }
 
@@ -170,18 +182,22 @@ internal class EntityManager {
             return;
         }
 
-        // Any entity of the spawning type that spawns something of the spawned type works as a template: the thing is
-        // made from what the template's FSMs spawn
+        // What the room made is made the way the room here makes it. Otherwise any entity of the spawning type that
+        // spawns something of the spawned type works as a template: the thing is made from what its FSMs spawn
         GameObject? spawnedObject = null;
-        foreach (var templateEntity in _entities.Values.Where(e => e.Type == spawningType)) {
-            spawnedObject = EntitySpawner.SpawnEntityGameObject(
-                spawningType,
-                spawnedType,
-                templateEntity.Object.Client,
-                templateEntity.GetClientFsms()
-            );
-            if (spawnedObject != null) {
-                break;
+        if (spawningType == EntityType.Room) {
+            spawnedObject = _roomCreatures.Make(spawnedType);
+        } else {
+            foreach (var templateEntity in _entities.Values.Where(e => e.Type == spawningType)) {
+                spawnedObject = EntitySpawner.SpawnEntityGameObject(
+                    spawningType,
+                    spawnedType,
+                    templateEntity.Object.Client,
+                    templateEntity.GetClientFsms()
+                );
+                if (spawnedObject != null) {
+                    break;
+                }
             }
         }
 
@@ -293,6 +309,7 @@ internal class EntityManager {
 
         _sceneRoleDetermined = false;
         FindEntitiesInScene(newScene, lateLoad: false);
+        _roomCreatures.FindMakers(newScene);
         DrainPendingUpdates();
     }
 
@@ -320,6 +337,7 @@ internal class EntityManager {
 
         Logger.Info($"Additional scene loaded ({scene.name}), looking for entities");
         FindEntitiesInScene(scene, lateLoad: true);
+        _roomCreatures.FindMakers(scene);
         DrainPendingUpdates();
     }
 
@@ -487,6 +505,7 @@ internal class EntityManager {
 
         _pendingUpdates.Clear();
         MusicComponent.ClearInstance();
+        _roomCreatures.Clear();
     }
 
     // Once an update is buffered, the queue owns its lifetime until it is applied or discarded.

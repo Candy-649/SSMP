@@ -251,5 +251,11 @@ internal enum EntityType {
     BellfleaSwooper,
     BellfleaGameStart,
     SongAutomatonTiny,
-    AspidHatchling
+    AspidHatchling,
+
+    /// <summary>
+    /// Not a creature: what a creature that the room makes itself is spawned by in a spawn message (see
+    /// <see cref="RoomCreatures"/>). No registry entry has this type.
+    /// </summary>
+    Room
 }
