@@ -371,6 +371,10 @@ internal partial class CoopSave {
         _deathAnnouncementHook = HoldBackTheNewsOfADeath();
         _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
         _burnHook = WatchForBurns();
+        _respawnResetHook = CreateHook(
+            typeof(HeroController).GetMethod("HazardRespawnReset", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<HeroController>, HeroController>(OnRespawnReset)
+        );
         _timePassesHook = CreateHook(
             typeof(global::GameManager).GetMethod("TimePasses", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<global::GameManager>, global::GameManager>(OnTimePasses)

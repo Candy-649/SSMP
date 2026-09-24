@@ -524,7 +524,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// safely, sent a few times a second while it chases. <see cref="CoopSaveUpdate.Scene"/> names the room,
     /// <see cref="CoopSaveUpdate.Sequence"/> tells the newest apart, and <see cref="CoopSaveUpdate.Values"/> holds how
     /// high the lava is, how fast it rises, whether it is after anyone (1 or 0), whether there is a safe place (1 or
-    /// 0), and that place.
+    /// 0), that place, and how many seconds ago the sender stood there.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.

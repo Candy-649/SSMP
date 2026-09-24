@@ -461,7 +461,7 @@ internal partial class CoopSave {
         UpdateDeliverySummon(hero, partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateRescue(hero, partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateLavaChase(hero, partner != null && _checkedWith == partner.Id ? partner : null);
-        UpdateChaseStandUp(partner != null && _checkedWith == partner.Id ? partner : null);
+        UpdateChaseStandUp(hero, partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateRaces(partner != null && _checkedWith == partner.Id ? partner : null);
 
         if (partner != null && _checkedWith == partner.Id) {

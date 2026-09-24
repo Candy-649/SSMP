@@ -96,6 +96,17 @@ internal partial class CoopSave {
     private const float LavaClearance = 2f;
 
     /// <summary>
+    /// The layers on which the game looks for the ground below the place it puts a player back after a burn.
+    /// </summary>
+    private const int PutBackGroundLayerMask = 8448;
+
+    /// <summary>
+    /// How much further down than the feet of a player that ground may be below them, which covers slopes and small
+    /// steps.
+    /// </summary>
+    private const float PutBackGroundSlack = 0.5f;
+
+    /// <summary>
     /// How long a player who died in the chase lies down before they stand up beside the other player, in seconds.
     /// </summary>
     private const float ChaseStandUpDelay = 3f;
@@ -168,6 +179,11 @@ internal partial class CoopSave {
     private Hook? _burnHook;
 
     /// <summary>
+    /// Detour hook for the game telling the room that the local player has been put back after a burn.
+    /// </summary>
+    private Hook? _respawnResetHook;
+
+    /// <summary>
     /// Whether a failure of this has been logged already.
     /// </summary>
     private bool _lavaChaseFailed;
@@ -176,17 +192,23 @@ internal partial class CoopSave {
     /// A lava that chases, in the room the local player is in.
     /// </summary>
     private sealed class LavaChase {
-        public LavaChase(PlayMakerFSM fsm, Rigidbody2D body, GameObject target, Rigidbody2D targetBody) {
+        public LavaChase(PlayMakerFSM fsm, Rigidbody2D body, GameObject target, Rigidbody2D targetBody, string scene) {
             Fsm = fsm;
             Body = body;
             Target = target;
             TargetBody = targetBody;
+            Scene = scene;
         }
 
         /// <summary>
         /// The FSM that raises it.
         /// </summary>
         public PlayMakerFSM Fsm { get; }
+
+        /// <summary>
+        /// The room it is in.
+        /// </summary>
+        public string Scene { get; }
 
         /// <summary>
         /// The body it moves by.
@@ -365,6 +387,8 @@ internal partial class CoopSave {
     /// </summary>
     private void ForgetLavaChase() {
         if (_lavaChase is { } chase) {
+            StandUpOnLeaving(chase);
+
             if (chase.Fsm != null) {
                 UnmuteLavaStops(chase);
             }
@@ -417,7 +441,9 @@ internal partial class CoopSave {
         targetBody.bodyType = RigidbodyType2D.Kinematic;
         targetBody.gravityScale = 0f;
 
-        var chase = new LavaChase(fsm, body, target, targetBody) { Band = FindLavaBand(fsm) };
+        var chase = new LavaChase(fsm, body, target, targetBody, SceneUtil.GetCurrentSceneName()) {
+            Band = FindLavaBand(fsm)
+        };
         foreach (var register in fsm.GetComponents<EventRegister>()) {
             if (register != null && Array.IndexOf(LavaStopEvents, register.SubscribedEvent) >= 0) {
                 chase.Stops.Add(register);
@@ -569,15 +595,13 @@ internal partial class CoopSave {
     /// </summary>
     private void FollowTheRoomsLava(LavaChase chase) {
         try {
-            var body = chase.Body;
-            if (body == null) {
+            if (chase.Body == null) {
                 return;
             }
 
             var now = Time.time;
             if (now < chase.HoldUntil) {
-                body.position = new Vector2(body.position.x, chase.HoldY);
-                body.linearVelocity = new Vector2(body.linearVelocity.x, 0f);
+                SetLavaY(chase, chase.HoldY, 0f);
                 return;
             }
 
@@ -589,11 +613,22 @@ internal partial class CoopSave {
 
             // Where it has got to since, going by how fast it was rising and how long the news took to arrive
             var age = now - chase.SampleTime + (float) _netClient.UpdateManager.AverageRtt / 2000f;
-            body.position = new Vector2(body.position.x, chase.SampleY + chase.SampleVelocity * age);
-            body.linearVelocity = new Vector2(body.linearVelocity.x, chase.SampleVelocity);
+            SetLavaY(chase, chase.SampleY + chase.SampleVelocity * age, chase.SampleVelocity);
         } catch (Exception e) {
             LogLavaChaseError(e);
         }
+    }
+
+    /// <summary>
+    /// Puts the lava at a height and has it rise at a speed. Where it is drawn is set as well as its body: the actions
+    /// of its FSM read and set the one, and move it by the other.
+    /// </summary>
+    private static void SetLavaY(LavaChase chase, float y, float velocity) {
+        var body = chase.Body;
+        var transform = body.transform;
+        transform.position = new Vector3(transform.position.x, y, transform.position.z);
+        body.position = new Vector2(body.position.x, y);
+        body.linearVelocity = new Vector2(body.linearVelocity.x, velocity);
     }
 
     /// <summary>
@@ -625,10 +660,17 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// How high the top of the lava is, or null before the part that burns has been seen.
+    /// How high the lava is. Read from where it is drawn rather than from its body: the actions of its FSM that put it
+    /// somewhere set that, and the body only catches up at the next step of the physics.
+    /// </summary>
+    private static float GetLavaY(LavaChase chase) => chase.Body.transform.position.y;
+
+    /// <summary>
+    /// How high the top of the lava is, or null before the part that burns has been seen, or once the lava is gone
+    /// with the room it was in.
     /// </summary>
     private static float? GetLavaTop(LavaChase chase) {
-        return chase.BandTopOffset is { } offset ? chase.Body.position.y + offset : null;
+        return chase.BandTopOffset is { } offset && chase.Body != null ? GetLavaY(chase) + offset : null;
     }
 
     /// <summary>
@@ -657,7 +699,7 @@ internal partial class CoopSave {
             }
 
             if (chase.Band is { enabled: true } band && band.gameObject.activeInHierarchy) {
-                chase.BandTopOffset = band.bounds.max.y - chase.Body.position.y;
+                chase.BandTopOffset = band.bounds.max.y - GetLavaY(chase);
             }
 
             NoteSafeSpot(hero, chase);
@@ -683,7 +725,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Notes where the local player stands if it is a safe place to put someone: on the ground, clear of the lava, and
-    /// over nothing that hurts.
+    /// over nothing that hurts. The ground has to be right below the middle of the player, which is where the game
+    /// looks for it when it puts a player back: standing on the very edge of a ledge already counts as being on the
+    /// ground, and from there the game would find the ground at the bottom of the drop instead, under the lava.
     /// </summary>
     private static void NoteSafeSpot(HeroController hero, LavaChase chase) {
         if (hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning ||
@@ -692,12 +736,26 @@ internal partial class CoopSave {
         }
 
         var position = (Vector2) hero.transform.position;
-        if (!IsAboveLava(chase, position) || IsInOrOverTheRoomsHarm(position)) {
+        if (!IsAboveLava(chase, position) || IsInOrOverTheRoomsHarm(position) || !HasGroundRightBelow(hero, position)) {
             return;
         }
 
         chase.SafeSpot = position;
         chase.SafeTime = Time.time;
+    }
+
+    /// <summary>
+    /// Whether the ground the game puts a player back on is straight below the middle of the local player, no further
+    /// down than their feet and a little more.
+    /// </summary>
+    private static bool HasGroundRightBelow(HeroController hero, Vector2 position) {
+        var collider = hero.GetComponent<Collider2D>();
+        if (collider == null) {
+            return false;
+        }
+
+        var reach = position.y - collider.bounds.min.y + PutBackGroundSlack;
+        return Helper.IsRayHittingNoTriggers(position, Vector2.down, reach, PutBackGroundLayerMask);
     }
 
     /// <summary>
@@ -710,19 +768,21 @@ internal partial class CoopSave {
         }
 
         _nextLavaSampleTime = now + LavaSampleInterval;
-        var hasSafeSpot = Time.time - chase.SafeTime <= LavaSafeSpotLifetime;
+        var safeAge = Time.time - chase.SafeTime;
+        var hasSafeSpot = safeAge <= LavaSafeSpotLifetime;
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.LavaChase,
             Scene = SceneUtil.GetCurrentSceneName(),
             Sequence = ++_lavaChaseSequence,
             Values = [
-                chase.Body.position.y,
+                GetLavaY(chase),
                 chase.Body.linearVelocity.y,
                 IsLavaChasing(chase) ? 1f : 0f,
                 hasSafeSpot ? 1f : 0f,
                 chase.SafeSpot.x,
-                chase.SafeSpot.y
+                chase.SafeSpot.y,
+                hasSafeSpot ? safeAge : 0f
             ]
         });
     }
@@ -753,11 +813,10 @@ internal partial class CoopSave {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.LavaChaseSetDown,
             Scene = SceneUtil.GetCurrentSceneName(),
-            Values = [chase.Body.position.y, pause + LavaSetDownHoldExtra]
+            Values = [GetLavaY(chase), pause + LavaSetDownHoldExtra]
         });
         Logger.Info(
-            $"The lava was set down to {chase.Body.position.y} for a burn of this player, telling the game that runs " +
-            "the room"
+            $"The lava was set down to {GetLavaY(chase)} for a burn of this player, telling the game that runs the room"
         );
     }
 
@@ -767,8 +826,14 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update.</param>
     private void OnLavaChase(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCheckedPartner()?.Id != player.Id || _lavaChase is not { } chase || update.Values.Count < 6 ||
-            update.Scene != SceneUtil.GetCurrentSceneName() || update.Sequence <= chase.PartnerSequence) {
+        if (GetCheckedPartner()?.Id != player.Id || _lavaChase is not { } chase || update.Values.Count < 7 ||
+            update.Scene != SceneUtil.GetCurrentSceneName()) {
+            return;
+        }
+
+        // One that was overtaken on the way is dropped, but only while newer ones keep arriving: a partner whose game
+        // was started again counts from the beginning again
+        if (update.Sequence <= chase.PartnerSequence && Time.time - chase.SampleTime <= LavaSampleLifetime) {
             return;
         }
 
@@ -780,7 +845,8 @@ internal partial class CoopSave {
 
         if (update.Values[3] > 0f) {
             chase.PartnerSafeSpot = new Vector2(update.Values[4], update.Values[5]);
-            chase.PartnerSafeTime = Time.time;
+            // As old as it already was when it was sent
+            chase.PartnerSafeTime = Time.time - update.Values[6];
         }
     }
 
@@ -793,6 +859,12 @@ internal partial class CoopSave {
     private void OnLavaChaseSetDown(ClientPlayerData player, CoopSaveUpdate update) {
         if (GetCheckedPartner()?.Id != player.Id || _lavaChase is not { } chase || update.Values.Count < 2 ||
             update.Scene != SceneUtil.GetCurrentSceneName() || IsSceneHost?.Invoke() != true) {
+            return;
+        }
+
+        // Only a lava that is after the players, and only downwards: one at rest before the chase or at the top after
+        // it stays where the game put it
+        if (!IsLavaChasing(chase) || update.Values[0] >= GetLavaY(chase)) {
             return;
         }
 
@@ -878,7 +950,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Takes where the game is about to put the local player back after a burn, if that burn is one that puts them
-    /// beside the partner instead.
+    /// beside the partner instead. The partner has usually moved on since the burn, and the lava, which did not stop
+    /// for it, has gone on rising: where they stand now is used if they stand somewhere safe, the place taken at the
+    /// burn if the lava has not reached it yet, and otherwise the burn goes the game's own way after all.
     /// </summary>
     private void TakeBurnRedirect(PlayerData? playerData) {
         if (_burnRedirect is not { } spot) {
@@ -886,11 +960,38 @@ internal partial class CoopSave {
         }
 
         _burnRedirect = null;
-        if (playerData == null || Time.time - _burnRedirectTime > 10f) {
+        if (playerData == null || Time.time - _burnRedirectTime > 10f || _lavaChase is not { } chase) {
+            return;
+        }
+
+        if (GetCheckedPartner() is { } partner && TryGetPartnerSafeSpot(chase, partner, out var newer)) {
+            spot = newer;
+        } else if (!IsAboveLava(chase, spot)) {
+            // The game's own mark, with the lava stopped and set down below it, which is what the burn would have
+            // told the lava had it not been kept from stopping
+            UnmuteLavaStops(chase);
+            chase.Fsm.SendEvent(LavaStopEvents[0]);
+            Logger.Info("Nowhere beside the partner is clear of the lava any more, so going back the game's own way");
+
             return;
         }
 
         playerData.hazardRespawnLocation = new Vector3(spot.x, spot.y, playerData.hazardRespawnLocation.z);
+    }
+
+    /// <summary>
+    /// The game has put the local player back after a burn and is about to tell the room so. That is when the lava
+    /// takes where the player it chases is, to set itself down below them, and the object it asks about was last
+    /// moved before the player was, so it is moved to where they are now first.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The hero controller.</param>
+    private void OnRespawnReset(Action<HeroController> orig, HeroController self) {
+        if (_lavaChase is { } chase) {
+            MoveChaseTarget(chase, false);
+        }
+
+        orig(self);
     }
 
     /// <summary>
@@ -926,63 +1027,102 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Stands up a partner who died in the chase, beside the local player, once they have lain long enough. It is this
-    /// game that says when, and only while the local player is on their feet: a player who goes down first stops
-    /// anyone being stood up by them, which makes it two players down, and that is decided the same way in both games.
+    /// Stands up a partner who died in the chase, beside the local player, once they have lain long enough and the
+    /// local player is on their feet somewhere clear of the lava. It is this game that says when, and only while the
+    /// local player is standing: a player who goes down first stops anyone being stood up by them, which makes it two
+    /// players down, and that is decided the same way in both games.
     /// </summary>
+    /// <param name="hero">The hero controller.</param>
     /// <param name="partner">The partner whose save is checked with this one, or null.</param>
-    private void UpdateChaseStandUp(ClientPlayerData? partner) {
+    private void UpdateChaseStandUp(HeroController hero, ClientPlayerData? partner) {
         try {
             if (_chaseStandUp is not { } standUp || Time.unscaledTime < standUp.At) {
                 return;
             }
 
-            _chaseStandUp = null;
+            // No longer this game's to decide: the partner left, stood up or went to their bench, or this player went
+            // down after them and told them so
             if (partner == null || partner.Id != standUp.PlayerId || _partnerWaitingRescue != standUp.PlayerId) {
+                _chaseStandUp = null;
                 return;
             }
 
-            var hero = HeroController.instance;
-            if (hero == null || hero.cState.dead || _rescue != null) {
-                Logger.Info($"Not standing {partner.Username} up: this player is down as well");
-                return;
+            Vector2? spot = null;
+            if (_lavaChase is { } chase && chase.Scene == standUp.Scene) {
+                // Standing them up while this player is in mid-air, being put back after a burn, or somewhere the lava
+                // is about to reach would drop them straight into it, so it waits for a place that is clear
+                if (hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning ||
+                    !TryGetOwnSafeSpot(chase, out var beside)) {
+                    return;
+                }
+
+                spot = beside;
             }
 
-            if (SceneUtil.GetCurrentSceneName() != standUp.Scene) {
-                Logger.Info($"Not standing {partner.Username} up: this player is no longer in the room they died in");
-                return;
-            }
-
-            var spot = GetStandUpSpot(hero);
-
-            // Counted as standing from here on, so that a death of this player now is one of one player, which waits
-            // to be stood up beside them - the same answer their game gives once this arrives
-            _partnerWaitingRescue = null;
-            Send(new CoopSaveUpdate {
-                TargetId = partner.Id,
-                Kind = CoopSaveUpdateKind.RescueHit,
-                Part = RescueHits,
-                PartCount = RescueHits,
-                Key = standUp.Key,
-                Values = [spot.x, spot.y]
-            });
-            Logger.Info($"Standing {partner.Username} up beside this player at {spot}");
+            // Otherwise this player is somewhere without the lava of that room, and they stand up where they fell
+            _chaseStandUp = null;
+            StandUpChasePartner(partner, standUp, spot);
         } catch (Exception e) {
             LogLavaChaseError(e);
         }
     }
 
     /// <summary>
-    /// Where a partner who died in the chase stands up: where the local player last stood safely, or where they are
-    /// now if that place is gone under the lava.
+    /// Where the local player last stood safely, if that was a moment ago and the lava has not reached it since.
     /// </summary>
-    private Vector2 GetStandUpSpot(HeroController hero) {
-        if (_lavaChase is { } chase && Time.time - chase.SafeTime <= LavaSafeSpotLifetime &&
-            IsAboveLava(chase, chase.SafeSpot)) {
-            return chase.SafeSpot;
+    private static bool TryGetOwnSafeSpot(LavaChase chase, out Vector2 spot) {
+        spot = chase.SafeSpot;
+        return Time.time - chase.SafeTime <= LavaSafeSpotLifetime && IsAboveLava(chase, spot);
+    }
+
+    /// <summary>
+    /// Stands up a partner who is still lying down in the chase of the room the local player is leaving, at once: with
+    /// the local player gone there is nobody left in that room to stand beside, and waiting for them would leave the
+    /// partner lying there until their wait ran out.
+    /// </summary>
+    private void StandUpOnLeaving(LavaChase chase) {
+        if (_chaseStandUp is not { } standUp || standUp.Scene != chase.Scene) {
+            return;
         }
 
-        return hero.transform.position;
+        _chaseStandUp = null;
+        if (GetCheckedPartner() is not { } partner || partner.Id != standUp.PlayerId ||
+            _partnerWaitingRescue != partner.Id) {
+            return;
+        }
+
+        // The last place the local player stood safely in that room, however long ago, as long as the lava has not
+        // reached it: it is no longer about standing beside them, only about the way out
+        var hasSpot = chase.SafeTime > float.NegativeInfinity && IsAboveLava(chase, chase.SafeSpot);
+        StandUpChasePartner(partner, standUp, hasSpot ? chase.SafeSpot : null);
+    }
+
+    /// <summary>
+    /// Stands up a partner who died in the chase: at the given place, or without one where they fell, the way a
+    /// partner pulled out of a cocoon stands up.
+    /// </summary>
+    private void StandUpChasePartner(ClientPlayerData partner, ChaseStandUp standUp, Vector2? spot) {
+        // Counted as standing from here on, so that a death of this player now is one of one player, which waits to be
+        // stood up beside them - the same answer their game gives once this arrives
+        _partnerWaitingRescue = null;
+
+        var update = new CoopSaveUpdate {
+            TargetId = partner.Id,
+            Kind = CoopSaveUpdateKind.RescueHit,
+            Part = RescueHits,
+            PartCount = RescueHits,
+            Key = standUp.Key
+        };
+        if (spot is { } at) {
+            update.Values = [at.x, at.y];
+        }
+
+        Send(update);
+        Logger.Info(
+            spot is { } place
+                ? $"Standing {partner.Username} up at {place}"
+                : $"Standing {partner.Username} up where they fell"
+        );
     }
 
     /// <summary>
@@ -990,6 +1130,13 @@ internal partial class CoopSave {
     /// few seconds from now.
     /// </summary>
     private void OnChaseDeath(ClientPlayerData player, CoopSaveUpdate update) {
+        // Both down: this player is dying as well, on their way to their bench, so there is nobody to stand them up
+        // beside. A player lying down waiting was answered before this, and one being stood back up is not dying.
+        if (HeroController.instance is { cState.dead: true } && _rescue == null) {
+            TellPartnerNobodyIsComing();
+            return;
+        }
+
         _chaseStandUp = new ChaseStandUp(player.Id, update.Key, update.Scene, Time.unscaledTime + ChaseStandUpDelay);
 
         SetPartnerBodyHidden(player.Id, true);
