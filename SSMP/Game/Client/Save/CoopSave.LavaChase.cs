@@ -90,10 +90,12 @@ internal partial class CoopSave {
     private const float LavaSafeSpotLifetime = 3f;
 
     /// <summary>
-    /// How far above the top of the lava a place must be to count as out of it, measured from the middle of the
-    /// player standing there.
+    /// How far above the top of the lava a place must be to put a player there, measured from the middle of a player
+    /// standing there. The lava does not stop for them: near the players it rises about 2.5 a second, a player put back
+    /// after a burn cannot move for about 1.3 s, and they need half a second more to get going, which with the height
+    /// of the player comes to about this.
     /// </summary>
-    private const float LavaClearance = 2f;
+    private const float LavaClearance = 6f;
 
     /// <summary>
     /// The layers on which the game looks for the ground below the place it puts a player back after a burn.
@@ -234,6 +236,11 @@ internal partial class CoopSave {
         /// How far above its body the top of the part that burns is, once that part has been seen switched on.
         /// </summary>
         public float? BandTopOffset { get; set; }
+
+        /// <summary>
+        /// How high the top of it was when last seen, for once it is gone with the room it was in.
+        /// </summary>
+        public float? LastTop { get; set; }
 
         /// <summary>
         /// The listeners through which a burn stops it.
@@ -558,11 +565,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The body of the partner if the lava can chase them: they are in the room and not lying down.
+    /// The body of the partner if the lava can chase them: they are in the room and not lying down. A partner who died
+    /// in the chase counts as lying down until their game says they are up, since their body stays where they fell
+    /// until then.
     /// </summary>
     private GameObject? GetChasablePartnerBody() {
         if (GetCheckedPartner() is not { IsInLocalScene: true, PlayerObject: { } body } partner ||
-            _partnerWaitingRescue == partner.Id || !body.activeInHierarchy) {
+            _partnerWaitingRescue == partner.Id || _chaseHiddenPartner == partner.Id || !body.activeInHierarchy) {
             return null;
         }
 
@@ -666,11 +675,15 @@ internal partial class CoopSave {
     private static float GetLavaY(LavaChase chase) => chase.Body.transform.position.y;
 
     /// <summary>
-    /// How high the top of the lava is, or null before the part that burns has been seen, or once the lava is gone
-    /// with the room it was in.
+    /// How high the top of the lava is, or null before the part that burns has been seen. Once the lava is gone with
+    /// the room it was in, how high it was when last seen.
     /// </summary>
     private static float? GetLavaTop(LavaChase chase) {
-        return chase.BandTopOffset is { } offset && chase.Body != null ? GetLavaY(chase) + offset : null;
+        if (chase.BandTopOffset is not { } offset) {
+            return null;
+        }
+
+        return chase.Body != null ? GetLavaY(chase) + offset : chase.LastTop;
     }
 
     /// <summary>
@@ -693,14 +706,17 @@ internal partial class CoopSave {
                 return;
             }
 
+            // Gone without the room going, which is let go of the same way
             if (chase.Fsm == null || chase.Body == null) {
-                _lavaChase = null;
+                ForgetLavaChase();
                 return;
             }
 
             if (chase.Band is { enabled: true } band && band.gameObject.activeInHierarchy) {
                 chase.BandTopOffset = band.bounds.max.y - GetLavaY(chase);
             }
+
+            chase.LastTop = GetLavaTop(chase);
 
             NoteSafeSpot(hero, chase);
 
