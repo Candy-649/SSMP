@@ -515,6 +515,17 @@ internal class HealthManagerComponent : EntityComponent {
     /// <param name="triggerHostDeath">Whether the scene host should run death when HP crosses zero.</param>
     private void ApplyHp(int newHp, bool triggerHostDeath) {
         var wasAlive = GetCurrentHp() > 0;
+        var killsHost = triggerHostDeath && !IsControlled && wasAlive && newHp <= 0 && _healthManager.Host != null;
+
+        // A creature is told that it was hit before a blow takes its health, lethal or not, and some only go on to
+        // die from where that takes them: a spine floater with no health left switches its body off to hits at once,
+        // but only explodes from the states it goes into when it is hit, and stays in the air untouchable until then.
+        // The partner's blow arrives here as health alone, so the creature is told the same as for a blow of its own.
+        if (killsHost) {
+            var hostObject = _healthManager.Host!.gameObject;
+            FSMUtility.SendEventToGameObject(hostObject, "HIT", false);
+            FSMUtility.SendEventToGameObject(hostObject, "TOOK DAMAGE", false);
+        }
 
         _lastHp = newHp;
 
@@ -526,8 +537,8 @@ internal class HealthManagerComponent : EntityComponent {
             _healthManager.Client.hp = newHp;
         }
 
-        if (triggerHostDeath && !IsControlled && wasAlive && newHp <= 0 && _healthManager.Host != null) {
-            _healthManager.Host.Die(null, AttackTypes.Generic, true);
+        if (killsHost) {
+            _healthManager.Host!.Die(null, AttackTypes.Generic, true);
         }
     }
 

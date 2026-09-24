@@ -2071,7 +2071,6 @@
     ],
     "internal_name": "Spine Floater",
     "fsm_names": [
-      "Control",
       "Death Effect"
     ]
   },

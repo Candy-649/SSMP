@@ -444,6 +444,16 @@ internal static partial class EntityFsmActions {
                 case 1:
                     var path = data.Packet.ReadString();
                     var owner = action.Fsm?.GameObject;
+
+                    // Parts can share a name - every spine a floater grows is called the same - and a path then
+                    // finds the first of them each time, so each spine was turned in place of the first one while
+                    // the others kept pointing down. The copy's own variable already holds the right one where the
+                    // copy's own replays put it there, so an object it holds at the same place is kept.
+                    var held = variable.Value;
+                    if (held != null && owner != null && PathFromOwner(owner, held) == path) {
+                        break;
+                    }
+
                     var named = owner == null ? null : path.Length == 0 ? owner.transform : owner.transform.Find(path);
                     variable.Value = named == null ? null : named.gameObject;
                     break;
@@ -492,8 +502,7 @@ internal static partial class EntityFsmActions {
         }
 
         // What a creature throws is often named after it, so the registry takes it for the creature, but it is not
-        // an entity, and what is done to it is done again on the other game like anything else: the turning of each
-        // spine a floater grows, for one, which is what points them out in every direction
+        // an entity, and what is done to it is done again on the other game like anything else
         return EntitySpawner.IsSpawnedAsEntity(gameObject, entry.Type) || EntityProcessor.IsRegistered(gameObject);
     }
 

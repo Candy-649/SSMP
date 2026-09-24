@@ -430,8 +430,8 @@ internal class EntityManager {
             return false;
         }
 
-        // What a creature throws is often named after it - "Spine Floater Spine" - so the registry takes it for the
-        // creature, but it is thrown on the other game like anything else, by doing the spawning action there
+        // What a creature throws is often named after it, so the registry takes it for the creature, but it is thrown
+        // on the other game like anything else, by doing the spawning action there
         if (!EntitySpawner.IsSpawnedAsEntity(details.GameObject, spawnedEntry.Type)) {
             return false;
         }

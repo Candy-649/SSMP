@@ -92,8 +92,8 @@ internal static class EntitySpawner {
     /// out of the ordinary way of showing a spawn on the other game, which is doing the spawning action over there.
     /// What the other game can make from a spawn message is made there as an entity. A creature it cannot make stays
     /// in the game it was spawned in, since a copy made the ordinary way would go its own way unseen by this one. What
-    /// a creature throws is not kept out: its spines, sickles and bombs are often named after it - "Spine Floater
-    /// Spine" - so the registry takes them for the creature itself, but they are thrown like anything else.
+    /// a creature throws is not kept out: its sickles, javelins and bombs are often named after it, so the registry
+    /// takes them for the creature itself, but they are thrown like anything else.
     /// </summary>
     /// <param name="gameObject">The spawned object, or the prefab it is spawned from.</param>
     /// <param name="type">The type the registry takes it for.</param>
