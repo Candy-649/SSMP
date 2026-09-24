@@ -57,6 +57,11 @@ internal partial class CoopSave {
     private const float RescueInvulnerabilityTime = 2f;
 
     /// <summary>
+    /// The layer of the body of the player.
+    /// </summary>
+    private const int PlayerLayer = (int) GlobalEnums.PhysLayers.PLAYER;
+
+    /// <summary>
     /// The name of the one FSM on a cocoon that is kept. It is the game's own name for it, matched at runtime
     /// rather than written into the prefab, so the cocoon shown for the partner decides how it looks the same way
     /// the player's own cocoon does.
@@ -1584,9 +1589,15 @@ internal partial class CoopSave {
             // the spikes or the drop, and a player put back into it dies again before they can move - which is a
             // death, a cocoon, a rescue and a death again, with nothing either player can do to break out of it.
             // The game keeps a place of its own for exactly this, which is where it would have put them itself.
-            if (rescue.KilledByTheRoom) {
+            // A creature can kill a player over the same lava too, in the middle of a jump across it. Standing up
+            // there is falling straight in, and lava takes two masks - all that a rescue gives back of five.
+            var overTheRoomsHarm = !rescue.KilledByTheRoom && IsOverTheRoomsHarm(hero.transform.position);
+            if (rescue.KilledByTheRoom || overTheRoomsHarm) {
                 var safe = playerData.hazardRespawnLocation;
-                Logger.Info($"The room itself did the killing, so standing back up happens at {safe} instead");
+                Logger.Info(
+                    $"Standing back up at {safe} instead of {hero.transform.position}: " +
+                    (overTheRoomsHarm ? "below it is lava, spikes or a pit" : "the room itself did the killing")
+                );
                 hero.transform.position = safe;
             }
 
@@ -1677,6 +1688,42 @@ internal partial class CoopSave {
 
             return false;
         }
+    }
+
+    /// <summary>
+    /// Whether the first thing below the given place is something of the room that hurts - lava, spikes, a pit -
+    /// rather than ground the player can stand on, so that a player stood up there falls straight into it.
+    /// </summary>
+    /// <param name="position">Where the player would stand up.</param>
+    private static bool IsOverTheRoomsHarm(Vector2 position) {
+        var hits = new List<RaycastHit2D>();
+        Physics2D.Raycast(position, Vector2.down, new ContactFilter2D().NoFilter(), hits, Mathf.Infinity);
+
+        // Ground is anything solid that the body of the player collides with, as the game's own table of layers says
+        var nearest = Mathf.Infinity;
+        var harm = false;
+        foreach (var hit in hits) {
+            var collider = hit.collider;
+            var isGround = !collider.isTrigger &&
+                           !Physics2D.GetIgnoreLayerCollision(PlayerLayer, collider.gameObject.layer);
+            var isHarm = collider.TryGetComponent<DamageHero>(out var damage) && IsTheRoomsHarm(damage.hazardType);
+            if ((isGround || isHarm) && hit.distance < nearest) {
+                nearest = hit.distance;
+                harm = isHarm;
+            }
+        }
+
+        return harm;
+    }
+
+    /// <summary>
+    /// Whether a kind of harm belongs to the room rather than to a creature: every kind that the game answers by
+    /// putting the player back at the last safe place, which is all but a creature's attack and an explosion
+    /// (HeroController.TakeDamage).
+    /// </summary>
+    private static bool IsTheRoomsHarm(GlobalEnums.HazardType type) {
+        return type is not (GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or
+            GlobalEnums.HazardType.EXPLOSION);
     }
 
     /// <summary>
