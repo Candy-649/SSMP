@@ -249,5 +249,7 @@ internal enum EntityType {
     BellfleaJuggler,
     BellfleaJugglerGiant,
     BellfleaSwooper,
-    BellfleaGameStart
+    BellfleaGameStart,
+    SongAutomatonTiny,
+    AspidHatchling
 }
