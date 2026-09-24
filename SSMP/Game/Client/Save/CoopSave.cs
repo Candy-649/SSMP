@@ -627,6 +627,7 @@ internal partial class CoopSave {
         OnDeliverySceneChanged();
         OnRescueSceneChanged();
         OnLavaChaseSceneChanged(newScene);
+        OnCageSceneChanged();
         ResetRaces();
     }
 
@@ -806,6 +807,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WorldTrigger:
                 OnWorldTrigger(player, update);
+                break;
+            case CoopSaveUpdateKind.CageSprung:
+                OnCageSprung(player, update);
                 break;
             case CoopSaveUpdateKind.Trapdoor:
                 OnTrapdoor(player, update);

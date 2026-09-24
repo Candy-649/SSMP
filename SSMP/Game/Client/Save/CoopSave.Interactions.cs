@@ -422,6 +422,14 @@ internal partial class CoopSave {
             return;
         }
 
+        // The cage that only goes off for both players first, since it can send its bait into another state, which is
+        // then the state that everything below sees
+        try {
+            toState = RedirectCageBait(self, toState);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Traps of the world ride along with this hook rather than putting a second one on the same method
         try {
             OnWorldTriggerSwitch(self, toState);

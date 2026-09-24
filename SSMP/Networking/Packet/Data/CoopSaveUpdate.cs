@@ -539,5 +539,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    LavaChaseSetDown
+    LavaChaseSetDown,
+
+    /// <summary>
+    /// The sender took the bait of a cage while the other player stood in it, so the cage went off in their game and
+    /// the game of the other player makes its own go off as well. <see cref="CoopSaveUpdate.Scene"/> and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> name the bait.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    CageSprung
 }
