@@ -352,6 +352,7 @@ internal partial class CoopSave {
         RegisterStoryItemHooks();
         RegisterRescueHooks();
         RegisterTrapdoorHooks();
+        RegisterPrisonCaptureHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -463,6 +464,8 @@ internal partial class CoopSave {
         UpdateLavaChase(hero, partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateChaseStandUp(hero, partner != null && _checkedWith == partner.Id ? partner : null);
         UpdateRaces(partner != null && _checkedWith == partner.Id ? partner : null);
+        UpdatePrisonCapture(hero);
+        UpdateClothesGrab(hero);
 
         if (partner != null && _checkedWith == partner.Id) {
             UpdateCheckedPlayTime(marker);
@@ -562,6 +565,10 @@ internal partial class CoopSave {
             }
         }
 
+        if (_clothesGrabHeld != null && fsmEvent != null && HoldsClothesGrab(self, fsmEvent)) {
+            return;
+        }
+
         orig(self, fsmEvent!, eventData);
     }
 
@@ -600,6 +607,8 @@ internal partial class CoopSave {
         ResetStoryItems();
         ResetRescue();
         ResetRaces();
+        ResetPrisonCapture();
+        ResetClothesGrab();
     }
 
     /// <summary>
@@ -628,6 +637,7 @@ internal partial class CoopSave {
         OnRescueSceneChanged();
         OnLavaChaseSceneChanged(newScene);
         OnCageSceneChanged();
+        OnClothesGrabSceneChanged();
         ResetRaces();
     }
 
@@ -701,6 +711,7 @@ internal partial class CoopSave {
         // good, and this player would be remembered as waiting to be pulled up by someone who is gone - which would
         // quietly stop the next death of the local player from waiting for anyone
         ResetRescue();
+        OnClothesGrabPartnerLeft();
 
         if (wasChecked) {
             // The play time that both players played together is kept for the next check
@@ -741,6 +752,7 @@ internal partial class CoopSave {
         // This path does not go through ResetSession either, so the same cocoon and the same memory of a partner
         // waiting would be left behind, this time by leaving the server rather than by them leaving it
         ResetRescue();
+        OnClothesGrabPartnerLeft();
 
         _highestCheckKey = 0;
 
@@ -810,6 +822,12 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.CageSprung:
                 OnCageSprung(player, update);
+                break;
+            case CoopSaveUpdateKind.PrisonCapture:
+                OnPrisonCapture(player);
+                break;
+            case CoopSaveUpdateKind.ClothesGrab:
+                OnClothesGrab(player, update);
                 break;
             case CoopSaveUpdateKind.Trapdoor:
                 OnTrapdoor(player, update);

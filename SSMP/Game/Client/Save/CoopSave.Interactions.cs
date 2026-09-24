@@ -437,6 +437,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // And taking the clothes back in the prison, which waits for the partner and tells them when it plays
+        try {
+            OnClothesGrabSwitch(self, toState);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // And races, before the switch, so that a try that starts is followed before anything it goes on to
         try {
             OnRaceSwitch(self, toState);

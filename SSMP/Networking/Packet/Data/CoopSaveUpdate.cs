@@ -549,5 +549,23 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    CageSprung
+    CageSprung,
+
+    /// <summary>
+    /// The sender was caught and taken to the prison, so the game of the other player takes them there as well.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    PrisonCapture,
+
+    /// <summary>
+    /// How taking the clothes back in the prison goes for the sender. <see cref="CoopSaveUpdate.PartCount"/> says what
+    /// happened: 1 they reached for theirs, 0 they stopped waiting, 2 their grab started, 3 it showed them
+    /// again. <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name where they reached.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    ClothesGrab
 }
