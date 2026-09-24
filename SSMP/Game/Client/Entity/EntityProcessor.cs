@@ -103,6 +103,20 @@ internal class EntityProcessor {
     }
 
     /// <summary>
+    /// Whether the given object is the room's own object of a registered entity, as opposed to its shown copy.
+    /// </summary>
+    /// <param name="gameObject">The object to look for.</param>
+    public static bool IsRoomObject(GameObject gameObject) {
+        foreach (var entity in _entities.Values) {
+            if (entity.Object.Host == gameObject) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Process the game object set in this instance with the parameter set in this instance.
     /// </summary>
     /// <returns>The instance of this class for convenience.</returns>

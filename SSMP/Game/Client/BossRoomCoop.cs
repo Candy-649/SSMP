@@ -356,10 +356,19 @@ internal partial class BossRoomCoop {
     /// <param name="eventTarget">The target of the event.</param>
     /// <param name="eventName">The name of the event.</param>
     public static void SendNetworkEvent(Fsm fsm, FsmEventTarget eventTarget, string eventName) {
+        RunAsNetworkSender(fsm, () => fsm.Event(eventTarget, eventName));
+    }
+
+    /// <summary>
+    /// Sends events for an FSM of the scene host's game, so that gates know which FSM closes them.
+    /// </summary>
+    /// <param name="fsm">The FSM that sends the events.</param>
+    /// <param name="send">What sends them.</param>
+    public static void RunAsNetworkSender(Fsm fsm, Action send) {
         var previousSender = _networkSender;
         _networkSender = fsm;
         try {
-            fsm.Event(eventTarget, eventName);
+            send();
         } finally {
             _networkSender = previousSender;
         }

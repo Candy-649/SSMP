@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
+using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using UnityEngine.SceneManagement;
 // ReSharper disable ConditionalAccessQualifierIsNonNullableAccordingToAPIContract
@@ -10,9 +11,19 @@ using UnityEngine.SceneManagement;
 namespace SSMP.Game.Client.Entity.Action; 
 
 /// <summary>
-/// Static class for registering callbacks on the "OnEnter" method of an <see cref="FsmStateAction"/> class.
+/// Static class for registering callbacks on the "OnEnter" method of an <see cref="FsmStateAction"/> class, or on the
+/// method that does its work for an action that does it later than that.
 /// </summary>
 internal static class FsmActionHooks {
+    /// <summary>
+    /// The methods that do the work of actions that do not do it on entering their state, by action type. The callbacks
+    /// run when the work is done instead, so that the other game does it at the same moment, and not at all when the
+    /// state is left before.
+    /// </summary>
+    private static readonly Dictionary<Type, string> WorkMethodNames = new() {
+        [typeof(SendEventToRegisterDelay)] = "SendToRegister"
+    };
+
     /// <summary>
     /// Dictionary mapping types (subtypes of <see cref="FsmStateAction"/>) to an hook class.
     /// </summary>
@@ -62,7 +73,13 @@ internal static class FsmActionHooks {
             fsmActionHook = new FsmActionHook();
 
             // Types that inherit "OnEnter" share one hook on the class that declares it
-            var onEnterMethodInfo = type.GetMethod("OnEnter");
+            var onEnterMethodInfo = WorkMethodNames.TryGetValue(type, out var workMethodName)
+                ? type.GetMethod(
+                    workMethodName,
+                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public |
+                    System.Reflection.BindingFlags.NonPublic
+                )
+                : type.GetMethod("OnEnter");
             if (onEnterMethodInfo != null && HookedMethods.Add(onEnterMethodInfo)) {
                 Hooks.Add(new Hook(
                     onEnterMethodInfo,

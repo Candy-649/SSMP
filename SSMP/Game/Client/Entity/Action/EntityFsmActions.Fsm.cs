@@ -1,4 +1,6 @@
 using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
@@ -220,6 +222,124 @@ internal static partial class EntityFsmActions {
     }
 
     #endregion
+
+    #region SendEventToRegister
+
+    // A creature tells the room what it is doing by broadcasting an event to everything registered for it: the floor
+    // that grows back at once when a boss is stunned, the rocks that burst in the air, the camera that starts to follow
+    // the player up for the last part of a fight. Only the scene host runs the creature, so none of it happened in the
+    // other game before.
+
+    /// <summary>
+    /// Events about the player that a creature has just dealt with, and a player's points in a flea game, which each
+    /// game counts for its own player. Broadcast again in the other game they would land on that game's player: the
+    /// benches, lifts and camera locks that react to the player being hit, grabbed or caught in a tendril, the
+    /// followers and effects that are cleared away, points in a game that player did not play.
+    /// </summary>
+    private static readonly HashSet<string> PlayerEvents = [
+        "HERO DAMAGED", "FSM CANCEL", "HORNET CAUGHT", "TENDRIL HORNET CAPTURED", "TENDRIL HORNET ESCAPED",
+        "HORNET BONKED", "HORNET BONKED HEAVY", "REGOOPED", "END FOLLOWERS INSTANT", "CLEAR EFFECTS", "DID PARRY",
+        "PARRY REMINDER", "SCORE", "FLEA FAIL", "FLEA TINKED"
+    ];
+
+    /// <summary>
+    /// The game's own lists of what is registered for each event, by the hash of the event's name.
+    /// </summary>
+    private static readonly FieldInfo? EventRegistersField =
+        typeof(EventRegister).GetField("_eventRegister", StaticNonPublicFlags);
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventToRegister action) {
+        // Sent, because some creatures keep the event in a variable
+        data.Packet.Write(action.eventName.Value);
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventToRegister action) {
+        SendEventToRoom(action.Fsm, data == null ? action.eventName.Value : data.Packet.ReadString());
+    }
+
+    #endregion
+
+    #region SendEventToRegisterV2
+
+    // The owner it leaves out is a creature kept in step, which SendEventToRoom leaves out anyway
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventToRegisterV2 action) {
+        data.Packet.Write(action.EventName.Value);
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventToRegisterV2 action) {
+        SendEventToRoom(action.Fsm, data == null ? action.EventName.Value : data.Packet.ReadString());
+    }
+
+    #endregion
+
+    #region SendEventToRegisterDelay
+
+    // Sent when the delay runs out in the scene host's game rather than on entering the state (see FsmActionHooks), so
+    // it is not sent at all when the creature leaves the state first, as the game does not send it then either
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventToRegisterDelay action) {
+        data.Packet.Write(action.EventName.Value);
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventToRegisterDelay action) {
+        SendEventToRoom(action.Fsm, data == null ? action.EventName.Value : data.Packet.ReadString());
+    }
+
+    #endregion
+
+    /// <summary>
+    /// Broadcasts an event that a creature broadcast in the scene host's game to what is registered for it in this
+    /// game, the way EventRegister.SendEvent does, except to what is left to the scene host's game.
+    /// </summary>
+    /// <param name="fsm">The FSM of the creature that broadcast the event.</param>
+    /// <param name="eventName">The name of the event.</param>
+    private static void SendEventToRoom(HutongGames.PlayMaker.Fsm fsm, string eventName) {
+        if (PlayerEvents.Contains(eventName) ||
+            EventRegistersField?.GetValue(null) is not Dictionary<int, List<EventRegister>> registers ||
+            !registers.TryGetValue(EventRegister.GetEventHashCode(eventName), out var list)) {
+            return;
+        }
+
+        BossRoomCoop.RunAsNetworkSender(fsm, () => {
+            foreach (var register in list) {
+                if (!IsLeftToTheSceneHost(register)) {
+                    register.ReceiveEvent();
+                }
+            }
+        });
+    }
+
+    /// <summary>
+    /// Whether what is registered for a broadcast is left to the scene host's game:
+    /// - a creature's copy, whose own FSMs follow the scene host's through replays and could be switched on by the
+    ///   event; the parts under the copy run here as they do there, so they take it like the scene host's parts do;
+    /// - anything in the room's own copy of a creature, which sleeps while the other game runs the creature;
+    /// - an arena, which follows the scene host's game its own way: one woken here would lock this game's player in
+    ///   even when they are outside it. What lies inside an arena, such as a floor that breaks, takes the event.
+    /// </summary>
+    private static bool IsLeftToTheSceneHost(EventRegister register) {
+        if (EntityProcessor.IsRegistered(register.gameObject) || register.GetComponent<BattleScene>() != null) {
+            return true;
+        }
+
+        for (var current = register.transform.parent; current != null; current = current.parent) {
+            if (EntityProcessor.IsRoomObject(current.gameObject)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     #region SendHealthManagerDeathEvent
 
