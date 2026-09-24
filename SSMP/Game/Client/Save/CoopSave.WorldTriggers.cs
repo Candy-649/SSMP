@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -54,6 +55,11 @@ internal partial class CoopSave {
     private const float WorldTriggerRetryTime = 2f;
 
     /// <summary>
+    /// The type of the action that sends an event to everything in the game that listens for it.
+    /// </summary>
+    private const string SendEventToRegisterTypeName = "SendEventToRegister";
+
+    /// <summary>
     /// The traps that a player walking into them sets off, each named by what its objects are called and by the one
     /// event that sets it going.
     ///
@@ -104,7 +110,12 @@ internal partial class CoopSave {
         // Floors and ledges that break away. These are written into the save as well, so a partner in another room
         // gets them when their own room loads; this is only about seeing it happen while both are standing there.
         new(["Collapser Small"], "Control", "BREAK", "Antic Type", ["Idle"], ["Idle"]),
-        new(["Abyss_Weaver_Hanging_Plat"], "Break Control", "ENTER", "Tendrils Up", ["Idle"], ["Idle"])
+        new(["Abyss_Weaver_Hanging_Plat"], "Break Control", "ENTER", "Tendrils Up", ["Idle"], ["Idle"]),
+
+        // A bench that gives way under whoever sits on it and drops them down with it. It is written into the save as
+        // well; this is the floor going here as it goes over there. The copy here only falls: taking the sitter off
+        // the bench, carrying them down, the camera on them and handing them back their controls are about them.
+        new(["Fake Bench Collapser"], "Control", "FAKE BENCH SIT", "Antic", ["Idle"], ["Idle"], keepOffThePlayer: true)
     ];
 
     /// <summary>
@@ -248,8 +259,13 @@ internal partial class CoopSave {
     private void ReplayWorldTrigger(PlayMakerFSM fsm, WorldTriggerKind kind, string name, string username) {
         _replayingWorldTrigger = true;
         try {
+            var keptOff = kind.KeepOffThePlayer ? KeepTrapOffThePlayer(fsm) : 0;
             fsm.SendEvent(kind.EventName);
-            Logger.Info($"Set off '{name}' the way {username} did");
+            Logger.Info(
+                keptOff > 0
+                    ? $"Set off '{name}' the way {username} did, without the {keptOff} of its actions about them"
+                    : $"Set off '{name}' the way {username} did"
+            );
         } catch (Exception e) {
             Logger.Warn($"Could not set off '{name}' the way the partner did: {e.Message}");
         } finally {
@@ -276,12 +292,25 @@ internal partial class CoopSave {
             return null;
         }
 
+        // The kind before the parents: some of the states these go into, such as "Antic", are ones that creatures
+        // go into all the time, and none of those is one of these
+        if (MatchWorldTriggerKind(name, fsmName, goneOffStateName) is not { } kind) {
+            return null;
+        }
+
         for (var parent = gameObject.transform.parent; parent != null; parent = parent.parent) {
             if (parent.name.StartsWith(BossSceneNamePrefix, StringComparison.Ordinal)) {
                 return null;
             }
         }
 
+        return kind;
+    }
+
+    /// <summary>
+    /// The kind of trap that objects of a name are, going by the FSM and the state that says it went off.
+    /// </summary>
+    private static WorldTriggerKind? MatchWorldTriggerKind(string name, string fsmName, string goneOffStateName) {
         foreach (var kind in WorldTriggerKinds) {
             if (kind.FsmName != fsmName || kind.GoneOffStateName != goneOffStateName) {
                 continue;
@@ -295,6 +324,61 @@ internal partial class CoopSave {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Switches off, in the copy of a trap here, whatever it does to the player who set it off. In their game that
+    /// player is them; here the same actions would take hold of the local player, who set nothing off. The copy only
+    /// ever goes off once, so they stay off: the next time the room loads, it is a new copy.
+    /// </summary>
+    /// <returns>How many actions were switched off.</returns>
+    private static int KeepTrapOffThePlayer(PlayMakerFSM fsm) {
+        var hero = HeroController.instance;
+        var switchedOff = 0;
+        foreach (var state in fsm.FsmStates) {
+            foreach (var action in state.Actions) {
+                if (action is not { Enabled: true } || !IsAboutThePlayer(action, fsm.Fsm, hero)) {
+                    continue;
+                }
+
+                action.Enabled = false;
+                switchedOff++;
+            }
+        }
+
+        return switchedOff;
+    }
+
+    /// <summary>
+    /// Whether an action of a trap does something to the local player: moves, parents, frees or animates them, has the
+    /// camera follow them or plays a sound on them - or sends an event to everything in the game that listens, which
+    /// for the bench that gives way takes whoever sits on a bench off it.
+    ///
+    /// The object an action names is worked out through the FSM it belongs to, not through the action: an action only
+    /// learns its FSM when its state is first entered, and these are states the copy has never been in.
+    /// </summary>
+    private static bool IsAboutThePlayer(FsmStateAction action, Fsm fsm, HeroController? hero) {
+        if (action.GetType().Name == SendEventToRegisterTypeName) {
+            return true;
+        }
+
+        if (hero == null) {
+            return false;
+        }
+
+        foreach (var field in action.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance)) {
+            var target = field.GetValue(action) switch {
+                FsmOwnerDefault owner => fsm.GetOwnerDefaultTarget(owner),
+                FsmGameObject gameObject => gameObject.Value,
+                _ => null
+            };
+
+            if (target != null && target.transform.IsChildOf(hero.transform)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -318,7 +402,8 @@ internal partial class CoopSave {
             string eventName,
             string goneOffStateName,
             string[] fromStateNames,
-            string[] waitingStateNames
+            string[] waitingStateNames,
+            bool keepOffThePlayer = false
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -326,6 +411,7 @@ internal partial class CoopSave {
             GoneOffStateName = goneOffStateName;
             FromStateNames = fromStateNames;
             WaitingStateNames = waitingStateNames;
+            KeepOffThePlayer = keepOffThePlayer;
         }
 
         /// <summary>
@@ -361,5 +447,12 @@ internal partial class CoopSave {
         /// The states it can still be set off from.
         /// </summary>
         public string[] WaitingStateNames { get; }
+
+        /// <summary>
+        /// Whether it does things to the player who set it off, which the copy here must not do to the local player.
+        /// Those are switched off before it is set off here (<see cref="KeepTrapOffThePlayer"/>), so for these the
+        /// event sent by hand plays everything of the trap except what happens to that player.
+        /// </summary>
+        public bool KeepOffThePlayer { get; }
     }
 }
