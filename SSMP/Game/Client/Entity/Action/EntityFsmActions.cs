@@ -403,7 +403,8 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// Writes, ahead of an action's own data, which objects the action worked on when they are held in variables: for
-    /// each, 0 for none, 1 and its path for a part of the creature, 2 for an object anywhere else.
+    /// each, 0 for none, 1 and its path for a part of the creature, 3 and its scene and path for a part of the room
+    /// itself, 2 for an object anywhere else.
     ///
     /// The creature's FSM fills such variables in while it runs - which spray to use, which of its parts to light, which
     /// of them an event is for - and the scene client's copy never runs, so there the variable stayed empty and the
@@ -422,6 +423,17 @@ internal static partial class EntityFsmActions {
 
             var path = PathFromOwner(action.Fsm.GameObject, subject);
             if (path == null) {
+                // The floor a boss breaks, the rocks it drops, the lava it lights: the room's own things, found by
+                // the creature's FSM from its parent or through a reference into another scene. The copy has no
+                // parent and never runs that, so its variables for them stayed empty and none of it happened on the
+                // other game. They are named by scene and path, which are the same there.
+                if (TryGetScenePath(subject, out var sceneName, out var scenePath)) {
+                    data.Packet.Write((byte) 3);
+                    data.Packet.Write(sceneName);
+                    data.Packet.Write(scenePath);
+                    continue;
+                }
+
                 data.Packet.Write((byte) 2);
                 continue;
             }
@@ -457,8 +469,49 @@ internal static partial class EntityFsmActions {
                     var named = owner == null ? null : path.Length == 0 ? owner.transform : owner.transform.Find(path);
                     variable.Value = named == null ? null : named.gameObject;
                     break;
+                case 3:
+                    var sceneName = data.Packet.ReadString();
+                    var scenePath = data.Packet.ReadString();
+
+                    // Left to the copy's own variable, like anything else, if this game has no such thing
+                    var inScene = ScenePath.Find(scenePath, sceneName);
+                    if (inScene != null) {
+                        variable.Value = inScene;
+                    }
+
+                    break;
             }
         }
+    }
+
+    /// <summary>
+    /// The scene and the path within it of something the room itself is made of, by which the other game, which has
+    /// the same room, finds its own. Left out: what was made while playing ("(Clone)" anywhere on the way up), which
+    /// is not the same object there for having the same name; what is kept from room to room; and what belongs to a
+    /// creature kept in step, which its own replays already take care of on the other game.
+    /// </summary>
+    /// <param name="gameObject">The object to name.</param>
+    /// <param name="sceneName">The name of the scene it is in.</param>
+    /// <param name="path">Its path in that scene, as <see cref="ScenePath.Find"/> takes it.</param>
+    /// <returns>Whether it can be named this way.</returns>
+    private static bool TryGetScenePath(GameObject gameObject, out string sceneName, out string path) {
+        sceneName = string.Empty;
+        path = string.Empty;
+
+        var scene = gameObject.scene;
+        if (!scene.IsValid() || scene.name == "DontDestroyOnLoad") {
+            return false;
+        }
+
+        for (var current = gameObject.transform; current != null; current = current.parent) {
+            if (current.name.Contains("(Clone)") || EntityProcessor.IsRegistered(current.gameObject)) {
+                return false;
+            }
+        }
+
+        sceneName = scene.name;
+        path = ScenePath.Get(gameObject.transform);
+        return true;
     }
 
     /// <summary>

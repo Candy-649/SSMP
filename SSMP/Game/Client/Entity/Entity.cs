@@ -16,6 +16,7 @@ using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
 using Math_Vector2 = SSMP.Math.Vector2;
+using Math_Vector3 = SSMP.Math.Vector3;
 
 //using Logger = SSMP.Logging.Logger;
 
@@ -622,6 +623,9 @@ internal class Entity {
                 collider
             );
 
+            // What the collider can be hit by goes with the layer it is on
+            _components[EntityComponentType.Layer] = new LayerComponent(_netClient, Id, Object);
+
             //addedComponentsString += " Collider";
         }
 
@@ -999,7 +1003,7 @@ internal class Entity {
 
                 _netClient.UpdateManager.UpdateEntityPosition(
                     Id,
-                    new Math_Vector2(newPosition.x, newPosition.y)
+                    new Math_Vector3(newPosition.x, newPosition.y, newPosition.z)
                 );
 
                 // Beside every position for a while rather than only the once, for the same reason as above, and
@@ -1753,7 +1757,7 @@ internal class Entity {
     /// How far the scene host had got through what the local player did to this entity when it sent this, or null if
     /// it didn't say.
     /// </param>
-    public void UpdatePosition(Math_Vector2 position, ushort sequence, byte? anticipation) {
+    public void UpdatePosition(Math_Vector3 position, ushort sequence, byte? anticipation) {
         // An older position arriving after a newer one is thrown away: nothing below this transport orders what it
         // carries, so one that had to be sent again lands after ones sent later, and applying it puts the entity
         // back where it was that much earlier.
@@ -1766,11 +1770,10 @@ internal class Entity {
             return;
         }
 
-        var unityPos = new Vector3(
-            position.X,
-            position.Y,
-            _hasParent ? Object.Host.transform.localPosition.z : Object.Host.transform.position.z
-        );
+        // The depth comes from the scene host like the rest. It used to be this game's own room copy's, which is
+        // wherever that copy stood when it was switched off - part way through a boss rising out of the scenery, say,
+        // so that the boss fought on from deep in the background, small and blurred, for the whole fight
+        var unityPos = new Vector3(position.X, position.Y, position.Z);
 
         var positionInterpolation = Object.Client.GetComponent<PredictiveInterpolation>();
         if (positionInterpolation == null) {

@@ -121,5 +121,6 @@ internal enum EntityComponentType : ushort {
     DreamPlatform,
     HazardRespawn,
     Health,
-    BodyType
+    BodyType,
+    Layer
 }

@@ -346,7 +346,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>
     /// <param name="position">The position of the entity.</param>
-    public void UpdateEntityPosition(ushort entityId, Vector2 position) {
+    public void UpdateEntityPosition(ushort entityId, Vector3 position) {
         lock (Lock) {
             var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ClientUpdatePacketId.EntityUpdate);
             entityUpdate!.UpdateTypes.Add(EntityUpdateType.Position);

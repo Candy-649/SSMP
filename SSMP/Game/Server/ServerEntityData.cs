@@ -25,7 +25,7 @@ internal class ServerEntityData {
     /// <summary>
     /// The last position of the entity.
     /// </summary>
-    public Vector2? Position { get; set; }
+    public Vector3? Position { get; set; }
     /// <summary>
     /// The last scale data of the entity.
     /// </summary>

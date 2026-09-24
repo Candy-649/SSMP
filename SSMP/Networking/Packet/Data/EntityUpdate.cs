@@ -55,9 +55,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public HashSet<EntityUpdateType> UpdateTypes { get; }
 
     /// <summary>
-    /// The position of the entity.
+    /// The position of the entity, depth included: a creature that steps back into the scenery or comes out of it
+    /// moves in z alone, and the other game has no other way to know how far back it is.
     /// </summary>
-    public Vector2 Position { get; set; }
+    public Vector3 Position { get; set; }
 
     /// <summary>
     /// The sequence number of the packet this arrived in, filled in on reading rather than sent: it is not part of
@@ -177,7 +178,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
 
         // Based on the update types, we read the corresponding values
         if (UpdateTypes.Contains(EntityUpdateType.Position)) {
-            Position = packet.ReadVector2();
+            Position = packet.ReadVector3();
         }
 
         if (UpdateTypes.Contains(EntityUpdateType.Scale)) {

@@ -607,6 +607,82 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region SetAnimatorTrigger
+
+    // A creature built on Unity's animator rather than on sprite clips moves its whole body by these: a boss that
+    // rears up, sweeps and slams did all of it on one game only, while its copy on the other kept the pose it started
+    // in. None of the three was done again on the other game before.
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetAnimatorTrigger action) {
+        return action.Fsm.GetOwnerDefaultTarget(action.gameObject) != null;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetAnimatorTrigger action) {
+        var animator = GetUnityAnimator(action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        if (animator != null) {
+            animator.SetTrigger(action.trigger.Value);
+        }
+    }
+
+    #endregion
+
+    #region ResetAnimatorTrigger
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, ResetAnimatorTrigger action) {
+        return action.Fsm.GetOwnerDefaultTarget(action.gameObject) != null;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, ResetAnimatorTrigger action) {
+        var animator = GetUnityAnimator(action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        if (animator != null) {
+            animator.ResetTrigger(action.trigger.Value);
+        }
+    }
+
+    #endregion
+
+    #region AnimatorPlay
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimatorPlay action) {
+        if (action.Fsm.GetOwnerDefaultTarget(action.gameObject) == null) {
+            return false;
+        }
+
+        // Sent, because one creature keeps the state to play in a variable that only the scene host's FSM fills in
+        data.Packet.Write(action.stateName.Value);
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, AnimatorPlay action) {
+        var stateName = data == null ? action.stateName.Value : data.Packet.ReadString();
+
+        var animator = GetUnityAnimator(action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        if (animator == null) {
+            return;
+        }
+
+        animator.Play(
+            stateName,
+            action.layer.IsNone ? -1 : action.layer.Value,
+            action.normalizedTime.IsNone ? float.NegativeInfinity : action.normalizedTime.Value
+        );
+    }
+
+    /// <summary>
+    /// The Unity animator on the given object, as opposed to the sprite animator most replays here work with.
+    /// </summary>
+    private static Animator? GetUnityAnimator(GameObject? gameObject) {
+        return gameObject == null ? null : gameObject.GetComponent<Animator>();
+    }
+
+    #endregion
+
     #region SetSpriteRenderer
 
     /// <summary>Builds network data from the FSM action.</summary>
