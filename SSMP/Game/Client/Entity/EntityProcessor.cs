@@ -134,10 +134,12 @@ internal class EntityProcessor {
     /// top-level entries.</param>
     /// <param name="parentClientObject">The client object of the parent entity for this entity or null if no such
     /// parent exists.</param>
+    /// <param name="parentHostObject">The host object of the parent entity, when there is one.</param>
     private void Process(
         GameObject gameObject,
         IEnumerable<EntityRegistryEntry> entries = null,
-        GameObject parentClientObject = null
+        GameObject parentClientObject = null,
+        GameObject parentHostObject = null
     ) {
         // Nullable, so that the NotNullWhen of TryGetEntry is what decides it is there, rather than the declaration
         // saying it always is and the assignment having to be taken on trust
@@ -215,19 +217,11 @@ internal class EntityProcessor {
                 $"Registering entity ({foundEntry.Type}) '{gameObject.name}' with ID '{id}' with parent: {parentClientObject.name}"
             );
 
-            // Find the correct child of the client object of the parent entity
-            var clientObject = parentClientObject.GetChildren()
-                                                 .FirstOrDefault(c => {
-                                                         if (Entities.Any(processedEntity =>
-                                                                 processedEntity.Object.Client == c
-                                                             )) {
-                                                             return false;
-                                                         }
-
-                                                         return c.name.Contains(foundEntry.BaseObjectName);
-                                                     }
-                                                 );
-            if (clientObject == null) {
+            // The part of the parent's copy that stands where this object stands in the parent. A part can sit deep
+            // in its parent, like a head on the torso of a body, so it is found by the whole way down to it
+            var clientObject = FindSamePart(parentHostObject, gameObject, parentClientObject);
+            if (clientObject == null ||
+                Entities.Any(processedEntity => processedEntity.Object.Client == clientObject)) {
                 Logger.Warn("Could not find child of client object of parent entity");
                 return;
             }
@@ -250,10 +244,12 @@ internal class EntityProcessor {
 
         Entities.Add(entity);
 
-        // If this entry has child entries, we recursively check the children of the object as well
+        // If this entry has child entries, the parts of the object are checked for them, however deep they sit
         if (foundEntry.Children != null) {
-            foreach (var childObj in gameObject.GetChildren()) {
-                Process(childObj, foundEntry.Children, entity.Object.Client);
+            foreach (var part in gameObject.GetComponentsInChildren<Transform>(true)) {
+                if (part.gameObject != gameObject) {
+                    Process(part.gameObject, foundEntry.Children, entity.Object.Client, gameObject);
+                }
             }
         }
 
@@ -266,6 +262,57 @@ internal class EntityProcessor {
                 entity.UpdateIsActive(true);
             }
         }
+    }
+
+    /// <summary>
+    /// Finds the object in a copy that stands where a part stands in the original: the same names all the way down,
+    /// and the same place among siblings of the same name.
+    /// </summary>
+    /// <param name="hostRoot">The original, which the part is in.</param>
+    /// <param name="part">The part of the original.</param>
+    /// <param name="clientRoot">The copy of the original.</param>
+    /// <returns>The same part of the copy, or null if the copy has no such part.</returns>
+    private static GameObject? FindSamePart(GameObject? hostRoot, GameObject part, GameObject clientRoot) {
+        if (hostRoot == null) {
+            return null;
+        }
+
+        var steps = new Stack<(string Name, int Index)>();
+        for (var current = part.transform; current != hostRoot.transform; current = current.parent) {
+            if (current == null) {
+                return null;
+            }
+
+            var index = 0;
+            for (var i = 0; i < current.GetSiblingIndex(); i++) {
+                if (current.parent.GetChild(i).name == current.name) {
+                    index++;
+                }
+            }
+
+            steps.Push((current.name, index));
+        }
+
+        var found = clientRoot.transform;
+        while (steps.Count > 0) {
+            var (name, index) = steps.Pop();
+            Transform? next = null;
+            for (var i = 0; i < found.childCount; i++) {
+                var child = found.GetChild(i);
+                if (child.name == name && index-- == 0) {
+                    next = child;
+                    break;
+                }
+            }
+
+            if (next == null) {
+                return null;
+            }
+
+            found = next;
+        }
+
+        return found.gameObject;
     }
 
     /// <summary>

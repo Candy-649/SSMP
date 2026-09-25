@@ -721,8 +721,10 @@ internal static partial class EntityFsmActions {
     /// <param name="gameObject">The game object to check for.</param>
     /// <returns>true if the given game object is in the entity registry; otherwise false.</returns>
     private static bool IsObjectInRegistry(GameObject gameObject) {
+        // A part of another entity, like a head on a body, is found under the entry of that entity rather than at the
+        // top of the registry, and does its own animating and switching all the same
         if (!EntityRegistry.TryGetEntry(gameObject, out var entry)) {
-            return false;
+            return EntityProcessor.IsRegistered(gameObject);
         }
 
         // What a creature throws is often named after it, so the registry takes it for the creature, but it is not

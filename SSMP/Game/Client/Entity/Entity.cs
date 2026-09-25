@@ -353,8 +353,11 @@ internal class Entity {
         //    $"Entity '{Object.Host.name}' was original active: {_originalIsActive}, last active: {_lastIsActive}"
         //);
 
-        // Add a position interpolation component to the enemy so we can smooth out position updates
-        Object.Client.AddComponent<PredictiveInterpolation>();
+        // Add a position interpolation component to the enemy so we can smooth out position updates. A part of another
+        // entity goes without: the parent's copy carries it (UpdatePosition)
+        if (!_hasParent) {
+            Object.Client.AddComponent<PredictiveInterpolation>();
+        }
 
         // Register an update event to send position updates and check for certain value changes
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
@@ -1012,9 +1015,10 @@ internal class Entity {
 
         var transform = Object.Host.transform;
 
-        // Unity already tracks transform mutations; avoid re-reading and comparing position/scale on quiet frames.
-        if (transform.hasChanged || anticipationTaken) {
-            var newPosition = _hasParent ? transform.localPosition : transform.position;
+        // Unity already tracks transform mutations; avoid re-reading and comparing position/scale on quiet frames. A
+        // part of another entity sends neither: the copy of its parent carries it and moves it the way it moves here.
+        if (!_hasParent && (transform.hasChanged || anticipationTaken)) {
+            var newPosition = transform.position;
 
             // A position is sent even when the entity has not moved, for as long as there are forced ones left,
             // because the player waiting on it has nothing else to wait for. It is also the whole of the answer
@@ -1041,7 +1045,7 @@ internal class Entity {
 
             const float epsilon = 0.0001f;
 
-            var newScale = _hasParent ? transform.localScale : transform.lossyScale;
+            var newScale = transform.lossyScale;
             if (newScale != _lastScale) {
                 var scaleData = new EntityUpdate.ScaleData {
                     origin = true
@@ -1800,6 +1804,14 @@ internal class Entity {
         // wherever that copy stood when it was switched off - part way through a boss rising out of the scenery, say,
         // so that the boss fought on from deep in the background, small and blurred, for the whole fight
         var unityPos = new Vector3(position.X, position.Y, position.Z);
+
+        // A part of another entity, like a head on the torso of a body, is carried by the copy of that body and moved
+        // by its animation there, the way the body moves it in the scene host's game. Made a copy of its own instead,
+        // it was put into the room by positions that came a few times a second and were guessed in between, beside a
+        // body that the animation moved smoothly every frame: it shook.
+        if (_hasParent) {
+            return;
+        }
 
         var positionInterpolation = Object.Client.GetComponent<PredictiveInterpolation>();
         if (positionInterpolation == null) {

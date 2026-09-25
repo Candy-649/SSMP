@@ -2907,6 +2907,19 @@
     "internal_name": "Cogwork Golem",
     "fsm_names": [
       "Control"
+    ],
+    "children": [
+      {
+        "base_object_name": "SG_head",
+        "type": "FourthChorus",
+        "parent_name": null,
+        "components": [],
+        "internal_name": "Song Golem",
+        "fsm_names": [
+          "Phase Control",
+          "Receive Explosion Dmg"
+        ]
+      }
     ]
   },
   {
@@ -3171,19 +3184,6 @@
     "internal_name": "Scholar",
     "fsm_names": [
       "Control"
-    ]
-  },
-  {
-    "base_object_name": "SG_head",
-    "type": "FourthChorus",
-    "parent_name": null,
-    "components": [
-      "Rotation"
-    ],
-    "internal_name": "Song Golem",
-    "fsm_names": [
-      "Phase Control",
-      "Receive Explosion Dmg"
     ]
   },
   {
