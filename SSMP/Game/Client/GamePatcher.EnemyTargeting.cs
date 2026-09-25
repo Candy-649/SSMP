@@ -193,15 +193,21 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Gets whoever the enemy that set something of the room off goes after (see <see cref="NoteWhatAnEnemySetsOff"/>).
+    /// Gets whoever the enemy that set something of the room off goes after (see <see cref="NoteWhatAnEnemySetsOff"/>),
+    /// or this game's own player while that enemy goes after no one, as the thing would by itself: left at the player
+    /// it had, it went on aiming at a partner who had left or gone down.
     /// </summary>
     /// <param name="requester">The thing that was set off, or one of its child/component objects.</param>
-    /// <returns>The target, or <see langword="null"/> when no enemy set it off or it goes after no one.</returns>
+    /// <returns>The target, or <see langword="null"/> when no enemy set it off.</returns>
     private static GameObject? GetTargetOfWhoSetItOff(GameObject requester) {
         var owner = GetEnemyTargetOwner(requester);
-        return owner != null && SetOffByEnemy.TryGetValue(owner.GetInstanceID(), out var enemy) && enemy != null
-            ? GetFsmActionTarget(enemy)
-            : null;
+        if (owner == null || !SetOffByEnemy.TryGetValue(owner.GetInstanceID(), out var enemy)) {
+            return null;
+        }
+
+        var hero = HeroController.instance;
+        var heroObject = hero == null ? null : hero.gameObject;
+        return enemy == null ? heroObject : GetFsmActionTarget(enemy) ?? heroObject;
     }
 
     /// <summary>
@@ -388,8 +394,17 @@ internal partial class GamePatcher {
 
         foreach (var actionType in new[] { typeof(SendEventByName), typeof(SendEventByNameV2) }) {
             var onEnterMethod = actionType.GetMethod("OnEnter", InstancePublicFlags | InstanceNonPublicFlags);
-            if (onEnterMethod != null) {
+            if (onEnterMethod == null) {
+                continue;
+            }
+
+            try {
                 _targetedFsmActionEnterHooks.Add(new Hook(onEnterMethod, OnEventSenderEnter));
+            } catch (Exception e) {
+                Logger.Debug(
+                    $"Could not hook {actionType.Name}.OnEnter for what enemies set off: " +
+                    $"{e.GetType().Name}: {e.Message}"
+                );
             }
         }
     }
@@ -419,6 +434,9 @@ internal partial class GamePatcher {
     /// goes after (<see cref="ForceApprovedTargetOnFsmAction"/>). What such a thing aims at is the player of its own
     /// game, held in a variable like an enemy's, while the enemy that sets it off is the one that has chosen between
     /// the players: the pins went at the player whose game ran the boss, whichever of the two the boss was after.
+    ///
+    /// Passed on down a chain: a boss tells the thing that drops its boulders to drop, and that thing tells a boulder,
+    /// which then drops for whoever the boss goes after too.
     /// </summary>
     /// <param name="fsm">The FSM that sends the event.</param>
     /// <param name="eventTarget">Where the event goes.</param>
@@ -429,12 +447,25 @@ internal partial class GamePatcher {
         }
 
         var sender = fsm.GameObject;
-        if (sender == null || sender.GetComponentInParent<HealthManager>() == null) {
+        var senderOwner = sender == null ? null : GetEnemyTargetOwner(sender);
+        if (senderOwner == null) {
             return;
         }
 
+        // The enemy behind the event: the sender itself, or the enemy that set the sender off
+        GameObject? enemy;
+        if (senderOwner.GetComponent<HealthManager>() != null) {
+            enemy = senderOwner;
+        } else if (!SetOffByEnemy.TryGetValue(senderOwner.GetInstanceID(), out enemy) || enemy == null) {
+            return;
+        }
+
+        // Only something that is on and runs an FSM of its own is set off by an event. One that is off may be an enemy
+        // still asleep, which would be taken for the room's; one with no FSM would be noted under whatever holds it
+        // higher up, which never got the event.
         var target = fsm.GetOwnerDefaultTarget(eventTarget.gameObject);
-        if (target == null || target.GetComponentInParent<HealthManager>() != null) {
+        if (target == null || !target.activeInHierarchy || target.GetComponent<PlayMakerFSM>() == null ||
+            target.GetComponentInParent<HealthManager>() != null) {
             return;
         }
 
@@ -443,9 +474,8 @@ internal partial class GamePatcher {
             return;
         }
 
-        var enemy = GetEnemyTargetOwner(sender);
         var setOff = GetEnemyTargetOwner(target);
-        if (enemy != null && setOff != null) {
+        if (setOff != null && setOff != senderOwner) {
             SetOffByEnemy[setOff.GetInstanceID()] = enemy;
         }
     }
@@ -470,6 +500,89 @@ internal partial class GamePatcher {
         ForceApprovedTargetOnFsmAction(self);
         orig(self);
         ForceApprovedTargetOnFsmAction(self);
+
+        if (self is GetPosition getPosition) {
+            ReadCameraOfWhoIsAimedAt(getPosition);
+        }
+    }
+
+    /// <summary>
+    /// The PlayMaker global that holds the game's main camera, once found.
+    /// </summary>
+    private static FsmGameObject? _mainCameraVariable;
+
+    /// <summary>
+    /// Half the width and half the height of what the camera shows, by which the game keeps it inside the room
+    /// (<c>CameraController.KeepWithinSceneBounds</c>).
+    /// </summary>
+    private const float CameraHalfWidth = 14.6f, CameraHalfHeight = 8.3f;
+
+    /// <summary>
+    /// Has something of the room that an enemy set off, reading where the main camera is, read where the camera of the
+    /// partner that enemy goes after would be. A boss drops some boulders from just above the top of the screen, and
+    /// the scene host's screen is not the partner's, who may be well above or below.
+    /// </summary>
+    /// <param name="action">The GetPosition action that has just read a position.</param>
+    private static void ReadCameraOfWhoIsAimedAt(GetPosition action) {
+        var requester = action.Fsm?.GameObject;
+        if (requester == null || action.space != Space.World || GetFsmActionTarget(requester) != null) {
+            return;
+        }
+
+        var target = GetTargetOfWhoSetItOff(requester);
+        var hero = HeroController.instance;
+        if (target == null || hero == null || target == hero.gameObject) {
+            return;
+        }
+
+        _mainCameraVariable ??= FsmVariables.GlobalVariables.FindFsmGameObject("MainCamera");
+        var camera = _mainCameraVariable?.Value;
+        if (camera == null || action.Fsm!.GetOwnerDefaultTarget(action.gameObject) != camera) {
+            return;
+        }
+
+        var position = EstimateCameraPosition(target.transform.position, camera.transform.position.z);
+        action.vector.Value = position;
+        action.x.Value = position.x;
+        action.y.Value = position.y;
+        action.z.Value = position.z;
+    }
+
+    /// <summary>
+    /// Where the game's camera would be for a player at the given place: over the player, kept inside the room the way
+    /// the camera keeps itself (<c>CameraController.KeepWithinSceneBounds</c>, which is not called for this because it
+    /// also sets flags of the camera itself). Looking up or down, or leading a fall, moves the real one a little
+    /// further.
+    /// </summary>
+    /// <param name="player">Where the player is.</param>
+    /// <param name="z">The depth of the camera.</param>
+    /// <returns>Where the camera would be.</returns>
+    private static Vector3 EstimateCameraPosition(Vector3 player, float z) {
+        var position = new Vector3(player.x, player.y, z);
+
+        var cameras = GameCameras.instance;
+        var controller = cameras == null ? null : cameras.cameraController;
+        if (controller == null || controller.AllowExitingSceneBounds) {
+            return position;
+        }
+
+        if (position.x < CameraHalfWidth) {
+            position.x = CameraHalfWidth;
+        }
+
+        if (position.x > controller.xLimit) {
+            position.x = controller.xLimit;
+        }
+
+        if (position.y < CameraHalfHeight) {
+            position.y = CameraHalfHeight;
+        }
+
+        if (position.y > controller.yLimit) {
+            position.y = controller.yLimit;
+        }
+
+        return position;
     }
 
     /// <summary>
@@ -815,11 +928,9 @@ internal partial class GamePatcher {
             return false;
         }
 
-        // Over a player, or over one written here before whose player has gone
+        // Only over a player (see ForceApprovedTargetOnFsmAction)
         if (onlyWherePlayer) {
-            return currentTarget == null
-                ? string.IsNullOrEmpty(variableName)
-                : PlayerTargetRegistry.IsHeroLikeObject(currentTarget);
+            return currentTarget != null && PlayerTargetRegistry.IsHeroLikeObject(currentTarget);
         }
 
         if (currentTarget != null &&
