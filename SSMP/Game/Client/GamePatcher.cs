@@ -750,6 +750,13 @@ internal partial class GamePatcher {
         Action<CallMethodProper> orig,
         CallMethodProper self
     ) {
+        // Whatever an object calls on the player character in answer to a remote player's hit is for the player who
+        // struck - a bounce off a boulder or a platform, the silk of a vine - and here it would be the local player's
+        // character that bounced or was paid
+        if (_suppressHeroKnockback && self.behaviour.Value == "HeroController") {
+            return;
+        }
+
         // If the 'behaviour' and 'methodName' strings do not match, we execute the original method and return
         if (self.behaviour.Value != "HeroController" ||
             self.methodName.Value != "RecoilLeft" &&

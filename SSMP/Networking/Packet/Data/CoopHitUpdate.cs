@@ -42,7 +42,8 @@ internal class CoopHitUpdate : IPacketData {
     public string Path { get; set; } = "";
 
     /// <summary>
-    /// For a hit on an object, the name of the type of the component on the object that took the hit.
+    /// For a hit on an object, the name of the type of the component on the object that took the hit. For a touch, the
+    /// name of the type of the component that told the object of it.
     /// </summary>
     public string Responder { get; set; } = "";
 
@@ -114,5 +115,11 @@ internal enum CoopHitKind : byte {
     /// A blocked hit is not a wound. It only strikes a spark off the enemy and clinks, and showing it over there as
     /// the effect of a hit that landed had the enemy bleeding every time it guarded.
     /// </summary>
-    EnemyBlockEffect
+    EnemyBlockEffect,
+
+    /// <summary>
+    /// A shared object of the world, found by its path, that an attack touched and that answered the touch. The other
+    /// game replays the touch through the same component that told the object of it.
+    /// </summary>
+    ObjectTouch
 }

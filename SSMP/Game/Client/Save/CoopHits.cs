@@ -1,9 +1,11 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Reflection;
 using GlobalEnums;
+using HutongGames.PlayMaker;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
@@ -18,13 +20,17 @@ using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client.Save;
 
+// SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
+using Fsm = HutongGames.PlayMaker.Fsm;
+
 /// <summary>
-/// Replays hits between the players of a two-player save. When the local player hits an object of the world, such as a
-/// wall that breaks or a lever, the game of the partner replays the hit on its own copy of that object, so that both
-/// worlds change in the same way. The copies of the partner's attacks in the local game leave those objects alone, so
-/// that nothing is hit twice.
-/// A replayed hit gives the local player nothing: no knockback, no silk and no hit pause. What the object drops is
-/// dropped in both games, so each player gets their own.
+/// Replays hits between the players of a two-player save. When the local player hits an object of the room, such as a
+/// wall that breaks, a lever or a rock that explodes, the game of the partner replays the hit on its own copy of that
+/// object, so that both worlds change in the same way. Many objects notice an attack by its touch rather than by its
+/// hit, and a touch that such an object answered is replayed the same way. The copies of the partner's attacks in the
+/// local game only show the attacks and leave those objects alone, so that nothing is hit twice and nothing is missed.
+/// A replayed hit gives the local player nothing: no knockback, no bounce, no silk and no hit pause. What the object
+/// drops is dropped in both games, so each player gets their own.
 /// Knockback of enemies is local first as well: a hit of the local player knocks back an enemy at once, also when the
 /// scene host controls the enemy, and the game of the scene host applies the same knockback when the hit arrives.
 /// </summary>
@@ -35,10 +41,29 @@ internal class CoopHits {
     private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     /// <summary>
-    /// The types of objects whose hits are replayed: objects of the world that both players share. Objects that give
-    /// the player who hits them something, that move that player, or that only react to hits, are left out.
+    /// The kinds of objects of the room that are there for the player who hits them: they fling that player off them,
+    /// heal or pay them, or ring or spark against their weapon, where their own game has them. A hit on one is not
+    /// sent, and the copy of the partner's attack leaves the one here alone, so each player has their own. Every other
+    /// object of the room takes the partner's hits as replays of them (see <see cref="IsRoomObject"/>).
     /// </summary>
-    private static readonly Type[] ReplayedTypes = [
+    private static readonly Type[] PersonalTypes = [
+        typeof(BounceBalloon),
+        typeof(BouncePod),
+        typeof(CurrencyObjectBase),
+        typeof(HealthFlyer),
+        typeof(LifebloodPustule),
+        typeof(ScuttlerControl),
+        typeof(SpikeSlashReaction),
+        typeof(TinkEffect)
+    ];
+
+    /// <summary>
+    /// The kinds of objects whose hits were replayed before those of every other object of the room were. They were
+    /// replayed also when the room spawned them as it loaded, which rooms do with some of them, and the other game
+    /// finds a spawned one by its place and name like any other. So these count as objects of the room when spawned
+    /// too (see <see cref="IsRoomObject"/>).
+    /// </summary>
+    private static readonly Type[] ReplayedWhenSpawnedTypes = [
         typeof(ActivatorPlatform),
         typeof(Breakable),
         typeof(BreakableHolder),
@@ -67,9 +92,33 @@ internal class CoopHits {
     ];
 
     /// <summary>
-    /// Whether hits on objects of a type are replayed, for the types that were looked up.
+    /// The components through which the state machines of an object hear of something touching it: coming into it,
+    /// staying in it or leaving it. Unity tells each of them, and each passes it on to the state machines of its object
+    /// and to the actions elsewhere that listen to it. Many objects of the room notice an attack this way rather than
+    /// by its hit, and then only where the attack touched them.
     /// </summary>
-    private static readonly Dictionary<Type, bool> IsReplayedByType = new();
+    private static readonly Type[] TouchReceiverTypes = [
+        typeof(PlayMakerTriggerEnter2D),
+        typeof(PlayMakerTriggerStay2D),
+        typeof(PlayMakerTriggerExit2D),
+        typeof(CustomPlayMakerTriggerStay2D)
+    ];
+
+    /// <summary>
+    /// Whether objects of a type are there for the player who hits them, for the types that were looked up.
+    /// </summary>
+    private static readonly Dictionary<Type, bool> IsPersonalByType = new();
+
+    /// <summary>
+    /// Whether objects of a type count as objects of the room when spawned, for the types that were looked up.
+    /// </summary>
+    private static readonly Dictionary<Type, bool> IsReplayedWhenSpawnedByType = new();
+
+    /// <summary>
+    /// While a hit or touch of the partner is replayed, what each range of the object had inside it in the partner's
+    /// game when they struck.
+    /// </summary>
+    private static readonly Dictionary<TrackTriggerObjects, RangeState> ReplayedRanges = new();
 
     /// <summary>
     /// The net client for sending hits.
@@ -112,7 +161,12 @@ internal class CoopHits {
     private Rigidbody2D? _movingHitSource;
 
     /// <summary>
-    /// Whether a hit of the partner is being replayed.
+    /// The object that replayed touches come from, which takes the name, place and kind of the partner's attack.
+    /// </summary>
+    private Collider2D? _touchSource;
+
+    /// <summary>
+    /// Whether a hit or touch of the partner is being replayed.
     /// </summary>
     private bool _isReplaying;
 
@@ -125,6 +179,17 @@ internal class CoopHits {
     /// Whether sending a hit threw, which is only logged once.
     /// </summary>
     private bool _sendFailed;
+
+    /// <summary>
+    /// The state that each state machine was in before it first changed state during a hit or touch of the local
+    /// player's attack, which tells whether the object answered it (see <see cref="AnswersAttack"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, FsmState?> _statesBefore = new();
+
+    /// <summary>
+    /// Whether a hit or touch of the local player's attack is being made, while the states are written down.
+    /// </summary>
+    private bool _watchingStates;
 
     public CoopHits(
         NetClient netClient,
@@ -187,6 +252,36 @@ internal class CoopHits {
             new Action<Action<Recoil, int, float>, Recoil, int, float>(OnRecoilByDirection)
         );
         AddHook(
+            typeof(TrackTriggerObjects).GetMethod("get_InsideCount", InstanceFlags),
+            new Func<Func<TrackTriggerObjects, int>, TrackTriggerObjects, int>(OnInsideCount)
+        );
+        AddHook(
+            typeof(ThreadSpinner).GetMethod("AddSilkDelayed", InstanceFlags),
+            new Func<Func<ThreadSpinner, IEnumerator>, ThreadSpinner, IEnumerator>(OnThreadSpinnerAddSilkDelayed)
+        );
+        AddHook(
+            typeof(Fsm).GetMethod("SwitchState", InstanceFlags, null, [typeof(FsmState)], null),
+            new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnSwitchState)
+        );
+        AddHook(
+            GetTouchMethod(typeof(PlayMakerTriggerEnter2D), "OnTriggerEnter2D"),
+            new Action<Action<PlayMakerTriggerEnter2D, Collider2D>, PlayMakerTriggerEnter2D, Collider2D>(OnTouchEnter)
+        );
+        AddHook(
+            GetTouchMethod(typeof(PlayMakerTriggerStay2D), "OnTriggerStay2D"),
+            new Action<Action<PlayMakerTriggerStay2D, Collider2D>, PlayMakerTriggerStay2D, Collider2D>(OnTouchStay)
+        );
+        AddHook(
+            GetTouchMethod(typeof(PlayMakerTriggerExit2D), "OnTriggerExit2D"),
+            new Action<Action<PlayMakerTriggerExit2D, Collider2D>, PlayMakerTriggerExit2D, Collider2D>(OnTouchExit)
+        );
+        AddHook(
+            GetTouchMethod(typeof(CustomPlayMakerTriggerStay2D), "OnTriggerStay2D"),
+            new Action<Action<CustomPlayMakerTriggerStay2D, Collider2D>, CustomPlayMakerTriggerStay2D, Collider2D>(
+                OnCustomTouchStay
+            )
+        );
+        AddHook(
             typeof(HeroController).GetMethod(
                 nameof(HeroController.NailHitEnemy),
                 InstanceFlags,
@@ -211,6 +306,7 @@ internal class CoopHits {
         _hooks.Clear();
         _isReplaying = false;
         _hitContext = HitContext.None;
+        ReplayedRanges.Clear();
 
         if (_hitSource != null) {
             Object.Destroy(_hitSource);
@@ -220,13 +316,18 @@ internal class CoopHits {
             Object.Destroy(_movingHitSource.gameObject);
         }
 
+        if (_touchSource != null) {
+            Object.Destroy(_touchSource.gameObject);
+        }
+
         _hitSource = null;
         _movingHitSource = null;
+        _touchSource = null;
     }
 
     /// <summary>
-    /// Replays a hit of the partner on the local copy of the object that they hit, or applies the knockback of their
-    /// hit on an enemy.
+    /// Replays a hit or touch of the partner on the local copy of the object that they hit or touched, or applies the
+    /// knockback of their hit on an enemy.
     /// </summary>
     public void OnCoopHitUpdate(CoopHitUpdate update) {
         if (_getPartnerId() != update.PlayerId || !_playerData.TryGetValue(update.PlayerId, out var partner) ||
@@ -249,8 +350,13 @@ internal class CoopHits {
             return;
         }
 
+        if (update.Kind == CoopHitKind.ObjectTouch) {
+            ReplayTouch(update);
+            return;
+        }
+
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
-        if (type == null || !typeof(IHitResponder).IsAssignableFrom(type) || !IsReplayed(type)) {
+        if (type == null || !typeof(IHitResponder).IsAssignableFrom(type) || IsPersonal(type)) {
             return;
         }
 
@@ -266,7 +372,7 @@ internal class CoopHits {
 
         var component = components[update.Index];
         if (component is not IHitResponder responder || component is Behaviour { isActiveAndEnabled: false } ||
-            !IsReplayed(component)) {
+            !IsRoomObject(component)) {
             return;
         }
 
@@ -280,11 +386,14 @@ internal class CoopHits {
 
         _isReplaying = true;
         try {
+            // An object that takes a hit only while the player is near goes by where the partner stood in their game
+            SetReplayedRanges(target, source.Ranges);
             _gamePatcher.RunAsRemoteHit(() => responder.Hit(hit));
         } catch (Exception e) {
             Logger.Warn($"Could not replay a hit of the partner on {update.Path}:\n{e}");
         } finally {
             _isReplaying = false;
+            ReplayedRanges.Clear();
 
             if (_movingHitSource != null) {
                 _movingHitSource.linearVelocity = Vector2.zero;
@@ -397,6 +506,38 @@ internal class CoopHits {
     }
 
     /// <summary>
+    /// Hook for the number of things inside a range of an object, which gives the ranges of an object whose hit or
+    /// touch is being replayed the number they had in the game of the partner who struck. An object that takes a hit
+    /// only while the player is near counts the player of its own game, and here that is the player who did not strike.
+    /// </summary>
+    private int OnInsideCount(Func<TrackTriggerObjects, int> orig, TrackTriggerObjects self) {
+        return _isReplaying && ReplayedRanges.TryGetValue(self, out var range) ? range.Inside : orig(self);
+    }
+
+    /// <summary>
+    /// While a hit or touch of the partner is replayed, what an alert range of the object said in their game when they
+    /// struck: whether a player was near. What such a range says here goes by who stands where in this game. Asked by
+    /// the answer that <see cref="GamePatcher"/> gives for alert ranges.
+    /// </summary>
+    /// <param name="alertRange">The alert range.</param>
+    /// <param name="inRange">What it said in the partner's game.</param>
+    /// <returns>Whether the range is one of the object whose hit or touch is being replayed.</returns>
+    public static bool TryGetReplayedInRange(AlertRange alertRange, out bool inRange) {
+        var replayed = ReplayedRanges.TryGetValue(alertRange, out var range);
+        inRange = range.InRange;
+        return replayed;
+    }
+
+    /// <summary>
+    /// Hook for the routine that pays the silk of a spool a moment after it was hit, which keeps a replayed hit of the
+    /// partner from paying the local player. The routine pays when the replay is over and <see cref="OnAddSilk"/> can
+    /// no longer tell whose hit it was, so it is not started for one at all.
+    /// </summary>
+    private IEnumerator OnThreadSpinnerAddSilkDelayed(Func<ThreadSpinner, IEnumerator> orig, ThreadSpinner self) {
+        return _isReplaying || _hitContext == HitContext.Remote ? Array.Empty<object>().GetEnumerator() : orig(self);
+    }
+
+    /// <summary>
     /// Hook for <see cref="HeroController.NailHitEnemy"/>, which keeps a replayed hit, or the copy of a swing of the
     /// partner, from paying the local player for landing it.
     ///
@@ -472,15 +613,28 @@ internal class CoopHits {
             return isRemote ? IHitResponder.Response.None : responder.Hit(hit);
         }
 
-        if (responder is Component component && IsReplayed(component)) {
+        // An object of the room takes only the hits that really reached it: those of this game's player, and those of
+        // the partner as replays of their hits, which arrive through OnCoopHitUpdate. The copy of the partner's attack
+        // only shows the attack. It is drawn where this game has the partner, a little off from where they are, so it
+        // missed what they hit at the edge of their reach - and an object that counts a hit only while the player is
+        // near counted this game's player, who may be anywhere.
+        if (responder is Component component && IsRoomObject(component)) {
             if (isRemote) {
                 return IHitResponder.Response.None;
             }
 
-            // The update is made before the hit, since a hit can break the object and move its parts
+            if (IsPersonal(component.GetType())) {
+                return responder.Hit(hit);
+            }
+
+            // The update is made before the hit, since a hit can break the object and move its parts. An object that
+            // lets the attack go on through it says it was not hit, and it still answered when one of its state
+            // machines moved on to another state
             var update = hit.IsHeroDamage ? CreateUpdate(partnerId, component, hit) : null;
-            var response = responder.Hit(hit);
-            if (update != null && response.response != IHitResponder.Response.None && _netClient.IsConnected) {
+            var response = default(IHitResponder.HitResponse);
+            var answered = AnswersAttack(() => response = responder.Hit(hit));
+            if (update != null && _netClient.IsConnected &&
+                (response.response != IHitResponder.Response.None || answered)) {
                 _netClient.UpdateManager.SetCoopHitUpdate(update);
             }
 
@@ -528,6 +682,169 @@ internal class CoopHits {
         } finally {
             _hitContext = lastContext;
         }
+    }
+
+    /// <summary>
+    /// Hook for the component that tells the state machines of an object of something coming into it (see
+    /// <see cref="TouchReceiverTypes"/>). The local player's attack touching an object of the room goes to
+    /// <see cref="OnLocalAttackTouch"/>, and the copy of the partner's attack touches nothing there.
+    /// </summary>
+    private void OnTouchEnter(
+        Action<PlayMakerTriggerEnter2D, Collider2D> orig,
+        PlayMakerTriggerEnter2D self,
+        Collider2D other
+    ) {
+        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+            orig(self, other);
+        } else if (isLocal) {
+            OnLocalAttackTouch(self, other, () => orig(self, other));
+        }
+    }
+
+    /// <summary>
+    /// Hook for the component that tells the state machines of an object of something staying in it, like
+    /// <see cref="OnTouchEnter"/>.
+    /// </summary>
+    private void OnTouchStay(
+        Action<PlayMakerTriggerStay2D, Collider2D> orig,
+        PlayMakerTriggerStay2D self,
+        Collider2D other
+    ) {
+        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+            orig(self, other);
+        } else if (isLocal) {
+            OnLocalAttackTouch(self, other, () => orig(self, other));
+        }
+    }
+
+    /// <summary>
+    /// Hook for the component that tells the state machines of an object of something leaving it, like
+    /// <see cref="OnTouchEnter"/>.
+    /// </summary>
+    private void OnTouchExit(
+        Action<PlayMakerTriggerExit2D, Collider2D> orig,
+        PlayMakerTriggerExit2D self,
+        Collider2D other
+    ) {
+        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+            orig(self, other);
+        } else if (isLocal) {
+            OnLocalAttackTouch(self, other, () => orig(self, other));
+        }
+    }
+
+    /// <summary>
+    /// Hook for the game's own component that tells actions of something staying in an object, like
+    /// <see cref="OnTouchEnter"/>.
+    /// </summary>
+    private void OnCustomTouchStay(
+        Action<CustomPlayMakerTriggerStay2D, Collider2D> orig,
+        CustomPlayMakerTriggerStay2D self,
+        Collider2D other
+    ) {
+        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+            orig(self, other);
+        } else if (isLocal) {
+            OnLocalAttackTouch(self, other, () => orig(self, other));
+        }
+    }
+
+    /// <summary>
+    /// Gets the method through which Unity tells a component of a touch.
+    /// </summary>
+    private static MethodInfo? GetTouchMethod(Type type, string name) {
+        return type.GetMethod(name, InstanceFlags, null, [typeof(Collider2D)], null);
+    }
+
+    /// <summary>
+    /// Whether something touching an object is an attack of one of the players and the object one of the room, in a
+    /// checked two-player save, and if so whether the attack is the local player's. Every touch in the game comes
+    /// through here, so the cheap checks come first. A replayed touch goes straight through.
+    /// </summary>
+    /// <param name="receiver">The component that tells the object of the touch.</param>
+    /// <param name="other">What touches the object.</param>
+    /// <param name="isLocal">Whether it is an attack of the local player rather than a copy of the partner's.</param>
+    private bool IsPlayerAttackOnRoomObject(Component receiver, Collider2D other, out bool isLocal) {
+        isLocal = false;
+        if (_isReplaying || other.gameObject.layer != (int) PhysLayers.HERO_ATTACK || _getPartnerId() == null) {
+            return false;
+        }
+
+        var isRemote = RemoteAttackComponent.IsRemoteAttack(other.gameObject);
+        isLocal = !isRemote && IsLocalAttack(other);
+        return (isRemote || isLocal) && IsRoomObject(receiver);
+    }
+
+    /// <summary>
+    /// Handles the local player's attack touching an object of the room. A touch that the object answered goes to the
+    /// partner, whose game replays it.
+    /// </summary>
+    /// <param name="receiver">The component that tells the object of the touch.</param>
+    /// <param name="attack">The attack.</param>
+    /// <param name="touch">Tells the object of the touch.</param>
+    private void OnLocalAttackTouch(Component receiver, Collider2D attack, Action touch) {
+        // The update is made before the touch, since a touch can break the object and move its parts
+        var update = _getPartnerId() is { } partnerId ? CreateTouchUpdate(partnerId, receiver, attack) : null;
+        if (AnswersAttack(touch) && update != null && _netClient.IsConnected) {
+            _netClient.UpdateManager.SetCoopHitUpdate(update);
+        }
+    }
+
+    /// <summary>
+    /// Whether an attack is the local player's own: a part of their character, a thing of a tool they threw or set, or
+    /// an attack that a skill of theirs left in the world. The game knows the last by the attack itself, which says
+    /// that the player is its source, and that is also what makes a hit of it the player's (see
+    /// <see cref="HitInstance.IsHeroDamage"/>).
+    /// </summary>
+    private static bool IsLocalAttack(Collider2D attack) {
+        var hero = HeroController.SilentInstance;
+        if (hero != null && attack.transform.IsChildOf(hero.transform) ||
+            LocalToolComponent.IsLocalTool(attack.gameObject)) {
+            return true;
+        }
+
+        var damager = attack.GetComponentInParent<DamageEnemies>();
+        return damager != null && (damager.isHeroDamage || damager.sourceIsHero);
+    }
+
+    /// <summary>
+    /// Hook for a state machine changing state, which writes down the state it was in the first time it changes
+    /// during a hit or touch of the local player's attack (see <see cref="AnswersAttack"/>).
+    /// </summary>
+    private void OnSwitchState(Action<Fsm, FsmState> orig, Fsm self, FsmState toState) {
+        if (_watchingStates && !_statesBefore.ContainsKey(self)) {
+            _statesBefore[self] = self.ActiveState;
+        }
+
+        orig(self, toState);
+    }
+
+    /// <summary>
+    /// Makes a hit or touch of the local player's attack on an object of the room, and says whether the object
+    /// answered it: whether a state machine that changed state on it ended up in another state than before. An object
+    /// that looks at an attack and turns it down goes straight back to where it was, like a rock struck from too far
+    /// off or a wall struck from its wrong side. Such an attack is not sent: replayed, it would be looked at again,
+    /// and a check that goes by something of the partner's game, like where their player stands, could let it through.
+    /// </summary>
+    private bool AnswersAttack(Action attack) {
+        _statesBefore.Clear();
+        _watchingStates = true;
+        try {
+            attack();
+        } finally {
+            _watchingStates = false;
+        }
+
+        var answered = false;
+        foreach (var pair in _statesBefore) {
+            if (pair.Key.ActiveState != pair.Value) {
+                answered = true;
+                break;
+            }
+        }
+
+        _statesBefore.Clear();
+        return answered;
     }
 
     /// <summary>
@@ -952,7 +1269,7 @@ internal class CoopHits {
                 Path = ScenePath.Get(target.transform),
                 Responder = type.FullName,
                 Index = (byte) index,
-                Hit = WriteHit(hit)
+                Hit = WriteHit(hit, null, target)
             };
         } catch (Exception e) {
             if (!_sendFailed) {
@@ -961,6 +1278,155 @@ internal class CoopHits {
             }
 
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Creates the update that sends a touch of the local player's attack on an object of the room to the partner.
+    /// </summary>
+    /// <returns>The update, or null if the partner isn't in the scene or the object can't be found by others.</returns>
+    private CoopHitUpdate? CreateTouchUpdate(ushort partnerId, Component receiver, Collider2D attack) {
+        try {
+            if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+                return null;
+            }
+
+            var target = receiver.gameObject;
+            var type = receiver.GetType();
+            var index = Array.IndexOf(target.GetComponents(type), receiver);
+            if (index is < 0 or > byte.MaxValue || type.FullName == null) {
+                return null;
+            }
+
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            var position = attack.transform.position;
+            writer.Write(position.x);
+            writer.Write(position.y);
+            writer.Write(position.z);
+            writer.Write(attack.name);
+            writer.Write(attack.tag);
+            writer.Write(attack.gameObject.layer);
+            WriteRanges(writer, target);
+            writer.Flush();
+
+            return new CoopHitUpdate {
+                TargetId = partnerId,
+                Kind = CoopHitKind.ObjectTouch,
+                Scene = target.scene.name,
+                Path = ScenePath.Get(target.transform),
+                Responder = type.FullName,
+                Index = (byte) index,
+                Hit = stream.ToArray()
+            };
+        } catch (Exception e) {
+            if (!_sendFailed) {
+                _sendFailed = true;
+                Logger.Error($"Could not send a touch to the partner:\n{e}");
+            }
+
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Replays a touch of the partner's attack on the local copy of the object of the room that it touched, through
+    /// the same component that told the object of it in their game.
+    /// </summary>
+    private void ReplayTouch(CoopHitUpdate update) {
+        var type = Array.Find(TouchReceiverTypes, touchType => touchType.FullName == update.Responder);
+        var target = type != null ? ScenePath.Find(update.Path, update.Scene) : null;
+        if (type == null || target == null || !target.activeInHierarchy) {
+            return;
+        }
+
+        var receivers = target.GetComponents(type);
+        if (update.Index >= receivers.Length || !IsRoomObject(receivers[update.Index])) {
+            return;
+        }
+
+        if (!TryReadTouch(update.Hit, out var touch)) {
+            Logger.Warn($"Could not read a touch of the partner on {update.Path}");
+            return;
+        }
+
+        var attack = GetTouchSource(touch);
+
+        _isReplaying = true;
+        try {
+            SetReplayedRanges(target, touch.Ranges);
+            _gamePatcher.RunAsRemoteHit(() => TellOfTouch(receivers[update.Index], attack));
+        } catch (Exception e) {
+            Logger.Warn($"Could not replay a touch of the partner on {update.Path}:\n{e}");
+        } finally {
+            _isReplaying = false;
+            ReplayedRanges.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Tells a component that hears of touches of an attack touching its object, as Unity does.
+    /// </summary>
+    private static void TellOfTouch(Component receiver, Collider2D attack) {
+        switch (receiver) {
+            case PlayMakerTriggerEnter2D enter:
+                enter.OnTriggerEnter2D(attack);
+                break;
+            case PlayMakerTriggerStay2D stay:
+                stay.OnTriggerStay2D(attack);
+                break;
+            case PlayMakerTriggerExit2D exit:
+                exit.OnTriggerExit2D(attack);
+                break;
+            case CustomPlayMakerTriggerStay2D customStay:
+                customStay.OnTriggerStay2D(attack);
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Gets the object that replayed touches come from and gives it the name, place and kind of the partner's attack,
+    /// which is what the actions that listen for a touch look at.
+    /// </summary>
+    private Collider2D GetTouchSource(TouchSourceState state) {
+        if (_touchSource == null) {
+            // Switched off, since it only stands for the partner's attack and must not touch anything itself
+            _touchSource = CreateHitSource("Coop Touch Source").AddComponent<BoxCollider2D>();
+            _touchSource.isTrigger = true;
+            _touchSource.enabled = false;
+        }
+
+        var source = _touchSource.gameObject;
+        source.name = state.Name;
+        source.transform.position = state.Position;
+        source.layer = state.Layer is >= 0 and < 32 ? state.Layer : (int) PhysLayers.HERO_ATTACK;
+
+        try {
+            source.tag = state.Tag;
+        } catch (UnityException) {
+            source.tag = "Untagged";
+        }
+
+        return _touchSource;
+    }
+
+    /// <summary>
+    /// Reads a touch that <see cref="CreateTouchUpdate"/> wrote.
+    /// </summary>
+    /// <returns>Whether the touch could be read.</returns>
+    private static bool TryReadTouch(byte[] data, out TouchSourceState touch) {
+        touch = default;
+
+        try {
+            using var reader = new BinaryReader(new MemoryStream(data));
+            touch.Position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            touch.Name = reader.ReadString();
+            touch.Tag = reader.ReadString();
+            touch.Layer = reader.ReadInt32();
+            touch.Ranges = ReadRanges(reader);
+            return true;
+        } catch (IOException) {
+            return false;
         }
     }
 
@@ -1042,23 +1508,100 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Whether hits on the given object are replayed: it is of a replayed type and not part of an enemy, since enemy
-    /// sync takes care of enemies.
+    /// Whether an object is a part of the room itself, which both games have in the same place: in a scene rather than
+    /// kept across scenes, placed there rather than spawned, and neither a creature nor a part of one, since enemy
+    /// sync takes care of creatures. The kinds that were replayed before the others count when spawned too (see
+    /// <see cref="ReplayedWhenSpawnedTypes"/>).
     /// </summary>
-    private static bool IsReplayed(Component component) {
-        return IsReplayed(component.GetType()) && component.GetComponentInParent<HealthManager>(true) == null;
+    private static bool IsRoomObject(Component component) {
+        var scene = component.gameObject.scene;
+        if (!scene.IsValid() || scene.name == "DontDestroyOnLoad" ||
+            component.GetComponentInParent<HealthManager>(true) != null) {
+            return false;
+        }
+
+        var countsWhenSpawned = IsOfType(
+            component.GetType(), ReplayedWhenSpawnedTypes, IsReplayedWhenSpawnedByType
+        );
+        for (var current = component.transform; current != null; current = current.parent) {
+            if (!countsWhenSpawned && current.name.Contains("(Clone)") ||
+                EntityProcessor.IsRegistered(current.gameObject)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
-    /// Whether hits on objects of the given type are replayed.
+    /// Whether objects of the given type are there for the player who hits them (see <see cref="PersonalTypes"/>).
     /// </summary>
-    private static bool IsReplayed(Type type) {
-        if (!IsReplayedByType.TryGetValue(type, out var replayed)) {
-            replayed = Array.Exists(ReplayedTypes, replayedType => replayedType.IsAssignableFrom(type));
-            IsReplayedByType[type] = replayed;
+    private static bool IsPersonal(Type type) {
+        return IsOfType(type, PersonalTypes, IsPersonalByType);
+    }
+
+    /// <summary>
+    /// Whether a type is one of the given types or derives from one, remembered per type.
+    /// </summary>
+    private static bool IsOfType(Type type, Type[] types, Dictionary<Type, bool> known) {
+        if (!known.TryGetValue(type, out var isOfType)) {
+            isOfType = Array.Exists(types, candidate => candidate.IsAssignableFrom(type));
+            known[type] = isOfType;
         }
 
-        return replayed;
+        return isOfType;
+    }
+
+    /// <summary>
+    /// Writes what the ranges of an object have inside them, in the order they are found under it: how many of what
+    /// each counts, and for an alert range whether it says that a player is near. An object that takes a hit only
+    /// while the player is near goes by these. A range of a creature under the object is left out: asking it whether a
+    /// player is near picks whom the creature goes after, and the creature is kept in step by its own sync.
+    /// </summary>
+    private static void WriteRanges(BinaryWriter writer, GameObject? target) {
+        var ranges = target != null
+            ? target.GetComponentsInChildren<TrackTriggerObjects>(true)
+            : Array.Empty<TrackTriggerObjects>();
+        var count = Mathf.Min(ranges.Length, byte.MaxValue);
+        writer.Write((byte) count);
+        for (var i = 0; i < count; i++) {
+            var isCreatures = IsCreatureRange(ranges[i]);
+            writer.Write((byte) (isCreatures ? 0 : Mathf.Min(ranges[i].InsideCount, byte.MaxValue)));
+            writer.Write(!isCreatures && ranges[i] is AlertRange alertRange && alertRange.IsHeroInRange());
+        }
+    }
+
+    /// <summary>
+    /// Reads what <see cref="WriteRanges"/> wrote.
+    /// </summary>
+    private static RangeState[] ReadRanges(BinaryReader reader) {
+        var ranges = new RangeState[reader.ReadByte()];
+        for (var i = 0; i < ranges.Length; i++) {
+            ranges[i].Inside = reader.ReadByte();
+            ranges[i].InRange = reader.ReadBoolean();
+        }
+
+        return ranges;
+    }
+
+    /// <summary>
+    /// Gives the ranges of an object whose hit or touch is replayed what they had inside them in the partner's game,
+    /// until the replay is over. What the object checks later, after waiting a moment, goes by this game.
+    /// </summary>
+    private static void SetReplayedRanges(GameObject target, RangeState[] states) {
+        var ranges = target.GetComponentsInChildren<TrackTriggerObjects>(true);
+        for (var i = 0; i < ranges.Length && i < states.Length; i++) {
+            if (!IsCreatureRange(ranges[i])) {
+                ReplayedRanges[ranges[i]] = states[i];
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a range belongs to a creature: whether something with health is above it.
+    /// </summary>
+    private static bool IsCreatureRange(TrackTriggerObjects range) {
+        return range.GetComponentInParent<HealthManager>(true) != null;
     }
 
     /// <summary>
@@ -1084,7 +1627,8 @@ internal class CoopHits {
     /// <param name="hit">The hit.</param>
     /// <param name="enemyPosition">For a hit that goes the way from its source to the enemy, where the enemy stood.
     /// </param>
-    private static byte[] WriteHit(HitInstance hit, Vector3? enemyPosition = null) {
+    /// <param name="rangesOf">For a hit on an object of the room, the object, whose ranges go with the hit.</param>
+    private static byte[] WriteHit(HitInstance hit, Vector3? enemyPosition = null, GameObject? rangesOf = null) {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
 
@@ -1147,6 +1691,7 @@ internal class CoopHits {
         writer.Write(enemyPosition?.x ?? 0f);
         writer.Write(enemyPosition?.y ?? 0f);
         writer.Write(enemyPosition?.z ?? 0f);
+        WriteRanges(writer, rangesOf);
 
         writer.Flush();
         return stream.ToArray();
@@ -1232,6 +1777,7 @@ internal class CoopHits {
             var hasEnemyPosition = reader.ReadBoolean();
             var enemyPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
             source.EnemyPosition = hasEnemyPosition ? enemyPosition : null;
+            source.Ranges = ReadRanges(reader);
 
             hit.SilkGeneration = HitSilkGeneration.None;
             return true;
@@ -1294,5 +1840,55 @@ internal class CoopHits {
         /// who struck, or null.
         /// </summary>
         public Vector3? EnemyPosition;
+
+        /// <summary>
+        /// For a hit on an object of the room, what its ranges had inside them in the game of the player who struck.
+        /// </summary>
+        public RangeState[] Ranges;
+    }
+
+    /// <summary>
+    /// What a range of an object had inside it in the game of the player who struck.
+    /// </summary>
+    private struct RangeState {
+        /// <summary>
+        /// How many of what it counts were inside it.
+        /// </summary>
+        public byte Inside;
+
+        /// <summary>
+        /// For an alert range, whether it said that a player was near.
+        /// </summary>
+        public bool InRange;
+    }
+
+    /// <summary>
+    /// The state of the attack that a touch came from, which the object that replayed touches come from takes on.
+    /// </summary>
+    private struct TouchSourceState {
+        /// <summary>
+        /// The position of the attack.
+        /// </summary>
+        public Vector3 Position;
+
+        /// <summary>
+        /// The name of the attack, which some actions look at.
+        /// </summary>
+        public string Name;
+
+        /// <summary>
+        /// The tag of the attack.
+        /// </summary>
+        public string Tag;
+
+        /// <summary>
+        /// The layer of the attack.
+        /// </summary>
+        public int Layer;
+
+        /// <summary>
+        /// What the ranges of the object that was touched had inside them in the game of the player who struck.
+        /// </summary>
+        public RangeState[] Ranges;
     }
 }

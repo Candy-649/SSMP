@@ -181,6 +181,12 @@ internal partial class GamePatcher {
     /// <param name="self">The alert range being queried.</param>
     /// <returns>True when the relevant tracked player is inside this alert range and visible; otherwise false.</returns>
     private static bool OnAlertRangeIsHeroInRange(AlertRange self) {
+        // A hit or touch of the partner that is being replayed goes by what the range said in their game when they
+        // struck
+        if (Save.CoopHits.TryGetReplayedInRange(self, out var replayed)) {
+            return replayed;
+        }
+
         var answer = AnswerWhetherAPlayerIsInAlertRange(self);
 
         // Said out loud when the answer is no while somebody is plainly standing there and can be seen, because
