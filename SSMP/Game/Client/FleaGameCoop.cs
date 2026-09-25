@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -163,14 +164,24 @@ internal class FleaGameCoop {
     private bool _resetHeld;
 
     /// <summary>
-    /// Whether the partner has won every game of the festival.
+    /// Which players have won every game of the festival, by their ID. Kept for whoever says it rather than only for
+    /// the partner: the game that finishes the check first says it at once, often before the other game has finished
+    /// its own half, and it is only said again on a change - so a word turned away for coming that early was never
+    /// heard at all, and the festival of the other player waited for it for good.
     /// </summary>
-    private bool _partnerOutroReady;
+    private readonly Dictionary<ushort, bool> _outroReadyOf = new();
 
     /// <summary>
     /// What the partner was last told about the local player having won every game, so it is only sent on a change.
     /// </summary>
     private bool? _sentOutroReady;
+
+    /// <summary>
+    /// The partner that <see cref="_sentOutroReady"/> was told to. A partner who comes back has forgotten it, so they
+    /// are told again: said only on a change, it never changed again once every game was won, and the festival of the
+    /// partner who came back waited for it for good.
+    /// </summary>
+    private ushort? _sentOutroReadyTo;
 
     /// <summary>
     /// Hook that keeps a character of the festival from taking both players on until both have won every game.
@@ -242,8 +253,9 @@ internal class FleaGameCoop {
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
 
-        _partnerOutroReady = false;
+        _outroReadyOf.Clear();
         _sentOutroReady = null;
+        _sentOutroReadyTo = null;
 
         ForgetScores();
     }
@@ -456,16 +468,12 @@ internal class FleaGameCoop {
     }
 
     /// <summary>
-    /// Takes whether the partner has won every game of the festival.
+    /// Takes whether a player has won every game of the festival, which counts once they are the partner.
     /// </summary>
     /// <param name="player">The player who sent it.</param>
     /// <param name="update">The update.</param>
     public void OnPartnerOutroReady(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_getPartnerId() != player.Id) {
-            return;
-        }
-
-        _partnerOutroReady = update.Part != 0;
+        _outroReadyOf[player.Id] = update.Part != 0;
     }
 
     /// <summary>
@@ -478,11 +486,11 @@ internal class FleaGameCoop {
     /// <returns>Whether the festival may move on.</returns>
     private bool OnFleaGamesOutroReady(Func<PlayerData, bool> orig, PlayerData self) {
         var ready = orig(self);
-        if (!ready || _getPartnerId() == null) {
+        if (!ready || _getPartnerId() is not { } partnerId) {
             return ready;
         }
 
-        return _partnerOutroReady;
+        return _outroReadyOf.TryGetValue(partnerId, out var partnerReady) && partnerReady;
     }
 
     /// <summary>
@@ -491,7 +499,7 @@ internal class FleaGameCoop {
     /// </summary>
     /// <param name="heroController">The hero controller that updated.</param>
     private void OnHeroControllerUpdate(HeroController heroController) {
-        if (_getPartnerId() == null) {
+        if (_getPartnerId() is not { } partnerId) {
             return;
         }
 
@@ -503,11 +511,12 @@ internal class FleaGameCoop {
         var ready = playerData.FleaGamesIsJugglingChampion &&
                     playerData.FleaGamesIsBouncingChampion &&
                     playerData.FleaGamesIsDodgingChampion;
-        if (_sentOutroReady == ready) {
+        if (_sentOutroReady == ready && _sentOutroReadyTo == partnerId) {
             return;
         }
 
         _sentOutroReady = ready;
+        _sentOutroReadyTo = partnerId;
         Send(CoopSaveUpdateKind.FleaGamesOutroReady, 0, (ushort) (ready ? 1 : 0));
     }
 
