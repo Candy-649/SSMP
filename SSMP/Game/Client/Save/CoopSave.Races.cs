@@ -46,6 +46,13 @@ internal partial class CoopSave {
     private const ushort RaceOut = 2;
 
     /// <summary>
+    /// The sender is already running and answers the partner's word that they are at the start line. Kept apart from
+    /// <see cref="RaceReady"/> so that it is never answered in turn: two players who were both already running used to
+    /// answer each other's answers for the rest of the race.
+    /// </summary>
+    private const ushort RaceReadyAnswer = 3;
+
+    /// <summary>
     /// The state of the racer that picks the track, which every try of a race goes through.
     /// </summary>
     private const string RaceSetTrackState = "Set Track";
@@ -593,7 +600,10 @@ internal partial class CoopSave {
 
             switch (update.PartCount) {
                 case RaceReady:
-                    OnPartnerRaceReady(player);
+                    OnPartnerRaceReady(player, false);
+                    break;
+                case RaceReadyAnswer:
+                    OnPartnerRaceReady(player, true);
                     break;
                 case RaceWon:
                     if (_raceFsm == null || _raceWonHere) {
@@ -632,7 +642,9 @@ internal partial class CoopSave {
     /// The partner got to the start line: the local player who waits there starts with them, one who is not there yet
     /// starts at once when they get there, and one who already started tells them to start too.
     /// </summary>
-    private void OnPartnerRaceReady(ClientPlayerData player) {
+    /// <param name="player">The partner.</param>
+    /// <param name="answer">Whether this answers a word of the local player, which is never answered again.</param>
+    private void OnPartnerRaceReady(ClientPlayerData player, bool answer) {
         if (_raceFsm is { } fsm && _raceHold is { IsStart: true }) {
             _partnerRacing = true;
             ReleaseRaceHold(fsm, Lang.Pick(
@@ -646,8 +658,11 @@ internal partial class CoopSave {
         // are only waiting for this word.
         if (_raceFsm != null && _raceStarted) {
             _partnerRacing = true;
-            SendRace(player.Id, RaceReady);
-            Logger.Info($"{player.Username} reached the start line after the race started here");
+            if (!answer) {
+                SendRace(player.Id, RaceReadyAnswer);
+                Logger.Info($"{player.Username} reached the start line after the race started here");
+            }
+
             return;
         }
 
