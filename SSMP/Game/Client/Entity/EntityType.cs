@@ -257,5 +257,11 @@ internal enum EntityType {
     /// Not a creature: what a creature that the room makes itself is spawned by in a spawn message (see
     /// <see cref="RoomCreatures"/>). No registry entry has this type.
     /// </summary>
-    Room
+    Room,
+
+    /// <summary>
+    /// Not a creature: a rock of the room that a boss makes fall. Where it falls and how fast is rolled by the room,
+    /// so each game rolled its own and the two games saw different rocks. Only the scene host's game runs them now.
+    /// </summary>
+    FourthChorusLavaRock
 }

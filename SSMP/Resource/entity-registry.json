@@ -2923,6 +2923,17 @@
     ]
   },
   {
+    "base_object_name": "SG Lava Rock",
+    "type": "FourthChorusLavaRock",
+    "parent_name": "Rock Pool",
+    "components": [
+      "Rotation"
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
     "base_object_name": "Bone Worm",
     "type": "Grom",
     "parent_name": null,
