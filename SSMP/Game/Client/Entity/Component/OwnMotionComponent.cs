@@ -48,6 +48,17 @@ internal class OwnMotionComponent : EntityComponent {
     private bool _changed;
 
     /// <summary>
+    /// Whether the copy on show was set moving by what the scene host sent, so that a takeover carries on with it.
+    /// </summary>
+    private bool _copyWasMoved;
+
+    /// <summary>
+    /// How the copy was moving when this game took the entity over, taken before the copy is switched off and given to
+    /// the room's own object once that is on (<see cref="InitializeHost"/>).
+    /// </summary>
+    private (RigidbodyType2D BodyType, float GravityScale, Vector2 Velocity, float Spin, float Angle)? _takenOver;
+
+    /// <summary>
     /// The position that was last sent.
     /// </summary>
     private Vector2 _lastPosition;
@@ -224,12 +235,52 @@ internal class OwnMotionComponent : EntityComponent {
         _clientBody.rotation = angle;
         _clientBody.linearVelocity = velocity;
         _clientBody.angularVelocity = spin;
+        _copyWasMoved = true;
 
         // No positions come while the entity moves by itself, so the interpolation is told where the copy is now, to
         // carry on from there when it stops rather than from where the entity stood before it set off
         if (GameObject.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
             interpolation.SetNewState(transform.position, isTeleport: true);
         }
+    }
+
+    /// <summary>
+    /// Takes how the copy is moving, when this game takes the entity over from the other one and the copy is about to
+    /// stop. The room's own object is given the copy's place and the states of its FSMs, and nothing more: it was left
+    /// hanging where the copy was, since what set it moving had already been done, and nothing else moves it.
+    /// </summary>
+    public void TakeMotionFromCopy() {
+        if (!_copyWasMoved || _clientBody == null || GameObject.Client == null) {
+            return;
+        }
+
+        _takenOver = (
+            _clientBody.bodyType, _clientBody.gravityScale, _clientBody.linearVelocity, _clientBody.angularVelocity,
+            GameObject.Client.transform.eulerAngles.z
+        );
+    }
+
+    /// <inheritdoc />
+    protected override void InitializeHost() {
+        _copyWasMoved = false;
+
+        if (_takenOver is not { } motion || _hostBody == null || GameObject.Host == null) {
+            return;
+        }
+
+        _takenOver = null;
+
+        var transform = GameObject.Host.transform;
+        var eulerAngles = transform.eulerAngles;
+        transform.eulerAngles = new Vector3(eulerAngles.x, eulerAngles.y, motion.Angle);
+
+        _hostBody.bodyType = motion.BodyType;
+        _hostBody.gravityScale = motion.GravityScale;
+        _hostBody.linearVelocity = motion.Velocity;
+        _hostBody.angularVelocity = motion.Spin;
+
+        // Told again, for anyone else in the room
+        MarkChanged();
     }
 
     /// <inheritdoc />

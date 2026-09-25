@@ -270,6 +270,12 @@ internal class Entity {
     private Vector3 _lastPosition;
 
     /// <summary>
+    /// Whether the entity was moving by itself in the scene host's game at the last update (see
+    /// <see cref="HostMovesByItself"/>).
+    /// </summary>
+    private bool _hostMovedByItself;
+
+    /// <summary>
     /// The last scale of the entity.
     /// </summary>
     private Vector3 _lastScale;
@@ -1023,9 +1029,15 @@ internal class Entity {
 
         var transform = Object.Host.transform;
 
+        // A body that stops moving by itself does not always move its transform as it stops: one that the physics puts
+        // to sleep where it lies is left alone, and the place it came to rest was never sent
+        var movesByItself = HostMovesByItself();
+        var stoppedMovingByItself = _hostMovedByItself && !movesByItself;
+        _hostMovedByItself = movesByItself;
+
         // Unity already tracks transform mutations; avoid re-reading and comparing position/scale on quiet frames. A
         // part of another entity sends neither: the copy of its parent carries it and moves it the way it moves here.
-        if (!_hasParent && (transform.hasChanged || anticipationTaken)) {
+        if (!_hasParent && (transform.hasChanged || anticipationTaken || stoppedMovingByItself)) {
             var newPosition = transform.position;
 
             // A position is sent even when the entity has not moved, for as long as there are forced ones left,
@@ -1035,7 +1047,7 @@ internal class Entity {
             //
             // None is sent while the entity moves by itself from how it set off: the other game moves the copy the
             // same way, and was told where it set off from (OwnMotionComponent).
-            if ((newPosition != _lastPosition || anticipationTaken) && !HostMovesByItself()) {
+            if ((newPosition != _lastPosition || anticipationTaken) && !movesByItself) {
                 if (_anticipationSendsLeft > 0) {
                     _anticipationSendsLeft--;
                 }
@@ -1681,6 +1693,12 @@ internal class Entity {
             }
         }
 
+        // How the copy was moving by itself is taken before its replays are stopped and it is switched off, for the
+        // room's own object to carry on with (OwnMotionComponent)
+        if (_components.TryGetValue(EntityComponentType.OwnMotion, out var ownMotion)) {
+            ((OwnMotionComponent) ownMotion).TakeMotionFromCopy();
+        }
+
         EntityFsmActions.LeaveStatesOf(_fsms.Client);
         _playedHere.Clear();
         LetGo();
@@ -1887,6 +1905,17 @@ internal class Entity {
     private bool HostMovesByItself() {
         return _components.TryGetValue(EntityComponentType.OwnMotion, out var component) &&
                component is OwnMotionComponent { IsHostMoving: true };
+    }
+
+    /// <summary>
+    /// Has how the entity moves by itself sent again, for a player who has just walked into the room: what was kept
+    /// for them is where it last set off or stopped, and without this its copy waited there, not moving, until the
+    /// next one (<see cref="OwnMotionComponent"/>).
+    /// </summary>
+    public void SendOwnMotionAgain() {
+        if (!_isControlled && _components.TryGetValue(EntityComponentType.OwnMotion, out var component)) {
+            ((OwnMotionComponent) component).MarkChanged();
+        }
     }
 
     /// <summary>

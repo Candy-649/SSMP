@@ -262,7 +262,19 @@
     "type": "Collision2dEventLayer"
   },
   {
+    "type": "Collision2dEvent"
+  },
+  {
     "type": "Trigger2dEvent"
+  },
+  {
+    "type": "Trigger2dEventLayer"
+  },
+  {
+    "type": "AccelerateToY"
+  },
+  {
+    "type": "DecelerateV2"
   },
   {
     "type": "IdleBuzz"

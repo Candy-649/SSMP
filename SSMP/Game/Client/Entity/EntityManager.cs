@@ -160,6 +160,20 @@ internal class EntityManager {
     }
 
     /// <summary>
+    /// Called when another player walks into the scene of this game. As its scene host, this game sends again how the
+    /// things that move by themselves are moving (<see cref="Entity.SendOwnMotionAgain"/>).
+    /// </summary>
+    public void OnPlayerEnterScene() {
+        if (!_sceneRoleDetermined || !IsSceneHost) {
+            return;
+        }
+
+        foreach (var entity in _entities.Values) {
+            entity.SendOwnMotionAgain();
+        }
+    }
+
+    /// <summary>
     /// Updates the entity manager if we become the scene host.
     /// </summary>
     public void BecomeSceneHost(uint sceneHostEpoch = 0) {
