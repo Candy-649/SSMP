@@ -567,5 +567,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    ClothesGrab
+    ClothesGrab,
+
+    /// <summary>
+    /// The sender came back out of the lava in the room named by <see cref="CoopSaveUpdate.Scene"/>, so the room of the
+    /// other player hears it as well and puts its broken floors back like the room of the sender did.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    LavaDeathEnd
 }
