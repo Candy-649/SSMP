@@ -274,14 +274,6 @@ internal enum EntityType {
     EnemySummonCage,
 
     /// <summary>
-    /// Not a creature: a boulder hanging in a room that drops when a player comes near. It dropped in the game of the
-    /// player who came near and nowhere else, so the other player neither saw it fall nor lost it. Only the scene
-    /// host's game runs them now: a player coming near the other game's copy has it start there and tells the scene
-    /// host (ListenForTouches), and the copy falls by itself, speeding up step by step (OwnMotionComponent).
-    /// </summary>
-    BoneBoulder,
-
-    /// <summary>
     /// Not a creature: a boulder that a boss drops in its fight, which each game dropped with a look and a wait of its
     /// own. Only the scene host's game runs them now, and the copy falls by itself (OwnMotionComponent).
     /// </summary>

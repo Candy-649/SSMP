@@ -1736,17 +1736,8 @@ internal class Entity {
             return;
         }
 
-        // A trigger is told to the object of the body it belongs to, so a part with a body of its own - like the range
-        // in which a boulder notices the player - is listened to itself; the copy's own body hears its other parts
-        var listened = new HashSet<GameObject> { Object.Client };
-        foreach (var body in Object.Client.GetComponentsInChildren<Rigidbody2D>(true)) {
-            listened.Add(body.gameObject);
-        }
-
-        foreach (var part in listened) {
-            var listener = part.GetComponent<TouchListener>() ?? part.AddComponent<TouchListener>();
-            listener.Touched += OnCopyTouched;
-        }
+        var listener = Object.Client.GetComponent<TouchListener>() ?? Object.Client.AddComponent<TouchListener>();
+        listener.Touched += OnCopyTouched;
     }
 
     /// <summary>
