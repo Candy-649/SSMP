@@ -1086,7 +1086,17 @@ internal partial class BossRoomCoop {
                 continue;
             }
 
-            if (!HaveAllReached(GetFightReadiness(fsm))) {
+            // A fight that the room got to while a shared line was still being read is got to once it is read. The
+            // room does not ask a second time, so this is the only place left to say so, and without it both players
+            // waited for the rest of their stay: this one for the other's word, the other for this one's
+            var readiness = GetFightReadiness(fsm);
+            if (!readiness.Local && !StillReadingWhatTheFightWaitsFor()) {
+                readiness.Local = true;
+                Send(BossRoomUpdateKind.Ready, fsm, "", "", "");
+            }
+
+            if (!HaveAllReached(readiness)) {
+                NotifyWaiting(readiness);
                 continue;
             }
 
