@@ -233,6 +233,8 @@ internal class CoopHits {
     /// Registers the hooks that send, filter and replay hits.
     /// </summary>
     public void RegisterHooks() {
+        Entity.Entity.CopyTouchedLocalPlayer += OnCopyTouchedLocalPlayer;
+
         AddILHook(
             typeof(DamageEnemies).GetMethod("ProcessDamageBuffer", InstanceFlags),
             DamageEnemiesOnProcessDamageBuffer
@@ -323,6 +325,8 @@ internal class CoopHits {
     /// Disposes the hooks and the objects that replayed hits come from.
     /// </summary>
     public void DeregisterHooks() {
+        Entity.Entity.CopyTouchedLocalPlayer -= OnCopyTouchedLocalPlayer;
+
         foreach (var hook in _hooks) {
             hook.Dispose();
         }
@@ -376,6 +380,11 @@ internal class CoopHits {
 
         if (update.Kind == CoopHitKind.ObjectTouch) {
             ReplayTouch(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.EntityTouch) {
+            ApplyEntityTouch(update);
             return;
         }
 
@@ -1119,6 +1128,46 @@ internal class CoopHits {
         // the player waiting on this is told nothing until then. They have already watched their own copy go the
         // whole way; a position from the first moment of the same knockback would only pull it back to the start.
         entity.NoteAnticipation(id, recoil.recoilTimeRemaining);
+    }
+
+    /// <summary>
+    /// Tells the partner that the copy of an entity touched the local player, for the partner's game to send the entity
+    /// the event the copy has already played here (see <see cref="Entity.Entity.ListenForTouches"/>).
+    /// </summary>
+    /// <param name="entityId">The ID of the entity.</param>
+    /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
+    /// <param name="eventName">The event.</param>
+    private void OnCopyTouchedLocalPlayer(ushort entityId, byte fsmIndex, string eventName) {
+        if (!_netClient.IsConnected || _getPartnerId() is not { } partnerId ||
+            !_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+            return;
+        }
+
+        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
+            TargetId = partnerId,
+            Kind = CoopHitKind.EntityTouch,
+            EntityId = entityId,
+            Index = fsmIndex,
+            Responder = eventName
+        });
+    }
+
+    /// <summary>
+    /// Sends an entity the event that the partner's copy of it was touched with, if this game is the scene host and so
+    /// runs it. An FSM that has already moved on from where the event leads anywhere takes no notice of it.
+    /// </summary>
+    /// <param name="update">The update of the partner's touch.</param>
+    private void ApplyEntityTouch(CoopHitUpdate update) {
+        if (!_entityManager.IsSceneHost || FindEntity(update.EntityId) is not { } entity ||
+            update.Index >= entity.HostFsms.Count || entity.HostFsms[update.Index] is not { } fsm) {
+            return;
+        }
+
+        Logger.Info(
+            $"The partner was touched by entity {update.EntityId} in its '{fsm.ActiveStateName}', so it is sent " +
+            $"'{update.Responder}' here too"
+        );
+        fsm.SendEvent(update.Responder);
     }
 
     /// <summary>

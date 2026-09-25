@@ -1671,6 +1671,8 @@ internal class Entity {
         }
 
         EntityFsmActions.LeaveStatesOf(_fsms.Client);
+        _playedHere.Clear();
+        LetGo();
 
         var clientActive = Object.Client.activeSelf;
         Object.Client.SetActive(false);
@@ -1684,6 +1686,124 @@ internal class Entity {
         foreach (var component in _components.Values) {
             component.InitializeHost(sceneHostEpoch);
         }
+    }
+
+    /// <summary>
+    /// Events that the FSMs of this entity send themselves when the player touches it, or null for none.
+    /// </summary>
+    private HashSet<string>? _touchEvents;
+
+    /// <summary>
+    /// For each FSM of the copy that this game moved on by itself when its own player touched the copy, the state it
+    /// moved it to. Kept until the scene host's FSM is somewhere else.
+    /// </summary>
+    private readonly Dictionary<int, string> _playedHere = new();
+
+    /// <summary>
+    /// The kind of body the copy had before it was held still for a state played here, or null while it is not held.
+    /// </summary>
+    private RigidbodyType2D? _bodyTypeBeforeHold;
+
+    /// <summary>
+    /// Raised on a scene client when its player touched the copy of an entity and the copy has played what that leads
+    /// to: the ID of the entity, the index of the FSM and the event, for the scene host to send to its own FSM.
+    /// </summary>
+    public static event Action<ushort, byte, string>? CopyTouchedLocalPlayer;
+
+    /// <summary>
+    /// Makes the copy of this entity answer the local player touching it, the way the entity itself answers its own
+    /// player. The copy runs none of its FSMs, and in the game that does, the player of this game is only a figure
+    /// that nothing can touch: a rock that hit the player of a scene client fell on through them. With this, the
+    /// game of the player who was touched plays what the event leads to at once and has the scene host send the event
+    /// to the entity, so that it happens there too - the way a hit is played where it lands and sent on.
+    /// </summary>
+    /// <param name="events">The events that the FSMs send themselves when the player touches the entity.</param>
+    public void ListenForTouches(IEnumerable<string> events) {
+        _touchEvents = new HashSet<string>(events);
+
+        if (Object.Client == null) {
+            return;
+        }
+
+        var listener = Object.Client.GetComponent<TouchListener>() ?? Object.Client.AddComponent<TouchListener>();
+        listener.Touched += OnCopyTouched;
+    }
+
+    /// <summary>
+    /// Plays what touching the local player leads to on the copy, if the state the scene host says the copy is in
+    /// leads anywhere on one of the touch events, and tells the scene host.
+    /// </summary>
+    /// <param name="other">The collider that started touching the copy.</param>
+    private void OnCopyTouched(Collider2D other) {
+        if (!_isControlled || _touchEvents == null || !IsLocalPlayer(other)) {
+            return;
+        }
+
+        for (var fsmIndex = 0; fsmIndex < _fsms.Client.Count; fsmIndex++) {
+            var fsm = _fsms.Client[fsmIndex];
+            if (fsm == null || _playedHere.ContainsKey(fsmIndex) ||
+                EntityFsmActions.HostStateOf(fsm.Fsm) is not { } stateName ||
+                fsm.Fsm.GetState(stateName) is not { } state) {
+                continue;
+            }
+
+            foreach (var transition in state.Transitions) {
+                if (!_touchEvents.Contains(transition.EventName) || transition.ToFsmState == null) {
+                    continue;
+                }
+
+                _playedHere[fsmIndex] = transition.ToFsmState.Name;
+                EntityFsmActions.PlayStateHere(fsm, transition.ToFsmState);
+                HoldStill();
+
+                CopyTouchedLocalPlayer?.Invoke(Id, (byte) fsmIndex, transition.EventName);
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a collider is the body or the hit box of the local player, rather than one of their attacks.
+    /// </summary>
+    private static bool IsLocalPlayer(Collider2D other) {
+        var hero = HeroController.SilentInstance;
+        return hero != null && other != null &&
+               (other.gameObject == hero.gameObject || other.GetComponent<HeroBox>() != null);
+    }
+
+    /// <summary>
+    /// Keeps the copy where the touch was while it shows what the touch led to. The scene host's game is still moving
+    /// the entity on until it hears of the touch, and a rock bursting here was carried on down with its burst.
+    /// </summary>
+    private void HoldStill() {
+        if (_bodyTypeBeforeHold != null || Object.Client == null) {
+            return;
+        }
+
+        if (Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            interpolation.SetNewState(Object.Client.transform.position, isTeleport: true);
+        }
+
+        if (!Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
+            return;
+        }
+
+        _bodyTypeBeforeHold = body.bodyType;
+        body.bodyType = RigidbodyType2D.Kinematic;
+        body.linearVelocity = Vector2.zero;
+        body.angularVelocity = 0f;
+    }
+
+    /// <summary>
+    /// Lets the copy follow the scene host's game again once that game has moved past what was played here.
+    /// </summary>
+    private void LetGo() {
+        if (_bodyTypeBeforeHold is { } bodyType && Object.Client != null &&
+            Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
+            body.bodyType = bodyType;
+        }
+
+        _bodyTypeBeforeHold = null;
     }
 
     /// <summary>
@@ -1812,6 +1932,12 @@ internal class Entity {
         // it was put into the room by positions that came a few times a second and were guessed in between, beside a
         // body that the animation moved smoothly every frame: it shook.
         if (_hasParent) {
+            return;
+        }
+
+        // A copy that is showing what the local player's touch led to stays where the touch was until the scene host's
+        // game has moved past it too (ListenForTouches)
+        if (_playedHere.Count > 0) {
             return;
         }
 
@@ -1994,6 +2120,7 @@ internal class Entity {
         foreach (var data in entityNetworkData) {
             if (data.Type == EntityComponentType.Fsm) {
                 PlayMakerFSM fsm;
+                var fsmIndex = 0;
 
                 if (_fsms.Client == null) {
                     continue;
@@ -2005,7 +2132,7 @@ internal class Entity {
                         continue;
                     }
 
-                    var fsmIndex = data.Packet.ReadByte();
+                    fsmIndex = data.Packet.ReadByte();
                     if (fsmIndex >= _fsms.Client.Count) {
                         continue;
                     }
@@ -2042,6 +2169,11 @@ internal class Entity {
 
                 var action = state.Actions[actionIndex];
 
+                // Already played here, when the local player touched the copy (ListenForTouches)
+                if (_playedHere.TryGetValue(fsmIndex, out var playedHere) && playedHere == state.Name) {
+                    continue;
+                }
+
                 //Logger.Info(
                 //    $"Received entity network data for FSM: {fsm.Fsm.Name}, {state.Name}, {actionIndex} ({action.GetType()})"
                 //);
@@ -2049,6 +2181,11 @@ internal class Entity {
                 EntityFsmActions.ReadSubject(data, action);
                 EntityFsmActions.ApplyNetworkDataFromAction(data, action);
 
+                continue;
+            }
+
+            // Held with its position too while it shows what the local player's touch led to (ListenForTouches)
+            if (data.Type == EntityComponentType.Rotation && _playedHere.Count > 0) {
                 continue;
             }
 
@@ -2088,6 +2225,15 @@ internal class Entity {
                     // Also propagate this state change to the EntityFsmActions class with the client FSM for the
                     // same index
                     EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, stateName);
+
+                    // The scene host's game has moved past what this game played ahead of it for a touch, so the copy
+                    // follows it again from here
+                    if (_playedHere.TryGetValue(fsmIndex, out var playedHere) && playedHere != stateName) {
+                        _playedHere.Remove(fsmIndex);
+                        if (_playedHere.Count == 0) {
+                            LetGo();
+                        }
+                    }
                 }
             }
 

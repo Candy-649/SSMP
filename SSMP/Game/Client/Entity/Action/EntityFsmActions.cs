@@ -7,6 +7,7 @@ using HutongGames.PlayMaker.Actions;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
+using SSMP.Game.Client.Entity.Component;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -711,6 +712,47 @@ internal static partial class EntityFsmActions {
             if (copyFsms.Exists(copyFsm => copyFsm != null && copyFsm.Fsm == fsm)) {
                 ExitAt(i);
             }
+        }
+    }
+
+    /// <summary>
+    /// The state that the scene host last said an FSM of a creature's copy is in, or null if it has said none.
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    public static string? HostStateOf(HutongGames.PlayMaker.Fsm fsm) {
+        return HostStates.TryGetValue(fsm, out var state) ? state : null;
+    }
+
+    /// <summary>
+    /// Plays a state on the copy of a creature as the copy plays it when the scene host's FSM goes there: it leaves the
+    /// state it was in, and each action of the state is replayed from the copy's own action, as if the scene host had
+    /// sent it. For what the local player did to the copy that the scene host has yet to hear of (see
+    /// <see cref="Entity.ListenForTouches"/>).
+    /// </summary>
+    /// <param name="copyFsm">The FSM of the copy.</param>
+    /// <param name="state">The state to play.</param>
+    public static void PlayStateHere(PlayMakerFSM copyFsm, FsmState state) {
+        RegisterStateChange(copyFsm.Fsm, state.Name);
+
+        foreach (var action in state.Actions) {
+            if (action == null || !action.Enabled || !TypeGetMethodInfos.ContainsKey(action.GetType())) {
+                continue;
+            }
+
+            var sent = new EntityNetworkData { Type = EntityComponentType.Fsm };
+            try {
+                if (!GetNetworkDataFromAction(sent, action)) {
+                    continue;
+                }
+            } catch (Exception e) {
+                Logger.Warn($"Could not play '{state.Name}' here for a {action.GetType().Name}: {e.Message}");
+                continue;
+            }
+
+            ApplyNetworkDataFromAction(new EntityNetworkData {
+                Type = EntityComponentType.Fsm,
+                Packet = new global::SSMP.Networking.Packet.Packet(sent.Packet.ToArray())
+            }, action);
         }
     }
 

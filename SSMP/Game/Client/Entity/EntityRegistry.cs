@@ -204,6 +204,15 @@ internal class EntityRegistryEntry {
     public List<string>? NonAcquiringRanges { get; set; }
 
     /// <summary>
+    /// Events that the FSMs of the entity send themselves when the player touches it, like a rock that bursts on the
+    /// player it hits. The copy on a scene client runs none of its FSMs and so never notices its own player: with
+    /// these listed, it plays what the event leads to at once and has the scene host send the event to the entity
+    /// (see <see cref="Entity.ListenForTouches"/>).
+    /// </summary>
+    [JsonProperty("touch_events")]
+    public List<string>? TouchEvents { get; set; }
+
+    /// <summary>
     /// Child entries nested under this entry. Populated from the registry file and validated
     /// during startup. Null if no children are defined.
     /// </summary>
