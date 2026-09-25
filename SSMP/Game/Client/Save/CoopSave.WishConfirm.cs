@@ -644,6 +644,17 @@ internal partial class CoopSave {
                         CloseConfirmBox(shown.IsWish);
                     }
 
+                    // The partner is no longer standing at their own box. Kept, their yes was still here to meet, and
+                    // a yes at this player's box went straight through on its own: the wish taken, handed in or
+                    // raced by one of them after the other had said no
+                    if (_partnerWishWait is { } partnerAt && partnerAt.Key == update.Key) {
+                        _partnerWishWait = null;
+                        Chat(Lang.Pick(
+                            $"The yes of {partnerAt.PartnerName} no longer stands.",
+                            $"{partnerAt.PartnerName} 的「是」已经不算数了。"
+                        ));
+                    }
+
                     break;
             }
         } catch (Exception e) {
