@@ -289,7 +289,10 @@ internal class PlayerManager : IPlayerManager {
         new GameObject("Special Attacks").transform.SetParent(playerPrefab.transform);
         new GameObject("Tool Effects").transform.SetParent(playerPrefab.transform);
 
-        CreateUsername(_playerContainerPrefab);
+        // The name goes at the depth of the character it hangs over, for the same reason: the name over the player's
+        // own head is held at the depth of the hero, and the name of another player at 0 was drawn over it
+        var usernameObject = CreateUsername(_playerContainerPrefab);
+        usernameObject.transform.localPosition += new Vector3(0f, 0f, PlayerObjectDepth);
 
         _playerContainerPrefab.SetActive(false);
         Object.DontDestroyOnLoad(_playerContainerPrefab);
