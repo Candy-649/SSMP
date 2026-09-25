@@ -445,6 +445,326 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    // A creature's voice and many of its sounds are picked from tables of clips, and quite a few of its sounds fade,
+    // stop by fading, loop while it stays in a state or switch their source on and off. None of those was done again
+    // on the other game, which heard little of a creature beyond its plainest sounds. The copy runs them itself, as its
+    // FSM would; a table picks its clip there as it does here, which nobody can tell apart.
+    //
+    // Setting up a creature's first states only sets its sources up - which clip, whether it loops, where it starts -
+    // and plays nothing. The copy may be set up long after the creature left those states, for a player who walks in
+    // later, and a loop started then would go on with nothing left to stop it.
+
+    #region AudioPlayRandomVoiceFromTable
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayRandomVoiceFromTable action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlayRandomVoiceFromTable action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioPlayRandomVoiceFromTableV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayRandomVoiceFromTableV2 action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlayRandomVoiceFromTableV2 action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioPlayRandomVoiceFromTableBool
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayRandomVoiceFromTableBool action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlayRandomVoiceFromTableBool action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioPlayRandomVoice
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayRandomVoice action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlayRandomVoice action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioPlayRandomSingle
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayRandomSingle action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlayRandomSingle action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region PlayRandomAudioClipTable
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayRandomAudioClipTable action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, PlayRandomAudioClipTable action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region PlayRandomAudioClipTableV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayRandomAudioClipTableV2 action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, PlayRandomAudioClipTableV2 action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region PlayRandomAudioClipTableV3
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayRandomAudioClipTableV3 action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, PlayRandomAudioClipTableV3 action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region PlayAudioEventRandomBool
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayAudioEventRandomBool action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, PlayAudioEventRandomBool action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioPlaySimpleV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlaySimpleV2 action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlaySimpleV2 action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioPlayV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayV2 action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlayV2 action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioPlayInStateConditional
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayInStateConditional action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPlayInStateConditional action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region PlayEnemySingAudio
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayEnemySingAudio action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, PlayEnemySingAudio action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region SetRandomAudioClipFromTable
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetRandomAudioClipFromTable action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetRandomAudioClipFromTable action) {
+        if (data != null) {
+            RunInState(action);
+            return;
+        }
+
+        // Only the clip is picked when the creature's first states are set up: the action always makes its source
+        // loop, and playing it too would start a loop that the creature may have stopped long ago
+        var table = action.Table.Value as RandomAudioClipTable;
+        var owner = action.AudioSource.Value;
+        var source = owner != null ? owner.GetComponent<AudioSource>() : null;
+        if (table == null || source == null) {
+            return;
+        }
+
+        source.clip = table.SelectClip(true);
+        source.volume = table.SelectVolume();
+        source.pitch = table.SelectPitch();
+        source.loop = true;
+    }
+
+    #endregion
+
+    #region SetAudioSource
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetAudioSource action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetAudioSource action) {
+        RunInState(action);
+    }
+
+    #endregion
+
+    #region SetAudioLoop
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetAudioLoop action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetAudioLoop action) {
+        RunInState(action);
+    }
+
+    #endregion
+
+    #region RandomiseAudioPosition
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, RandomiseAudioPosition action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, RandomiseAudioPosition action) {
+        RunInState(action);
+    }
+
+    #endregion
+
+    #region AudioPause
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPause action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioPause action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region AudioStopV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioStopV2 action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AudioStopV2 action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region FadeAudio
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FadeAudio action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, FadeAudio action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region FadeAudioV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FadeAudioV2 action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, FadeAudioV2 action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
     /// <summary>
     /// Gets the audio player prefab of a PlayAudioEvent action, or null for the default prefab the action falls
     /// back to.

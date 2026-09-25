@@ -80,6 +80,13 @@ internal static partial class EntityFsmActions {
     private static readonly List<ActionInState> ActionsInState = [];
 
     /// <summary>
+    /// The state that the update being applied says each FSM of its entity is in, for the FSMs whose state it carries.
+    /// An update carries the state of an FSM at the time it was sent, together with the actions of every state entered
+    /// since the last one, so an action of any other state belongs to a state that was already over by then.
+    /// </summary>
+    private static readonly Dictionary<HutongGames.PlayMaker.Fsm, string> StatesOfTheUpdate = new();
+
+    /// <summary>
     /// ILHook for FlingObjectsFromGlobalPool.OnEnter.
     /// </summary>
     private static ILHook? _flingPoolHook;
@@ -294,6 +301,17 @@ internal static partial class EntityFsmActions {
     /// </summary>
     /// <param name="action">The action about to be replayed.</param>
     private static bool ActsOnTheLocalPlayer(FsmStateAction action) {
+        return WorksOnThePlayerCharacter(action, true);
+    }
+
+    /// <summary>
+    /// Whether an action works on this game's player character, or on something the character carries: the object it
+    /// acts on, the parent it puts something under, the object it sends an event to or where it spawns or plays
+    /// something, and the object it aims at when asked.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="withAim">Whether the object an action aims at, chases or faces counts too.</param>
+    private static bool WorksOnThePlayerCharacter(FsmStateAction action, bool withAim) {
         if (action.Fsm == null || ReadsWithoutActing.Contains(action.GetType().Name)) {
             return false;
         }
@@ -304,6 +322,10 @@ internal static partial class EntityFsmActions {
         }
 
         foreach (var field in GetSubjectFields(action.GetType())) {
+            if (!withAim && field.Name == "target") {
+                continue;
+            }
+
             var target = field.GetValue(action) switch {
                 FsmOwnerDefault owner => action.Fsm.GetOwnerDefaultTarget(owner),
                 FsmGameObject gameObject => gameObject.Value,
@@ -323,7 +345,8 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// The fields of an action type that name the object it works on: the object it acts on, the parent it puts
-    /// something under, and the object it sends an event to.
+    /// something under, the object it sends an event to, the object it aims at, and where it spawns or plays
+    /// something - a sound a creature plays at the player it caught is part of that player being caught.
     /// </summary>
     private static FieldInfo[] GetSubjectFields(Type type) {
         if (SubjectFields.TryGetValue(type, out var fields)) {
@@ -332,7 +355,8 @@ internal static partial class EntityFsmActions {
 
         var found = new List<FieldInfo>();
         foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance)) {
-            if (field.Name is not ("gameObject" or "parent" or "target" or "eventTarget")) {
+            if (field.Name is not ("gameObject" or "parent" or "target" or "eventTarget" or "spawnPoint" or
+                "SpawnPoint")) {
                 continue;
             }
 
@@ -541,6 +565,103 @@ internal static partial class EntityFsmActions {
             StateName = action.State.Name,
             ExitAction = undo
         }.Register();
+    }
+
+    /// <summary>
+    /// Runs a replayed action on the copy the way its state runs it in the game: OnEnter at once, OnUpdate every frame
+    /// until it finishes, and OnExit once the scene host's FSM leaves the state. The copy's own FSM is switched off, so
+    /// nothing else would. Meant for actions whose whole effect is what they show or play - a colour that tweens, a
+    /// sound that fades, a camera shake that waits, repeats or loops until its state is left - where doing the action
+    /// itself is truer than writing it again here.
+    /// </summary>
+    /// <param name="action">The replayed action.</param>
+    private static void RunInState(FsmStateAction action) {
+        // Entering the state it is still in leaves the state first, as the game does
+        for (var i = ActionsInState.Count - 1; i >= 0; i--) {
+            if (ActionsInState[i].Action == action) {
+                ExitAt(i);
+            }
+        }
+
+        action.Finished = false;
+        action.OnEnter();
+
+        // Its state was left before the update was sent, so it is left here at once, as it was there
+        if (StatesOfTheUpdate.TryGetValue(action.Fsm, out var stateOfTheUpdate) &&
+            stateOfTheUpdate != action.State.Name) {
+            action.OnExit();
+            return;
+        }
+
+        new ActionInState {
+            Fsm = action.Fsm,
+            StateName = action.State.Name,
+            Action = action,
+            Coroutine = action.Finished ? null : MonoBehaviourUtil.Instance.StartCoroutine(UpdateUntilFinished()),
+            ExitAction = action.OnExit
+        }.Register();
+
+        // An FSM stops running its state when its object is switched off or gone, and so does this
+        System.Collections.IEnumerator UpdateUntilFinished() {
+            while (!action.Finished) {
+                yield return null;
+
+                var owner = action.Fsm.GameObject;
+                if (owner == null || !owner.activeInHierarchy) {
+                    yield break;
+                }
+
+                action.OnUpdate();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Runs a replayed action with <see cref="RunInState"/>, except in the replay that sets up a creature's first
+    /// states. The copy may be set up long after the creature left them, for a player who walks in later: a sound, a
+    /// shake or a flash of then would come out of place, and a colour or a loop of then would stay on a creature that
+    /// has long moved on.
+    /// </summary>
+    /// <param name="data">The data of the replay, or null when it sets up the creature's first states.</param>
+    /// <param name="action">The replayed action.</param>
+    private static void RunMoment(EntityNetworkData? data, FsmStateAction action) {
+        if (data != null) {
+            RunInState(action);
+        }
+    }
+
+    /// <summary>
+    /// Forgets the actions still running in a state of the creatures of a room that is being left. Their objects go
+    /// with the room, and what they do outside it, like a looping shake of the camera, the game ends itself then.
+    /// </summary>
+    public static void ForgetActionsInState() {
+        foreach (var actionInState in ActionsInState) {
+            actionInState.StopUpdating();
+        }
+
+        ActionsInState.Clear();
+    }
+
+    /// <summary>
+    /// Forgets the states that the update applied last carried, before and after applying an update.
+    /// </summary>
+    public static void ForgetStatesOfTheUpdate() {
+        StatesOfTheUpdate.Clear();
+    }
+
+    /// <summary>
+    /// Leaves the state of the action in state at the given index and forgets it. It is forgotten first: leaving runs
+    /// the game's own code, and an entry that threw there would otherwise throw again at every state change after.
+    /// </summary>
+    private static void ExitAt(int index) {
+        var actionInState = ActionsInState[index];
+        ActionsInState.RemoveAt(index);
+
+        try {
+            actionInState.ExitState();
+        } catch (Exception e) {
+            Logger.Warn($"Could not leave '{actionInState.StateName}' for a replayed action: {e.Message}");
+        }
     }
 
     /// <summary>
@@ -793,6 +914,8 @@ internal static partial class EntityFsmActions {
     public static void RegisterStateChange(HutongGames.PlayMaker.Fsm fsm, string stateName) {
         //Logger.Debug($"RegisterStateChange: {fsm.Name}, {stateName}");
 
+        StatesOfTheUpdate[fsm] = stateName;
+
         for (var i = ActionsInState.Count - 1; i >= 0; i--) {
             var actionInState = ActionsInState[i];
 
@@ -800,8 +923,7 @@ internal static partial class EntityFsmActions {
 
             if (actionInState.Fsm == fsm && actionInState.StateName != stateName) {
                 //Logger.Debug("EntityFsmActions: state changed, cancelling action in state");
-                actionInState.ExitState();
-                ActionsInState.RemoveAt(i);
+                ExitAt(i);
             }
         }
     }
@@ -822,9 +944,14 @@ internal static partial class EntityFsmActions {
         public string StateName { get; init; }
 
         /// <summary>
+        /// The action that is executing, if the copy runs it itself (see <see cref="RunInState"/>).
+        /// </summary>
+        public FsmStateAction? Action { get; init; }
+
+        /// <summary>
         /// The coroutine that should be stopped when the state is exited.
         /// </summary>
-        public Coroutine Coroutine { private get; init; }
+        public Coroutine? Coroutine { private get; init; }
 
         /// <summary>
         /// The action that should be executed when the state is exited.
@@ -842,11 +969,18 @@ internal static partial class EntityFsmActions {
         /// Call when the state is exited, will stop the coroutine and execute the exit action.
         /// </summary>
         public void ExitState() {
+            StopUpdating();
+
+            ExitAction?.Invoke();
+        }
+
+        /// <summary>
+        /// Stops the coroutine, if any, without executing the exit action.
+        /// </summary>
+        public void StopUpdating() {
             if (Coroutine != null) {
                 MonoBehaviourUtil.Instance.StopCoroutine(Coroutine);
             }
-
-            ExitAction?.Invoke();
         }
     }
 }

@@ -760,6 +760,12 @@ internal class Entity {
         //    $"Entity ({Id}, {Type}) hooked action: {self.Fsm.Name}, {self.State.Name}, {self.GetType()} ({hookedEntityAction.FsmIndex}, {hookedEntityAction.StateIndex}, {hookedEntityAction.ActionIndex})"
         //);
 
+        // The state goes out with the actions that entering it runs, in the same update. Left to the next look at the
+        // FSMs it could go in the update after them, and the other game, which takes the states of an update before
+        // its actions, could not tell the action of a state it is yet to hear of from one of a state that was over
+        // before the update was even sent.
+        SendStateChange(hookedEntityAction.FsmIndex);
+
         var networkData = new EntityNetworkData {
             Type = EntityComponentType.Fsm
         };
@@ -779,6 +785,26 @@ internal class Entity {
         if (EntityFsmActions.GetNetworkDataFromAction(networkData, self)) {
             _netClient.UpdateManager.AddEntityData(Id, networkData);
         }
+    }
+
+    /// <summary>
+    /// Sends the state that an FSM of the host is in, if it is not the one sent last.
+    /// </summary>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    private void SendStateChange(int fsmIndex) {
+        var fsm = _fsms.Host[fsmIndex];
+        var snapshot = _fsmSnapshots[fsmIndex];
+        if (fsm.ActiveStateName == snapshot.CurrentState) {
+            return;
+        }
+
+        var data = ObjectPool<EntityHostFsmData>.Get();
+        snapshot.CurrentState = fsm.ActiveStateName;
+        data.Types.Add(EntityHostFsmData.Type.State);
+        data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
+
+        _netClient.UpdateManager.AddEntityHostFsmData(Id, (byte) fsmIndex, data);
+        ObjectPool<EntityHostFsmData>.Return(data);
     }
 
     /// <summary>
