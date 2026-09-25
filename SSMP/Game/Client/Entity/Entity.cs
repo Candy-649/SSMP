@@ -82,11 +82,12 @@ internal class Entity {
     private float _nextHostActiveLogTime;
 
     /// <summary>
-    /// Whether something the local player did to this entity was still waiting to come back from the scene host on
-    /// the last frame, which says when one has just stopped and the interpolation is about to take the entity over
-    /// again.
+    /// Whether something other than the interpolation was moving the copy on the last frame - something the local
+    /// player did to this entity still waiting to come back from the scene host, or the copy moving by itself
+    /// (<see cref="OwnMotionComponent"/>) - which says when that has just stopped and the interpolation is about to
+    /// take the entity over again.
     /// </summary>
-    private bool _wasAnticipating;
+    private bool _wasMovedHere;
 
     /// <summary>
     /// The number the next thing the local player does to this entity before telling the scene host goes under.
@@ -966,9 +967,10 @@ internal class Entity {
                 interpolation.AdaptToRTT(_netClient.UpdateManager.AverageRtt);
 
                 // While something the local player did to this entity is still on its way to the scene host and
-                // back, what the local game did is what moves it, and the interpolation stays out of the way
-                var anticipating = IsAnticipating();
-                if (_wasAnticipating && !anticipating) {
+                // back, what the local game did is what moves it, and the interpolation stays out of the way. So it
+                // does while the copy moves by itself from how the entity set off (OwnMotionComponent).
+                var movedHere = IsAnticipating() || MovesByItself();
+                if (_wasMovedHere && !movedHere) {
                     // Nothing wrote this object while that was going on, so the interpolation carried on predicting
                     // from where the entity stood before any of it. Picking that up again would put it back there in
                     // a single frame, which is the whole of what the wait was for, so where it is standing now is
@@ -976,8 +978,8 @@ internal class Entity {
                     interpolation.KeepVisualPosition();
                 }
 
-                _wasAnticipating = anticipating;
-                if (!anticipating) {
+                _wasMovedHere = movedHere;
+                if (!movedHere) {
                     interpolation.ManualUpdate(Time.deltaTime);
                 }
             }
@@ -1858,7 +1860,15 @@ internal class Entity {
         _incorporatedAnticipation = 0;
         _anticipationSendsLeft = 0;
         _anticipationStampUntil = 0f;
-        _wasAnticipating = false;
+        _wasMovedHere = false;
+    }
+
+    /// <summary>
+    /// Whether the copy is moving by itself from how the entity set off (<see cref="OwnMotionComponent"/>).
+    /// </summary>
+    private bool MovesByItself() {
+        return _components.TryGetValue(EntityComponentType.OwnMotion, out var component) &&
+               component is OwnMotionComponent { IsMoving: true };
     }
 
     /// <summary>
@@ -2185,7 +2195,7 @@ internal class Entity {
             }
 
             // Held with its position too while it shows what the local player's touch led to (ListenForTouches)
-            if (data.Type == EntityComponentType.Rotation && _playedHere.Count > 0) {
+            if ((data.Type is EntityComponentType.Rotation or EntityComponentType.OwnMotion) && _playedHere.Count > 0) {
                 continue;
             }
 

@@ -122,5 +122,6 @@ internal enum EntityComponentType : ushort {
     HazardRespawn,
     Health,
     BodyType,
-    Layer
+    Layer,
+    OwnMotion
 }
