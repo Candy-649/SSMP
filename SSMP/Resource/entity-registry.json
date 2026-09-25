@@ -2998,6 +2998,30 @@
     ]
   },
   {
+    "base_object_name": "FW Pin Projectile",
+    "type": "WeaverPin",
+    "parent_name": "Pin Projectiles",
+    "components": [
+      "OwnMotion",
+      "Rotation"
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "FW Loose Pin",
+    "type": "WeaverLoosePin",
+    "parent_name": "Loose Pins",
+    "components": [
+      "OwnMotion",
+      "Rotation"
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
     "base_object_name": "Bone Worm",
     "type": "Grom",
     "parent_name": null,

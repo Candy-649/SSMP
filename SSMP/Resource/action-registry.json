@@ -10,6 +10,11 @@
     "targeted_fsm": true
   },
   {
+    "type": "CheckXPosition",
+    "update_field": "everyFrame",
+    "targeted_fsm": true
+  },
+  {
     "type": "GetVelocity2d",
     "update_field": "everyFrame"
   },

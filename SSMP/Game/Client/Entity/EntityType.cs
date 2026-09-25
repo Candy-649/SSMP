@@ -298,5 +298,21 @@ internal enum EntityType {
     /// Not a creature: a bell that a boss throws up, which bounces along the floor. Only the scene host's game runs
     /// them now, and the copy flies by itself with the same gravity (OwnMotionComponent).
     /// </summary>
-    AttackBell
+    AttackBell,
+
+    /// <summary>
+    /// Not a creature: a pin that a boss fires across its arena, placed, turned and timed at random by the room and
+    /// aimed at the player the boss is after. Only the scene host's game runs them now, and the copy flies by itself
+    /// until the wall stops it (OwnMotionComponent).
+    /// </summary>
+    WeaverPin,
+
+    /// <summary>
+    /// Not a creature: a pin lying about the arena of the boss that fires <see cref="WeaverPin"/>s. The boss pulls one
+    /// up for each pin it fires, and one is left where a fired pin lands, stuck there or falling. Which one is pulled,
+    /// how fast it rises and whether it sticks were rolled by each game, and with the fired pins run by the scene host
+    /// alone the other game's lay where they were while pins came out of nowhere. Only the scene host's game runs them
+    /// now, and the copy rises, falls and bounces by itself (OwnMotionComponent).
+    /// </summary>
+    WeaverLoosePin
 }

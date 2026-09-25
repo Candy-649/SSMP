@@ -73,6 +73,12 @@ internal partial class GamePatcher {
     private static readonly Dictionary<int, GameObject> TargetOwnerCache = new();
 
     /// <summary>
+    /// For each target owner that is no enemy itself, by instance ID, the enemy that last set it off by sending it an
+    /// event (see <see cref="NoteWhatAnEnemySetsOff"/>).
+    /// </summary>
+    private static readonly Dictionary<int, GameObject> SetOffByEnemy = new();
+
+    /// <summary>
     /// Searches active assemblies to find a PlayMaker FSM action type matching the given class name.
     /// </summary>
     /// <param name="name">The name of the action class.</param>
@@ -183,6 +189,18 @@ internal partial class GamePatcher {
         return owner != null && EnemyApprovedTargets.TryGetValue(owner.GetInstanceID(), out var target) &&
                target != null && target.activeInHierarchy
             ? target
+            : null;
+    }
+
+    /// <summary>
+    /// Gets whoever the enemy that set something of the room off goes after (see <see cref="NoteWhatAnEnemySetsOff"/>).
+    /// </summary>
+    /// <param name="requester">The thing that was set off, or one of its child/component objects.</param>
+    /// <returns>The target, or <see langword="null"/> when no enemy set it off or it goes after no one.</returns>
+    private static GameObject? GetTargetOfWhoSetItOff(GameObject requester) {
+        var owner = GetEnemyTargetOwner(requester);
+        return owner != null && SetOffByEnemy.TryGetValue(owner.GetInstanceID(), out var enemy) && enemy != null
+            ? GetFsmActionTarget(enemy)
             : null;
     }
 
@@ -303,6 +321,7 @@ internal partial class GamePatcher {
         EnemyApprovedTargets.Clear();
         EnemyTargetLocks.Clear();
         TargetOwnerCache.Clear();
+        SetOffByEnemy.Clear();
         ClearNeedolinTargets();
     }
 
@@ -365,6 +384,69 @@ internal partial class GamePatcher {
                     $"{e.GetType().Name}: {e.Message}"
                 );
             }
+        }
+
+        foreach (var actionType in new[] { typeof(SendEventByName), typeof(SendEventByNameV2) }) {
+            var onEnterMethod = actionType.GetMethod("OnEnter", InstancePublicFlags | InstanceNonPublicFlags);
+            if (onEnterMethod != null) {
+                _targetedFsmActionEnterHooks.Add(new Hook(onEnterMethod, OnEventSenderEnter));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Notes what an enemy sets off by sending it an event, before the event goes.
+    /// </summary>
+    /// <param name="orig">The original action enter method.</param>
+    /// <param name="self">The FSM action instance.</param>
+    private static void OnEventSenderEnter(Action<FsmStateAction> orig, FsmStateAction self) {
+        var eventTarget = self switch {
+            SendEventByName action => action.eventTarget,
+            SendEventByNameV2 action => action.eventTarget,
+            _ => null
+        };
+
+        if (eventTarget != null && self.Fsm != null) {
+            NoteWhatAnEnemySetsOff(self.Fsm, eventTarget);
+        }
+
+        orig(self);
+    }
+
+    /// <summary>
+    /// Remembers that an enemy set off something of the room that is no enemy itself by sending it an event - the
+    /// thing that aims and fires a boss's pins, say - so that where it looks at a player, it looks at whoever the enemy
+    /// goes after (<see cref="ForceApprovedTargetOnFsmAction"/>). What such a thing aims at is the player of its own
+    /// game, held in a variable like an enemy's, while the enemy that sets it off is the one that has chosen between
+    /// the players: the pins went at the player whose game ran the boss, whichever of the two the boss was after.
+    /// </summary>
+    /// <param name="fsm">The FSM that sends the event.</param>
+    /// <param name="eventTarget">Where the event goes.</param>
+    private static void NoteWhatAnEnemySetsOff(HutongGames.PlayMaker.Fsm fsm, FsmEventTarget eventTarget) {
+        if (eventTarget.target is not (FsmEventTarget.EventTarget.GameObject or
+            FsmEventTarget.EventTarget.GameObjectFSM)) {
+            return;
+        }
+
+        var sender = fsm.GameObject;
+        if (sender == null || sender.GetComponentInParent<HealthManager>() == null) {
+            return;
+        }
+
+        var target = fsm.GetOwnerDefaultTarget(eventTarget.gameObject);
+        if (target == null || target.GetComponentInParent<HealthManager>() != null) {
+            return;
+        }
+
+        // Enemies send the player events too, and the player's own actions look at what the player aims at
+        if (PlayerTargetRegistry.IsHeroLikeObject(target)) {
+            return;
+        }
+
+        var enemy = GetEnemyTargetOwner(sender);
+        var setOff = GetEnemyTargetOwner(target);
+        if (enemy != null && setOff != null) {
+            SetOffByEnemy[setOff.GetInstanceID()] = enemy;
         }
     }
 
@@ -521,11 +603,17 @@ internal partial class GamePatcher {
         }
 
         var approvedTarget = GetFsmActionTarget(requester);
-        if (approvedTarget == null) {
+        if (approvedTarget != null) {
+            RetargetFsmActionGameObjectFields(action, approvedTarget);
             return;
         }
 
-        RetargetFsmActionGameObjectFields(action, approvedTarget);
+        // Something of the room that an enemy set off goes after whoever that enemy goes after, but only where it
+        // looks at a player: a variable named like a target may hold anything else there, like the enemy an ally fights
+        var setOffTarget = GetTargetOfWhoSetItOff(requester);
+        if (setOffTarget != null) {
+            RetargetFsmActionGameObjectFields(action, setOffTarget, onlyWherePlayer: true);
+        }
     }
 
     /// <summary>
@@ -599,7 +687,12 @@ internal partial class GamePatcher {
     /// </summary>
     /// <param name="action">The active FSM action to retarget.</param>
     /// <param name="approvedTarget">The approved multiplayer target for the owning enemy.</param>
-    private static void RetargetFsmActionGameObjectFields(FsmStateAction action, GameObject approvedTarget) {
+    /// <param name="onlyWherePlayer">Whether only what points at a player is rewritten.</param>
+    private static void RetargetFsmActionGameObjectFields(
+        FsmStateAction action,
+        GameObject approvedTarget,
+        bool onlyWherePlayer = false
+    ) {
         var fields = GetFsmGameObjectFields(action.GetType());
 
         foreach (var field in fields) {
@@ -612,7 +705,7 @@ internal partial class GamePatcher {
                 continue;
             }
 
-            ReplaceFsmGameObjectFieldWithDirectTarget(action, field, fsmGameObject, approvedTarget);
+            ReplaceFsmGameObjectFieldWithDirectTarget(action, field, fsmGameObject, approvedTarget, onlyWherePlayer);
         }
 
         // Some actions do not keep the object they are about in a plain variable at all. They keep it in the pair
@@ -636,7 +729,7 @@ internal partial class GamePatcher {
                 continue;
             }
 
-            ReplaceOwnerDefaultWithDirectTarget(action, owner, ownerGameObject, approvedTarget);
+            ReplaceOwnerDefaultWithDirectTarget(action, owner, ownerGameObject, approvedTarget, onlyWherePlayer);
         }
     }
 
@@ -648,13 +741,15 @@ internal partial class GamePatcher {
     /// <param name="field">The reflected target field.</param>
     /// <param name="fsmGameObject">The current field value.</param>
     /// <param name="approvedTarget">The approved multiplayer target.</param>
+    /// <param name="onlyWherePlayer">Whether it is rewritten only when it points at a player.</param>
     private static void ReplaceFsmGameObjectFieldWithDirectTarget(
         FsmStateAction action,
         FieldInfo field,
         FsmGameObject fsmGameObject,
-        GameObject approvedTarget
+        GameObject approvedTarget,
+        bool onlyWherePlayer
     ) {
-        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget)) {
+        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget, onlyWherePlayer)) {
             return;
         }
 
@@ -674,13 +769,15 @@ internal partial class GamePatcher {
     /// <param name="owner">The pair to write into.</param>
     /// <param name="fsmGameObject">What the pair currently points at.</param>
     /// <param name="approvedTarget">The approved multiplayer target.</param>
+    /// <param name="onlyWherePlayer">Whether it is rewritten only when it points at a player.</param>
     private static void ReplaceOwnerDefaultWithDirectTarget(
         FsmStateAction action,
         FsmOwnerDefault owner,
         FsmGameObject fsmGameObject,
-        GameObject approvedTarget
+        GameObject approvedTarget,
+        bool onlyWherePlayer
     ) {
-        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget)) {
+        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget, onlyWherePlayer)) {
             return;
         }
 
@@ -697,11 +794,13 @@ internal partial class GamePatcher {
     /// <param name="action">The action being retargeted.</param>
     /// <param name="fsmGameObject">What the action currently points at.</param>
     /// <param name="approvedTarget">The approved multiplayer target.</param>
+    /// <param name="onlyWherePlayer">Whether it is written only over a player.</param>
     /// <returns><see langword="true"/> when it should be written; otherwise <see langword="false"/>.</returns>
     private static bool ShouldWriteDirectTarget(
         FsmStateAction action,
         FsmGameObject fsmGameObject,
-        GameObject approvedTarget
+        GameObject approvedTarget,
+        bool onlyWherePlayer
     ) {
         var variableName = fsmGameObject.Name;
 
@@ -714,6 +813,13 @@ internal partial class GamePatcher {
 
         if (currentTarget == approvedTarget && string.IsNullOrEmpty(variableName)) {
             return false;
+        }
+
+        // Over a player, or over one written here before whose player has gone
+        if (onlyWherePlayer) {
+            return currentTarget == null
+                ? string.IsNullOrEmpty(variableName)
+                : PlayerTargetRegistry.IsHeroLikeObject(currentTarget);
         }
 
         if (currentTarget != null &&
