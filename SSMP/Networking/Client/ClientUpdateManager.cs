@@ -440,6 +440,18 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
+    /// Add a comparison of the state of the room in a two-player save for another player to the current packet.
+    /// </summary>
+    /// <param name="update">The comparison.</param>
+    public void SetCoopCheckUpdate(CoopCheckUpdate update) {
+        lock (Lock) {
+            var coopCheckUpdateCollection =
+                GetOrCreateCollection<CoopCheckUpdate>(ServerUpdatePacketId.CoopCheckUpdate);
+            coopCheckUpdateCollection.DataInstances.Add(update);
+        }
+    }
+
+    /// <summary>
     /// Set a chat message in the current packet.
     /// </summary>
     /// <param name="message">The string message.</param>

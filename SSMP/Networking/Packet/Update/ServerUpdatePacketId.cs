@@ -111,5 +111,11 @@ public enum ServerUpdatePacketId {
     /// chance: a player whose game never heard it spent the rest of its stay in that room unable to see their
     /// partner and deaf to everything the room contained, with no way back but leaving.
     /// </summary>
-    SceneResyncRequest = 20
+    SceneResyncRequest = 20,
+
+    /// <summary>
+    /// A comparison of the state of the room between the games of the two players of a two-player save, for the other
+    /// player.
+    /// </summary>
+    CoopCheckUpdate = 21
 }

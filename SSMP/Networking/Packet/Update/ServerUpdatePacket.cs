@@ -43,6 +43,8 @@ internal class ServerUpdatePacket : UpdatePacket<ServerUpdatePacketId> {
                 return new PacketDataCollection<CoopSaveUpdate>();
             case ServerUpdatePacketId.CoopHitUpdate:
                 return new PacketDataCollection<CoopHitUpdate>();
+            case ServerUpdatePacketId.CoopCheckUpdate:
+                return new PacketDataCollection<CoopCheckUpdate>();
             default:
                 return new EmptyData();
         }

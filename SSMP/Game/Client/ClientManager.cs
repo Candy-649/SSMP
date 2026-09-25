@@ -140,6 +140,11 @@ internal class ClientManager : IClientManager {
     private readonly CoopHits _coopHits;
 
     /// <summary>
+    /// The comparison of the room that both players of a checked two-player save are in, between their games.
+    /// </summary>
+    private readonly CoopStateCheck _coopStateCheck;
+
+    /// <summary>
     /// Scores the hits on the fleas of the festival games for the player whose game doesn't control them.
     /// </summary>
     private readonly FleaGameCoop _fleaGameCoop;
@@ -334,6 +339,9 @@ internal class ClientManager : IClientManager {
             netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedPartnerId
         );
         _fleaGameCoop = new FleaGameCoop(netClient, _entityManager, () => _coopSave.CheckedPartnerId);
+        _coopStateCheck = new CoopStateCheck(
+            netClient, _playerData, _entityManager, _coopSave, () => _coopSave.CheckedPartnerId
+        );
         _coopSave.OnFleaGameScore = _fleaGameCoop.OnPartnerScore;
         _coopSave.OnFleaGamesOutroReady = _fleaGameCoop.OnPartnerOutroReady;
         _fsmPatcher = new FsmPatcher();
@@ -414,6 +422,7 @@ internal class ClientManager : IClientManager {
         _arenaCoop.RegisterHooks();
         _bossRoomCoop.RegisterHooks();
         _coopHits.RegisterHooks();
+        _coopStateCheck.RegisterHooks();
         _fleaGameCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
@@ -449,6 +458,7 @@ internal class ClientManager : IClientManager {
         _arenaCoop.DeregisterHooks();
         _bossRoomCoop.DeregisterHooks();
         _coopHits.DeregisterHooks();
+        _coopStateCheck.DeregisterHooks();
         _fleaGameCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
@@ -551,6 +561,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.CoopHitUpdate,
             _coopHits.OnCoopHitUpdate
         );
+        _packetManager.RegisterClientUpdatePacketHandler<CoopCheckUpdate>(
+            ClientUpdatePacketId.CoopCheckUpdate,
+            _coopStateCheck.OnCoopCheckUpdate
+        );
 
         // Register packet handlers related to full synchronisation
         if (_fullSynchronisation) {
@@ -597,6 +611,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopSaveUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopHitUpdate);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopCheckUpdate);
 
         if (_fullSynchronisation) {
             _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);

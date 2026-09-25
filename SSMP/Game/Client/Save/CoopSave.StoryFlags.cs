@@ -369,7 +369,7 @@ internal partial class CoopSave {
     /// <summary>
     /// Gets the fields of the player data that hold the story state, loading their list the first time.
     /// </summary>
-    private static FieldInfo[] GetStoryFields() {
+    internal static FieldInfo[] GetStoryFields() {
         if (_storyFields != null) {
             return _storyFields;
         }
@@ -411,7 +411,7 @@ internal partial class CoopSave {
     /// <summary>
     /// Reads a story field as a number: 1 or 0 for booleans, and the number of an enum value.
     /// </summary>
-    private static int ReadStoryValue(FieldInfo field, PlayerData playerData) {
+    internal static int ReadStoryValue(FieldInfo field, PlayerData playerData) {
         return field.GetValue(playerData) switch {
             bool flag => flag ? 1 : 0,
             int number => number,

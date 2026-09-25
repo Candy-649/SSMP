@@ -57,6 +57,8 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new PacketDataCollection<CoopSaveUpdate>();
             case ClientUpdatePacketId.CoopHitUpdate:
                 return new PacketDataCollection<CoopHitUpdate>();
+            case ClientUpdatePacketId.CoopCheckUpdate:
+                return new PacketDataCollection<CoopCheckUpdate>();
             default:
                 return new EmptyData();
         }

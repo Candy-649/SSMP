@@ -121,6 +121,30 @@ internal class CoopHits {
     private static readonly Dictionary<TrackTriggerObjects, RangeState> ReplayedRanges = new();
 
     /// <summary>
+    /// How many hits and touches <see cref="Traffic"/> keeps.
+    /// </summary>
+    private const int TrafficCapacity = 400;
+
+    /// <summary>
+    /// The hits and touches on objects of the room that went between the games lately, oldest first, with when, the
+    /// scene and path of the object and what happened. <see cref="CoopStateCheck"/> shows them with a difference of the
+    /// object that they were for.
+    /// </summary>
+    private static readonly Queue<(float Time, string Scene, string Path, string Text)> Traffic = new();
+
+    /// <summary>
+    /// When a hit or touch of the partner on each object that could not be replayed may next be written down, by the
+    /// scene and path of the object, so that swinging at one cannot fill the log.
+    /// </summary>
+    private static readonly Dictionary<string, float> NextNotReplayedLogTime = new();
+
+    /// <summary>
+    /// The shortest time between two lines about a hit or touch on the same object that could not be replayed, in
+    /// seconds.
+    /// </summary>
+    private const float NotReplayedLogInterval = 30f;
+
+    /// <summary>
     /// The net client for sending hits.
     /// </summary>
     private readonly NetClient _netClient;
@@ -356,23 +380,39 @@ internal class CoopHits {
         }
 
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
-        if (type == null || !typeof(IHitResponder).IsAssignableFrom(type) || IsPersonal(type)) {
+        if (type == null || !typeof(IHitResponder).IsAssignableFrom(type)) {
+            NotReplayed(update, "hit", "that kind of object is unknown here");
+            return;
+        }
+
+        if (IsPersonal(type)) {
             return;
         }
 
         var target = ScenePath.Find(update.Path, update.Scene);
         if (target == null) {
+            NotReplayed(update, "hit", "the object is not here");
             return;
         }
 
         var components = target.GetComponents(type);
         if (update.Index >= components.Length) {
+            NotReplayed(update, "hit", $"the object has only {components.Length} parts of that kind here");
             return;
         }
 
         var component = components[update.Index];
-        if (component is not IHitResponder responder || component is Behaviour { isActiveAndEnabled: false } ||
-            !IsRoomObject(component)) {
+        if (component is not IHitResponder responder) {
+            return;
+        }
+
+        if (component is Behaviour { isActiveAndEnabled: false }) {
+            NotReplayed(update, "hit", "the object is switched off here");
+            return;
+        }
+
+        if (!IsRoomObject(component)) {
+            NotReplayed(update, "hit", "the object is not a part of the room here");
             return;
         }
 
@@ -384,13 +424,17 @@ internal class CoopHits {
         var sourceObject = GetHitSource(source);
         hit.Source = sourceObject;
 
+        var response = default(IHitResponder.HitResponse);
+        bool answered;
         _isReplaying = true;
         try {
             // An object that takes a hit only while the player is near goes by where the partner stood in their game
             SetReplayedRanges(target, source.Ranges);
-            _gamePatcher.RunAsRemoteHit(() => responder.Hit(hit));
+            answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(() => response = responder.Hit(hit)));
         } catch (Exception e) {
             Logger.Warn($"Could not replay a hit of the partner on {update.Path}:\n{e}");
+            NoteTraffic(update.Scene, update.Path, $"got a hit on {update.Responder}, whose replay failed");
+            return;
         } finally {
             _isReplaying = false;
             ReplayedRanges.Clear();
@@ -399,6 +443,8 @@ internal class CoopHits {
                 _movingHitSource.linearVelocity = Vector2.zero;
             }
         }
+
+        NoteReplayed(update, "hit", response.response != IHitResponder.Response.None || answered);
     }
 
     /// <summary>
@@ -632,10 +678,13 @@ internal class CoopHits {
             // machines moved on to another state
             var update = hit.IsHeroDamage ? CreateUpdate(partnerId, component, hit) : null;
             var response = default(IHitResponder.HitResponse);
-            var answered = AnswersAttack(() => response = responder.Hit(hit));
-            if (update != null && _netClient.IsConnected &&
-                (response.response != IHitResponder.Response.None || answered)) {
+            var answered = AnswersAttack(() => response = responder.Hit(hit)) ||
+                           response.response != IHitResponder.Response.None;
+            if (update != null && answered && _netClient.IsConnected) {
                 _netClient.UpdateManager.SetCoopHitUpdate(update);
+                NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder}");
+            } else if (update != null && !answered) {
+                NoteTraffic(update.Scene, update.Path, $"hit its {update.Responder}, which did not answer: not sent");
             }
 
             return response;
@@ -787,6 +836,7 @@ internal class CoopHits {
         var update = _getPartnerId() is { } partnerId ? CreateTouchUpdate(partnerId, receiver, attack) : null;
         if (AnswersAttack(touch) && update != null && _netClient.IsConnected) {
             _netClient.UpdateManager.SetCoopHitUpdate(update);
+            NoteTraffic(update.Scene, update.Path, $"sent a touch of {attack.name} through {update.Responder}");
         }
     }
 
@@ -820,11 +870,12 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Makes a hit or touch of the local player's attack on an object of the room, and says whether the object
-    /// answered it: whether a state machine that changed state on it ended up in another state than before. An object
-    /// that looks at an attack and turns it down goes straight back to where it was, like a rock struck from too far
-    /// off or a wall struck from its wrong side. Such an attack is not sent: replayed, it would be looked at again,
-    /// and a check that goes by something of the partner's game, like where their player stands, could let it through.
+    /// Makes a hit or touch on an object of the room, and says whether the object answered it: whether a state machine
+    /// that changed state on it ended up in another state than before. An object that looks at an attack and turns it
+    /// down goes straight back to where it was, like a rock struck from too far off or a wall struck from its wrong
+    /// side. Such an attack of the local player is not sent: replayed, it would be looked at again, and a check that
+    /// goes by something of the partner's game, like where their player stands, could let it through. A replay of the
+    /// partner's that is not answered is written down (see <see cref="NoteReplayed"/>).
     /// </summary>
     private bool AnswersAttack(Action attack) {
         _statesBefore.Clear();
@@ -1335,13 +1386,31 @@ internal class CoopHits {
     /// </summary>
     private void ReplayTouch(CoopHitUpdate update) {
         var type = Array.Find(TouchReceiverTypes, touchType => touchType.FullName == update.Responder);
-        var target = type != null ? ScenePath.Find(update.Path, update.Scene) : null;
-        if (type == null || target == null || !target.activeInHierarchy) {
+        if (type == null) {
+            NotReplayed(update, "touch", "that kind of receiver is unknown here");
+            return;
+        }
+
+        var target = ScenePath.Find(update.Path, update.Scene);
+        if (target == null) {
+            NotReplayed(update, "touch", "the object is not here");
+            return;
+        }
+
+        if (!target.activeInHierarchy) {
+            NotReplayed(update, "touch", "the object is switched off here");
             return;
         }
 
         var receivers = target.GetComponents(type);
-        if (update.Index >= receivers.Length || !IsRoomObject(receivers[update.Index])) {
+        if (update.Index >= receivers.Length) {
+            NotReplayed(update, "touch", $"the object has only {receivers.Length} receivers of that kind here");
+            return;
+        }
+
+        var receiver = receivers[update.Index];
+        if (!IsRoomObject(receiver)) {
+            NotReplayed(update, "touch", "the object is not a part of the room here");
             return;
         }
 
@@ -1352,16 +1421,96 @@ internal class CoopHits {
 
         var attack = GetTouchSource(touch);
 
+        bool answered;
         _isReplaying = true;
         try {
             SetReplayedRanges(target, touch.Ranges);
-            _gamePatcher.RunAsRemoteHit(() => TellOfTouch(receivers[update.Index], attack));
+            answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(() => TellOfTouch(receiver, attack)));
         } catch (Exception e) {
             Logger.Warn($"Could not replay a touch of the partner on {update.Path}:\n{e}");
+            NoteTraffic(update.Scene, update.Path, $"got a touch through {update.Responder}, whose replay failed");
+            return;
         } finally {
             _isReplaying = false;
             ReplayedRanges.Clear();
         }
+
+        NoteReplayed(update, "touch", answered);
+    }
+
+    /// <summary>
+    /// Notes a hit or touch of the partner that was replayed, and whether the object answered it here. The partner's
+    /// game sends only what was answered there, so one that is not answered here means that the object here is not
+    /// where it is there, or that a check of it came out another way. That is not written down at once: both players
+    /// cutting the same grass does it all the time. <see cref="CoopStateCheck"/> shows it with a difference that lasts.
+    /// </summary>
+    private static void NoteReplayed(CoopHitUpdate update, string what, bool answered) {
+        NoteTraffic(
+            update.Scene,
+            update.Path,
+            answered
+                ? $"got a {what} through {update.Responder}, replayed"
+                : $"got a {what} through {update.Responder}, replayed, but the object did not answer it here"
+        );
+    }
+
+    /// <summary>
+    /// Notes a hit or touch of the partner that could not be replayed, and writes it down, once in a while for each
+    /// object.
+    /// </summary>
+    private static void NotReplayed(CoopHitUpdate update, string what, string reason) {
+        NoteTraffic(update.Scene, update.Path, $"got a {what} through {update.Responder}, not replayed: {reason}");
+
+        var key = update.Scene + "/" + update.Path;
+        if (NextNotReplayedLogTime.TryGetValue(key, out var next) && Time.unscaledTime < next) {
+            return;
+        }
+
+        NextNotReplayedLogTime[key] = Time.unscaledTime + NotReplayedLogInterval;
+        Logger.Info(
+            $"[Hits] The partner's {what} on {update.Path} in {update.Scene} through {update.Responder}: {reason}"
+        );
+    }
+
+    /// <summary>
+    /// Notes a hit or touch on an object of the room that went between the games.
+    /// </summary>
+    private static void NoteTraffic(string scene, string path, string text) {
+        if (Traffic.Count >= TrafficCapacity) {
+            Traffic.Dequeue();
+        }
+
+        Traffic.Enqueue((Time.unscaledTime, scene, path, text));
+    }
+
+    /// <summary>
+    /// The hits and touches that went between the games since the given time for an object, one of its parents or one
+    /// of its children, as text with how long ago each was, oldest first.
+    /// </summary>
+    /// <param name="scene">The scene of the object.</param>
+    /// <param name="path">The path of the object in its scene.</param>
+    /// <param name="since">The unscaled time to go back to.</param>
+    internal static List<string> GetTraffic(string scene, string path, float since) {
+        var lines = new List<string>();
+        var now = Time.unscaledTime;
+        foreach (var (time, trafficScene, trafficPath, text) in Traffic) {
+            if (time < since || trafficScene != scene || !IsSameOrRelated(path, trafficPath)) {
+                continue;
+            }
+
+            var ago = (now - time).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+            lines.Add(trafficPath == path ? $"{ago} s ago: {text}" : $"{ago} s ago: {text} (on {trafficPath})");
+        }
+
+        return lines;
+    }
+
+    /// <summary>
+    /// Whether two paths are of the same object, or one is of a parent of the other.
+    /// </summary>
+    private static bool IsSameOrRelated(string path, string other) {
+        return path == other || other.StartsWith(path + "/", StringComparison.Ordinal) ||
+               path.StartsWith(other + "/", StringComparison.Ordinal);
     }
 
     /// <summary>
@@ -1513,7 +1662,7 @@ internal class CoopHits {
     /// sync takes care of creatures. The kinds that were replayed before the others count when spawned too (see
     /// <see cref="ReplayedWhenSpawnedTypes"/>).
     /// </summary>
-    private static bool IsRoomObject(Component component) {
+    internal static bool IsRoomObject(Component component) {
         var scene = component.gameObject.scene;
         if (!scene.IsValid() || scene.name == "DontDestroyOnLoad" ||
             component.GetComponentInParent<HealthManager>(true) != null) {
@@ -1536,7 +1685,7 @@ internal class CoopHits {
     /// <summary>
     /// Whether objects of the given type are there for the player who hits them (see <see cref="PersonalTypes"/>).
     /// </summary>
-    private static bool IsPersonal(Type type) {
+    internal static bool IsPersonal(Type type) {
         return IsOfType(type, PersonalTypes, IsPersonalByType);
     }
 

@@ -319,6 +319,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether a saved object is one of the world that both saves share and that doesn't reset at a bench, with the
+    /// scene and the ID that it is saved under.
+    /// </summary>
+    internal bool IsSharedWorldItem(PersistentBoolItem item, out string scene, out string id) {
+        GetItemSceneAndId(item, out scene, out id);
+        return GetWorldBools().Contains(GetItemKey(scene, id)) && !item.GetIsSemiPersistent();
+    }
+
+    /// <summary>
     /// Finds the saved objects of the world in the loaded scenes.
     /// </summary>
     private void FindLoadedWorldItems() {

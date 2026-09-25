@@ -594,6 +594,25 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Add a comparison of the state of the room in a two-player save from another player to the current packet.
+    /// </summary>
+    /// <param name="update">The comparison.</param>
+    public void AddCoopCheckUpdateData(CoopCheckUpdate update) {
+        lock (Lock) {
+            var coopCheckUpdateCollection =
+                GetOrCreateCollection<CoopCheckUpdate>(ClientUpdatePacketId.CoopCheckUpdate);
+            coopCheckUpdateCollection.DataInstances.Add(
+                new CoopCheckUpdate {
+                    PlayerId = update.PlayerId,
+                    TargetId = update.TargetId,
+                    Kind = update.Kind,
+                    Data = update.Data
+                }
+            );
+        }
+    }
+
+    /// <summary>
     /// Add a player setting update to the current packet for the receiving player.
     /// </summary>
     /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.

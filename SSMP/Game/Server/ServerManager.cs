@@ -362,6 +362,10 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.CoopHitUpdate,
             OnCoopHitUpdate
         );
+        _packetManager.RegisterServerUpdatePacketHandler<CoopCheckUpdate>(
+            ServerUpdatePacketId.CoopCheckUpdate,
+            OnCoopCheckUpdate
+        );
         _packetManager.RegisterServerUpdatePacketHandler<ChatMessage>(
             ServerUpdatePacketId.ChatMessage,
             OnChatMessage
@@ -413,6 +417,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopSaveUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopHitUpdate);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopCheckUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ChatMessage);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ServerSettings);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerSetting);
@@ -1480,6 +1485,26 @@ internal abstract class ServerManager : IServerManager {
 
         update.PlayerId = id;
         _netServer.GetUpdateManagerForClient(update.TargetId)?.AddCoopHitUpdateData(update);
+    }
+
+    /// <summary>
+    /// Callback method for when a player sends a comparison of the state of the room in a two-player save, which goes
+    /// to the player it names.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="update">The CoopCheckUpdate packet data.</param>
+    private void OnCoopCheckUpdate(ushort id, CoopCheckUpdate update) {
+        if (!_playerData.ContainsKey(id)) {
+            Logger.Warn($"Received CoopCheckUpdate data, but player with ID {id} is not in mapping");
+            return;
+        }
+
+        if (update.TargetId == id || !_playerData.ContainsKey(update.TargetId)) {
+            return;
+        }
+
+        update.PlayerId = id;
+        _netServer.GetUpdateManagerForClient(update.TargetId)?.AddCoopCheckUpdateData(update);
     }
 
     /// <summary>
