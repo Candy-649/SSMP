@@ -632,7 +632,12 @@ internal static partial class EntityFsmActions {
     /// itself is truer than writing it again here.
     /// </summary>
     /// <param name="action">The replayed action.</param>
-    private static void RunInState(FsmStateAction action) {
+    /// <param name="everyStep">
+    /// Whether the action also works in each step of physics, like one speeding a body up, which is then run in each
+    /// of them before the step moves anything, as the game's FSM runs it. Run after the step instead, every step would
+    /// move the body at the speed of the step before, and the copy would fall further behind with each one.
+    /// </param>
+    private static void RunInState(FsmStateAction action, bool everyStep = false) {
         // Entering the state it is still in leaves the state first, as the game does
         for (var i = ActionsInState.Count - 1; i >= 0; i--) {
             if (ActionsInState[i].Action == action) {
@@ -649,11 +654,23 @@ internal static partial class EntityFsmActions {
             return;
         }
 
+        System.Action? step = null;
+        if (everyStep && !action.Finished) {
+            step = () => {
+                var owner = action.Fsm.GameObject;
+                if (owner != null && owner.activeInHierarchy) {
+                    action.OnFixedUpdate();
+                }
+            };
+            MonoBehaviourUtil.Instance.OnFixedUpdateEvent += step;
+        }
+
         new ActionInState {
             Fsm = action.Fsm,
             StateName = action.State.Name,
             Action = action,
             Coroutine = action.Finished ? null : MonoBehaviourUtil.Instance.StartCoroutine(UpdateUntilFinished()),
+            Step = step,
             ExitAction = action.OnExit
         }.Register();
 
@@ -1063,6 +1080,11 @@ internal static partial class EntityFsmActions {
         public Coroutine? Coroutine { private get; init; }
 
         /// <summary>
+        /// What runs the action in each step of physics, if it works in them, which stops when the state is exited.
+        /// </summary>
+        public System.Action? Step { private get; init; }
+
+        /// <summary>
         /// The action that should be executed when the state is exited.
         /// </summary>
         public System.Action ExitAction { private get; init; }
@@ -1089,6 +1111,10 @@ internal static partial class EntityFsmActions {
         public void StopUpdating() {
             if (Coroutine != null) {
                 MonoBehaviourUtil.Instance.StopCoroutine(Coroutine);
+            }
+
+            if (Step != null) {
+                MonoBehaviourUtil.Instance.OnFixedUpdateEvent -= Step;
             }
         }
     }

@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using SSMP.Fsm;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
@@ -6,19 +7,26 @@ using UnityEngine;
 namespace SSMP.Game.Client.Entity.Component;
 
 /// <inheritdoc />
-/// This component lets the copy of an entity move by itself, for a thing that is set moving once and then keeps going
-/// the same way until it stops: a rock that drops, a stalactite that falls. Everything random about such a thing is
-/// decided at the moment it sets off - where it starts, which way it is turned, how fast it goes and spins - and
-/// nothing after that changes it. So what the scene host sends is that moment: where the entity is, how it is turned
-/// and how its body moves, each time its body starts or stops moving or changes how. The copy is put there and given
-/// the same movement, and the local game's physics carries it on from there the way the scene host's game carries the
-/// entity. Followed by positions instead, like other entities, a stall in the network left it hanging in the air.
-/// While it moves by itself the scene host sends no positions for it at all, so a falling rock costs two small
-/// messages rather than one every frame.
+/// This component lets the copy of an entity move by itself, for a thing that is set moving and then goes the way its
+/// own physics and FSM take it: a rock or a cage that drops, a boulder that speeds up as it falls, a bell thrown in an
+/// arc. Everything random about such a thing is decided where its FSM decides how it moves - where it starts, which
+/// way it is turned, how fast it goes and spins - and in between nothing but physics and its own actions move it. So
+/// what the scene host sends is each of those moments: where the entity is, how it is turned, how its body moves and
+/// what kind of body it is. The copy is put there and given the same body and movement, it runs the actions that move
+/// the entity step by step itself (EntityFsmActions), and the local game's physics carries it on from there the way the
+/// scene host's game carries the entity. Followed by positions instead, like other entities, a stall in the network
+/// left it hanging in the air. While it moves by itself the scene host sends no positions for it at all, so a falling
+/// rock costs a message where it sets off and one where it stops.
 ///
-/// Only for a body that nothing but its own FSM moves: kinematic, or with no gravity and only trigger colliders. The
-/// copy's body is kinematic, so it takes no gravity and nothing pushes it.
+/// Only for a thing that nothing but its own FSM and physics moves, and whose colliders that touch anything solid touch
+/// only the room itself, which is the same in both games.
 internal class OwnMotionComponent : EntityComponent {
+    /// <summary>
+    /// The objects of the entities with this component, the room's own and the copies, by which the replays of the
+    /// actions that move them know that the copy moves itself (see <see cref="Moves"/>).
+    /// </summary>
+    private static readonly HashSet<GameObject> Objects = new();
+
     /// <summary>
     /// The body of the room's own copy of the entity, which the scene host's game moves.
     /// </summary>
@@ -30,6 +38,21 @@ internal class OwnMotionComponent : EntityComponent {
     private readonly Rigidbody2D? _clientBody;
 
     /// <summary>
+    /// Whether an FSM of the entity did something since the last look that may have changed how it moves.
+    /// </summary>
+    private bool _changed;
+
+    /// <summary>
+    /// The position that was last sent.
+    /// </summary>
+    private Vector2 _lastPosition;
+
+    /// <summary>
+    /// The angle that was last sent, in degrees.
+    /// </summary>
+    private float _lastAngle;
+
+    /// <summary>
     /// The velocity that was last sent.
     /// </summary>
     private Vector2 _lastVelocity;
@@ -39,6 +62,16 @@ internal class OwnMotionComponent : EntityComponent {
     /// </summary>
     private float _lastSpin;
 
+    /// <summary>
+    /// The kind of body that was last sent.
+    /// </summary>
+    private RigidbodyType2D _lastBodyType;
+
+    /// <summary>
+    /// The gravity scale that was last sent.
+    /// </summary>
+    private float _lastGravityScale;
+
     public OwnMotionComponent(
         NetClient netClient,
         ushort entityId,
@@ -46,23 +79,54 @@ internal class OwnMotionComponent : EntityComponent {
     ) : base(netClient, entityId, gameObject) {
         _hostBody = gameObject.Host.GetComponent<Rigidbody2D>();
         _clientBody = gameObject.Client.GetComponent<Rigidbody2D>();
+
+        if (_hostBody != null) {
+            _lastBodyType = _hostBody.bodyType;
+            _lastGravityScale = _hostBody.gravityScale;
+        }
+
+        Objects.RemoveWhere(obj => obj == null);
+        Objects.Add(gameObject.Host);
+        Objects.Add(gameObject.Client);
+    }
+
+    /// <summary>
+    /// Whether the given object is one of an entity whose copy moves itself, so that the actions moving it step by step
+    /// are run on the copy rather than left to positions.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    public static bool Moves(GameObject gameObject) => Objects.Contains(gameObject);
+
+    /// <summary>
+    /// Says that an FSM of the scene host's entity did something that may have changed how it moves, which is looked at
+    /// in the next update. Every action that sets a velocity, a spin, a position or a kind of body is one that is
+    /// replayed, and so comes through <see cref="Entity"/> here.
+    /// </summary>
+    public void MarkChanged() {
+        _changed = true;
     }
 
     /// <summary>
     /// Whether the copy is moving by itself, which is when the interpolation of positions leaves it alone.
     /// </summary>
-    public bool IsMoving => IsControlled && _clientBody != null &&
-                            (_clientBody.linearVelocity != Vector2.zero || _clientBody.angularVelocity != 0f);
+    public bool IsMoving => IsControlled && _clientBody != null && MovesByItself(_clientBody);
 
     /// <summary>
     /// Whether the scene host's entity is moving by itself, which is when its positions are not sent: the other game
     /// moves the copy the same way from how it set off.
     /// </summary>
-    public bool IsHostMoving => !IsControlled && _hostBody != null &&
-                                (_hostBody.linearVelocity != Vector2.zero || _hostBody.angularVelocity != 0f);
+    public bool IsHostMoving => !IsControlled && _hostBody != null && MovesByItself(_hostBody);
 
     /// <summary>
-    /// Callback for checking the movement of the body each update.
+    /// Whether a body is moving by itself: going somewhere, turning, or falling.
+    /// </summary>
+    private static bool MovesByItself(Rigidbody2D body) {
+        return body.linearVelocity != Vector2.zero || body.angularVelocity != 0f ||
+               body.bodyType == RigidbodyType2D.Dynamic && body.gravityScale != 0f;
+    }
+
+    /// <summary>
+    /// Callback for sending how the entity moves each time that may have changed.
     /// </summary>
     /// <inheritdoc />
     public override void OnUpdate() {
@@ -70,27 +134,45 @@ internal class OwnMotionComponent : EntityComponent {
             return;
         }
 
-        var velocity = _hostBody.linearVelocity;
-        var spin = _hostBody.angularVelocity;
-        if (velocity == _lastVelocity && spin == _lastSpin) {
+        // A kind of body changed by anything says so itself. Any other change is one of the FSM's actions, and a
+        // velocity or spin that changes while nothing is done - by gravity, drag or a push against the room - changes
+        // the same way on the copy, which has the same body in the same room.
+        var bodyType = _hostBody.bodyType;
+        var gravityScale = _hostBody.gravityScale;
+        if (!_changed && bodyType == _lastBodyType && gravityScale == _lastGravityScale) {
             return;
         }
 
-        _lastVelocity = velocity;
-        _lastSpin = spin;
+        _changed = false;
 
         var transform = GameObject.Host.transform;
-        var position = transform.position;
+        Vector2 position = transform.position;
+        var angle = transform.eulerAngles.z;
+        var velocity = _hostBody.linearVelocity;
+        var spin = _hostBody.angularVelocity;
+        if (position == _lastPosition && angle == _lastAngle && velocity == _lastVelocity && spin == _lastSpin &&
+            bodyType == _lastBodyType && gravityScale == _lastGravityScale) {
+            return;
+        }
+
+        _lastPosition = position;
+        _lastAngle = angle;
+        _lastVelocity = velocity;
+        _lastSpin = spin;
+        _lastBodyType = bodyType;
+        _lastGravityScale = gravityScale;
 
         var data = new EntityNetworkData {
             Type = EntityComponentType.OwnMotion
         };
         data.Packet.Write(position.x);
         data.Packet.Write(position.y);
-        data.Packet.Write(transform.eulerAngles.z);
+        data.Packet.Write(angle);
         data.Packet.Write(velocity.x);
         data.Packet.Write(velocity.y);
         data.Packet.Write(spin);
+        data.Packet.Write((byte) bodyType);
+        data.Packet.Write(gravityScale);
 
         SendData(data);
     }
@@ -101,8 +183,10 @@ internal class OwnMotionComponent : EntityComponent {
         var angle = data.Packet.ReadFloat();
         var velocity = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
         var spin = data.Packet.ReadFloat();
+        var bodyType = (RigidbodyType2D) data.Packet.ReadByte();
+        var gravityScale = data.Packet.ReadFloat();
 
-        // What was kept for a player walking in says how the entity set off some time ago, not where it is now; the
+        // What was kept for a player walking in says how the entity moved some time ago, not where it is now; the
         // positions that come with it put it there
         if (!IsControlled || alreadyInSceneUpdate || GameObject.Client == null) {
             return;
@@ -118,6 +202,10 @@ internal class OwnMotionComponent : EntityComponent {
             return;
         }
 
+        // The same kind of body with the same gravity, so that what the physics does to the entity between two of these
+        // - its fall, its arc, the floor stopping it - the physics does to the copy too
+        _clientBody.bodyType = bodyType;
+        _clientBody.gravityScale = gravityScale;
         _clientBody.position = position;
         _clientBody.rotation = angle;
         _clientBody.linearVelocity = velocity;
@@ -132,5 +220,7 @@ internal class OwnMotionComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void Destroy() {
+        Objects.Remove(GameObject.Host);
+        Objects.Remove(GameObject.Client);
     }
 }

@@ -759,6 +759,12 @@ internal class Entity {
         if (!_hookedActions.TryGetValue(self, out var hookedEntityAction)) {
             return;
         }
+
+        // Whatever the FSM does may change how the entity moves, which the other game is then told
+        if (_components.TryGetValue(EntityComponentType.OwnMotion, out var component) &&
+            component is OwnMotionComponent ownMotion) {
+            ownMotion.MarkChanged();
+        }
         //
         //Logger.Info(
         //    $"Entity ({Id}, {Type}) hooked action: {self.Fsm.Name}, {self.State.Name}, {self.GetType()} ({hookedEntityAction.FsmIndex}, {hookedEntityAction.StateIndex}, {hookedEntityAction.ActionIndex})"
@@ -1730,8 +1736,17 @@ internal class Entity {
             return;
         }
 
-        var listener = Object.Client.GetComponent<TouchListener>() ?? Object.Client.AddComponent<TouchListener>();
-        listener.Touched += OnCopyTouched;
+        // A trigger is told to the object of the body it belongs to, so a part with a body of its own - like the range
+        // in which a boulder notices the player - is listened to itself; the copy's own body hears its other parts
+        var listened = new HashSet<GameObject> { Object.Client };
+        foreach (var body in Object.Client.GetComponentsInChildren<Rigidbody2D>(true)) {
+            listened.Add(body.gameObject);
+        }
+
+        foreach (var part in listened) {
+            var listener = part.GetComponent<TouchListener>() ?? part.AddComponent<TouchListener>();
+            listener.Touched += OnCopyTouched;
+        }
     }
 
     /// <summary>

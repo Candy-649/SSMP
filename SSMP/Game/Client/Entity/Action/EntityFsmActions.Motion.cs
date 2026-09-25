@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Entity.Component;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 
@@ -774,6 +775,26 @@ internal static partial class EntityFsmActions {
         }
 
         action.Apply(liftChain);
+    }
+
+    #endregion
+
+    #region AccelerateToY
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AccelerateToY action) {
+        // Run again only for an entity whose copy moves itself (OwnMotionComponent); the copy of any other is moved by
+        // the positions the scene host sends
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        return gameObject != null && OwnMotionComponent.Moves(gameObject);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, AccelerateToY action) {
+        // Not in the replay that sets a copy up for a player walking in: that one is placed by positions
+        if (data != null) {
+            RunInState(action, everyStep: true);
+        }
     }
 
     #endregion

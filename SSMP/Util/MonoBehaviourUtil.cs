@@ -28,6 +28,12 @@ internal class MonoBehaviourUtil : MonoBehaviour {
     /// </summary>
     public event Action? OnLateUpdateEvent;
 
+    /// <summary>
+    /// Event that is executed each step of physics, before the step moves anything - where the FSMs of the game run
+    /// the actions that work in steps of physics, like speeding a body up.
+    /// </summary>
+    public event Action? OnFixedUpdateEvent;
+
     public void Awake() {
         if (Instance != null) {
             Destroy(this);
@@ -54,6 +60,7 @@ internal class MonoBehaviourUtil : MonoBehaviour {
 
     public void FixedUpdate() {
         FixedStep++;
+        OnFixedUpdateEvent?.Invoke();
     }
 
     /// <summary>
