@@ -12,9 +12,9 @@ using SSMP.Networking.Packet.Data;
 namespace SSMP.Game.Client.Entity.Action;
 
 // What a creature shows besides its body and its parts moving: its colour changing and flashing, the screen flashing
-// and the camera shaking with its blows. None of it was done again on the other game. The copy runs these actions
-// itself, as its FSM would (RunInState), so a tween, an ease, a delayed or repeating shake and a looping one that its
-// state stops all play out there as they do here.
+// and the camera shaking with its blows, and its roars, which hold the player in place. None of it was done again on
+// the other game. The copy runs these actions itself, as its FSM would (RunInState), so a tween, an ease, a delayed or
+// repeating shake and a looping one that its state stops all play out there as they do here.
 //
 // None of it is done when the creature's first states are set up (RunMoment). The copy may be set up long after the
 // creature left them, for a player who walks in later, and would keep the colour of a state it left long ago until
@@ -276,6 +276,39 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, CancelCameraShake action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region StartRoarEmitter
+
+    // A roar holds the player character of the game that does it in place, and shows its wave on that game's camera.
+    // Done only in the game that runs the creature, it held that game's player while the other walked on through it.
+    // The copy roars too, at its own game's player. It is sent whatever else its state does, because a roar is felt by
+    // everyone in the room, not only by a player the creature is dealing with.
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, StartRoarEmitter action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, StartRoarEmitter action) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region StopRoarEmitter
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, StopRoarEmitter action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, StopRoarEmitter action) {
         RunMoment(data, action);
     }
 
