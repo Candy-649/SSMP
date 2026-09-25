@@ -420,6 +420,18 @@ internal partial class CoopSave {
     /// there, so the other one only comes into the room after they said so.
     /// </summary>
     private void OnClothesGrabSceneChanged() {
+        // A player who leaves the room while waiting, like by dying, no longer waits there, so the partner is told.
+        // Only jumping used to say it, and a partner who still counted them as waiting took their clothes back alone
+        // the moment they reached for them. The object may be gone with the room, so this says it without its path,
+        // which the partner doesn't need for this.
+        if (_clothesGrabHeld != null && _checkedWith is { } partnerId) {
+            Send(new CoopSaveUpdate {
+                TargetId = partnerId,
+                Kind = CoopSaveUpdateKind.ClothesGrab,
+                PartCount = ClothesGrabNotReady
+            });
+        }
+
         _clothesGrabHeld = null;
         _clothesGrabGoHeld = false;
         EndPartnerStandIn();
