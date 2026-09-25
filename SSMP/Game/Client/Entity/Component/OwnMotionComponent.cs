@@ -1,3 +1,4 @@
+using SSMP.Fsm;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
@@ -12,6 +13,8 @@ namespace SSMP.Game.Client.Entity.Component;
 /// and how its body moves, each time its body starts or stops moving or changes how. The copy is put there and given
 /// the same movement, and the local game's physics carries it on from there the way the scene host's game carries the
 /// entity. Followed by positions instead, like other entities, a stall in the network left it hanging in the air.
+/// While it moves by itself the scene host sends no positions for it at all, so a falling rock costs two small
+/// messages rather than one every frame.
 ///
 /// Only for a body that nothing but its own FSM moves: kinematic, or with no gravity and only trigger colliders. The
 /// copy's body is kinematic, so it takes no gravity and nothing pushes it.
@@ -46,10 +49,17 @@ internal class OwnMotionComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Whether the copy is moving by itself, which is when the positions the scene host sends leave it alone.
+    /// Whether the copy is moving by itself, which is when the interpolation of positions leaves it alone.
     /// </summary>
     public bool IsMoving => IsControlled && _clientBody != null &&
                             (_clientBody.linearVelocity != Vector2.zero || _clientBody.angularVelocity != 0f);
+
+    /// <summary>
+    /// Whether the scene host's entity is moving by itself, which is when its positions are not sent: the other game
+    /// moves the copy the same way from how it set off.
+    /// </summary>
+    public bool IsHostMoving => !IsControlled && _hostBody != null &&
+                                (_hostBody.linearVelocity != Vector2.zero || _hostBody.angularVelocity != 0f);
 
     /// <summary>
     /// Callback for checking the movement of the body each update.
@@ -112,6 +122,12 @@ internal class OwnMotionComponent : EntityComponent {
         _clientBody.rotation = angle;
         _clientBody.linearVelocity = velocity;
         _clientBody.angularVelocity = spin;
+
+        // No positions come while the entity moves by itself, so the interpolation is told where the copy is now, to
+        // carry on from there when it stops rather than from where the entity stood before it set off
+        if (GameObject.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            interpolation.SetNewState(transform.position, isTeleport: true);
+        }
     }
 
     /// <inheritdoc />

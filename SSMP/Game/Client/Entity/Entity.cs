@@ -1026,7 +1026,10 @@ internal class Entity {
             // because the player waiting on it has nothing else to wait for. It is also the whole of the answer
             // when the scene host did nothing with what they sent - the knockback went nowhere, and this is where
             // the enemy really is and always was.
-            if (newPosition != _lastPosition || anticipationTaken) {
+            //
+            // None is sent while the entity moves by itself from how it set off: the other game moves the copy the
+            // same way, and was told where it set off from (OwnMotionComponent).
+            if ((newPosition != _lastPosition || anticipationTaken) && !HostMovesByItself()) {
                 if (_anticipationSendsLeft > 0) {
                     _anticipationSendsLeft--;
                 }
@@ -1869,6 +1872,15 @@ internal class Entity {
     private bool MovesByItself() {
         return _components.TryGetValue(EntityComponentType.OwnMotion, out var component) &&
                component is OwnMotionComponent { IsMoving: true };
+    }
+
+    /// <summary>
+    /// Whether the entity moves by itself here, in the scene host's game, from how it set off
+    /// (<see cref="OwnMotionComponent"/>).
+    /// </summary>
+    private bool HostMovesByItself() {
+        return _components.TryGetValue(EntityComponentType.OwnMotion, out var component) &&
+               component is OwnMotionComponent { IsHostMoving: true };
     }
 
     /// <summary>
