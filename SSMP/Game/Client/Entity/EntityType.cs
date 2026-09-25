@@ -263,5 +263,13 @@ internal enum EntityType {
     /// Not a creature: a rock of the room that a boss makes fall. Where it falls and how fast is rolled by the room,
     /// so each game rolled its own and the two games saw different rocks. Only the scene host's game runs them now.
     /// </summary>
-    FourthChorusLavaRock
+    FourthChorusLavaRock,
+
+    /// <summary>
+    /// Not a creature: a cage that a boss drops, which lets a creature out where it lands. Where it drops and when is
+    /// rolled by the cage, so each game dropped its own at a place of its own, while the creature it let out was the
+    /// scene host's. Only the scene host's game runs them now, and the other game's copy falls by itself from where
+    /// it set off (OwnMotionComponent).
+    /// </summary>
+    EnemySummonCage
 }

@@ -2940,6 +2940,17 @@
     ]
   },
   {
+    "base_object_name": "Enemy Summon Cage",
+    "type": "EnemySummonCage",
+    "parent_name": "Summon Cages",
+    "components": [
+      "OwnMotion"
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
     "base_object_name": "Bone Worm",
     "type": "Grom",
     "parent_name": null,
