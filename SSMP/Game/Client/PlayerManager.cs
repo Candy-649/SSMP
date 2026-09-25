@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using MonoMod.RuntimeDetour;
 using SSMP.Animation.Effects;
 using SSMP.Animation.Effects.Tools;
 using SSMP.Api.Client;
@@ -192,6 +194,19 @@ internal class PlayerManager : IPlayerManager {
 
         CustomHooks.HeroControllerStartAction += HeroControllerOnStart;
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
+
+        var updateTint = typeof(CharacterTint).GetMethod(
+            "UpdateTint",
+            BindingFlags.Instance | BindingFlags.NonPublic,
+            null,
+            [typeof(bool)],
+            null
+        );
+        if (updateTint == null) {
+            Logger.Error("Could not find how the game tints characters, so other players keep their own colours");
+        } else {
+            _updateTintHook = new Hook(updateTint, (Action<UpdateTintMethod, CharacterTint, bool>) OnUpdateTint);
+        }
     }
 
     /// <summary>
@@ -202,6 +217,54 @@ internal class PlayerManager : IPlayerManager {
 
         CustomHooks.HeroControllerStartAction -= HeroControllerOnStart;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
+
+        _updateTintHook?.Dispose();
+        _updateTintHook = null;
+    }
+
+    /// <summary>
+    /// The hook that notices the game changing the tint of the player's own character.
+    /// </summary>
+    private Hook? _updateTintHook;
+
+    /// <summary>
+    /// The method that the game changes the tint of a character with, at once or fading to it.
+    /// </summary>
+    private delegate void UpdateTintMethod(CharacterTint self, bool instant);
+
+    /// <summary>
+    /// Gives the characters of other players the tint that the room has just given the player's own character.
+    ///
+    /// Parts of some rooms tint every character in them, and find what walks in by its collider. The collider of the
+    /// character of another player is on a layer they cannot see, kept there so that traps and plates do not go off for
+    /// it, so it stood in its own colours, lighter than the player's own character right beside it. It now takes the
+    /// tint whenever the game changes the player's own, with the game's own fade, as the two mostly stand in the same
+    /// part of a room. The ones waiting in the pool take it at once, so that one taken out for a player who walks in
+    /// comes with the tint of the room as it is now.
+    /// </summary>
+    private void OnUpdateTint(UpdateTintMethod orig, CharacterTint self, bool instant) {
+        orig(self, instant);
+
+        var hero = HeroController.SilentInstance;
+        if (hero == null || self.gameObject != hero.gameObject) {
+            return;
+        }
+
+        foreach (var container in _activePlayers.Values) {
+            TintLikeTheHero(container);
+        }
+
+        foreach (var container in _inactivePlayers) {
+            TintLikeTheHero(container);
+        }
+
+        void TintLikeTheHero(GameObject container) {
+            var tint = container == null ? null : container.GetComponentInChildren<CharacterTint>(true);
+            if (tint != null) {
+                // A fade runs on the object of the character, which cannot run anything while it is switched off
+                orig(tint, instant || !tint.isActiveAndEnabled);
+            }
+        }
     }
 
     /// <summary>
@@ -247,7 +310,8 @@ internal class PlayerManager : IPlayerManager {
             typeof(tk2dSprite),
             typeof(tk2dSpriteAnimator),
             typeof(Rigidbody2D),
-            typeof(CoroutineCancelComponent)
+            typeof(CoroutineCancelComponent),
+            typeof(CharacterTint)
         );
 
         playerPrefab.transform.SetParent(_playerContainerPrefab.transform);
