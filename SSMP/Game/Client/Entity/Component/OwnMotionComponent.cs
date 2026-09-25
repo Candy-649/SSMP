@@ -16,7 +16,7 @@ namespace SSMP.Game.Client.Entity.Component;
 /// the entity step by step itself (EntityFsmActions), and the local game's physics carries it on from there the way the
 /// scene host's game carries the entity. Followed by positions instead, like other entities, a stall in the network
 /// left it hanging in the air. While it moves by itself the scene host sends no positions for it at all, so a falling
-/// rock costs a message where it sets off and one where it stops.
+/// rock costs a message where it sets off, one where it stops and one for each thing it bumps into on the way.
 ///
 /// Only for a thing that nothing but its own FSM and physics moves, and whose colliders that touch anything solid touch
 /// only the room itself, which is the same in both games.
@@ -36,6 +36,11 @@ internal class OwnMotionComponent : EntityComponent {
     /// The body of the copy on show.
     /// </summary>
     private readonly Rigidbody2D? _clientBody;
+
+    /// <summary>
+    /// What tells this component of the room's own copy of the entity bumping into something.
+    /// </summary>
+    private readonly BumpListener? _bumpListener;
 
     /// <summary>
     /// Whether an FSM of the entity did something since the last look that may have changed how it moves.
@@ -83,6 +88,13 @@ internal class OwnMotionComponent : EntityComponent {
         if (_hostBody != null) {
             _lastBodyType = _hostBody.bodyType;
             _lastGravityScale = _hostBody.gravityScale;
+
+            // A bump changes how the entity moves where no action does: the game bounces some things off the floor
+            // with a strength rolled for each bounce, and a copy a moment behind may meet a corner a little
+            // differently. So how the entity goes on from each bump is sent as well.
+            var host = gameObject.Host;
+            _bumpListener = host.GetComponent<BumpListener>() ?? host.AddComponent<BumpListener>();
+            _bumpListener.Bumped += MarkChanged;
         }
 
         Objects.RemoveWhere(obj => obj == null);
@@ -98,9 +110,9 @@ internal class OwnMotionComponent : EntityComponent {
     public static bool Moves(GameObject gameObject) => Objects.Contains(gameObject);
 
     /// <summary>
-    /// Says that an FSM of the scene host's entity did something that may have changed how it moves, which is looked at
-    /// in the next update. Every action that sets a velocity, a spin, a position or a kind of body is one that is
-    /// replayed, and so comes through <see cref="Entity"/> here.
+    /// Says that something may have changed how the scene host's entity moves, which is looked at in the next update:
+    /// an FSM of the entity did something, or the entity bumped into something. Every action that sets a velocity, a
+    /// spin, a position or a kind of body is one that is replayed, and so comes through <see cref="Entity"/> here.
     /// </summary>
     public void MarkChanged() {
         _changed = true;
@@ -118,11 +130,13 @@ internal class OwnMotionComponent : EntityComponent {
     public bool IsHostMoving => !IsControlled && _hostBody != null && MovesByItself(_hostBody);
 
     /// <summary>
-    /// Whether a body is moving by itself: going somewhere, turning, or falling.
+    /// Whether a body is moving by itself: going somewhere, turning, or falling. One that has come to rest on something
+    /// is put to sleep by the physics, and then its place is sent like any other entity's, so that a player walking in
+    /// later finds it where it lies rather than where it set off.
     /// </summary>
     private static bool MovesByItself(Rigidbody2D body) {
         return body.linearVelocity != Vector2.zero || body.angularVelocity != 0f ||
-               body.bodyType == RigidbodyType2D.Dynamic && body.gravityScale != 0f;
+               body.bodyType == RigidbodyType2D.Dynamic && body.gravityScale != 0f && body.IsAwake();
     }
 
     /// <summary>
@@ -134,9 +148,9 @@ internal class OwnMotionComponent : EntityComponent {
             return;
         }
 
-        // A kind of body changed by anything says so itself. Any other change is one of the FSM's actions, and a
-        // velocity or spin that changes while nothing is done - by gravity, drag or a push against the room - changes
-        // the same way on the copy, which has the same body in the same room.
+        // A kind of body changed by anything says so itself. Any other change is one of the FSM's actions or a bump,
+        // and a velocity or spin that changes while nothing is done - by gravity or drag - changes the same way on the
+        // copy, which has the same body in the same room.
         var bodyType = _hostBody.bodyType;
         var gravityScale = _hostBody.gravityScale;
         if (!_changed && bodyType == _lastBodyType && gravityScale == _lastGravityScale) {
@@ -222,5 +236,9 @@ internal class OwnMotionComponent : EntityComponent {
     public override void Destroy() {
         Objects.Remove(GameObject.Host);
         Objects.Remove(GameObject.Client);
+
+        if (_bumpListener != null) {
+            _bumpListener.Bumped -= MarkChanged;
+        }
     }
 }

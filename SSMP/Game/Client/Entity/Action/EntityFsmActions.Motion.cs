@@ -799,6 +799,24 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region DecelerateV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, DecelerateV2 action) {
+        // As AccelerateToY: slowed down step by step on a copy that moves itself, left to positions on any other
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        return gameObject != null && OwnMotionComponent.Moves(gameObject);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, DecelerateV2 action) {
+        if (data != null) {
+            RunInState(action, everyStep: true);
+        }
+    }
+
+    #endregion
+
     #region SetIsKinematic2d
 
     /// <summary>Builds network data from the FSM action.</summary>

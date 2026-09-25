@@ -12,11 +12,17 @@ internal class RotationComponent : EntityComponent {
     /// </summary>
     private Vector3 _lastRotation;
 
+    /// <summary>
+    /// The body of the room's own copy of the entity, if it has one.
+    /// </summary>
+    private readonly Rigidbody2D? _hostBody;
+
     public RotationComponent(
         NetClient netClient,
         ushort entityId,
         HostClientPair<GameObject> gameObject
     ) : base(netClient, entityId, gameObject) {
+        _hostBody = gameObject.Host.GetComponent<Rigidbody2D>();
     }
 
     /// <summary>
@@ -29,6 +35,13 @@ internal class RotationComponent : EntityComponent {
         }
 
         if (GameObject.Host == null) {
+            return;
+        }
+
+        // An entity that moves by itself and is turning by itself turns the same way on the copy, from how it set off
+        // (OwnMotionComponent). Sent every frame it turned, each angle came a moment late and turned the copy back. The
+        // angle it ends up at is sent once it stops turning.
+        if (_hostBody != null && _hostBody.angularVelocity != 0f && OwnMotionComponent.Moves(GameObject.Host)) {
             return;
         }
 
