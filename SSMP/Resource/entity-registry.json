@@ -2951,6 +2951,53 @@
     ]
   },
   {
+    "base_object_name": "Bone_Boulder",
+    "type": "BoneBoulder",
+    "parent_name": null,
+    "components": [
+      "OwnMotion"
+    ],
+    "fsm_names": [
+      "Control"
+    ],
+    "touch_events": [
+      "DROP"
+    ]
+  },
+  {
+    "base_object_name": "Bone_Boulder SK",
+    "type": "BattleBoneBoulder",
+    "parent_name": null,
+    "components": [
+      "OwnMotion"
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "DropBell",
+    "type": "DropBell",
+    "parent_name": null,
+    "components": [
+      "OwnMotion"
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "BoneBeast AtkBell",
+    "type": "AttackBell",
+    "parent_name": null,
+    "components": [
+      "OwnMotion"
+    ],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
     "base_object_name": "Bone Worm",
     "type": "Grom",
     "parent_name": null,

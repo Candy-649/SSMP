@@ -271,5 +271,32 @@ internal enum EntityType {
     /// scene host's. Only the scene host's game runs them now, and the other game's copy falls by itself from where
     /// it set off (OwnMotionComponent).
     /// </summary>
-    EnemySummonCage
+    EnemySummonCage,
+
+    /// <summary>
+    /// Not a creature: a boulder hanging in a room that drops when a player comes near. It dropped in the game of the
+    /// player who came near and nowhere else, so the other player neither saw it fall nor lost it. Only the scene
+    /// host's game runs them now: a player coming near the other game's copy has it start there and tells the scene
+    /// host (ListenForTouches), and the copy falls by itself, speeding up step by step (OwnMotionComponent).
+    /// </summary>
+    BoneBoulder,
+
+    /// <summary>
+    /// Not a creature: a boulder that a boss drops in its fight, which each game dropped with a look and a wait of its
+    /// own. Only the scene host's game runs them now, and the copy falls by itself (OwnMotionComponent).
+    /// </summary>
+    BattleBoneBoulder,
+
+    /// <summary>
+    /// Not a creature: a bell that a boss drops, which bounces off the floor. Where it drops and which way it bounces
+    /// was rolled by each game. Only the scene host's game runs them now, and the copy falls and bounces by itself
+    /// with the same gravity (OwnMotionComponent).
+    /// </summary>
+    DropBell,
+
+    /// <summary>
+    /// Not a creature: a bell that a boss throws up, which bounces along the floor. Only the scene host's game runs
+    /// them now, and the copy flies by itself with the same gravity (OwnMotionComponent).
+    /// </summary>
+    AttackBell
 }
