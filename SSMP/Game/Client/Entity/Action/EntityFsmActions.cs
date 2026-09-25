@@ -80,11 +80,12 @@ internal static partial class EntityFsmActions {
     private static readonly List<ActionInState> ActionsInState = [];
 
     /// <summary>
-    /// The state that the update being applied says each FSM of its entity is in, for the FSMs whose state it carries.
-    /// An update carries the state of an FSM at the time it was sent, together with the actions of every state entered
-    /// since the last one, so an action of any other state belongs to a state that was already over by then.
+    /// The state that the scene host last said each FSM of a creature's copy is in. An update carries the state of an
+    /// FSM at the time it was sent, together with the actions of every state entered since the last one, so an action
+    /// of any other state belongs to a state that was already over by then. It is kept after the update: an update that
+    /// went missing is sent again after newer ones, without the state that the newer ones replaced.
     /// </summary>
-    private static readonly Dictionary<HutongGames.PlayMaker.Fsm, string> StatesOfTheUpdate = new();
+    private static readonly Dictionary<HutongGames.PlayMaker.Fsm, string> HostStates = new();
 
     /// <summary>
     /// ILHook for FlingObjectsFromGlobalPool.OnEnter.
@@ -345,8 +346,8 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// The fields of an action type that name the object it works on: the object it acts on, the parent it puts
-    /// something under, the object it sends an event to, the object it aims at, and where it spawns or plays
-    /// something - a sound a creature plays at the player it caught is part of that player being caught.
+    /// something under, the object it sends an event to, the object it aims at, and where it spawns something - an
+    /// attack spawned at the player is about that player.
     /// </summary>
     private static FieldInfo[] GetSubjectFields(Type type) {
         if (SubjectFields.TryGetValue(type, out var fields)) {
@@ -360,6 +361,13 @@ internal static partial class EntityFsmActions {
                 continue;
             }
 
+            // Where a sound is played does nothing to the player. A roar is played at the player to be loud, and the
+            // scene client hears it all the same; a sound of the player being hit is kept back where it is sent (see
+            // IsPlayerHitSound)
+            if (field.Name is "spawnPoint" or "SpawnPoint" && type.Name.Contains("Audio")) {
+                continue;
+            }
+
             if (field.FieldType == typeof(FsmOwnerDefault) || field.FieldType == typeof(FsmGameObject) ||
                 field.FieldType == typeof(FsmEventTarget)) {
                 found.Add(field);
@@ -369,6 +377,54 @@ internal static partial class EntityFsmActions {
         fields = found.ToArray();
         SubjectFields[type] = fields;
         return fields;
+    }
+
+    /// <summary>
+    /// Whether a sound is one of this game's player character being hit or caught: played at the character, in a state
+    /// that is about them (see <see cref="IsAboutThePlayer"/>). Such a sound is not sent: the other game's copy would
+    /// play it at its own player, whom nothing happened to. A sound played at the player in any other state, like a
+    /// roar made loud that way, is heard in both games.
+    /// </summary>
+    private static bool IsPlayerHitSound(FsmStateAction action) {
+        return action.State != null && IsAboutThePlayer(action.State) && PlaysAtThePlayer(action);
+    }
+
+    /// <summary>
+    /// The fields of an action type that say where it plays its sound, by type.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> SpawnPointFields = new();
+
+    /// <summary>
+    /// Whether an action plays its sound at this game's player character.
+    /// </summary>
+    private static bool PlaysAtThePlayer(FsmStateAction action) {
+        var hero = HeroController.instance;
+        if (hero == null || action.Fsm == null) {
+            return false;
+        }
+
+        var type = action.GetType();
+        if (!SpawnPointFields.TryGetValue(type, out var fields)) {
+            fields = Array.FindAll(
+                type.GetFields(BindingFlags.Public | BindingFlags.Instance),
+                field => field.Name is "spawnPoint" or "SpawnPoint"
+            );
+            SpawnPointFields[type] = fields;
+        }
+
+        foreach (var field in fields) {
+            var point = field.GetValue(action) switch {
+                FsmOwnerDefault owner => action.Fsm.GetOwnerDefaultTarget(owner),
+                FsmGameObject gameObject => gameObject.Value,
+                _ => null
+            };
+
+            if (point != null && point.transform.IsChildOf(hero.transform)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -587,8 +643,7 @@ internal static partial class EntityFsmActions {
         action.OnEnter();
 
         // Its state was left before the update was sent, so it is left here at once, as it was there
-        if (StatesOfTheUpdate.TryGetValue(action.Fsm, out var stateOfTheUpdate) &&
-            stateOfTheUpdate != action.State.Name) {
+        if (HostStates.TryGetValue(action.Fsm, out var hostState) && hostState != action.State.Name) {
             action.OnExit();
             return;
         }
@@ -631,8 +686,9 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// Forgets the actions still running in a state of the creatures of a room that is being left. Their objects go
-    /// with the room, and what they do outside it, like a looping shake of the camera, the game ends itself then.
+    /// Forgets the actions still running in a state of the creatures of a room that is being left, and the states that
+    /// their FSMs were in. Their objects go with the room, and what they do outside it, like a looping shake of the
+    /// camera, the game ends itself then.
     /// </summary>
     public static void ForgetActionsInState() {
         foreach (var actionInState in ActionsInState) {
@@ -640,13 +696,7 @@ internal static partial class EntityFsmActions {
         }
 
         ActionsInState.Clear();
-    }
-
-    /// <summary>
-    /// Forgets the states that the update applied last carried, before and after applying an update.
-    /// </summary>
-    public static void ForgetStatesOfTheUpdate() {
-        StatesOfTheUpdate.Clear();
+        HostStates.Clear();
     }
 
     /// <summary>
@@ -914,7 +964,7 @@ internal static partial class EntityFsmActions {
     public static void RegisterStateChange(HutongGames.PlayMaker.Fsm fsm, string stateName) {
         //Logger.Debug($"RegisterStateChange: {fsm.Name}, {stateName}");
 
-        StatesOfTheUpdate[fsm] = stateName;
+        HostStates[fsm] = stateName;
 
         for (var i = ActionsInState.Count - 1; i >= 0; i--) {
             var actionInState = ActionsInState[i];

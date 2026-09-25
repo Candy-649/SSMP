@@ -280,10 +280,6 @@ internal class EntityManager {
         // creature, so neither of them sees the other fighting nothing.
         var isPersonal = alreadyInSceneUpdate && entity.Type == EntityType.Aknid;
 
-        // The replayed actions of the update are told which states it carries, so that they know which of them were
-        // already over when it was sent
-        EntityFsmActions.ForgetStatesOfTheUpdate();
-
         // Active state and host FSM are driven by the scene host; clients are consumers only.
         if (!IsSceneHost) {
             if (update.UpdateTypes.Contains(EntityUpdateType.Active) && !isPersonal)
@@ -295,8 +291,6 @@ internal class EntityManager {
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Data) && !isPersonal)
             entity.UpdateData(update.GenericData, alreadyInSceneUpdate);
-
-        EntityFsmActions.ForgetStatesOfTheUpdate();
 
         return true;
     }

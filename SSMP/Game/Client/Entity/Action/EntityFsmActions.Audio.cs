@@ -99,7 +99,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayerOneShot action) {
-        return true;
+        return !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -137,7 +137,8 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, AudioPlayerOneShotSingle action) {
-        return !action.audioPlayer.IsNone && !action.spawnPoint.IsNone && action.spawnPoint.Value != null;
+        return !action.audioPlayer.IsNone && !action.spawnPoint.IsNone && action.spawnPoint.Value != null &&
+               !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -344,7 +345,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayAudioEvent action) {
-        return true;
+        return !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -368,7 +369,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayAudioEventRandom action) {
-        return true;
+        return !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -528,7 +529,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayRandomAudioClipTable action) {
-        return true;
+        return !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -542,7 +543,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayRandomAudioClipTableV2 action) {
-        return true;
+        return !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -556,7 +557,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayRandomAudioClipTableV3 action) {
-        return true;
+        return !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -570,7 +571,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayAudioEventRandomBool action) {
-        return true;
+        return !IsPlayerHitSound(action);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
