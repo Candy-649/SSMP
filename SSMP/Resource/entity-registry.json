@@ -2613,7 +2613,7 @@
   {
     "base_object_name": "Rock Roller",
     "type": "Flintbeetle",
-    "parent_name": null,
+    "parent_name": "Rock Roller Scene",
     "components": [
       "Rotation"
     ],
