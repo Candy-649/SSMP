@@ -8,6 +8,13 @@ namespace SSMP.Networking.Packet.Data;
 /// </summary>
 internal class ClientPlayerEnterScene : GenericClientData {
     /// <summary>
+    /// The scene that the player entered. The server only knows which scene a player is in once they said so, so a
+    /// player who has just left a scene is still told about players entering it for a moment; the name is what lets
+    /// them tell.
+    /// </summary>
+    public string SceneName { get; set; } = "";
+
+    /// <summary>
     /// The position of the player.
     /// </summary>
     public Vector2 Position { get; set; } = null!;
@@ -33,6 +40,7 @@ internal class ClientPlayerEnterScene : GenericClientData {
     /// <inheritdoc />
     public override void WriteData(IPacket packet) {
         packet.Write(Id);
+        packet.Write(SceneName);
 
         packet.Write(Position);
         packet.Write(Scale);
@@ -43,6 +51,7 @@ internal class ClientPlayerEnterScene : GenericClientData {
     /// <inheritdoc />
     public override void ReadData(IPacket packet) {
         Id = packet.ReadUShort();
+        SceneName = packet.ReadString();
 
         Position = packet.ReadVector2();
         Scale = packet.ReadBool();
@@ -92,6 +101,12 @@ internal class ClientPlayerAlreadyInScene : IPacketData {
     public uint SceneHostEpoch { get; set; }
 
     /// <summary>
+    /// The scene that this is the state of. A player who leaves a scene right after entering it gets the answer for
+    /// it in the next scene, where it describes nothing that is there.
+    /// </summary>
+    public string SceneName { get; set; } = "";
+
+    /// <summary>
     /// Construct the client player already in scene data.
     /// </summary>
     public ClientPlayerAlreadyInScene() {
@@ -137,6 +152,7 @@ internal class ClientPlayerAlreadyInScene : IPacketData {
 
         packet.Write(SceneHost);
         packet.Write(SceneHostEpoch);
+        packet.Write(SceneName);
     }
 
     /// <inheritdoc />
@@ -191,6 +207,7 @@ internal class ClientPlayerAlreadyInScene : IPacketData {
 
         SceneHost = packet.ReadBool();
         SceneHostEpoch = packet.ReadUInt();
+        SceneName = packet.ReadString();
     }
 }
 

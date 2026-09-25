@@ -559,6 +559,7 @@ internal abstract class ServerManager : IServerManager {
 
                     _netServer.GetUpdateManagerForClient(key)?.AddPlayerEnterSceneData(
                         playerData.Id,
+                        playerData.CurrentScene,
                         playerData.Position ?? Vector2.Zero,
                         playerData.Scale,
                         playerData.AnimationId
@@ -574,6 +575,7 @@ internal abstract class ServerManager : IServerManager {
                 enterSceneList.Add(
                     new ClientPlayerEnterScene {
                         Id = key,
+                        SceneName = playerData.CurrentScene,
                         Position = otherPlayerData.Position ?? Vector2.Zero,
                         Scale = otherPlayerData.Scale,
                         AnimationClipId = otherPlayerData.AnimationId
@@ -712,7 +714,8 @@ internal abstract class ServerManager : IServerManager {
             entityUpdateList,
             reliableEntityUpdateList,
             _fullSynchronisation && makeEnteringPlayerHost,
-            sceneHostEpoch
+            sceneHostEpoch,
+            playerData.CurrentScene
         );
     }
 

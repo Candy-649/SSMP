@@ -163,11 +163,13 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// Add player enter scene data to the current packet.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
+    /// <param name="sceneName">The name of the scene that the player entered.</param>
     /// <param name="position">The position of the player.</param>
     /// <param name="scale">The scale of the player.</param>
     /// <param name="animationClipId">The ID of the animation clip of the player.</param>
     public void AddPlayerEnterSceneData(
         ushort id,
+        string sceneName,
         Vector2 position,
         bool scale,
         ushort animationClipId
@@ -175,6 +177,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
         lock (Lock) {
             var playerEnterScene =
                 FindOrCreatePacketData<ClientPlayerEnterScene>(id, ClientUpdatePacketId.PlayerEnterScene);
+            playerEnterScene.SceneName = sceneName;
             playerEnterScene.Position = position;
             playerEnterScene.Scale = scale;
             playerEnterScene.AnimationClipId = animationClipId;
@@ -190,17 +193,20 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// <param name="reliableEntityUpdateList">An enumerable of ReliableEntityUpdate instances to add.</param>
     /// <param name="sceneHost">Whether the player is the scene host.</param>
     /// <param name="sceneHostEpoch">The current scene host epoch.</param>
+    /// <param name="sceneName">The name of the scene that this is the state of.</param>
     public void AddPlayerAlreadyInSceneData(
         IEnumerable<ClientPlayerEnterScene> playerEnterSceneList,
         IEnumerable<EntitySpawn> entitySpawnList,
         IEnumerable<EntityUpdate> entityUpdateList,
         IEnumerable<ReliableEntityUpdate> reliableEntityUpdateList,
         bool sceneHost,
-        uint sceneHostEpoch
+        uint sceneHostEpoch,
+        string sceneName
     ) {
         var alreadyInScene = new ClientPlayerAlreadyInScene {
             SceneHost = sceneHost,
-            SceneHostEpoch = sceneHostEpoch
+            SceneHostEpoch = sceneHostEpoch,
+            SceneName = sceneName
         };
         alreadyInScene.PlayerEnterSceneList.AddRange(playerEnterSceneList);
         alreadyInScene.EntitySpawnList.AddRange(entitySpawnList);

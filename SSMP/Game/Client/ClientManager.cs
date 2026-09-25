@@ -511,7 +511,7 @@ internal class ClientManager : IClientManager {
         );
         _packetManager.RegisterClientUpdatePacketHandler<ClientPlayerEnterScene>(
             ClientUpdatePacketId.PlayerEnterScene,
-            OnPlayerEnterScene
+            OnPlayerEnterSceneData
         );
         _packetManager.RegisterClientUpdatePacketHandler<ClientPlayerAlreadyInScene>(
             ClientUpdatePacketId.PlayerAlreadyInScene,
@@ -1053,6 +1053,18 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="alreadyInScene">The ClientPlayerAlreadyInScene packet data.</param>
     private void OnPlayerAlreadyInScene(ClientPlayerAlreadyInScene alreadyInScene) {
+        // The answer to entering a scene that was left again before it came. Taken here, it put the players of that
+        // scene into this one and gave this game the role it had there, and it stopped the question from being asked
+        // again: the answer for this scene is still on its way, but until it came, this one counted as settled.
+        var sceneName = SceneManager.GetActiveScene().name;
+        if (alreadyInScene.SceneName != sceneName) {
+            Logger.Info(
+                $"Received AlreadyInScene packet for '{alreadyInScene.SceneName}', but this game is in " +
+                $"'{sceneName}' now, ignoring"
+            );
+            return;
+        }
+
         Logger.Info("Received AlreadyInScene packet");
 
         foreach (var playerEnterScene in alreadyInScene.PlayerEnterSceneList) {
@@ -1095,6 +1107,27 @@ internal class ClientManager : IClientManager {
             _sceneHostDetermined = true;
             _sceneResyncDueAt = -1f;
         }
+    }
+
+    /// <summary>
+    /// Callback method for when the server says that another player entered a scene that this game is in.
+    /// </summary>
+    /// <param name="enterSceneData">The ClientPlayerEnterScene packet data.</param>
+    private void OnPlayerEnterSceneData(ClientPlayerEnterScene enterSceneData) {
+        // The server hears that this game left a scene some time after the game did, and until then it tells this
+        // game about players entering the scene it left. Taken here, that put a frozen copy of the other player in
+        // the next scene, and every rule about who is in the room counted them as here until the next scene change:
+        // a boss room waited for them, and so did everything else that waits for both players. Seen in play.
+        var sceneName = SceneManager.GetActiveScene().name;
+        if (enterSceneData.SceneName != sceneName) {
+            Logger.Info(
+                $"Player {enterSceneData.Id} entered '{enterSceneData.SceneName}', which this game already left for " +
+                $"'{sceneName}', ignoring"
+            );
+            return;
+        }
+
+        OnPlayerEnterScene(enterSceneData);
     }
 
     /// <summary>
