@@ -322,7 +322,13 @@ internal static partial class EntityFsmActions {
             // then a thing with no gravity and no contacts: it could not fall, and it could not land, because the
             // test for having hit the ground is a collision and a kinematic body reports none. What it was given at
             // the moment it was thrown simply carried it away, and it never came down.
-            RestoreOwnPhysics(gameObject);
+            //
+            // Not an entity letting go of its own parent, which hundreds of creatures do and a falling rock does as
+            // it drops: that is still the thing the network moves, and a body that fell by itself under it went on
+            // gathering speed that nothing ever took away again.
+            if (!IsObjectInRegistry(gameObject)) {
+                RestoreOwnPhysics(gameObject);
+            }
 
             var fsms = gameObject.GetComponents<PlayMakerFSM>();
             foreach (var fsm in fsms) {
