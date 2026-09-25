@@ -1670,6 +1670,8 @@ internal class Entity {
             }
         }
 
+        EntityFsmActions.LeaveStatesOf(_fsms.Client);
+
         var clientActive = Object.Client.activeSelf;
         Object.Client.SetActive(false);
         SwitchOnWithoutStartingOver(clientActive, resumed);

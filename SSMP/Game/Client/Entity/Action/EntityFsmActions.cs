@@ -700,6 +700,21 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// Leaves the states of the copy of a creature that this game is taking over. The copy is switched off, and nothing
+    /// tells its FSMs anything after that, so what it was doing in a state was never left: a roar it was in the middle
+    /// of held the player of this game until something hit them.
+    /// </summary>
+    /// <param name="copyFsms">The FSMs of the copy.</param>
+    public static void LeaveStatesOf(List<PlayMakerFSM> copyFsms) {
+        for (var i = ActionsInState.Count - 1; i >= 0; i--) {
+            var fsm = ActionsInState[i].Fsm;
+            if (copyFsms.Exists(copyFsm => copyFsm != null && copyFsm.Fsm == fsm)) {
+                ExitAt(i);
+            }
+        }
+    }
+
+    /// <summary>
     /// Leaves the state of the action in state at the given index and forgets it. It is forgotten first: leaving runs
     /// the game's own code, and an entry that threw there would otherwise throw again at every state change after.
     /// </summary>
