@@ -226,6 +226,11 @@ internal class ArenaCoop {
     /// </summary>
     private BattleScene? _heroTriggerTarget;
 
+    /// <summary>
+    /// The arena whose start this game is running a step of, or null.
+    /// </summary>
+    private BattleScene? _startingArena;
+
     public ArenaCoop(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
@@ -257,6 +262,12 @@ internal class ArenaCoop {
             new Action<Action<BattleScene, Collider2D>, BattleScene, Collider2D>(OnTriggerEnter2D)
         );
         AddHook(typeof(BattleScene), "LockInBattle", new Action<Action<BattleScene>, BattleScene>(OnLockInBattle));
+        AddHook(
+            typeof(BattleScene),
+            "DoStartBattle",
+            new Func<Func<BattleScene, IEnumerator>, BattleScene, IEnumerator>(OnDoStartBattle)
+        );
+        AddHook(typeof(Gate), "ForceClose", new Action<Action<Gate>, Gate>(OnGateForceClose));
         AddHook(
             typeof(BattleScene),
             "StartWave",
@@ -492,7 +503,8 @@ internal class ArenaCoop {
     }
 
     /// <summary>
-    /// Closes the gates of an arena for the local player, unless this game starts the battle for another player.
+    /// Closes the gates of an arena for the local player, unless this game starts the battle for another player. The
+    /// gates that the start of the battle left open for the local player close now as well.
     /// </summary>
     private void OnLockInBattle(Action<BattleScene> orig, BattleScene self) {
         if (IsRemoteTarget(self)) {
@@ -500,7 +512,65 @@ internal class ArenaCoop {
         }
 
         orig(self);
-        GetState(self).LockedIn = true;
+
+        var state = GetState(self);
+        state.LockedIn = true;
+        foreach (var gate in state.HeldGates) {
+            if (gate != null) {
+                Logger.Info($"Closing gate '{gate.name}' of arena '{state.Path}' behind the local player");
+                gate.ForceClose();
+            }
+        }
+
+        state.HeldGates.Clear();
+    }
+
+    /// <summary>
+    /// Runs the start of an arena one step at a time, so that what its start does can be told apart.
+    /// </summary>
+    private IEnumerator OnDoStartBattle(Func<BattleScene, IEnumerator> orig, BattleScene self) {
+        return RunStart(self, orig(self));
+    }
+
+    /// <summary>
+    /// Runs the steps of the start of an arena, remembering during each of them which arena is starting.
+    /// </summary>
+    private IEnumerator RunStart(BattleScene battleScene, IEnumerator routine) {
+        while (true) {
+            var previousArena = _startingArena;
+            _startingArena = battleScene;
+            bool hasNext;
+            try {
+                hasNext = routine.MoveNext();
+            } finally {
+                _startingArena = previousArena;
+            }
+
+            if (!hasNext) {
+                yield break;
+            }
+
+            yield return routine.Current;
+        }
+    }
+
+    /// <summary>
+    /// Closes a gate, unless the start of an arena closes it while the local player is not locked in there. Most
+    /// arenas close their gates by locking in the player (see <see cref="OnLockInBattle"/>), but some gates close on
+    /// an event that the start of the battle sends to the whole room, which would shut out a player who has not walked
+    /// in. Such a gate stays open until the local player walks in.
+    /// </summary>
+    private void OnGateForceClose(Action<Gate> orig, Gate self) {
+        if (_startingArena != null && _arenas.TryGetValue(_startingArena, out var state) && !state.LockedIn) {
+            Logger.Info(
+                $"Arena '{state.Path}' closed gate '{self.name}' as its battle started, which stays open here until " +
+                "the local player walks in"
+            );
+            state.HeldGates.Add(self);
+            return;
+        }
+
+        orig(self);
     }
 
     /// <summary>
@@ -1356,6 +1426,12 @@ internal class ArenaCoop {
         /// The time since which the number of enemies has not changed, or null if the battle is not running.
         /// </summary>
         public float? QuietSince;
+
+        /// <summary>
+        /// The gates that the start of the battle closed while the local player was not locked in, which close once
+        /// they walk in.
+        /// </summary>
+        public readonly List<Gate> HeldGates = [];
 
         public ArenaState(string path) {
             Path = path;
