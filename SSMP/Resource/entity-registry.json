@@ -2884,6 +2884,9 @@
     "fsm_names": [
       "Control",
       "Bonk Hero"
+    ],
+    "own_player_fsms": [
+      "Bonk Hero"
     ]
   },
   {
@@ -2937,7 +2940,8 @@
     ],
     "touch_events": [
       "BLOW"
-    ]
+    ],
+    "local_first": true
   },
   {
     "base_object_name": "Enemy Summon Cage",
@@ -2970,7 +2974,8 @@
     ],
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "local_first": true
   },
   {
     "base_object_name": "BoneBeast AtkBell",
@@ -3426,7 +3431,8 @@
     "internal_name": "Bellflea Juggler",
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "local_first": true
   },
   {
     "base_object_name": "Bellflea Juggler Giant",
@@ -3438,7 +3444,8 @@
     "internal_name": "Bellflea Juggler Giant",
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "local_first": true
   },
   {
     "base_object_name": "Bellflea Swooper",
@@ -3450,6 +3457,9 @@
     "internal_name": "Bellflea Swooper",
     "fsm_names": [
       "Control"
+    ],
+    "own_player_fsms": [
+      "Bonk Hero"
     ]
   },
   {
@@ -3483,6 +3493,7 @@
     "internal_name": "JuggleGame",
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "local_first": true
   }
 ]

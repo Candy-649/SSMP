@@ -741,36 +741,23 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// Plays a state on the copy of a creature as the copy plays it when the scene host's FSM goes there: it leaves the
-    /// state it was in, and each action of the state is replayed from the copy's own action, as if the scene host had
-    /// sent it. For what the local player did to the copy that the scene host has yet to hear of (see
-    /// <see cref="Entity.ListenForTouches"/>).
+    /// Finds the state an event takes an FSM to from the given state, looking at the transitions of the whole FSM
+    /// first, as the game does.
     /// </summary>
-    /// <param name="copyFsm">The FSM of the copy.</param>
-    /// <param name="state">The state to play.</param>
-    public static void PlayStateHere(PlayMakerFSM copyFsm, FsmState state) {
-        RegisterStateChange(copyFsm.Fsm, state.Name);
-
-        foreach (var action in state.Actions) {
-            if (action == null || !action.Enabled || !TypeGetMethodInfos.ContainsKey(action.GetType())) {
-                continue;
+    internal static FsmState? FindTransition(HutongGames.PlayMaker.Fsm fsm, FsmState state, string eventName) {
+        foreach (var transition in fsm.GlobalTransitions) {
+            if (transition.EventName == eventName) {
+                return transition.ToFsmState;
             }
-
-            var sent = new EntityNetworkData { Type = EntityComponentType.Fsm };
-            try {
-                if (!GetNetworkDataFromAction(sent, action)) {
-                    continue;
-                }
-            } catch (Exception e) {
-                Logger.Warn($"Could not play '{state.Name}' here for a {action.GetType().Name}: {e.Message}");
-                continue;
-            }
-
-            ApplyNetworkDataFromAction(new EntityNetworkData {
-                Type = EntityComponentType.Fsm,
-                Packet = new global::SSMP.Networking.Packet.Packet(sent.Packet.ToArray())
-            }, action);
         }
+
+        foreach (var transition in state.Transitions) {
+            if (transition.EventName == eventName) {
+                return transition.ToFsmState;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

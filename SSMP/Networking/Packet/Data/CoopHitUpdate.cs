@@ -125,12 +125,9 @@ internal enum CoopHitKind : byte {
 
     /// <summary>
     /// An entity, found by the ID of its entity, whose copy touched the player of the game that sends this, or was
-    /// struck by that player so that a part of it told one of its FSMs an event, like a bell that a tink knocks away.
-    /// A touch was already played on the copy in that game; the game of the scene host sends the event named by
-    /// <see cref="CoopHitUpdate.Responder"/> to the FSM at <see cref="CoopHitUpdate.Index"/> of the entity, so that
-    /// it happens where the entity is run as well. A strike that the sender's game played on its copy at once carries
-    /// in <see cref="CoopHitUpdate.Hit"/> how the copy stood and moved as it was struck, and the sender's round trip to
-    /// the server, for the scene host to take the strike from there; a plain one carries nothing.
+    /// struck by that player so that a part of it told one of its FSMs an event, which the sender's game did not play
+    /// on its copy. The game of the scene host sends the event named by <see cref="CoopHitUpdate.Responder"/> to the
+    /// FSM at <see cref="CoopHitUpdate.Index"/> of the entity, so that it happens where the entity is run.
     /// </summary>
     EntityTouch,
 
@@ -144,11 +141,11 @@ internal enum CoopHitKind : byte {
     ObjectEvents,
 
     /// <summary>
-    /// An entity that is juggled, found by the ID of its entity, whose copy the sender struck and whose FSM at
+    /// An entity, found by the ID of its entity, whose copy the sender struck or touched and whose FSM at
     /// <see cref="CoopHitUpdate.Index"/> played the event named by <see cref="CoopHitUpdate.Responder"/> there at once.
     /// <see cref="CoopHitUpdate.Hit"/> holds the state it went to, where the copy was, the number the sender waits on,
-    /// the sender's round trip to the server and the dice the FSM rolled; the game of the scene host takes the strike
-    /// from there with the same dice.
+    /// the sender's round trip to the server, how the body of the copy moved if it moves by itself and the dice the FSM
+    /// rolled; the game of the scene host plays the same from there with the same dice, and answers.
     /// </summary>
-    EntityBounce
+    EntityInput
 }

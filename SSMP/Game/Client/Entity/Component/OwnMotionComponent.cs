@@ -88,41 +88,6 @@ internal class OwnMotionComponent : EntityComponent {
     /// </summary>
     private float _lastGravityScale;
 
-    /// <summary>
-    /// How long the copy waits for the scene host to take in a strike that it played at once before it follows what the
-    /// scene host sends again anyway, in seconds: long past any round trip, for a strike that never arrived.
-    /// </summary>
-    private const float StrikeWaitTime = 2f;
-
-    /// <summary>
-    /// The number the next strike of the local player on the copy goes under. Zero is kept for "none", so it is
-    /// skipped when the count comes round.
-    /// </summary>
-    private byte _nextStrike;
-
-    /// <summary>
-    /// The number of the last strike of the local player that the copy played at once and that the scene host has not
-    /// said it has taken in yet, or zero.
-    /// </summary>
-    private byte _outstandingStrike;
-
-    /// <summary>
-    /// When the wait for <see cref="_outstandingStrike"/> is given up on.
-    /// </summary>
-    private float _strikeExpiry;
-
-    /// <summary>
-    /// On the scene host, the number of the last strike of a scene client that this game has taken in, which goes with
-    /// everything this component sends.
-    /// </summary>
-    private byte _strikeTaken;
-
-    /// <summary>
-    /// On the scene host, whether how the entity moves is to be sent at the next look even if nothing about it
-    /// changed, to answer a strike.
-    /// </summary>
-    private bool _answerStrike;
-
     public OwnMotionComponent(
         NetClient netClient,
         ushort entityId,
@@ -161,35 +126,6 @@ internal class OwnMotionComponent : EntityComponent {
     /// spin, a position or a kind of body is one that is replayed, and so comes through <see cref="Entity"/> here.
     /// </summary>
     public void MarkChanged() {
-        _changed = true;
-    }
-
-    /// <summary>
-    /// Takes the number for a strike of the local player that the copy has played at once, and holds off what the
-    /// scene host sends of how the entity moves until it says it has taken that strike in. What it sent before then
-    /// says the entity was never struck: a bell struck away here was put back to fall on at the player who struck it.
-    /// </summary>
-    /// <returns>The number to send with the strike.</returns>
-    public byte BeginStrike() {
-        _nextStrike = (byte) (_nextStrike == byte.MaxValue ? 1 : _nextStrike + 1);
-        _outstandingStrike = _nextStrike;
-        _strikeExpiry = Time.unscaledTime + StrikeWaitTime;
-
-        return _outstandingStrike;
-    }
-
-    /// <summary>
-    /// Notes on the scene host that a strike of a scene client has been taken in, and sends how the entity moves at the
-    /// next look whether it changed or not: the player who struck waits on it, whatever the strike did here.
-    /// </summary>
-    /// <param name="strike">The number the strike went under.</param>
-    public void TakeStrike(byte strike) {
-        if (strike == 0) {
-            return;
-        }
-
-        _strikeTaken = strike;
-        _answerStrike = true;
         _changed = true;
     }
 
@@ -240,11 +176,10 @@ internal class OwnMotionComponent : EntityComponent {
         var velocity = _hostBody.linearVelocity;
         var spin = _hostBody.angularVelocity;
         if (position == _lastPosition && angle == _lastAngle && velocity == _lastVelocity && spin == _lastSpin &&
-            bodyType == _lastBodyType && gravityScale == _lastGravityScale && !_answerStrike) {
+            bodyType == _lastBodyType && gravityScale == _lastGravityScale) {
             return;
         }
 
-        _answerStrike = false;
         _lastPosition = position;
         _lastAngle = angle;
         _lastVelocity = velocity;
@@ -263,7 +198,6 @@ internal class OwnMotionComponent : EntityComponent {
         data.Packet.Write(spin);
         data.Packet.Write((byte) bodyType);
         data.Packet.Write(gravityScale);
-        data.Packet.Write(_strikeTaken);
 
         SendData(data);
     }
@@ -276,23 +210,11 @@ internal class OwnMotionComponent : EntityComponent {
         var spin = data.Packet.ReadFloat();
         var bodyType = (RigidbodyType2D) data.Packet.ReadByte();
         var gravityScale = data.Packet.ReadFloat();
-        var strikeTaken = data.Packet.ReadByte();
 
         // What was kept for a player walking in says how the entity moved some time ago, not where it is now; the
         // positions that come with it put it there
         if (!IsControlled || alreadyInSceneUpdate || GameObject.Client == null) {
             return;
-        }
-
-        // Sent before the scene host took in the local player's last strike, which the copy has already played. The
-        // numbers are compared by the sign of their difference, so that going round from the largest to one reads as
-        // one forward.
-        if (_outstandingStrike != 0) {
-            if (Time.unscaledTime <= _strikeExpiry && (sbyte) (strikeTaken - _outstandingStrike) < 0) {
-                return;
-            }
-
-            _outstandingStrike = 0;
         }
 
         var transform = GameObject.Client.transform;
@@ -341,11 +263,6 @@ internal class OwnMotionComponent : EntityComponent {
     /// <inheritdoc />
     protected override void InitializeHost() {
         _copyWasMoved = false;
-
-        // Numbers of strikes are between one scene host and one scene client, and this game is the scene host now
-        _outstandingStrike = 0;
-        _strikeTaken = 0;
-        _answerStrike = false;
 
         if (_takenOver is not { } motion || _hostBody == null || GameObject.Host == null) {
             return;

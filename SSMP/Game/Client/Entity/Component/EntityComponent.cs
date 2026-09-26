@@ -123,5 +123,11 @@ internal enum EntityComponentType : ushort {
     Health,
     BodyType,
     Layer,
-    OwnMotion
+    OwnMotion,
+
+    /// <summary>
+    /// Not a component: the scene host's answer to something the player of a scene client did to the entity that their
+    /// game played at once, sent in order with the rest (see <see cref="Entity.HearEcho"/>).
+    /// </summary>
+    Echo
 }

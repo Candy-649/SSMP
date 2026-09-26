@@ -28,11 +28,37 @@ internal static class EntityRegistry {
     /// </summary>
     private static readonly List<EntityRegistryEntry> Entries;
 
+    /// <summary>
+    /// The types of entity whose entry says that the local player's strikes and touches are played at once on the copy
+    /// (see <see cref="EntityRegistryEntry.LocalFirst"/>).
+    /// </summary>
+    private static readonly HashSet<EntityType> LocalFirstTypes = [];
+
+    /// <summary>
+    /// For each type of entity whose entry names any, the FSMs that each game runs for its own player (see
+    /// <see cref="EntityRegistryEntry.OwnPlayerFsms"/>).
+    /// </summary>
+    private static readonly Dictionary<EntityType, HashSet<string>> OwnPlayerFsms = new();
+
     static EntityRegistry() {
         var loadedEntries = FileUtil.LoadObjectFromEmbeddedJson<List<EntityRegistryEntry>>(EntityRegistryFilePath)
                             ?? throw new InvalidDataException("Could not deserialize entries from embedded JSON.");
 
         Entries = GetValidEntries(loadedEntries);
+    }
+
+    /// <summary>
+    /// Whether the local player's strikes and touches on the copy of an entity of the given type are played there at
+    /// once by the copy's own FSMs (see <see cref="EntityRegistryEntry.LocalFirst"/>).
+    /// </summary>
+    public static bool IsLocalFirst(EntityType type) => LocalFirstTypes.Contains(type);
+
+    /// <summary>
+    /// Whether an FSM of an entity of the given type is one that each game runs for its own player (see
+    /// <see cref="EntityRegistryEntry.OwnPlayerFsms"/>).
+    /// </summary>
+    public static bool IsOwnPlayerFsm(EntityType type, string fsmName) {
+        return OwnPlayerFsms.TryGetValue(type, out var names) && names.Contains(fsmName);
     }
 
     /// <summary>
@@ -54,6 +80,18 @@ internal static class EntityRegistry {
 
             if (entry.Children != null) {
                 entry.Children = GetValidEntries(entry.Children);
+            }
+
+            if (entry.LocalFirst) {
+                LocalFirstTypes.Add(entry.Type);
+            }
+
+            if (entry.OwnPlayerFsms is { Count: > 0 } ownPlayerFsms) {
+                if (!OwnPlayerFsms.TryGetValue(entry.Type, out var names)) {
+                    OwnPlayerFsms[entry.Type] = names = new HashSet<string>(StringComparer.Ordinal);
+                }
+
+                names.UnionWith(ownPlayerFsms);
             }
 
             validEntries.Add(entry);
@@ -211,6 +249,27 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("touch_events")]
     public List<string>? TouchEvents { get; set; }
+
+    /// <summary>
+    /// Whether what the player of a scene client does to the copy of the entity - a strike that tells its FSM
+    /// something, or a touch (see <see cref="TouchEvents"/>) - is played at once in that player's game by the copy's
+    /// own FSM, and the scene host plays the same from there (see <see cref="Entity.PlayHere"/>). For something whose
+    /// answer to the player is all in how it moves: a juggled flea that flies off, a bell knocked away, a rock that
+    /// bursts. What such an FSM does to anything both games share is left to the scene host either way.
+    /// </summary>
+    [JsonProperty("local_first")]
+    public bool LocalFirst { get; set; }
+
+    /// <summary>
+    /// FSMs of the entity that only ever do something to the player who runs into it, like the fleas of a game of the
+    /// festival that knock the player aside. Each game runs its own for its own player, on the copy of a scene client
+    /// as well as on the room's own entity, and none of it is sent. The player of the other game is not the one who ran
+    /// into the flea, and the one who did is knocked aside at once rather than a round trip later - the way the copy of
+    /// a creature already hurts the local player. The FSM of the scene host was sent, and its knock was about the scene
+    /// host's player alone: a scene client ran through the fleas untouched.
+    /// </summary>
+    [JsonProperty("own_player_fsms")]
+    public List<string>? OwnPlayerFsms { get; set; }
 
     /// <summary>
     /// Child entries nested under this entry. Populated from the registry file and validated

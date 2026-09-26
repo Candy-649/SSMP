@@ -87,7 +87,7 @@ internal static class SharedDice {
     /// <summary>
     /// The state machine of an entity that rolls with the dice of what is being set off, or null for none. Otherwise
     /// only the room's own state machines do: an entity rolls where the scene host runs it, except for something that
-    /// a strike of the other player's has it do (see <see cref="Entity.Entity.PlayBounceHere"/>).
+    /// a strike or touch of the other player's has it do (see <see cref="Entity.Entity.PlayHere"/>).
     /// </summary>
     private static HutongGames.PlayMaker.Fsm? _entityFsm;
 

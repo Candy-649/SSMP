@@ -230,16 +230,6 @@ internal partial class Entity {
     private readonly HostClientPair<List<PlayMakerFSM>> _fsms;
 
     /// <summary>
-    /// The FSMs of entities that only ever do something to the player who runs into the entity: the fleas of a game
-    /// of the festival that knock the player aside. Each game runs its own for its own player, on the copy of a scene
-    /// client as well as on the room's own creature, and none of it is sent. The player of the other game is not the
-    /// one who ran into the flea, and the one who did is knocked aside at once rather than a round trip later - the
-    /// way the copy of a creature already hurts the local player. The FSM of the scene host was sent, and its
-    /// knock was about the scene host's player alone: a scene client ran through the fleas untouched.
-    /// </summary>
-    private static readonly string[] LocalPlayerFsmNames = ["Bonk Hero"];
-
-    /// <summary>
     /// The actions of the FSMs that the copy runs by itself that read how the copy moves, or null for none (see
     /// <see cref="ReadyToRunOnTheCopy"/>).
     /// </summary>
@@ -519,7 +509,7 @@ internal partial class Entity {
 
         EntityInitializer.CheckPreProcessFsm(fsm);
 
-        // Nothing of what an FSM that each game runs for its own player does is sent (see LocalPlayerFsmNames)
+        // Nothing of what an FSM that each game runs for its own player does is sent (see IsForTheLocalPlayer)
         var sendsActions = !IsForTheLocalPlayer(fsm);
 
         for (var i = 0; sendsActions && i < fsm.FsmStates.Length; i++) {
@@ -574,7 +564,7 @@ internal partial class Entity {
 
     /// <summary>
     /// Processes the given FSM for the client entity by disabling it, unless it is one that each game runs for its own
-    /// player (see <see cref="LocalPlayerFsmNames"/>), which the copy runs by itself.
+    /// player (see <see cref="IsForTheLocalPlayer"/>), which the copy runs by itself.
     /// </summary>
     /// <param name="fsm">The Playmaker FSM to process.</param>
     private void ProcessClientFsm(PlayMakerFSM fsm) {
@@ -589,10 +579,11 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether an FSM is one that each game runs for its own player (see <see cref="LocalPlayerFsmNames"/>).
+    /// Whether an FSM is one that each game runs for its own player, as the registry entry of the entity says (see
+    /// <see cref="EntityRegistryEntry.OwnPlayerFsms"/>).
     /// </summary>
-    private static bool IsForTheLocalPlayer(PlayMakerFSM fsm) {
-        return Array.IndexOf(LocalPlayerFsmNames, fsm.FsmName) != -1;
+    private bool IsForTheLocalPlayer(PlayMakerFSM fsm) {
+        return EntityRegistry.IsOwnPlayerFsm(Type, fsm.FsmName);
     }
 
     /// <summary>
@@ -1073,7 +1064,7 @@ internal partial class Entity {
                 // While something the local player did to this entity is still on its way to the scene host and
                 // back, what the local game did is what moves it, and the interpolation stays out of the way. So it
                 // does while the copy moves by itself from how the entity set off (OwnMotionComponent), or while its
-                // own FSM runs by itself for a strike (PlayBounceHere).
+                // own FSM runs here for something the local player did (PlayHere).
                 var movedHere = IsAnticipating() || MovesByItself() || _runHere != null;
                 if (_wasMovedHere && !movedHere) {
                     // Nothing wrote this object while that was going on, so the interpolation carried on predicting
@@ -1374,7 +1365,7 @@ internal partial class Entity {
         float overrideFps
     ) {
         if (self == _animator.Client) {
-            // The copy's own FSM plays its animations while it runs by itself for a strike (PlayBounceHere)
+            // The copy's own FSM plays its animations while it runs here (PlayHere)
             if (!_allowClientAnimation && _runHere == null) {
                 //Logger.Info($"Entity '{Object.Client.name}' client animator tried playing animation");
             } else {
@@ -1808,8 +1799,6 @@ internal partial class Entity {
 
         StopRunningHere();
         EntityFsmActions.LeaveStatesOf(_fsms.Client);
-        _playedHere.Clear();
-        LetGo();
 
         var clientActive = Object.Client.activeSelf;
         Object.Client.SetActive(false);
@@ -1831,38 +1820,28 @@ internal partial class Entity {
     private HashSet<string>? _touchEvents;
 
     /// <summary>
-    /// For each FSM of the copy that this game moved on by itself when its own player touched the copy, the state it
-    /// moved it to. Kept until the scene host's FSM is somewhere else.
-    /// </summary>
-    private readonly Dictionary<int, string> _playedHere = new();
-
-    /// <summary>
-    /// The kind of body the copy had before it was held still for a state played here, or null while it is not held.
-    /// </summary>
-    private RigidbodyType2D? _bodyTypeBeforeHold;
-
-    /// <summary>
-    /// What a cast of the body of an entity carried on after a strike found on the way (see <see cref="CarryOn"/>).
+    /// What a cast of the body of an entity carried on after an input found on the way (see <see cref="CarryOn"/>).
     /// </summary>
     private static readonly RaycastHit2D[] StrikeCastHits = new RaycastHit2D[8];
 
     /// <summary>
-    /// How far short of the room an entity carried on after a strike stops, so that it is not left touching it.
+    /// How far short of the room an entity carried on after an input stops, so that it is not left touching it.
     /// </summary>
     private const float StrikeCastSkin = 0.02f;
 
     /// <summary>
-    /// Raised on a scene client when its player touched the copy of an entity and the copy has played what that leads
-    /// to: the ID of the entity, the index of the FSM and the event, for the scene host to send to its own FSM.
+    /// Raised on a scene client when its player touched the copy of an entity: the entity, the index of the FSM and the
+    /// event that the FSM sends itself for it, which is played on the copy at once where the entity says so (see
+    /// <see cref="PlayHere"/>) and sent to the scene host.
     /// </summary>
-    public static event Action<ushort, byte, string>? CopyTouchedLocalPlayer;
+    public static event Action<Entity, byte, string>? CopyTouchedLocalPlayer;
 
     /// <summary>
     /// Makes the copy of this entity answer the local player touching it, the way the entity itself answers its own
     /// player. The copy runs none of its FSMs, and in the game that does, the player of this game is only a figure
     /// that nothing can touch: a rock that hit the player of a scene client fell on through them. With this, the
-    /// game of the player who was touched plays what the event leads to at once and has the scene host send the event
-    /// to the entity, so that it happens there too - the way a hit is played where it lands and sent on.
+    /// game of the player who was touched plays what the event leads to at once (see <see cref="PlayHere"/>) and the
+    /// scene host plays it too - the way a hit is played where it lands and sent on.
     /// </summary>
     /// <param name="events">The events that the FSMs send themselves when the player touches the entity.</param>
     public void ListenForTouches(IEnumerable<string> events) {
@@ -1877,8 +1856,8 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Plays what touching the local player leads to on the copy, if the state the scene host says the copy is in
-    /// leads anywhere on one of the touch events, and tells the scene host.
+    /// Says that the local player touched the copy, if the state its FSM is in - its own while it runs here, the scene
+    /// host's otherwise - leads anywhere on one of the touch events.
     /// </summary>
     /// <param name="other">The collider that started touching the copy.</param>
     private void OnCopyTouched(Collider2D other) {
@@ -1888,23 +1867,17 @@ internal partial class Entity {
 
         for (var fsmIndex = 0; fsmIndex < _fsms.Client.Count; fsmIndex++) {
             var fsm = _fsms.Client[fsmIndex];
-            if (fsm == null || _playedHere.ContainsKey(fsmIndex) ||
-                EntityFsmActions.HostStateOf(fsm.Fsm) is not { } stateName ||
+            if (fsm == null ||
+                (fsm == _runHere ? fsm.ActiveStateName : EntityFsmActions.HostStateOf(fsm.Fsm)) is not { } stateName ||
                 fsm.Fsm.GetState(stateName) is not { } state) {
                 continue;
             }
 
             foreach (var transition in state.Transitions) {
-                if (!_touchEvents.Contains(transition.EventName) || transition.ToFsmState == null) {
-                    continue;
+                if (_touchEvents.Contains(transition.EventName) && transition.ToFsmState != null) {
+                    CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, transition.EventName);
+                    return;
                 }
-
-                _playedHere[fsmIndex] = transition.ToFsmState.Name;
-                EntityFsmActions.PlayStateHere(fsm, transition.ToFsmState);
-                HoldStill();
-
-                CopyTouchedLocalPlayer?.Invoke(Id, (byte) fsmIndex, transition.EventName);
-                return;
             }
         }
     }
@@ -1916,104 +1889,6 @@ internal partial class Entity {
         var hero = HeroController.SilentInstance;
         return hero != null && other != null &&
                (other.gameObject == hero.gameObject || other.GetComponent<HeroBox>() != null);
-    }
-
-    /// <summary>
-    /// Keeps the copy where the touch was while it shows what the touch led to. The scene host's game is still moving
-    /// the entity on until it hears of the touch, and a rock bursting here was carried on down with its burst.
-    /// </summary>
-    private void HoldStill() {
-        if (_bodyTypeBeforeHold != null || Object.Client == null) {
-            return;
-        }
-
-        if (Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
-            interpolation.SetNewState(Object.Client.transform.position, isTeleport: true);
-        }
-
-        if (!Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
-            return;
-        }
-
-        _bodyTypeBeforeHold = body.bodyType;
-        body.bodyType = RigidbodyType2D.Kinematic;
-        body.linearVelocity = Vector2.zero;
-        body.angularVelocity = 0f;
-    }
-
-    /// <summary>
-    /// Plays at once what the local player's strike on a part of the copy makes the FSM at the given index do, if the
-    /// entity moves by itself and the strike only changes how it moves (see
-    /// <see cref="EntityFsmActions.PlayStrikeHere"/>): a bell struck sideways flies off here as it is struck, rather
-    /// than falling on at the player until the scene host's game has heard of it. The scene host puts the entity where
-    /// the copy was struck before it takes the strike (see <see cref="TakeStrike"/>), and until it says it has, what it
-    /// sends of how the entity moves is held off (see <see cref="OwnMotionComponent.BeginStrike"/>).
-    /// </summary>
-    /// <param name="fsmIndex">The index of the FSM.</param>
-    /// <param name="eventName">The event that the strike told the FSM.</param>
-    /// <returns>How the copy stood and moved as it was struck, or null if the strike was not played here.</returns>
-    public StrikeStart? PlayStrikeHere(byte fsmIndex, string eventName) {
-        if (!_isControlled || fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } fsm || fsm == null ||
-            !_components.TryGetValue(EntityComponentType.OwnMotion, out var component) ||
-            component is not OwnMotionComponent { IsMoving: true } ownMotion || Object.Client == null ||
-            !Object.Client.TryGetComponent<Rigidbody2D>(out var body) ||
-            EntityFsmActions.HostStateOf(fsm.Fsm) is not { } stateName) {
-            return null;
-        }
-
-        var velocity = body.linearVelocity;
-        var spin = body.angularVelocity;
-        if (!EntityFsmActions.PlayStrikeHere(fsm, eventName)) {
-            // What it did before it turned out not to be one to play here is taken back: the scene host's game says
-            // how the copy moves once it has taken the strike
-            body.linearVelocity = velocity;
-            body.angularVelocity = spin;
-            return null;
-        }
-
-        return new StrikeStart(stateName, body.position, velocity, body.rotation, spin, ownMotion.BeginStrike());
-    }
-
-    /// <summary>
-    /// Takes a strike of the partner that their game has already played on its copy (see <see cref="PlayStrikeHere"/>),
-    /// on the scene host. If the FSM is still in the state that the copy was struck in, the entity is put where the
-    /// copy was struck and set moving as the copy moved, is told the event, and is carried on for as long as the strike
-    /// took to arrive. Taken from where the entity had got to, it flew off from a place the partner never saw it in: a
-    /// bell had fallen on for a whole round trip, onto the player who struck it. Otherwise the event is only told, as
-    /// for any other strike. Either way the partner is told that the strike was taken in.
-    /// </summary>
-    /// <param name="fsmIndex">The index of the FSM.</param>
-    /// <param name="eventName">The event that the strike told the FSM.</param>
-    /// <param name="start">How the copy stood and moved as it was struck.</param>
-    /// <param name="elapsed">How long ago the partner's copy was struck, in seconds.</param>
-    /// <returns>Whether the strike was taken from where the copy was struck.</returns>
-    public bool TakeStrike(byte fsmIndex, string eventName, StrikeStart start, float elapsed) {
-        if (_isControlled || fsmIndex >= _fsms.Host.Count || _fsms.Host[fsmIndex] is not { } fsm || fsm == null) {
-            return false;
-        }
-
-        var ownMotion = _components.TryGetValue(EntityComponentType.OwnMotion, out var component)
-            ? component as OwnMotionComponent
-            : null;
-        Rigidbody2D? body = null;
-        var fromStrike = ownMotion != null && fsm.ActiveStateName == start.FromState && Object.Host != null &&
-                         Object.Host.TryGetComponent(out body);
-        if (fromStrike) {
-            PlaceBody(body!, start.Position, start.Angle);
-            body!.linearVelocity = start.Velocity;
-            body.angularVelocity = start.Spin;
-        }
-
-        fsm.SendEvent(eventName);
-
-        // Carried on as the physics carries it, if the strike left the FSM back where it was: something else, like
-        // reaching the floor on the way, has its own place to put the entity
-        if (fromStrike && fsm.ActiveStateName == start.FromState) {
-            CarryOn(body!, elapsed);
-        }
-
-        ownMotion?.TakeStrike(start.Number);
-        return fromStrike;
     }
 
     /// <summary>
@@ -2060,18 +1935,6 @@ internal partial class Entity {
 
         body.position = position;
         body.rotation = angle;
-    }
-
-    /// <summary>
-    /// Lets the copy follow the scene host's game again once that game has moved past what was played here.
-    /// </summary>
-    private void LetGo() {
-        if (_bodyTypeBeforeHold is { } bodyType && Object.Client != null &&
-            Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
-            body.bodyType = bodyType;
-        }
-
-        _bodyTypeBeforeHold = null;
     }
 
     /// <summary>
@@ -2231,12 +2094,6 @@ internal partial class Entity {
             return;
         }
 
-        // A copy that is showing what the local player's touch led to stays where the touch was until the scene host's
-        // game has moved past it too (ListenForTouches)
-        if (_playedHere.Count > 0) {
-            return;
-        }
-
         var positionInterpolation = Object.Client.GetComponent<PredictiveInterpolation>();
         if (positionInterpolation == null) {
             return;
@@ -2257,10 +2114,6 @@ internal partial class Entity {
 
         positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + packetsCovered);
         _positionsHeldBack = 0;
-
-        // Answered here if this is the scene host saying it took a strike that the copy's own FSM plays, so that what
-        // comes in after it is taken as coming after it (PlayBounceHere)
-        DecideRunHere();
     }
 
     /// <summary>
@@ -2337,8 +2190,8 @@ internal partial class Entity {
             return;
         }
 
-        // Played by the copy's own FSM until the scene host has taken its strike, and held till then (PlayBounceHere)
-        if (WaitsForBounce) {
+        // Played by the copy's own FSM until the scene host has answered its input, and held till then (PlayHere)
+        if (WaitsForEcho) {
             _heldAnimation = (animationId, wrapMode);
             return;
         }
@@ -2424,6 +2277,11 @@ internal partial class Entity {
     /// <param name="alreadyInSceneUpdate">Whether this data is from an already in scene update.</param>
     public void UpdateData(List<EntityNetworkData> entityNetworkData, bool alreadyInSceneUpdate) {
         foreach (var data in entityNetworkData) {
+            if (data.Type == EntityComponentType.Echo) {
+                HearEcho(data);
+                continue;
+            }
+
             if (data.Type == EntityComponentType.Fsm) {
                 PlayMakerFSM fsm;
                 var fsmIndex = 0;
@@ -2475,16 +2333,11 @@ internal partial class Entity {
 
                 var action = state.Actions[actionIndex];
 
-                // Already played here, when the local player touched the copy (ListenForTouches)
-                if (_playedHere.TryGetValue(fsmIndex, out var playedHere) && playedHere == state.Name) {
-                    continue;
-                }
-
-                // Played here by the copy's own FSM until the scene host has taken its strike, and held till then: all
-                // but what the scene host's game told the room, which the copy tells nobody meanwhile (PlayBounceHere)
+                // Played here by the copy's own FSM until the scene host has answered its input, and held till then:
+                // all but what the copy leaves to the scene host, which only comes from there (PlayHere)
                 HearFromSceneHost(fsm);
-                if (fsm == _runHere && WaitsForBounce && action is not SendEventToRegister) {
-                    HoldForBounce(data);
+                if (fsm == _runHere && WaitsForEcho && !IsLeftToSceneHost(action)) {
+                    HoldForEcho(data);
                     continue;
                 }
 
@@ -2498,8 +2351,10 @@ internal partial class Entity {
                 continue;
             }
 
-            // Held with its position too while it shows what the local player's touch led to (ListenForTouches)
-            if ((data.Type is EntityComponentType.Rotation or EntityComponentType.OwnMotion) && _playedHere.Count > 0) {
+            // How the entity moves by itself is its own FSM's to say while that runs here, and held until the scene
+            // host has answered the input (PlayHere)
+            if (data.Type == EntityComponentType.OwnMotion && WaitsForEcho) {
+                HoldForEcho(data);
                 continue;
             }
 
@@ -2539,20 +2394,15 @@ internal partial class Entity {
                     // Also propagate this state change to the EntityFsmActions class with the client FSM for the
                     // same index
                     EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, stateName);
-                    HearFromSceneHost(_fsms.Client[fsmIndex]);
-
-                    // The scene host's game has moved past what this game played ahead of it for a touch, so the copy
-                    // follows it again from here
-                    if (_playedHere.TryGetValue(fsmIndex, out var playedHere) && playedHere != stateName) {
-                        _playedHere.Remove(fsmIndex);
-                        if (_playedHere.Count == 0) {
-                            LetGo();
-                        }
-                    }
+                    HearStateFromSceneHost(_fsms.Client[fsmIndex], stateName);
                 }
             }
 
+            // What the scene host's FSM held before it took the local player's input is not written into the copy's
+            // FSM that runs here for it meanwhile, which has gone on from there: the copy is given it only if the
+            // scene host went another way (PlayHere)
             var clientFsm = _fsms.Client[fsmIndex];
+            var writesCopy = clientFsm != _runHere || !WaitsForEcho;
 
             if (data.Types.Contains(EntityHostFsmData.Type.Floats)) {
                 foreach (var (index, val) in data.Floats) {
@@ -2561,7 +2411,7 @@ internal partial class Entity {
                         snapshot.Floats[index] = val;
                     }
 
-                    if (index < clientFsm.FsmVariables.FloatVariables.Length) {
+                    if (writesCopy && index < clientFsm.FsmVariables.FloatVariables.Length) {
                         clientFsm.FsmVariables.FloatVariables[index].Value = val;
                     }
                 }
@@ -2574,7 +2424,7 @@ internal partial class Entity {
                         snapshot.Ints[index] = val;
                     }
 
-                    if (index < clientFsm.FsmVariables.IntVariables.Length) {
+                    if (writesCopy && index < clientFsm.FsmVariables.IntVariables.Length) {
                         clientFsm.FsmVariables.IntVariables[index].Value = val;
                     }
                 }
@@ -2587,7 +2437,7 @@ internal partial class Entity {
                         snapshot.Bools[index] = val;
                     }
 
-                    if (index < clientFsm.FsmVariables.BoolVariables.Length) {
+                    if (writesCopy && index < clientFsm.FsmVariables.BoolVariables.Length) {
                         clientFsm.FsmVariables.BoolVariables[index].Value = val;
                     }
                 }
@@ -2600,7 +2450,7 @@ internal partial class Entity {
                         snapshot.Strings[index] = val;
                     }
 
-                    if (index < clientFsm.FsmVariables.StringVariables.Length) {
+                    if (writesCopy && index < clientFsm.FsmVariables.StringVariables.Length) {
                         clientFsm.FsmVariables.StringVariables[index].Value = val;
                     }
                 }
@@ -2613,7 +2463,7 @@ internal partial class Entity {
                         snapshot.Vector2s[index] = (Vector2) val;
                     }
 
-                    if (index < clientFsm.FsmVariables.Vector2Variables.Length) {
+                    if (writesCopy && index < clientFsm.FsmVariables.Vector2Variables.Length) {
                         clientFsm.FsmVariables.Vector2Variables[index].Value = (Vector2) val;
                     }
                 }
@@ -2626,7 +2476,7 @@ internal partial class Entity {
                         snapshot.Vector3s[index] = (Vector3) val;
                     }
 
-                    if (index < clientFsm.FsmVariables.Vector3Variables.Length) {
+                    if (writesCopy && index < clientFsm.FsmVariables.Vector3Variables.Length) {
                         clientFsm.FsmVariables.Vector3Variables[index].Value = (Vector3) val;
                     }
                 }
@@ -2640,6 +2490,7 @@ internal partial class Entity {
     public void Destroy() {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
+        LetGoOfRunHere();
 
         _spriteAnimatorPlayHook?.Dispose();
         _spriteAnimatorPlayHook = null;
