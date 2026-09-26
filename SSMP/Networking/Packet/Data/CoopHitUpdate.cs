@@ -128,7 +128,9 @@ internal enum CoopHitKind : byte {
     /// struck by that player so that a part of it told one of its FSMs an event, like a bell that a tink knocks away.
     /// A touch was already played on the copy in that game; the game of the scene host sends the event named by
     /// <see cref="CoopHitUpdate.Responder"/> to the FSM at <see cref="CoopHitUpdate.Index"/> of the entity, so that
-    /// it happens where the entity is run as well.
+    /// it happens where the entity is run as well. A strike that the sender's game played on its copy at once carries
+    /// in <see cref="CoopHitUpdate.Hit"/> how the copy stood and moved as it was struck, and the sender's round trip to
+    /// the server, for the scene host to take the strike from there; a plain one carries nothing.
     /// </summary>
     EntityTouch,
 

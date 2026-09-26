@@ -150,6 +150,12 @@ internal class CoopHits {
     private const float NotReplayedLogInterval = 30f;
 
     /// <summary>
+    /// The longest time that the entity is carried on for when it takes a strike of the partner from where their copy
+    /// was struck, in seconds, so that a stalled network cannot throw it across the room.
+    /// </summary>
+    private const float MaxStrikeCatchUp = 0.5f;
+
+    /// <summary>
     /// The net client for sending hits.
     /// </summary>
     private readonly NetClient _netClient;
@@ -1232,11 +1238,24 @@ internal class CoopHits {
             (_copyBeingHit, _toldCopy) = (lastCopy, lastTold);
         }
 
+        // What only changes how the thing moves is played here at once, and the scene host takes it from where the
+        // copy was struck. Only when the scene host is there to take it: played here alone, the copy would fly off by
+        // itself and wait for an answer that never comes.
+        var canSend = CanSendEntityTouch();
         foreach (var (fsmIndex, eventName) in told) {
-            Logger.Info(
-                $"The local player struck the copy of entity {copied.Id}, so the scene host is sent '{eventName}'"
-            );
-            OnCopyTouchedLocalPlayer(copied.Id, fsmIndex, eventName);
+            var strike = canSend ? copied.PlayStrikeHere(fsmIndex, eventName) : null;
+            if (strike is { } start) {
+                Logger.Info(
+                    $"The local player struck the copy of entity {copied.Id}, which took '{eventName}' here at once " +
+                    $"from its '{start.FromState}', and the scene host is sent it with where it was struck"
+                );
+            } else {
+                Logger.Info(
+                    $"The local player struck the copy of entity {copied.Id}, so the scene host is sent '{eventName}'"
+                );
+            }
+
+            SendEntityTouch(copied.Id, fsmIndex, eventName, strike);
         }
 
         return response;
@@ -1434,9 +1453,38 @@ internal class CoopHits {
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
     /// <param name="eventName">The event.</param>
     private void OnCopyTouchedLocalPlayer(ushort entityId, byte fsmIndex, string eventName) {
-        if (!_netClient.IsConnected || _getPartnerId() is not { } partnerId ||
-            !_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+        SendEntityTouch(entityId, fsmIndex, eventName, null);
+    }
+
+    /// <summary>
+    /// Sends the scene host the event that the copy of an entity was touched or struck with, and for a strike that was
+    /// played on the copy at once, how the copy stood and moved as it was struck, with this game's round trip to the
+    /// server (see <see cref="Entity.Entity.PlayStrikeHere"/>).
+    /// </summary>
+    /// <param name="entityId">The ID of the entity.</param>
+    /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
+    /// <param name="eventName">The event.</param>
+    /// <param name="strike">How the copy stood and moved as it was struck, or null.</param>
+    private void SendEntityTouch(ushort entityId, byte fsmIndex, string eventName, Entity.StrikeStart? strike) {
+        if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
             return;
+        }
+
+        byte[] data = [];
+        if (strike is { } start) {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            writer.Write(start.FromState);
+            writer.Write(start.Position.x);
+            writer.Write(start.Position.y);
+            writer.Write(start.Velocity.x);
+            writer.Write(start.Velocity.y);
+            writer.Write(start.Angle);
+            writer.Write(start.Spin);
+            writer.Write(start.Number);
+            writer.Write((ushort) Mathf.Clamp(_netClient.UpdateManager.AverageRtt, 0, ushort.MaxValue));
+            writer.Flush();
+            data = stream.ToArray();
         }
 
         _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
@@ -1444,8 +1492,17 @@ internal class CoopHits {
             Kind = CoopHitKind.EntityTouch,
             EntityId = entityId,
             Index = fsmIndex,
-            Responder = eventName
+            Responder = eventName,
+            Hit = data
         });
+    }
+
+    /// <summary>
+    /// Whether the partner is there to be sent a touch or strike of the copy of an entity: connected and in this room.
+    /// </summary>
+    private bool CanSendEntityTouch() {
+        return _netClient.IsConnected && _getPartnerId() is { } partnerId &&
+               _playerData.TryGetValue(partnerId, out var partner) && partner.IsInLocalScene;
     }
 
     /// <summary>
@@ -1456,6 +1513,22 @@ internal class CoopHits {
     private void ApplyEntityTouch(CoopHitUpdate update) {
         if (!_entityManager.IsSceneHost || FindEntity(update.EntityId) is not { } entity ||
             update.Index >= entity.HostFsms.Count || entity.HostFsms[update.Index] is not { } fsm) {
+            return;
+        }
+
+        // A strike that the partner's game played on its copy at once is taken from where the copy was struck, and
+        // carried on for the time it took to come: the partner's copy went by this game's entity as it was one way
+        // along, and the strike came back the other way. The partner hears back that it was taken either way.
+        if (TryReadStrike(update.Hit, out var start, out var partnerRtt)) {
+            var stateName = fsm.ActiveStateName;
+            var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);
+            Logger.Info(
+                entity.TakeStrike(update.Index, update.Responder, start, elapsed)
+                    ? $"The partner struck the copy of entity {update.EntityId} in its '{stateName}', so it is sent " +
+                      $"'{update.Responder}' from where they struck it, {elapsed:0.00} s on"
+                    : $"The partner struck the copy of entity {update.EntityId} in its '{start.FromState}', but it " +
+                      $"is in '{stateName}' here, so it is sent '{update.Responder}' from where it is"
+            );
             return;
         }
 
@@ -1904,6 +1977,35 @@ internal class CoopHits {
         }
 
         return _touchSource;
+    }
+
+    /// <summary>
+    /// Reads how the partner's copy of an entity stood and moved as they struck it, which
+    /// <see cref="SendEntityTouch"/> wrote, with the partner's round trip to the server in milliseconds.
+    /// </summary>
+    /// <returns>Whether there was a strike to read.</returns>
+    private static bool TryReadStrike(byte[] data, out Entity.StrikeStart start, out int roundTrip) {
+        start = default;
+        roundTrip = 0;
+        if (data.Length == 0) {
+            return false;
+        }
+
+        try {
+            using var reader = new BinaryReader(new MemoryStream(data));
+            var fromState = reader.ReadString();
+            var position = new Vector2(reader.ReadSingle(), reader.ReadSingle());
+            var velocity = new Vector2(reader.ReadSingle(), reader.ReadSingle());
+            var angle = reader.ReadSingle();
+            var spin = reader.ReadSingle();
+            var number = reader.ReadByte();
+            roundTrip = reader.ReadUInt16();
+
+            start = new Entity.StrikeStart(fromState, position, velocity, angle, spin, number);
+            return true;
+        } catch (IOException) {
+            return false;
+        }
     }
 
     /// <summary>

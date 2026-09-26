@@ -1734,6 +1734,16 @@ internal class Entity {
     private RigidbodyType2D? _bodyTypeBeforeHold;
 
     /// <summary>
+    /// What a cast of the body of an entity carried on after a strike found on the way (see <see cref="CarryOn"/>).
+    /// </summary>
+    private static readonly RaycastHit2D[] StrikeCastHits = new RaycastHit2D[8];
+
+    /// <summary>
+    /// How far short of the room an entity carried on after a strike stops, so that it is not left touching it.
+    /// </summary>
+    private const float StrikeCastSkin = 0.02f;
+
+    /// <summary>
     /// Raised on a scene client when its player touched the copy of an entity and the copy has played what that leads
     /// to: the ID of the entity, the index of the FSM and the event, for the scene host to send to its own FSM.
     /// </summary>
@@ -1821,6 +1831,127 @@ internal class Entity {
         body.bodyType = RigidbodyType2D.Kinematic;
         body.linearVelocity = Vector2.zero;
         body.angularVelocity = 0f;
+    }
+
+    /// <summary>
+    /// Plays at once what the local player's strike on a part of the copy makes the FSM at the given index do, if the
+    /// entity moves by itself and the strike only changes how it moves (see
+    /// <see cref="EntityFsmActions.PlayStrikeHere"/>): a bell struck sideways flies off here as it is struck, rather
+    /// than falling on at the player until the scene host's game has heard of it. The scene host puts the entity where
+    /// the copy was struck before it takes the strike (see <see cref="TakeStrike"/>), and until it says it has, what it
+    /// sends of how the entity moves is held off (see <see cref="OwnMotionComponent.BeginStrike"/>).
+    /// </summary>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="eventName">The event that the strike told the FSM.</param>
+    /// <returns>How the copy stood and moved as it was struck, or null if the strike was not played here.</returns>
+    public StrikeStart? PlayStrikeHere(byte fsmIndex, string eventName) {
+        if (!_isControlled || fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } fsm || fsm == null ||
+            !_components.TryGetValue(EntityComponentType.OwnMotion, out var component) ||
+            component is not OwnMotionComponent { IsMoving: true } ownMotion || Object.Client == null ||
+            !Object.Client.TryGetComponent<Rigidbody2D>(out var body) ||
+            EntityFsmActions.HostStateOf(fsm.Fsm) is not { } stateName) {
+            return null;
+        }
+
+        var velocity = body.linearVelocity;
+        var spin = body.angularVelocity;
+        if (!EntityFsmActions.PlayStrikeHere(fsm, eventName)) {
+            // What it did before it turned out not to be one to play here is taken back: the scene host's game says
+            // how the copy moves once it has taken the strike
+            body.linearVelocity = velocity;
+            body.angularVelocity = spin;
+            return null;
+        }
+
+        return new StrikeStart(stateName, body.position, velocity, body.rotation, spin, ownMotion.BeginStrike());
+    }
+
+    /// <summary>
+    /// Takes a strike of the partner that their game has already played on its copy (see <see cref="PlayStrikeHere"/>),
+    /// on the scene host. If the FSM is still in the state that the copy was struck in, the entity is put where the
+    /// copy was struck and set moving as the copy moved, is told the event, and is carried on for as long as the strike
+    /// took to arrive. Taken from where the entity had got to, it flew off from a place the partner never saw it in: a
+    /// bell had fallen on for a whole round trip, onto the player who struck it. Otherwise the event is only told, as
+    /// for any other strike. Either way the partner is told that the strike was taken in.
+    /// </summary>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="eventName">The event that the strike told the FSM.</param>
+    /// <param name="start">How the copy stood and moved as it was struck.</param>
+    /// <param name="elapsed">How long ago the partner's copy was struck, in seconds.</param>
+    /// <returns>Whether the strike was taken from where the copy was struck.</returns>
+    public bool TakeStrike(byte fsmIndex, string eventName, StrikeStart start, float elapsed) {
+        if (_isControlled || fsmIndex >= _fsms.Host.Count || _fsms.Host[fsmIndex] is not { } fsm || fsm == null) {
+            return false;
+        }
+
+        var ownMotion = _components.TryGetValue(EntityComponentType.OwnMotion, out var component)
+            ? component as OwnMotionComponent
+            : null;
+        Rigidbody2D? body = null;
+        var fromStrike = ownMotion != null && fsm.ActiveStateName == start.FromState && Object.Host != null &&
+                         Object.Host.TryGetComponent(out body);
+        if (fromStrike) {
+            PlaceBody(body!, start.Position, start.Angle);
+            body!.linearVelocity = start.Velocity;
+            body.angularVelocity = start.Spin;
+        }
+
+        fsm.SendEvent(eventName);
+
+        // Carried on as the physics carries it, if the strike left the FSM back where it was: something else, like
+        // reaching the floor on the way, has its own place to put the entity
+        if (fromStrike && fsm.ActiveStateName == start.FromState) {
+            CarryOn(body!, elapsed);
+        }
+
+        ownMotion?.TakeStrike(start.Number);
+        return fromStrike;
+    }
+
+    /// <summary>
+    /// Carries the body of the room's own object of the entity on for a while the way the physics would: along at its
+    /// speed, falling as its gravity says and turning at its spin. It stops short at the room on the way, which the
+    /// partner's copy bumped into rather than went through.
+    /// </summary>
+    /// <param name="body">The body.</param>
+    /// <param name="elapsed">For how long, in seconds.</param>
+    private void CarryOn(Rigidbody2D body, float elapsed) {
+        var velocity = body.linearVelocity;
+        var gravity = body.bodyType == RigidbodyType2D.Dynamic ? Physics2D.gravity * body.gravityScale : Vector2.zero;
+        var way = velocity * elapsed + 0.5f * elapsed * elapsed * gravity;
+
+        var distance = way.magnitude;
+        if (distance > 0f) {
+            var direction = way / distance;
+            var hitCount = body.Cast(direction, StrikeCastHits, distance);
+            for (var i = 0; i < hitCount; i++) {
+                var collider = StrikeCastHits[i].collider;
+                if (collider != null && !collider.isTrigger &&
+                    collider.gameObject.layer == (int) GlobalEnums.PhysLayers.TERRAIN) {
+                    distance = Mathf.Min(distance, Mathf.Max(0f, StrikeCastHits[i].distance - StrikeCastSkin));
+                }
+            }
+
+            way = direction * distance;
+        }
+
+        PlaceBody(body, body.position + way, body.rotation + body.angularVelocity * elapsed);
+        body.linearVelocity = velocity + gravity * elapsed;
+    }
+
+    /// <summary>
+    /// Puts the body of the room's own object of the entity somewhere, the object with it, so that what reads where
+    /// the object is before the next step of physics finds it there.
+    /// </summary>
+    private void PlaceBody(Rigidbody2D body, Vector2 position, float angle) {
+        var transform = Object.Host.transform;
+        transform.position = new Vector3(position.x, position.y, transform.position.z);
+
+        var eulerAngles = transform.eulerAngles;
+        transform.eulerAngles = new Vector3(eulerAngles.x, eulerAngles.y, angle);
+
+        body.position = position;
+        body.rotation = angle;
     }
 
     /// <summary>
