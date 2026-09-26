@@ -800,7 +800,7 @@ internal static class ToolCopies {
         var owner = prefab != null ? FsmExecutionStack.ExecutingFsm?.GameObject : null;
         var copy = owner != null ? owner.GetComponentInParent<RemoteToolCopy>(true) : null;
         var twinned = false;
-        if (copy != null && GetTwin(prefab!) is { } twin) {
+        if (copy != null && !IsCopyPrefab(prefab!) && GetTwin(prefab!) is { } twin) {
             prefab = twin;
             twinned = true;
         }
@@ -849,6 +849,15 @@ internal static class ToolCopies {
     private static bool IsHeroToolsFsm() {
         var hero = HeroController.SilentInstance;
         return hero != null && hero.toolsFSM != null && FsmExecutionStack.ExecutingFsm == hero.toolsFSM.Fsm;
+    }
+
+    /// <summary>
+    /// Whether a prefab is one of the copies made here. The pool spawns a prefab it has no pool for by making the pool
+    /// and spawning the prefab again, and when that prefab is a private copy, the second spawn must not copy it once
+    /// more: each copy would be new and poolless in turn, and the spawns would nest until the stack ran out.
+    /// </summary>
+    private static bool IsCopyPrefab(GameObject prefab) {
+        return _holder != null && prefab.transform.parent == _holder.transform;
     }
 
     /// <summary>
