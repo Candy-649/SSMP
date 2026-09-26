@@ -25,6 +25,8 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new ClientPlayerAlreadyInScene();
             case ClientUpdatePacketId.PlayerLeaveScene:
                 return new PacketDataCollection<ClientPlayerLeaveScene>();
+            case ClientUpdatePacketId.PlayerRoom:
+                return new PacketDataCollection<ClientPlayerRoom>();
             case ClientUpdatePacketId.PlayerUpdate:
                 return new PacketDataCollection<PlayerUpdate>();
             case ClientUpdatePacketId.PlayerMapUpdate:

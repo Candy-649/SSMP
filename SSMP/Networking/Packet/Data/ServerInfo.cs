@@ -179,6 +179,10 @@ internal class ServerInfo : IPacketData {
         /// The key that identifies the player for two-player saves, a hash of their authentication key.
         /// </summary>
         public required string SaveKey { get; init; }
+        /// <summary>
+        /// The room the player is in, or empty while they are in none.
+        /// </summary>
+        public required string Room { get; init; }
 
         /// <inheritdoc cref="IPacketData.WriteData" />
         public void WriteData(IPacket packet) {
@@ -188,6 +192,7 @@ internal class ServerInfo : IPacketData {
             packet.Write(SkinId);
             packet.Write((byte) CrestType);
             packet.Write(SaveKey);
+            packet.Write(Room);
         }
 
         /// <summary>
@@ -202,7 +207,8 @@ internal class ServerInfo : IPacketData {
                 Team = (Team) packet.ReadByte(),
                 SkinId = packet.ReadByte(),
                 CrestType = (CrestType) packet.ReadByte(),
-                SaveKey = packet.ReadString()
+                SaveKey = packet.ReadString(),
+                Room = packet.ReadString()
             };
         }
     }

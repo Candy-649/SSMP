@@ -18,6 +18,11 @@ internal class ClientPlayerData : IClientPlayer {
     /// </summary>
     public string SaveKey { get; init; } = "";
 
+    /// <summary>
+    /// The room the player is in, as far as this game has heard, or an empty string while they are in none.
+    /// </summary>
+    public string Room { get; set; } = "";
+
     /// <inheritdoc />
     public bool IsInLocalScene { get; set; }
 

@@ -232,6 +232,17 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Add the room a player is in now to the current packet.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="sceneName">The name of the scene the player is in, or empty while they are in none.</param>
+    public void AddPlayerRoomData(ushort id, string sceneName) {
+        lock (Lock) {
+            FindOrCreatePacketData<ClientPlayerRoom>(id, ClientUpdatePacketId.PlayerRoom).SceneName = sceneName;
+        }
+    }
+
+    /// <summary>
     /// Update a player's position in the current packet.
     /// </summary>
     /// <param name="id">The ID of the player.</param>

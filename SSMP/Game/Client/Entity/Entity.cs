@@ -271,6 +271,13 @@ internal partial class Entity {
     private bool _isSceneHostDetermined;
 
     /// <summary>
+    /// Whether the host object was left running when the entity was made, because the local client runs the scene or
+    /// expects to, and the scene host has not been determined since. It is not deactivated until then like it would
+    /// otherwise be, because activating it again makes PlayMaker start its FSMs over.
+    /// </summary>
+    private bool _keepsRunning;
+
+    /// <summary>
     /// The last position of the entity.
     /// </summary>
     private Vector3 _lastPosition;
@@ -319,6 +326,7 @@ internal partial class Entity {
         ushort id,
         EntityType type,
         GameObject hostObject,
+        bool keepsRunning,
         GameObject clientObject = null,
         params EntityComponentType[] types
     ) {
@@ -330,6 +338,7 @@ internal partial class Entity {
         _positionSequence = new PositionSequence($"entity {id} ({type})");
 
         _isControlled = true;
+        _keepsRunning = keepsRunning;
 
         if (clientObject == null) {
             Object = new HostClientPair<GameObject> {
@@ -357,7 +366,8 @@ internal partial class Entity {
             ? Object.Host.transform.localScale
             : Object.Host.transform.lossyScale;
 
-        // Store whether the host object was active and set it not active until we know if we are scene host
+        // Store whether the host object was active, and unless it keeps running, set it not active until we know if we
+        // are scene host
         _originalIsActive = Object.Host.activeSelf;
 
         _lastIsActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
@@ -473,8 +483,11 @@ internal partial class Entity {
             }
         }
 
-        RememberWhereTheHostFsmsAre();
-        Object.Host.SetActive(false);
+        if (!_keepsRunning) {
+            RememberWhereTheHostFsmsAre();
+            Object.Host.SetActive(false);
+        }
+
         Object.Client.SetActive(false);
 
         // // Debug code that logs each action's OnEnter method call
@@ -928,7 +941,7 @@ internal partial class Entity {
     /// after the late one.
     /// </summary>
     private void HideTheRoomsOwnCopy() {
-        if (Object.Host == null || !Object.Host.activeSelf) {
+        if (_keepsRunning || Object.Host == null || !Object.Host.activeSelf) {
             return;
         }
 
@@ -1440,11 +1453,13 @@ internal partial class Entity {
             return;
         }
 
+        // In the game that runs this creature, or expects to, the room switches it on and off as it always does.
+        //
         // While the other game is running this creature, the room's own copy of it is held asleep every frame, and
         // anything that switches it back on only makes it flash on screen for the frame in between. It cannot be its
         // own doing - a sleeping object runs nothing - so it is something else in the room reaching over, and that is
         // turned away here rather than fought frame by frame.
-        if (_isSceneHostDetermined && !_isControlled) {
+        if (_keepsRunning || _isSceneHostDetermined && !_isControlled) {
             orig(self);
             return;
         }
@@ -1473,20 +1488,27 @@ internal partial class Entity {
         // Nothing said under the numbering of a game that is no longer the one answering means anything here
         ResetAnticipation();
 
-        // Switching the object back on makes PlayMaker start its FSMs over there and then, so anything they had
-        // already done is done again. Where that moves the creature is undone at once, since in a game where nobody
-        // switched it off it never moved: one that moves itself out of the room to wait for its wave had moved out as
-        // far again, so its wave brought it back only half the way and the battle waited on it for good.
-        var position = Object.Host.transform.localPosition;
-        Object.Host.SetActive(_originalIsActive);
-        Object.Host.transform.localPosition = position;
+        // A room's own object that was left running needs none of this: it is where it is, doing what it does - and it
+        // may even be gone by now, since some take themselves away the moment they start.
+        if (_keepsRunning) {
+            _keepsRunning = false;
+        } else {
+            // Switching the object back on makes PlayMaker start its FSMs over there and then, so anything they
+            // had already done is done again. Where that moves the creature is undone at once, since in a game
+            // where nobody switched it off it never moved: one that moves itself out of the room to wait for its
+            // wave had moved out as far again, so its wave brought it back only half the way and the battle
+            // waited on it for good.
+            var position = Object.Host.transform.localPosition;
+            Object.Host.SetActive(_originalIsActive);
+            Object.Host.transform.localPosition = position;
 
-        // Where the FSMs had got to is put back on the next turn (PutHostFsmsBackWhereTheyWere)
-        _putFsmsBackWhereTheyWere = true;
+            // Where the FSMs had got to is put back on the next turn (PutHostFsmsBackWhereTheyWere)
+            _putFsmsBackWhereTheyWere = true;
+        }
 
         // Also update the last active variable to account for this potential change
         // Otherwise we might trigger the update sending of activity twice
-        _lastIsActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
+        _lastIsActive = Object.Host != null && (_hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy);
 
         //Logger.Info(
         //    $"Initializing entity '{Object.Host.name}' with active: {_originalIsActive}, sending active: {_lastIsActive}"
@@ -1513,6 +1535,16 @@ internal partial class Entity {
     /// </summary>
     public void InitializeClient(uint sceneHostEpoch = 0) {
         ResetAnticipation();
+
+        // This game expected to run the room and left the room's own object running, but the other game runs it
+        // after all: it is put to sleep now, as it would have been from the start
+        if (_keepsRunning) {
+            _keepsRunning = false;
+            if (Object.Host != null) {
+                RememberWhereTheHostFsmsAre();
+                Object.Host.SetActive(false);
+            }
+        }
 
         _isSceneHostDetermined = true;
 

@@ -68,6 +68,29 @@ internal class EntityManager {
     public bool IsSceneRoleDetermined => _sceneRoleDetermined;
 
     /// <summary>
+    /// Whether another player is in the room of the given name, as far as this game has heard.
+    /// </summary>
+    public Func<string, bool>? IsAnyoneElseIn { get; set; }
+
+    /// <summary>
+    /// Whether this game expects to run the room it walked into, while it waits to hear who does: the room goes to
+    /// whoever is in it first, and nobody else was in it when this game walked in.
+    /// </summary>
+    private bool _expectsToRunRoom;
+
+    /// <summary>
+    /// Whether this game runs the room, or, while that is still being settled, expects to.
+    /// </summary>
+    private bool RunsTheRoom => _sceneRoleDetermined ? IsSceneHost : _expectsToRunRoom;
+
+    /// <summary>
+    /// What the creatures of this game spawned before it was settled who runs the room, for the server to hear once
+    /// this game turns out to be the one. Told at once, the server could file it under the room this game was in
+    /// before: it takes what a game sends in a fixed order, and a spawn comes before walking into a room.
+    /// </summary>
+    private readonly List<(ushort Id, EntityType SpawningType, EntityType SpawnedType)> _spawnsToTell = [];
+
+    /// <summary>
     /// Gets all currently registered active entities.
     /// </summary>
     public Dictionary<ushort, Entity>.ValueCollection ActiveEntities => _entities.Values;
@@ -143,6 +166,14 @@ internal class EntityManager {
         IsSceneHost = true;
         foreach (var entity in _entities.Values) entity.InitializeHost(sceneHostEpoch);
         _sceneRoleDetermined = true;
+        _expectsToRunRoom = false;
+
+        foreach (var (id, spawningType, spawnedType) in _spawnsToTell) {
+            Logger.Info($"Notifying server of {spawningType} spawning entity ({spawnedType}) with ID {id}");
+            _netClient.UpdateManager.SetEntitySpawn(id, spawningType, spawnedType);
+        }
+
+        _spawnsToTell.Clear();
         _roomCreatures.Settle(share: true);
         DrainPendingUpdates();
     }
@@ -152,6 +183,13 @@ internal class EntityManager {
     /// </summary>
     public void InitializeSceneClient(uint sceneHostEpoch = 0) {
         Logger.Info($"We are scene client, taking control of all registered entities (epoch {sceneHostEpoch})");
+        if (_expectsToRunRoom) {
+            Logger.Info("This game expected to run the room, but the other game does: what ran here is put to sleep");
+            _expectsToRunRoom = false;
+        }
+
+        _spawnsToTell.Clear();
+
         IsSceneHost = false;
         foreach (var entity in _entities.Values) entity.InitializeClient(sceneHostEpoch);
         _sceneRoleDetermined = true;
@@ -323,6 +361,16 @@ internal class EntityManager {
         if (!_netClient.IsConnected) return;
 
         _sceneRoleDetermined = false;
+
+        // The creatures of a room that this game will run are left running from the start. Switched off until the
+        // server says so and then back on, they would start over what they had already begun (Entity.InitializeHost).
+        _expectsToRunRoom = IsAnyoneElseIn != null && !IsAnyoneElseIn(newScene.name);
+        Logger.Info(
+            _expectsToRunRoom
+                ? $"Nobody else is in {newScene.name}: this game expects to run it and leaves its creatures running"
+                : $"Someone else may be in {newScene.name}: its creatures sleep until it is settled who runs it"
+        );
+
         FindEntitiesInScene(newScene, lateLoad: false);
         _roomCreatures.FindMakers(newScene);
         DrainPendingUpdates();
@@ -369,6 +417,7 @@ internal class EntityManager {
                 GameObject = obj,
                 IsSceneHost = IsSceneHost,
                 IsSceneHostDetermined = _sceneRoleDetermined,
+                KeepsRunning = RunsTheRoom,
                 LateLoad = lateLoad,
                 UseStableSceneId = true
             }.Process();
@@ -451,13 +500,13 @@ internal class EntityManager {
             return false;
         }
 
-        // A creature is made an entity only in the game that runs the creature that spawned it, and only when the
-        // other game can make the same one from a spawn message; otherwise it stays in the game it was spawned in.
-        // One the other game could not make threw over there, and took everything else it was being told about the
-        // room down with it: whoever walked into a room after a floater had grown its spines never saw the creatures,
-        // the partner or anything else in it. In a game that does not run the room it would be a copy that is
-        // switched off and never moved by anything.
-        if (!IsSceneHost ||
+        // A creature is made an entity only in the game that runs the creature that spawned it, or expects to, and
+        // only when the other game can make the same one from a spawn message; otherwise it stays in the game it was
+        // spawned in. One the other game could not make threw over there, and took everything else it was being told
+        // about the room down with it: whoever walked into a room after a floater had grown its spines never saw the
+        // creatures, the partner or anything else in it. In a game that does not run the room it would be a copy that
+        // is switched off and never moved by anything.
+        if (!RunsTheRoom ||
             details.Type != EntitySpawnType.FsmAction ||
             !EntityRegistry.TryGetEntry(details.Action.Fsm.GameObject, out var entry) ||
             !EntitySpawner.CanSpawn(details.Action, spawnedEntry.Type)) {
@@ -468,12 +517,18 @@ internal class EntityManager {
             GameObject = details.GameObject,
             IsSceneHost = IsSceneHost,
             IsSceneHostDetermined = _sceneRoleDetermined,
+            KeepsRunning = RunsTheRoom,
             LateLoad = true
         }.Process();
 
         if (!processor.Success) return false;
 
         var topLevel = processor.Entities[0];
+        if (!_sceneRoleDetermined) {
+            _spawnsToTell.Add((topLevel.Id, entry.Type, topLevel.Type));
+            return true;
+        }
+
         Logger.Info(
             $"Notifying server of entity ({details.Action.Fsm.GameObject.name}, {entry.Type}) spawning entity ({details.GameObject.name}, {topLevel.Type}) with ID {topLevel.Id}"
         );
@@ -519,6 +574,7 @@ internal class EntityManager {
         }
 
         _pendingUpdates.Clear();
+        _spawnsToTell.Clear();
         MusicComponent.ClearInstance();
         _roomCreatures.Clear();
     }

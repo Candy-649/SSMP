@@ -232,6 +232,7 @@ internal class RoomCreatures {
             GameObject = creature,
             IsSceneHost = true,
             IsSceneHostDetermined = true,
+            KeepsRunning = true,
             LateLoad = true
         }.Process();
 

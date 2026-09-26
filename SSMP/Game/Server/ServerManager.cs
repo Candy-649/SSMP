@@ -503,6 +503,20 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
+    /// Tells every other player which room a player is in now. The room goes to whoever is in it first, so this is
+    /// how a game walking into a room knows beforehand whether it will be the one running it.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="sceneName">The name of the scene the player is in, or empty while they are in none.</param>
+    private void SendPlayerRoom(ushort id, string sceneName) {
+        foreach (var otherId in _playerData.Keys) {
+            if (otherId != id) {
+                _netServer.GetUpdateManagerForClient(otherId)?.AddPlayerRoomData(id, sceneName);
+            }
+        }
+    }
+
+    /// <summary>
     /// Callback method for when a player enters a scene.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
@@ -519,6 +533,7 @@ internal abstract class ServerManager : IServerManager {
 
         // Store it in their PlayerData object
         playerData.CurrentScene = newSceneName;
+        SendPlayerRoom(id, newSceneName);
         playerData.Position = playerEnterScene.Position;
         playerData.Scale = playerEnterScene.Scale;
         playerData.AnimationId = playerEnterScene.AnimationClipId;
@@ -1200,6 +1215,7 @@ internal abstract class ServerManager : IServerManager {
         // not be true, and we don't want to set the current scene (which is now already something else) to empty
         if (playerData.CurrentScene == sceneName) {
             playerData.CurrentScene = "";
+            SendPlayerRoom(id, "");
         }
 
         var username = playerData.Username;
@@ -1803,7 +1819,8 @@ internal abstract class ServerManager : IServerManager {
                     Team = otherPd.Team,
                     SkinId = otherPd.SkinId,
                     CrestType = otherPd.CrestType,
-                    SaveKey = AuthUtil.GetSaveKey(otherPd.AuthKey)
+                    SaveKey = AuthUtil.GetSaveKey(otherPd.AuthKey),
+                    Room = otherPd.CurrentScene
                 }
             );
 

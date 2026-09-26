@@ -305,6 +305,7 @@ internal class ClientManager : IClientManager {
 
         _entityManager = new EntityManager(netClient);
         ToolCopies.IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost;
+        _entityManager.IsAnyoneElseIn = IsAnyoneElseIn;
 
         _saveManager = new SaveManager(netClient, _entityManager);
 
@@ -523,6 +524,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.PlayerLeaveScene,
             OnPlayerLeaveScene
         );
+        _packetManager.RegisterClientUpdatePacketHandler<ClientPlayerRoom>(
+            ClientUpdatePacketId.PlayerRoom,
+            OnPlayerRoom
+        );
         _packetManager.RegisterClientUpdatePacketHandler<PlayerUpdate>(
             ClientUpdatePacketId.PlayerUpdate,
             OnPlayerUpdate
@@ -603,6 +608,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerEnterScene);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerAlreadyInScene);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerLeaveScene);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerRoom);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerMapUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.ServerSettingsUpdated);
@@ -875,7 +881,8 @@ internal class ClientManager : IClientManager {
                 Team = playerInfo.Team,
                 SkinId = playerInfo.SkinId,
                 CrestType = playerInfo.CrestType,
-                SaveKey = playerInfo.SaveKey
+                SaveKey = playerInfo.SaveKey,
+                Room = playerInfo.Room
             };
         }
 
@@ -1167,6 +1174,30 @@ internal class ClientManager : IClientManager {
                 $"Exception thrown while invoking PlayerEnterScene event:\n{e}"
             );
         }
+    }
+
+    /// <summary>
+    /// Callback method for when another player is in a new room, or in none.
+    /// </summary>
+    /// <param name="data">The client player room packet data.</param>
+    private void OnPlayerRoom(ClientPlayerRoom data) {
+        if (_playerData.TryGetValue(data.Id, out var playerData)) {
+            playerData.Room = data.SceneName;
+        }
+    }
+
+    /// <summary>
+    /// Whether another player is in the room of the given name, as far as this game has heard.
+    /// </summary>
+    /// <param name="sceneName">The name of the scene.</param>
+    private bool IsAnyoneElseIn(string sceneName) {
+        foreach (var playerData in _playerData.Values) {
+            if (playerData.Room == sceneName) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

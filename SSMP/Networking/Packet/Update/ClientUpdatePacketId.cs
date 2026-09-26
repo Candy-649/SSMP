@@ -128,4 +128,9 @@ internal enum ClientUpdatePacketId {
     /// A comparison of the state of the room between the games of the two players of a two-player save.
     /// </summary>
     CoopCheckUpdate = 24,
+
+    /// <summary>
+    /// The room another player is in now, or none while they are between rooms.
+    /// </summary>
+    PlayerRoom = 25,
 }

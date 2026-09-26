@@ -51,6 +51,12 @@ internal class EntityProcessor {
     public bool IsSceneHostDetermined { get; init; }
 
     /// <summary>
+    /// Whether the local client runs the scene, or expects to while the scene host is not determined yet, so that the
+    /// host object is left running instead of being deactivated until it is.
+    /// </summary>
+    public bool KeepsRunning { get; init; }
+
+    /// <summary>
     /// Whether the processing of this entity should happen under the assumption that was a late load of the
     /// game object.
     /// </summary>
@@ -232,6 +238,7 @@ internal class EntityProcessor {
                 id,
                 foundEntry.Type,
                 gameObject,
+                KeepsRunning,
                 types: componentTypes
             );
         } else {
@@ -257,6 +264,7 @@ internal class EntityProcessor {
                 id,
                 foundEntry.Type,
                 gameObject,
+                KeepsRunning,
                 clientObject,
                 componentTypes
             );
