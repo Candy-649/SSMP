@@ -1214,6 +1214,46 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Lets the masks of the room follow the player again after a death froze them.
+    ///
+    /// A mask covers a hidden part of the room in black until the player walks into it, and covers it again once
+    /// they walk back out (Remasker). A death freezes every mask of the room just as it stands, and nothing ever lets
+    /// go of them again: the game has no need to, since it loads the room over after every death. A player who is
+    /// pulled back up loads nothing, so a part that was covered when they fell stayed covered when they walked into
+    /// it afterwards - the player and the room around them gone black, with only the health bar and the rain in
+    /// front of the mask left to see, and spikes in there that nobody could see.
+    /// </summary>
+    private static void LetTheMasksFollowThePlayerAgain() {
+        var freed = new List<string>();
+        foreach (var mask in UnityEngine.Object.FindObjectsByType<Remasker>(
+                     FindObjectsInactive.Include,
+                     FindObjectsSortMode.None
+                 )) {
+            if (!mask.isFrozen) {
+                continue;
+            }
+
+            mask.isFrozen = false;
+
+            // Whether the player is inside went on being written down while the mask was frozen, and only the
+            // covering stood still. It catches up here the way it would have when they walked in or out.
+            if (mask.isInside && mask.isCovered) {
+                mask.Entered();
+            } else if (!mask.isInside && !mask.isCovered) {
+                mask.Exited(false);
+            }
+
+            freed.Add($"{mask.name} ({(mask.isCovered ? "covered" : "uncovered")})");
+        }
+
+        if (freed.Count > 0) {
+            Logger.Info(
+                $"The death froze masks of the room, which follow the player again: {string.Join(", ", freed)}"
+            );
+        }
+    }
+
+    /// <summary>
     /// How many leftovers are worth naming before the line stops being readable.
     /// </summary>
     private const int MostLeftoversWorthNaming = 25;
@@ -1703,6 +1743,13 @@ internal partial class CoopSave {
             // same reason as above: standing in the wrong pose is not worth failing a rescue over.
             try {
                 hero.StartAnimationControlToIdle();
+            } catch (Exception e) {
+                LogRescueError(e);
+            }
+
+            // Wrapped for the same reason: a part of the room left covered is not worth failing a rescue over either
+            try {
+                LetTheMasksFollowThePlayerAgain();
             } catch (Exception e) {
                 LogRescueError(e);
             }
