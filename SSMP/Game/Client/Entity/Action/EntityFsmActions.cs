@@ -328,21 +328,29 @@ internal static partial class EntityFsmActions {
                 continue;
             }
 
-            var target = field.GetValue(action) switch {
-                FsmOwnerDefault owner => action.Fsm.GetOwnerDefaultTarget(owner),
-                FsmGameObject gameObject => gameObject.Value,
-                FsmEventTarget {
-                    target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM
-                } eventTarget => action.Fsm.GetOwnerDefaultTarget(eventTarget.gameObject),
-                _ => null
-            };
-
-            if (target != null && target.transform.IsChildOf(hero.transform)) {
+            if (IsOnThePlayer(action, field, hero)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether the object that an action is given in a field - as the object itself, as the owner or as where an event
+    /// goes - is the given player character or something they carry.
+    /// </summary>
+    private static bool IsOnThePlayer(FsmStateAction action, FieldInfo field, HeroController hero) {
+        var target = field.GetValue(action) switch {
+            FsmOwnerDefault owner => action.Fsm.GetOwnerDefaultTarget(owner),
+            FsmGameObject gameObject => gameObject.Value,
+            FsmEventTarget {
+                target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM
+            } eventTarget => action.Fsm.GetOwnerDefaultTarget(eventTarget.gameObject),
+            _ => null
+        };
+
+        return target != null && target.transform.IsChildOf(hero.transform);
     }
 
     /// <summary>

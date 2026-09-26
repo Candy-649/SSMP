@@ -16,17 +16,20 @@ namespace SSMP.Game.Client.Entity;
 /// <summary>
 /// What the local player does to the copy of an entity, played at once in their own game by the copy's own FSM: a
 /// strike on a juggled flea or a falling bell, a rock that bursts on the player it touches. Only for entities whose
-/// registry entry says so (see <see cref="EntityRegistryEntry.LocalFirst"/>).
+/// registry entry says so (see <see cref="EntityRegistryEntry.LocalFirst"/>), and for any creature one of whose parts
+/// catches the local player for a combo of blows (see <see cref="CatchEvents"/>).
 ///
 /// The copy runs none of its FSMs, so what the player did went to the scene host and came back a round trip later,
 /// while the flea fell on through the player's nail. Now the game of the player who did it runs the copy's own FSM from
 /// the state the scene host says it is in: the event, and every state it goes through at once from there. What that
 /// does to the entity itself - how it moves, looks and sounds - happens here the way it happens in the scene host's
 /// game. What it does to anything both games share - a point told to the room, the save, a creature - is left to the
-/// scene host, which does it once for both (see <see cref="IsLeftToSceneHost"/>). The scene host is sent where the copy
-/// was, how it moved and the dice that the FSM rolled; it puts its entity there, plays the same event with the same
-/// dice and carries it on by the time that took to arrive (see <see cref="TakeInput"/>). In the same breath it answers
-/// with the number the input went under and the state its FSM went to: the echo (see <see cref="HearEcho"/>).
+/// scene host, which does it once for both (see <see cref="IsLeftToSceneHost"/>). What it does to the local player -
+/// the hold and the slashes of a catch - is theirs, and runs here only. The scene host is sent where the copy was, how
+/// it moved and the dice that the FSM rolled; it puts its entity there, plays the same event with the same dice,
+/// leaving out what it would do to its own player (see <see cref="PlayForPartner"/>), and carries it on by the time
+/// that took to arrive (see <see cref="TakeInput"/>). In the same breath it answers with the number the input went
+/// under and the state its FSM went to: the echo (see <see cref="HearEcho"/>).
 ///
 /// Until the echo comes, what the scene host sends of that FSM, of how the entity moves by itself and of what it plays
 /// is from before, and is held. If the scene host's FSM went where the copy's went, all of that is dropped, since the
@@ -34,7 +37,9 @@ namespace SSMP.Game.Client.Entity;
 /// with all of it. Either way the copy's FSM goes to no other state by itself after the input: where the entity goes
 /// next is the scene host's to say, and the copy follows it again as soon as it says anything more of that FSM. Run on
 /// by itself, the copy would do each of those states a moment before the scene host does, and again when the scene
-/// host's game sends them.
+/// host's game sends them. A catch is the one input that goes on further: the states that only the catch leads to are
+/// the combo it starts, all of it about the player caught, so the copy plays them by itself and takes none of them
+/// from the scene host, which leaves the player's part of them out (see <see cref="_runHereCombo"/>).
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -69,10 +74,10 @@ internal partial class Entity {
     );
 
     /// <summary>
-    /// The FSMs of copies that run here, which go to no other state unless an input of the local player takes them
-    /// there (see <see cref="PlayHere"/>).
+    /// The FSMs of copies that run here, with their entities, which go to no other state unless an input of the local
+    /// player takes them there or it is one of the combo of a catch (see <see cref="PlayHere"/>).
     /// </summary>
-    private static readonly HashSet<HutongGames.PlayMaker.Fsm> HeldFsms = [];
+    private static readonly Dictionary<HutongGames.PlayMaker.Fsm, Entity> HeldFsms = new();
 
     /// <summary>
     /// The hook that keeps the FSMs in <see cref="HeldFsms"/> where they are, put in place the first time a copy runs
@@ -115,6 +120,15 @@ internal partial class Entity {
     private string? _runHereReached;
 
     /// <summary>
+    /// The states that <see cref="_runHere"/> goes through by itself after a catch of the local player: the state the
+    /// catch took it to, and the states that only that state leads to, which are the rest of the combo the catch starts
+    /// (see <see cref="CatchEvents"/>). The scene host's game plays them too, leaving out what they do to its own
+    /// player (see <see cref="PlayForPartner"/>), and what it sends of them is not played again here. Null for any
+    /// other input.
+    /// </summary>
+    private HashSet<FsmState>? _runHereCombo;
+
+    /// <summary>
     /// The number of the last input played here that the scene host has not answered yet, or zero once it has.
     /// </summary>
     private byte _runHereAwaited;
@@ -147,15 +161,25 @@ internal partial class Entity {
     private readonly List<FsmStateAction> _mutedHere = [];
 
     /// <summary>
+    /// The FSMs of the room's own object that play on something of the partner's, each with the states it goes through
+    /// for it and its actions that are this game's player's own, switched off until it has left those states (see
+    /// <see cref="PlayForPartner"/>).
+    /// </summary>
+    private readonly List<(HutongGames.PlayMaker.Fsm Fsm, HashSet<FsmState> States, List<FsmStateAction> Muted)>
+        _playedForPartner = [];
+
+    /// <summary>
     /// Plays at once what the local player's strike or touch makes the FSM at the given index of the copy do, for an
-    /// entity whose registry entry says so: the copy's own FSM takes the event in the state the scene host says it is
-    /// in - or where it is, if it runs here already - and goes through what the event leads to at once.
+    /// entity whose registry entry says so, or what one of the copy's parts catching the local player makes it do: the
+    /// copy's own FSM takes the event in the state the scene host says it is in - or where it is, if it runs here
+    /// already - and goes through what the event leads to at once.
     /// </summary>
     /// <param name="fsmIndex">The index of the FSM.</param>
-    /// <param name="eventName">The event that the strike or touch told the FSM.</param>
+    /// <param name="eventName">The event that the strike, touch or catch told the FSM.</param>
     /// <returns>What the scene host is sent to play the same, or null if it was not played here.</returns>
     public InputStart? PlayHere(byte fsmIndex, string eventName) {
-        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) || SwitchToStateField == null ||
+        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && !CatchEvents.Contains(eventName) ||
+            SwitchToStateField == null ||
             fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null ||
             Object.Client == null || _runHere != null && _runHere != copyFsm) {
             return null;
@@ -187,11 +211,12 @@ internal partial class Entity {
                 Settle(fsm);
             }, fsm);
         } finally {
-            HeldFsms.Add(fsm);
+            HeldFsms[fsm] = this;
         }
 
         _runHereIndex = fsmIndex;
         _runHereReached = fsm.ActiveStateName;
+        _runHereCombo = CatchEvents.Contains(eventName) ? RestOfTheInput(fsm) : null;
         _runHereAwaited = BeginAnticipation();
         _runHereExpiry = Time.unscaledTime + AnticipationHoldTime;
         return new InputStart(_runHereReached, position, motion, dice, _runHereAwaited);
@@ -236,10 +261,10 @@ internal partial class Entity {
             transform.position = new Vector3(start.Position.x, start.Position.y, transform.position.z);
         }
 
-        SharedDice.Throw(start.Dice, () => {
+        PlayForPartner(hostFsm, eventName, () => SharedDice.Throw(start.Dice, () => {
             fsm.Event(eventName);
             Settle(fsm);
-        }, fsm);
+        }, fsm));
 
         var reached = fsm.ActiveState;
         var sameWay = reached != null && reached.Name == start.State;
@@ -318,8 +343,9 @@ internal partial class Entity {
         _heldAnimation = null;
 
         // The scene host's FSM may have gone on already, which it said before this came, and the copy then plays what
-        // the scene host last played
-        if (EntityFsmActions.HostStateOf(fsm) != _runHereReached) {
+        // the scene host last played - unless it has only gone on through the combo of a catch
+        var hostState = EntityFsmActions.HostStateOf(fsm);
+        if (hostState != _runHereReached && !IsInCombo(hostState)) {
             StopRunningHere();
             if (heldAnimation is { } animation) {
                 UpdateAnimation(animation.Id, animation.WrapMode, false);
@@ -408,24 +434,150 @@ internal partial class Entity {
     /// <summary>
     /// Takes it that the scene host's game sent a replay of an action of an FSM of the copy. While the copy runs that
     /// FSM here in step with the scene host, the scene host did something that the copy did not - its own player struck
-    /// the flea too - and the copy follows it again from here.
+    /// the flea too - and the copy follows it again from here; but not for a state of the combo of a catch, which the
+    /// copy plays by itself (see <see cref="_runHereCombo"/>).
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
-    private void HearFromSceneHost(PlayMakerFSM fsm) {
-        if (fsm == _runHere && !WaitsForEcho) {
-            StopRunningHere();
+    /// <param name="state">The state of the action.</param>
+    private void HearFromSceneHost(PlayMakerFSM fsm, FsmState state) {
+        if (fsm == _runHere && !WaitsForEcho && _runHereCombo?.Contains(state) != true) {
+            CatchUpWithSceneHost();
         }
     }
 
     /// <summary>
     /// Takes it that the scene host's FSM went to a state. While the copy runs that FSM here in step with the scene
-    /// host, the scene host has gone on, unless that is the state the copy is in: the copy follows it again from here.
+    /// host, the scene host has gone on, unless that is the state the copy is in or one of the combo of a catch, which
+    /// the copy goes through by itself: the copy follows it again from here.
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state.</param>
     private void HearStateFromSceneHost(PlayMakerFSM fsm, string stateName) {
-        if (fsm == _runHere && !WaitsForEcho && stateName != fsm.ActiveStateName) {
-            StopRunningHere();
+        if (fsm == _runHere && !WaitsForEcho && stateName != fsm.ActiveStateName && !IsInCombo(stateName)) {
+            CatchUpWithSceneHost();
+        }
+    }
+
+    /// <summary>
+    /// Stops the copy's FSM running here, which follows the scene host again from here, and plays the last animation
+    /// that the scene host sent while the copy went through the combo of a catch by itself - unless the copy shows it
+    /// already, having played that part of the combo itself: played again, it would start over.
+    /// </summary>
+    private void CatchUpWithSceneHost() {
+        var heldAnimation = _heldAnimation;
+        StopRunningHere();
+        if (heldAnimation is { } animation && !(_animationClipNameIds.TryGetValue(animation.Id, out var clipName) &&
+                                                _animator.Client != null &&
+                                                _animator.Client.CurrentClip?.name == clipName)) {
+            UpdateAnimation(animation.Id, animation.WrapMode, false);
+        }
+    }
+
+    /// <summary>
+    /// Whether the state of the given name is one of the combo of a catch that the FSM that runs here goes through by
+    /// itself (see <see cref="_runHereCombo"/>).
+    /// </summary>
+    private bool IsInCombo(string? stateName) {
+        return stateName != null && _runHereCombo?.Contains(_runHere!.Fsm.GetState(stateName)) == true;
+    }
+
+    /// <summary>
+    /// Plays on an FSM of the room's own object something that the partner did to their copy of the entity, or that
+    /// caught them. A catch is played but for what is this game's own player's (see
+    /// <see cref="EntityFsmActions.IsThePlayersOwn"/>). The FSM knows of no player but this game's, so when one of the
+    /// creature's parts caught the partner, it held this game's player in place for the slashes, wherever they were.
+    /// What the combo does to the partner is theirs, and their own game plays it on them (see <see cref="PlayHere"/>).
+    /// Those actions are switched off before it plays, and on again for the states that the catch took it through at
+    /// once; for the state it stands in then, and those that only that state leads to, they stay off until it has left
+    /// them (see <see cref="LetThePlayerBackIn"/>). A strike or a touch is played as it is: what it sets off can be a
+    /// whole round of the creature's attacks, which goes on at this game's player too.
+    /// </summary>
+    /// <param name="hostFsm">The FSM.</param>
+    /// <param name="eventName">The event that the partner's strike, touch or catch told the FSM.</param>
+    /// <param name="play">What plays it on the FSM.</param>
+    public void PlayForPartner(PlayMakerFSM hostFsm, string eventName, System.Action play) {
+        if (!CatchEvents.Contains(eventName)) {
+            play();
+            return;
+        }
+
+        var fsm = hostFsm.Fsm;
+        var muted = EntityFsmActions.PlayersOwnActionsOf(fsm);
+        foreach (var action in muted) {
+            action.Enabled = false;
+        }
+
+        // Whatever the game's code does on the way, what is switched off is never left off for good
+        try {
+            play();
+        } finally {
+            KeepOffForWhatIsLeft(fsm, muted);
+        }
+    }
+
+    /// <summary>
+    /// Switches back on the actions kept off this game's player while an FSM played something of the partner's, but
+    /// for those of the state it stands in now and of the states that only that state leads to, which are the rest of
+    /// what it played; those stay off until it has left them (see <see cref="LetThePlayerBackIn"/>).
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="muted">The actions that were switched off.</param>
+    private void KeepOffForWhatIsLeft(HutongGames.PlayMaker.Fsm fsm, List<FsmStateAction> muted) {
+        var states = RestOfTheInput(fsm);
+        muted.RemoveAll(action => {
+            if (states.Contains(action.State)) {
+                return false;
+            }
+
+            action.Enabled = true;
+            return true;
+        });
+
+        if (muted.Count == 0) {
+            return;
+        }
+
+        // Played again before it left what it played before, it keeps all of it off until it has left all of it
+        var index = _playedForPartner.FindIndex(played => played.Fsm == fsm);
+        if (index < 0) {
+            _playedForPartner.Add((fsm, states, muted));
+        } else {
+            _playedForPartner[index].States.UnionWith(states);
+            _playedForPartner[index].Muted.AddRange(muted);
+        }
+    }
+
+    /// <summary>
+    /// The rest of what an input does to an FSM once it has played: the state it took the FSM to, and the states that
+    /// only that state leads to - for a catch, the rest of its combo.
+    /// </summary>
+    private static HashSet<FsmState> RestOfTheInput(HutongGames.PlayMaker.Fsm fsm) {
+        var states = new HashSet<FsmState>();
+        if (fsm.ActiveState is { } reached) {
+            states.Add(reached);
+            EntityFsmActions.AddStatesEnteredOnlyFrom(fsm, states);
+        }
+
+        return states;
+    }
+
+    /// <summary>
+    /// Switches back on what is this game's player's own in each FSM that played something of the partner's (see
+    /// <see cref="PlayForPartner"/>) and has left the states it went through for it, or in all of them.
+    /// </summary>
+    /// <param name="all">Whether to switch it all back on, wherever the FSMs are.</param>
+    private void LetThePlayerBackIn(bool all) {
+        for (var i = _playedForPartner.Count - 1; i >= 0; i--) {
+            var (fsm, states, muted) = _playedForPartner[i];
+            if (!all && fsm.ActiveState is { } state && states.Contains(state)) {
+                continue;
+            }
+
+            foreach (var action in muted) {
+                action.Enabled = true;
+            }
+
+            _playedForPartner.RemoveAt(i);
         }
     }
 
@@ -470,7 +622,7 @@ internal partial class Entity {
             )!,
             new Action<Action<HutongGames.PlayMaker.Fsm, FsmState>, HutongGames.PlayMaker.Fsm, FsmState>(OnSwitchState)
         );
-        HeldFsms.Add(fsm);
+        HeldFsms[fsm] = this;
     }
 
     /// <summary>
@@ -482,6 +634,7 @@ internal partial class Entity {
         }
 
         _runHere = null;
+        _runHereCombo = null;
         _runHereAwaited = 0;
         _heldData.Clear();
         _heldAnimation = null;
@@ -515,15 +668,17 @@ internal partial class Entity {
 
     /// <summary>
     /// Hook for an FSM going to another state, which keeps the FSM of a copy that runs here where it is unless an input
-    /// of the local player takes it on (see <see cref="HeldFsms"/>). The state it was about to go to is cleared, as the
-    /// game clears it once it has gone there, so that the game does not try again.
+    /// of the local player takes it on, or it goes on through the combo of a catch (see <see cref="HeldFsms"/>). The
+    /// state it was about to go to is cleared, as the game clears it once it has gone there, so that the game does not
+    /// try again.
     /// </summary>
     private static void OnSwitchState(
         Action<HutongGames.PlayMaker.Fsm, FsmState> orig,
         HutongGames.PlayMaker.Fsm self,
         FsmState toState
     ) {
-        if (HeldFsms.Count == 0 || !HeldFsms.Contains(self)) {
+        if (HeldFsms.Count == 0 || !HeldFsms.TryGetValue(self, out var entity) ||
+            entity._runHereCombo?.Contains(toState) == true) {
             orig(self, toState);
             return;
         }
@@ -539,28 +694,34 @@ internal partial class Entity {
     /// it sends here - a point told here as well would count twice - and the save, money and creatures, which reach
     /// this game their own ways or not at all. A call on something else that the scene host's game does not send, like
     /// the reaction that a harpooned flea sets off on the player who harpooned it, is the player's own and runs here.
+    /// So does what it tells or sets on the local player (see <see cref="EntityFsmActions.IsThePlayersOwn"/>), like
+    /// the way a creature that caught them turns them to face it: the scene host leaves that out (see
+    /// <see cref="PlayForPartner"/>).
     /// </summary>
     private static bool IsLeftToSceneHost(FsmStateAction action) {
-        if (SharedEffectActionNames.Contains(action.GetType().Name)) {
-            return true;
-        }
-
         var fsm = action.Fsm;
-        return action switch {
-            // Told to anything but the entity itself
-            SendEventByName send => !IsToItself(fsm, send.eventTarget),
-            SendEventByNameV2 send => !IsToItself(fsm, send.eventTarget),
-            SendMessage send => fsm.GetOwnerDefaultTarget(send.gameObject) != fsm.GameObject,
+        var leftToSceneHost = SharedEffectActionNames.Contains(action.GetType().Name) || action switch {
+            // Told to anything but the entity itself and its parts, which each game has of its own: the blade that
+            // lets go of the player at the end of a combo is told so here, where it caught them
+            SendEventByName send => !IsToItsOwn(fsm, send.eventTarget),
+            SendEventByNameV2 send => !IsToItsOwn(fsm, send.eventTarget),
+            SendMessage send => !IsItsOwn(fsm, fsm.GetOwnerDefaultTarget(send.gameObject)),
             // A creature, which lives where the scene host's game runs it
             CreateObject create => IsEntity(create.gameObject.Value),
             SpawnObjectFromGlobalPool spawn => IsEntity(spawn.gameObject.Value),
             _ => false
         };
+        return leftToSceneHost && !EntityFsmActions.IsThePlayersOwn(action);
 
-        static bool IsToItself(HutongGames.PlayMaker.Fsm fsm, FsmEventTarget target) {
+        static bool IsToItsOwn(HutongGames.PlayMaker.Fsm fsm, FsmEventTarget target) {
             return target.target == FsmEventTarget.EventTarget.Self ||
                    target.target is FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM &&
-                   fsm.GetOwnerDefaultTarget(target.gameObject) == fsm.GameObject;
+                   IsItsOwn(fsm, fsm.GetOwnerDefaultTarget(target.gameObject));
+        }
+
+        // The copy has none of the parts that are entities of their own (DestroyManagedChildren)
+        static bool IsItsOwn(HutongGames.PlayMaker.Fsm fsm, GameObject? target) {
+            return target != null && target.transform.IsChildOf(fsm.GameObject.transform);
         }
 
         static bool IsEntity(GameObject? prefab) {

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Runtime.CompilerServices;
@@ -352,12 +353,20 @@ internal static partial class EntityFsmActions {
     /// </summary>
     /// <param name="state">The state of the scene host's creature.</param>
     private static bool IsAboutThePlayer(FsmState state) {
-        if (!PlayerStates.TryGetValue(state.Fsm, out var states)) {
-            states = FindPlayerStates(state.Fsm);
-            PlayerStates.Add(state.Fsm, states);
+        return PlayerStatesOf(state.Fsm).Contains(state);
+    }
+
+    /// <summary>
+    /// The states of an FSM of the scene host's creature that deal with the player character (see
+    /// <see cref="IsAboutThePlayer"/>), found the first time they are asked for.
+    /// </summary>
+    private static HashSet<FsmState> PlayerStatesOf(HutongGames.PlayMaker.Fsm fsm) {
+        if (!PlayerStates.TryGetValue(fsm, out var states)) {
+            states = FindPlayerStates(fsm);
+            PlayerStates.Add(fsm, states);
         }
 
-        return states.Contains(state);
+        return states;
     }
 
     /// <summary>
@@ -371,8 +380,17 @@ internal static partial class EntityFsmActions {
             }
         }
 
-        // Then the states entered from those states alone, until there are no more. A state that a global transition
-        // leads to can be entered from any state.
+        AddStatesEnteredOnlyFrom(fsm, found);
+        return found;
+    }
+
+    /// <summary>
+    /// Adds to some states of an FSM the states entered from those states alone, until there are no more: the slashes
+    /// after a catch, the pull after a stab. A state that a global transition leads to can be entered from any state.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="found">The states, which the states found are added to.</param>
+    internal static void AddStatesEnteredOnlyFrom(HutongGames.PlayMaker.Fsm fsm, HashSet<FsmState> found) {
         var globalTargets = new HashSet<string>();
         foreach (var transition in fsm.GlobalTransitions) {
             globalTargets.Add(transition.ToState);
@@ -402,8 +420,6 @@ internal static partial class EntityFsmActions {
                 added = true;
             }
         } while (added);
-
-        return found;
     }
 
     /// <summary>
@@ -443,6 +459,120 @@ internal static partial class EntityFsmActions {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The kinds of action that shake the camera or flash the screen.
+    /// </summary>
+    private static readonly HashSet<string> ShakeAndFlashNames = [
+        "ScreenFlash", "ScreenFlashTrobbio", "DoCameraShake", "DoCameraShakeV2", "DoCameraShakeV3", "DoCameraShakeV4",
+        "DoCameraShakeRepeating", "DoCameraShakeRepeatingV2"
+    ];
+
+    /// <summary>
+    /// The fields of each kind of action that hold an object, by type.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> ObjectFields = new();
+
+    /// <summary>
+    /// The fields of each kind of action that hold events it may send its own FSM on with, by type.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> EventFields = new();
+
+    /// <summary>
+    /// The actions of an FSM of a creature that are this game's player's own (see <see cref="IsThePlayersOwn"/>) and
+    /// switched on.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    internal static List<FsmStateAction> PlayersOwnActionsOf(HutongGames.PlayMaker.Fsm fsm) {
+        // Which states deal with the player is found once, from the actions that are switched on, so it is found
+        // before any of these is switched off
+        PlayerStatesOf(fsm);
+
+        var found = new List<FsmStateAction>();
+        foreach (var state in fsm.States) {
+            foreach (var action in state.Actions) {
+                if (action.Enabled && IsThePlayersOwn(action)) {
+                    found.Add(action);
+                }
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>
+    /// Whether an action of a creature's FSM is this game's player's own: it does something to the player character -
+    /// moves, holds or turns them, tells them or their FSMs something, plays or spawns something at them, looks at
+    /// them - or it shakes the camera or flashes the screen in a state that deals with them (see
+    /// <see cref="IsAboutThePlayer"/>). An action that may send its FSM on to another state is never counted, so that
+    /// an FSM without these actions still goes where it would have gone.
+    ///
+    /// A copy that plays what the local player did, or what caught them, runs these on the local player, whose own
+    /// they are (see Entity.IsLeftToSceneHost). The scene host, playing the same for its partner, leaves them out: its
+    /// own player was not the one caught (see Entity.PlayForPartner).
+    /// </summary>
+    internal static bool IsThePlayersOwn(FsmStateAction action) {
+        var name = action.GetType().Name;
+        var own = ShakeAndFlashNames.Contains(name)
+            ? action.State != null && IsAboutThePlayer(action.State)
+            : PlayerActionNames.Contains(name) || NamesThePlayer(action);
+        return own && !DecidesWhereItGoes(action);
+    }
+
+    /// <summary>
+    /// Whether any object that an action is given, under any name, is this game's player character or something they
+    /// carry.
+    /// </summary>
+    private static bool NamesThePlayer(FsmStateAction action) {
+        var hero = HeroController.instance;
+        if (hero == null || action.Fsm == null) {
+            return false;
+        }
+
+        foreach (var field in FieldsOf(action.GetType(), ObjectFields, IsObjectField)) {
+            if (IsOnThePlayer(action, field, hero)) {
+                return true;
+            }
+        }
+
+        return false;
+
+        static bool IsObjectField(FieldInfo field) {
+            return field.FieldType == typeof(FsmOwnerDefault) || field.FieldType == typeof(FsmGameObject) ||
+                   field.FieldType == typeof(FsmEventTarget);
+        }
+    }
+
+    /// <summary>
+    /// Whether an action is given an event that it may send its own FSM on to another state with.
+    /// </summary>
+    private static bool DecidesWhereItGoes(FsmStateAction action) {
+        foreach (var field in FieldsOf(action.GetType(), EventFields, IsEventField)) {
+            switch (field.GetValue(action)) {
+                case FsmEvent { Name.Length: > 0 }:
+                case FsmEvent[] events when Array.Exists(events, fsmEvent => fsmEvent is { Name.Length: > 0 }):
+                    return true;
+            }
+        }
+
+        return false;
+
+        static bool IsEventField(FieldInfo field) {
+            return field.FieldType == typeof(FsmEvent) || field.FieldType == typeof(FsmEvent[]);
+        }
+    }
+
+    /// <summary>
+    /// The public fields of a kind of action that the given test picks, found once for each kind.
+    /// </summary>
+    private static FieldInfo[] FieldsOf(Type type, Dictionary<Type, FieldInfo[]> found, Func<FieldInfo, bool> picks) {
+        if (!found.TryGetValue(type, out var fields)) {
+            fields = Array.FindAll(type.GetFields(BindingFlags.Public | BindingFlags.Instance), field => picks(field));
+            found[type] = fields;
+        }
+
+        return fields;
     }
 
     /// <summary>

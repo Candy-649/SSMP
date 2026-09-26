@@ -433,6 +433,15 @@ internal partial class Entity {
             Client = Object.Client.GetComponents<PlayMakerFSM>().ToList()
         };
 
+        EntitiesByCopy[Object.Client] = this;
+        _broadcastHook ??= new Hook(
+            typeof(HutongGames.PlayMaker.Fsm).GetMethod(
+                nameof(HutongGames.PlayMaker.Fsm.BroadcastEventToGameObject),
+                [typeof(GameObject), typeof(FsmEvent), typeof(FsmEventData), typeof(bool), typeof(bool)]
+            ),
+            OnBroadcastToObject
+        );
+
         _hookedActions = new Dictionary<FsmStateAction, HookedEntityAction>();
         _hookedTypes = [];
         _fsmSnapshots = [];
@@ -1082,6 +1091,8 @@ internal partial class Entity {
 
             return;
         }
+
+        LetThePlayerBackIn(false);
 
         foreach (var entityComponent in _updatableComponents) {
             entityComponent.OnUpdate();
@@ -1830,11 +1841,27 @@ internal partial class Entity {
     private const float StrikeCastSkin = 0.02f;
 
     /// <summary>
-    /// Raised on a scene client when its player touched the copy of an entity: the entity, the index of the FSM and the
-    /// event that the FSM sends itself for it, which is played on the copy at once where the entity says so (see
-    /// <see cref="PlayHere"/>) and sent to the scene host.
+    /// Raised on a scene client when its player touched the copy of an entity, or one of the copy's parts caught them:
+    /// the entity, the index of the FSM and the event that the FSM is sent for it, which is played on the copy at once
+    /// where the entity or the catch says so (see <see cref="PlayHere"/>) and sent to the scene host.
     /// </summary>
     public static event Action<Entity, byte, string>? CopyTouchedLocalPlayer;
+
+    /// <summary>
+    /// The events with which the game's catching parts - a blade, a claw, a coil that holds the player for a string of
+    /// blows - tell the creature they belong to that they caught the player, and which start its combo.
+    /// </summary>
+    public static readonly HashSet<string> CatchEvents = ["MULTI HIT CONNECT"];
+
+    /// <summary>
+    /// The entities, by the object of their copy (see <see cref="OnBroadcastToObject"/>).
+    /// </summary>
+    private static readonly Dictionary<GameObject, Entity> EntitiesByCopy = new();
+
+    /// <summary>
+    /// The hook that hears events sent to the objects of copies, put in place with the first entity.
+    /// </summary>
+    private static Hook? _broadcastHook;
 
     /// <summary>
     /// Makes the copy of this entity answer the local player touching it, the way the entity itself answers its own
@@ -1866,10 +1893,7 @@ internal partial class Entity {
         }
 
         for (var fsmIndex = 0; fsmIndex < _fsms.Client.Count; fsmIndex++) {
-            var fsm = _fsms.Client[fsmIndex];
-            if (fsm == null ||
-                (fsm == _runHere ? fsm.ActiveStateName : EntityFsmActions.HostStateOf(fsm.Fsm)) is not { } stateName ||
-                fsm.Fsm.GetState(stateName) is not { } state) {
+            if (StateOfCopy(_fsms.Client[fsmIndex]) is not { } state) {
                 continue;
             }
 
@@ -1879,6 +1903,64 @@ internal partial class Entity {
                     return;
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// The state that an FSM of the copy is in: its own while it runs here, the one the scene host says otherwise.
+    /// </summary>
+    private FsmState? StateOfCopy(PlayMakerFSM? fsm) {
+        return fsm != null &&
+               (fsm == _runHere ? fsm.ActiveStateName : EntityFsmActions.HostStateOf(fsm.Fsm)) is { } stateName
+            ? fsm.Fsm.GetState(stateName)
+            : null;
+    }
+
+    /// <summary>
+    /// Hook for an FSM sending an event to the FSMs of an object, which hears one of the parts of a copy catching the
+    /// local player (see <see cref="CatchEvents"/>). The part runs by itself in this game and caught this game's
+    /// player; the copy's own FSMs are switched off and did not hear it. An FSM that is switched off only sends what
+    /// the scene host's game did, replayed on it.
+    /// </summary>
+    private static void OnBroadcastToObject(
+        Action<HutongGames.PlayMaker.Fsm, GameObject, FsmEvent, FsmEventData, bool, bool> orig,
+        HutongGames.PlayMaker.Fsm self,
+        GameObject go,
+        FsmEvent fsmEvent,
+        FsmEventData eventData,
+        bool sendToChildren,
+        bool excludeSelf
+    ) {
+        orig(self, go, fsmEvent, eventData, sendToChildren, excludeSelf);
+
+        if (go != null && fsmEvent != null && CatchEvents.Contains(fsmEvent.Name) &&
+            self.Owner is PlayMakerFSM { enabled: true } && EntitiesByCopy.TryGetValue(go, out var entity)) {
+            entity.OnCopyCaughtThePlayer(fsmEvent.Name);
+        }
+    }
+
+    /// <summary>
+    /// Takes it that a part of the copy caught the local player and told the copy so. In the game that runs the
+    /// creature, its FSM goes from there into the combo that holds the player and strikes them; here the part held the
+    /// player while the copy flew on. Each FSM of the copy that goes anywhere on the event from the state it is in is
+    /// played as a touch: at once here, where the combo is theirs, and on the scene host (see <see cref="PlayHere"/>).
+    /// </summary>
+    /// <param name="eventName">The event with which the part told the copy.</param>
+    private void OnCopyCaughtThePlayer(string eventName) {
+        if (!_isControlled) {
+            return;
+        }
+
+        for (var fsmIndex = 0; fsmIndex < _fsms.Client.Count; fsmIndex++) {
+            var fsm = _fsms.Client[fsmIndex];
+
+            // One that runs by itself on the copy heard the event
+            if (fsm == null || fsm.enabled || StateOfCopy(fsm) is not { } state ||
+                EntityFsmActions.FindTransition(fsm.Fsm, state, eventName) == null) {
+                continue;
+            }
+
+            CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, eventName);
         }
     }
 
@@ -2190,8 +2272,9 @@ internal partial class Entity {
             return;
         }
 
-        // Played by the copy's own FSM until the scene host has answered its input, and held till then (PlayHere)
-        if (WaitsForEcho) {
+        // Played by the copy's own FSM until the scene host has answered its input, and through the combo of a catch,
+        // and held till then (PlayHere)
+        if (WaitsForEcho || _runHereCombo != null) {
             _heldAnimation = (animationId, wrapMode);
             return;
         }
@@ -2334,11 +2417,18 @@ internal partial class Entity {
                 var action = state.Actions[actionIndex];
 
                 // Played here by the copy's own FSM until the scene host has answered its input, and held till then:
-                // all but what the copy leaves to the scene host, which only comes from there (PlayHere)
-                HearFromSceneHost(fsm);
-                if (fsm == _runHere && WaitsForEcho && !IsLeftToSceneHost(action)) {
-                    HoldForEcho(data);
-                    continue;
+                // all but what the copy leaves to the scene host, which only comes from there (PlayHere). The combo of
+                // a catch is played here all through, and not again from what the scene host sends of it.
+                HearFromSceneHost(fsm, state);
+                if (fsm == _runHere && !IsLeftToSceneHost(action)) {
+                    if (WaitsForEcho) {
+                        HoldForEcho(data);
+                        continue;
+                    }
+
+                    if (_runHereCombo?.Contains(state) == true) {
+                        continue;
+                    }
                 }
 
                 //Logger.Info(
@@ -2491,6 +2581,8 @@ internal partial class Entity {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
         LetGoOfRunHere();
+        LetThePlayerBackIn(true);
+        EntitiesByCopy.Remove(Object.Client);
 
         _spriteAnimatorPlayHook?.Dispose();
         _spriteAnimatorPlayHook = null;

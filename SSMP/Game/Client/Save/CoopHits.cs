@@ -1461,7 +1461,8 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Says that the copy of an entity touched the local player (see <see cref="Entity.Entity.ListenForTouches"/>).
+    /// Says that the copy of an entity touched the local player (see <see cref="Entity.Entity.ListenForTouches"/>), or
+    /// that one of its parts caught them (see <see cref="Entity.Entity.CatchEvents"/>).
     /// </summary>
     /// <param name="copied">The entity.</param>
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
@@ -1600,8 +1601,9 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Sends an entity the event that the partner's copy of it was touched or struck with, if this game is the scene
-    /// host and so runs it. An FSM that has already moved on from where the event leads anywhere takes no notice of it.
+    /// Sends an entity the event that the partner's copy of it was touched, struck or caught them with, if this game is
+    /// the scene host and so runs it (see <see cref="Entity.Entity.PlayForPartner"/>). An FSM that has already moved on
+    /// from where the event leads anywhere takes no notice of it.
     /// </summary>
     /// <param name="update">The update of the partner's touch.</param>
     private void ApplyEntityTouch(CoopHitUpdate update) {
@@ -1614,7 +1616,10 @@ internal class CoopHits {
             $"The partner touched or struck the copy of entity {update.EntityId} in its '{fsm.ActiveStateName}', so " +
             $"it is sent '{update.Responder}' here too"
         );
-        fsm.SendEvent(update.Responder);
+        if (fsm.Fsm.ActiveState is { } state &&
+            Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) != null) {
+            entity.PlayForPartner(fsm, update.Responder, () => fsm.SendEvent(update.Responder));
+        }
     }
 
     /// <summary>
