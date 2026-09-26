@@ -583,7 +583,7 @@ internal class FleaGameCoop {
     /// </summary>
     /// <param name="tink">The tink that was hit.</param>
     /// <returns>Whether hitting it scores a point.</returns>
-    private static bool IsScoringFlea(TinkEffect tink) {
+    internal static bool IsScoringFlea(TinkEffect tink) {
         if (ScoringFleaTinks.TryGetValue(tink, out var known)) {
             return known.Value;
         }

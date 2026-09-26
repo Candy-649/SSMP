@@ -124,8 +124,9 @@ internal enum CoopHitKind : byte {
     ObjectTouch,
 
     /// <summary>
-    /// An entity, found by the ID of its entity, whose copy touched the player of the game that sends this. That game
-    /// has already played what the touch leads to on its copy; the game of the scene host sends the event named by
+    /// An entity, found by the ID of its entity, whose copy touched the player of the game that sends this, or was
+    /// struck by that player so that a part of it told one of its FSMs an event, like a bell that a tink knocks away.
+    /// A touch was already played on the copy in that game; the game of the scene host sends the event named by
     /// <see cref="CoopHitUpdate.Responder"/> to the FSM at <see cref="CoopHitUpdate.Index"/> of the entity, so that
     /// it happens where the entity is run as well.
     /// </summary>

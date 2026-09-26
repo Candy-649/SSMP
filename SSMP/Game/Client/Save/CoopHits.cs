@@ -215,6 +215,17 @@ internal class CoopHits {
     /// </summary>
     private bool _watchingStates;
 
+    /// <summary>
+    /// The entity whose copy the local player's hit is landing on, while the hit is made (see <see cref="HitCopy"/>).
+    /// </summary>
+    private Entity.Entity? _copyBeingHit;
+
+    /// <summary>
+    /// What the parts of <see cref="_copyBeingHit"/> told its state machines during the hit: the index of each state
+    /// machine and the event, in the order they were told.
+    /// </summary>
+    private List<(byte FsmIndex, string EventName)> _toldCopy = [];
+
     public CoopHits(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
@@ -288,6 +299,10 @@ internal class CoopHits {
         AddHook(
             typeof(Fsm).GetMethod("SwitchState", InstanceFlags, null, [typeof(FsmState)], null),
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnSwitchState)
+        );
+        AddHook(
+            typeof(PlayMakerFSM).GetMethod(nameof(PlayMakerFSM.SendEvent), InstanceFlags, null, [typeof(string)], null),
+            new Action<Action<PlayMakerFSM, string>, PlayMakerFSM, string>(OnFsmSendEvent)
         );
         AddHook(
             GetTouchMethod(typeof(PlayMakerTriggerEnter2D), "OnTriggerEnter2D"),
@@ -722,11 +737,19 @@ internal class CoopHits {
             ? hitComponent.transform.position
             : (Vector3?) null;
 
+        // A part of the copy of something that the scene host runs, like a falling bell or a creature's shield. What
+        // it has for health goes by the hits of enemies instead, and the festival's fleas by their own scoring, which
+        // counts a hit for the player who made it only (FleaGameCoop)
+        var copied = !isRemote && hit.IsHeroDamage && responder is Component part and not HealthManager &&
+                     !(part is TinkEffect flea && FleaGameCoop.IsScoringFlea(flea))
+            ? FindCopyHolding(part.gameObject)
+            : null;
+
         // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is
         var lastContext = _hitContext;
         _hitContext = isRemote ? HitContext.Remote : hit.IsHeroDamage ? HitContext.Local : HitContext.None;
         try {
-            var response = responder.Hit(hit);
+            var response = copied != null ? HitCopy(copied, responder, hit) : responder.Hit(hit);
 
             // Nothing of this hit happens in the partner's game any more, so what it looked like is sent to them. A hit
             // that the enemy blocked showed only the spark of the block here, and that is what goes, not a wound.
@@ -1131,8 +1154,74 @@ internal class CoopHits {
     }
 
     /// <summary>
+    /// Finds the entity whose copy on show in this game is the given object or holds it as a part.
+    /// </summary>
+    /// <param name="part">The object.</param>
+    /// <returns>The entity, or null if the object is no part of a copy.</returns>
+    private Entity.Entity? FindCopyHolding(GameObject part) {
+        for (var transform = part.transform; transform != null; transform = transform.parent) {
+            if (TryGetEntity(transform.gameObject, out var entity, out var isClientCopy)) {
+                return isClientCopy ? entity : null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Makes a hit of the local player on a part of the copy of something that the scene host runs, and sends the
+    /// scene host what the hit made the part tell the copy's state machines. The copy runs none of them, and a tink
+    /// tells them without a word to anyone else: a player whose game showed the copy struck a bell falling at them and
+    /// it fell on, while the same hit in the scene host's game knocked it away. The spark and the recoil of the hit
+    /// are this game's own and happen here as usual; the copy moves as the scene host's game then moves the thing.
+    /// </summary>
+    /// <param name="copied">The entity whose copy is hit.</param>
+    /// <param name="responder">The part that is hit.</param>
+    /// <param name="hit">The hit.</param>
+    /// <returns>How the part responded to the hit.</returns>
+    private IHitResponder.HitResponse HitCopy(Entity.Entity copied, IHitResponder responder, HitInstance hit) {
+        var (lastCopy, lastTold) = (_copyBeingHit, _toldCopy);
+        List<(byte FsmIndex, string EventName)> told = [];
+        (_copyBeingHit, _toldCopy) = (copied, told);
+
+        IHitResponder.HitResponse response;
+        try {
+            response = responder.Hit(hit);
+        } finally {
+            (_copyBeingHit, _toldCopy) = (lastCopy, lastTold);
+        }
+
+        foreach (var (fsmIndex, eventName) in told) {
+            Logger.Info(
+                $"The local player struck the copy of entity {copied.Id}, so the scene host is sent '{eventName}'"
+            );
+            OnCopyTouchedLocalPlayer(copied.Id, fsmIndex, eventName);
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// Hook for <see cref="PlayMakerFSM.SendEvent(string)"/>. While the local player's hit lands on a copy (see
+    /// <see cref="HitCopy"/>), an event for one of the copy's own state machines is written down to go to the scene
+    /// host rather than told: the copy's state machines stay where the scene host says they are.
+    /// </summary>
+    private void OnFsmSendEvent(Action<PlayMakerFSM, string> orig, PlayMakerFSM self, string eventName) {
+        if (_copyBeingHit is { } copied) {
+            var fsmIndex = copied.ClientFsms.IndexOf(self);
+            if (fsmIndex >= 0) {
+                _toldCopy.Add(((byte) fsmIndex, eventName));
+                return;
+            }
+        }
+
+        orig(self, eventName);
+    }
+
+    /// <summary>
     /// Tells the partner that the copy of an entity touched the local player, for the partner's game to send the entity
-    /// the event the copy has already played here (see <see cref="Entity.Entity.ListenForTouches"/>).
+    /// the event the copy has already played here (see <see cref="Entity.Entity.ListenForTouches"/>), or that the
+    /// local player's hit made a part of the copy tell its state machines an event (see <see cref="HitCopy"/>).
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
@@ -1153,8 +1242,8 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Sends an entity the event that the partner's copy of it was touched with, if this game is the scene host and so
-    /// runs it. An FSM that has already moved on from where the event leads anywhere takes no notice of it.
+    /// Sends an entity the event that the partner's copy of it was touched or struck with, if this game is the scene
+    /// host and so runs it. An FSM that has already moved on from where the event leads anywhere takes no notice of it.
     /// </summary>
     /// <param name="update">The update of the partner's touch.</param>
     private void ApplyEntityTouch(CoopHitUpdate update) {
@@ -1164,8 +1253,8 @@ internal class CoopHits {
         }
 
         Logger.Info(
-            $"The partner was touched by entity {update.EntityId} in its '{fsm.ActiveStateName}', so it is sent " +
-            $"'{update.Responder}' here too"
+            $"The partner touched or struck the copy of entity {update.EntityId} in its '{fsm.ActiveStateName}', so " +
+            $"it is sent '{update.Responder}' here too"
         );
         fsm.SendEvent(update.Responder);
     }
