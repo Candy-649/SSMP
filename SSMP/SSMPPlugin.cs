@@ -32,6 +32,8 @@ public partial class SSMPPlugin : BaseUnityPlugin {
         // assembly that is really running, and is the same wording the other player's build is compared against.
         Logging.Logger.Info($"Plugin {Name} ({Id}) has loaded! Running build: {Game.SteamManager.LocalModVersion}");
 
+        StackOverflowRecovery.Apply();
+
         // Register the event to initialize SSMP once we enter the main menu.
         EventHooks.UIManagerUIGoToMainMenu += Initialize;
     }
