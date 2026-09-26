@@ -85,6 +85,13 @@ internal static class SharedDice {
     private static int _nextRoll;
 
     /// <summary>
+    /// The state machine of an entity that rolls with the dice of what is being set off, or null for none. Otherwise
+    /// only the room's own state machines do: an entity rolls where the scene host runs it, except for something that
+    /// a strike of the other player's has it do (see <see cref="Entity.Entity.PlayBounceHere"/>).
+    /// </summary>
+    private static HutongGames.PlayMaker.Fsm? _entityFsm;
+
+    /// <summary>
     /// Gets the hooks on the actions that roll as they start, for the hit replays to put in place.
     /// </summary>
     /// <returns>Each method and what replaces it.</returns>
@@ -107,14 +114,18 @@ internal static class SharedDice {
     /// Sets off something here that goes to the partner, writing the dice down as it goes.
     /// </summary>
     /// <param name="action">What is set off.</param>
+    /// <param name="entityFsm">The state machine of an entity that rolls with these dice too, or null for none.</param>
     /// <returns>The dice, for <see cref="Throw"/> in the partner's game.</returns>
-    public static int[] Record(Action action) {
+    public static int[] Record(Action action, HutongGames.PlayMaker.Fsm? entityFsm = null) {
         var recording = new List<int>(TakeState());
+        var lastEntityFsm = _entityFsm;
         Recordings.Add(recording);
+        _entityFsm = entityFsm ?? lastEntityFsm;
         try {
             action();
         } finally {
             Recordings.Remove(recording);
+            _entityFsm = lastEntityFsm;
         }
 
         return recording.ToArray();
@@ -125,20 +136,21 @@ internal static class SharedDice {
     /// </summary>
     /// <param name="dice">The dice, or null or broken ones for none, which leaves the game to roll its own.</param>
     /// <param name="action">What the partner set off.</param>
-    public static void Throw(IReadOnlyList<int>? dice, Action action) {
+    /// <param name="entityFsm">The state machine of an entity that rolls with these dice too, or null for none.</param>
+    public static void Throw(IReadOnlyList<int>? dice, Action action, HutongGames.PlayMaker.Fsm? entityFsm = null) {
         if (dice == null || dice.Count < StateSize || (dice.Count - StateSize) % RollSize != 0) {
             action();
             return;
         }
 
         var own = Random.state;
-        var (lastThrown, lastNextRoll) = (_thrown, _nextRoll);
+        var (lastThrown, lastNextRoll, lastEntityFsm) = (_thrown, _nextRoll, _entityFsm);
         Random.state = ToState(dice, 0);
-        (_thrown, _nextRoll) = (dice, StateSize);
+        (_thrown, _nextRoll, _entityFsm) = (dice, StateSize, entityFsm ?? lastEntityFsm);
         try {
             action();
         } finally {
-            (_thrown, _nextRoll) = (lastThrown, lastNextRoll);
+            (_thrown, _nextRoll, _entityFsm) = (lastThrown, lastNextRoll, lastEntityFsm);
             Random.state = own;
         }
     }
@@ -206,7 +218,7 @@ internal static class SharedDice {
     /// </summary>
     private static void OnRollingActionEnter(Action<FsmStateAction> orig, FsmStateAction self) {
         if (Recordings.Count == 0 && _thrown == null || self.Fsm?.FsmComponent is not { } fsm ||
-            !CoopHits.IsRoomObject(fsm)) {
+            self.Fsm != _entityFsm && !CoopHits.IsRoomObject(fsm)) {
             orig(self);
             return;
         }
@@ -238,15 +250,22 @@ internal static class SharedDice {
 
     /// <summary>
     /// A number for an action that is the same in both games: from the name of its object, of its state machine, of its
-    /// state and its place in the state.
+    /// state and its place in the state. The copy of an entity is named after the entity with "(Clone)" on the end,
+    /// which is left out, as many times as it is there: the copy of something spawned has it twice.
     /// </summary>
     private static int Identify(FsmStateAction action, PlayMakerFSM fsm) {
+        const string clone = "(Clone)";
+
         var state = action.State;
         var place = state == null ? -1 : Array.IndexOf(state.Actions, action);
+        var name = fsm.gameObject.name;
+        while (name.EndsWith(clone, StringComparison.Ordinal)) {
+            name = name[..^clone.Length];
+        }
 
         // FNV-1a, since the hash of a string is not promised to be the same in another process
         var hash = 2166136261u;
-        foreach (var text in new[] { fsm.gameObject.name, fsm.FsmName, state?.Name ?? "" }) {
+        foreach (var text in new[] { name, fsm.FsmName, state?.Name ?? "" }) {
             foreach (var character in text) {
                 hash = unchecked((hash ^ character) * 16777619u);
             }

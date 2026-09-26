@@ -432,6 +432,11 @@ internal class CoopHits {
             return;
         }
 
+        if (update.Kind == CoopHitKind.EntityBounce) {
+            ApplyEntityBounce(update);
+            return;
+        }
+
         if (update.Kind == CoopHitKind.ObjectEvents) {
             ReplayObjectEvents(update);
             return;
@@ -1249,6 +1254,17 @@ internal class CoopHits {
         var canSend = CanSendEntityTouch();
         foreach (var (fsmIndex, eventName) in told) {
             var strike = canSend ? copied.PlayStrikeHere(fsmIndex, eventName) : null;
+
+            // What is juggled flies off along a way that its state machine rolls, which is played here at once too
+            if (strike == null && canSend && copied.PlayBounceHere(fsmIndex, eventName) is { } bounce) {
+                Logger.Info(
+                    $"The local player struck the copy of entity {copied.Id}, which took '{eventName}' here at once " +
+                    $"and went to '{bounce.State}', and the scene host is sent it with where it was struck"
+                );
+                SendEntityBounce(copied.Id, fsmIndex, eventName, bounce);
+                continue;
+            }
+
             if (strike is { } start) {
                 Logger.Info(
                     $"The local player struck the copy of entity {copied.Id}, which took '{eventName}' here at once " +
@@ -1522,6 +1538,74 @@ internal class CoopHits {
             Responder = eventName,
             Hit = data
         });
+    }
+
+    /// <summary>
+    /// Sends the scene host a strike of the local player on the copy of something juggled that the copy's FSM played
+    /// at once (see <see cref="Entity.Entity.PlayBounceHere"/>), with where the copy was struck, the dice it rolled and
+    /// this game's round trip to the server.
+    /// </summary>
+    /// <param name="entityId">The ID of the entity.</param>
+    /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
+    /// <param name="eventName">The event.</param>
+    /// <param name="bounce">Where the copy was struck and the dice.</param>
+    private void SendEntityBounce(ushort entityId, byte fsmIndex, string eventName, Entity.BounceStart bounce) {
+        if (_getPartnerId() is not { } partnerId) {
+            return;
+        }
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write(bounce.State);
+        writer.Write(bounce.Position.x);
+        writer.Write(bounce.Position.y);
+        writer.Write(bounce.Anticipation);
+        writer.Write((ushort) Mathf.Clamp(_netClient.UpdateManager.AverageRtt, 0, ushort.MaxValue));
+        SharedDice.Write(writer, bounce.Dice);
+        writer.Flush();
+
+        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
+            TargetId = partnerId,
+            Kind = CoopHitKind.EntityBounce,
+            EntityId = entityId,
+            Index = fsmIndex,
+            Responder = eventName,
+            Hit = stream.ToArray()
+        });
+    }
+
+    /// <summary>
+    /// Takes a strike of the partner on the copy of something juggled that their game played at once, if this game is
+    /// the scene host and so runs it (see <see cref="Entity.Entity.TakeBounce"/>).
+    /// </summary>
+    /// <param name="update">The update of the partner's strike.</param>
+    private void ApplyEntityBounce(CoopHitUpdate update) {
+        if (!_entityManager.IsSceneHost || FindEntity(update.EntityId) is not { } entity) {
+            return;
+        }
+
+        Entity.BounceStart start;
+        int partnerRtt;
+        try {
+            using var reader = new BinaryReader(new MemoryStream(update.Hit));
+            var state = reader.ReadString();
+            var position = new Vector2(reader.ReadSingle(), reader.ReadSingle());
+            var anticipation = reader.ReadByte();
+            partnerRtt = reader.ReadUInt16();
+            start = new Entity.BounceStart(state, position, SharedDice.Read(reader) ?? [], anticipation);
+        } catch (IOException e) {
+            Logger.Warn($"Could not read the partner's strike on the copy of entity {update.EntityId}: {e.Message}");
+            return;
+        }
+
+        var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);
+        Logger.Info(
+            entity.TakeBounce(update.Index, update.Responder, start, elapsed)
+                ? $"The partner struck the copy of entity {update.EntityId}, so it is sent '{update.Responder}' " +
+                  $"from where they struck it with their dice, and went to '{start.State}' too, {elapsed:0.00} s on"
+                : $"The partner struck the copy of entity {update.EntityId}, which went to '{start.State}' there, " +
+                  $"but '{update.Responder}' did not take it there here"
+        );
     }
 
     /// <summary>

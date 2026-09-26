@@ -127,7 +127,7 @@ internal static partial class EntityFsmActions {
     /// Finds the state an event takes an FSM to from the given state, looking at the transitions of the whole FSM
     /// first, as the game does.
     /// </summary>
-    private static FsmState? FindTransition(HutongGames.PlayMaker.Fsm fsm, FsmState state, string eventName) {
+    internal static FsmState? FindTransition(HutongGames.PlayMaker.Fsm fsm, FsmState state, string eventName) {
         foreach (var transition in fsm.GlobalTransitions) {
             if (transition.EventName == eventName) {
                 return transition.ToFsmState;

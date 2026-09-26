@@ -141,5 +141,14 @@ internal enum CoopHitKind : byte {
     /// in order, each with the dice of the sender's game as it was told; the other game tells it the same events with
     /// the same dice.
     /// </summary>
-    ObjectEvents
+    ObjectEvents,
+
+    /// <summary>
+    /// An entity that is juggled, found by the ID of its entity, whose copy the sender struck and whose FSM at
+    /// <see cref="CoopHitUpdate.Index"/> played the event named by <see cref="CoopHitUpdate.Responder"/> there at once.
+    /// <see cref="CoopHitUpdate.Hit"/> holds the state it went to, where the copy was, the number the sender waits on,
+    /// the sender's round trip to the server and the dice the FSM rolled; the game of the scene host takes the strike
+    /// from there with the same dice.
+    /// </summary>
+    EntityBounce
 }

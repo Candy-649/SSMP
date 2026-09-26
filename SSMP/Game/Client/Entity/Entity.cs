@@ -34,7 +34,7 @@ namespace SSMP.Game.Client.Entity;
 /// A networked entity that is either sending behaviour updates to the server or is entirely controlled by
 /// updates from the server.
 /// </summary>
-internal class Entity {
+internal partial class Entity {
     /// <summary>
     /// The net client for networking.
     /// </summary>
@@ -1064,6 +1064,7 @@ internal class Entity {
 
         if (_isControlled) {
             HideTheRoomsOwnCopy();
+            UpdateRunHere();
 
             if (Object.Client != null &&
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
@@ -1071,8 +1072,9 @@ internal class Entity {
 
                 // While something the local player did to this entity is still on its way to the scene host and
                 // back, what the local game did is what moves it, and the interpolation stays out of the way. So it
-                // does while the copy moves by itself from how the entity set off (OwnMotionComponent).
-                var movedHere = IsAnticipating() || MovesByItself();
+                // does while the copy moves by itself from how the entity set off (OwnMotionComponent), or while its
+                // own FSM runs by itself for a strike (PlayBounceHere).
+                var movedHere = IsAnticipating() || MovesByItself() || _runHere != null;
                 if (_wasMovedHere && !movedHere) {
                     // Nothing wrote this object while that was going on, so the interpolation carried on predicting
                     // from where the entity stood before any of it. Picking that up again would put it back there in
@@ -1372,7 +1374,8 @@ internal class Entity {
         float overrideFps
     ) {
         if (self == _animator.Client) {
-            if (!_allowClientAnimation) {
+            // The copy's own FSM plays its animations while it runs by itself for a strike (PlayBounceHere)
+            if (!_allowClientAnimation && _runHere == null) {
                 //Logger.Info($"Entity '{Object.Client.name}' client animator tried playing animation");
             } else {
                 // Logger.Info($"Entity '{_object.Client.name}' client animator was allowed to play animation");
@@ -1803,6 +1806,7 @@ internal class Entity {
             ((OwnMotionComponent) ownMotion).TakeMotionFromCopy();
         }
 
+        StopRunningHere();
         EntityFsmActions.LeaveStatesOf(_fsms.Client);
         _playedHere.Clear();
         LetGo();
@@ -2253,6 +2257,10 @@ internal class Entity {
 
         positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + packetsCovered);
         _positionsHeldBack = 0;
+
+        // Answered here if this is the scene host saying it took a strike that the copy's own FSM plays, so that what
+        // comes in after it is taken as coming after it (PlayBounceHere)
+        DecideRunHere();
     }
 
     /// <summary>
@@ -2326,6 +2334,12 @@ internal class Entity {
     ) {
         if (_animator.Client == null) {
             //Logger.Warn($"Entity '{Object.Client.name}' received animation while client animator does not exist");
+            return;
+        }
+
+        // Played by the copy's own FSM until the scene host has taken its strike, and held till then (PlayBounceHere)
+        if (WaitsForBounce) {
+            _heldAnimation = (animationId, wrapMode);
             return;
         }
 
@@ -2466,6 +2480,14 @@ internal class Entity {
                     continue;
                 }
 
+                // Played here by the copy's own FSM until the scene host has taken its strike, and held till then: all
+                // but what the scene host's game told the room, which the copy tells nobody meanwhile (PlayBounceHere)
+                HearFromSceneHost(fsm);
+                if (fsm == _runHere && WaitsForBounce && action is not SendEventToRegister) {
+                    HoldForBounce(data);
+                    continue;
+                }
+
                 //Logger.Info(
                 //    $"Received entity network data for FSM: {fsm.Fsm.Name}, {state.Name}, {actionIndex} ({action.GetType()})"
                 //);
@@ -2517,6 +2539,7 @@ internal class Entity {
                     // Also propagate this state change to the EntityFsmActions class with the client FSM for the
                     // same index
                     EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, stateName);
+                    HearFromSceneHost(_fsms.Client[fsmIndex]);
 
                     // The scene host's game has moved past what this game played ahead of it for a touch, so the copy
                     // follows it again from here
