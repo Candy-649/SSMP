@@ -230,6 +230,22 @@ internal class Entity {
     private readonly HostClientPair<List<PlayMakerFSM>> _fsms;
 
     /// <summary>
+    /// The FSMs of entities that only ever do something to the player who runs into the entity: the fleas of a game
+    /// of the festival that knock the player aside. Each game runs its own for its own player, on the copy of a scene
+    /// client as well as on the room's own creature, and none of it is sent. The player of the other game is not the
+    /// one who ran into the flea, and the one who did is knocked aside at once rather than a round trip later - the
+    /// way the copy of a creature already hurts the local player. The FSM of the scene host was sent, and its
+    /// knock was about the scene host's player alone: a scene client ran through the fleas untouched.
+    /// </summary>
+    private static readonly string[] LocalPlayerFsmNames = ["Bonk Hero"];
+
+    /// <summary>
+    /// The actions of the FSMs that the copy runs by itself that read how the copy moves, or null for none (see
+    /// <see cref="ReadyToRunOnTheCopy"/>).
+    /// </summary>
+    private HashSet<FsmStateAction>? _motionReadsOfTheCopy;
+
+    /// <summary>
     /// Dictionary mapping data types to entity components.
     /// </summary>
     private readonly Dictionary<EntityComponentType, EntityComponent> _components;
@@ -503,7 +519,10 @@ internal class Entity {
 
         EntityInitializer.CheckPreProcessFsm(fsm);
 
-        for (var i = 0; i < fsm.FsmStates.Length; i++) {
+        // Nothing of what an FSM that each game runs for its own player does is sent (see LocalPlayerFsmNames)
+        var sendsActions = !IsForTheLocalPlayer(fsm);
+
+        for (var i = 0; sendsActions && i < fsm.FsmStates.Length; i++) {
             var state = fsm.FsmStates[i];
             //var stateName = state.Name;
 
@@ -554,13 +573,85 @@ internal class Entity {
     }
 
     /// <summary>
-    /// Processes the given FSM for the client entity by disabling it.
+    /// Processes the given FSM for the client entity by disabling it, unless it is one that each game runs for its own
+    /// player (see <see cref="LocalPlayerFsmNames"/>), which the copy runs by itself.
     /// </summary>
     /// <param name="fsm">The Playmaker FSM to process.</param>
     private void ProcessClientFsm(PlayMakerFSM fsm) {
         //Logger.Info($"Processing client FSM: {fsm.Fsm.Name}");
+        if (IsForTheLocalPlayer(fsm)) {
+            ReadyToRunOnTheCopy(fsm);
+            return;
+        }
+
         EntityInitializer.InitializeFsm(fsm);
         fsm.enabled = false;
+    }
+
+    /// <summary>
+    /// Whether an FSM is one that each game runs for its own player (see <see cref="LocalPlayerFsmNames"/>).
+    /// </summary>
+    private static bool IsForTheLocalPlayer(PlayMakerFSM fsm) {
+        return Array.IndexOf(LocalPlayerFsmNames, fsm.FsmName) != -1;
+    }
+
+    /// <summary>
+    /// Readies an FSM that the copy runs by itself to find out about the copy what the room's own creature finds out
+    /// about itself. The copy stands on its own at the top of the scene and is carried to wherever the scene host says
+    /// the creature is. Asked for its parent, it found none, so a flea read how tired its game had made the player -
+    /// which makes each knock harder - from nothing at all. Asked how it moved, its own body said it stood still, so a
+    /// flea knocked the player to either side at random rather than the way it flew. Its parent and grandparent are
+    /// now those of the room's own creature, and it moves as it is seen to move.
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    private void ReadyToRunOnTheCopy(PlayMakerFSM fsm) {
+        EntityInitializer.CheckPreProcessFsm(fsm);
+
+        var parent = Object.Host.transform.parent;
+        var grandparent = parent == null ? null : parent.parent;
+        foreach (var state in fsm.FsmStates) {
+            foreach (var action in state.Actions) {
+                switch (action) {
+                    case GetParent { gameObject.OwnerOption: OwnerDefaultOption.UseOwner } getParent:
+                        getParent.Enabled = false;
+                        getParent.storeResult.Value = parent == null ? null : parent.gameObject;
+                        break;
+                    case GetGrandparent { gameObject.OwnerOption: OwnerDefaultOption.UseOwner } getGrandparent:
+                        getGrandparent.Enabled = false;
+                        getGrandparent.storeResult.Value = grandparent == null ? null : grandparent.gameObject;
+                        break;
+                    case GetVelocity2d { gameObject.OwnerOption: OwnerDefaultOption.UseOwner } getVelocity:
+                        if (_motionReadsOfTheCopy == null) {
+                            _motionReadsOfTheCopy = [];
+                            FsmActionHooks.RegisterFsmStateActionType(typeof(GetVelocity2d), OnMotionRead);
+                        }
+
+                        _motionReadsOfTheCopy.Add(getVelocity);
+                        break;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Callback for an action having read how its object moves, which tells one of the FSMs that the copy runs by
+    /// itself how the copy is seen to move (see <see cref="ReadyToRunOnTheCopy"/>).
+    /// </summary>
+    /// <param name="action">The action.</param>
+    private void OnMotionRead(FsmStateAction action) {
+        if (action is not GetVelocity2d read || _motionReadsOfTheCopy?.Contains(read) != true ||
+            !Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            return;
+        }
+
+        Vector2 velocity = interpolation.Velocity;
+        if (read.space == Space.Self) {
+            velocity = Object.Client.transform.InverseTransformDirection(velocity);
+        }
+
+        read.vector.Value = velocity;
+        read.x.Value = velocity.x;
+        read.y.Value = velocity.y;
     }
 
     /// <summary>
@@ -1126,6 +1217,10 @@ internal class Entity {
         // (avoiding generic methods with delegates/closures) and only retrieve/populate EntityHostFsmData from the pool if a change is detected.
         for (byte fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
+            if (IsForTheLocalPlayer(fsm)) {
+                continue;
+            }
+
             var snapshot = _fsmSnapshots[fsmIndex];
 
             var lastStateName = snapshot.CurrentState;
@@ -1597,6 +1692,12 @@ internal class Entity {
         for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
 
+            // The other game never said anything about it, and this game's player is the one it is about: it starts
+            // over, looking its room up afresh, when the object is switched on
+            if (IsForTheLocalPlayer(fsm)) {
+                continue;
+            }
+
             //Logger.Debug($"    Restoring variables for FSM: {fsm.Fsm.Name}");
 
             var snapshot = _fsmSnapshots[fsmIndex];
@@ -1640,6 +1741,9 @@ internal class Entity {
         for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
             var snapshot = _fsmSnapshots[fsmIndex];
+            if (IsForTheLocalPlayer(fsm)) {
+                continue;
+            }
 
             // Before setting the state, we replace the actions of the to-be state to only include the ones that
             // should be executed again (including actions with "everyFrame" on true or that continuously check

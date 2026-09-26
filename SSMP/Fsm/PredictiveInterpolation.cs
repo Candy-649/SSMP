@@ -97,6 +97,11 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
     private Vector3 _velocity;
 
+    /// <summary>
+    /// How fast and which way the object is seen to move, worked out from the positions it was sent.
+    /// </summary>
+    public Vector3 Velocity => _velocity;
+
     private float _timeSinceLastPacket;
     private float _lastUpdateTime;
 
