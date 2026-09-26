@@ -19,7 +19,8 @@ namespace SSMP.Game.Client.Save;
 /// the path it takes whenever a player declines, and nothing else has to know that two of them were asked.
 ///
 /// A racer asking whether to start a race is one of them too, because both players run it together: see
-/// <c>CoopSave.Races</c>.
+/// <c>CoopSave.Races</c>. So is a character asking whether to help in a fight, which both players fight together:
+/// see <c>CoopSave.Aid</c>.
 ///
 /// The hold sits on the button rather than on the answer, because the box pays before it answers: the box wraps the
 /// yes it is given so that it takes the currency, locks the tools and takes the items first, and only then runs the
@@ -314,6 +315,9 @@ internal partial class CoopSave {
             SendConfirmAnswer(partnerAt.PartnerId, partnerAt.Key, true);
             Chat(meeting.Kind switch {
                 WishConfirmRace => Lang.Pick("You both said yes, so you race together.", "你们都选了「是」，一起跑。"),
+                WishConfirmAid => Lang.Pick(
+                    "You both asked for help, so the help comes to the fight.", "你们都请求了援助，援助成立。"
+                ),
                 WishConfirmFleaGame => Lang.Pick(
                     "You both said yes, so you start together.", "你们都选了「是」，一起开始。"
                 ),
@@ -348,6 +352,12 @@ internal partial class CoopSave {
             ? Lang.Pick(
                 $"The game starts once {GetPartnerName()} says yes at the same game too. Answer no to take it back.",
                 $"等 {GetPartnerName()} 也在同一个游戏那里选「是」，才会一起开始。选「否」就可以收回。"
+            )
+            : GetAskWish(ask) is { Kind: WishConfirmAid }
+            ? Lang.Pick(
+                $"The help comes only once {GetPartnerName()} asks the same character for it too. " +
+                "Answer no to take it back.",
+                $"要等 {GetPartnerName()} 也去找同一个角色请求援助，援助才成立。选「否」就可以收回。"
             )
             : GetAskWish(ask) != null
             ? Lang.Pick(
@@ -402,9 +412,11 @@ internal partial class CoopSave {
             ? CreateRaceConfirm(prompt, ref what)
             : IsFleaGamePrompt(prompt, box)
                 ? CreateFleaGameConfirm(prompt, ref what)
-                : IsWishPrompt(prompt, box)
-                    ? GetWishConfirmAsk(prompt, ref what)
-                    : null;
+                : IsAidPrompt(prompt, box)
+                    ? CreateAidConfirm(prompt, ref what)
+                    : IsWishPrompt(prompt, box)
+                        ? GetWishConfirmAsk(prompt, ref what)
+                        : null;
 
         return GetAskWish(ask) is { } wish && wish.Kind == waiting.Kind && wish.Wish == waiting.Wish;
     }
@@ -428,6 +440,7 @@ internal partial class CoopSave {
         var kind = ask.Records[0];
 
         return kind is WishConfirmAccept or WishConfirmTurnIn or WishConfirmRace or WishConfirmFleaGame
+                   or WishConfirmAid
             ? (kind, ask.WishNames[0])
             : null;
     }
@@ -477,6 +490,11 @@ internal partial class CoopSave {
         // No game of the festival is started by one player alone
         if (action != null && IsFleaGamePrompt(action, box)) {
             return CreateFleaGameConfirm(action, ref what);
+        }
+
+        // Nor is a character asked to help in a fight that both of them fight
+        if (action != null && IsAidPrompt(action, box)) {
+            return CreateAidConfirm(action, ref what);
         }
 
         // Both kinds of box are their own single instance and can be open at the same time, so a prompt is only taken
@@ -646,7 +664,12 @@ internal partial class CoopSave {
                             $"{player.Username} said yes too, so you start together.",
                             $"{player.Username} 也选了「是」，一起开始。"
                         )
-                        : $"{player.Username} agreed.");
+                        : IsAidHold(update.Key)
+                        ? Lang.Pick(
+                            $"{player.Username} asked for help too, so the help comes to the fight.",
+                            $"{player.Username} 也请求了援助，援助成立。"
+                        )
+                        : Lang.Pick($"{player.Username} agreed.", $"{player.Username} 同意了。"));
                     break;
                 case WishConfirmNo:
                     AnswerHeldConfirm(update.Key, false, IsRaceHold(update.Key)
@@ -659,7 +682,15 @@ internal partial class CoopSave {
                             $"{player.Username} didn't say yes, so the game didn't start.",
                             $"{player.Username} 没有选「是」，游戏没有开始。"
                         )
-                        : $"{player.Username} didn't agree, so nothing was taken.");
+                        : IsAidHold(update.Key)
+                        ? Lang.Pick(
+                            $"{player.Username} didn't ask for help, so nobody comes to help.",
+                            $"{player.Username} 没有请求援助，援助没有成立。"
+                        )
+                        : Lang.Pick(
+                            $"{player.Username} didn't agree, so nothing was taken.",
+                            $"{player.Username} 没有同意，所以什么都没有拿走。"
+                        ));
                     break;
                 case WishConfirmGone:
                     if (_pendingConfirmAsk is { } waiting && waiting.Update.Key == update.Key) {
@@ -900,6 +931,11 @@ internal partial class CoopSave {
                     $"{player.Username} said yes too, so you start together.",
                     $"{player.Username} 也选了「是」，一起开始。"
                 )
+                : asked.Kind == WishConfirmAid
+                ? Lang.Pick(
+                    $"{player.Username} asked for help too, so the help comes to the fight.",
+                    $"{player.Username} 也请求了援助，援助成立。"
+                )
                 : Lang.Pick(
                     $"{player.Username} said yes at their own prompt too, so it is done.",
                     $"{player.Username} 也在他们自己的选项上选了「是」，成立。"
@@ -925,6 +961,11 @@ internal partial class CoopSave {
                 "both start.",
                 $"{player.Username} 想开始跳蚤游戏。你也去同一个游戏那里选「是」，就一起开始。"
             ),
+            WishConfirmAid => Lang.Pick(
+                $"{player.Username} asked a character for help in a fight. Ask the same character and say yes too, " +
+                "and the help comes for you both.",
+                $"{player.Username} 向一个角色请求了援助。你也去找同一个角色、选「是」，援助才成立。"
+            ),
             WishConfirmAccept => Lang.Pick(
                 $"{player.Username} said yes to taking this wish. Say yes at your own prompt and you both take it.",
                 $"{player.Username} 在他们那边选了接下这个愿望。你走到自己的选项上也选「是」，就一起接下。"
@@ -941,8 +982,9 @@ internal partial class CoopSave {
     /// Whether a question of the partner is one this save has answered by living: a wish it has already taken, when
     /// they are taking it, or one it has already turned in, when they are turning it in.
     ///
-    /// Only wishes. What the story takes for good is asked about every time, because that is a thing being spent and
-    /// two players spending it are spending it twice.
+    /// A character asked to help in a fight is the same: this save has asked them already. What the story takes for
+    /// good is asked about every time, because that is a thing being spent and two players spending it are spending
+    /// it twice.
     /// </summary>
     private static bool IsWishThisSaveAlreadyHas(CoopSaveUpdate update) {
         if (update.Records.Count == 0 || update.WishNames.Count == 0) {
@@ -959,6 +1001,7 @@ internal partial class CoopSave {
         return update.Records[0] switch {
             WishConfirmAccept => wish.IsAccepted || wish.IsCompleted,
             WishConfirmTurnIn => wish.IsCompleted,
+            WishConfirmAid => playerData.GetBool(update.WishNames[0]),
             _ => false
         };
     }
@@ -1211,7 +1254,15 @@ internal partial class CoopSave {
                     $"{GetPartnerName()} didn't say yes in time, so the game didn't start.",
                     $"{GetPartnerName()} 没有及时选「是」，游戏没有开始。"
                 )
-                : $"{GetPartnerName()} didn't answer, so nothing was taken.", HeldEnd.PressNo);
+                : IsAidHold(held.Key)
+                ? Lang.Pick(
+                    $"{GetPartnerName()} didn't ask for help in time, so nobody comes to help.",
+                    $"{GetPartnerName()} 没有及时请求援助，援助没有成立。"
+                )
+                : Lang.Pick(
+                    $"{GetPartnerName()} didn't answer, so nothing was taken.",
+                    $"{GetPartnerName()} 没有回答，所以什么都没有拿走。"
+                ), HeldEnd.PressNo);
         }
 
         if (_partnerConfirm is { } shown && now - shown.Started > WishConfirmTimeout) {
@@ -1235,6 +1286,11 @@ internal partial class CoopSave {
                 ? Lang.Pick(
                     $"You didn't say yes at the same game in time, so the game of {wishWait.PartnerName} didn't start.",
                     $"你没有及时去同一个游戏那里选「是」，所以 {wishWait.PartnerName} 那边的游戏没有开始。"
+                )
+                : wishWait.Kind == WishConfirmAid
+                ? Lang.Pick(
+                    $"You didn't ask the same character for help in time, so {wishWait.PartnerName} gets no help.",
+                    $"你没有及时去找同一个角色请求援助，所以 {wishWait.PartnerName} 那边的援助没有成立。"
                 )
                 : Lang.Pick(
                     $"You didn't get to the same prompt in time, so {wishWait.PartnerName} didn't take it.",

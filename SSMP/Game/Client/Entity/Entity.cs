@@ -1457,6 +1457,13 @@ internal partial class Entity {
         // Also, we do not let this action execute any further since we do not want it to modify our host object
         // before the scene host is determined
         _originalIsActive = self.activate.Value;
+
+        // For its FSM the action is still over, as it is once it has done what it does. Left unfinished, the state it
+        // is in never ends: a room that calls a helper into its fight and then waits for the player stood calling
+        // them for good, and the fight never came.
+        if (!self.everyFrame) {
+            self.Finish();
+        }
     }
 
     /// <summary>
@@ -1466,11 +1473,15 @@ internal partial class Entity {
         // Nothing said under the numbering of a game that is no longer the one answering means anything here
         ResetAnticipation();
 
+        // Switching the object back on makes PlayMaker start its FSMs over there and then, so anything they had
+        // already done is done again. Where that moves the creature is undone at once, since in a game where nobody
+        // switched it off it never moved: one that moves itself out of the room to wait for its wave had moved out as
+        // far again, so its wave brought it back only half the way and the battle waited on it for good.
+        var position = Object.Host.transform.localPosition;
         Object.Host.SetActive(_originalIsActive);
+        Object.Host.transform.localPosition = position;
 
-        // Switching the object back on makes PlayMaker start its FSMs over, so anything they had already done is
-        // left done with no way back. It cannot be put right in the same breath, because PlayMaker has not started
-        // them yet; it is done on the next turn instead.
+        // Where the FSMs had got to is put back on the next turn (PutHostFsmsBackWhereTheyWere)
         _putFsmsBackWhereTheyWere = true;
 
         // Also update the last active variable to account for this potential change

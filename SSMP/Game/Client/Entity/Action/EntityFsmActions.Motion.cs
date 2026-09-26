@@ -851,8 +851,15 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetIsKinematic2d action) {
+        // Nothing sent makes the creature's own body move by itself. The copy shown while the other game runs it is
+        // put where that game has it, frame by frame, and none of its bodies moves by itself
+        // (EntityInitializer.RemoveClientTypes): made to, it fell between two of those frames onto the floor under
+        // where it was drawn, and a player standing there was hit by what looked like thin air. The other way is left
+        // to happen, since a body that does not move by itself is always safe - and it takes back one that a run of
+        // the copy's own FSM here set moving (PlayHere). The room's own body, taken over, keeps the kind the other
+        // game last left it as (BodyTypeComponent), not one its FSM starts with.
         var go = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
-        if (go == null) {
+        if (go == null || !action.isKinematic.Value && go.transform.IsChildOf(action.Fsm.GameObject.transform)) {
             return;
         }
 
