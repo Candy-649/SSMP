@@ -729,6 +729,11 @@ internal class CoopHits {
                 return IHitResponder.Response.None;
             }
 
+            // In a place that each player has to themselves, the local player's hits stay in this game
+            if (PersonalPlaces.Contains(component.gameObject)) {
+                return responder.Hit(hit);
+            }
+
             // A tink that tells a state machine of the room of being struck is no longer the hitter's alone: the bell
             // that it knocks away fell on in the other game
             if (component is TinkEffect tink && hit.IsHeroDamage &&
@@ -782,11 +787,10 @@ internal class CoopHits {
             ? hitComponent.transform.position
             : (Vector3?) null;
 
-        // A part of the copy of something that the scene host runs, like a falling bell or a creature's shield. What
-        // it has for health goes by the hits of enemies instead, and the festival's fleas by their own scoring, which
-        // counts a hit for the player who made it only (FleaGameCoop)
-        var copied = !isRemote && hit.IsHeroDamage && responder is Component part and not HealthManager &&
-                     !(part is TinkEffect flea && FleaGameCoop.IsScoringFlea(flea))
+        // A part of the copy of something that the scene host runs, like a falling bell, a creature's shield or a flea
+        // of a festival game that both players play with the same fleas. What it has for health goes by the hits of
+        // enemies instead
+        var copied = !isRemote && hit.IsHeroDamage && responder is Component part and not HealthManager
             ? FindCopyHolding(part.gameObject)
             : null;
 
@@ -896,9 +900,10 @@ internal class CoopHits {
             return false;
         }
 
+        // In a place that each player has to themselves, the local player's touches stay in this game
         var isRemote = RemoteAttackComponent.IsRemoteAttack(other.gameObject);
         isLocal = !isRemote && IsLocalAttack(other);
-        return (isRemote || isLocal) && IsRoomObject(receiver);
+        return (isRemote || isLocal && !PersonalPlaces.Contains(receiver.gameObject)) && IsRoomObject(receiver);
     }
 
     /// <summary>

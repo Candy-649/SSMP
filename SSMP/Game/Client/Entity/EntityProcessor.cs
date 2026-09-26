@@ -117,6 +117,23 @@ internal class EntityProcessor {
     }
 
     /// <summary>
+    /// Gets the room's own object of the entity whose shown copy the given object is, or is a part of.
+    /// </summary>
+    /// <param name="gameObject">The object to look for.</param>
+    /// <returns>The room's own object of the entity, or null if the object is not in a shown copy.</returns>
+    public static GameObject? GetRoomObjectOfCopy(GameObject gameObject) {
+        for (var current = gameObject.transform; current != null; current = current.parent) {
+            foreach (var entity in _entities.Values) {
+                if (entity.Object.Client == current.gameObject) {
+                    return entity.Object.Host;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Process the game object set in this instance with the parameter set in this instance.
     /// </summary>
     /// <returns>The instance of this class for convenience.</returns>
@@ -141,6 +158,11 @@ internal class EntityProcessor {
         GameObject parentClientObject = null,
         GameObject parentHostObject = null
     ) {
+        // What is in a place that each player has to themselves runs in each game on its own (see PersonalPlaces)
+        if (PersonalPlaces.Contains(gameObject)) {
+            return;
+        }
+
         // Nullable, so that the NotNullWhen of TryGetEntry is what decides it is there, rather than the declaration
         // saying it always is and the assignment having to be taken on trust
         EntityRegistryEntry? foundEntry;

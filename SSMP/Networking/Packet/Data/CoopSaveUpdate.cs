@@ -459,9 +459,11 @@ internal enum CoopSaveUpdateKind : byte {
     RescueEnd,
 
     /// <summary>
-    /// How many fleas the sender has hit in the game of the festival they are playing.
-    /// <see cref="CoopSaveUpdate.Key"/> is the running total rather than a single point, so a lost or repeated
-    /// update cannot make the other game count wrong: it only ever takes the larger of the two.
+    /// Which game of the festival the sender is playing and their score in it, sent whenever either changes.
+    /// <see cref="CoopSaveUpdate.Part"/> is 1 while they play one and 0 otherwise, and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> is then the name of the game's object. <see cref="CoopSaveUpdate.Key"/>
+    /// is the score of the round as a running total rather than a single point, so a lost or repeated update cannot
+    /// make the other game count wrong: it only ever takes the larger of the two.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.

@@ -231,16 +231,25 @@ internal static partial class EntityFsmActions {
     // other game before.
 
     /// <summary>
-    /// Events about the player that a creature has just dealt with, and a player's points in a flea game, which each
-    /// game counts for its own player. Broadcast again in the other game they would land on that game's player: the
-    /// benches, lifts and camera locks that react to the player being hit, grabbed or caught in a tendril, the
-    /// followers and effects that are cleared away, points in a game that player did not play.
+    /// Events about the player that a creature has just dealt with, which each game counts for its own player.
+    /// Broadcast again in the other game they would land on that game's player: the benches, lifts and camera locks
+    /// that react to the player being hit, grabbed or caught in a tendril, the followers and effects that are cleared
+    /// away. Also a festival flea being tinked, which only the game that runs the fleas counts: from it the other
+    /// game's copy of that festival game would finish rounds of its own and send out a rival that only it has.
     /// </summary>
     private static readonly HashSet<string> PlayerEvents = [
         "HERO DAMAGED", "FSM CANCEL", "HORNET CAUGHT", "TENDRIL HORNET CAPTURED", "TENDRIL HORNET ESCAPED",
         "HORNET BONKED", "HORNET BONKED HEAVY", "REGOOPED", "END FOLLOWERS INSTANT", "CLEAR EFFECTS", "DID PARRY",
-        "PARRY REMINDER", "SCORE", "FLEA FAIL", "FLEA TINKED"
+        "PARRY REMINDER", "FLEA TINKED"
     ];
+
+    /// <summary>
+    /// Events of a festival game that a flea sends when it scores or is dropped. Both players play such a game with the
+    /// same fleas, so they count in both games: a point is a point for both players, whoever hit the flea or got past
+    /// it, and a dropped flea counts against both. Only the game the flea belongs to takes them, though: broadcast to
+    /// the whole room, a point would also land on another game of the festival that the local player is playing there.
+    /// </summary>
+    private static readonly HashSet<string> GameEvents = ["SCORE", "FLEA FAIL"];
 
     /// <summary>
     /// The game's own lists of what is registered for each event, by the hash of the event's name.
@@ -310,9 +319,19 @@ internal static partial class EntityFsmActions {
             return;
         }
 
+        // An event of a game goes only to what is registered on the way up from where the flea belongs in the room,
+        // which is where the room's own copy of it still sits: it sleeps here, so it never flies off
+        Transform? within = null;
+        if (GameEvents.Contains(eventName)) {
+            within = EntityProcessor.GetRoomObjectOfCopy(fsm.GameObject)?.transform;
+            if (within == null) {
+                return;
+            }
+        }
+
         BossRoomCoop.RunAsNetworkSender(fsm, () => {
             foreach (var register in list) {
-                if (!IsLeftToTheSceneHost(register)) {
+                if (!IsLeftToTheSceneHost(register) && (within == null || within.IsChildOf(register.transform))) {
                     register.ReceiveEvent();
                 }
             }

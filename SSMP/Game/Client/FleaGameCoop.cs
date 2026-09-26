@@ -2,42 +2,40 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using HutongGames.PlayMaker;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
-using SSMP.Util;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client;
 
 /// <summary>
-/// Co-op rules for the games of the festival, where hitting the flying fleas scores points.
+/// Co-op rules for the games of the festival, where the fleas that fly about are hit or dodged for points.
 ///
-/// The fleas are entities, so the scene host runs their state machines and the other game only receives where they
-/// are. That keeps both players looking at the same fleas, but it also means the copies in the game that does not
-/// control them never react to being hit: their state machines are switched off, so the hit that would send the
-/// scoring event lands on nothing. The game that controls them has the opposite problem in the same place, since a
-/// copy of the partner's attack is not allowed to tink at all, so it can never score for them either.
+/// One of the three games is played by each player on their own (see <see cref="PersonalPlaces"/>): each game sends
+/// out its own fleas for its own player, the partner does not see them, and the score, the saving and how hard it gets
+/// are all as when playing alone. Going for the same fleas there left one of the two players with nothing to land on.
 ///
-/// The score of each player is theirs alone and their own game saves it, so nothing is taken over here. In the game
-/// that does not control the fleas, a hit of the local player that really did tink a flea broadcasts the scoring
-/// event that its own fleas can no longer send, and from there that game counts it, shows it and saves it exactly
-/// as it does when playing alone. The game that controls the fleas needs none of that and is left untouched, and so
-/// is playing alone.
+/// The other two are played with the same fleas. The fleas are entities, so the scene host runs them and the other
+/// game only shows where they are. A hit of the other game's player on a flea goes to the scene host like a hit on any
+/// other copy (see CoopHits), so the flea answers it there, and what the fleas then say about the game - a point, a
+/// flea tinked or dropped - is replayed in the other game's copy of that game (see EntityFsmActions). So the two
+/// players score together: a point is a point for both, whoever hit the flea or got past it, and a dropped flea counts
+/// against both. Each game still counts, shows and saves the score as when playing alone.
 ///
-/// Both games do keep their own running count of the fleas they hit and tell the other, so that each player can be
-/// shown where the two of them stand. That count is sent as a total rather than as single points, so a lost or a
-/// repeated message cannot make it drift.
+/// Since the scene host's game sends those fleas out, a round of such a game goes on only while the scene host plays
+/// it: once they have played along and their round is over, the other player's round of the same game ends too.
+/// Putting the fleas away at the end of the scene host's round waits until the other player's round is over as well.
 ///
-/// Known limit: the game that does not control the fleas cannot see what state a flea is in, because the copy's
-/// state machine is off. It therefore counts a tink that the controlling game might not have counted, such as one
-/// on a flea that was already falling. Feedback stays immediate for the player who swung, which is the rule this
-/// mod follows everywhere else.
+/// Both games tell each other which game their player is in and the score of the round, so that each player can be
+/// shown where the other stands. The score is sent as a total rather than as single points, so a lost or a repeated
+/// message cannot make it drift.
 /// </summary>
 internal class FleaGameCoop {
     /// <summary>
@@ -46,22 +44,9 @@ internal class FleaGameCoop {
     private const BindingFlags InstanceFlags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
 
     /// <summary>
-    /// Event that a flea sends when it was hit. Every game listens for it: the one that counts and saves the score,
-    /// and the one that decides what to send out next, which in one of the three games gets harder for every point.
-    /// </summary>
-    private const string ScoreEventName = "SCORE";
-
-    /// <summary>
     /// Events that mean a game of the festival is starting over, so the counts of both players begin again.
     /// </summary>
     private static readonly string[] ResetEventNames = ["GAME BEGIN PLAY", "RESET FLEA GAMES"];
-
-    /// <summary>
-    /// Name of the state machine of a game that decides what to send out next. In one of the three games it makes
-    /// the game harder for every point scored; the other two never answer to a point at all, so telling all of them
-    /// is both simpler and safer than picking one out by name.
-    /// </summary>
-    private const string DirectorFsmName = "Game Specific Control";
 
     /// <summary>
     /// Name of the state machine that runs one of the games, counts the score and saves it.
@@ -76,27 +61,24 @@ internal class FleaGameCoop {
     private static readonly string[] IdleStateNames = ["Init", "Inactive"];
 
     /// <summary>
+    /// Name of the variable in which a game counts the score of the round being played.
+    /// </summary>
+    private const string ScoreVariableName = "Score";
+
+    /// <summary>
     /// Event that puts every flea away again at the end of a game.
     /// </summary>
     private const string ResetEventName = "RESET FLEA GAMES";
 
     /// <summary>
-    /// The entity types of the fleas that can be hit for points. The fleas that fly in before a game starts are left
-    /// out, since their state machine has no scoring state at all.
+    /// Event that ends a round of a game, as a game sends it when the last flea it allows has been dropped.
     /// </summary>
-    private static readonly EntityType[] ScoringFleaTypes = [
-        EntityType.BellfleaBouncer,
-        EntityType.BellfleaBouncerGiant,
-        EntityType.BellfleaJuggler,
-        EntityType.BellfleaJugglerGiant,
-        EntityType.BellfleaSwooper
-    ];
+    private const string GameEndEventName = "GAME END";
 
     /// <summary>
-    /// Cache telling whether a tink belongs to a flea that scores. The hook runs for every tinkable object in the
-    /// game, so the walk up the hierarchy is done once per object instead of once per hit.
+    /// The states of a game that take <see cref="GameEndEventName"/>: once it has begun, and while it is playing.
     /// </summary>
-    private static readonly ConditionalWeakTable<TinkEffect, BoxedBool> ScoringFleaTinks = [];
+    private static readonly string[] EndableStateNames = ["Transitioning - Can End", "Playing"];
 
     /// <summary>
     /// Reflected field with the text a badge of the score board draws its number into. A badge added at runtime has
@@ -106,9 +88,14 @@ internal class FleaGameCoop {
         typeof(ScoreBoardUIBadgeBase).GetField("scoreText", InstanceFlags);
 
     /// <summary>
-    /// The net client, for telling the partner how many fleas the local player has hit.
+    /// The net client, for telling the partner which game the local player is in.
     /// </summary>
     private readonly NetClient _netClient;
+
+    /// <summary>
+    /// The data of the other players, which tells whether the partner is in the local player's room.
+    /// </summary>
+    private readonly Dictionary<ushort, ClientPlayerData> _playerData;
 
     /// <summary>
     /// The entity manager, which tells whether this game controls the entities of the scene.
@@ -121,11 +108,6 @@ internal class FleaGameCoop {
     private readonly Func<ushort?> _getPartnerId;
 
     /// <summary>
-    /// Hook that notices a hit of the local player landing on a flea.
-    /// </summary>
-    private Hook? _tinkEffectHitHook;
-
-    /// <summary>
     /// Hook that notices a game of the festival starting over.
     /// </summary>
     private Hook? _eventRegisterSendEventHook;
@@ -136,9 +118,59 @@ internal class FleaGameCoop {
     private Hook? _scoreBoardOnEnableHook;
 
     /// <summary>
-    /// How many fleas the local player has hit in the game being played.
+    /// The state machines that run the games of the festival in the loaded rooms. They are looked up again after a
+    /// room has loaded rather than whenever they are needed, since that looks through every state machine there is.
     /// </summary>
-    private ulong _localScore;
+    private PlayMakerFSM[] _masters = [];
+
+    /// <summary>
+    /// The names of the objects of <see cref="_masters"/>, which is how the two games tell each other which game.
+    /// </summary>
+    private string[] _masterNames = [];
+
+    /// <summary>
+    /// The variables in which <see cref="_masters"/> count the score.
+    /// </summary>
+    private FsmInt?[] _masterScores = [];
+
+    /// <summary>
+    /// Whether a room has loaded since the games were last looked up.
+    /// </summary>
+    private bool _mastersStale = true;
+
+    /// <summary>
+    /// The game the partner was last told the local player is in, by the name of its object, or null for none.
+    /// </summary>
+    private string? _sentGame;
+
+    /// <summary>
+    /// The score the partner was last told the local player has in <see cref="_sentGame"/>.
+    /// </summary>
+    private int _sentScore;
+
+    /// <summary>
+    /// The partner that <see cref="_sentGame"/> and <see cref="_sentScore"/> were told to. A partner who comes back
+    /// has forgotten them, so they are told again.
+    /// </summary>
+    private ushort? _sentTo;
+
+    /// <summary>
+    /// The number the last message about the local player's game went under. They are only sent on a change, and a
+    /// lost one is sent again later, which can bring it in after a newer one: the number lets the partner tell. It
+    /// starts from the clock, so that it still counts up when this game is started again.
+    /// </summary>
+    private ulong _sentSequence = (ulong) DateTime.UtcNow.Ticks;
+
+    /// <summary>
+    /// The number of the newest message about the partner's game so far, and whose it was.
+    /// </summary>
+    private (ushort Id, ulong Sequence)? _partnerSequence;
+
+    /// <summary>
+    /// Whether the scene host has been in the game that the local player is in during this round of it, which a round
+    /// of a game played with the same fleas needs in order to have any.
+    /// </summary>
+    private bool _sceneHostPlayedAlong;
 
     /// <summary>
     /// How many fleas the partner has hit in the game being played.
@@ -146,16 +178,9 @@ internal class FleaGameCoop {
     public int PartnerScore { get; private set; }
 
     /// <summary>
-    /// How many of the partner's points the game that runs the fleas has already been told about. Only the game
-    /// that runs them makes them harder, and both players see the fleas it sends out, so a point the partner scores
-    /// has to reach it or the two of them would be playing the same fleas at different speeds.
+    /// The game the partner is in, by the name of its object, or null when they are in none.
     /// </summary>
-    private int _partnerScoreFed;
-
-    /// <summary>
-    /// Whether the partner is still in a game of the festival.
-    /// </summary>
-    private bool _partnerPlaying;
+    private string? _partnerGame;
 
     /// <summary>
     /// Whether putting the fleas away was held back because the partner was still playing, and so still has to
@@ -188,8 +213,14 @@ internal class FleaGameCoop {
     /// </summary>
     private Hook? _outroReadyHook;
 
-    public FleaGameCoop(NetClient netClient, EntityManager entityManager, Func<ushort?> getPartnerId) {
+    public FleaGameCoop(
+        NetClient netClient,
+        Dictionary<ushort, ClientPlayerData> playerData,
+        EntityManager entityManager,
+        Func<ushort?> getPartnerId
+    ) {
         _netClient = netClient;
+        _playerData = playerData;
         _entityManager = entityManager;
         _getPartnerId = getPartnerId;
     }
@@ -198,13 +229,6 @@ internal class FleaGameCoop {
     /// Registers the hooks of the flea games.
     /// </summary>
     public void RegisterHooks() {
-        var hitMethod = typeof(TinkEffect).GetMethod("Hit", InstanceFlags);
-        if (hitMethod == null) {
-            Logger.Error("TinkEffect does not declare Hit; the flea games were not hooked");
-        } else {
-            _tinkEffectHitHook = new Hook(hitMethod, OnTinkEffectHit);
-        }
-
         var sendMethod = typeof(EventRegister).GetMethod(
             "SendEvent",
             BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
@@ -233,17 +257,23 @@ internal class FleaGameCoop {
         }
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
+        SceneManager.sceneLoaded += OnSceneLoaded;
+
+        // Rooms loaded while unhooked were not noticed
+        _mastersStale = true;
     }
 
     /// <summary>
     /// Deregisters the hooks of the flea games.
     /// </summary>
     public void DeregisterHooks() {
-        _tinkEffectHitHook?.Dispose();
-        _tinkEffectHitHook = null;
-
         _eventRegisterSendEventHook?.Dispose();
         _eventRegisterSendEventHook = null;
+
+        // Putting the fleas away was held back for the partner, who is not watching any more
+        if (_resetHeld && GetLocalGame() == null) {
+            PutFleasAway();
+        }
 
         _scoreBoardOnEnableHook?.Dispose();
         _scoreBoardOnEnableHook = null;
@@ -252,32 +282,38 @@ internal class FleaGameCoop {
         _outroReadyHook = null;
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
+        SceneManager.sceneLoaded -= OnSceneLoaded;
 
         _outroReadyOf.Clear();
         _sentOutroReady = null;
         _sentOutroReadyTo = null;
 
+        _sentGame = null;
+        _sentScore = 0;
+        _sentTo = null;
+        _partnerGame = null;
+        _partnerSequence = null;
+        _sceneHostPlayedAlong = false;
+
         ForgetScores();
     }
 
     /// <summary>
-    /// Takes how many fleas the partner has hit. The update carries their total rather than a single point, so one
-    /// that arrives late or twice can only ever be ignored.
+    /// Takes which game the partner is in and their score in it. The score is their total rather than a single
+    /// point, and a message that was overtaken on the way is left out, so one that arrives late or twice can only ever
+    /// be ignored.
     /// </summary>
     /// <param name="player">The player who sent it.</param>
     /// <param name="update">The update.</param>
     public void OnPartnerScore(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_getPartnerId() != player.Id) {
+        if (_getPartnerId() != player.Id ||
+            _partnerSequence is { } newest && newest.Id == player.Id && update.Sequence <= newest.Sequence) {
             return;
         }
 
+        _partnerSequence = (player.Id, update.Sequence);
+        _partnerGame = update.Part != 0 ? update.ObjectPath : null;
         PartnerScore = System.Math.Max(PartnerScore, (int) update.Key);
-        _partnerPlaying = update.Part != 0;
-
-        if (_entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
-            FeedPartnerPoints();
-            ReleaseHeldReset();
-        }
     }
 
     /// <summary>
@@ -285,10 +321,17 @@ internal class FleaGameCoop {
     /// still playing, since they are watching these same fleas, and nothing else would ever do it afterwards.
     /// </summary>
     private void ReleaseHeldReset() {
-        if (!_resetHeld || _partnerPlaying || IsLocalPlaying()) {
+        if (!_resetHeld || PartnerPlaysSharedGame() || GetLocalGame() != null) {
             return;
         }
 
+        PutFleasAway();
+    }
+
+    /// <summary>
+    /// Puts away the fleas of every game of the festival, as a game does at the end of its round.
+    /// </summary>
+    private void PutFleasAway() {
         _resetHeld = false;
 
         try {
@@ -299,81 +342,37 @@ internal class FleaGameCoop {
     }
 
     /// <summary>
-    /// Makes the game as hard for both players as the better of the two has earned. Only the game that runs the
-    /// fleas sends them out, so only it decides the difficulty, and its own player's points already reach it. This
-    /// hands it the partner's, without going near the score that each player keeps and saves for themselves.
+    /// Ends the local player's round of a game played with the same fleas once the scene host has played along and is
+    /// no longer in that game. The scene host's game sends those fleas out, so nothing would come any more: the round
+    /// ends the way the game ends it when the last flea it allows has been dropped, and what was scored is saved as it
+    /// is then. Checked every frame rather than when the scene host's round ends, because a round that is only just
+    /// starting does not take the end yet.
     /// </summary>
-    private void FeedPartnerPoints() {
-        if (_partnerScoreFed >= PartnerScore) {
+    private void EndRoundWithoutSceneHost() {
+        if (GetLocalGame() is not { } index || PersonalPlaces.Contains(_masters[index].gameObject)) {
+            _sceneHostPlayedAlong = false;
             return;
         }
 
-        try {
-            var directors = FindFsms(DirectorFsmName);
-            if (directors.Length == 0) {
-                return;
-            }
-
-            for (; _partnerScoreFed < PartnerScore; _partnerScoreFed++) {
-                foreach (var director in directors) {
-                    if (director != null) {
-                        director.SendEvent(ScoreEventName);
-                    }
-                }
-            }
-        } catch (Exception e) {
-            Logger.Warn($"Could not pass on a point of the partner: {e.GetType()}, {e.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Hook for <see cref="TinkEffect.Hit"/>. A hit of the local player that tinked a flea counts for them, and in
-    /// a game that does not control the fleas it also scores, which the flea's own state machine cannot do while it
-    /// is off.
-    /// </summary>
-    /// <param name="orig">The original method.</param>
-    /// <param name="self">The tink that was hit.</param>
-    /// <param name="hit">The hit.</param>
-    /// <returns>What the tink answered to the hit.</returns>
-    private IHitResponder.HitResponse OnTinkEffectHit(
-        Func<TinkEffect, HitInstance, IHitResponder.HitResponse> orig,
-        TinkEffect self,
-        HitInstance hit
-    ) {
-        var response = orig(self, hit);
-
-        // Nothing tinked, so there is nothing to score
-        if (response.response == IHitResponder.Response.None) {
-            return response;
+        var game = _masterNames[index];
+        if (_partnerGame == game) {
+            _sceneHostPlayedAlong = true;
+            return;
         }
 
-        // Only a two-player save has a partner to be shown against
-        if (_getPartnerId() == null) {
-            return response;
+        if (!_sceneHostPlayedAlong || _masters[index].Fsm?.ActiveState is not { } state ||
+            Array.IndexOf(EndableStateNames, state.Name) < 0) {
+            return;
         }
 
-        // A copy of the partner's attack scores in their game, not in this one
-        if (RemoteAttackComponent.IsRemoteAttack(hit.Source)) {
-            return response;
-        }
+        _sceneHostPlayedAlong = false;
+        Logger.Info($"The scene host is no longer in '{game}', so the local player's round of it ends too");
 
         try {
-            if (!IsScoringFlea(self)) {
-                return response;
-            }
-
-            // The game that controls the fleas already scores through their own state machines
-            if (!_entityManager.IsSceneHost) {
-                EventRegister.SendEvent(ScoreEventName, null);
-            }
-
-            _localScore++;
-            SendLocalScore();
+            EventRegister.SendEvent(GameEndEventName, null);
         } catch (Exception e) {
-            Logger.Warn($"Could not score a hit on a flea: {e.GetType()}, {e.Message}");
+            Logger.Warn($"Could not end the round of '{game}': {e.GetType()}, {e.Message}");
         }
-
-        return response;
     }
 
     /// <summary>
@@ -384,11 +383,12 @@ internal class FleaGameCoop {
     /// <param name="eventName">The event being sent.</param>
     /// <param name="source">The object that sent it.</param>
     private void OnEventRegisterSendEvent(Action<string, GameObject> orig, string eventName, GameObject source) {
-        // Putting the fleas away is what the game that runs them does when its own player is finished. The other
-        // player watches those same fleas, so doing it while they are still playing would reparent, stop and hide
-        // every flea in the middle of their game. It waits until they are finished too.
-        if (eventName == ResetEventName && _partnerPlaying && _getPartnerId() != null &&
-            _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost) {
+        // Putting the fleas away is what the game that runs them does when its own player is finished. A partner who
+        // plays with those same fleas would have every flea reparented, stopped and hidden in the middle of their
+        // round, so it waits until they are finished too. The fleas of a game that each player has to themselves are
+        // put away along with the rest then.
+        if (eventName == ResetEventName && _getPartnerId() != null && _entityManager.IsSceneRoleDetermined &&
+            _entityManager.IsSceneHost && PartnerPlaysSharedGame()) {
             _resetHeld = true;
             return;
         }
@@ -401,25 +401,38 @@ internal class FleaGameCoop {
     }
 
     /// <summary>
-    /// Begins both counts again, and tells the partner so that neither is left showing the last game.
+    /// Begins the count shown for the partner again, and forgets putting the fleas away if that was held back, since
+    /// it has just happened.
     /// </summary>
     private void ForgetScores() {
         PartnerScore = 0;
-        _partnerScoreFed = 0;
-        _partnerPlaying = false;
         _resetHeld = false;
-        _localScore = 0;
-
-        // Always told, even from nothing to nothing, because this is also how the partner hears that the local
-        // player is no longer in a game and that the fleas may be put away
-        SendLocalScore();
     }
 
     /// <summary>
-    /// Tells the partner how many fleas the local player has hit in the game being played.
+    /// Tells the partner which game the local player is in and their score in it, whenever either changes, including
+    /// when they are no longer in a game: that is how the partner hears that the fleas may be put away.
     /// </summary>
-    private void SendLocalScore() {
-        Send(CoopSaveUpdateKind.FleaGameScore, _localScore, (ushort) (IsLocalPlaying() ? 1 : 0));
+    /// <param name="partnerId">The ID of the partner.</param>
+    private void SendLocalGame(ushort partnerId) {
+        if (!_netClient.IsConnected) {
+            return;
+        }
+
+        var index = GetLocalGame();
+        var game = index is { } playing ? _masterNames[playing] : null;
+        var score = index is { } scored && _masterScores[scored] is { } variable ? variable.Value : 0;
+        if (game == _sentGame && score == _sentScore && partnerId == _sentTo) {
+            return;
+        }
+
+        _sentGame = game;
+        _sentScore = score;
+        _sentTo = partnerId;
+        Send(
+            CoopSaveUpdateKind.FleaGameScore, (ulong) System.Math.Max(score, 0), (ushort) (game != null ? 1 : 0),
+            game, ++_sentSequence
+        );
     }
 
     /// <summary>
@@ -428,7 +441,9 @@ internal class FleaGameCoop {
     /// <param name="kind">What is being told.</param>
     /// <param name="key">The running count it carries, if any.</param>
     /// <param name="part">The flag it carries, if any.</param>
-    private void Send(CoopSaveUpdateKind kind, ulong key, ushort part) {
+    /// <param name="game">The game it is about, by the name of its object, if any.</param>
+    /// <param name="sequence">The number it goes under, if any.</param>
+    private void Send(CoopSaveUpdateKind kind, ulong key, ushort part, string? game = null, ulong sequence = 0) {
         if (_getPartnerId() is not { } partnerId || !_netClient.IsConnected) {
             return;
         }
@@ -438,22 +453,67 @@ internal class FleaGameCoop {
                 TargetId = partnerId,
                 Kind = kind,
                 Key = key,
-                Part = part
+                Part = part,
+                ObjectPath = game ?? "",
+                Sequence = sequence
             }
         );
     }
 
     /// <summary>
-    /// Returns whether the local player is in a game of the festival.
+    /// Gets which game of the festival the local player is in, as an index into <see cref="_masters"/>, or null when
+    /// they are in none. A game whose state machine has not started, as in a room where the festival is not on, is
+    /// one that nobody plays.
     /// </summary>
-    private static bool IsLocalPlaying() {
-        foreach (var master in FindFsms(MasterFsmName)) {
-            if (master != null && Array.IndexOf(IdleStateNames, master.ActiveStateName) < 0) {
-                return true;
+    private int? GetLocalGame() {
+        RefreshMasters();
+
+        for (var index = 0; index < _masters.Length; index++) {
+            var master = _masters[index];
+            if (master != null && master.Fsm?.ActiveState is { } state &&
+                Array.IndexOf(IdleStateNames, state.Name) < 0) {
+                return index;
             }
         }
 
-        return false;
+        return null;
+    }
+
+    /// <summary>
+    /// Whether the partner is in a game that both players play with the same fleas, which this game sends out while
+    /// it is the scene host, and in this room to play it.
+    /// </summary>
+    private bool PartnerPlaysSharedGame() {
+        if (_partnerGame == null || _getPartnerId() is not { } partnerId ||
+            !_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+            return false;
+        }
+
+        RefreshMasters();
+
+        var index = Array.IndexOf(_masterNames, _partnerGame);
+        return index >= 0 && _masters[index] != null && !PersonalPlaces.Contains(_masters[index].gameObject);
+    }
+
+    /// <summary>
+    /// Looks the games of the festival up again if a room has loaded since they were last looked up.
+    /// </summary>
+    private void RefreshMasters() {
+        if (!_mastersStale) {
+            return;
+        }
+
+        _mastersStale = false;
+        _masters = FindFsms(MasterFsmName);
+        _masterNames = _masters.Select(master => master.gameObject.name).ToArray();
+        _masterScores = _masters.Select(master => master.FsmVariables.FindFsmInt(ScoreVariableName)).ToArray();
+    }
+
+    /// <summary>
+    /// Callback for a room having loaded, after which the games of the festival are looked up again.
+    /// </summary>
+    private void OnSceneLoaded(Scene scene, LoadSceneMode mode) {
+        _mastersStale = true;
     }
 
     /// <summary>
@@ -494,13 +554,26 @@ internal class FleaGameCoop {
     }
 
     /// <summary>
-    /// Tells the partner when the local player has won every game of the festival, or no longer has. Read from the
-    /// three games one by one rather than from the answer above, which this game's own hook has already changed.
+    /// Tells the partner which game the local player is in, and when they have won every game of the festival or no
+    /// longer have. The latter is read from the three games one by one rather than from the answer above, which this
+    /// game's own hook has already changed. Also what waits on the partner's game: putting the fleas away for the
+    /// scene host, and ending a round without the scene host for the other player.
     /// </summary>
     /// <param name="heroController">The hero controller that updated.</param>
     private void OnHeroControllerUpdate(HeroController heroController) {
         if (_getPartnerId() is not { } partnerId) {
             return;
+        }
+
+        SendLocalGame(partnerId);
+
+        if (_entityManager.IsSceneRoleDetermined) {
+            if (_entityManager.IsSceneHost) {
+                _sceneHostPlayedAlong = false;
+                ReleaseHeldReset();
+            } else {
+                EndRoundWithoutSceneHost();
+            }
         }
 
         var playerData = PlayerData.instance;
@@ -575,31 +648,6 @@ internal class FleaGameCoop {
 
         row.SetActive(true);
         return true;
-    }
-
-    /// <summary>
-    /// Returns whether a tink belongs to a flea of a game that can be hit for points. The tinks sit below the flea,
-    /// so its entry is looked for on the objects above them.
-    /// </summary>
-    /// <param name="tink">The tink that was hit.</param>
-    /// <returns>Whether hitting it scores a point.</returns>
-    internal static bool IsScoringFlea(TinkEffect tink) {
-        if (ScoringFleaTinks.TryGetValue(tink, out var known)) {
-            return known.Value;
-        }
-
-        var isScoringFlea = false;
-        for (var transform = tink.transform; transform != null; transform = transform.parent) {
-            if (!EntityRegistry.TryGetEntry(transform.gameObject, out var entry)) {
-                continue;
-            }
-
-            isScoringFlea = ScoringFleaTypes.Contains(entry.Type);
-            break;
-        }
-
-        ScoringFleaTinks.Add(tink, new BoxedBool { Value = isScoringFlea });
-        return isScoringFlea;
     }
 }
 

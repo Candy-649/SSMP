@@ -338,7 +338,7 @@ internal class ClientManager : IClientManager {
         _coopHits = new CoopHits(
             netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedPartnerId
         );
-        _fleaGameCoop = new FleaGameCoop(netClient, _entityManager, () => _coopSave.CheckedPartnerId);
+        _fleaGameCoop = new FleaGameCoop(netClient, _playerData, _entityManager, () => _coopSave.CheckedPartnerId);
         _coopStateCheck = new CoopStateCheck(
             netClient, _playerData, _entityManager, _coopSave, () => _coopSave.CheckedPartnerId
         );
