@@ -118,7 +118,8 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For key dialogue, the amounts of what it took and gave in <see cref="ItemIds"/>, and for the progress of wishes,
-    /// the progress of the targets in <see cref="WishNames"/>.
+    /// the progress of the targets in <see cref="WishNames"/>. For a trap going off, the dice of the sender's game as
+    /// it went off (see <c>SharedDice</c>).
     /// </summary>
     public List<int> Amounts { get; set; } = [];
 

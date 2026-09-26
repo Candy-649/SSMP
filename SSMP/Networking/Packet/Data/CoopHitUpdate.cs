@@ -130,5 +130,14 @@ internal enum CoopHitKind : byte {
     /// <see cref="CoopHitUpdate.Responder"/> to the FSM at <see cref="CoopHitUpdate.Index"/> of the entity, so that
     /// it happens where the entity is run as well.
     /// </summary>
-    EntityTouch
+    EntityTouch,
+
+    /// <summary>
+    /// A state machine of a shared object of the world that a tink told of an attack of the sender, like a bell struck
+    /// upwards. It is found by its path, its name in <see cref="CoopHitUpdate.Responder"/> and its place among those
+    /// of that name in <see cref="CoopHitUpdate.Index"/>. <see cref="CoopHitUpdate.Hit"/> holds the events it was told
+    /// in order, each with the dice of the sender's game as it was told; the other game tells it the same events with
+    /// the same dice.
+    /// </summary>
+    ObjectEvents
 }

@@ -430,9 +430,11 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
-        // Traps of the world ride along with this hook rather than putting a second one on the same method
+        // Traps of the world ride along with this hook rather than putting a second one on the same method. One that
+        // goes off is sent once it has, with what it rolled
+        CoopSaveUpdate? trap = null;
         try {
-            OnWorldTriggerSwitch(self, toState);
+            trap = OnWorldTriggerSwitch(self, toState);
         } catch (Exception e) {
             LogInteractionError(e);
         }
@@ -464,7 +466,11 @@ internal partial class CoopSave {
         var previousCapture = _captureFsm;
         _captureFsm = GetCaptureFsm(self, mechanism);
         try {
-            orig(self, toState);
+            if (trap != null) {
+                SetOffWorldTrigger(trap, () => orig(self, toState));
+            } else {
+                orig(self, toState);
+            }
         } finally {
             _captureFsm = previousCapture;
         }

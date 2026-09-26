@@ -110,6 +110,11 @@ internal class CoopHits {
     private static readonly Dictionary<Type, bool> IsPersonalByType = new();
 
     /// <summary>
+    /// The state machine that a tink tells of being struck, if it tells one (see <see cref="HitRoomTink"/>).
+    /// </summary>
+    private static readonly FieldInfo? TinkFsmField = typeof(TinkEffect).GetField("fsm", InstanceFlags);
+
+    /// <summary>
     /// Whether objects of a type count as objects of the room when spawned, for the types that were looked up.
     /// </summary>
     private static readonly Dictionary<Type, bool> IsReplayedWhenSpawnedByType = new();
@@ -226,6 +231,18 @@ internal class CoopHits {
     /// </summary>
     private List<(byte FsmIndex, string EventName)> _toldCopy = [];
 
+    /// <summary>
+    /// The state machine of the room that a tink of the local player's hit tells of it, while the hit is made (see
+    /// <see cref="HitRoomTink"/>).
+    /// </summary>
+    private PlayMakerFSM? _toldByTink;
+
+    /// <summary>
+    /// What the tink told <see cref="_toldByTink"/> during the hit and it answered: each event, with the dice as it was
+    /// told.
+    /// </summary>
+    private readonly List<(string EventName, int[] Dice)> _toldRoom = [];
+
     public CoopHits(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
@@ -304,6 +321,12 @@ internal class CoopHits {
             typeof(PlayMakerFSM).GetMethod(nameof(PlayMakerFSM.SendEvent), InstanceFlags, null, [typeof(string)], null),
             new Action<Action<PlayMakerFSM, string>, PlayMakerFSM, string>(OnFsmSendEvent)
         );
+
+        // The dice that go with what the local player sets off and come with what the partner did
+        foreach (var (method, detour) in SharedDice.GetHooks()) {
+            AddHook(method, detour);
+        }
+
         AddHook(
             GetTouchMethod(typeof(PlayMakerTriggerEnter2D), "OnTriggerEnter2D"),
             new Action<Action<PlayMakerTriggerEnter2D, Collider2D>, PlayMakerTriggerEnter2D, Collider2D>(OnTouchEnter)
@@ -403,6 +426,11 @@ internal class CoopHits {
             return;
         }
 
+        if (update.Kind == CoopHitKind.ObjectEvents) {
+            ReplayObjectEvents(update);
+            return;
+        }
+
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
         if (type == null || !typeof(IHitResponder).IsAssignableFrom(type)) {
             NotReplayed(update, "hit", "that kind of object is unknown here");
@@ -454,7 +482,9 @@ internal class CoopHits {
         try {
             // An object that takes a hit only while the player is near goes by where the partner stood in their game
             SetReplayedRanges(target, source.Ranges);
-            answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(() => response = responder.Hit(hit)));
+            answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
+                () => SharedDice.Throw(source.Dice, () => response = responder.Hit(hit))
+            ));
         } catch (Exception e) {
             Logger.Warn($"Could not replay a hit of the partner on {update.Path}:\n{e}");
             NoteTraffic(update.Scene, update.Path, $"got a hit on {update.Responder}, whose replay failed");
@@ -693,6 +723,13 @@ internal class CoopHits {
                 return IHitResponder.Response.None;
             }
 
+            // A tink that tells a state machine of the room of being struck is no longer the hitter's alone: the bell
+            // that it knocks away fell on in the other game
+            if (component is TinkEffect tink && hit.IsHeroDamage &&
+                TinkFsmField?.GetValue(tink) is PlayMakerFSM told && told != null) {
+                return HitRoomTink(partnerId, tink, told, hit);
+            }
+
             if (IsPersonal(component.GetType())) {
                 return responder.Hit(hit);
             }
@@ -702,9 +739,11 @@ internal class CoopHits {
             // machines moved on to another state
             var update = hit.IsHeroDamage ? CreateUpdate(partnerId, component, hit) : null;
             var response = default(IHitResponder.HitResponse);
-            var answered = AnswersAttack(() => response = responder.Hit(hit)) ||
+            int[] dice = [];
+            var answered = AnswersAttack(() => dice = SharedDice.Record(() => response = responder.Hit(hit))) ||
                            response.response != IHitResponder.Response.None;
             if (update != null && answered && _netClient.IsConnected) {
+                update.Hit = SharedDice.Append(update.Hit, dice);
                 _netClient.UpdateManager.SetCoopHitUpdate(update);
                 NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder}");
             } else if (update != null && !answered) {
@@ -866,7 +905,9 @@ internal class CoopHits {
     private void OnLocalAttackTouch(Component receiver, Collider2D attack, Action touch) {
         // The update is made before the touch, since a touch can break the object and move its parts
         var update = _getPartnerId() is { } partnerId ? CreateTouchUpdate(partnerId, receiver, attack) : null;
-        if (AnswersAttack(touch) && update != null && _netClient.IsConnected) {
+        int[] dice = [];
+        if (AnswersAttack(() => dice = SharedDice.Record(touch)) && update != null && _netClient.IsConnected) {
+            update.Hit = SharedDice.Append(update.Hit, dice);
             _netClient.UpdateManager.SetCoopHitUpdate(update);
             NoteTraffic(update.Scene, update.Path, $"sent a touch of {attack.name} through {update.Responder}");
         }
@@ -1204,7 +1245,9 @@ internal class CoopHits {
     /// <summary>
     /// Hook for <see cref="PlayMakerFSM.SendEvent(string)"/>. While the local player's hit lands on a copy (see
     /// <see cref="HitCopy"/>), an event for one of the copy's own state machines is written down to go to the scene
-    /// host rather than told: the copy's state machines stay where the scene host says they are.
+    /// host rather than told: the copy's state machines stay where the scene host says they are. While a tink of the
+    /// local player's hit tells a state machine of the room (see <see cref="HitRoomTink"/>), what it tells is told and
+    /// written down with what it rolled, to go to the partner.
     /// </summary>
     private void OnFsmSendEvent(Action<PlayMakerFSM, string> orig, PlayMakerFSM self, string eventName) {
         if (_copyBeingHit is { } copied) {
@@ -1215,7 +1258,171 @@ internal class CoopHits {
             }
         }
 
+        // Told here as usual, and written down with the dice it rolled, for the partner's game to be told the same with
+        // the same dice. An event that leads nowhere from where the state machine is does nothing. What the state
+        // machine tells itself on the way is not the tink's: over there it follows from this again by itself.
+        if (ReferenceEquals(self, _toldByTink) && Answers(self, eventName)) {
+            var told = _toldByTink;
+            _toldByTink = null;
+            try {
+                _toldRoom.Add((eventName, SharedDice.Record(() => orig(self, eventName))));
+            } finally {
+                _toldByTink = told;
+            }
+
+            return;
+        }
+
         orig(self, eventName);
+    }
+
+    /// <summary>
+    /// Whether an event leads a state machine anywhere from the state it is in.
+    /// </summary>
+    private static bool Answers(PlayMakerFSM fsm, string eventName) {
+        var state = fsm.Fsm.ActiveState;
+        return state != null && Array.Exists(state.Transitions, transition => transition.EventName == eventName) ||
+               Array.Exists(fsm.FsmGlobalTransitions, transition => transition.EventName == eventName);
+    }
+
+    /// <summary>
+    /// Makes a hit of the local player on a tink of the room that tells a state machine of being struck, and sends
+    /// the partner what it told the state machine. A tink was left to the player who struck it, since most only spark
+    /// and fling that player off, but some move the world: a bell that a player struck upwards flew off in their game
+    /// and fell on in the other. The partner's game tells its state machine the same, with the dice this game had as it
+    /// told it, so that the bell flies off at the same angle there (see <see cref="SharedDice"/>). The spark and the
+    /// recoil stay here.
+    /// </summary>
+    /// <param name="partnerId">The ID of the partner.</param>
+    /// <param name="tink">The tink that is struck.</param>
+    /// <param name="told">The state machine that it tells.</param>
+    /// <param name="hit">The hit.</param>
+    /// <returns>How the tink responded to the hit.</returns>
+    private IHitResponder.HitResponse HitRoomTink(
+        ushort partnerId,
+        TinkEffect tink,
+        PlayMakerFSM told,
+        HitInstance hit
+    ) {
+        _toldByTink = told;
+        _toldRoom.Clear();
+
+        IHitResponder.HitResponse response;
+        try {
+            response = tink.Hit(hit);
+        } finally {
+            _toldByTink = null;
+        }
+
+        try {
+            if (_toldRoom.Count > 0 && CreateEventsUpdate(partnerId, told) is { } update && _netClient.IsConnected) {
+                _netClient.UpdateManager.SetCoopHitUpdate(update);
+                NoteTraffic(
+                    update.Scene, update.Path, $"sent {_toldRoom.Count} event(s) of a tink to {update.Responder}"
+                );
+            }
+        } finally {
+            _toldRoom.Clear();
+        }
+
+        return response;
+    }
+
+    /// <summary>
+    /// Creates the update that sends the events that a tink told a state machine of the room, in
+    /// <see cref="_toldRoom"/>, to the partner.
+    /// </summary>
+    /// <returns>The update, or null if the partner isn't in the scene or the object can't be found by others.</returns>
+    private CoopHitUpdate? CreateEventsUpdate(ushort partnerId, PlayMakerFSM fsm) {
+        if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+            return null;
+        }
+
+        var target = fsm.gameObject;
+        if (!target.scene.IsValid() || target.scene.name == "DontDestroyOnLoad" || !IsRoomObject(fsm)) {
+            return null;
+        }
+
+        var sameName = Array.FindAll(target.GetComponents<PlayMakerFSM>(), other => other.FsmName == fsm.FsmName);
+        var index = Array.IndexOf(sameName, fsm);
+        if (index is < 0 or > byte.MaxValue) {
+            return null;
+        }
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write((byte) _toldRoom.Count);
+        foreach (var (eventName, dice) in _toldRoom) {
+            writer.Write(eventName);
+            SharedDice.Write(writer, dice);
+        }
+
+        writer.Flush();
+
+        return new CoopHitUpdate {
+            TargetId = partnerId,
+            Kind = CoopHitKind.ObjectEvents,
+            Scene = target.scene.name,
+            Path = ScenePath.Get(target.transform),
+            Responder = fsm.FsmName,
+            Index = (byte) index,
+            Hit = stream.ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Tells a state machine of the room the events that a tink of the partner's attack told it in their game, each
+    /// with the dice their game had as it was told.
+    /// </summary>
+    private void ReplayObjectEvents(CoopHitUpdate update) {
+        var target = ScenePath.Find(update.Path, update.Scene);
+        if (target == null) {
+            NotReplayed(update, "tink", "the object is not here");
+            return;
+        }
+
+        var fsms = Array.FindAll(target.GetComponents<PlayMakerFSM>(), fsm => fsm.FsmName == update.Responder);
+        if (update.Index >= fsms.Length) {
+            NotReplayed(update, "tink", $"the object has only {fsms.Length} state machines of that name here");
+            return;
+        }
+
+        var told = fsms[update.Index];
+        if (!told.isActiveAndEnabled || !IsRoomObject(told)) {
+            NotReplayed(update, "tink", "the state machine is switched off or not a part of the room here");
+            return;
+        }
+
+        List<(string EventName, int[] Dice)> events = [];
+        try {
+            using var reader = new BinaryReader(new MemoryStream(update.Hit));
+            var count = reader.ReadByte();
+            for (var i = 0; i < count; i++) {
+                var eventName = reader.ReadString();
+                events.Add((eventName, SharedDice.Read(reader) ?? []));
+            }
+        } catch (IOException) {
+            Logger.Warn($"Could not read the events of a tink of the partner on {update.Path}");
+            return;
+        }
+
+        var answered = false;
+        _isReplaying = true;
+        try {
+            _gamePatcher.RunAsRemoteHit(() => {
+                foreach (var (eventName, dice) in events) {
+                    answered |= Answers(told, eventName);
+                    SharedDice.Throw(dice, () => told.SendEvent(eventName));
+                }
+            });
+        } catch (Exception e) {
+            Logger.Warn($"Could not replay the events of a tink of the partner on {update.Path}:\n{e}");
+            return;
+        } finally {
+            _isReplaying = false;
+        }
+
+        NoteReplayed(update, "tink", answered);
     }
 
     /// <summary>
@@ -1563,7 +1770,9 @@ internal class CoopHits {
         _isReplaying = true;
         try {
             SetReplayedRanges(target, touch.Ranges);
-            answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(() => TellOfTouch(receiver, attack)));
+            answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
+                () => SharedDice.Throw(touch.Dice, () => TellOfTouch(receiver, attack))
+            ));
         } catch (Exception e) {
             Logger.Warn($"Could not replay a touch of the partner on {update.Path}:\n{e}");
             NoteTraffic(update.Scene, update.Path, $"got a touch through {update.Responder}, whose replay failed");
@@ -1711,6 +1920,9 @@ internal class CoopHits {
             touch.Tag = reader.ReadString();
             touch.Layer = reader.ReadInt32();
             touch.Ranges = ReadRanges(reader);
+
+            // What the touch rolled in the game of the player who struck, after the touch
+            touch.Dice = SharedDice.Read(reader);
             return true;
         } catch (IOException) {
             return false;
@@ -2066,6 +2278,9 @@ internal class CoopHits {
             source.EnemyPosition = hasEnemyPosition ? enemyPosition : null;
             source.Ranges = ReadRanges(reader);
 
+            // What a hit on an object of the room rolled in the game of the player who struck, after the hit
+            source.Dice = SharedDice.Read(reader);
+
             hit.SilkGeneration = HitSilkGeneration.None;
             return true;
         } catch (IOException) {
@@ -2132,6 +2347,12 @@ internal class CoopHits {
         /// For a hit on an object of the room, what its ranges had inside them in the game of the player who struck.
         /// </summary>
         public RangeState[] Ranges;
+
+        /// <summary>
+        /// For a hit on an object of the room, the dice that the hit rolled in the game of the player who struck, or
+        /// null.
+        /// </summary>
+        public int[]? Dice;
     }
 
     /// <summary>
@@ -2177,5 +2398,10 @@ internal class CoopHits {
         /// What the ranges of the object that was touched had inside them in the game of the player who struck.
         /// </summary>
         public RangeState[] Ranges;
+
+        /// <summary>
+        /// The dice that the touch rolled in the game of the player who struck, or null.
+        /// </summary>
+        public int[]? Dice;
     }
 }

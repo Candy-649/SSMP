@@ -83,7 +83,7 @@ internal partial class GamePatcher {
     /// </summary>
     /// <param name="name">The name of the action class.</param>
     /// <returns>The resolved action <see cref="Type"/>, or null if not found.</returns>
-    private static Type? GetFsmActionTypeByName(string name) {
+    internal static Type? GetFsmActionTypeByName(string name) {
         var actionAssembly = typeof(GetHero).Assembly;
         var type = actionAssembly.GetType($"HutongGames.PlayMaker.Actions.{name}");
         if (type != null) return type;

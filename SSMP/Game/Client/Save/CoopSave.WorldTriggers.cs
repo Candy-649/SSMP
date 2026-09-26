@@ -151,31 +151,50 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends a trap that a player set off here to the partner. Called from the hook on changes of FSM state that
-    /// <see cref="RegisterInteractionHooks"/> puts in place, because one hook on it is enough.
+    /// Makes the update that sends a trap that a player set off here to the partner, if the change of state is a trap
+    /// going off. Called from the hook on changes of FSM state that <see cref="RegisterInteractionHooks"/> puts in
+    /// place, because one hook on it is enough, before the change: the trap goes off in the change, and the update
+    /// goes once it has, with the dice it rolled (see <see cref="SetOffWorldTrigger"/>).
     /// </summary>
     /// <param name="fsm">The FSM that is changing state.</param>
     /// <param name="toState">The state it is changing into.</param>
-    private void OnWorldTriggerSwitch(Fsm fsm, FsmState toState) {
+    /// <returns>The update, or null if no trap goes off.</returns>
+    private CoopSaveUpdate? OnWorldTriggerSwitch(Fsm fsm, FsmState toState) {
         if (_replayingWorldTrigger ||
             !WorldTriggerGoneOffStateNames.Contains(toState.Name) ||
             _checkedWith is not { } partnerId ||
             fsm.GameObject is not { } gameObject ||
             FindWorldTriggerKind(gameObject, fsm.Name, toState.Name) is not { } kind ||
             Array.IndexOf(kind.FromStateNames, fsm.ActiveStateName) < 0) {
-            return;
+            return null;
         }
 
-        Send(new CoopSaveUpdate {
+        return new CoopSaveUpdate {
             TargetId = partnerId,
             Kind = CoopSaveUpdateKind.WorldTrigger,
             Scene = gameObject.scene.name,
             ObjectPath = ScenePath.Get(gameObject.transform),
             FsmName = fsm.Name,
             StateName = toState.Name
-        });
+        };
+    }
 
-        Logger.Info($"Sent the trap '{gameObject.name}' going off to the partner");
+    /// <summary>
+    /// Lets a trap that a player set off here go off, writing down what it rolls, and sends it to the partner with
+    /// those dice for their game to roll the same: a mine leaps out, turns and lands by them (see
+    /// <see cref="SharedDice"/>). A trap that it sets off in turn is sent before it, having gone off first; the dice
+    /// of each roll go by the action that rolled, so it does not matter which goes off first over there. It is sent
+    /// even if going off here broke, as it was before the dice went with it.
+    /// </summary>
+    /// <param name="trap">The update of the trap, from <see cref="OnWorldTriggerSwitch"/>.</param>
+    /// <param name="goOff">Lets it go off.</param>
+    private void SetOffWorldTrigger(CoopSaveUpdate trap, Action goOff) {
+        try {
+            trap.Amounts = [.. SharedDice.Record(goOff)];
+        } finally {
+            Send(trap);
+            Logger.Info($"Sent the trap '{trap.ObjectPath}' going off to the partner");
+        }
     }
 
     /// <summary>
@@ -188,9 +207,9 @@ internal partial class CoopSave {
             return;
         }
 
-        MonoBehaviourUtil.Instance.StartCoroutine(
-            SpringWorldTrigger(player.Username, update.Scene, update.ObjectPath, update.FsmName, update.StateName)
-        );
+        MonoBehaviourUtil.Instance.StartCoroutine(SpringWorldTrigger(
+            player.Username, update.Scene, update.ObjectPath, update.FsmName, update.StateName, update.Amounts
+        ));
     }
 
     /// <summary>
@@ -201,12 +220,14 @@ internal partial class CoopSave {
     /// <param name="path">The path of the trap in that scene.</param>
     /// <param name="fsmName">The name of the FSM that runs it.</param>
     /// <param name="goneOffStateName">The state it went into over there, which says which trap this is.</param>
+    /// <param name="dice">The dice of the partner's game as it went off there.</param>
     private IEnumerator SpringWorldTrigger(
         string username,
         string scene,
         string path,
         string fsmName,
-        string goneOffStateName
+        string goneOffStateName,
+        List<int> dice
     ) {
         var until = Time.unscaledTime + WorldTriggerRetryTime;
 
@@ -229,7 +250,7 @@ internal partial class CoopSave {
                 }
 
                 if (IsWaitingWorldTrigger(fsm, kind)) {
-                    ReplayWorldTrigger(fsm, kind, target.name, username);
+                    ReplayWorldTrigger(fsm, kind, target.name, username, dice);
 
                     yield break;
                 }
@@ -250,17 +271,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends a waiting trap the event that sets it off, without letting that go back to the partner.
+    /// Sends a waiting trap the event that sets it off, without letting that go back to the partner, with the dice
+    /// that the partner's game had as it went off there.
     /// </summary>
     /// <param name="fsm">The FSM that runs the trap.</param>
     /// <param name="kind">What kind of trap it is.</param>
     /// <param name="name">The name of the trap, for the log.</param>
     /// <param name="username">The name of the partner, for the log.</param>
-    private void ReplayWorldTrigger(PlayMakerFSM fsm, WorldTriggerKind kind, string name, string username) {
+    /// <param name="dice">The dice of the partner's game.</param>
+    private void ReplayWorldTrigger(
+        PlayMakerFSM fsm,
+        WorldTriggerKind kind,
+        string name,
+        string username,
+        List<int> dice
+    ) {
         _replayingWorldTrigger = true;
         try {
             var keptOff = kind.KeepOffThePlayer ? KeepTrapOffThePlayer(fsm) : 0;
-            fsm.SendEvent(kind.EventName);
+            SharedDice.Throw(dice, () => fsm.SendEvent(kind.EventName));
             Logger.Info(
                 keptOff > 0
                     ? $"Set off '{name}' the way {username} did, without the {keptOff} of its actions about them"
