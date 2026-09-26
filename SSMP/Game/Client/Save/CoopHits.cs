@@ -1339,7 +1339,8 @@ internal class CoopHits {
         }
 
         try {
-            if (_toldRoom.Count > 0 && CreateEventsUpdate(partnerId, told) is { } update && _netClient.IsConnected) {
+            if (_toldRoom.Count > 0 && CreateEventsUpdate(partnerId, told, _toldRoom) is { } update &&
+                _netClient.IsConnected) {
                 _netClient.UpdateManager.SetCoopHitUpdate(update);
                 NoteTraffic(
                     update.Scene, update.Path, $"sent {_toldRoom.Count} event(s) of a tink to {update.Responder}"
@@ -1353,11 +1354,32 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Creates the update that sends the events that a tink told a state machine of the room, in
-    /// <see cref="_toldRoom"/>, to the partner.
+    /// Sends the partner an event that a state machine of the room was told here, with the dice this game had as it
+    /// was told, for their game to tell its own state machine the same (see <see cref="ReplayObjectEvents"/>): what the
+    /// director of a game of the festival has the room do, which the scene host's game says for both.
+    /// </summary>
+    /// <param name="fsm">The state machine.</param>
+    /// <param name="eventName">The event.</param>
+    /// <param name="dice">The dice.</param>
+    public void SendObjectEvent(PlayMakerFSM fsm, string eventName, int[] dice) {
+        if (_getPartnerId() is not { } partnerId || !_netClient.IsConnected ||
+            CreateEventsUpdate(partnerId, fsm, [(eventName, dice)]) is not { } update) {
+            return;
+        }
+
+        _netClient.UpdateManager.SetCoopHitUpdate(update);
+        NoteTraffic(update.Scene, update.Path, $"sent '{eventName}' to {update.Responder}");
+    }
+
+    /// <summary>
+    /// Creates the update that sends the events that a state machine of the room was told here to the partner.
     /// </summary>
     /// <returns>The update, or null if the partner isn't in the scene or the object can't be found by others.</returns>
-    private CoopHitUpdate? CreateEventsUpdate(ushort partnerId, PlayMakerFSM fsm) {
+    private CoopHitUpdate? CreateEventsUpdate(
+        ushort partnerId,
+        PlayMakerFSM fsm,
+        List<(string EventName, int[] Dice)> events
+    ) {
         if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
             return null;
         }
@@ -1375,8 +1397,8 @@ internal class CoopHits {
 
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
-        writer.Write((byte) _toldRoom.Count);
-        foreach (var (eventName, dice) in _toldRoom) {
+        writer.Write((byte) events.Count);
+        foreach (var (eventName, dice) in events) {
             writer.Write(eventName);
             SharedDice.Write(writer, dice);
         }
@@ -1395,25 +1417,25 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Tells a state machine of the room the events that a tink of the partner's attack told it in their game, each
-    /// with the dice their game had as it was told.
+    /// Tells a state machine of the room the events that it was told in the partner's game, each with the dice their
+    /// game had as it was told: by a tink of the partner's attack, or by the director of a game of the festival.
     /// </summary>
     private void ReplayObjectEvents(CoopHitUpdate update) {
         var target = ScenePath.Find(update.Path, update.Scene);
         if (target == null) {
-            NotReplayed(update, "tink", "the object is not here");
+            NotReplayed(update, "events", "the object is not here");
             return;
         }
 
         var fsms = Array.FindAll(target.GetComponents<PlayMakerFSM>(), fsm => fsm.FsmName == update.Responder);
         if (update.Index >= fsms.Length) {
-            NotReplayed(update, "tink", $"the object has only {fsms.Length} state machines of that name here");
+            NotReplayed(update, "events", $"the object has only {fsms.Length} state machines of that name here");
             return;
         }
 
         var told = fsms[update.Index];
         if (!told.isActiveAndEnabled || !IsRoomObject(told)) {
-            NotReplayed(update, "tink", "the state machine is switched off or not a part of the room here");
+            NotReplayed(update, "events", "the state machine is switched off or not a part of the room here");
             return;
         }
 
@@ -1426,7 +1448,7 @@ internal class CoopHits {
                 events.Add((eventName, SharedDice.Read(reader) ?? []));
             }
         } catch (IOException) {
-            Logger.Warn($"Could not read the events of a tink of the partner on {update.Path}");
+            Logger.Warn($"Could not read the events the partner's game told {update.Path}");
             return;
         }
 
@@ -1440,13 +1462,13 @@ internal class CoopHits {
                 }
             });
         } catch (Exception e) {
-            Logger.Warn($"Could not replay the events of a tink of the partner on {update.Path}:\n{e}");
+            Logger.Warn($"Could not replay the events the partner's game told {update.Path}:\n{e}");
             return;
         } finally {
             _isReplaying = false;
         }
 
-        NoteReplayed(update, "tink", answered);
+        NoteReplayed(update, "events", answered);
     }
 
     /// <summary>

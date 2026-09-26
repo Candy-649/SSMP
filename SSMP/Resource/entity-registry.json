@@ -3463,5 +3463,26 @@
     "fsm_names": [
       "Control"
     ]
+  },
+  {
+    "base_object_name": "Flea Hunter",
+    "type": "FleaHunter",
+    "parent_name": null,
+    "internal_name": "Flea Hunter",
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
+    "base_object_name": "JuggleGame",
+    "type": "JuggleGameGuest",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "JuggleGame",
+    "fsm_names": [
+      "Control"
+    ]
   }
 ]

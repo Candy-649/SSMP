@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
+using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
+using SSMP.Game.Client.Save;
 using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
@@ -36,6 +38,9 @@ namespace SSMP.Game.Client;
 /// Both games tell each other which game their player is in and the score of the round, so that each player can be
 /// shown where the other stands. The score is sent as a total rather than as single points, so a lost or a repeated
 /// message cannot make it drift.
+///
+/// What else happens in the room during such a game is the scene host's game's to say too (see
+/// <see cref="OnSendEventByNameEnter"/>).
 /// </summary>
 internal class FleaGameCoop {
     /// <summary>
@@ -52,6 +57,18 @@ internal class FleaGameCoop {
     /// Name of the state machine that runs one of the games, counts the score and saves it.
     /// </summary>
     private const string MasterFsmName = "flea_game_master_control";
+
+    /// <summary>
+    /// Name of the state machine of a game that runs its rounds: when the fleas come, and what else happens in the room
+    /// around them.
+    /// </summary>
+    private const string DirectorFsmName = "Game Specific Control";
+
+    /// <summary>
+    /// Name of what one game sends in now and then to throw something at the player. It is an entity, so only the
+    /// scene host's game runs it, and it only ever threw at the scene host's player.
+    /// </summary>
+    private const string ThrowerName = "Flea Hunter DodgeGame";
 
     /// <summary>
     /// The states of a game that mean nobody is playing it. Whether the local player is in a game is read from the
@@ -106,6 +123,22 @@ internal class FleaGameCoop {
     /// Gets the ID of the partner of the two-player save, or null when no save is paired.
     /// </summary>
     private readonly Func<ushort?> _getPartnerId;
+
+    /// <summary>
+    /// Sends the partner an event that a state machine of the room was told here, with the dice this game had as it
+    /// was told (see <see cref="CoopHits.SendObjectEvent"/>).
+    /// </summary>
+    private readonly Action<PlayMakerFSM, string, int[]> _sendObjectEvent;
+
+    /// <summary>
+    /// Which player the thrower throws at, rolled apart from the dice of the game itself.
+    /// </summary>
+    private readonly System.Random _throwerDice = new();
+
+    /// <summary>
+    /// Hook for what the directors of the games tell the room.
+    /// </summary>
+    private Hook? _sendEventByNameHook;
 
     /// <summary>
     /// Hook that notices a game of the festival starting over.
@@ -217,12 +250,14 @@ internal class FleaGameCoop {
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
-        Func<ushort?> getPartnerId
+        Func<ushort?> getPartnerId,
+        Action<PlayMakerFSM, string, int[]> sendObjectEvent
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _entityManager = entityManager;
         _getPartnerId = getPartnerId;
+        _sendObjectEvent = sendObjectEvent;
     }
 
     /// <summary>
@@ -240,6 +275,13 @@ internal class FleaGameCoop {
             Logger.Error("EventRegister does not declare SendEvent; the flea game counts will not start over");
         } else {
             _eventRegisterSendEventHook = new Hook(sendMethod, OnEventRegisterSendEvent);
+        }
+
+        var sendByNameMethod = typeof(SendEventByName).GetMethod(nameof(SendEventByName.OnEnter), InstanceFlags);
+        if (sendByNameMethod == null) {
+            Logger.Error("SendEventByName does not declare OnEnter; each game will change the rooms of the festival");
+        } else {
+            _sendEventByNameHook = new Hook(sendByNameMethod, OnSendEventByNameEnter);
         }
 
         var boardMethod = typeof(ScoreBoardUI).GetMethod("OnEnable", InstanceFlags);
@@ -269,6 +311,9 @@ internal class FleaGameCoop {
     public void DeregisterHooks() {
         _eventRegisterSendEventHook?.Dispose();
         _eventRegisterSendEventHook = null;
+
+        _sendEventByNameHook?.Dispose();
+        _sendEventByNameHook = null;
 
         // Putting the fleas away was held back for the partner, who is not watching any more
         if (_resetHeld && GetLocalGame() == null) {
@@ -398,6 +443,101 @@ internal class FleaGameCoop {
         if (eventName != null && Array.IndexOf(ResetEventNames, eventName) >= 0) {
             ForgetScores();
         }
+    }
+
+    /// <summary>
+    /// Hook for <see cref="SendEventByName.OnEnter"/>, for what the director of a game played with the same fleas has
+    /// the room do.
+    ///
+    /// Each game runs the director of such a game for itself, and it rolls on its own clock when the room around the
+    /// fleas changes: which of two platforms sinks and how high the other comes back up, when someone joins in. The
+    /// fleas are entities and follow the scene host's game whatever the other director says, but the room did what each
+    /// director said, so the two players stood on platforms that were not the same. What such a director tells an
+    /// object of the room is now the scene host's alone to say: its game tells it and sends the partner the event with
+    /// the dice it had, and the other game's director tells the room nothing.
+    ///
+    /// What is sent in to throw something at the player is an entity, which follows the scene host's game already. It
+    /// is given a player to throw at (see <see cref="PickThrowTarget"/>), rather than always the scene host's own.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The action.</param>
+    private void OnSendEventByNameEnter(Action<SendEventByName> orig, SendEventByName self) {
+        if (SharedGameOf(self.Fsm) is not { } game) {
+            orig(self);
+            return;
+        }
+
+        var target = self.eventTarget is { target: FsmEventTarget.EventTarget.GameObject } eventTarget
+            ? self.Fsm.GetOwnerDefaultTarget(eventTarget.gameObject)
+            : null;
+        if (target != null && target.name == ThrowerName && _entityManager.IsSceneHost &&
+            HeroController.instance != null) {
+            GamePatcher.SetTargetOf(target, PickThrowTarget(game));
+        }
+
+        if (GetRoomFsm(self, target) is not { } told) {
+            orig(self);
+            return;
+        }
+
+        if (!_entityManager.IsSceneHost) {
+            self.Finish();
+            return;
+        }
+
+        var eventName = self.sendEvent.Value;
+        var dice = SharedDice.Record(() => orig(self));
+        _sendObjectEvent(told, eventName, dice);
+    }
+
+    /// <summary>
+    /// Gets the game that a state machine directs, by its index in <see cref="_masters"/>, if it is the director of a
+    /// game played with the same fleas in a two-player save whose games have settled which of them is the scene host.
+    /// </summary>
+    /// <param name="fsm">The state machine.</param>
+    /// <returns>The index of the game, or null if the state machine is no such director.</returns>
+    private int? SharedGameOf(HutongGames.PlayMaker.Fsm? fsm) {
+        if (fsm is not { Name: DirectorFsmName, GameObject: { } root } || _getPartnerId() == null ||
+            !_entityManager.IsSceneRoleDetermined || PersonalPlaces.Contains(root)) {
+            return null;
+        }
+
+        RefreshMasters();
+        var game = Array.FindIndex(_masters, master => master != null && master.gameObject == root);
+        return game >= 0 ? game : null;
+    }
+
+    /// <summary>
+    /// Picks the player that the thrower of a game throws at next: one of the two at random while the partner plays
+    /// this round too, and the local player otherwise. A partner whose round has ended stands about the room out of
+    /// the game, and half of what was thrown went at them.
+    /// </summary>
+    /// <param name="game">The index of the game in <see cref="_masters"/>.</param>
+    private GameObject PickThrowTarget(int game) {
+        if (_partnerGame == _masterNames[game] && _getPartnerId() is { } partnerId &&
+            _playerData.TryGetValue(partnerId, out var partner) && partner.IsInLocalScene &&
+            partner.PlayerObject is var avatar && avatar != null && avatar.activeInHierarchy &&
+            _throwerDice.Next(2) == 0) {
+            return avatar;
+        }
+
+        return HeroController.instance.gameObject;
+    }
+
+    /// <summary>
+    /// Gets the state machine of the room that the event of a director is for, or null if it is for anything else - an
+    /// entity, which follows the scene host's game by itself, or a player - or is not told at once, or not to one
+    /// state machine alone.
+    /// </summary>
+    /// <param name="action">The action that tells the event.</param>
+    /// <param name="target">The object it tells it to.</param>
+    private static PlayMakerFSM? GetRoomFsm(SendEventByName action, GameObject? target) {
+        if (target == null || action.everyFrame || action.delay.Value > 0f) {
+            return null;
+        }
+
+        var fsms = target.GetComponents<PlayMakerFSM>();
+        return fsms.Length == 1 && CoopHits.IsRoomObject(fsms[0]) ? fsms[0] : null;
     }
 
     /// <summary>

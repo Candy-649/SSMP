@@ -306,5 +306,19 @@ internal enum EntityType {
     /// alone the other game's lay where they were while pins came out of nowhere. Only the scene host's game runs them
     /// now, and the copy rises, falls and bounces by itself (OwnMotionComponent).
     /// </summary>
-    WeaverLoosePin
+    WeaverLoosePin,
+
+    /// <summary>
+    /// Not a creature: what one game of the festival sends in now and then to throw something at the player. The game
+    /// of each player sent it in at its own time and it threw at that game's player alone; it is the scene host's to
+    /// run now, like the fleas of that game, and the thrown thing goes to the other game with the throw.
+    /// </summary>
+    FleaHunter,
+
+    /// <summary>
+    /// Not a creature: a guest who joins one game of the festival now and then to be juggled like its fleas. The game
+    /// of each player sent the guests in at its own time, each juggled only in the game of the player who hit them;
+    /// they are the scene host's to run now, like the fleas of that game.
+    /// </summary>
+    JuggleGameGuest
 }

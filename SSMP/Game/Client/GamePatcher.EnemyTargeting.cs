@@ -236,6 +236,17 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Has something that is no enemy go after a player wherever it looks at one, as an enemy that has chosen them
+    /// does: something a game sends in to throw at the player, which would otherwise only ever aim at the player of the
+    /// game that runs it.
+    /// </summary>
+    /// <param name="thing">The thing, or one of its parts.</param>
+    /// <param name="player">The player.</param>
+    public static void SetTargetOf(GameObject thing, GameObject player) {
+        ApproveEnemyTarget(thing, player);
+    }
+
+    /// <summary>
     /// How many times an action of a state machine has had the object it aims at written into it.
     ///
     /// Said in the same line as the target, because the two failures look identical from outside the game and this is
