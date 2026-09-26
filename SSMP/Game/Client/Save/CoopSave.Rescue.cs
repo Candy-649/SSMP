@@ -486,6 +486,13 @@ internal partial class CoopSave {
     private const string DeathAnnouncement = "HORNET DEATH";
 
     /// <summary>
+    /// What the death announces once it has played itself out. One scripted battle answers to it by undoing its own
+    /// outcome, for a player who is to fight it again from the bench, which a player pulled back up in the middle of
+    /// it is not.
+    /// </summary>
+    private const string DeathOverAnnouncement = "HORNET DEATH COMPLETE";
+
+    /// <summary>
     /// The hook on the one call that carries that announcement.
     /// </summary>
     private Hook? _deathAnnouncementHook;
@@ -502,10 +509,10 @@ internal partial class CoopSave {
     private bool _deathCanWait;
 
     /// <summary>
-    /// Whether the announcement of the current death was held back, and what it was to leave out, so that it can
-    /// still go out if the partner dies as well while this player is waiting.
+    /// The announcements of the current death that were held back, in the order they came, each with what it was to
+    /// leave out, so that they can still go out if the partner dies as well while this player is waiting.
     /// </summary>
-    private (bool Held, GameObject? ExcludeTarget) _heldDeathAnnouncement;
+    private readonly List<(string EventName, GameObject? ExcludeTarget)> _heldDeathAnnouncements = [];
 
     /// <summary>
     /// Stops one player's death from telling the room the fight is over while the other player is still in it.
@@ -557,9 +564,9 @@ internal partial class CoopSave {
     /// <param name="excludeTarget">What is not to be told, which is the caller's own business.</param>
     private void OnDeathAnnounced(Action<string, GameObject> orig, string eventName, GameObject excludeTarget) {
         try {
-            if (eventName == DeathAnnouncement && _deathCanWait) {
-                Logger.Info("Not telling the room the player died, because their teammate is still fighting in it");
-                _heldDeathAnnouncement = (true, excludeTarget);
+            if ((eventName == DeathAnnouncement || eventName == DeathOverAnnouncement) && _deathCanWait) {
+                Logger.Info($"Not telling the room '{eventName}', because the teammate is still fighting in it");
+                _heldDeathAnnouncements.Add((eventName, excludeTarget));
 
                 return;
             }
@@ -582,6 +589,10 @@ internal partial class CoopSave {
     /// <param name="nonLethal">Whether the death was non-lethal.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
     private IEnumerator WrapDeath(IEnumerator death, bool nonLethal, bool frostDeath) {
+        // The game makes every death in a memory non-lethal itself, inside the death and so after this is asked
+        // (HeroController.Die). It leaves no cocoon there, so none of them is held either.
+        nonLethal |= global::GameManager.instance != null && global::GameManager.instance.IsMemoryScene();
+
         // Before anything is decided about this death, including the deaths this mod then keeps its hands off. One
         // of those is a death that is not lethal, and from the player's chair a death that is not lethal is dying
         // and coming back to life by itself - which is exactly the thing that was reported and that no line in
@@ -590,7 +601,7 @@ internal partial class CoopSave {
 
         // Before telling a waiting partner anything, because that changes the answer
         _deathCanWait = CanWaitForRescue();
-        _heldDeathAnnouncement = default;
+        _heldDeathAnnouncements.Clear();
         _deathPassesNoTime = false;
 
         // A non-lethal death leaves no cocoon: the game skips that whole part of its own sequence, so there would be
@@ -609,6 +620,7 @@ internal partial class CoopSave {
         // Before the death has run a single frame of itself, so that anything it is still showing afterwards can be
         // told apart from what the room was already showing
         NoteWhatIsOnAroundThePlayer();
+        NoteTheMoneyLyingAround();
 
         return HoldDeath(death);
     }
@@ -710,17 +722,19 @@ internal partial class CoopSave {
     /// that does nothing by itself, so a boss that had killed them both never celebrated.
     /// </summary>
     private void AnnounceTheHeldBackDeath() {
-        if (!_heldDeathAnnouncement.Held) {
+        if (_heldDeathAnnouncements.Count == 0) {
             return;
         }
 
-        var excludeTarget = _heldDeathAnnouncement.ExcludeTarget;
-        _heldDeathAnnouncement = default;
+        var held = _heldDeathAnnouncements.ToArray();
+        _heldDeathAnnouncements.Clear();
         _deathCanWait = false;
 
         try {
             Logger.Info("Telling the room the player died after all, because their teammate has died as well");
-            EventRegister.SendEvent(DeathAnnouncement, excludeTarget);
+            foreach (var (eventName, excludeTarget) in held) {
+                EventRegister.SendEvent(eventName, excludeTarget);
+            }
         } catch (Exception e) {
             LogRescueError(e);
         }
@@ -1211,6 +1225,81 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Warn($"Could not open the dark plates the death closed around the player: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// The money lying in the room that could be picked up when the current death began.
+    /// </summary>
+    private static readonly List<CurrencyObjectBase> MoneyLyingAround = [];
+
+    /// <summary>
+    /// Writes down the money lying in the room that can be picked up, before the death has run a single frame.
+    /// </summary>
+    private static void NoteTheMoneyLyingAround() {
+        MoneyLyingAround.Clear();
+        try {
+            foreach (var money in CurrencyObjectBase._currencyObjects.List) {
+                if (money != null && !money.activated) {
+                    MoneyLyingAround.Add(money);
+                }
+            }
+        } catch (Exception e) {
+            // Like the note beside it, this runs on the way into a death, which has to go on whatever happens here
+            Logger.Warn($"Could not write down the money lying around before the death: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Lets the money that was lying in the room when the player died be picked up again.
+    ///
+    /// A death turns every piece of money in the room inert, so that none of it flies to a player who is dead
+    /// (CurrencyObjectBase.OnHeroDeath), and only switching a piece on again makes it collectible: the game needs
+    /// nothing else, since it loads the room over after every death. A player who is pulled back up loads nothing,
+    /// so the rosaries and shards from the very fight they fell in lay there for good, out of reach of their hands
+    /// and of the magnet tool alike.
+    /// </summary>
+    private static void LetTheMoneyBePickedUpAgain() {
+        var freed = 0;
+        foreach (var money in MoneyLyingAround) {
+            // A piece that was picked up or went away since is left as it is
+            if (money == null || !money.isActiveAndEnabled || money.isDisabling || !money.activated) {
+                continue;
+            }
+
+            money.activated = false;
+            money.OnToolEquipsUpdated();
+            freed++;
+        }
+
+        MoneyLyingAround.Clear();
+        if (freed > 0) {
+            Logger.Info($"The death froze {freed} piece(s) of money lying in the room, which can be picked up again");
+        }
+    }
+
+    /// <summary>
+    /// Lets the camera follow the player again if the death left it standing still.
+    ///
+    /// A death takes the player off the layer that the lock areas of the camera see, so the lock area they were in
+    /// saw them leave, and a camera that sees a dead player leave stops following and stays where it is
+    /// (CameraTarget.ExitLockZone). Walking into another lock area puts that right, but a player stood up outside of
+    /// all of them - at the room's own safe spot, or beside the partner in a lava chase - walked out of the picture.
+    /// This is what the camera does itself when a living player leaves a lock area (CameraController.ReleaseLock).
+    /// </summary>
+    private static void LetTheCameraFollowThePlayerAgain() {
+        var controller = GameCameras.instance == null ? null : GameCameras.instance.cameraController;
+        var target = controller == null ? null : controller.camTarget;
+        if (controller == null || target == null || target.mode != CameraTarget.TargetMode.FREE ||
+            target.IsFreeModeManual || controller.currentLockArea != null) {
+            return;
+        }
+
+        target.mode = CameraTarget.TargetMode.FOLLOW_HERO;
+        if (controller.mode != CameraController.CameraMode.FROZEN) {
+            controller.SetMode(CameraController.CameraMode.FOLLOWING);
+        }
+
+        Logger.Info("The death left the camera standing still, so it follows the player again");
     }
 
     /// <summary>
@@ -1708,6 +1797,12 @@ internal partial class CoopSave {
                 playerData.health = health;
             }
 
+            // A Steel Soul save is marked lost the moment its player dies, before a death can even be held
+            // (HeroController.Die), and a player who is pulled back up has not lost it
+            if (playerData.permadeathMode == GlobalEnums.PermadeathModes.Dead) {
+                playerData.permadeathMode = GlobalEnums.PermadeathModes.On;
+            }
+
             hero.AddInvulnerabilitySource(RescueInvulnerability);
             MonoBehaviourUtil.Instance.StartCoroutine(EndRescueInvulnerability(hero));
 
@@ -1747,9 +1842,23 @@ internal partial class CoopSave {
                 LogRescueError(e);
             }
 
-            // Wrapped for the same reason: a part of the room left covered is not worth failing a rescue over either
+            // Wrapped for the same reason: what the room was left like is not worth failing a rescue over either.
+            // Everything in here is put right in the game only by loading a room, which it does after every death.
             try {
                 LetTheMasksFollowThePlayerAgain();
+                LetTheMoneyBePickedUpAgain();
+                LetTheCameraFollowThePlayerAgain();
+
+                // The cold the player died in is let go of, as the game does itself a moment into a death, past the
+                // point where a held death stops (HeroController.Die). Left alone, a player who froze to death stood
+                // up frozen and started freezing again at once.
+                hero.SetFrostAmount(0f);
+                StatusVignette.SetFrostVignetteAmount(0f);
+
+                // The death turned the rumble of the pad down to nothing, and only the fade into the next room turns
+                // it back up (GameManager.FadeSceneIn), so a player pulled back up played on without it until they
+                // left the room. This is the call that fade makes.
+                VibrationManager.FadeVibration(1f, 0.25f);
             } catch (Exception e) {
                 LogRescueError(e);
             }
