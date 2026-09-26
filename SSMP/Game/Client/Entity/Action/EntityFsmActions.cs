@@ -358,7 +358,7 @@ internal static partial class EntityFsmActions {
         var found = new List<FieldInfo>();
         foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Instance)) {
             if (field.Name is not ("gameObject" or "parent" or "target" or "eventTarget" or "spawnPoint" or
-                "SpawnPoint")) {
+                "SpawnPoint") && !IsNewerSubjectField(type, field)) {
                 continue;
             }
 
@@ -378,6 +378,18 @@ internal static partial class EntityFsmActions {
         fields = found.ToArray();
         SubjectFields[type] = fields;
         return fields;
+    }
+
+    /// <summary>
+    /// Whether a field names the object an action works on the way newer kinds of action name it: "Target",
+    /// "GameObject" or "flungObject", given as the object or the owner, like "gameObject". Many kinds that only look
+    /// at an object name it the same way - whether a character stands on the ground, where a body is - so these
+    /// names are only taken for the kinds that are sent to the other game. Each of those works on what it names, or
+    /// names the creature itself.
+    /// </summary>
+    private static bool IsNewerSubjectField(Type type, FieldInfo field) {
+        return field.Name is "Target" or "GameObject" or "flungObject" && field.FieldType == typeof(FsmOwnerDefault) &&
+               SupportedActionTypes.Contains(type);
     }
 
     /// <summary>
@@ -458,7 +470,8 @@ internal static partial class EntityFsmActions {
         }
 
         foreach (var field in GetSubjectFields(action.GetType())) {
-            if (field.Name is not ("gameObject" or "eventTarget" or "parent")) {
+            // What it aims at and where it spawns something stay the copy's own
+            if (field.Name is "target" or "spawnPoint" or "SpawnPoint") {
                 continue;
             }
 

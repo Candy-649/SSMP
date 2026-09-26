@@ -76,6 +76,31 @@ internal static partial class EntityFsmActions {
         }
 
         gameObject.transform.localScale = scale;
+
+        // Scaled every frame, like a sickle a boss grows in its hand by easing the size it is given, it goes on being
+        // scaled here until the scene host's FSM leaves the state. Done once, the sickle stayed the size it started at.
+        // The size is read from the copy's FSM variables, which the scene host sends as they change and which can
+        // arrive a little after this, still holding the size the last throw ended at. They start from what the scene
+        // host's held when it scaled, so the sickle does not first flash at that old size.
+        if (data != null && action.everyFrame) {
+            if (!action.vector.IsNone) {
+                action.vector.Value = scale;
+            }
+
+            if (!action.x.IsNone) {
+                action.x.Value = scale.x;
+            }
+
+            if (!action.y.IsNone) {
+                action.y.Value = scale.y;
+            }
+
+            if (!action.z.IsNone) {
+                action.z.Value = scale.z;
+            }
+
+            RunInState(action);
+        }
     }
 
     #endregion
