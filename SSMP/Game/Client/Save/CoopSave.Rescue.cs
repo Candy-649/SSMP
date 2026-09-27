@@ -1896,22 +1896,23 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update.</param>
     private void OnRescueOffer(ClientPlayerData player, CoopSaveUpdate update) {
+        // Said either way, because this news is not sent again, and without a line here a partner who went down
+        // unseen could not be told from one whose news never arrived
         if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+            Logger.Info(
+                $"Not taking the news that {player.Username} went down in '{update.Scene}': " +
+                $"two-player save loaded: {GetCurrentMarker() != null}, " +
+                $"saves checked with: {_checkedWith?.ToString() ?? "nobody"}"
+            );
+
             return;
         }
+
+        Logger.Info($"{player.Username} went down in '{update.Scene}' ({update.Key})");
 
         RemoveRescueTarget();
 
         if (update.Values.Count < 2) {
-            return;
-        }
-
-        // Both went down before either heard about the other, so each is lying there waiting for someone who cannot
-        // come. Two deaths are two benches in whichever order the news arrives: this wait ends here, and the partner's
-        // game ends theirs the same way when this player's cocoon reaches it
-        if (_rescue is { Outcome: RescueOutcome.Waiting }) {
-            OnRescueLost(player);
-
             return;
         }
 
@@ -1922,8 +1923,17 @@ internal partial class CoopSave {
         _partnerCocoonPosition = new Vector2(update.Values[0], update.Values[1]);
         _partnerRescueKey = update.Key;
 
-        // This player is on their way to a bench themselves - their wait is over, or the game already has them dead -
-        // so nobody is coming for the partner either: two deaths, two benches
+        // Both went down before either heard about the other, so each is lying there waiting for someone who cannot
+        // come. Two deaths are two benches in whichever order the news arrives, and this wait ends here.
+        if (_rescue is { Outcome: RescueOutcome.Waiting }) {
+            OnRescueLost(player);
+        }
+
+        // This player is down themselves - lying there, on their way to a bench, or dead as far as the game knows - so
+        // nobody is coming for the partner either: two deaths, two benches. Told to them even when this player's own
+        // cocoon should have told them already, because it may not have reached them: a partner whose news was lost
+        // in a stretch of the connection carrying nothing lay there waiting for someone who had long gone to their
+        // bench, and let no time pass for a death that both of them died.
         if (HeroController.instance is { } hero &&
             (PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.dead)) {
             TellPartnerNobodyIsComing();
