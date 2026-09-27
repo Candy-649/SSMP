@@ -105,6 +105,12 @@ internal partial class CoopSave {
     private const string DeathAnimFsmName = "Hero Death Anim";
 
     /// <summary>
+    /// The name of the bool of the camera's shake FSM that the death shown over a player keeps the screen rumbling
+    /// with, for as long as it is on.
+    /// </summary>
+    private const string DeathRumbleName = "RumblingMed";
+
+    /// <summary>
     /// The frame the game's own death was started behind a dark screen, for a player who already heard it once while
     /// lying down. What the game puts up for a death plays its sounds as it starts: on that frame when it is taken out
     /// of the pool, which starts it over at once, or on the next when it is made new.
@@ -1623,8 +1629,20 @@ internal partial class CoopSave {
             // What is left of the death shown over them, for a player pulled up before it had played out
             if (rescue.Effect != null) {
                 UnityEngine.Object.Destroy(rescue.Effect);
+
+                // Cut short before its end, which is where it lets go of the rumble it holds the camera in: its Blow
+                // and Explode states switch the camera's RumblingMed on, and only Ended switches it off. Left on, the
+                // camera went back to rumbling every time it came to rest, until the room changed.
+                var cameras = GameCameras.instance;
+                var rumble = cameras == null || cameras.cameraShakeFSM == null
+                    ? null
+                    : cameras.cameraShakeFSM.FsmVariables.FindFsmBool(DeathRumbleName);
+                if (rumble != null) {
+                    rumble.Value = false;
+                }
             }
 
+            // After the rumble is let go of, since a camera that stops shaking goes back to whatever it is still told
             StopTheScreenShaking();
             RestoreMusic(rescue);
 
