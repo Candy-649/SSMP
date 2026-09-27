@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Networking.Client;
@@ -12,11 +13,12 @@ using Object = UnityEngine.Object;
 namespace SSMP.Game.Client.Entity;
 
 /// <summary>
-/// Creatures that the room makes, rather than a creature: a nest that lets out its flyers, and the controller of a room
-/// that places the creatures haunting it. What makes them is a part of the room and not an entity, so it runs in both
-/// games alike, and each game made creatures of its own that the other player never saw - each player fought their
-/// own. They are now made in the scene host's game only, where they are made entities and sent to the other game as
-/// spawned by <see cref="EntityType.Room"/>, and the scene client makes none of its own.
+/// Creatures that the room makes, rather than a creature: a nest that lets out its flyers, the controller of a room
+/// that places the creatures haunting it, and the shell a creature leaves behind that lets out what lived inside it.
+/// What makes them is a part of the room and not an entity, so it runs in both games alike, and each game made
+/// creatures of its own that the other player never saw - each player fought their own. They are now made in the scene
+/// host's game only, where they are made entities and sent to the other game as spawned by
+/// <see cref="EntityType.Room"/>, and the scene client makes none of its own.
 /// </summary>
 internal class RoomCreatures {
     /// <summary>
@@ -49,13 +51,18 @@ internal class RoomCreatures {
     /// </summary>
     private Hook? _createObjectHook;
 
+    /// <summary>
+    /// Detour hook for the FSM action that lets out what an object made ahead of time.
+    /// </summary>
+    private Hook? _letOutHook;
+
     public RoomCreatures(NetClient netClient, EntityManager entityManager) {
         _netClient = netClient;
         _entityManager = entityManager;
     }
 
     /// <summary>
-    /// Register the hook of the action that makes the creatures.
+    /// Register the hooks of the actions that make the creatures.
     /// </summary>
     public void RegisterHooks() {
         _createObjectHook = new Hook(
@@ -65,14 +72,25 @@ internal class RoomCreatures {
             ),
             OnCreateObject
         );
+
+        _letOutHook = new Hook(
+            typeof(GetPreInstantiatedGameObject).GetMethod(
+                nameof(GetPreInstantiatedGameObject.OnEnter),
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
+            ),
+            OnLetOut
+        );
     }
 
     /// <summary>
-    /// Deregister the hook of the action that makes the creatures.
+    /// Deregister the hooks of the actions that make the creatures.
     /// </summary>
     public void DeregisterHooks() {
         _createObjectHook?.Dispose();
         _createObjectHook = null;
+
+        _letOutHook?.Dispose();
+        _letOutHook = null;
     }
 
     /// <summary>
@@ -85,7 +103,8 @@ internal class RoomCreatures {
 
     /// <summary>
     /// Finds what the room makes in the given scene: every creature that an FSM of the room, rather than of a
-    /// creature, makes from a prefab the action names itself. Both games load the same room, so both find the same.
+    /// creature, makes from a prefab the action names itself, and every creature that a shell makes ahead of time to
+    /// let out when it breaks. Both games load the same room, so both find the same.
     /// </summary>
     /// <param name="scene">The scene of the room, or a part of it that was loaded later.</param>
     public void FindMakers(Scene scene) {
@@ -99,30 +118,44 @@ internal class RoomCreatures {
 
             foreach (var state in fsm.FsmStates) {
                 foreach (var action in state.Actions) {
-                    if (action is not CreateObject { gameObject: { UseVariable: false } prefabField } create) {
-                        continue;
-                    }
-
-                    // A creature's own FSMs run in one game only, and what they spawn is sent already
-                    var prefab = prefabField.Value;
-                    if (prefab == null ||
-                        !EntityRegistry.TryGetEntry(prefab, out var entry) ||
-                        !EntitySpawner.IsSpawnedAsEntity(prefab, entry.Type) ||
-                        EntityProcessor.IsRegistered(fsm.gameObject)) {
-                        continue;
-                    }
-
-                    if (!_makers.TryGetValue(entry.Type, out var known)) {
-                        Logger.Info($"'{fsm.gameObject.name}' makes '{prefab.name}' ({entry.Type}) in this room");
-                        _makers[entry.Type] = new Maker(prefab, fsm, create);
-                    } else if (known != null && known.Prefab != prefab) {
-                        Logger.Info(
-                            $"The room makes {entry.Type} from both '{known.Prefab.name}' and '{prefab.name}', so " +
-                            "each game makes its own"
-                        );
-                        _makers[entry.Type] = null;
+                    if (action is CreateObject { gameObject: { UseVariable: false } prefabField } create) {
+                        Find(prefabField.Value, fsm, create);
                     }
                 }
+            }
+        }
+
+        // The shell that a creature leaves behind when it dies, which lets out what lived inside it. A creature's
+        // death is played out in both games, and so is its shell: each game's shell let out a creature of its own.
+        // Each shell is made along with its creature, as the room starts, and makes what it lets out there and then
+        var shells = Object.FindObjectsByType<PreInstantiateGameObject>(
+            FindObjectsInactive.Include,
+            FindObjectsSortMode.None
+        );
+        foreach (var shell in shells) {
+            if (shell.gameObject.scene == scene) {
+                Find(shell.prefab, shell, null);
+            }
+        }
+
+        void Find(GameObject? prefab, UnityEngine.Component maker, CreateObject? create) {
+            // A creature's own FSMs run in one game only, and what they spawn is sent already
+            if (prefab == null ||
+                !EntityRegistry.TryGetEntry(prefab, out var entry) ||
+                !EntitySpawner.IsSpawnedAsEntity(prefab, entry.Type) ||
+                EntityProcessor.IsRegistered(maker.gameObject)) {
+                return;
+            }
+
+            if (!_makers.TryGetValue(entry.Type, out var known)) {
+                Logger.Info($"'{maker.gameObject.name}' makes '{prefab.name}' ({entry.Type}) in this room");
+                _makers[entry.Type] = new Maker(prefab, maker, create);
+            } else if (known != null && known.Prefab != prefab) {
+                Logger.Info(
+                    $"The room makes {entry.Type} from both '{known.Prefab.name}' and '{prefab.name}', so " +
+                    "each game makes its own"
+                );
+                _makers[entry.Type] = null;
             }
         }
     }
@@ -162,11 +195,11 @@ internal class RoomCreatures {
             return null;
         }
 
-        var spawnPoint = maker.Action.spawnPoint.Value;
+        var spawnPoint = maker.Action?.spawnPoint.Value;
         var position = spawnPoint != null
             ? spawnPoint.transform.position
-            : maker.Fsm != null
-                ? maker.Fsm.transform.position
+            : maker.MadeBy != null
+                ? maker.MadeBy.transform.position
                 : Vector3.zero;
 
         return Object.Instantiate(maker.Prefab, position, Quaternion.identity);
@@ -182,19 +215,54 @@ internal class RoomCreatures {
             return;
         }
 
+        MakeInTheSceneHostsGame(self, prefab, self.storeObject, () => orig(self));
+    }
+
+    /// <summary>
+    /// Lets out what a shell made ahead of time, and for a creature that the room makes, does it in the scene host's
+    /// game only. The other game's shell lets out nothing, and what it made stays switched off where it was made.
+    /// </summary>
+    private void OnLetOut(Action<GetPreInstantiatedGameObject> orig, GetPreInstantiatedGameObject self) {
+        var shell = self.Fsm.GetOwnerDefaultTarget(self.target);
+        var prefab = shell != null && shell.TryGetComponent<PreInstantiateGameObject>(out var maker)
+            ? maker.prefab
+            : null;
+        if (prefab == null || !IsMadeByTheRoom(prefab) || EntityProcessor.IsRegistered(self.Fsm.GameObject)) {
+            orig(self);
+            return;
+        }
+
+        MakeInTheSceneHostsGame(self, prefab, self.storeGameObject, () => orig(self));
+    }
+
+    /// <summary>
+    /// Makes a creature that the room makes in the scene host's game only, where it is made an entity and sent.
+    /// </summary>
+    /// <param name="action">The action that makes it.</param>
+    /// <param name="prefab">What it is made from.</param>
+    /// <param name="store">Where the action keeps what it made.</param>
+    /// <param name="make">Makes it the way the game does.</param>
+    private void MakeInTheSceneHostsGame(
+        FsmStateAction action,
+        GameObject prefab,
+        FsmGameObject store,
+        System.Action make
+    ) {
         // The scene host's game makes it and sends it. Nothing is stored either, so that what the FSM goes on to do
         // to the new creature - move it, put it under something, tell it where it belongs - is done to nothing rather
         // than to whatever the variable held before.
         if (_entityManager.IsSceneRoleDetermined && !_entityManager.IsSceneHost) {
-            Logger.Info($"Not making '{prefab.name}' for '{self.Fsm.GameObject.name}': the scene host's game makes it");
-            self.storeObject.Value = null;
-            self.Finish();
+            Logger.Info(
+                $"Not making '{prefab.name}' for '{action.Fsm.GameObject.name}': the scene host's game makes it"
+            );
+            store.Value = null;
+            action.Finish();
             return;
         }
 
-        orig(self);
+        make();
 
-        var creature = self.storeObject.Value;
+        var creature = store.Value;
         if (creature == null) {
             return;
         }
@@ -256,18 +324,18 @@ internal class RoomCreatures {
         public GameObject Prefab { get; }
 
         /// <summary>
-        /// One of the FSMs that make it.
+        /// One of the things that make it: an FSM of the room, or a shell that makes it ahead of time.
         /// </summary>
-        public PlayMakerFSM Fsm { get; }
+        public UnityEngine.Component MadeBy { get; }
 
         /// <summary>
-        /// The action of that FSM that makes it.
+        /// The action of that FSM that makes it, or null for a shell.
         /// </summary>
-        public CreateObject Action { get; }
+        public CreateObject? Action { get; }
 
-        public Maker(GameObject prefab, PlayMakerFSM fsm, CreateObject action) {
+        public Maker(GameObject prefab, UnityEngine.Component madeBy, CreateObject? action) {
             Prefab = prefab;
-            Fsm = fsm;
+            MadeBy = madeBy;
             Action = action;
         }
     }

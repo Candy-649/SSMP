@@ -1805,6 +1805,15 @@
     ]
   },
   {
+    "base_object_name": "Control",
+    "type": "ShellwoodHive",
+    "parent_name": "Shellwood Hive",
+    "components": [],
+    "fsm_names": [
+      "Control"
+    ]
+  },
+  {
     "base_object_name": "Slab Fly Large",
     "type": "Wardenfly",
     "parent_name": null,

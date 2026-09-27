@@ -320,5 +320,12 @@ internal enum EntityType {
     /// of each player sent the guests in at its own time, each juggled only in the game of the player who hit them;
     /// they are the scene host's to run now, like the fleas of that game.
     /// </summary>
-    JuggleGameGuest
+    JuggleGameGuest,
+
+    /// <summary>
+    /// Not a creature: the part of a nest that can be struck, which lets out <see cref="WoodWasp"/>s and breaks the
+    /// nest when its health runs out. Each game had a nest of its own that took the hits of that game, so one player's
+    /// nest broke while the other's went on letting out flyers. It is the scene host's to run now, like a creature.
+    /// </summary>
+    ShellwoodHive
 }

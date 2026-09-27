@@ -446,12 +446,19 @@ internal class EntityManager {
             Object.FindObjectsOfType<DreamPlatform>(true).Select(c => c.gameObject),
         }.SelectMany(x => x);
 
+        // What the shell of a creature makes ahead of time to let out when the creature dies is not in the room until
+        // then, and it is made an entity when it is let out (RoomCreatures). Taken as the room starts, the ones in a
+        // room were taken for a single creature: they wait alike where the game makes them, and got the same ID
+        var madeAhead = Object.FindObjectsOfType<PreInstantiateGameObject>(true)
+                              .Select(shell => shell.InstantiatedGameObject)
+                              .ToHashSet();
+
         return fromDeathEffects
                // Expand each object to itself and all children
                .Concat(fromFsms)
                .SelectMany(obj => obj == null ? [] : obj.GetChildren().Prepend(obj))
                .Concat(fromComponents)
-               .Where(obj => obj.scene == scene && !IsCorpseObject(obj))
+               .Where(obj => obj.scene == scene && !IsCorpseObject(obj) && !madeAhead.Contains(obj))
                .Distinct();
     }
 
