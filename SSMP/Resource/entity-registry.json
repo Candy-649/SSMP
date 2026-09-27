@@ -1843,7 +1843,7 @@
   {
     "base_object_name": "Splinter Queen",
     "type": "SisterSplinter",
-    "parent_name": null,
+    "parent_name": "Boss Scene",
     "components": [
       "Rotation"
     ],
@@ -1853,6 +1853,19 @@
       "Damage Effects",
       "Death",
       "Stun Control"
+    ]
+  },
+  {
+    "base_object_name": "Splinter Queen Spike",
+    "type": "SisterSplinter",
+    "parent_name": "Spikes",
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Splinter Queen Spike",
+    "fsm_names": [
+      "Control",
+      "Damage Effects"
     ]
   },
   {
