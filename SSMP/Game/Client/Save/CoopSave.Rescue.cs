@@ -14,11 +14,12 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Being pulled back up by the other player after dying, instead of waking at a bench. A death holds just before the
-/// game takes the player to their bench, which is late enough that the cocoon has been placed and the money and silk
-/// have been moved into it. The other player sees that cocoon in their own game and can break it open, and the player
-/// who died is put back on their feet where they fell with half their health. Waiting is a choice: giving up goes to
-/// the bench as always, and the cocoon stops being shown to the other player the moment waiting ends.
+/// Being pulled back up by the other player after dying, instead of waking at a bench. While the other player is
+/// still standing, a death of the local player is not played out at all: the player goes down where they are, the
+/// game's own death is shown over them with what it tells the room taken out, and they lie in a cocoon that the other
+/// player can break open to put them back on their feet with half their health. The game's own death runs, from its
+/// very first step, only once nobody is left to do that: both players are down, the wait ran out, or the player gave
+/// up. Waiting is a choice, and the cocoon stops being shown to the other player the moment waiting ends.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -86,13 +87,6 @@ internal partial class CoopSave {
     /// belongs to never sends another animation of their own.
     /// </summary>
     private const string IdleClipName = "Idle";
-
-    /// <summary>
-    /// The name of the FSM that plays a death out on the object the death spawns for it. Every one of the five of
-    /// those objects - the ordinary one, the cursed one, the non-lethal one, the memory one and the frost one -
-    /// carries one FSM by this name, which is what makes it the way to find the object at all.
-    /// </summary>
-    private const string DeathAnimFsmName = "Hero Death Anim";
 
     /// <summary>
     /// How long the screen takes to come back, in seconds.
@@ -198,6 +192,17 @@ internal partial class CoopSave {
         /// Where the partner said to stand up, for a death in the chase, or null to stand up where they fell.
         /// </summary>
         public Vector2? StandAt { get; set; }
+
+        /// <summary>
+        /// The game's death shown over the player as they went down, while it is still playing.
+        /// </summary>
+        public GameObject? Effect { get; set; }
+
+        /// <summary>
+        /// The last frame the wait itself, or the way to the bench after it, ran on. Both run on every frame for as
+        /// long as anything is holding them, so a frame count that has stopped moving means whatever held it is gone.
+        /// </summary>
+        public int HeldFrame { get; set; } = Time.frameCount;
     }
 
     /// <summary>
@@ -329,8 +334,8 @@ internal partial class CoopSave {
     ///
     /// The game makes no such object at the moment of a death. A death writes down where the cocoon is and what it
     /// holds, and the object itself is made when the room is next loaded - which is what a player walking back to
-    /// where they died sees. A held death never loads anything, so the player waiting to be pulled up was lying in
-    /// a cocoon that was nowhere on their screen.
+    /// where they died sees. A player lying down loads nothing, so without this they were lying in a cocoon that was
+    /// nowhere on their screen.
     /// </summary>
     private GameObject? _rescueOwnCocoon;
 
@@ -368,7 +373,6 @@ internal partial class CoopSave {
     /// </summary>
     private void RegisterRescueHooks() {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
-        _deathAnnouncementHook = HoldBackTheNewsOfADeath();
         _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
         _burnHook = WatchForBurns();
         _respawnResetHook = CreateHook(
@@ -378,6 +382,53 @@ internal partial class CoopSave {
         _timePassesHook = CreateHook(
             typeof(global::GameManager).GetMethod("TimePasses", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<global::GameManager>, global::GameManager>(OnTimePasses)
+        );
+        _specialDamageHook = CreateHook(
+            typeof(HeroController).GetMethod(
+                "DoSpecialDamage",
+                InstanceFlags,
+                null,
+                [typeof(int), typeof(bool), typeof(string), typeof(bool), typeof(bool), typeof(bool), typeof(bool)],
+                null
+            ),
+            new Action<Action<HeroController, int, bool, string, bool, bool, bool, bool>, HeroController, int, bool,
+                string, bool, bool, bool, bool>(OnSpecialDamage)
+        );
+    }
+
+    /// <summary>
+    /// The hook on the damage that goes around the defences of the player.
+    /// </summary>
+    private Hook? _specialDamageHook;
+
+    /// <summary>
+    /// Keeps the damage that goes around the defences of the player - frost, and what the room marks them with - off
+    /// a player lying down.
+    ///
+    /// Going down takes the player out of reach of hits (<see cref="GoDown"/>), but this damage does not ask about
+    /// that: it goes straight to the health, and asks only whether the player is changing rooms
+    /// (HeroController.DoSpecialDamage). The game keeps it off the dead by stopping what deals it - the frost stops
+    /// building for a dead player - and a player lying down is not dead. So a player lying in the cold lost health they
+    /// did not have, broke what they were carrying, and asked for a death again every time the frost came round, each
+    /// of which showed the partner a death of theirs.
+    /// </summary>
+    private static void OnSpecialDamage(
+        Action<HeroController, int, bool, string, bool, bool, bool, bool> orig,
+        HeroController self,
+        int damageAmount,
+        bool playEffects,
+        string damageEvent,
+        bool canDie,
+        bool allowFracturedMaskBreak,
+        bool justTakeHealth,
+        bool isFrostDamage
+    ) {
+        if (PlayerTargetRegistry.IsPlayerDown(self.gameObject)) {
+            return;
+        }
+
+        orig(
+            self, damageAmount, playEffects, damageEvent, canDie, allowFracturedMaskBreak, justTakeHealth, isFrostDamage
         );
     }
 
@@ -419,7 +470,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether the death that is on its way to the bench is one the partner lived through, so the world does not move
-    /// on for it. Set when a held death is let go to the bench, and used up by the one call that moves the world on.
+    /// on for it. Set when a player lying down is let go to the bench, and used up by the one call that moves the
+    /// world on.
     /// </summary>
     private bool _deathPassesNoTime;
 
@@ -479,111 +531,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// What a death of the player announces to everything in the room that answers to one. Fifty-seven objects in the
-    /// game listen for it and almost all of them are bosses; nothing on the player themselves does, so holding it
-    /// back takes nothing away from the death itself.
-    /// </summary>
-    private const string DeathAnnouncement = "HORNET DEATH";
-
-    /// <summary>
-    /// What the death announces once it has played itself out. One scripted battle answers to it by undoing its own
-    /// outcome, for a player who is to fight it again from the bench, which a player pulled back up in the middle of
-    /// it is not.
-    /// </summary>
-    private const string DeathOverAnnouncement = "HORNET DEATH COMPLETE";
-
-    /// <summary>
-    /// The hook on the one call that carries that announcement.
-    /// </summary>
-    private Hook? _deathAnnouncementHook;
-
-    /// <summary>
-    /// Whether the death being played out now can wait for the partner to pull the player back up, decided once, when
-    /// the death starts.
-    ///
-    /// The announcement used to ask again when it went out, but by then the second of two deaths has already told the
-    /// waiting partner that nobody is coming, and that clears the very thing the question looks at. Asked again, the
-    /// second death looked like a first one, so the room never heard of either and a boss never had two deaths to
-    /// celebrate.
-    /// </summary>
-    private bool _deathCanWait;
-
-    /// <summary>
-    /// The announcements of the current death that were held back, in the order they came, each with what it was to
-    /// leave out, so that they can still go out if the partner dies as well while this player is waiting.
-    /// </summary>
-    private readonly List<(string EventName, GameObject? ExcludeTarget)> _heldDeathAnnouncements = [];
-
-    /// <summary>
-    /// Stops one player's death from telling the room the fight is over while the other player is still in it.
-    ///
-    /// A boss that hears this stops fighting and celebrates, and what ends the celebration is the loading of the room
-    /// the bench is in. In two players that room is never loaded while one of them is still standing, so the boss
-    /// stood there celebrating over a player who was being pulled back up, and the one still fighting had nothing
-    /// left to fight. Held back, the boss simply carries on with whoever is left.
-    /// </summary>
-    private Hook? HoldBackTheNewsOfADeath() {
-        try {
-            var method = typeof(EventRegister).GetMethod(
-                nameof(EventRegister.SendEvent),
-                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
-                null,
-                [typeof(string), typeof(GameObject)],
-                null
-            );
-
-            if (method == null) {
-                Logger.Error("Could not find how a death tells the room, so a boss will celebrate over one player");
-
-                return null;
-            }
-
-            return new Hook(method, (Action<Action<string, GameObject>, string, GameObject>) OnDeathAnnounced);
-        } catch (Exception e) {
-            Logger.Error($"Could not hold back the news of a death:\n{e}");
-
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Lets the news of a death through only when there is nobody left in the room it would be news to.
-    /// </summary>
-    /// <remarks>
-    /// Decided by the very thing that decides where this death is going: a death that can still wait to be pulled
-    /// back up is not the end of anything, and a death that cannot is the one that goes to the bench, which is the
-    /// same as saying both players are down. Keeping one answer rather than two means the boss and the bench can
-    /// never disagree about whether the fight is over.
-    ///
-    /// Only the death of the player at this screen ever reaches here. The death of the partner is played out as
-    /// particles and a cocoon and nothing else - it never puts up the object that carries this announcement - so
-    /// there is no second case to get right.
-    /// </remarks>
-    /// <param name="orig">The original call.</param>
-    /// <param name="eventName">The announcement.</param>
-    /// <param name="excludeTarget">What is not to be told, which is the caller's own business.</param>
-    private void OnDeathAnnounced(Action<string, GameObject> orig, string eventName, GameObject excludeTarget) {
-        try {
-            if ((eventName == DeathAnnouncement || eventName == DeathOverAnnouncement) && _deathCanWait) {
-                Logger.Info($"Not telling the room '{eventName}', because the teammate is still fighting in it");
-                _heldDeathAnnouncements.Add((eventName, excludeTarget));
-
-                return;
-            }
-        } catch (Exception e) {
-            // Whatever goes wrong in deciding this, the game's own call has to happen: the alternative is a death
-            // that half the room never hears about for a reason that was never about the room
-            Logger.Warn($"Could not decide whether to hold back the news of a death: {e.Message}");
-        }
-
-        orig(eventName, excludeTarget);
-    }
-
-
-
-    /// <summary>
-    /// Holds a death of the local player before it takes them to their bench, so that the partner has a chance to pull
-    /// them back up. Anything that leaves no cocoon to open, or leaves nobody to open it, plays out untouched.
+    /// Keeps a death of the local player from being played out while the partner can still pull them back up, and lays
+    /// them down instead. Anything that leaves no cocoon to open, or leaves nobody to open it, plays out untouched.
     /// </summary>
     /// <param name="death">The coroutine of the game that plays out the death.</param>
     /// <param name="nonLethal">Whether the death was non-lethal.</param>
@@ -599,9 +548,23 @@ internal partial class CoopSave {
         // either log could be matched to, because this used to sit below the return.
         SayWhatTheDeathFound(nonLethal, frostDeath);
 
-        // Before telling a waiting partner anything, because that changes the answer
-        _deathCanWait = CanWaitForRescue();
-        _heldDeathAnnouncements.Clear();
+        // A player lying down is not marked dead, so the game can ask for their death again: a hit that deals its
+        // damage directly does so whenever the health is at nothing and the player is not dead
+        // (HeroController.CheckDeathCatch). The death they are lying in is the only one there is, and it stays the
+        // only one on the way from there to the bench, until the game's own death has marked them dead.
+        if (HeroController.instance is { } hero && PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+            Logger.Info("Not playing out a death of a player who is already lying down");
+
+            return Array.Empty<object>().GetEnumerator();
+        }
+
+        // Nor is a player the game has already marked dead laid down on their way to the bench. Damage that goes
+        // around the defences of the player asks for a death without looking at that (HeroController.DoSpecialDamage),
+        // and the game's own death answers it by itself.
+        if (HeroController.instance is { cState.dead: true }) {
+            return death;
+        }
+
         _deathPassesNoTime = false;
 
         // A non-lethal death leaves no cocoon: the game skips that whole part of its own sequence, so there would be
@@ -611,18 +574,17 @@ internal partial class CoopSave {
             return death;
         }
 
-        if (!_deathCanWait) {
+        if (!CanWaitForRescue()) {
             TellPartnerNobodyIsComing();
 
             return death;
         }
 
-        // Before the death has run a single frame of itself, so that anything it is still showing afterwards can be
-        // told apart from what the room was already showing
+        // Before the player has gone down, so that anything still showing afterwards can be told apart from what the
+        // room was already showing
         NoteWhatIsOnAroundThePlayer();
-        NoteTheMoneyLyingAround();
 
-        return HoldDeath(death);
+        return LieDown(death, frostDeath);
     }
 
     /// <summary>
@@ -705,7 +667,6 @@ internal partial class CoopSave {
         rescue.Outcome = RescueOutcome.Ended;
         rescue.PartnerDown = true;
         Logger.Info($"{player.Username} died as well, so this wait is over and both go to their benches");
-        AnnounceTheHeldBackDeath();
         Chat(
             Lang.Pick(
                 $"{player.Username} died as well, so you are both going back to your bench.",
@@ -715,37 +676,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the room about this player's death after all, now that the partner has died too.
-    ///
-    /// Only the game that runs a creature can make it act on the news, and the one that died first had held it
-    /// back. When that was the game running the boss, the second death was only ever heard by a copy of the boss
-    /// that does nothing by itself, so a boss that had killed them both never celebrated.
-    /// </summary>
-    private void AnnounceTheHeldBackDeath() {
-        if (_heldDeathAnnouncements.Count == 0) {
-            return;
-        }
-
-        var held = _heldDeathAnnouncements.ToArray();
-        _heldDeathAnnouncements.Clear();
-        _deathCanWait = false;
-
-        try {
-            Logger.Info("Telling the room the player died after all, because their teammate has died as well");
-            foreach (var (eventName, excludeTarget) in held) {
-                EventRegister.SendEvent(eventName, excludeTarget);
-            }
-        } catch (Exception e) {
-            LogRescueError(e);
-        }
-    }
-
-    /// <summary>
     /// Whether the local player can be pulled back up at all: the saves are checked with a partner who is here, and
     /// that partner is not lying dead themselves, since two players waiting for each other would wait forever.
     /// </summary>
     private bool CanWaitForRescue() {
         if (!_netClient.IsConnected || !IsInGame() || GetCurrentMarker() == null) {
+            return false;
+        }
+
+        // Steel Soul keeps the game's own rule, whoever else is still standing: its one death is the end
+        if (PlayerData.instance is { permadeathMode: not GlobalEnums.PermadeathModes.Off }) {
             return false;
         }
 
@@ -767,30 +707,16 @@ internal partial class CoopSave {
     private float _lastStoodBackUpTime;
 
     /// <summary>
-    /// Plays the death out to the point where the cocoon has been placed, holds there while the partner has a chance
-    /// to open it, and then either puts the player back on their feet or lets the death finish as it always did.
+    /// Lays the player down where they are instead of playing the death out, holds them there while the partner has a
+    /// chance to open their cocoon, and then either puts them back on their feet or plays the game's own death after
+    /// all, from its first step.
     /// </summary>
-    /// <param name="death">The coroutine of the game that plays out the death.</param>
-    private IEnumerator HoldDeath(IEnumerator death) {
-        // One step covers everything the game does before its first wait: the cocoon is placed, the money and the silk
-        // are moved into it and the body is hidden. Taking the player to their bench is the first thing after it, so
-        // this is the last moment at which a death can still be undone.
-        bool running;
-        try {
-            running = death.MoveNext();
-        } catch (Exception e) {
-            LogRescueError(e);
-            yield break;
-        }
-
-        if (!running) {
-            yield break;
-        }
-
-        if (!StartRescueWait()) {
-            // Nothing is waiting, so the death finishes the way it started
-            yield return death.Current;
-
+    /// <param name="death">The coroutine of the game that plays out the death, not started yet.</param>
+    /// <param name="frostDeath">Whether the death was caused by frost.</param>
+    private IEnumerator LieDown(IEnumerator death, bool frostDeath) {
+        var hero = HeroController.instance;
+        if (hero == null || !StartRescueWait(hero) || _rescue is not { } lying) {
+            // Nothing is waiting, so the death plays out the way it always did
             while (death.MoveNext()) {
                 yield return death.Current;
             }
@@ -798,24 +724,30 @@ internal partial class CoopSave {
             yield break;
         }
 
-        // The death is allowed to play its own ending out - it belongs to the game and it is worth seeing - and the
-        // screen is given back as soon as it is over, so that the rest of the wait is spent looking at the room, the
-        // cocoon and the line that explains what is happening rather than at nothing at all.
-        if (_rescue is { } started) {
-            MonoBehaviourUtil.Instance.StartCoroutine(BringScreenBackAfterDeath(started));
+        try {
+            GoDown(hero, lying, frostDeath);
+        } catch (Exception e) {
+            LogRescueError(e);
         }
+
+        // The death is shown over the player the way the game shows it - it belongs to the game and it is worth
+        // seeing - and the screen is given back as soon as it is over, so that the rest of the wait is spent looking at
+        // the room, the cocoon and the line that explains what is happening rather than at nothing at all.
+        MonoBehaviourUtil.Instance.StartCoroutine(BringScreenBackAfterDeath(lying));
 
         // Running out of time is decided here rather than only frame by frame next door, because the update that runs
         // frame by frame sits behind early returns of its own: a marker that is gone for a moment is enough to stop it,
-        // and then this would hold the death for as long as the game runs. A held death has already switched the pause
-        // menu off, so there would be nothing left to do about it but kill the game. This loop is the one thing that is
-        // certainly still running while a death is held, so the way out that must always work lives in it.
+        // and then this would keep the player down for as long as the game runs. Going down has already switched the
+        // pause menu off, so there would be nothing left to do about it but kill the game. This loop is the one thing
+        // that is certainly still running while the player lies there, so the way out that must always work is in it.
         // Seeded with what the key is doing right now rather than with "not held". A player dies in the middle of
         // doing things, and a key that was already down when they died is not them asking to give up on being saved.
         var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
         var padButtonWasDown = IsPadButtonDown(_modSettings.Keybinds.CoopLeave, out _);
 
         while (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
+            waiting.HeldFrame = Time.frameCount;
+
             if (Time.unscaledTime - waiting.StartTime >= RescueWaitTime) {
                 Logger.Info("Waited the whole time to be pulled back up and nobody came, going to the bench");
                 waiting.Outcome = RescueOutcome.Ended;
@@ -824,7 +756,7 @@ internal partial class CoopSave {
             }
 
             // The line and the way out live here for the same reason the time limit does: this is the one thing that
-            // is certainly still running while a death is held. They used to live next door, behind those early
+            // is certainly still running while the player lies there. They used to live next door, behind those early
             // returns, so a player could be left staring at a cocoon with nothing on screen telling them anything and
             // no way out but to sit through the whole wait.
             ShowTheWayOutOfTheWait(waiting);
@@ -861,38 +793,69 @@ internal partial class CoopSave {
             yield return null;
         }
 
-        var waited = _rescue;
-        var rescued = waited is { Outcome: RescueOutcome.Rescued };
-        var screenBack = waited is { ScreenBack: true };
-
         // Said here because this is the one place that knows which of the ways out of a wait was taken, and a player
         // left standing in neither their own body nor at their bench has no way of telling us which it was
-        Logger.Info($"The wait to be pulled back up is over as '{waited?.Outcome}', with the screen back: {screenBack}");
-        EndRescueWait();
+        Logger.Info(
+            $"The wait to be pulled back up is over as '{lying.Outcome}', with the screen back: {lying.ScreenBack}"
+        );
 
-        if (rescued && waited != null && TryRevive(HeroController.instance, waited)) {
-            yield break;
+        // No longer down before being put back on their feet, since giving the body back asks whether anything still
+        // holds it (IsHeroTakenByGame)
+        if (lying.Outcome == RescueOutcome.Rescued) {
+            EndRescueWait();
+
+            if (TryRevive(HeroController.instance, lying)) {
+                yield break;
+            }
         }
 
         // Time only passes when both players are down. A partner who is still connected and did not go down as well
         // lived through this death, whether this player gave up, ran out of time or could not be stood back up
-        _deathPassesNoTime = waited is not { PartnerDown: true } && GetCheckedPartner() != null;
+        _deathPassesNoTime = !lying.PartnerDown && GetCheckedPartner() != null;
         Logger.Info(
-            "Letting the death finish and take the player to their bench, " +
+            "Letting the game's own death take the player to their bench, " +
             (_deathPassesNoTime ? "without time passing: the teammate is still standing" : "with time passing")
         );
 
-        // The bench this death is about to take the player to is reached with the screen already black: the game
-        // leaves it that way on purpose across the load of the room it is in, and only fades back in once the player
-        // is standing there. Giving the screen back during the wait took that away, so it goes dark again here.
-        if (screenBack) {
-            ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), Color.black, RescueFadeTime);
-
-            yield return new WaitForSeconds(RescueFadeTime);
+        // The player has already watched their death once, so the game's own is played behind a dark screen rather
+        // than shown to them a second time. The bench is reached with the screen dark anyway: the game fades back in
+        // only once the player is standing there.
+        if (lying.Effect != null) {
+            UnityEngine.Object.Destroy(lying.Effect);
         }
 
-        // Either the player gave up, or putting them back on their feet did not work, and a death that is left half
-        // played out would be far worse than the bench they expected in the first place
+        ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), Color.black, RescueFadeTime);
+
+        // Still down while the screen goes dark, and marked as held all the way, so that nothing in between takes the
+        // player for someone on their feet: a second death would be laid down on top of this one, a partner going
+        // down now would be told this player is coming for them, and what only moves a player who is standing - back
+        // to the door of a fight, over to a delivery - would move one on their way to a death
+        for (var faded = 0f; faded < RescueFadeTime; faded += Time.deltaTime) {
+            lying.HeldFrame = Time.frameCount;
+
+            yield return null;
+        }
+
+        // The one thing of lying down that the way to the bench does not undo by itself: it gives control and the
+        // animation back when the bench room is ready (GameManager.OnNextLevelReady), but knows nothing of this
+        if (HeroController.instance is { } dying) {
+            dying.RemoveInvulnerabilitySource(RescueInvulnerability);
+        }
+
+        // Either the player gave up, or putting them back on their feet did not work, and a player left lying there
+        // would be far worse than the bench they expected in the first place. From its first step, which is where the
+        // player was headed before the partner could do anything about it: it finds them lying where they went down,
+        // so what it writes down of the cocoon and the money in it is written about that place, and it tells the room
+        // of the death itself.
+        var more = death.MoveNext();
+
+        // That first step has marked the player dead, which is where lying down ends
+        EndRescueWait();
+
+        if (!more) {
+            yield break;
+        }
+
         yield return death.Current;
 
         while (death.MoveNext()) {
@@ -901,18 +864,128 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Takes the player down where they are, as the first step of the game's own death does (HeroController.Die),
+    /// without the part that makes it a death: they are not marked dead, nothing is told of it, and their money and
+    /// silk stay with them. Nothing in the room acts on a death that never happened - a boss can still fall to the
+    /// partner, the money on the floor can still be picked up, the dark over hidden places still follows the player -
+    /// and nothing has to be put back when they stand up. The game's own death does all of it if it comes to that.
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    /// <param name="rescue">The wait the player goes down for.</param>
+    /// <param name="frostDeath">Whether the death was caused by frost.</param>
+    private static void GoDown(HeroController hero, PendingRescue rescue, bool frostDeath) {
+        if (hero.hazardRespawnRoutine != null) {
+            hero.StopCoroutine(hero.hazardRespawnRoutine);
+            hero.hazardRespawnRoutine = null;
+        }
+
+        hero.ResetSilkRegen();
+        hero.audioCtrl.StopSound(GlobalEnums.HeroSounds.FOOTSTEPS_WALK, true);
+        hero.audioCtrl.StopSound(GlobalEnums.HeroSounds.FOOTSTEPS_RUN, true);
+
+        // Whatever the player was in the middle of - a swing, a skill, a tool - stops, as it does for a death. Before
+        // control is taken, since some of what stops hands control back as it goes.
+        EventRegister.SendEvent(EventRegisterEvents.FsmCancel, null);
+        hero.RelinquishControl();
+        hero.StopAnimationControl();
+        PlayerData.instance.disablePause = true;
+
+        hero.StopTilemapTest();
+        hero.cState.onConveyor = false;
+        hero.cState.onConveyorV = false;
+        hero.rb2d.linearVelocity = Vector2.zero;
+        hero.CancelRecoilHorizontal();
+        hero.AffectedByGravity(false);
+        hero.cState.falling = false;
+        hero.rb2d.bodyType = RigidbodyType2D.Kinematic;
+        hero.ResetMotion(true);
+        hero.ResetHardLandingTimer();
+
+        // Out of reach of anything that hurts. The layer stays as it is, unlike in a death, so that nothing the player
+        // is standing in sees them leave: the camera stays where it was held, and the dark over a hidden place stays
+        // off while they lie inside it.
+        HeroBox.Inactive = true;
+        hero.heroBox.HeroBoxOff();
+        hero.AddInvulnerabilitySource(RescueInvulnerability);
+        hero.renderer.enabled = false;
+
+        if (hero.vibrationCtrl != null) {
+            hero.vibrationCtrl.PlayHeroDeath();
+        }
+
+        rescue.Effect = ShowTheDeath(hero, frostDeath);
+    }
+
+    /// <summary>
+    /// Shows the game's own death over the player going down: a copy of what the game puts up for it, placed and
+    /// dressed the way the game does it (HeroController.Die), with the actions that tell the room about a death and
+    /// the one that rids the player of what they carry switched off. Everything else plays as it always does - the
+    /// fall, the sound, the shake, the music going quiet and the screen going black - and the screen is given back
+    /// when it is over (<see cref="BringScreenBackAfterDeath"/>).
+    ///
+    /// A copy of its own rather than one out of the game's pool, because the pool would hand the same object to the
+    /// game's own death later on, and that one must not come with its announcements switched off.
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    /// <param name="frostDeath">Whether the death was caused by frost.</param>
+    /// <returns>The copy, which takes itself away once it has played out.</returns>
+    private static GameObject ShowTheDeath(HeroController hero, bool frostDeath) {
+        var prefab = hero.GetHeroDeathPrefab(false, false, frostDeath);
+        var effect = UnityEngine.Object.Instantiate(prefab, hero.transform.position, prefab.transform.rotation);
+        effect.transform.localScale = Vector3.Scale(hero.transform.localScale, prefab.transform.localScale);
+        effect.SetActive(true);
+
+        // Switched on first, so that its FSMs are set up, but before they start, which is not until the next frame
+        foreach (var fsm in effect.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            foreach (var state in fsm.FsmStates) {
+                foreach (var action in state.Actions) {
+                    if (action is SendEventToRegister or SendEventToRegisterDelay or SetHeroMaggoted) {
+                        action.Enabled = false;
+                    }
+                }
+            }
+        }
+
+        var animator = effect.GetComponent<tk2dSpriteAnimator>();
+        if (animator != null) {
+            animator.Library = hero.animCtrl.animator.Library;
+        }
+
+        return effect;
+    }
+
+    /// <summary>
+    /// Where the game would leave the cocoon of a death of the player standing here: the room, and the place in it.
+    ///
+    /// The same choice the first step of the game's own death makes (HeroController.Die), without writing it down,
+    /// since the player lying here has not died: a room can send the cocoon somewhere of its choosing, and otherwise it
+    /// goes to the nearest of the places the room keeps for one, or where the player is if the room keeps none.
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    private static (string Scene, Vector2 Position) WhereTheGameLeavesTheCocoon(HeroController hero) {
+        var proxy = HeroCorpseMarkerProxy.Instance;
+        if (proxy != null) {
+            return (proxy.TargetSceneName, proxy.TargetScenePos);
+        }
+
+        var at = (Vector2) hero.transform.position;
+        var marker = HeroCorpseMarker.GetClosest(at);
+
+        return (hero.gm.GetSceneNameString(), marker != null ? marker.Position : at);
+    }
+
+    /// <summary>
     /// Starts waiting to be pulled back up, and tells the partner where the cocoon is so their game can show it.
     /// </summary>
     /// <returns>Whether a wait was started.</returns>
-    private bool StartRescueWait() {
-        var playerData = PlayerData.instance;
-        if (playerData == null || GetCheckedPartner() is not { } partner) {
+    /// <param name="hero">The hero controller.</param>
+    private bool StartRescueWait(HeroController hero) {
+        if (GetCheckedPartner() is not { } partner) {
             return false;
         }
 
-        // The position the game itself wrote for its own cocoon, so both games point at the same spot
-        var scene = playerData.HeroCorpseScene;
-        var position = playerData.HeroDeathScenePos;
+        // Where the game itself would leave the cocoon, so both games point at the same spot
+        var (scene, position) = WhereTheGameLeavesTheCocoon(hero);
         if (string.IsNullOrEmpty(scene)) {
             return false;
         }
@@ -923,8 +996,8 @@ internal partial class CoopSave {
 
         var gameManager = global::GameManager.instance;
         _rescue = new PendingRescue(scene, position) {
-            // Taken now, before the death has played any of itself out, so it is the music of the room rather than
-            // the music of the death
+            // Taken now, before the death shown over the player has played any of itself out, so it is the music of
+            // the room rather than the music of the death
             Music = gameManager == null ? null : gameManager.AudioManager.CurrentMusicCue,
             Key = ++_lastRescueKey,
             Chase = chase
@@ -962,7 +1035,6 @@ internal partial class CoopSave {
         }
 
         _rescueOwnCocoon = null;
-        SayTheLocalPlayerIsDown(false);
     }
 
     /// <summary>
@@ -970,8 +1042,8 @@ internal partial class CoopSave {
     ///
     /// A death this mod holds never reloads the room, so the hero goes on existing where it fell for as long as the
     /// player lies there - and the enemies in the room, which were never told any different, went on attacking that
-    /// spot. Tied to the cocoon rather than to the death, because the cocoon is there for exactly as long as the
-    /// player is down, however the wait ends.
+    /// spot. Tied to the wait rather than to the cocoon: the player is down from the moment they go down until they are
+    /// back on their feet or the game's own death has marked them dead, and the cocoon can go before that.
     /// </summary>
     /// <param name="down">Whether the local player is down.</param>
     private static void SayTheLocalPlayerIsDown(bool down) {
@@ -988,7 +1060,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Stops waiting to be pulled back up, and tells the partner so that the cocoon stops being shown to them.
+    /// Stops waiting to be pulled back up, so the player is no longer down, and tells the partner so that the cocoon
+    /// stops being shown to them.
     /// </summary>
     private void EndRescueWait() {
         // Marked as over on the way out, not just dropped. What is watching the death play out so it can give the
@@ -1001,6 +1074,7 @@ internal partial class CoopSave {
 
         _rescue = null;
         RemoveOwnCocoon();
+        SayTheLocalPlayerIsDown(false);
         _uiManager.CoopPrompt.Hide();
 
         if (GetCheckedPartner() is { } partner) {
@@ -1009,152 +1083,6 @@ internal partial class CoopSave {
                 Kind = CoopSaveUpdateKind.RescueEnd
             });
         }
-    }
-
-    /// <summary>
-    /// The object the death spawned to play itself out, or null if it is no longer playing.
-    ///
-    /// This used to be looked for by a <c>HeroDeathSequence</c> component, on the belief that every kind of death
-    /// carries one. It does not: of the five objects a death can spawn, exactly one has that component, and it is not
-    /// the one an ordinary death uses - so the search came back empty every single time and everything built on it
-    /// quietly did nothing. What all five do carry is one FSM named <see cref="DeathAnimFsmName"/>, which is the
-    /// thing that plays the death out, so that is what they are found by now.
-    ///
-    /// Only objects that are switched on are found, which is exactly right: the death's own ending puts this object
-    /// back in the pool, and a pooled object is switched off. Finding nothing therefore means the death has already
-    /// played itself out.
-    /// </summary>
-    private static GameObject? FindDeathEffect() {
-        foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(FindObjectsSortMode.None)) {
-            if (fsm != null && fsm.FsmName == DeathAnimFsmName) {
-                return fsm.gameObject;
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Takes away the object the death spawned to play itself out, so that it cannot darken the screen after the
-    /// player has been put back on their feet.
-    ///
-    /// Its last step sets the screen to black and puts itself back in the pool, and nothing in a held death ever
-    /// reaches the place where the game clears that again. A player pulled up before the death finished would
-    /// therefore be walking around for a second or two and then have the screen go black on them.
-    ///
-    /// It came out of the game's pool, so it goes back to the pool: destroying a pooled object leaves the pool
-    /// believing it is still on loan.
-    /// </summary>
-    private static void ClearDeathEffect() {
-        if (FindDeathEffect() is not { } effect) {
-            return;
-        }
-
-        try {
-            effect.Recycle();
-        } catch (Exception e) {
-            Logger.Warn($"Could not return the death effect to the pool: {e.Message}");
-            UnityEngine.Object.Destroy(effect);
-        }
-    }
-
-    /// <summary>
-    /// The value of <see cref="AutoRecycleSelf.afterEvent"/> that has the effect taken away by a timer running out.
-    /// </summary>
-    private const int EffectEndedByTimer = 0;
-
-    /// <summary>
-    /// The value of <see cref="AutoRecycleSelf.afterEvent"/> that has the effect taken away when its animation stops.
-    /// </summary>
-    private const int EffectEndedByAnimation = 1;
-
-    /// <summary>
-    /// The value of <see cref="AutoRecycleSelf.afterEvent"/> that has nothing take the effect away at all.
-    /// </summary>
-    private const int EffectEndedByNothing = 2;
-
-    /// <summary>
-    /// Whether an effect that is playing now has any way of ending itself.
-    ///
-    /// Read from <c>AutoRecycleSelf.RecycleUpdate</c>, which is one switch over <see cref="AutoRecycleSelf.afterEvent"/>
-    /// and nothing else. The names of that enumeration are not in the game's own libraries for us to write here, so
-    /// the numbers stand, and what each of them does is written next to it.
-    ///
-    /// The two values not named here count frames instead, and are left alone: an effect counting frames is an
-    /// effect that is going to end, and this is not the place to decide it has waited long enough.
-    /// </summary>
-    /// <param name="recycler">The effect to judge.</param>
-    /// <returns>Whether it can still put itself back in the pool.</returns>
-    private static bool CanEffectEndItself(AutoRecycleSelf recycler) {
-        return (int) recycler.afterEvent switch {
-            // A timer that was never started never runs out, and the branch reads the flag before the clock
-            EffectEndedByTimer => recycler.recycleTimerRunning,
-            // Likewise: without an animator there is no animation to end
-            EffectEndedByAnimation => recycler.hasTk2dAnimator,
-            EffectEndedByNothing => false,
-            _ => true
-        };
-    }
-
-    /// <summary>
-    /// Takes away the effects that were playing when the player died and that nothing will ever take away by itself.
-    ///
-    /// Every effect the game draws from its pool carries an <see cref="AutoRecycleSelf"/> saying what ends it: a
-    /// timer, the end of an animation, a count of frames - or, for one of the values, nothing at all. The ones ended
-    /// by nothing are not a mistake and are not leaks. They are held up by the one thing that clears all of them at
-    /// once, which is the change of room: <c>GameManager.SetupGameRefs</c> hands
-    /// <c>AutoRecycleSelf.RecycleActiveRecyclers</c> to <c>NextSceneWillActivate</c>, and that recycles every effect
-    /// that is playing, whatever it says about itself. A pooled effect outlives the unloading of a scene - the pool it
-    /// belongs to is not part of the scene - so without that hook they would follow the player into the next room.
-    ///
-    /// An ordinary death changes rooms, so an ordinary death clears them. A death that is held for the other player to
-    /// answer never changes rooms, and so it never clears them: whatever was covering the player when they died is
-    /// still covering them when they are pulled back up, and stays there until they walk out of the room. That was the
-    /// screen full of smoke.
-    ///
-    /// Only the ones with no way of ending themselves are taken, not the whole list the room change takes. Everything
-    /// else was going to be gone within a second or two on its own, and taking it as well would mean answering a death
-    /// by wiping the room - including whatever the other player has in the air at that moment.
-    /// </summary>
-    private static void ClearStuckEffects() {
-        var stuck = new List<AutoRecycleSelf>();
-
-        // Copied before any of it is touched, because putting one back in the pool takes it out of this same list
-        try {
-            foreach (var recycler in AutoRecycleSelf.activeRecyclers) {
-                if (recycler != null && !CanEffectEndItself(recycler)) {
-                    stuck.Add(recycler);
-                }
-            }
-        } catch (Exception e) {
-            Logger.Warn($"Could not look over the effects the death left playing: {e.Message}");
-
-            return;
-        }
-
-        var cleared = new List<string>();
-        foreach (var recycler in stuck) {
-            try {
-                if (recycler == null) {
-                    continue;
-                }
-
-                cleared.Add(recycler.name);
-                recycler.ForceRecycle();
-            } catch (Exception e) {
-                Logger.Warn($"Could not return an effect the death left playing to the pool: {e.Message}");
-            }
-        }
-
-        if (cleared.Count > 0) {
-            // By name, because something a player can see is still there afterwards cannot be told from something
-            // that was never here at all unless what was taken away is written down
-            Logger.Info(
-                $"Took away {cleared.Count} effect(s) the death left playing that nothing would have ended: " +
-                string.Join(", ", cleared)
-            );
-        }
-
     }
 
     /// <summary>
@@ -1178,9 +1106,9 @@ internal partial class CoopSave {
     /// The hero carries the vignette of the game on them: two plates larger than the screen with the player's own
     /// place cut out of the middle, which is how a dark room is drawn. A death draws them closed, and the state it
     /// does that in is a dead end - it has no transition of its own at all, and the only ways out of it are events
-    /// the game sends while respawning. A held death never respawns, so the plates stayed closed for the whole wait,
-    /// over a screen this mod had just deliberately given back: a dark cloud around a player who could otherwise see
-    /// the room, their cocoon and their teammate coming.
+    /// the game sends while respawning. A player lying down never respawns, so the plates stayed closed for the whole
+    /// wait, over a screen this mod had just deliberately given back: a dark cloud around a player who could otherwise
+    /// see the room, their cocoon and their teammate coming.
     ///
     /// The event sent is the one whose state grows the plates back to the size the room itself asked for, so a dark
     /// room stays as dark as it was rather than being thrown open by a death.
@@ -1224,121 +1152,6 @@ internal partial class CoopSave {
             Logger.Info($"Opened the dark plates the death closed around the player; they are now in '{darkness.ActiveStateName}'");
         } catch (Exception e) {
             Logger.Warn($"Could not open the dark plates the death closed around the player: {e.Message}");
-        }
-    }
-
-    /// <summary>
-    /// The money lying in the room that could be picked up when the current death began.
-    /// </summary>
-    private static readonly List<CurrencyObjectBase> MoneyLyingAround = [];
-
-    /// <summary>
-    /// Writes down the money lying in the room that can be picked up, before the death has run a single frame.
-    /// </summary>
-    private static void NoteTheMoneyLyingAround() {
-        MoneyLyingAround.Clear();
-        try {
-            foreach (var money in CurrencyObjectBase._currencyObjects.List) {
-                if (money != null && !money.activated) {
-                    MoneyLyingAround.Add(money);
-                }
-            }
-        } catch (Exception e) {
-            // Like the note beside it, this runs on the way into a death, which has to go on whatever happens here
-            Logger.Warn($"Could not write down the money lying around before the death: {e.Message}");
-        }
-    }
-
-    /// <summary>
-    /// Lets the money that was lying in the room when the player died be picked up again.
-    ///
-    /// A death turns every piece of money in the room inert, so that none of it flies to a player who is dead
-    /// (CurrencyObjectBase.OnHeroDeath), and only switching a piece on again makes it collectible: the game needs
-    /// nothing else, since it loads the room over after every death. A player who is pulled back up loads nothing,
-    /// so the rosaries and shards from the very fight they fell in lay there for good, out of reach of their hands
-    /// and of the magnet tool alike.
-    /// </summary>
-    private static void LetTheMoneyBePickedUpAgain() {
-        var freed = 0;
-        foreach (var money in MoneyLyingAround) {
-            // A piece that was picked up or went away since is left as it is
-            if (money == null || !money.isActiveAndEnabled || money.isDisabling || !money.activated) {
-                continue;
-            }
-
-            money.activated = false;
-            money.OnToolEquipsUpdated();
-            freed++;
-        }
-
-        MoneyLyingAround.Clear();
-        if (freed > 0) {
-            Logger.Info($"The death froze {freed} piece(s) of money lying in the room, which can be picked up again");
-        }
-    }
-
-    /// <summary>
-    /// Lets the camera follow the player again if the death left it standing still.
-    ///
-    /// A death takes the player off the layer that the lock areas of the camera see, so the lock area they were in
-    /// saw them leave, and a camera that sees a dead player leave stops following and stays where it is
-    /// (CameraTarget.ExitLockZone). Walking into another lock area puts that right, but a player stood up outside of
-    /// all of them - at the room's own safe spot, or beside the partner in a lava chase - walked out of the picture.
-    /// This is what the camera does itself when a living player leaves a lock area (CameraController.ReleaseLock).
-    /// </summary>
-    private static void LetTheCameraFollowThePlayerAgain() {
-        var controller = GameCameras.instance == null ? null : GameCameras.instance.cameraController;
-        var target = controller == null ? null : controller.camTarget;
-        if (controller == null || target == null || target.mode != CameraTarget.TargetMode.FREE ||
-            target.IsFreeModeManual || controller.currentLockArea != null) {
-            return;
-        }
-
-        target.mode = CameraTarget.TargetMode.FOLLOW_HERO;
-        if (controller.mode != CameraController.CameraMode.FROZEN) {
-            controller.SetMode(CameraController.CameraMode.FOLLOWING);
-        }
-
-        Logger.Info("The death left the camera standing still, so it follows the player again");
-    }
-
-    /// <summary>
-    /// Lets the masks of the room follow the player again after a death froze them.
-    ///
-    /// A mask covers a hidden part of the room in black until the player walks into it, and covers it again once
-    /// they walk back out (Remasker). A death freezes every mask of the room just as it stands, and nothing ever lets
-    /// go of them again: the game has no need to, since it loads the room over after every death. A player who is
-    /// pulled back up loads nothing, so a part that was covered when they fell stayed covered when they walked into
-    /// it afterwards - the player and the room around them gone black, with only the health bar and the rain in
-    /// front of the mask left to see, and spikes in there that nobody could see.
-    /// </summary>
-    private static void LetTheMasksFollowThePlayerAgain() {
-        var freed = new List<string>();
-        foreach (var mask in UnityEngine.Object.FindObjectsByType<Remasker>(
-                     FindObjectsInactive.Include,
-                     FindObjectsSortMode.None
-                 )) {
-            if (!mask.isFrozen) {
-                continue;
-            }
-
-            mask.isFrozen = false;
-
-            // Whether the player is inside went on being written down while the mask was frozen, and only the
-            // covering stood still. It catches up here the way it would have when they walked in or out.
-            if (mask.isInside && mask.isCovered) {
-                mask.Entered();
-            } else if (!mask.isInside && !mask.isCovered) {
-                mask.Exited(false);
-            }
-
-            freed.Add($"{mask.name} ({(mask.isCovered ? "covered" : "uncovered")})");
-        }
-
-        if (freed.Count > 0) {
-            Logger.Info(
-                $"The death froze masks of the room, which follow the player again: {string.Join(", ", freed)}"
-            );
         }
     }
 
@@ -1388,9 +1201,9 @@ internal partial class CoopSave {
     /// <summary>
     /// Writes down what was switched on around the player before the death began playing.
     ///
-    /// A death is a sequence that switches things on at its start and off again at its end, and a held death never
-    /// reaches its end. Which things those are cannot be guessed from a report that says only how many were dealt
-    /// with, so the only honest way to name one is to know what was there beforehand.
+    /// A death is a sequence that switches things on at its start and off again at its end, and a player pulled up
+    /// early never sees its end. Which things those are cannot be guessed from a report that says only how many were
+    /// dealt with, so the only honest way to name one is to know what was there beforehand.
     /// </summary>
     private static void NoteWhatIsOnAroundThePlayer() {
         try {
@@ -1494,9 +1307,9 @@ internal partial class CoopSave {
     ///
     /// The camera tells the two kinds of shake apart by how they end. The short ones count themselves out and stop.
     /// The long ones - the ground going, the deep rumble under a death - do not: they run until something sends the
-    /// event that ends them, and the thing that sends it is further along the death than a held death ever gets. So
-    /// the screen was still shaking after the player was back on their feet, and would have gone on shaking until
-    /// they left the room.
+    /// event that ends them, and the thing that sends it is further along the death than a player pulled up early
+    /// ever sees. So the screen was still shaking after the player was back on their feet, and would have gone on
+    /// shaking until they left the room.
     ///
     /// The other way round is covered as well, because it has the same shape: a screen told to hold still is waiting
     /// on an event too, and being pulled up should not cost the player every shake for the rest of the room.
@@ -1579,9 +1392,9 @@ internal partial class CoopSave {
     ///
     /// A death ends with the whole screen black and the heads-up display slid away, and it stays that way on purpose:
     /// the game leaves it black across the load of the room the bench is in and only fades back in once the player is
-    /// standing there. A held death never gets that far, so nobody ever fades anything back in - which is the black
-    /// screen the waiting player was left staring at, unable to see the world, their own cocoon, or the line telling
-    /// them what is happening.
+    /// standing there. A player lying down never gets that far, so nobody ever fades anything back in - which is the
+    /// black screen the waiting player was left staring at, unable to see the world, their own cocoon, or the line
+    /// telling them what is happening.
     /// </summary>
     private static void RestoreScreen() {
         // From whatever the screen is now rather than from black. A fade always starts by putting its first colour
@@ -1668,16 +1481,10 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="rescue">The wait this belongs to.</param>
     private IEnumerator BringScreenBackAfterDeath(PendingRescue rescue) {
-        GameObject? effect = null;
-        try {
-            effect = FindDeathEffect();
-        } catch (Exception e) {
-            LogRescueError(e);
-        }
-
         var start = Time.unscaledTime;
 
-        while (effect != null && effect.activeInHierarchy && Time.unscaledTime - start < DeathEffectWaitTime) {
+        while (rescue.Effect != null && rescue.Effect.activeInHierarchy &&
+               Time.unscaledTime - start < DeathEffectWaitTime) {
             yield return null;
         }
 
@@ -1698,13 +1505,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Puts the local player back on their feet where they fell, with half of their health. This undoes by hand what
-    /// the death did before it was held, in the order the game's own respawn does it, and then hands back what the
-    /// cocoon held, which is what makes being pulled up worth anything: the money and the silk are already inside it
-    /// by this point, so a rescue that left them there would send the player back for them anyway.
+    /// Puts the local player back on their feet where they fell, with half of their health. This undoes what going
+    /// down did (<see cref="GoDown"/>) and what the death shown over them left on the screen and in the sound, in the
+    /// order the game's own respawn does it. Their money and silk never left them.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
-    /// <param name="rescue">The wait that is ending, which holds what the death took away.</param>
+    /// <param name="rescue">The wait that is ending, which holds what was playing before the death.</param>
     /// <returns>Whether the player was put back on their feet.</returns>
     private bool TryRevive(HeroController? hero, PendingRescue rescue) {
         var playerData = PlayerData.instance;
@@ -1720,12 +1526,14 @@ internal partial class CoopSave {
                 RestoreScreen();
             }
 
-            ClearDeathEffect();
-            ClearStuckEffects();
+            // What is left of the death shown over them, for a player pulled up before it had played out
+            if (rescue.Effect != null) {
+                UnityEngine.Object.Destroy(rescue.Effect);
+            }
+
             StopTheScreenShaking();
             RestoreMusic(rescue);
 
-            hero.gameObject.layer = 9;
             hero.renderer.enabled = true;
             hero.heroBox.HeroBoxNormal();
 
@@ -1764,8 +1572,6 @@ internal partial class CoopSave {
                 hero.transform.position = safe;
             }
 
-            hero.cState.dead = false;
-            hero.cState.isFrostDeath = false;
             hero.cState.onGround = true;
             hero.cState.falling = false;
             hero.cState.hazardDeath = false;
@@ -1777,10 +1583,6 @@ internal partial class CoopSave {
             hero.ResetHardLandingTimer();
             hero.ResetInput();
             hero.ResetLook();
-
-            // Hands back the money and the silk the cocoon holds and clears what the save keeps of it, all of which
-            // belongs to this player and is done by their own game, so none of it depends on a hit crossing over
-            hero.CocoonBroken();
 
             // Half of the maximum, rounded down, but never nothing: waking up already dead would be absurd.
             //
@@ -1795,12 +1597,6 @@ internal partial class CoopSave {
                 hero.AddHealth(missing);
             } else {
                 playerData.health = health;
-            }
-
-            // A Steel Soul save is marked lost the moment its player dies, before a death can even be held
-            // (HeroController.Die), and a player who is pulled back up has not lost it
-            if (playerData.permadeathMode == GlobalEnums.PermadeathModes.Dead) {
-                playerData.permadeathMode = GlobalEnums.PermadeathModes.On;
             }
 
             hero.AddInvulnerabilitySource(RescueInvulnerability);
@@ -1842,22 +1638,16 @@ internal partial class CoopSave {
                 LogRescueError(e);
             }
 
-            // Wrapped for the same reason: what the room was left like is not worth failing a rescue over either.
-            // Everything in here is put right in the game only by loading a room, which it does after every death.
+            // Wrapped for the same reason: none of this is worth failing a rescue over either
             try {
-                LetTheMasksFollowThePlayerAgain();
-                LetTheMoneyBePickedUpAgain();
-                LetTheCameraFollowThePlayerAgain();
-
-                // The cold the player died in is let go of, as the game does itself a moment into a death, past the
-                // point where a held death stops (HeroController.Die). Left alone, a player who froze to death stood
-                // up frozen and started freezing again at once.
+                // The cold the player went down in is let go of, as the game's own death does a moment in
+                // (HeroController.Die). Left alone, a player who froze stood up frozen and started freezing again.
                 hero.SetFrostAmount(0f);
                 StatusVignette.SetFrostVignetteAmount(0f);
 
-                // The death turned the rumble of the pad down to nothing, and only the fade into the next room turns
-                // it back up (GameManager.FadeSceneIn), so a player pulled back up played on without it until they
-                // left the room. This is the call that fade makes.
+                // The death shown over them turned the rumble of the pad down to nothing, and only the fade into the
+                // next room turns it back up (GameManager.FadeSceneIn), so a player pulled back up played on without
+                // it until they left the room. This is the call that fade makes.
                 VibrationManager.FadeVibration(1f, 0.25f);
             } catch (Exception e) {
                 LogRescueError(e);
@@ -1947,19 +1737,18 @@ internal partial class CoopSave {
     /// <param name="partner">The partner whose save is checked with this one, or null.</param>
     private void UpdateRescue(HeroController hero, ClientPlayerData? partner) {
         try {
+            // The wait marks every frame it runs on, and so does the way to the bench after it, so one that has
+            // stopped marking them is gone: the room was loaded again underneath it, or the save was left, and
+            // whatever was holding it went away with it. After a room is loaded this is a different hero entirely.
+            // Nothing else can end the wait once that has happened, so it ends here, which also takes the cocoon of
+            // someone who is walking around again off the screen of the other player.
+            if (_rescue is { } held && Time.frameCount - held.HeldFrame > 2) {
+                EndRescueWait();
+
+                return;
+            }
+
             if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
-                // A death that is being held always leaves the player marked dead - that is set in the part of the
-                // death that has already been played out by the time a wait starts - so finding them alive means the
-                // death itself is gone: the room was loaded again underneath it, or the save was left, and whatever
-                // was holding it went away with it. After a room is loaded this is a different hero entirely. Nothing
-                // else can end the wait once that has happened, so it ends here, which also takes the cocoon of
-                // someone who is walking around again off the screen of the other player.
-                if (!hero.cState.dead) {
-                    EndRescueWait();
-
-                    return;
-                }
-
                 if (partner == null) {
                     // Nobody is left to open it
                     rescue.Outcome = RescueOutcome.Ended;
@@ -1967,7 +1756,7 @@ internal partial class CoopSave {
                 }
 
                 // Only remembered here. Showing the line and reading the key that gives up on the wait both happen in
-                // the wait itself, which is the one thing that keeps running while a death is held
+                // the wait itself, which is the one thing that keeps running while the player lies there
                 _rescuePartnerName = partner.Username;
 
                 return;
@@ -2015,6 +1804,15 @@ internal partial class CoopSave {
         _partnerCocoonScene = update.Scene;
         _partnerCocoonPosition = new Vector2(update.Values[0], update.Values[1]);
         _partnerRescueKey = update.Key;
+
+        // This player is on their way to a bench themselves - their wait is over, or the game already has them dead -
+        // so nobody is coming for the partner either: two deaths, two benches
+        if (HeroController.instance is { } hero &&
+            (PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.dead)) {
+            TellPartnerNobodyIsComing();
+
+            return;
+        }
 
         // A death in the chase of a lava leaves no cocoon to show, now or on walking into that room later
         if (update.Values.Count >= 3 && update.Values[2] > 0f) {

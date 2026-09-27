@@ -145,12 +145,13 @@ internal partial class CoopSave {
     /// <summary>
     /// The partner of the loaded two-player save if a boss fight in a scene can get a checkpoint: the fight didn't get
     /// one since the local player came in, both saves were checked, the partner is in the scene and the local player
-    /// is alive.
+    /// is on their feet.
     /// </summary>
     private ClientPlayerData? GetFightPartner(string scene, out CoopSaveMarker? marker) {
         marker = null;
         var hero = HeroController.instance;
         if (_fightStartedScene == scene || !IsInGame() || hero == null || hero.cState.dead ||
+            PlayerTargetRegistry.IsPlayerDown(hero.gameObject) ||
             GetCurrentMarker() is not { } current || FindPartner(current) is not { } partner ||
             _checkedWith != partner.Id || !partner.IsInLocalScene) {
             return null;
@@ -237,7 +238,8 @@ internal partial class CoopSave {
 
         var gameManager = global::GameManager.instance;
         if (gameManager.GameState != GameState.PLAYING || gameManager.IsInSceneTransition || hero.cState.dead ||
-            hero.cState.transitioning || hero.cState.hazardRespawning) {
+            PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.transitioning ||
+            hero.cState.hazardRespawning) {
             return;
         }
 

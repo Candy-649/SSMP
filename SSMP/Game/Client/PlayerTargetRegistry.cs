@@ -177,7 +177,7 @@ internal static class PlayerTargetRegistry {
     /// </summary>
     /// <param name="player">The player object.</param>
     /// <returns><see langword="true"/> when they are down; otherwise <see langword="false"/>.</returns>
-    private static bool IsPlayerDown(GameObject player) {
+    public static bool IsPlayerDown(GameObject player) {
         return DownedPlayers.Count > 0 && DownedPlayers.Contains(player);
     }
 

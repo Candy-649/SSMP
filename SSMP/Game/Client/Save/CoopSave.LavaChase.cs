@@ -527,7 +527,7 @@ internal partial class CoopSave {
             var hero = HeroController.instance;
             Vector2? at = null;
             var velocity = Vector2.zero;
-            if (hero != null && !hero.cState.dead) {
+            if (hero != null && !hero.cState.dead && !PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
                 at = hero.transform.position;
                 velocity = hero.rb2d.linearVelocity;
             }
@@ -746,8 +746,8 @@ internal partial class CoopSave {
     /// ground, and from there the game would find the ground at the bottom of the drop instead, under the lava.
     /// </summary>
     private static void NoteSafeSpot(HeroController hero, LavaChase chase) {
-        if (hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning ||
-            hero.cState.transitioning || !hero.cState.onGround) {
+        if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.hazardDeath ||
+            hero.cState.hazardRespawning || hero.cState.transitioning || !hero.cState.onGround) {
             return;
         }
 
@@ -1067,7 +1067,8 @@ internal partial class CoopSave {
             if (_lavaChase is { } chase && chase.Scene == standUp.Scene) {
                 // Standing them up while this player is in mid-air, being put back after a burn, or somewhere the lava
                 // is about to reach would drop them straight into it, so it waits for a place that is clear
-                if (hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning ||
+                if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject) ||
+                    hero.cState.hazardDeath || hero.cState.hazardRespawning ||
                     !TryGetOwnSafeSpot(chase, out var beside)) {
                     return;
                 }
@@ -1146,13 +1147,6 @@ internal partial class CoopSave {
     /// few seconds from now.
     /// </summary>
     private void OnChaseDeath(ClientPlayerData player, CoopSaveUpdate update) {
-        // Both down: this player is dying as well, on their way to their bench, so there is nobody to stand them up
-        // beside. A player lying down waiting was answered before this, and one being stood back up is not dying.
-        if (HeroController.instance is { cState.dead: true } && _rescue == null) {
-            TellPartnerNobodyIsComing();
-            return;
-        }
-
         _chaseStandUp = new ChaseStandUp(player.Id, update.Key, update.Scene, Time.unscaledTime + ChaseStandUpDelay);
 
         SetPartnerBodyHidden(player.Id, true);

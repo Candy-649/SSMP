@@ -149,11 +149,11 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData _, BeginSceneTransition action) {
-        // A player who is dying or already changing scenes can't be sent anywhere
+        // A player who is dying, lying down waiting to be pulled up or already changing scenes can't be sent anywhere
         var heroController = HeroController.instance;
         var gameManager = global::GameManager.instance;
         if (heroController == null || gameManager == null || heroController.cState.dead ||
-            gameManager.IsInSceneTransition) {
+            PlayerTargetRegistry.IsPlayerDown(heroController.gameObject) || gameManager.IsInSceneTransition) {
             Logger.Info($"Not following the scene host into memory scene '{action.sceneName.Value}'");
             return;
         }

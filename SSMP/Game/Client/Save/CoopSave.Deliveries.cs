@@ -775,7 +775,8 @@ internal partial class CoopSave {
             return;
         }
 
-        if (hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning || IsInBossFight() ||
+        if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.hazardDeath ||
+            hero.cState.hazardRespawning || IsInBossFight() ||
             IsHeroLockedInArena?.Invoke() == true || IsHeroInWaitingBossRoom?.Invoke() == true || playerData.atBench ||
             InteractManager.BlockingInteractable != null || IsRacing()) {
             SkipSummon(partner);
@@ -902,11 +903,11 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether the game has the hero to itself right now, like during a death, a hazard or a scene change, after which
-    /// it gives control back itself.
+    /// it gives control back itself, or the hero is lying down waiting to be pulled up.
     /// </summary>
     private static bool IsHeroTakenByGame(HeroController hero) {
-        return hero.cState.dead || hero.cState.hazardDeath || hero.cState.hazardRespawning ||
-               hero.cState.transitioning ||
+        return hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.hazardDeath ||
+               hero.cState.hazardRespawning || hero.cState.transitioning ||
                (global::GameManager.instance != null && global::GameManager.instance.IsInSceneTransition);
     }
 

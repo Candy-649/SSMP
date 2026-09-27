@@ -82,7 +82,8 @@ internal partial class BossRoomCoop {
     private readonly List<UnclaimedGate> _unclaimedGates = [];
 
     /// <summary>
-    /// Hook for noticing when the game gives control back to the local player while a room waits.
+    /// Hook for noticing when the game gives control back to the local player while a room waits, and for keeping it
+    /// from a player lying down.
     /// </summary>
     private Hook? _regainControlHook;
 
@@ -113,6 +114,14 @@ internal partial class BossRoomCoop {
     /// Notices when the game gives control back to the local player through the overload with an argument.
     /// </summary>
     private void OnRegainControl(Action<HeroController, bool> orig, HeroController self, bool allowInput) {
+        // A player lying in a cocoon waiting to be pulled back up gets no control back, whatever asks for it: the end
+        // of a dialogue, a room that waits, a door, the game itself. The game refuses it to the dead
+        // (HeroController.RegainControl), but a player lying down is not dead, and that refusal comes after the input
+        // is already switched back on. Being pulled up gives control back once they are no longer down.
+        if (PlayerTargetRegistry.IsPlayerDown(self.gameObject)) {
+            return;
+        }
+
         orig(self, allowInput);
         ForgetTakenControl();
     }
@@ -121,6 +130,10 @@ internal partial class BossRoomCoop {
     /// Notices when the game gives control back to the local player through the overload without arguments.
     /// </summary>
     private void OnRegainControl(Action<HeroController> orig, HeroController self) {
+        if (PlayerTargetRegistry.IsPlayerDown(self.gameObject)) {
+            return;
+        }
+
         orig(self);
         ForgetTakenControl();
     }
@@ -317,8 +330,9 @@ internal partial class BossRoomCoop {
                            (heroController.AnimCtrl != null && !heroController.AnimCtrl.controlEnabled) ||
                            PlayerData.instance is { disablePause: true };
 
-        // Dialogue, dying and changing scenes need the control that they take
+        // Dialogue, dying, lying down waiting to be pulled up and changing scenes need the control that they take
         if (!isRestricted || IsDialogueRunning() == true || heroController.cState.dead ||
+            PlayerTargetRegistry.IsPlayerDown(heroController.gameObject) ||
             global::GameManager.instance is { IsInSceneTransition: true }) {
             wait.RestrictedSince = null;
             return;

@@ -1932,6 +1932,14 @@ internal class AnimationManager {
             return;
         }
 
+        // A player lying in a cocoon waiting to be pulled back up is not dead as far as the game knows, so a hit that
+        // deals its damage directly still asks for a death of theirs whenever their health is at nothing
+        // (HeroController.CheckDeathCatch). Nothing is played out for it, and the other player has already been shown
+        // the one death there is.
+        if (HeroController.instance is { } hero && PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+            return;
+        }
+
         Logger.Debug("Client has died, sending PlayerDeath data");
 
         // Let the server know that we have died
