@@ -204,12 +204,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends the player here stepping onto a plate that opens a door, the moment the plate feels them, and stepping off
-    /// it again before it went down. It is a trap like the others, only not an FSM: the game asks its own hero, so the
-    /// door stayed shut for the player who did not stand on it. The partner's plate is stood on in turn by itself (see
+    /// Sends the player here stepping onto a plate, the moment the plate feels them, and stepping off it again before
+    /// it went down. It is a trap like the others, only not an FSM: the game asks its own hero, so the plate stayed up
+    /// for the player who did not stand on it. The partner's plate is stood on in turn by itself (see
     /// <see cref="OnWorldTrigger"/>) and goes through what this one does - the wait for its weight to stay on, going
-    /// down, the door - a moment behind, and gives up where this one gave up. A plate that calls a lift is left alone,
-    /// the lift is settled between the two games already.
+    /// down, a door - a moment behind, and gives up where this one gave up. Every plate goes this way. A lift that a
+    /// plate calls or unlocks is told only by the plate of the player who stood on it, and the other game takes it
+    /// from the updates about the lift (see <see cref="OnLiftPlateActivate"/>).
     /// </summary>
     private void OnPlateTouch(
         Action<PressurePlateBase, GameObject> orig,
@@ -223,11 +224,6 @@ internal partial class CoopSave {
         orig(self, toucher);
 
         if (!send || _checkedWith is not { } partnerId) {
-            return;
-        }
-
-        var gates = UnityEngine.Object.FindObjectsByType<TempGate>(FindObjectsSortMode.None);
-        if (self is TempPressurePlate && !Array.Exists(gates, gate => gate.plate == self)) {
             return;
         }
 
@@ -256,7 +252,8 @@ internal partial class CoopSave {
 
         // A plate, which names no FSM. It stands on itself for the partner and so does all that it does for a player on
         // it - waits for them to stay, goes down, opens the door, makes the call that three plates of a shrine count -
-        // and gives up if they get off in time. Not one that someone here is on already, or that went down already
+        // and gives up if they get off in time. Not one that the player here is on already, or that went down already.
+        // Nothing gets off a plate that has gone down, so one that came up again may still stand on itself
         if (update.FsmName.Length == 0) {
             if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target ||
                 target.GetComponent<PressurePlateBase>() is not { } plate) {
@@ -265,7 +262,7 @@ internal partial class CoopSave {
 
             if (update.StateName == PlateLeftName) {
                 plate.OnTouchEnd(target);
-            } else if (plate is { CanDepress: true, player: null } && plate.col.enabled) {
+            } else if (plate.CanDepress && plate.col.enabled && (plate.player == null || plate.player == target)) {
                 plate.OnTouchStart(target);
                 Logger.Info($"{player.Username} is on the plate '{target.name}'");
             }

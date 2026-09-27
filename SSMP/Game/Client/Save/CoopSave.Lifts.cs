@@ -220,10 +220,15 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// Unlocks the lift for a ride of the partner, whose game unlocked it first.
+        /// Unlocks the lift because the game of the partner unlocked it, when it did or before a ride of theirs.
         /// </summary>
         public virtual void Unlock() {
         }
+
+        /// <summary>
+        /// Whether a plate calls or unlocks the lift.
+        /// </summary>
+        public virtual bool HasPlate(TempPressurePlate plate) => false;
 
         /// <summary>
         /// Called every frame before the calls that wait are served.
@@ -360,7 +365,52 @@ internal partial class CoopSave {
         RegisterCageLiftHooks();
         RegisterFsmLiftHooks();
         RegisterCarriageHooks();
+        AddLiftHook(
+            typeof(TempPressurePlate).GetMethod("Activate", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<TempPressurePlate>, TempPressurePlate>(OnLiftPlateActivate)
+        );
         Application.onBeforeRender += OnLiftBeforeRender;
+    }
+
+    /// <summary>
+    /// Hook for <see cref="TempPressurePlate.Activate"/>, which tells what a plate opens or calls that it went down. A
+    /// plate that stands in for the partner (see OnWorldTrigger) goes down here like theirs, with the plates beside it,
+    /// but a lift that it calls or unlocks is not told: the lift takes its ride and its unlock from the updates that
+    /// the game of the partner sends about the lift, where their plate told it. Told here as well, the lift took the
+    /// call for one of the local player's and made it a second time, and jumped closer to the stop first.
+    /// </summary>
+    private void OnLiftPlateActivate(Action<TempPressurePlate> orig, TempPressurePlate self) {
+        if (self.player != self.gameObject || GetLiftPartner() == null ||
+            !FindRoomLifts().Exists(lift => lift.HasPlate(self))) {
+            orig(self);
+            return;
+        }
+
+        // Down all the same, so the lift raises it again when it leaves that stop
+        self.isActivated = true;
+    }
+
+    /// <summary>
+    /// Lets a lift unlock in the local game and, if it was locked, sends that to the partner in the room, whose game
+    /// unlocks the same lift (see <see cref="OnLiftUnlock"/>). Called from the hooks of the ways that lifts unlock.
+    /// </summary>
+    /// <param name="lift">The lift.</param>
+    /// <param name="unlock">Unlocks it.</param>
+    private void UnlockLift(SyncedLift lift, Action unlock) {
+        var locked = !lift.IsUnlocked;
+        unlock();
+        if (!locked || _liftReplaying || GetLiftPartner() is not { } partner) {
+            return;
+        }
+
+        Send(new CoopSaveUpdate {
+            TargetId = partner.Id,
+            Kind = CoopSaveUpdateKind.LiftUnlock,
+            Scene = lift.Owner.gameObject.scene.name,
+            ObjectPath = lift.Path,
+            FsmName = lift.FsmName
+        });
+        Logger.Info($"Sent unlocking the lift '{lift.Path}' to the partner");
     }
 
     /// <summary>

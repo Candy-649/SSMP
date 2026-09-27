@@ -166,6 +166,17 @@ internal partial class CoopSave {
         }
 
         /// <inheritdoc />
+        public override bool HasPlate(TempPressurePlate plate) {
+            for (var stop = 0; GetStopData(stop) is { } stopData; stop++) {
+                if (LiftStopPlatesField?.GetValue(stopData) is IList plates && plates.Contains(plate)) {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /// <inheritdoc />
         public override void Update() {
             LastFrameY = Control.transform.position.y;
         }
@@ -211,6 +222,14 @@ internal partial class CoopSave {
         AddLiftHook(
             typeof(LiftControl).GetMethod("MoveToStop", InstanceFlags, null, [typeof(int), typeof(bool)], null),
             new Action<Action<LiftControl, int, bool>, LiftControl, int, bool>(OnLiftMoveToStop)
+        );
+
+        // A plate at a stop, or an item put in, unlocks the lift
+        AddLiftHook(
+            typeof(LiftControl).GetMethod("Unlock", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<LiftControl>, LiftControl>(
+                (orig, self) => UnlockLift(GetCageLift(self), () => orig(self))
+            )
         );
     }
 

@@ -249,7 +249,7 @@ internal partial class CoopSave {
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnInteractionSwitchState)
         );
 
-        // The plates that open doors, which are no FSMs (see OnPlateTouch)
+        // The plates, which are no FSMs (see OnPlateTouch)
         foreach (var leaving in (bool[]) [false, true]) {
             AddInteractionHook(
                 typeof(PressurePlateBase).GetMethod(

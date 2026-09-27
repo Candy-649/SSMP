@@ -579,5 +579,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    LavaDeathEnd
+    LavaDeathEnd,
+
+    /// <summary>
+    /// A lift was locked in the room of the sender and their game unlocked it, so the game of the other player unlocks
+    /// the same lift.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    LiftUnlock
 }

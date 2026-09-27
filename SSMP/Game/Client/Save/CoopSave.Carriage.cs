@@ -275,6 +275,14 @@ internal partial class CoopSave {
             UpdatePosition();
         }
 
+        /// <inheritdoc />
+        public override void Unlock() => Lift.OnUnlockPlateActivated();
+
+        /// <inheritdoc />
+        public override bool HasPlate(TempPressurePlate plate) {
+            return plate == Lift.callPlateLeft || plate == Lift.callPlateRight;
+        }
+
         /// <summary>
         /// Moves the carriage to its part of the way.
         /// </summary>
@@ -292,6 +300,12 @@ internal partial class CoopSave {
         AddLiftHook(
             typeof(ManualLift).GetMethod("Update", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<ManualLift>, ManualLift>(OnCarriageUpdate)
+        );
+
+        // The plate at the end that it is locked from unlocks it
+        AddLiftHook(
+            typeof(ManualLift).GetMethod("OnUnlockPlateActivated", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ManualLift>, ManualLift>((orig, self) => UnlockLift(GetCarriage(self), () => orig(self)))
         );
     }
 

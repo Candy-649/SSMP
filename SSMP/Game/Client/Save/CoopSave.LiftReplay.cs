@@ -125,6 +125,33 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Unlocks a lift that the game of the partner unlocked, mostly with a plate that their player stood on. The plate
+    /// here goes down for them as well, but tells the lift nothing (see <see cref="OnLiftPlateActivate"/>).
+    /// </summary>
+    private void OnLiftUnlock(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_checkedWith != player.Id || !IsLiftRoom(update.Scene)) {
+            return;
+        }
+
+        try {
+            if (FindLift(update) is not { IsUnlocked: false } lift) {
+                return;
+            }
+
+            _liftReplaying = true;
+            try {
+                lift.Unlock();
+            } finally {
+                _liftReplaying = false;
+            }
+
+            Logger.Info($"{player.Username} unlocked the lift '{update.ObjectPath}'");
+        } catch (Exception e) {
+            LogLiftError(e);
+        }
+    }
+
+    /// <summary>
     /// Sends the state of the lifts of the current room to a partner who entered it.
     /// </summary>
     /// <summary>
