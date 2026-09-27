@@ -29,9 +29,11 @@ internal partial class CoopSave {
 
     /// <summary>
     /// How long a player waits to be pulled back up before going to their bench anyway, in seconds. Without this a
-    /// player whose partner never noticed would wait for as long as the game runs.
+    /// player whose partner never noticed would wait for as long as the game runs. It leaves the partner time to finish
+    /// what they are in the middle of first - 45 seconds was too short in play - and a player who does not want to wait
+    /// gives up on it with a key.
     /// </summary>
-    private const float RescueWaitTime = 45f;
+    private const float RescueWaitTime = 180f;
 
     /// <summary>
     /// How long, in seconds, at the start of a wait during which the key that gives up on it is not listened to at
