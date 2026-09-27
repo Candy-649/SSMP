@@ -249,6 +249,16 @@ internal partial class CoopSave {
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnInteractionSwitchState)
         );
 
+        // The plates that open doors, which are no FSMs (see OnPlateActivate)
+        AddInteractionHook(
+            typeof(PersistentPressurePlate).GetMethod("Activate", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<PersistentPressurePlate>, PersistentPressurePlate>(OnPlateActivate)
+        );
+        AddInteractionHook(
+            typeof(TempPressurePlate).GetMethod("Activate", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<TempPressurePlate>, TempPressurePlate>(OnPlateActivate)
+        );
+
         AddInteractionHook(
             typeof(PlayerData).GetMethod("SetBool", InstanceFlags, null, [typeof(string), typeof(bool)], null),
             new Action<Action<PlayerData, string, bool>, PlayerData, string, bool>((orig, self, name, value) => {

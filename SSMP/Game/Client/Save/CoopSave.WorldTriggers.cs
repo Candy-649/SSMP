@@ -139,6 +139,12 @@ internal partial class CoopSave {
     private bool _replayingWorldTrigger;
 
     /// <summary>
+    /// The plates going down here because the partner took theirs down, which are not sent back to them as they open
+    /// their doors a moment later.
+    /// </summary>
+    private readonly HashSet<PressurePlateBase> _platesTakenDownForThePartner = [];
+
+    /// <summary>
     /// Collects the states of <see cref="WorldTriggerKinds"/> that say a trap has gone off.
     /// </summary>
     private static HashSet<string> BuildWorldTriggerGoneOffStateNames() {
@@ -198,12 +204,56 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Sends a plate that the player here took down to the partner, as it opens its door here. It is a trap like the
+    /// others, only not an FSM: the game asks its own hero whether to go down, so the door stayed shut for the player
+    /// who did not stand on it - for good behind the kind that stays down, until the room loaded again, and for the
+    /// while it stays open behind the kind that comes back up. A plate that calls a lift is left alone, the lift is
+    /// settled between the two games already.
+    /// </summary>
+    private void OnPlateActivate<T>(Action<T> orig, T self) where T : PressurePlateBase {
+        var takenDownHere = !_platesTakenDownForThePartner.Remove(self) && self.CanDepress;
+        orig(self);
+
+        if (!takenDownHere || _checkedWith is not { } partnerId) {
+            return;
+        }
+
+        var gates = UnityEngine.Object.FindObjectsByType<TempGate>(FindObjectsSortMode.None);
+        if (self is TempPressurePlate && !Array.Exists(gates, gate => gate.plate == self)) {
+            return;
+        }
+
+        var path = ScenePath.Get(self.transform);
+        Send(new CoopSaveUpdate {
+            TargetId = partnerId,
+            Kind = CoopSaveUpdateKind.WorldTrigger,
+            Scene = self.gameObject.scene.name,
+            ObjectPath = path
+        });
+        Logger.Info($"Sent the plate '{path}' going down to the partner");
+    }
+
+    /// <summary>
     /// The partner walked into a trap, so the copy here goes off as well.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names the trap by its path in its scene.</param>
     private void OnWorldTrigger(ClientPlayerData player, CoopSaveUpdate update) {
         if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+            return;
+        }
+
+        // A plate, which names no FSM. The game's own forced drop takes it down and does all that it does for a player
+        // standing on it - the door, and the call that three plates of a shrine count - without the wait for them to
+        // stay on it, or the sound, the rumble and the shake that are theirs
+        if (update.FsmName.Length == 0) {
+            if (ScenePath.Find(update.ObjectPath, update.Scene) is { activeInHierarchy: true } target &&
+                target.GetComponent<PressurePlateBase>() is { CanDepress: true } plate) {
+                _platesTakenDownForThePartner.Add(plate);
+                plate.StartDrop(true);
+                Logger.Info($"Took down the plate '{target.name}' the way {player.Username} did");
+            }
+
             return;
         }
 
