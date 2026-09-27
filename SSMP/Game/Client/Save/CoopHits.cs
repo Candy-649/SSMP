@@ -2209,16 +2209,14 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Writes what the ranges of an object have inside them, in the order they are found under it: how many of what
-    /// each counts, and for an alert range whether it says that a player is near. An object that takes a hit only
-    /// while the player is near goes by these. A range of a creature under the object is left out: asking it whether a
-    /// player is near picks whom the creature goes after, and the creature is kept in step by its own sync.
+    /// Writes what the ranges of an object have inside them, in the order <see cref="GetRanges"/> finds them: how many
+    /// of what each counts, and for an alert range whether it says that a player is near. An object that takes a hit
+    /// only while the player is near goes by these. A range of a creature under the object is left out: asking it
+    /// whether a player is near picks whom the creature goes after, and the creature is kept in step by its own sync.
     /// </summary>
     private static void WriteRanges(BinaryWriter writer, GameObject? target) {
-        var ranges = target != null
-            ? target.GetComponentsInChildren<TrackTriggerObjects>(true)
-            : Array.Empty<TrackTriggerObjects>();
-        var count = Mathf.Min(ranges.Length, byte.MaxValue);
+        var ranges = target != null ? GetRanges(target) : [];
+        var count = Mathf.Min(ranges.Count, byte.MaxValue);
         writer.Write((byte) count);
         for (var i = 0; i < count; i++) {
             var isCreatures = IsCreatureRange(ranges[i]);
@@ -2245,12 +2243,32 @@ internal class CoopHits {
     /// until the replay is over. What the object checks later, after waiting a moment, goes by this game.
     /// </summary>
     private static void SetReplayedRanges(GameObject target, RangeState[] states) {
-        var ranges = target.GetComponentsInChildren<TrackTriggerObjects>(true);
-        for (var i = 0; i < ranges.Length && i < states.Length; i++) {
+        var ranges = GetRanges(target);
+        for (var i = 0; i < ranges.Count && i < states.Length; i++) {
             if (!IsCreatureRange(ranges[i])) {
                 ReplayedRanges[ranges[i]] = states[i];
             }
         }
+    }
+
+    /// <summary>
+    /// The ranges an object goes by, in an order both games find alike: those under it, then those its state machines
+    /// keep hold of elsewhere in the room. The big flower of a wish counts a hit only while the player stands in a
+    /// range beside it, under its parent rather than under the flower, and the partner's three hits all counted for
+    /// nothing in a game where that range went by its own player, who stood somewhere else.
+    /// </summary>
+    private static List<TrackTriggerObjects> GetRanges(GameObject target) {
+        var ranges = new List<TrackTriggerObjects>(target.GetComponentsInChildren<TrackTriggerObjects>(true));
+        foreach (var fsm in target.GetComponents<PlayMakerFSM>()) {
+            foreach (var variable in fsm.FsmVariables.GameObjectVariables) {
+                if (variable.Value != null && variable.Value.TryGetComponent<TrackTriggerObjects>(out var range) &&
+                    !ranges.Contains(range)) {
+                    ranges.Add(range);
+                }
+            }
+        }
+
+        return ranges;
     }
 
     /// <summary>
