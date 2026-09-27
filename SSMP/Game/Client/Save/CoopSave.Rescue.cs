@@ -272,6 +272,13 @@ internal partial class CoopSave {
 
         /// <inheritdoc/>
         public IHitResponder.HitResponse Hit(HitInstance damageInstance) {
+            // Only the local player's own attacks open it. Creatures swing through where it lies as well, and the
+            // attacks of some of them hit whatever they touch, which counted towards pulling the partner up and paid
+            // this player silk for it. For them there is nothing there.
+            if (!damageInstance.IsHeroDamage) {
+                return IHitResponder.Response.None;
+            }
+
             Hits?.Invoke(damageInstance);
             PlayHitEffect(damageInstance);
 
