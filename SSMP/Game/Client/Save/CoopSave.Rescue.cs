@@ -100,12 +100,6 @@ internal partial class CoopSave {
     private const float DeathEffectWaitTime = 10f;
 
     /// <summary>
-    /// The silk that breaking open one's own cocoon gives back (HeroController.CocoonBroken): one spool, what a bind
-    /// takes. Being pulled up out of a cocoon gives the same.
-    /// </summary>
-    private const int CocoonSilk = 9;
-
-    /// <summary>
     /// The name of the FSM that plays a death out on what the game puts up for it.
     /// </summary>
     private const string DeathAnimFsmName = "Hero Death Anim";
@@ -268,7 +262,7 @@ internal partial class CoopSave {
         /// <summary>
         /// Called for every hit that lands.
         /// </summary>
-        public Action? Hits;
+        public Action<HitInstance>? Hits;
 
         /// <summary>
         /// The frame an effect was last played on, so that an attack which lands twice in one frame does not stack
@@ -278,7 +272,7 @@ internal partial class CoopSave {
 
         /// <inheritdoc/>
         public IHitResponder.HitResponse Hit(HitInstance damageInstance) {
-            Hits?.Invoke();
+            Hits?.Invoke(damageInstance);
             PlayHitEffect(damageInstance);
 
             // Not None. That is the answer for "there was nothing there", so the nail passes straight through with
@@ -1642,8 +1636,10 @@ internal partial class CoopSave {
                 playerData.health = health;
             }
 
-            // Out of a cocoon the way a player breaks their own open, which gives a spool of silk back
-            hero.AddSilk(CocoonSilk, true);
+            // A silk for every hit it took to open the cocoon. The one who opened it got one for each hit as well
+            // (OnRescueCocoonHit): a whole spool, which is what the game gives for breaking one's own cocoon, made a
+            // bind the moment they stood up, and with a bind that nothing interrupts that was all of their health.
+            hero.AddSilk(RescueHits, true);
 
             hero.AddInvulnerabilitySource(RescueInvulnerability);
             MonoBehaviourUtil.Instance.StartCoroutine(EndRescueInvulnerability(hero));
@@ -2018,15 +2014,23 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Counts a hit of the local player on the cocoon of the partner, and tells them how far it got.
+    /// Counts a hit of the local player on the cocoon of the partner, and tells them how far it got. Each one pays
+    /// silk the way a hit on a creature does (HealthManager.TakeDamage), by the game's own rule for the attack: what
+    /// gives no silk on a creature gives none here, and an attack that hits many times pays for its first.
     /// </summary>
-    private void OnRescueCocoonHit() {
+    /// <param name="hit">The hit.</param>
+    private void OnRescueCocoonHit(HitInstance hit) {
         if (_rescueTarget is not { } target || GetCheckedPartner() is not { } partner ||
             partner.Id != target.PlayerId) {
             return;
         }
 
         target.Hits++;
+
+        if (HeroController.instance is { } hero) {
+            hero.SilkGain(hit);
+        }
+
         Send(new CoopSaveUpdate {
             TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.RescueHit,
