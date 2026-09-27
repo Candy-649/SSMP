@@ -1653,16 +1653,12 @@ internal class CoopHits {
 
     /// <summary>
     /// Plays what a hit of the partner on an enemy looked like, without the hit itself. The enemy's own health comes
-    /// from whichever game controls it, so all that is left to do here is show that it was hit.
+    /// from whichever game controls it, so all that is left to do here is show that it was hit - and, in the game that
+    /// runs the enemy, to count it (<see cref="HitCounters"/>).
     /// </summary>
     /// <param name="update">The update of the partner's hit.</param>
     private void ApplyHitEffect(CoopHitUpdate update) {
         if (FindHitEnemy(update.EntityId) is not { } healthManager) {
-            return;
-        }
-
-        var receiver = healthManager.hitEffectReceiver;
-        if (receiver == null) {
             return;
         }
 
@@ -1671,8 +1667,13 @@ internal class CoopHits {
             return;
         }
 
+        if (_entityManager.IsSceneHost) {
+            HitCounters.Count(healthManager, hit);
+        }
+
         // The game leaves this one without an effect itself
-        if (hit.AttackType == AttackTypes.RuinsWater) {
+        var receiver = healthManager.hitEffectReceiver;
+        if (receiver == null || hit.AttackType == AttackTypes.RuinsWater) {
             return;
         }
 
