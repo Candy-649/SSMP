@@ -282,17 +282,12 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// Plays what the game plays when a hit lands on something that takes no damage from it: the shake the
-        /// controller rumbles along with, and the spark, thrown the way the blow was.
+        /// Plays what a thread spinner in the world plays where a hit draws silk out of it
+        /// (<see cref="PlaySilkHitEffect"/>).
         ///
-        /// It has to be done here because nothing else will. Every hit effect in this game is played by the health
-        /// of the thing that was hit - it is <c>HealthManager.TakeDamage</c> that asks the effects to play, through
-        /// the receiver written into each enemy - and a cocoon has no health and is no enemy. So the swing landed,
-        /// and counted, and looked and felt like nothing at all.
-        ///
-        /// What is played is the game's own, not an imitation: both come from the one set of effects the whole game
-        /// shares for a hit that does no damage, which is exactly what a hit on this is. The stronger effects are no
-        /// use here - each enemy carries its own, written into it one by one, and a cocoon has none to carry.
+        /// It has to be done here because nothing else will. Every hit effect in this game is played by the thing
+        /// that was hit - the health of an enemy, or the spinner itself - and a cocoon is neither. So the swing
+        /// landed, and counted, and looked and felt like nothing at all.
         /// </summary>
         private void PlayHitEffect(HitInstance hit) {
             if (_lastEffectFrame == Time.frameCount) {
@@ -301,27 +296,82 @@ internal partial class CoopSave {
 
             _lastEffectFrame = Time.frameCount;
 
-            try {
-                Effects.WeakHitEffectShake.DoShake(this, true);
+            // Whether the hit draws silk by the game's own rule (HeroController.SilkGain), which is what pays the
+            // silk for it (OnRescueCocoonHit)
+            PlaySilkHitEffect(
+                gameObject,
+                hit.SilkGeneration == HitSilkGeneration.Full ||
+                hit.SilkGeneration == HitSilkGeneration.FirstHit && hit.IsFirstHit
+            );
+        }
+    }
 
-                if (Effects.WeakHitEffectPrefab is not { } spark) {
-                    return;
+    /// <summary>
+    /// The game's own name for the strike a thread spinner in the world puts up where it is hit.
+    /// </summary>
+    private const string StrikeEffectName = "Strike Nail R";
+
+    /// <summary>
+    /// The game's own name for the threads that burst out of a thread spinner in the world where it is hit.
+    /// </summary>
+    private const string SilkBurstEffectName = "Silk Break Effect";
+
+    /// <summary>
+    /// The strike, once it has been found in the pool the game fills as it starts.
+    /// </summary>
+    private static GameObject? _strikeEffect;
+
+    /// <summary>
+    /// The threads bursting out, once they have been found in the pool the game fills as it starts.
+    /// </summary>
+    private static GameObject? _silkBurstEffect;
+
+    /// <summary>
+    /// Puts up on a cocoon what a thread spinner in the world puts up where a hit draws silk out of it
+    /// (ThreadSpinner.Hit): the strike, the threads bursting out, and the flash and sound of silk being gained.
+    ///
+    /// These are effects the whole game shares, not the spinner's own. The first two wait in the pool the game fills
+    /// as it starts, and the third is the one the game plays for a hit that gains the player something
+    /// (Effects.RageHitHealthEffectPrefab).
+    /// </summary>
+    /// <param name="cocoon">The cocoon that was hit.</param>
+    /// <param name="silkGained">Whether the local player gained silk by the hit, which the flash and the sound are
+    /// about.</param>
+    private static void PlaySilkHitEffect(GameObject cocoon, bool silkGained) {
+        try {
+            if (_strikeEffect == null || _silkBurstEffect == null) {
+                foreach (var startup in ObjectPool.instance.startupPools) {
+                    if (startup.prefab == null) {
+                        continue;
+                    }
+
+                    if (startup.prefab.name == StrikeEffectName) {
+                        _strikeEffect = startup.prefab;
+                    } else if (startup.prefab.name == SilkBurstEffectName) {
+                        _silkBurstEffect = startup.prefab;
+                    }
                 }
-
-                // Zero is what the game passes here, and there is no name for it to pass: the answer is the angle
-                // the blow came in at, which is what the spark is turned to.
-                var angle = hit.GetHitDirectionAsAngle((HitInstance.TargetType) 0);
-
-                // Where the thing is rather than where its feet are. A cocoon is drawn from the ground up, so its
-                // own position is the bottom of it, and a spark struck there would go off under the blow.
-                var at = GetComponentInChildren<Collider2D>() is { } body
-                    ? (Vector3) body.bounds.center
-                    : transform.position;
-
-                spark.Spawn(at, Quaternion.Euler(0f, 0f, angle));
-            } catch (Exception e) {
-                Logger.Warn($"Could not play the effect of a hit on the cocoon of the partner: {e.Message}");
             }
+
+            // Where the cocoon is rather than where its feet are. A cocoon is drawn from the ground up, so its own
+            // position is the bottom of it, and an effect put there would go off under the blow.
+            var at = cocoon.GetComponentInChildren<Collider2D>() is { } body
+                ? (Vector3) body.bounds.center
+                : cocoon.transform.position;
+
+            if (_strikeEffect != null) {
+                _strikeEffect.Spawn(at);
+            }
+
+            if (_silkBurstEffect != null) {
+                _silkBurstEffect.Spawn(at);
+            }
+
+            if (silkGained && Effects.RageHitHealthEffectPrefab is { } silkGet) {
+                silkGet.Spawn(at);
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not play the effect of a hit on a cocoon: {e.Message}");
         }
     }
 
@@ -1902,6 +1952,12 @@ internal partial class CoopSave {
         }
 
         rescue.Hits = update.Part;
+
+        // The hit the partner landed, shown on this side of it too. The silk it drew went to them.
+        if (_rescueOwnCocoon != null) {
+            PlaySilkHitEffect(_rescueOwnCocoon, false);
+        }
+
         if (update.Part >= (update.PartCount == 0 ? RescueHits : update.PartCount)) {
             // A death in the chase is stood up beside the partner, at the place their game picked
             if (update.Values.Count >= 2) {
