@@ -221,6 +221,13 @@ internal static class EntityInitializer {
                 UnityEngine.Object.Destroy(component);
             }
         }
+
+        // A copy's flock flyer flew off from this game's player and put itself away, while the scene host's stayed
+        // where the partner saw it. The copy follows the scene host's instead. It is only switched off, since its
+        // triggers call back into it
+        foreach (var flyer in gameObject.GetComponentsInChildren<FlockFlyer>(true)) {
+            flyer.enabled = false;
+        }
     }
 
     /// <summary>

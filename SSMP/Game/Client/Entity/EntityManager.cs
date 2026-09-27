@@ -50,6 +50,12 @@ internal class EntityManager {
     private Hook? _cameraShakeHook;
 
     /// <summary>
+    /// Detour hooks for a flock flyer waking up and coming out, which roll the same in both games
+    /// (<see cref="RollAlike"/>).
+    /// </summary>
+    private Hook? _flockFlyerAwakeHook, _flockFlyerEnableHook;
+
+    /// <summary>
     /// The creatures that the room makes rather than a creature, which only the scene host's game makes.
     /// </summary>
     private readonly RoomCreatures _roomCreatures;
@@ -133,6 +139,16 @@ internal class EntityManager {
             OnCameraShake
         );
 
+        const BindingFlags instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+        _flockFlyerAwakeHook = new Hook(
+            typeof(FlockFlyer).GetMethod("Awake", instance),
+            (Action<FlockFlyer> orig, FlockFlyer self) => RollAlike(orig, self, "Awake")
+        );
+        _flockFlyerEnableHook = new Hook(
+            typeof(FlockFlyer).GetMethod("OnEnable", instance),
+            (Action<FlockFlyer> orig, FlockFlyer self) => RollAlike(orig, self, "OnEnable")
+        );
+
         _roomCreatures.RegisterHooks();
     }
 
@@ -152,6 +168,11 @@ internal class EntityManager {
 
         _cameraShakeHook?.Dispose();
         _cameraShakeHook = null;
+
+        _flockFlyerAwakeHook?.Dispose();
+        _flockFlyerAwakeHook = null;
+        _flockFlyerEnableHook?.Dispose();
+        _flockFlyerEnableHook = null;
 
         _roomCreatures.DeregisterHooks();
 
@@ -427,7 +448,7 @@ internal class EntityManager {
     /// <summary>
     /// Gathers all GameObjects in the scene that are candidates for entity registration.
     /// Handles EnemyDeathEffects owners and several component-driven object types
-    /// (Climber, Walker, BigCentipede, CameraLockArea, DreamPlatform).
+    /// (Climber, Walker, BigCentipede, CameraLockArea, DreamPlatform, FlockFlyer).
     /// </summary>
     private static IEnumerable<GameObject> CollectEntityCandidates(Scene scene) {
         var fromDeathEffects = Object.FindObjectsOfType<EnemyDeathEffects>()
@@ -444,6 +465,9 @@ internal class EntityManager {
             Object.FindObjectsOfType<BigCentipede>(true).Select(c => c.gameObject),
             Object.FindObjectsOfType<CameraLockArea>(true).Select(c => c.gameObject),
             Object.FindObjectsOfType<DreamPlatform>(true).Select(c => c.gameObject),
+            // Also the ones not out yet: many wait in a part of the room that is only switched on after this, and
+            // were left to each game to run on its own
+            Object.FindObjectsOfType<FlockFlyer>(true).Select(c => c.gameObject),
         }.SelectMany(x => x);
 
         // What the shell of a creature makes ahead of time to let out when the creature dies is not in the room until
@@ -680,6 +704,25 @@ internal class EntityManager {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Has a flock flyer roll the same in both games as it wakes up (its look, and with it how high it sits) and as it
+    /// comes out (whether it is there at all, which way it faces, how big it is). Each game rolled its own, so much
+    /// of a flock that one player saw was not there for the other: a flyer that sat higher in one game was not taken
+    /// for the same creature, since the ID of a creature comes from where it sits; one that stayed away in one game
+    /// was not taken in there at all; and a copy with the other look played the wrong animations. The dice come from
+    /// the flyer's room and name, which its copy shares, and the game gets its own back afterwards.
+    /// </summary>
+    private static void RollAlike(Action<FlockFlyer> orig, FlockFlyer self, string when) {
+        var own = UnityEngine.Random.state;
+        var dice = self.gameObject.scene.name + self.name.Replace("(Clone)", "") + when;
+        UnityEngine.Random.InitState(dice.GetHashCode());
+        try {
+            orig(self);
+        } finally {
+            UnityEngine.Random.state = own;
+        }
     }
 
     /// <summary>
