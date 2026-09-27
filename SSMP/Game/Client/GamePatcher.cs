@@ -205,6 +205,8 @@ internal partial class GamePatcher {
             nameof(NailSlashTerrainThunk.OnCollisionEnter2D),
             NailSlashTerrainThunkOnCollisionEnter2D
         );
+
+        AddHook(typeof(CollectableItem), nameof(CollectableItem.IsAtMax), CollectableItemOnIsAtMax);
     }
 
     /// <summary>
@@ -924,5 +926,19 @@ internal partial class GamePatcher {
         }
 
         orig(self, collision);
+    }
+
+    /// <summary>
+    /// Hook for <see cref="CollectableItem"/>.<see cref="CollectableItem.IsAtMax"/> to let a player carry 99 of each
+    /// kind of rosary string rather than 20. Every item that is used up is held to the one cap of the game unless it
+    /// has one of its own, and the strings have none; nothing else changes. Shops, pickups and the inventory all ask
+    /// here.
+    /// </summary>
+    private static bool CollectableItemOnIsAtMax(Func<CollectableItem, bool> orig, CollectableItem self) {
+        if (!self.name.StartsWith("Rosary_Set_")) {
+            return orig(self);
+        }
+
+        return self.CollectedAmount >= 99;
     }
 }
