@@ -100,6 +100,24 @@ internal partial class CoopSave {
     private const float DeathEffectWaitTime = 10f;
 
     /// <summary>
+    /// The silk that breaking open one's own cocoon gives back (HeroController.CocoonBroken): one spool, what a bind
+    /// takes. Being pulled up out of a cocoon gives the same.
+    /// </summary>
+    private const int CocoonSilk = 9;
+
+    /// <summary>
+    /// The name of the FSM that plays a death out on what the game puts up for it.
+    /// </summary>
+    private const string DeathAnimFsmName = "Hero Death Anim";
+
+    /// <summary>
+    /// The frame the game's own death was started behind a dark screen, for a player who already heard it once while
+    /// lying down. What the game puts up for a death plays its sounds as it starts: on that frame when it is taken out
+    /// of the pool, which starts it over at once, or on the next when it is made new.
+    /// </summary>
+    private static int _deathHeardFrame = -2;
+
+    /// <summary>
     /// How the wait of the local player ended.
     /// </summary>
     private enum RescueOutcome {
@@ -394,6 +412,30 @@ internal partial class CoopSave {
             new Action<Action<HeroController, int, bool, string, bool, bool, bool, bool>, HeroController, int, bool,
                 string, bool, bool, bool, bool>(OnSpecialDamage)
         );
+        _deathSoundHook = CreateHook(
+            typeof(AudioPlayerOneShotSingle).GetMethod("OnEnter", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<AudioPlayerOneShotSingle>, AudioPlayerOneShotSingle>(OnDeathSound)
+        );
+    }
+
+    /// <summary>
+    /// The hook on the sounds FSMs play, which a death is one of.
+    /// </summary>
+    private Hook? _deathSoundHook;
+
+    /// <summary>
+    /// Keeps the sounds of the game's own death quiet when it plays behind a dark screen for a player who already
+    /// heard them while lying down (<see cref="_deathHeardFrame"/>). Both players going down made the one who went
+    /// down first hear their death twice.
+    /// </summary>
+    private static void OnDeathSound(Action<AudioPlayerOneShotSingle> orig, AudioPlayerOneShotSingle self) {
+        if (Time.frameCount - _deathHeardFrame <= 1 && self.Fsm?.Name == DeathAnimFsmName) {
+            self.Finish();
+
+            return;
+        }
+
+        orig(self);
     }
 
     /// <summary>
@@ -846,7 +888,8 @@ internal partial class CoopSave {
         // would be far worse than the bench they expected in the first place. From its first step, which is where the
         // player was headed before the partner could do anything about it: it finds them lying where they went down,
         // so what it writes down of the cocoon and the money in it is written about that place, and it tells the room
-        // of the death itself.
+        // of the death itself. Its sounds were heard once already, while the player went down (OnDeathSound).
+        _deathHeardFrame = Time.frameCount;
         var more = death.MoveNext();
 
         // That first step has marked the player dead, which is where lying down ends
@@ -1598,6 +1641,9 @@ internal partial class CoopSave {
             } else {
                 playerData.health = health;
             }
+
+            // Out of a cocoon the way a player breaks their own open, which gives a spool of silk back
+            hero.AddSilk(CocoonSilk, true);
 
             hero.AddInvulnerabilitySource(RescueInvulnerability);
             MonoBehaviourUtil.Instance.StartCoroutine(EndRescueInvulnerability(hero));
