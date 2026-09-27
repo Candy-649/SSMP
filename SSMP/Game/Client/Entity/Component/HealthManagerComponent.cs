@@ -322,6 +322,15 @@ internal class HealthManagerComponent : EntityComponent {
             var previousHp = _lastHp;
             _lastHp = newHp;
 
+            // The copy that is not running is kept at the same health. It is the one that carries on when the room
+            // changes hands, and left at the health from before this game's own hits it gave all of them back: the
+            // game that took the room over put both copies at its health, and since nothing had changed as far as it
+            // could tell, never said so to the player who came back in, who kept the health that had been sent
+            var otherHealthManager = IsControlled ? _healthManager.Host : _healthManager.Client;
+            if (otherHealthManager != null) {
+                otherHealthManager.hp = newHp;
+            }
+
             // Obtain a pooled network data instance to avoid new allocations
             var hpData = ObjectPool<EntityNetworkData>.Get();
             hpData.Type = EntityComponentType.Health;
