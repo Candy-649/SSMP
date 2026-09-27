@@ -1697,39 +1697,6 @@ internal partial class Entity {
             return;
         }
 
-        if (_hasParent) {
-            //Logger.Debug("  Entity has parent, only setting local transform");
-
-            Object.Host.transform.localPosition = _lastPosition = Object.Client.transform.localPosition;
-            Object.Host.transform.localScale = _lastScale = Object.Client.transform.localScale;
-        } else {
-            //Logger.Debug("  Entity has no parent, calculating transform");
-
-            // Where the copy stands is where the room's own creature must stand. Worked out by hand from the position
-            // of its parent alone, this left out the parent's scale: a crawler on a platform scaled a little narrower
-            // was put down almost half a unit from the ledge it had been crawling on, and circled in the air after.
-            Object.Host.transform.position = Object.Client.transform.position;
-            _lastPosition = Object.Host.transform.position;
-
-            // Since the scale of the client object is the entire scale we have and the host object scale can be in a
-            // hierarchy, we need to calculate what the new local scale of the host will be to match the client scale
-            var clientScale = Object.Client.transform.localScale;
-            var hostLocalScale = Object.Host.transform.localScale;
-            var hostLossyScale = Object.Host.transform.lossyScale;
-
-            var newScaleX = hostLocalScale.x == 0 || hostLossyScale.x == 0
-                ? 0f
-                : clientScale.x / (hostLossyScale.x / hostLocalScale.x);
-            var newScaleY = hostLocalScale.y == 0 || hostLossyScale.y == 0
-                ? 0f
-                : clientScale.y / (hostLossyScale.y / hostLocalScale.y);
-            var newScaleZ = hostLocalScale.z == 0 || hostLossyScale.z == 0
-                ? 0f
-                : clientScale.z / (hostLossyScale.z / hostLocalScale.z);
-
-            Object.Host.transform.localScale = _lastScale = new Vector3(newScaleX, newScaleY, newScaleZ);
-        }
-
         // Make sure that the sprite animator doesn't play the default clip after enabling the object
         if (_animator.Host != null) {
             _animator.Host.playAutomatically = false;
@@ -1778,6 +1745,42 @@ internal partial class Entity {
             for (var i = 0; i < snapshot.Vector3s.Length; i++) {
                 fsm.FsmVariables.Vector3Variables[i].Value = snapshot.Vector3s[i];
             }
+        }
+
+        // Only now to where the copy stands. The setting up above is done where the room put the creature, as in a
+        // game where it started with the room: a creature that lets go of the markers it hides at, so that they stay
+        // where the room has them, let them go wherever the copy had run to, and hid beside itself after
+        if (_hasParent) {
+            //Logger.Debug("  Entity has parent, only setting local transform");
+
+            Object.Host.transform.localPosition = _lastPosition = Object.Client.transform.localPosition;
+            Object.Host.transform.localScale = _lastScale = Object.Client.transform.localScale;
+        } else {
+            //Logger.Debug("  Entity has no parent, calculating transform");
+
+            // Where the copy stands is where the room's own creature must stand. Worked out by hand from the position
+            // of its parent alone, this left out the parent's scale: a crawler on a platform scaled a little narrower
+            // was put down almost half a unit from the ledge it had been crawling on, and circled in the air after.
+            Object.Host.transform.position = Object.Client.transform.position;
+            _lastPosition = Object.Host.transform.position;
+
+            // Since the scale of the client object is the entire scale we have and the host object scale can be in a
+            // hierarchy, we need to calculate what the new local scale of the host will be to match the client scale
+            var clientScale = Object.Client.transform.localScale;
+            var hostLocalScale = Object.Host.transform.localScale;
+            var hostLossyScale = Object.Host.transform.lossyScale;
+
+            var newScaleX = hostLocalScale.x == 0 || hostLossyScale.x == 0
+                ? 0f
+                : clientScale.x / (hostLossyScale.x / hostLocalScale.x);
+            var newScaleY = hostLocalScale.y == 0 || hostLossyScale.y == 0
+                ? 0f
+                : clientScale.y / (hostLossyScale.y / hostLocalScale.y);
+            var newScaleZ = hostLocalScale.z == 0 || hostLossyScale.z == 0
+                ? 0f
+                : clientScale.z / (hostLossyScale.z / hostLocalScale.z);
+
+            Object.Host.transform.localScale = _lastScale = new Vector3(newScaleX, newScaleY, newScaleZ);
         }
 
         //Logger.Debug("  Restoring FSM states from snapshots");

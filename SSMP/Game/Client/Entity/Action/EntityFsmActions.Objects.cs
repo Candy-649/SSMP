@@ -315,28 +315,58 @@ internal static partial class EntityFsmActions {
         }
 
         if (parent == null) {
-            // Something let out into the world is not part of the entity any more, so it is given back its own
-            // physics. Every rigid body under an entity is made kinematic when its copy is built, so that the copy
-            // is moved by what arrives over the network rather than drifting off on its own - and that reaches the
-            // children too, including the things the creature is carrying. One of those let go of afterwards was
-            // then a thing with no gravity and no contacts: it could not fall, and it could not land, because the
-            // test for having hit the ground is a collision and a kinematic body reports none. What it was given at
-            // the moment it was thrown simply carried it away, and it never came down.
-            //
-            // Not an entity letting go of its own parent, which hundreds of creatures do and a falling rock does as
-            // it drops: that is still the thing the network moves, and a body that fell by itself under it went on
-            // gathering speed that nothing ever took away again.
-            if (!IsObjectInRegistry(gameObject)) {
-                RestoreOwnPhysics(gameObject);
-            }
+            LetOutIntoTheWorld(gameObject);
+        }
+    }
 
-            var fsms = gameObject.GetComponents<PlayMakerFSM>();
-            foreach (var fsm in fsms) {
-                if (fsm.Fsm.Name.Equals("destroy_if_gameobject_null")) {
-                    Object.Destroy(fsm);
+    #endregion
 
-                    //Logger.Debug($"De-parented object contained \"{fsm.Fsm.Name}\" FSM, removing it");
-                }
+    #region SetTransformParent
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetTransformParent action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetTransformParent action) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null) {
+            return;
+        }
+
+        var parent = action.parent.Value;
+        gameObject.transform.SetParent(parent != null ? parent.transform : null, action.worldPositionStays.Value);
+        if (parent == null) {
+            LetOutIntoTheWorld(gameObject);
+        }
+    }
+
+    /// <summary>
+    /// Makes something that an entity let out into the world, by giving it no parent, a thing of its own.
+    /// </summary>
+    private static void LetOutIntoTheWorld(GameObject gameObject) {
+        // Something let out into the world is not part of the entity any more, so it is given back its own
+        // physics. Every rigid body under an entity is made kinematic when its copy is built, so that the copy
+        // is moved by what arrives over the network rather than drifting off on its own - and that reaches the
+        // children too, including the things the creature is carrying. One of those let go of afterwards was
+        // then a thing with no gravity and no contacts: it could not fall, and it could not land, because the
+        // test for having hit the ground is a collision and a kinematic body reports none. What it was given at
+        // the moment it was thrown simply carried it away, and it never came down.
+        //
+        // Not an entity letting go of its own parent, which hundreds of creatures do and a falling rock does as
+        // it drops: that is still the thing the network moves, and a body that fell by itself under it went on
+        // gathering speed that nothing ever took away again.
+        if (!IsObjectInRegistry(gameObject)) {
+            RestoreOwnPhysics(gameObject);
+        }
+
+        var fsms = gameObject.GetComponents<PlayMakerFSM>();
+        foreach (var fsm in fsms) {
+            if (fsm.Fsm.Name.Equals("destroy_if_gameobject_null")) {
+                Object.Destroy(fsm);
+
+                //Logger.Debug($"De-parented object contained \"{fsm.Fsm.Name}\" FSM, removing it");
             }
         }
     }
