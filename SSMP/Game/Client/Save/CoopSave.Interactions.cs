@@ -249,14 +249,30 @@ internal partial class CoopSave {
             new Action<Action<Fsm, FsmState>, Fsm, FsmState>(OnInteractionSwitchState)
         );
 
-        // The plates that open doors, which are no FSMs (see OnPlateActivate)
+        // The plates that open doors, which are no FSMs (see OnPlateTouch)
+        foreach (var leaving in (bool[]) [false, true]) {
+            AddInteractionHook(
+                typeof(PressurePlateBase).GetMethod(
+                    leaving ? "OnTouchEnd" : "OnTouchStart", InstanceFlags, null, [typeof(GameObject)], null
+                ),
+                new Action<Action<PressurePlateBase, GameObject>, PressurePlateBase, GameObject>(
+                    (orig, self, toucher) => OnPlateTouch(orig, self, toucher, leaving)
+                )
+            );
+        }
+
+        // The partner's weight on a plate here is theirs to feel, not this player's hands
         AddInteractionHook(
-            typeof(PersistentPressurePlate).GetMethod("Activate", InstanceFlags, null, Type.EmptyTypes, null),
-            new Action<Action<PersistentPressurePlate>, PersistentPressurePlate>(OnPlateActivate)
-        );
-        AddInteractionHook(
-            typeof(TempPressurePlate).GetMethod("Activate", InstanceFlags, null, Type.EmptyTypes, null),
-            new Action<Action<TempPressurePlate>, TempPressurePlate>(OnPlateActivate)
+            typeof(PressurePlateBase).GetMethod(
+                "PlayVibration", InstanceFlags, null, [typeof(VibrationDataAsset)], null
+            ),
+            new Action<Action<PressurePlateBase, VibrationDataAsset>, PressurePlateBase, VibrationDataAsset>(
+                (orig, self, vibration) => {
+                    if (self.player != self.gameObject) {
+                        orig(self, vibration);
+                    }
+                }
+            )
         );
 
         AddInteractionHook(

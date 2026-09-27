@@ -139,10 +139,10 @@ internal partial class CoopSave {
     private bool _replayingWorldTrigger;
 
     /// <summary>
-    /// The plates going down here because the partner took theirs down, which are not sent back to them as they open
-    /// their doors a moment later.
+    /// What an update of a plate says in place of the state a trap went into when the player got off it again before it
+    /// went down. An update of a plate that says nothing there is the player stepping onto it.
     /// </summary>
-    private readonly HashSet<PressurePlateBase> _platesTakenDownForThePartner = [];
+    private const string PlateLeftName = "Left";
 
     /// <summary>
     /// Collects the states of <see cref="WorldTriggerKinds"/> that say a trap has gone off.
@@ -204,17 +204,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends a plate that the player here took down to the partner, as it opens its door here. It is a trap like the
-    /// others, only not an FSM: the game asks its own hero whether to go down, so the door stayed shut for the player
-    /// who did not stand on it - for good behind the kind that stays down, until the room loaded again, and for the
-    /// while it stays open behind the kind that comes back up. A plate that calls a lift is left alone, the lift is
-    /// settled between the two games already.
+    /// Sends the player here stepping onto a plate that opens a door, the moment the plate feels them, and stepping off
+    /// it again before it went down. It is a trap like the others, only not an FSM: the game asks its own hero, so the
+    /// door stayed shut for the player who did not stand on it. The partner's plate is stood on in turn by itself (see
+    /// <see cref="OnWorldTrigger"/>) and goes through what this one does - the wait for its weight to stay on, going
+    /// down, the door - a moment behind, and gives up where this one gave up. A plate that calls a lift is left alone,
+    /// the lift is settled between the two games already.
     /// </summary>
-    private void OnPlateActivate<T>(Action<T> orig, T self) where T : PressurePlateBase {
-        var takenDownHere = !_platesTakenDownForThePartner.Remove(self) && self.CanDepress;
-        orig(self);
+    private void OnPlateTouch(
+        Action<PressurePlateBase, GameObject> orig,
+        PressurePlateBase self,
+        GameObject toucher,
+        bool leaving
+    ) {
+        // A plate stands on itself only for the partner. Getting off one that has gone down already changes nothing:
+        // it has put its collider away by then
+        var send = toucher != self.gameObject && (!leaving || self.player == toucher && self.col.enabled);
+        orig(self, toucher);
 
-        if (!takenDownHere || _checkedWith is not { } partnerId) {
+        if (!send || _checkedWith is not { } partnerId) {
             return;
         }
 
@@ -228,9 +236,12 @@ internal partial class CoopSave {
             TargetId = partnerId,
             Kind = CoopSaveUpdateKind.WorldTrigger,
             Scene = self.gameObject.scene.name,
-            ObjectPath = path
+            ObjectPath = path,
+            StateName = leaving ? PlateLeftName : ""
         });
-        Logger.Info($"Sent the plate '{path}' going down to the partner");
+        Logger.Info(
+            leaving ? $"Sent getting off the plate '{path}' to the partner" : $"Sent the plate '{path}' to the partner"
+        );
     }
 
     /// <summary>
@@ -243,15 +254,20 @@ internal partial class CoopSave {
             return;
         }
 
-        // A plate, which names no FSM. The game's own forced drop takes it down and does all that it does for a player
-        // standing on it - the door, and the call that three plates of a shrine count - without the wait for them to
-        // stay on it, or the sound, the rumble and the shake that are theirs
+        // A plate, which names no FSM. It stands on itself for the partner and so does all that it does for a player on
+        // it - waits for them to stay, goes down, opens the door, makes the call that three plates of a shrine count -
+        // and gives up if they get off in time. Not one that someone here is on already, or that went down already
         if (update.FsmName.Length == 0) {
-            if (ScenePath.Find(update.ObjectPath, update.Scene) is { activeInHierarchy: true } target &&
-                target.GetComponent<PressurePlateBase>() is { CanDepress: true } plate) {
-                _platesTakenDownForThePartner.Add(plate);
-                plate.StartDrop(true);
-                Logger.Info($"Took down the plate '{target.name}' the way {player.Username} did");
+            if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target ||
+                target.GetComponent<PressurePlateBase>() is not { } plate) {
+                return;
+            }
+
+            if (update.StateName == PlateLeftName) {
+                plate.OnTouchEnd(target);
+            } else if (plate is { CanDepress: true, player: null } && plate.col.enabled) {
+                plate.OnTouchStart(target);
+                Logger.Info($"{player.Username} is on the plate '{target.name}'");
             }
 
             return;
