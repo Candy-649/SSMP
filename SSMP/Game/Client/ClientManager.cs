@@ -120,6 +120,11 @@ internal class ClientManager : IClientManager {
     private readonly EnemyHealthCoop _enemyHealthCoop;
 
     /// <summary>
+    /// The bind co-op instance.
+    /// </summary>
+    private readonly BindCoop _bindCoop;
+
+    /// <summary>
     /// The arena co-op instance.
     /// </summary>
     private readonly ArenaCoop _arenaCoop;
@@ -313,6 +318,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher = new GamePatcher(netClient, _entityManager);
         _benchCoop = new BenchCoop(netClient, _playerData, _saveManager);
         _enemyHealthCoop = new EnemyHealthCoop(_playerData);
+        _bindCoop = new BindCoop();
         _arenaCoop = new ArenaCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
         _bossRoomCoop = new BossRoomCoop(
             netClient,
@@ -422,6 +428,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher.RegisterHooks();
         _benchCoop.RegisterHooks();
         _enemyHealthCoop.RegisterHooks();
+        _bindCoop.RegisterHooks();
         _arenaCoop.RegisterHooks();
         _bossRoomCoop.RegisterHooks();
         _coopHits.RegisterHooks();
@@ -458,6 +465,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher.DeregisterHooks();
         _benchCoop.DeregisterHooks();
         _enemyHealthCoop.DeregisterHooks();
+        _bindCoop.DeregisterHooks();
         _arenaCoop.DeregisterHooks();
         _bossRoomCoop.DeregisterHooks();
         _coopHits.DeregisterHooks();
