@@ -44,7 +44,7 @@ internal static class HitCounters {
     /// <summary>
     /// The events that the game tells a creature of when a hit lands on it, in the order it tells them.
     /// </summary>
-    private static IEnumerable<string> EventsOf(HitInstance hit) {
+    public static IEnumerable<string> EventsOf(HitInstance hit) {
         if (hit.AttackType == AttackTypes.Heavy) {
             yield return "TOOK HEAVY DAMAGE";
         }

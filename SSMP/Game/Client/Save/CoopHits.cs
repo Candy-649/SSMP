@@ -1671,6 +1671,18 @@ internal class CoopHits {
             HitCounters.Count(healthManager, hit);
         }
 
+        // A state machine that each game runs by itself to show the enemy being hit, like the shaking and the sparks of
+        // a nest, hears of the partner's hit the way it heard of the local player's as that landed (see
+        // EntityRegistryEntry.EachGameFsms)
+        var type = FindEntity(update.EntityId)!.Type;
+        foreach (var eventName in HitCounters.EventsOf(hit)) {
+            foreach (var fsm in healthManager.GetComponents<PlayMakerFSM>()) {
+                if (EntityRegistry.IsEachGameFsm(type, fsm.FsmName)) {
+                    fsm.SendEvent(eventName);
+                }
+            }
+        }
+
         // The game leaves this one without an effect itself
         var receiver = healthManager.hitEffectReceiver;
         if (receiver == null || hit.AttackType == AttackTypes.RuinsWater) {

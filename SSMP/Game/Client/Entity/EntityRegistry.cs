@@ -35,10 +35,10 @@ internal static class EntityRegistry {
     private static readonly HashSet<EntityType> LocalFirstTypes = [];
 
     /// <summary>
-    /// For each type of entity whose entry names any, the FSMs that each game runs for its own player (see
-    /// <see cref="EntityRegistryEntry.OwnPlayerFsms"/>).
+    /// For each type of entity whose entry names any, the FSMs that each game runs by itself (see
+    /// <see cref="EntityRegistryEntry.EachGameFsms"/>).
     /// </summary>
-    private static readonly Dictionary<EntityType, HashSet<string>> OwnPlayerFsms = new();
+    private static readonly Dictionary<EntityType, HashSet<string>> EachGameFsms = new();
 
     static EntityRegistry() {
         var loadedEntries = FileUtil.LoadObjectFromEmbeddedJson<List<EntityRegistryEntry>>(EntityRegistryFilePath)
@@ -54,11 +54,11 @@ internal static class EntityRegistry {
     public static bool IsLocalFirst(EntityType type) => LocalFirstTypes.Contains(type);
 
     /// <summary>
-    /// Whether an FSM of an entity of the given type is one that each game runs for its own player (see
-    /// <see cref="EntityRegistryEntry.OwnPlayerFsms"/>).
+    /// Whether an FSM of an entity of the given type is one that each game runs by itself (see
+    /// <see cref="EntityRegistryEntry.EachGameFsms"/>).
     /// </summary>
-    public static bool IsOwnPlayerFsm(EntityType type, string fsmName) {
-        return OwnPlayerFsms.TryGetValue(type, out var names) && names.Contains(fsmName);
+    public static bool IsEachGameFsm(EntityType type, string fsmName) {
+        return EachGameFsms.TryGetValue(type, out var names) && names.Contains(fsmName);
     }
 
     /// <summary>
@@ -86,12 +86,12 @@ internal static class EntityRegistry {
                 LocalFirstTypes.Add(entry.Type);
             }
 
-            if (entry.OwnPlayerFsms is { Count: > 0 } ownPlayerFsms) {
-                if (!OwnPlayerFsms.TryGetValue(entry.Type, out var names)) {
-                    OwnPlayerFsms[entry.Type] = names = new HashSet<string>(StringComparer.Ordinal);
+            if (entry.EachGameFsms is { Count: > 0 } eachGameFsms) {
+                if (!EachGameFsms.TryGetValue(entry.Type, out var names)) {
+                    EachGameFsms[entry.Type] = names = new HashSet<string>(StringComparer.Ordinal);
                 }
 
-                names.UnionWith(ownPlayerFsms);
+                names.UnionWith(eachGameFsms);
             }
 
             validEntries.Add(entry);
@@ -261,15 +261,21 @@ internal class EntityRegistryEntry {
     public bool LocalFirst { get; set; }
 
     /// <summary>
-    /// FSMs of the entity that only ever do something to the player who runs into it, like the fleas of a game of the
-    /// festival that knock the player aside. Each game runs its own for its own player, on the copy of a scene client
-    /// as well as on the room's own entity, and none of it is sent. The player of the other game is not the one who ran
-    /// into the flea, and the one who did is knocked aside at once rather than a round trip later - the way the copy of
-    /// a creature already hurts the local player. The FSM of the scene host was sent, and its knock was about the scene
-    /// host's player alone: a scene client ran through the fleas untouched.
+    /// FSMs of the entity that each game runs by itself, on the copy of a scene client as well as on the room's own
+    /// entity, and none of whose doings is sent.
+    /// Some only ever do something to the player who runs into the entity, like the fleas of a game of the festival
+    /// that knock the player aside. The player of the other game is not the one who ran into the flea, and the one who
+    /// did is knocked aside at once rather than a round trip later - the way the copy of a creature already hurts the
+    /// local player. The FSM of the scene host was sent, and its knock was about the scene host's player alone: a scene
+    /// client ran through the fleas untouched.
+    /// Others only show the hits the entity takes, like the shaking and the sparks of a nest, which is what the
+    /// components of most creatures do: each game shows the hits of its own player as they land, and those of the
+    /// partner as their game sends them (CoopHits.ApplyHitEffect). Run by the scene host alone, the nest showed only
+    /// the blows of the scene host's player, and to the other player striking it felt like striking a thing of the
+    /// room rather than a creature.
     /// </summary>
-    [JsonProperty("own_player_fsms")]
-    public List<string>? OwnPlayerFsms { get; set; }
+    [JsonProperty("each_game_fsms")]
+    public List<string>? EachGameFsms { get; set; }
 
     /// <summary>
     /// Child entries nested under this entry. Populated from the registry file and validated

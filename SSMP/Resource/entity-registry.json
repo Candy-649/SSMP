@@ -1811,6 +1811,9 @@
     "components": [],
     "fsm_names": [
       "Control"
+    ],
+    "each_game_fsms": [
+      "DAMAGE EFFECTS"
     ]
   },
   {
@@ -1865,6 +1868,9 @@
     "internal_name": "Splinter Queen Spike",
     "fsm_names": [
       "Control",
+      "Damage Effects"
+    ],
+    "each_game_fsms": [
       "Damage Effects"
     ]
   },
@@ -2907,7 +2913,7 @@
       "Control",
       "Bonk Hero"
     ],
-    "own_player_fsms": [
+    "each_game_fsms": [
       "Bonk Hero"
     ]
   },
@@ -3480,7 +3486,7 @@
     "fsm_names": [
       "Control"
     ],
-    "own_player_fsms": [
+    "each_game_fsms": [
       "Bonk Hero"
     ]
   },

@@ -531,8 +531,8 @@ internal partial class Entity {
 
         EntityInitializer.CheckPreProcessFsm(fsm);
 
-        // Nothing of what an FSM that each game runs for its own player does is sent (see IsForTheLocalPlayer)
-        var sendsActions = !IsForTheLocalPlayer(fsm);
+        // Nothing of what an FSM that each game runs by itself does is sent (see IsRunByEachGame)
+        var sendsActions = !IsRunByEachGame(fsm);
 
         for (var i = 0; sendsActions && i < fsm.FsmStates.Length; i++) {
             var state = fsm.FsmStates[i];
@@ -585,13 +585,13 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Processes the given FSM for the client entity by disabling it, unless it is one that each game runs for its own
-    /// player (see <see cref="IsForTheLocalPlayer"/>), which the copy runs by itself.
+    /// Processes the given FSM for the client entity by disabling it, unless it is one that each game runs by itself
+    /// (see <see cref="IsRunByEachGame"/>), which the copy runs.
     /// </summary>
     /// <param name="fsm">The Playmaker FSM to process.</param>
     private void ProcessClientFsm(PlayMakerFSM fsm) {
         //Logger.Info($"Processing client FSM: {fsm.Fsm.Name}");
-        if (IsForTheLocalPlayer(fsm)) {
+        if (IsRunByEachGame(fsm)) {
             ReadyToRunOnTheCopy(fsm);
             return;
         }
@@ -601,11 +601,11 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether an FSM is one that each game runs for its own player, as the registry entry of the entity says (see
-    /// <see cref="EntityRegistryEntry.OwnPlayerFsms"/>).
+    /// Whether an FSM is one that each game runs by itself, as the registry entry of the entity says (see
+    /// <see cref="EntityRegistryEntry.EachGameFsms"/>).
     /// </summary>
-    private bool IsForTheLocalPlayer(PlayMakerFSM fsm) {
-        return EntityRegistry.IsOwnPlayerFsm(Type, fsm.FsmName);
+    private bool IsRunByEachGame(PlayMakerFSM fsm) {
+        return EntityRegistry.IsEachGameFsm(Type, fsm.FsmName);
     }
 
     /// <summary>
@@ -1244,7 +1244,7 @@ internal partial class Entity {
         // (avoiding generic methods with delegates/closures) and only retrieve/populate EntityHostFsmData from the pool if a change is detected.
         for (byte fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
-            if (IsForTheLocalPlayer(fsm)) {
+            if (IsRunByEachGame(fsm)) {
                 continue;
             }
 
@@ -1717,9 +1717,9 @@ internal partial class Entity {
         for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
 
-            // The other game never said anything about it, and this game's player is the one it is about: it starts
-            // over, looking its room up afresh, when the object is switched on
-            if (IsForTheLocalPlayer(fsm)) {
+            // The other game never said anything about it, and what it does is about this game: it starts over,
+            // looking its room up afresh, when the object is switched on
+            if (IsRunByEachGame(fsm)) {
                 continue;
             }
 
@@ -1802,7 +1802,7 @@ internal partial class Entity {
         for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
             var snapshot = _fsmSnapshots[fsmIndex];
-            if (IsForTheLocalPlayer(fsm)) {
+            if (IsRunByEachGame(fsm)) {
                 continue;
             }
 
