@@ -232,7 +232,11 @@ internal static partial class EntityFsmActions {
                action.Fsm.GameObject.name.StartsWith("Mantis Lord Throne") &&
                action.Fsm.Name.Equals("Mantis Throne Main") ||
                action.Fsm.GameObject.name.Equals("Radiance") &&
-               action.Fsm.Name.Equals("Control");
+               action.Fsm.Name.Equals("Control") ||
+               // Where the effects that the health of a creature spawns on a hit come out, like those of a crest's
+               // combo: moved along with those of SetHitEffectOrigin
+               action.behaviour.Value == nameof(HealthManager) &&
+               action.methodName.Value == nameof(HealthManager.SetEffectOrigin);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -285,6 +289,20 @@ internal static partial class EntityFsmActions {
 
         action.storeResult.SetValue(obj);
     }
+
+    #endregion
+
+    #region SetHitEffectOrigin
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData _, SetHitEffectOrigin __) => true;
+
+    /// <summary>
+    /// Applies network data to the FSM action. Where the sparks of a hit come out of a creature, which some move for as
+    /// long as they hold a pose: a boss lying dazed sparks higher up than one standing. The copy kept them where they
+    /// started, and a hit on it in such a pose sparked well away from where it was struck.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData _, SetHitEffectOrigin action) => action.OnEnter();
 
     #endregion
 
