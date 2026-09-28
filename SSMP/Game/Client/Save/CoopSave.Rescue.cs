@@ -450,7 +450,7 @@ internal partial class CoopSave {
     /// </summary>
     private void RegisterRescueHooks() {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
-        Entity.Entity.EachGamePartBegan += StandUpForWhatComesAfterTheBoss;
+        Entity.Entity.EachGamePartBegan += EndFightOfFallenBoss;
         _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
         _burnHook = WatchForBurns();
         _respawnResetHook = CreateHook(
@@ -1163,13 +1163,20 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Stands the local player up the way a rescue does if they lie in their cocoon when a boss falls. What comes after
-    /// a boss is for both players, and a game whose player still lay there had them miss it: they neither bound the
-    /// boss nor followed the other into the memory it sends them to, and found its room shut when they came back. Asked
-    /// when the boss goes into the end that each game plays for its own player (Entity.EachGamePartBegan), and for any
-    /// boss once its save has it beaten.
+    /// Ends the fight of a boss that fell, asked when the boss goes into the end that each game plays for its own
+    /// player (Entity.EachGamePartBegan), and for any boss once its save has it beaten. Its checkpoint ends: the boss
+    /// counts as beaten only once the local player has bound it, and the partner dropping out in the middle of that
+    /// took them back to the door with the boss still holding them. And the local player is stood up the way a rescue
+    /// does if they lie in their cocoon. What comes after a boss is for both players, and a game whose player still
+    /// lay there had them miss it: they neither bound the boss nor followed the other into the memory it sends them
+    /// to, and found its room shut when they came back.
     /// </summary>
-    private void StandUpForWhatComesAfterTheBoss() {
+    private void EndFightOfFallenBoss() {
+        if (GetCurrentMarker() is { BossScene: { } bossScene } marker && bossScene == SceneUtil.GetCurrentSceneName()) {
+            Logger.Info($"The boss in '{bossScene}' fell, so its checkpoint ends");
+            ClearCheckpoint(marker);
+        }
+
         if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
             Logger.Info("The boss fell while the local player lay waiting to be pulled up, so they get up");
             rescue.Outcome = RescueOutcome.Rescued;

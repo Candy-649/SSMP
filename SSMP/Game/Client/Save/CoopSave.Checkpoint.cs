@@ -211,7 +211,7 @@ internal partial class CoopSave {
             _nextDefeatCheckTime = Time.unscaledTime + DefeatCheckInterval;
             if (EndCheckpointIfBeaten(marker)) {
                 bossScene = null;
-                StandUpForWhatComesAfterTheBoss();
+                EndFightOfFallenBoss();
             }
         }
 

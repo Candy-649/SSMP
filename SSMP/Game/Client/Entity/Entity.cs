@@ -929,7 +929,8 @@ internal partial class Entity {
         }
 
         // The boss fell into the part of its FSM that each game runs by itself, in this game that runs it
-        if (EntityRegistry.IsEachGameFrom(Type, fsm.FsmName, fsm.ActiveStateName)) {
+        if (EntityRegistry.TryGetEachGameFrom(Type, fsm.FsmName, out var eachGameFrom) &&
+            eachGameFrom == fsm.ActiveStateName) {
             EachGamePartBegan?.Invoke();
         }
 

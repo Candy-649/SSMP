@@ -160,10 +160,10 @@ internal partial class Entity {
     private bool _runHereForGood;
 
     /// <summary>
-    /// The FSM of the copy and the state it is to run by itself from, heard of from the scene host while the local
-    /// player could not be taken along yet, or null (see <see cref="RunEachGamePart"/>).
+    /// The FSM of the copy, the state it is to run by itself from and every state that one leads to, heard of from the
+    /// scene host while the local player could not be taken along yet, or null (see <see cref="RunEachGamePart"/>).
     /// </summary>
-    private (PlayMakerFSM Fsm, FsmState From)? _eachGamePartWaiting;
+    private (PlayMakerFSM Fsm, FsmState From, HashSet<FsmState> Part)? _eachGamePartWaiting;
 
     /// <summary>
     /// The number of the last input played here that the scene host has not answered yet, or zero once it has.
@@ -487,18 +487,36 @@ internal partial class Entity {
     /// <summary>
     /// Takes it that the scene host's FSM went to a state. While the copy runs that FSM here in step with the scene
     /// host, the scene host has gone on, unless that is the state the copy is in or one of the combo of a catch, which
-    /// the copy goes through by itself: the copy follows it again from here. The state from which each game runs the
-    /// FSM by itself starts that here (see <see cref="RunEachGamePart"/>), after a player lying in their cocoon is
-    /// stood up for it (<see cref="EachGamePartBegan"/>).
+    /// the copy goes through by itself: the copy follows it again from here. Any state of the part of the FSM that each
+    /// game runs by itself starts that here from its first state (see <see cref="RunEachGamePart"/>), after a player
+    /// lying in their cocoon is stood up for it (<see cref="EachGamePartBegan"/>). Any of them, as only the latest
+    /// state of the scene host's FSM is sent, and the short one that the part is gone into by can be passed over.
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state.</param>
     private void HearStateFromSceneHost(PlayMakerFSM fsm, string stateName) {
-        if (!_runHereForGood && EntityRegistry.IsEachGameFrom(Type, fsm.FsmName, stateName)) {
-            _eachGamePartWaiting = (fsm, fsm.Fsm.GetState(stateName));
-            EachGamePartBegan?.Invoke();
-            RunEachGamePart();
-            return;
+        if (!_runHereForGood && _eachGamePartWaiting == null &&
+            EntityRegistry.TryGetEachGameFrom(Type, fsm.FsmName, out var fromName)) {
+            // Every state that the first one leads to on its own, the binding that goes round as often as the boss
+            // takes to be bound among them
+            var from = fsm.Fsm.GetState(fromName);
+            var part = new HashSet<FsmState> { from };
+            var toGo = new Stack<FsmState>();
+            toGo.Push(from);
+            while (toGo.Count > 0) {
+                foreach (var transition in toGo.Pop().Transitions) {
+                    if (transition.ToFsmState is { } to && part.Add(to)) {
+                        toGo.Push(to);
+                    }
+                }
+            }
+
+            if (part.Contains(fsm.Fsm.GetState(stateName))) {
+                _eachGamePartWaiting = (fsm, from, part);
+                EachGamePartBegan?.Invoke();
+                RunEachGamePart();
+                return;
+            }
         }
 
         if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && stateName != fsm.ActiveStateName &&
@@ -509,16 +527,16 @@ internal partial class Entity {
 
     /// <summary>
     /// Runs the FSM of the copy by itself from the state from which each game runs it by itself (see
-    /// <see cref="EntityRegistryEntry.EachGameFrom"/>), once the scene host has said its own went into that state and
-    /// the local player can be taken along. That is the end of a boss: the local player is taken to the boss, binds it
-    /// with their own button, gets what it gives and is sent into its memory, as the scene host's player is in the
-    /// other game. Only the scene host's player used to: the copy's replays of taking "the player" along are kept off
-    /// the local one (EntityFsmActions.ActsOnTheLocalPlayer), so the other player stood by and watched the binding.
+    /// <see cref="EntityRegistryEntry.EachGameFrom"/>), once the scene host has said its own is in the part that state
+    /// leads to and the local player can be taken along. That is the end of a boss: the local player is taken to the
+    /// boss, binds it with their own button, gets what it gives and is sent into its memory, as the scene host's player
+    /// is in the other game. Only the scene host's player used to: the copy's replays of taking "the player" along are
+    /// kept off the local one (EntityFsmActions.ActsOnTheLocalPlayer), so the other player stood by and watched the
+    /// binding.
     ///
     /// It runs on for good: none of what the scene host says of that FSM is taken any more but what the copy leaves to
     /// it (see <see cref="IsLeftToSceneHost"/>), which does not count what the part writes into the save and tells the
-    /// room (see <see cref="EachGamePartActionNames"/>). It goes through every state that it leads to on its own, the
-    /// binding that goes round as often as the boss takes to be bound among them.
+    /// room (see <see cref="EachGamePartActionNames"/>). It goes through every state of the part.
     /// </summary>
     private void RunEachGamePart() {
         if (_eachGamePartWaiting is not { } waiting || !EntityFsmActions.IsLocalPlayerFree()) {
@@ -526,24 +544,14 @@ internal partial class Entity {
         }
 
         _eachGamePartWaiting = null;
-        var (copyFsm, from) = waiting;
+        var (copyFsm, from, part) = waiting;
 
         // Whatever ran here for an input of the local player is over
         StopRunningHere();
 
         _runHereForGood = true;
         StartRunningHere(copyFsm, from);
-
-        _runHereCombo = [from];
-        var toGo = new Stack<FsmState>();
-        toGo.Push(from);
-        while (toGo.Count > 0) {
-            foreach (var transition in toGo.Pop().Transitions) {
-                if (transition.ToFsmState is { } to && _runHereCombo.Add(to)) {
-                    toGo.Push(to);
-                }
-            }
-        }
+        _runHereCombo = part;
 
         // Done now, as the scene host's FSM did it on going in. It is not gone into again: the copy is told of the
         // death that the scene host's game sends as well (HealthManagerComponent), which would start it all over

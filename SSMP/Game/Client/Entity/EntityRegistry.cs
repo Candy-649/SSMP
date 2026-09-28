@@ -68,12 +68,12 @@ internal static class EntityRegistry {
     }
 
     /// <summary>
-    /// Whether a state of an FSM of an entity of the given type is the one from which each game runs that FSM by itself
-    /// (see <see cref="EntityRegistryEntry.EachGameFrom"/>).
+    /// Gets the state from which each game runs an FSM of an entity of the given type by itself, if it does (see
+    /// <see cref="EntityRegistryEntry.EachGameFrom"/>).
     /// </summary>
-    public static bool IsEachGameFrom(EntityType type, string fsmName, string stateName) {
-        return EachGameFrom.TryGetValue(type, out var states) && states.TryGetValue(fsmName, out var state) &&
-               state == stateName;
+    public static bool TryGetEachGameFrom(EntityType type, string fsmName, [NotNullWhen(true)] out string? stateName) {
+        stateName = null;
+        return EachGameFrom.TryGetValue(type, out var states) && states.TryGetValue(fsmName, out stateName);
     }
 
     /// <summary>
@@ -300,9 +300,9 @@ internal class EntityRegistryEntry {
     /// FSMs of the entity that each game runs by itself from a state on, by name, with that state: the end of a boss
     /// that the game plays for one player. The player is taken to the boss, binds it with their own button, gets what
     /// it gives and is sent into the memory it keeps. The scene host's game plays it for its own player as it always
-    /// did, and the copy of a scene client plays it for theirs from the moment the scene host says the FSM went into
-    /// that state (Entity.RunEachGamePart). Played by the scene host alone, only its player did the binding, and the
-    /// other stood by and watched it.
+    /// did, and the copy of a scene client plays it for theirs, from that state, from the moment the scene host says
+    /// the FSM is in it or any state it leads to (Entity.RunEachGamePart). Played by the scene host alone, only its
+    /// player did the binding, and the other stood by and watched it.
     /// </summary>
     [JsonProperty("each_game_from")]
     public Dictionary<string, string>? EachGameFrom { get; set; }
