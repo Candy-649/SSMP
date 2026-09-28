@@ -1803,15 +1803,16 @@ internal class ConnectInterface {
             yield break;
         }
 
-        // For private lobbies, show invite code in ChatBox so it's easily shareable
+        // For private lobbies, show invite code in ChatBox so it's easily shareable. Green is written out as a
+        // number, because the chat's TextMeshPro knows only a handful of colours by name and lime is not one of them
         if (visibility == LobbyVisibility.Private) {
             UiManager.InternalChatBox.AddMessage(
-                $"<color=yellow>[Private Lobby]</color> Invite code: <color=lime>{lobbyId}</color>"
+                $"<color=yellow>[Private Lobby]</color> Invite code: <color=#00FF00>{lobbyId}</color>"
             );
             ShowFeedback(Color.green, Lang.Pick("Private lobby created!", "私人房间已创建！"));
         } else {
             UiManager.InternalChatBox.AddMessage(
-                $"<color=yellow>[Public Lobby]</color> Lobby name: <color=lime>{lobbyName}</color>, invite code: <color=lime>{lobbyId}</color>"
+                $"<color=yellow>[Public Lobby]</color> Lobby name: <color=#00FF00>{lobbyName}</color>, invite code: <color=#00FF00>{lobbyId}</color>"
             );
             ShowFeedback(Color.green, Lang.Pick($"Lobby: {lobbyId}", $"房间：{lobbyId}"));
         }

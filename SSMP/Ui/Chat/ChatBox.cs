@@ -1,14 +1,14 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using System.Text;
 using GlobalEnums;
+using MonoMod.RuntimeDetour;
 using SSMP.Api.Client;
 using SSMP.Game.Settings;
 using SSMP.Ui.Component;
 using SSMP.Util;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.UI;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
@@ -70,18 +70,13 @@ internal class ChatBox : IChatBox {
     public static Vector2 MessageSize { get; private set; }
 
     /// <summary>
-    /// Text generation settings used to figure out the width of to-be created text.
-    /// </summary>
-    private static TextGenerationSettings _textGenSettings;
-
-    /// <summary>
     /// The component group of this chat box and all messages in it.
     /// </summary>
     private readonly ComponentGroup _chatBoxGroup;
     /// <summary>
-    /// Text generator used to figure out the width of to-be created text.
+    /// A line of the chat that is never shown, used to figure out the width of to-be created text.
     /// </summary>
-    private readonly TextGenerator _textGenerator;
+    private readonly ChatTextComponent _textMeasure;
     /// <summary>
     /// Array containing all the messages.
     /// </summary>
@@ -113,14 +108,23 @@ internal class ChatBox : IChatBox {
     /// <param name="modSettings">The current mod settings.</param>
     public ChatBox(ComponentGroup chatBoxGroup, ModSettings modSettings) {
         _chatBoxGroup = chatBoxGroup;
-        _textGenerator = new TextGenerator();
         _messages = new ChatMessage[MaxMessages];
         _modSettings = modSettings;
 
         _chatInput = CreateChatInput(chatBoxGroup);
-        InitializeTextSettings();
+        MessageSize = new Vector2(ChatWidth + TextMargin, MessageHeight);
+        _textMeasure = new ChatTextComponent(chatBoxGroup, Vector2.zero, MessageSize, "", UiManager.ChatFontSize);
+        _textMeasure.SetActive(false);
 
         MonoBehaviourUtil.Instance.OnUpdateEvent += CheckKeyBinds;
+
+        // In play the game hides the mouse and pins it to the middle of the screen, every frame. The emoji panel
+        // Windows opens with Win+. is a window of its own that is picked from with the mouse, so while the chat is
+        // open the mouse is left free to reach it
+        new Hook(
+            typeof(InputHandler).GetMethod("SetCursorEnabled", BindingFlags.NonPublic | BindingFlags.Static)!,
+            (Action<Action<bool>, bool>) ((orig, isEnabled) => orig(isEnabled || IsOpen))
+        );
     }
 
     /// <summary>
@@ -148,33 +152,6 @@ internal class ChatBox : IChatBox {
         }
 
         HideChatInput();
-    }
-
-    /// <summary>
-    /// Initialize the text settings so we can more easily create new chat messages on the fly.
-    /// </summary>
-    private static void InitializeTextSettings() {
-        MessageSize = new Vector2(ChatWidth + TextMargin, MessageHeight);
-        _textGenSettings = new TextGenerationSettings {
-            font = Resources.FontManager.UIFontRegular,
-            color = Color.white,
-            fontSize = UiManager.ChatFontSize,
-            lineSpacing = 1,
-            richText = true,
-            scaleFactor = 1,
-            fontStyle = FontStyle.Normal,
-            textAnchor = TextAnchor.LowerLeft,
-            alignByGeometry = false,
-            resizeTextForBestFit = false,
-            resizeTextMinSize = 10,
-            resizeTextMaxSize = 40,
-            updateBounds = false,
-            verticalOverflow = VerticalWrapMode.Overflow,
-            horizontalOverflow = HorizontalWrapMode.Wrap,
-            generationExtents = MessageSize,
-            pivot = new Vector2(0.5f, 0.5f),
-            generateOutOfBounds = false
-        };
     }
 
     /// <summary>
@@ -302,12 +279,6 @@ internal class ChatBox : IChatBox {
         _chatInput.SetActive(true);
         _chatInput.Focus();
 
-        // Typing into this box shows nothing at all - no text, no caret - and the input method's own window sits in
-        // the corner of the screen, yet the message that Return sends does carry what was typed. So the keys arrive
-        // and only the drawing is missing. Which event system holds the field decides whether the per-frame update
-        // that draws the caret and the half-composed characters ever runs, and that cannot be read off the code.
-        MonoBehaviourUtil.Instance.StartCoroutine(LogChatInputState());
-
         InputHandler.Instance.StopMouseInput();
         InputHandler.Instance.PreventPause();
         SetEnabledHeroActions(false);
@@ -317,43 +288,6 @@ internal class ChatBox : IChatBox {
         // after a death, and a "j" asked the other player for a two-player save. Switching off the whole set rather
         // than the two keys by name means a key added later cannot be forgotten here.
         _modSettings.Keybinds.Enabled = false;
-    }
-
-    /// <summary>
-    /// Says what state the chat input is really in, because the box shows nothing while typing yet the message that
-    /// Return sends carries the text. Read once a frame after opening, since asking an input field for focus only
-    /// takes effect on the update after, and again a few seconds later, by which time there is something half-typed
-    /// to look at: an input method that never reaches the game leaves the composition empty in both samples, while
-    /// one that reaches it and is not drawn does not.
-    /// </summary>
-    private IEnumerator LogChatInputState() {
-        yield return null;
-        LogChatInputSample("just opened");
-
-        yield return new WaitForSecondsRealtime(4f);
-        if (IsOpen) {
-            LogChatInputSample("four seconds in");
-        }
-    }
-
-    /// <summary>
-    /// Writes one reading of the chat input's state.
-    /// </summary>
-    /// <param name="when">Which of the two readings this is.</param>
-    private void LogChatInputSample(string when) {
-        var eventSystem = EventSystem.current;
-        Logger.Info(
-            $"Chat input ({when}): " +
-            (eventSystem == null
-                ? "no event system at all"
-                : $"driven by '{eventSystem.gameObject.name}' using " +
-                  $"{eventSystem.currentInputModule?.GetType().Name ?? "no input module"}, " +
-                  $"selected '{eventSystem.currentSelectedGameObject?.name ?? "nothing"}'") +
-            $", focused: {_chatInput.IsFocused}" +
-            $", composition mode: {Input.imeCompositionMode}" +
-            $", composing: '{Input.compositionString}'" +
-            $", field holds: '{_chatInput.CurrentText}'"
-        );
     }
 
     /// <summary>
@@ -447,11 +381,14 @@ internal class ChatBox : IChatBox {
                 lastSpaceIndex = i;
             }
 
+            // Most emoji are two characters of a string, and a line split between them draws neither half. They are
+            // measured at the second one only, so a split, which comes after the character measured, falls after both
+            if (char.IsHighSurrogate(text[i])) {
+                continue;
+            }
+
             var currentText = text.Substring(0, i + 1);
-            var width = _textGenerator.GetPreferredWidth(
-                StripRichTextTags(currentText),
-                _textGenSettings
-            );
+            var width = _textMeasure.GetPreferredWidth(StripRichTextTags(currentText));
 
             if (width > ChatWidth) {
                 return SplitAndWrapLine(text, lastSpaceIndex, i);

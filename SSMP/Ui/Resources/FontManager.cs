@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Reflection;
 using TMProOld;
 using UnityEngine;
+using UnityEngine.TextCore.LowLevel;
 using SSMP.Util;
 using Logger = SSMP.Logging.Logger;
 
@@ -51,6 +54,16 @@ internal static class FontManager {
     private static TMP_FontAsset[]? _nameFallbackFonts;
 
     /// <summary>
+    /// The face the chat's messages are drawn in. <see cref="DrawInChatFont"/> draws a text in it.
+    /// </summary>
+    private static TMPro.TMP_FontAsset _chatFont = null!;
+
+    /// <summary>
+    /// The face the chat's input is drawn in.
+    /// </summary>
+    public static TMPro.TMP_FontAsset ChatInputFont = null!;
+
+    /// <summary>
     /// The faces that already have the others hung off them, so that it is done once each.
     /// </summary>
     private static readonly HashSet<TMP_FontAsset> FacesLeaningOnOthers = [];
@@ -92,6 +105,11 @@ internal static class FontManager {
     /// players' machines. That is why the name check in FindChineseFont runs first and this only backs it up.
     /// </summary>
     private const string ChineseSample = "的匹配大厅直连身份房间创建浏览公开进入你们双人存档连接退出加入输入已经开好";
+
+    /// <summary>
+    /// The colour emoji font every Windows has, in its fonts folder.
+    /// </summary>
+    private const string EmojiFontFile = "seguiemj.ttf";
 
     /// <summary>
     /// The fonts to ask Windows for if the game turns out to have none that can draw Chinese, in order of preference.
@@ -169,6 +187,8 @@ internal static class FontManager {
         if (InGameNameFont == null) {
             Logger.Error("In-game name font is missing!");
         }
+
+        BuildChatFonts();
     }
 
     /// <summary>
@@ -336,6 +356,96 @@ internal static class FontManager {
             }
 
             return _nameFallbackFonts;
+        }
+    }
+
+    /// <summary>
+    /// Draws a text in the face the chat's messages use, with the black outline that keeps them readable over a
+    /// bright room.
+    /// </summary>
+    /// <param name="text">The text to draw in it.</param>
+    public static void DrawInChatFont(TMPro.TMP_Text text) {
+        text.font = _chatFont;
+        text.OnPreRenderText += FitOldOutlineShader;
+    }
+
+    /// <summary>
+    /// Builds the chat's faces. They are TextMeshPro's - the one that comes with Unity, not the old copy the
+    /// game draws its own text with - because the chat has to show emoji and a Unity text cannot: it draws nothing
+    /// its face lacks, and the game has no face with emoji in. This TextMeshPro builds its faces while the game runs,
+    /// so it can take them from the colour emoji font of Windows.
+    ///
+    /// Two faces out of the same font. The messages are drawn from how far each point is from a letter's edge, which
+    /// is what lets them keep their black outline. The input is drawn as plain pixels at the size it is shown: an
+    /// input field ends its text with a character that has no width, and the outline drew that one as a speck after
+    /// the last letter.
+    /// </summary>
+    private static void BuildChatFonts() {
+        // The game never uses this TextMeshPro, so the settings every one of its texts reads as it is created were
+        // never built into it. A text made before they exist stops on a null halfway through setting itself up and
+        // never draws anything, which is why this runs with the loading of the fonts, before any of the interface is
+        // made. What is read unchecked is filled in: the tables of where a line may break and the lists of faces to
+        // fall back on, empty, and the face a new text starts out in
+        var settings = ScriptableObject.CreateInstance<TMPro.TMP_Settings>();
+
+        void Set(string field, object value) => typeof(TMPro.TMP_Settings)
+            .GetField(field, BindingFlags.Instance | BindingFlags.Static | BindingFlags.NonPublic)!
+            .SetValue(settings, value);
+
+        Set("s_Instance", settings);
+        Set("m_leadingCharacters", new TextAsset(""));
+        Set("m_followingCharacters", new TextAsset(""));
+        Set("m_fallbackFontAssets", new List<TMPro.TMP_FontAsset>());
+        Set("m_EmojiFallbackTextAssets", new List<TMPro.TMP_Asset>());
+        Set("m_enableKerning", true);
+
+        // How many pixels tall the chat's text is on this screen, so that what is drawn as plain pixels is drawn at
+        // its own size rather than stretched to it
+        var pixelSize = Mathf.CeilToInt(UiManager.ChatFontSize * Screen.height / 1080f);
+        var face = UIFontRegular;
+
+        _chatFont = TMPro.TMP_FontAsset.CreateFontAsset(
+            face, 48, 6, GlyphRenderMode.SDFAA, 1024, 1024, TMPro.AtlasPopulationMode.Dynamic, true
+        );
+        var material = _chatFont.material;
+        material.shader = Shader.Find("TextMeshPro/Distance Field");
+        material.SetFloat(TMPro.ShaderUtilities.ID_OutlineWidth, 0.2f);
+        material.SetColor(TMPro.ShaderUtilities.ID_OutlineColor, Color.black);
+        // An outline takes as much from inside the letters as it adds around them, so the letters are widened by as
+        // much again to keep their weight
+        material.SetFloat(TMPro.ShaderUtilities.ID_FaceDilate, 0.2f);
+        TMPro.ShaderUtilities.UpdateShaderRatios(material);
+
+        ChatInputFont = TMPro.TMP_FontAsset.CreateFontAsset(
+            face, pixelSize, 4, GlyphRenderMode.SMOOTH, 1024, 1024, TMPro.AtlasPopulationMode.Dynamic, true
+        );
+        Set("m_defaultFontAsset", ChatInputFont);
+
+        var emoji = TMPro.TMP_FontAsset.CreateFontAsset(
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), EmojiFontFile),
+            0, pixelSize, 4, GlyphRenderMode.COLOR, 1024, 1024
+        );
+        if (emoji == null) {
+            Logger.Warn($"Could not load '{EmojiFontFile}', so the chat cannot show emoji");
+            return;
+        }
+
+        _chatFont.fallbackFontAssetTable = [emoji];
+        ChatInputFont.fallbackFontAssetTable = [emoji];
+    }
+
+    /// <summary>
+    /// Fits a text in the chat's message face to the shader it is drawn with. The game carries the shaders of an
+    /// older TextMeshPro, which reads how sharp a letter's edge is from the second set of texture coordinates, where
+    /// this one writes where its face texture sits instead. The older reading is put back just before the text is
+    /// handed on to be drawn; without it the letters came out as rows of spikes.
+    /// </summary>
+    /// <param name="textInfo">The text as it is about to be drawn.</param>
+    private static void FitOldOutlineShader(TMPro.TMP_TextInfo textInfo) {
+        foreach (var meshInfo in textInfo.meshInfo) {
+            for (var i = 0; i < meshInfo.vertexCount; i++) {
+                meshInfo.uvs2[i].y = meshInfo.uvs0[i].w;
+            }
         }
     }
 

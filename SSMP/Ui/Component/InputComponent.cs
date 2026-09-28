@@ -179,6 +179,11 @@ internal class InputComponent : Component, IInputComponent {
         InputField.shouldActivateOnSelect = false;
         InputField.onValueChanged.AddListener(value => { _onChange?.Invoke(value); });
 
+        // A caret is one unit wide unless told otherwise, and one unit is drawn a single pixel wide on any screen short
+        // of 4K. On a sharp laptop screen that is too thin to find: the caret was there all along and was reported
+        // as missing.
+        InputField.caretWidth = 2;
+
         var eventTrigger = GameObject.AddComponent<EventTrigger>();
 
         AddEventTrigger(eventTrigger, EventTriggerType.PointerEnter, _ => {

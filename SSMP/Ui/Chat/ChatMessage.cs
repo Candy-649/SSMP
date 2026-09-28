@@ -22,7 +22,7 @@ internal class ChatMessage {
     /// <summary>
     /// The text component belonging to this chat message.
     /// </summary>
-    private readonly TextComponent _textComponent;
+    private readonly ChatTextComponent _textComponent;
 
     /// <summary>
     /// The current coroutine responsible for fading out the message after a delay.
@@ -61,14 +61,12 @@ internal class ChatMessage {
     /// <param name="position">The screen position of the message.</param>
     /// <param name="text">The message text content (supports Unity rich text).</param>
     public ChatMessage(ComponentGroup componentGroup, Vector2 position, string text) {
-        _textComponent = new TextComponent(
+        _textComponent = new ChatTextComponent(
             componentGroup,
             position,
             ChatBox.MessageSize,
             text,
-            UiManager.ChatFontSize,
-            alignment: TextAnchor.LowerLeft,
-            anchorLeft: true
+            UiManager.ChatFontSize
         );
         _textComponent.SetActive(false);
     }
