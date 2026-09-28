@@ -164,7 +164,7 @@ internal class BindCoop {
             return;
         }
 
-        orig(self, fsmEvent, eventData);
+        orig(self, fsmEvent!, eventData);
     }
 
     /// <summary>
