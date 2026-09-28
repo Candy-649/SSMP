@@ -1654,7 +1654,7 @@ internal class CoopHits {
     /// <summary>
     /// Plays what a hit of the partner on an enemy looked like, without the hit itself. The enemy's own health comes
     /// from whichever game controls it, so all that is left to do here is show that it was hit - and, in the game that
-    /// runs the enemy, to tell the enemy of it, which counts it and answers it (<see cref="HitCounters"/>).
+    /// runs the enemy, to count it (<see cref="HitCounters"/>).
     /// </summary>
     /// <param name="update">The update of the partner's hit.</param>
     private void ApplyHitEffect(CoopHitUpdate update) {
