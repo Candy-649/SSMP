@@ -93,6 +93,13 @@ internal partial class BossRoomCoop {
     private readonly Dictionary<Fsm, SharedDialogue> _sharedDialogues = new();
 
     /// <summary>
+    /// Whether a boss of the current scene fell into the end that each game plays for its own player
+    /// (Entity.EachGamePartBegan). What a boss says from then on, each game shows its own player itself: shared as well,
+    /// it came to the other player twice, the shared copy taking the dialogue box and their control from their own.
+    /// </summary>
+    private bool _eachGamePartBegan;
+
+    /// <summary>
     /// Dialogue that the scene host shared, which is shown to the local player in order.
     /// </summary>
     private readonly Queue<BossRoomUpdate> _dialogueQueue = new();
@@ -160,6 +167,14 @@ internal partial class BossRoomCoop {
         AddStartDialogueHook<RunDialogueBase>();
         AddStartDialogueHook<RunDialogueV4>();
         AddStartDialogueHook<RunDialogueV5>();
+        Entity.Entity.EachGamePartBegan += OnEachGamePartBegan;
+    }
+
+    /// <summary>
+    /// Takes it that a boss of the current scene fell into the end that each game plays for its own player.
+    /// </summary>
+    private void OnEachGamePartBegan() {
+        _eachGamePartBegan = true;
     }
 
     /// <summary>
@@ -198,6 +213,7 @@ internal partial class BossRoomCoop {
         }
 
         _startDialogueHooks.Clear();
+        Entity.Entity.EachGamePartBegan -= OnEachGamePartBegan;
     }
 
     /// <summary>
@@ -224,7 +240,7 @@ internal partial class BossRoomCoop {
         // Key dialogue of a two-player save, like about a wish, goes to the partner whoever hosts the scene
         var isSharedTalk = _netClient.IsConnected && IsOtherPlayerInScene() && _isSharedTalk(fsm);
         if (!isSharedTalk) {
-            if (!IsCoopActive() || !_entityManager.IsSceneHost) {
+            if (!IsCoopActive() || !_entityManager.IsSceneHost || _eachGamePartBegan) {
                 return;
             }
 
@@ -1143,6 +1159,7 @@ internal partial class BossRoomCoop {
         var heldFights = _heldFights.ToList();
 
         _sharedDialogues.Clear();
+        _eachGamePartBegan = false;
         _dialogueQueue.Clear();
         _fightReadiness.Clear();
         _heldFights.Clear();

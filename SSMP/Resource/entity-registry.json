@@ -2732,7 +2732,10 @@
       "Control",
       "Crust Up",
       "Stun Control"
-    ]
+    ],
+    "each_game_from": {
+      "Control": "Death Stagger"
+    }
   },
   {
     "base_object_name": "Crawfather",

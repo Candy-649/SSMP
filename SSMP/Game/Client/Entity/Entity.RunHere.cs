@@ -528,11 +528,12 @@ internal partial class Entity {
     /// <summary>
     /// Runs the FSM of the copy by itself from the state from which each game runs it by itself (see
     /// <see cref="EntityRegistryEntry.EachGameFrom"/>), once the scene host has said its own is in the part that state
-    /// leads to and the local player can be taken along. That is the end of a boss: the local player is taken to the
-    /// boss, binds it with their own button, gets what it gives and is sent into its memory, as the scene host's player
-    /// is in the other game. Only the scene host's player used to: the copy's replays of taking "the player" along are
-    /// kept off the local one (EntityFsmActions.ActsOnTheLocalPlayer), so the other player stood by and watched the
-    /// binding.
+    /// leads to and the local player can be taken along. That is the end of a boss, which takes the local player along
+    /// as the scene host's player is in the other game: to bind the boss with their own button, get what it gives and
+    /// go into its memory, or to hear its last words and go back out of the memory it was fought in. Only the scene
+    /// host's player used to: the copy's replays of taking "the player" along are kept off the local one
+    /// (EntityFsmActions.ActsOnTheLocalPlayer), and what the boss runs of a template is not sent at all, so the other
+    /// player stood by and watched the binding, or was left in the memory.
     ///
     /// It runs on for good: none of what the scene host says of that FSM is taken any more but what the copy leaves to
     /// it (see <see cref="IsLeftToSceneHost"/>), which does not count what the part writes into the save and tells the

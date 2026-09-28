@@ -298,11 +298,12 @@ internal class EntityRegistryEntry {
 
     /// <summary>
     /// FSMs of the entity that each game runs by itself from a state on, by name, with that state: the end of a boss
-    /// that the game plays for one player. The player is taken to the boss, binds it with their own button, gets what
-    /// it gives and is sent into the memory it keeps. The scene host's game plays it for its own player as it always
-    /// did, and the copy of a scene client plays it for theirs, from that state, from the moment the scene host says
-    /// the FSM is in it or any state it leads to (Entity.RunEachGamePart). Played by the scene host alone, only its
-    /// player did the binding, and the other stood by and watched it.
+    /// that the game plays for one player. The player is taken to the boss and binds it with their own button, gets
+    /// what it gives and is sent into the memory it keeps; or hears its last words and is sent out of the memory it was
+    /// fought in. The scene host's game plays it for its own player as it always did, and the copy of a scene client
+    /// plays it for theirs, from that state, from the moment the scene host says the FSM is in it or any state it leads
+    /// to (Entity.RunEachGamePart). Played by the scene host alone, only its player did the binding, and the other
+    /// stood by and watched it, or was left in the memory.
     /// </summary>
     [JsonProperty("each_game_from")]
     public Dictionary<string, string>? EachGameFrom { get; set; }
