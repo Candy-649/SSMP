@@ -211,6 +211,14 @@ internal partial class CoopSave {
             _nextDefeatCheckTime = Time.unscaledTime + DefeatCheckInterval;
             if (EndCheckpointIfBeaten(marker)) {
                 bossScene = null;
+
+                // A player lying in their cocoon when the boss falls gets up with the fight over. What comes after a
+                // boss is for both players, and a game whose player still lay there did not follow the other into
+                // the memory the boss sends them to - and that player found its room shut when they came back
+                if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
+                    Logger.Info("The boss fell while the local player lay waiting to be pulled up, so they get up");
+                    rescue.Outcome = RescueOutcome.Rescued;
+                }
             }
         }
 
