@@ -863,6 +863,16 @@ internal partial class Entity {
     /// <param name="self">The FSM action instance that was entered.</param>
     private void OnActionEntered(FsmStateAction self) {
         if (_isControlled) {
+            // Left running while it is still being settled who runs the room, the creature sends nothing yet. What it
+            // spawns meanwhile is still looked at where the data of the spawning action is made
+            // (EntityManager.OnGameObjectSpawned), so the data is made and goes nowhere. A creature is made an entity
+            // as it is spawned or never, and the server hears of it once this game turns out to run the room. Missed,
+            // it stayed in this game alone: a nest makes its first creatures in the first frames of its room, and the
+            // other player watched the player of this game swing at nothing.
+            if (_keepsRunning && _hookedActions.ContainsKey(self)) {
+                EntityFsmActions.GetNetworkDataFromAction(new EntityNetworkData(), self);
+            }
+
             return;
         }
 
