@@ -450,6 +450,7 @@ internal partial class CoopSave {
     /// </summary>
     private void RegisterRescueHooks() {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
+        Entity.Entity.EachGamePartBegan += StandUpForWhatComesAfterTheBoss;
         _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
         _burnHook = WatchForBurns();
         _respawnResetHook = CreateHook(
@@ -1158,6 +1159,20 @@ internal partial class CoopSave {
 
         if (down) {
             GamePatcher.ForgetPlayerAsTarget(hero.gameObject);
+        }
+    }
+
+    /// <summary>
+    /// Stands the local player up the way a rescue does if they lie in their cocoon when a boss falls. What comes after
+    /// a boss is for both players, and a game whose player still lay there had them miss it: they neither bound the
+    /// boss nor followed the other into the memory it sends them to, and found its room shut when they came back. Asked
+    /// when the boss goes into the end that each game plays for its own player (Entity.EachGamePartBegan), and for any
+    /// boss once its save has it beaten.
+    /// </summary>
+    private void StandUpForWhatComesAfterTheBoss() {
+        if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
+            Logger.Info("The boss fell while the local player lay waiting to be pulled up, so they get up");
+            rescue.Outcome = RescueOutcome.Rescued;
         }
     }
 

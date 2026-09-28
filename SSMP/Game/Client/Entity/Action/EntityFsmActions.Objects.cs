@@ -244,6 +244,34 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region FindNamedChild
+
+    // The same look-up as FindChild, for the child named like the variable it is stored in. The copy never ran the
+    // first state that looks its parts up this way, so what it found stayed empty there: the silk that a boss is bound
+    // with at its end, whose animation is what the binding waits for.
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FindNamedChild action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, FindNamedChild action) {
+        if (action.Fsm == null) {
+            return;
+        }
+
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null) {
+            return;
+        }
+
+        var transform = gameObject.transform.Find(action.storeResult.Name);
+        action.storeResult.Value = transform == null ? null : transform.gameObject;
+    }
+
+    #endregion
+
     #region FindGameObject
 
     /// <summary>Builds network data from the FSM action.</summary>

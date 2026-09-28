@@ -40,6 +40,9 @@ namespace SSMP.Game.Client.Entity;
 /// host's game sends them. A catch is the one input that goes on further: the states that only the catch leads to are
 /// the combo it starts, all of it about the player caught, so the copy plays them by itself and takes none of them
 /// from the scene host, which leaves the player's part of them out (see <see cref="_runHereCombo"/>).
+///
+/// The end of a boss goes on further still, and for good: from the state that its registry entry names, each game
+/// plays the rest of that FSM for its own player (see <see cref="RunEachGamePart"/>).
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -105,6 +108,27 @@ internal partial class Entity {
     ];
 
     /// <summary>
+    /// The kinds of action, by name, that the part of an FSM which each game runs by itself does here like the rest of
+    /// it, although a copy that runs here otherwise leaves them to the scene host (see
+    /// <see cref="IsLeftToSceneHost"/>): what it writes into the save and tells the room. Here they are about the
+    /// player whose part it is - the kill that is recorded, the skill that is given, the player kept from harm and
+    /// from the pause menu while it plays, the prompt to bind - and the scene host's game does the same for its own
+    /// player.
+    /// </summary>
+    private static readonly HashSet<string> EachGamePartActionNames = [
+        "SendEventToRegister", "SendEventToRegisterV2", "SendEventToRegisterDelay",
+        "SetPlayerDataBool", "SetPlayerDataInt", "SetPlayerDataFloat", "SetPlayerDataString", "SetPlayerDataVariable",
+        "IncrementPlayerDataInt", "DecrementPlayerDataInt", "PlayerDataIntAdd"
+    ];
+
+    /// <summary>
+    /// Raised when an FSM of an entity goes into the state from which each game runs it by itself (see
+    /// <see cref="EntityRegistryEntry.EachGameFrom"/>), in the game that runs the entity, and in the other as the scene
+    /// host says so: the boss has fallen, and what comes after it is for both players.
+    /// </summary>
+    public static event System.Action? EachGamePartBegan;
+
+    /// <summary>
     /// The FSM of the copy that runs here, or null while none does.
     /// </summary>
     private PlayMakerFSM? _runHere;
@@ -127,6 +151,19 @@ internal partial class Entity {
     /// other input.
     /// </summary>
     private HashSet<FsmState>? _runHereCombo;
+
+    /// <summary>
+    /// Whether <see cref="_runHere"/> runs the part of its FSM that each game runs by itself (see
+    /// <see cref="RunEachGamePart"/>), which it does for as long as the entity is in the room: nothing the scene host
+    /// says of that FSM takes it back.
+    /// </summary>
+    private bool _runHereForGood;
+
+    /// <summary>
+    /// The FSM of the copy and the state it is to run by itself from, heard of from the scene host while the local
+    /// player could not be taken along yet, or null (see <see cref="RunEachGamePart"/>).
+    /// </summary>
+    private (PlayMakerFSM Fsm, FsmState From)? _eachGamePartWaiting;
 
     /// <summary>
     /// The number of the last input played here that the scene host has not answered yet, or zero once it has.
@@ -158,7 +195,7 @@ internal partial class Entity {
     /// <summary>
     /// The actions of <see cref="_runHere"/> that are left to the scene host, switched off while the copy runs here.
     /// </summary>
-    private readonly List<FsmStateAction> _mutedHere = [];
+    private readonly HashSet<FsmStateAction> _mutedHere = [];
 
     /// <summary>
     /// The FSMs of the room's own object that play on something of the partner's, each with the states it goes through
@@ -358,6 +395,8 @@ internal partial class Entity {
     /// has gone on longer than any answer takes, which it only does when the scene host never heard of it.
     /// </summary>
     private void UpdateRunHere() {
+        RunEachGamePart();
+
         if (WaitsForEcho && Time.unscaledTime > _runHereExpiry) {
             Logger.Info($"The scene host never answered an input on entity {Id}, so its copy follows it again");
             FollowSceneHost();
@@ -435,12 +474,12 @@ internal partial class Entity {
     /// Takes it that the scene host's game sent a replay of an action of an FSM of the copy. While the copy runs that
     /// FSM here in step with the scene host, the scene host did something that the copy did not - its own player struck
     /// the flea too - and the copy follows it again from here; but not for a state of the combo of a catch, which the
-    /// copy plays by itself (see <see cref="_runHereCombo"/>).
+    /// copy plays by itself (see <see cref="_runHereCombo"/>), nor for the part that each game runs by itself.
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="state">The state of the action.</param>
     private void HearFromSceneHost(PlayMakerFSM fsm, FsmState state) {
-        if (fsm == _runHere && !WaitsForEcho && _runHereCombo?.Contains(state) != true) {
+        if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && _runHereCombo?.Contains(state) != true) {
             CatchUpWithSceneHost();
         }
     }
@@ -448,14 +487,70 @@ internal partial class Entity {
     /// <summary>
     /// Takes it that the scene host's FSM went to a state. While the copy runs that FSM here in step with the scene
     /// host, the scene host has gone on, unless that is the state the copy is in or one of the combo of a catch, which
-    /// the copy goes through by itself: the copy follows it again from here.
+    /// the copy goes through by itself: the copy follows it again from here. The state from which each game runs the
+    /// FSM by itself starts that here (see <see cref="RunEachGamePart"/>), after a player lying in their cocoon is
+    /// stood up for it (<see cref="EachGamePartBegan"/>).
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state.</param>
     private void HearStateFromSceneHost(PlayMakerFSM fsm, string stateName) {
-        if (fsm == _runHere && !WaitsForEcho && stateName != fsm.ActiveStateName && !IsInCombo(stateName)) {
+        if (!_runHereForGood && EntityRegistry.IsEachGameFrom(Type, fsm.FsmName, stateName)) {
+            _eachGamePartWaiting = (fsm, fsm.Fsm.GetState(stateName));
+            EachGamePartBegan?.Invoke();
+            RunEachGamePart();
+            return;
+        }
+
+        if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && stateName != fsm.ActiveStateName &&
+            !IsInCombo(stateName)) {
             CatchUpWithSceneHost();
         }
+    }
+
+    /// <summary>
+    /// Runs the FSM of the copy by itself from the state from which each game runs it by itself (see
+    /// <see cref="EntityRegistryEntry.EachGameFrom"/>), once the scene host has said its own went into that state and
+    /// the local player can be taken along. That is the end of a boss: the local player is taken to the boss, binds it
+    /// with their own button, gets what it gives and is sent into its memory, as the scene host's player is in the
+    /// other game. Only the scene host's player used to: the copy's replays of taking "the player" along are kept off
+    /// the local one (EntityFsmActions.ActsOnTheLocalPlayer), so the other player stood by and watched the binding.
+    ///
+    /// It runs on for good: none of what the scene host says of that FSM is taken any more but what the copy leaves to
+    /// it (see <see cref="IsLeftToSceneHost"/>), which does not count what the part writes into the save and tells the
+    /// room (see <see cref="EachGamePartActionNames"/>). It goes through every state that it leads to on its own, the
+    /// binding that goes round as often as the boss takes to be bound among them.
+    /// </summary>
+    private void RunEachGamePart() {
+        if (_eachGamePartWaiting is not { } waiting || !EntityFsmActions.IsLocalPlayerFree()) {
+            return;
+        }
+
+        _eachGamePartWaiting = null;
+        var (copyFsm, from) = waiting;
+
+        // Whatever ran here for an input of the local player is over
+        StopRunningHere();
+
+        _runHereForGood = true;
+        StartRunningHere(copyFsm, from);
+
+        _runHereCombo = [from];
+        var toGo = new Stack<FsmState>();
+        toGo.Push(from);
+        while (toGo.Count > 0) {
+            foreach (var transition in toGo.Pop().Transitions) {
+                if (transition.ToFsmState is { } to && _runHereCombo.Add(to)) {
+                    toGo.Push(to);
+                }
+            }
+        }
+
+        // Done now, as the scene host's FSM did it on going in. It is not gone into again: the copy is told of the
+        // death that the scene host's game sends as well (HealthManagerComponent), which would start it all over
+        copyFsm.Fsm.SetState(from.Name);
+        _runHereCombo.Remove(from);
+
+        Logger.Info($"The copy of entity {Id} runs '{copyFsm.FsmName}' by itself from '{from.Name}' for this player");
     }
 
     /// <summary>
@@ -595,7 +690,8 @@ internal partial class Entity {
 
         foreach (var state in fsm.States) {
             foreach (var action in state.Actions) {
-                if (action is { Enabled: true } && IsLeftToSceneHost(action)) {
+                if (action is { Enabled: true } && IsLeftToSceneHost(action) &&
+                    !(_runHereForGood && EachGamePartActionNames.Contains(action.GetType().Name))) {
                     action.Enabled = false;
                     _mutedHere.Add(action);
                 }
@@ -635,6 +731,7 @@ internal partial class Entity {
 
         _runHere = null;
         _runHereCombo = null;
+        _runHereForGood = false;
         _runHereAwaited = 0;
         _heldData.Clear();
         _heldAnimation = null;

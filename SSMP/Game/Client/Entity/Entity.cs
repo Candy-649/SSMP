@@ -928,6 +928,11 @@ internal partial class Entity {
             return;
         }
 
+        // The boss fell into the part of its FSM that each game runs by itself, in this game that runs it
+        if (EntityRegistry.IsEachGameFrom(Type, fsm.FsmName, fsm.ActiveStateName)) {
+            EachGamePartBegan?.Invoke();
+        }
+
         var data = ObjectPool<EntityHostFsmData>.Get();
         snapshot.CurrentState = fsm.ActiveStateName;
         data.Types.Add(EntityHostFsmData.Type.State);
@@ -1686,6 +1691,14 @@ internal partial class Entity {
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
+        // The copy plays the end of the boss for the local player by itself, which takes them out of the room, and the
+        // scene host has gone on to the end of its own. Taken over, the room's own boss would go on from where the
+        // scene host's was instead: into the memory at once, from the middle of the binding (RunEachGamePart).
+        if (_runHereForGood) {
+            SSMP.Logging.Logger.Info($"Not taking over entity {Id}, whose copy plays its end for the local player");
+            return;
+        }
+
         ResetAnticipation();
 
         //Logger.Info($"Making entity ({Id}, {Type}) a host entity");
@@ -2259,7 +2272,8 @@ internal partial class Entity {
     /// </summary>
     /// <param name="scale">The new scale data.</param>
     public void UpdateScale(EntityUpdate.ScaleData scale) {
-        if (Object.Client == null) {
+        // The part of an FSM that each game runs by itself turns the copy to the local player (RunEachGamePart)
+        if (Object.Client == null || _runHereForGood) {
             //Logger.Warn($"Cannot update scale for entity ({Id}, {Type}), client object is null");
             return;
         }
@@ -2474,15 +2488,16 @@ internal partial class Entity {
 
                 // Played here by the copy's own FSM until the scene host has answered its input, and held till then:
                 // all but what the copy leaves to the scene host, which only comes from there (PlayHere). The combo of
-                // a catch is played here all through, and not again from what the scene host sends of it.
+                // a catch is played here all through, and not again from what the scene host sends of it, and so is
+                // the part of an FSM that each game runs by itself (RunEachGamePart).
                 HearFromSceneHost(fsm, state);
-                if (fsm == _runHere && !IsLeftToSceneHost(action)) {
+                if (fsm == _runHere && !_mutedHere.Contains(action)) {
                     if (WaitsForEcho) {
                         HoldForEcho(data);
                         continue;
                     }
 
-                    if (_runHereCombo?.Contains(state) == true) {
+                    if (_runHereForGood || _runHereCombo?.Contains(state) == true) {
                         continue;
                     }
                 }
@@ -2546,9 +2561,10 @@ internal partial class Entity {
 
             // What the scene host's FSM held before it took the local player's input is not written into the copy's
             // FSM that runs here for it meanwhile, which has gone on from there: the copy is given it only if the
-            // scene host went another way (PlayHere)
+            // scene host went another way (PlayHere). Nor is anything written into the part that each game runs by
+            // itself, whose count of binds left is the local player's (RunEachGamePart).
             var clientFsm = _fsms.Client[fsmIndex];
-            var writesCopy = clientFsm != _runHere || !WaitsForEcho;
+            var writesCopy = clientFsm != _runHere || !WaitsForEcho && !_runHereForGood;
 
             if (data.Types.Contains(EntityHostFsmData.Type.Floats)) {
                 foreach (var (index, val) in data.Floats) {

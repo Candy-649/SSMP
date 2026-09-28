@@ -274,8 +274,8 @@ internal static partial class EntityFsmActions {
     /// store it in a variable - so that being given the player character does nothing to it.
     /// </summary>
     private static readonly HashSet<string> ReadsWithoutActing = [
-        "FindChild", "GetChild", "GetParent", "GetRandomChild", "GetOwner", "GetHero", "FindGameObject",
-        "FindAlertRange", "GetPosition", "SetGameObject", "SpawnObjectFromGlobalPool", "FireAtTarget"
+        "FindChild", "FindNamedChild", "GetChild", "GetParent", "GetRandomChild", "GetOwner", "GetHero",
+        "FindGameObject", "FindAlertRange", "GetPosition", "SetGameObject", "SpawnObjectFromGlobalPool", "FireAtTarget"
     ];
 
     /// <summary>

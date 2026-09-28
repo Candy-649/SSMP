@@ -40,6 +40,12 @@ internal static class EntityRegistry {
     /// </summary>
     private static readonly Dictionary<EntityType, HashSet<string>> EachGameFsms = new();
 
+    /// <summary>
+    /// For each type of entity whose entry names any, the FSMs that each game runs by itself from a state on, with that
+    /// state (see <see cref="EntityRegistryEntry.EachGameFrom"/>).
+    /// </summary>
+    private static readonly Dictionary<EntityType, Dictionary<string, string>> EachGameFrom = new();
+
     static EntityRegistry() {
         var loadedEntries = FileUtil.LoadObjectFromEmbeddedJson<List<EntityRegistryEntry>>(EntityRegistryFilePath)
                             ?? throw new InvalidDataException("Could not deserialize entries from embedded JSON.");
@@ -59,6 +65,15 @@ internal static class EntityRegistry {
     /// </summary>
     public static bool IsEachGameFsm(EntityType type, string fsmName) {
         return EachGameFsms.TryGetValue(type, out var names) && names.Contains(fsmName);
+    }
+
+    /// <summary>
+    /// Whether a state of an FSM of an entity of the given type is the one from which each game runs that FSM by itself
+    /// (see <see cref="EntityRegistryEntry.EachGameFrom"/>).
+    /// </summary>
+    public static bool IsEachGameFrom(EntityType type, string fsmName, string stateName) {
+        return EachGameFrom.TryGetValue(type, out var states) && states.TryGetValue(fsmName, out var state) &&
+               state == stateName;
     }
 
     /// <summary>
@@ -92,6 +107,10 @@ internal static class EntityRegistry {
                 }
 
                 names.UnionWith(eachGameFsms);
+            }
+
+            if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {
+                EachGameFrom[entry.Type] = new Dictionary<string, string>(eachGameFrom, StringComparer.Ordinal);
             }
 
             validEntries.Add(entry);
@@ -276,6 +295,17 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("each_game_fsms")]
     public List<string>? EachGameFsms { get; set; }
+
+    /// <summary>
+    /// FSMs of the entity that each game runs by itself from a state on, by name, with that state: the end of a boss
+    /// that the game plays for one player. The player is taken to the boss, binds it with their own button, gets what
+    /// it gives and is sent into the memory it keeps. The scene host's game plays it for its own player as it always
+    /// did, and the copy of a scene client plays it for theirs from the moment the scene host says the FSM went into
+    /// that state (Entity.RunEachGamePart). Played by the scene host alone, only its player did the binding, and the
+    /// other stood by and watched it.
+    /// </summary>
+    [JsonProperty("each_game_from")]
+    public Dictionary<string, string>? EachGameFrom { get; set; }
 
     /// <summary>
     /// Child entries nested under this entry. Populated from the registry file and validated

@@ -197,21 +197,29 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// Sends the local player into the memory of a boss the way the boss does, unless they can't be sent anywhere:
-    /// dying, lying down waiting to be pulled up or already changing scenes.
+    /// Sends the local player into the memory of a boss the way the boss does, unless they can't be sent anywhere (see
+    /// <see cref="IsLocalPlayerFree"/>).
     /// </summary>
     /// <param name="action">The action of the boss that sends the player into its memory.</param>
     /// <returns>Whether the player was sent.</returns>
     private static bool GoIntoMemory(BeginSceneTransition action) {
-        var heroController = HeroController.instance;
-        var gameManager = global::GameManager.instance;
-        if (heroController == null || gameManager == null || heroController.cState.dead ||
-            PlayerTargetRegistry.IsPlayerDown(heroController.gameObject) || gameManager.IsInSceneTransition) {
+        if (!IsLocalPlayerFree()) {
             return false;
         }
 
         action.OnEnter();
         return true;
+    }
+
+    /// <summary>
+    /// Whether the local player can be taken into what a boss does with the player once it falls: not dying, lying
+    /// down waiting to be pulled up or already changing scenes.
+    /// </summary>
+    public static bool IsLocalPlayerFree() {
+        var heroController = HeroController.instance;
+        var gameManager = global::GameManager.instance;
+        return heroController != null && gameManager != null && !heroController.cState.dead &&
+               !PlayerTargetRegistry.IsPlayerDown(heroController.gameObject) && !gameManager.IsInSceneTransition;
     }
 
     #endregion

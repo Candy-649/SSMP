@@ -2395,7 +2395,10 @@
       "Control",
       "Fake Death",
       "Stun Control"
-    ]
+    ],
+    "each_game_from": {
+      "Control": "Death Stagger"
+    }
   },
   {
     "base_object_name": "Swamp Shaman",
