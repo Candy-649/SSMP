@@ -707,7 +707,7 @@ internal partial class CoopSave {
     /// <summary>
     /// The bosses that the local save has beaten, by the names of their records.
     /// </summary>
-    private static List<string> GetDefeatRecords() {
+    internal static List<string> GetDefeatRecords() {
         var playerData = PlayerData.instance;
         if (playerData == null) {
             return [];
