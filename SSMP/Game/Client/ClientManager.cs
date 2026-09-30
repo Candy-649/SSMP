@@ -503,6 +503,7 @@ internal class ClientManager : IClientManager {
         _commandManager.RegisterCommand(new GiveUpCommand(_bossRoomCoop, _arenaCoop));
         _commandManager.RegisterCommand(new MemoryCommand());
         _commandManager.RegisterCommand(new CoopSaveCommand(_coopSave));
+        _commandManager.RegisterCommand(new CopyCommand(_coopSave));
     }
 
     /// <summary>
