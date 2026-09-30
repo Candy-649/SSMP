@@ -730,8 +730,9 @@ internal class AnimationManager {
         { AnimationClip.HeroPartClip, HeroPartClips.Instance },
         { AnimationClip.HeroChildParticle, HeroChildParticles.Instance },
 
-        // A creature holding the hero, which hides it
-        { AnimationClip.HeroHeld, HeroHeld.Instance }
+        // A creature holding the hero, which hides it, and a figure of the hero that the room shows in its place
+        { AnimationClip.HeroHeld, HeroHeld.Instance },
+        { AnimationClip.HeroRoomFigure, HeroRoomFigure.Instance }
     };
 
     #endregion
@@ -1192,6 +1193,7 @@ internal class AnimationManager {
         HeroPartClips.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroPartClip, effectInfo));
         HeroChildParticles.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildParticle, effectInfo));
         HeroHeld.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHeld, effectInfo));
+        HeroRoomFigure.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroRoomFigure, effectInfo));
         BeamShot.Watch(hc, OnToolMessage);
         if (hc.silkSpecialFSM != null) {
             TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));

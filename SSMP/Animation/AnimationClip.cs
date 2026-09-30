@@ -810,5 +810,8 @@ internal enum AnimationClip {
     HeroChildParticle,
 
     // Whether a creature holds the hero, which the game hides while it does
-    HeroHeld
+    HeroHeld,
+
+    // What a figure of the hero that the room shows in its place plays, like a bed that lays the hero down
+    HeroRoomFigure
 }
