@@ -83,6 +83,39 @@ internal partial class Entity {
     private float _nextHostActiveLogTime;
 
     /// <summary>
+    /// Whether the scene host last said that this entity is switched on, as the copy then is too.
+    /// </summary>
+    private bool _sceneHostHasItOn;
+
+    /// <summary>
+    /// How many times the scene host has said whether this entity is on.
+    /// </summary>
+    private int _timesToldIfOn;
+
+    /// <summary>
+    /// When the scene host last said whether this entity is on, in unscaled time.
+    /// </summary>
+    private float _lastToldIfOn;
+
+    /// <summary>
+    /// How long, in seconds, a copy has to stay off while the scene host has it on before that is said: longer than a
+    /// copy that something here switches off stays off before the scene host's own word that it is off arrives.
+    /// </summary>
+    private const float CopyOffGrace = 2f;
+
+    /// <summary>
+    /// Since when, in unscaled time, the copy has been off here although the scene host has it on, or a negative number
+    /// while it is not (see <see cref="SayWhyTheCopyIsOff"/>).
+    /// </summary>
+    private float _copyOffSince = -1f;
+
+    /// <summary>
+    /// Whether this entity has said that its copy is off although the scene host has it on (see
+    /// <see cref="SayWhyTheCopyIsOff"/>), which is said once for each time the scene host says it is on.
+    /// </summary>
+    private bool _saidTheCopyIsOff;
+
+    /// <summary>
     /// Whether something other than the interpolation was moving the copy on the last frame - something the local
     /// player did to this entity still waiting to come back from the scene host, or the copy moving by itself
     /// (<see cref="OwnMotionComponent"/>) - which says when that has just stopped and the interpolation is about to
@@ -1058,6 +1091,94 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Says that the copy is off here although the scene host has the creature on, and what switched it off.
+    ///
+    /// Only the scene host's word switches a copy on or off, so nothing ever switches one back on that was switched
+    /// off here some other way while the creature went on in the other game: its player saw it and this one did not,
+    /// for the rest of the visit. Nothing else can tell afterwards what did it; a creature that dies here is left out,
+    /// since its death is played out here and the scene host's word follows. Said once for each time the scene host
+    /// says the creature is on, and only for a copy that stays off longer than <see cref="CopyOffGrace"/>.
+    /// </summary>
+    private void SayWhyTheCopyIsOff() {
+        if (!_sceneHostHasItOn || _saidTheCopyIsOff || Object.Client == null) {
+            return;
+        }
+
+        // A part of another entity is on when it is switched on itself, as the scene host tells it (OnUpdate)
+        if (_hasParent ? Object.Client.activeSelf : Object.Client.activeInHierarchy) {
+            _copyOffSince = -1f;
+            return;
+        }
+
+        var healthManager = Object.Client.GetComponent<HealthManager>();
+        if (healthManager != null && healthManager.GetIsDead()) {
+            _copyOffSince = -1f;
+            return;
+        }
+
+        var now = Time.unscaledTime;
+        if (_copyOffSince < 0f) {
+            _copyOffSince = now;
+            return;
+        }
+
+        if (now - _copyOffSince < CopyOffGrace) {
+            return;
+        }
+
+        _saidTheCopyIsOff = true;
+
+        var parent = Object.Client.transform.parent;
+        var caller = Object.Client.TryGetComponent<SaysWhoSwitchesTheCopyOff>(out var says) ? says.Caller : null;
+        SSMP.Logging.Logger.Info(
+            $"The copy of '{Object.Client.name}' is off here although the other game has it on" + (
+                Object.Client.activeSelf && parent != null ? $": '{parent.name}', which it was put under, is off"
+                : caller != null ? $", switched off by:\n{caller}"
+                : ""
+            )
+        );
+    }
+
+    /// <summary>
+    /// Says what the scene host last told this game about whether the creature is on, and what last switched the copy
+    /// off here while the scene host had it on, for a state check that finds the copy off here and the creature on in
+    /// the other game. The two tell apart a word that never came, or came in the wrong order, from something here.
+    /// </summary>
+    public string SayWhatItWasToldAboutBeingOn() {
+        var ago = (Time.unscaledTime - _lastToldIfOn).ToString("0.0", System.Globalization.CultureInfo.InvariantCulture);
+        var told = _timesToldIfOn == 0
+            ? "the other game never said here whether it is on"
+            : $"the other game last said it is {(_sceneHostHasItOn ? "on" : "off")}, {ago} s ago ({_timesToldIfOn} in all)";
+        var caller = Object.Client != null && Object.Client.TryGetComponent<SaysWhoSwitchesTheCopyOff>(out var says)
+            ? says.Caller
+            : null;
+        return caller == null ? told : $"{told}; last switched off here while it was on by:\n{caller}";
+    }
+
+    /// <summary>
+    /// Remembers what switched a copy off while the scene host had it on (see <see cref="SayWhyTheCopyIsOff"/>), from
+    /// inside the call that does it, which is the one place that can name the caller.
+    /// </summary>
+    private sealed class SaysWhoSwitchesTheCopyOff : MonoBehaviour {
+        /// <summary>
+        /// The entity whose copy this is on.
+        /// </summary>
+        public Entity? Entity;
+
+        /// <summary>
+        /// The calls that switched the copy off, the last time it happened while the scene host had it on, since the
+        /// scene host last said whether it is on.
+        /// </summary>
+        public string? Caller;
+
+        private void OnDisable() {
+            if (Entity is { _sceneHostHasItOn: true, _isControlled: true, _saidTheCopyIsOff: false }) {
+                Caller = new System.Diagnostics.StackTrace(1, false).ToString();
+            }
+        }
+    }
+
+    /// <summary>
     /// Writes down where each host FSM is standing, just before this mod switches the object off.
     /// PlayMaker starts an FSM over from the beginning when its object comes back on, and an FSM's variables survive
     /// that while its place does not. A creature that decided once and for all what it was - hiding itself and putting
@@ -1124,6 +1245,7 @@ internal partial class Entity {
 
         if (_isControlled) {
             HideTheRoomsOwnCopy();
+            SayWhyTheCopyIsOff();
             UpdateRunHere();
 
             if (Object.Client != null &&
@@ -1922,6 +2044,7 @@ internal partial class Entity {
         SaveWhereItRuns(copyRuns: false);
 
         var clientActive = Object.Client.activeSelf;
+        _sceneHostHasItOn = false;
         Object.Client.SetActive(false);
         SwitchOnWithoutStartingOver(clientActive, resumed);
         SayWhatWasTakenOver();
@@ -2737,8 +2860,23 @@ internal partial class Entity {
     /// </summary>
     /// <param name="active">The new value for active.</param>
     public void UpdateIsActive(bool active) {
+        _sceneHostHasItOn = active;
+        _timesToldIfOn++;
+        _lastToldIfOn = Time.unscaledTime;
+
+        // Each word from the scene host starts the wait of SayWhyTheCopyIsOff over, so a copy that stays off anyway
+        // is said again
+        _copyOffSince = -1f;
+        _saidTheCopyIsOff = false;
+
         if (Object.Client != null) {
             //Logger.Info($"Entity '{Object.Client.name}' received active: {active}");
+            if (Object.Client.TryGetComponent<SaysWhoSwitchesTheCopyOff>(out var says)) {
+                says.Caller = null;
+            } else if (active) {
+                Object.Client.AddComponent<SaysWhoSwitchesTheCopyOff>().Entity = this;
+            }
+
             Object.Client.SetActive(active);
         } else {
             //Logger.Warn($"Entity ({Id}, {Type}) could not update active, because client object is null");

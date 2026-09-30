@@ -1571,6 +1571,13 @@ internal class CoopStateCheck {
             _builder.Append(", partner shown at ").Append(Where(partner.PlayerObject.transform.position));
         }
 
+        // A creature that only this scene client has off: whether the scene host's word that it is on never came or
+        // came in the wrong order, or something here switched it off
+        if (!_entityManager.IsSceneHost && entry.Value == OffPrefix &&
+            !there.StartsWith(OffPrefix, StringComparison.Ordinal) && FindCreature(entry.Key) is { } creature) {
+            _builder.AppendLine().Append("    ").Append(creature.SayWhatItWasToldAboutBeingOn());
+        }
+
         if (entry.Scene != null && entry.Path != null) {
             var traffic = CoopHits.GetTraffic(entry.Scene, entry.Path, now - TrafficTime);
             if (traffic.Count == 0) {
@@ -1585,6 +1592,25 @@ internal class CoopStateCheck {
         }
 
         Logger.Info(_builder.ToString());
+    }
+
+    /// <summary>
+    /// The creature of the room that the given key is about, if it is the key of a creature that is still there.
+    /// </summary>
+    private Entity.Entity? FindCreature(string key) {
+        foreach (var pair in _creatureKeys) {
+            if (pair.Value != key) {
+                continue;
+            }
+
+            foreach (var entity in _entityManager.ActiveEntities) {
+                if (entity.Id == pair.Key) {
+                    return entity;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
