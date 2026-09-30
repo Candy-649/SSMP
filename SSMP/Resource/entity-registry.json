@@ -1781,6 +1781,9 @@
     "fsm_names": [
       "Control",
       "Drop Rosaries"
+    ],
+    "hitter_game_fsms": [
+      "Drop Rosaries"
     ]
   },
   {
