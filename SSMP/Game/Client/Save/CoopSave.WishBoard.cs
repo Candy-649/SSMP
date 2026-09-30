@@ -36,6 +36,21 @@ internal partial class CoopSave {
     private static readonly FieldInfo? BoardYesNoQuestField =
         typeof(QuestItemBoard).GetField("yesNoQuest", InstanceFlags);
 
+    private static readonly MethodInfo? BoardCloseMethod =
+        typeof(QuestItemBoard).GetMethod("CloseBoard", InstanceFlags, null, Type.EmptyTypes, null);
+
+    private static readonly MethodInfo? BoardQuestActionedMethod =
+        typeof(QuestItemBoard).GetMethod("QuestActioned", InstanceFlags, null, Type.EmptyTypes, null);
+
+    private static readonly FieldInfo? BoardFadeRoutineField =
+        typeof(QuestItemBoard).GetField("fadeStateRoutine", InstanceFlags);
+
+    /// <summary>
+    /// The board that asks the local player whether to donate right now. The partner can complete the wish that it asks
+    /// about meanwhile.
+    /// </summary>
+    private QuestItemBoard? _donationPrompt;
+
     /// <summary>
     /// How many openings of boards without the partner close by run right now, during which no wish is ready to turn in
     /// at a board.
@@ -86,6 +101,10 @@ internal partial class CoopSave {
         AddWishTalkHook(
             typeof(QuestItemBoard).GetMethod("AcceptDonation", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<QuestItemBoard>, QuestItemBoard>(OnBoardAcceptDonation)
+        );
+        AddWishTalkHook(
+            typeof(QuestItemBoard).GetMethod("DeclineDonation", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<QuestItemBoard>, QuestItemBoard>(OnBoardDeclineDonation)
         );
     }
 
@@ -282,25 +301,70 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for QuestItemBoard.SubmitQuestSelection: a donation that the local player could pay but the partner can't
-    /// shows as not enough, so the local player hears why.
+    /// shows as not enough, so the local player hears why, with how much the partner has as far as this game knows. A
+    /// wish that the partner turned in meanwhile is taken off the list instead.
     /// </summary>
     private void OnBoardSubmitSelection(
         Action<QuestItemBoard, BasicQuestBase> orig,
         QuestItemBoard self,
         BasicQuestBase quest
     ) {
+        try {
+            // It still shows, since the list is only drawn again once something on it was taken, and picking it asked
+            // the local player to pay for a wish that is done
+            if (_checkedWith != null && quest is FullQuestBase { IsCompleted: true } done && done != null &&
+                BoardQuestActionedMethod != null && BoardFadeRoutineField?.GetValue(self) == null) {
+                Chat(Lang.Pick(
+                    $"{GetPartnerName()} already turned in this wish with you.",
+                    $"这个愿望 {GetPartnerName()} 已经和你一起交过了。"
+                ));
+                BoardQuestActionedMethod.Invoke(self, null);
+                return;
+            }
+        } catch (Exception e) {
+            LogWishTalkError(e);
+        }
+
         orig(self, quest);
         try {
             if (_checkedWith == null || quest is not FullQuestBase { IsDonateType: true } donation || donation == null ||
-                BoardYesNoQuestField?.GetValue(self) as FullQuestBase != donation || donation.CanComplete ||
-                !WithLocalCopiesOnly(() => donation.CanComplete)) {
+                BoardYesNoQuestField?.GetValue(self) as FullQuestBase != donation) {
                 return;
             }
 
-            Chat(Lang.Pick(
-                $"{GetPartnerName()} doesn't have enough to donate too. Both of you pay the donation.",
-                $"{GetPartnerName()} 那边也不够捐。捐赠需要你们两个各出一份。"
-            ));
+            _donationPrompt = self;
+            if (donation.CanComplete || !WithLocalCopiesOnly(() => donation.CanComplete) ||
+                !PartnerLacksCopy(donation, out var amount, out var needed, out var target)) {
+                return;
+            }
+
+            Logger.Info(
+                $"The donation '{donation.name}' can't go through, because {GetPartnerName()} has " +
+                (amount < 0 ? "an amount this game doesn't know yet" : $"{amount}") + $" of the {needed} it takes"
+            );
+
+            if (amount < 0) {
+                Chat(Lang.Pick(
+                    $"Your game doesn't know yet how much {GetPartnerName()} has for this donation. Try again in a moment.",
+                    $"你的游戏还不知道 {GetPartnerName()} 身上有多少可以捐。过一会儿再试。"
+                ));
+                return;
+            }
+
+            // Only loose rosaries count for a donation in the game itself, so a partner who keeps theirs on strings
+            // can have plenty and still be short here
+            var rosaries = target is QuestTargetCurrency { CurrencyType: CurrencyType.Money };
+            Chat(rosaries
+                ? Lang.Pick(
+                    $"{GetPartnerName()} has only {amount} of the {needed} loose rosaries this donation takes (rosaries " +
+                    "on strings only count once they are broken off). Both of you pay the donation.",
+                    $"{GetPartnerName()} 身上的念珠只有 {amount}/{needed}（念珠串不算，要先拆开）。捐赠需要你们两个各出一份。"
+                )
+                : Lang.Pick(
+                    $"{GetPartnerName()} has only {amount} of the {needed} this donation takes. Both of you pay the " +
+                    "donation.",
+                    $"{GetPartnerName()} 身上只有 {amount}/{needed}，不够捐。捐赠需要你们两个各出一份。"
+                ));
         } catch (Exception e) {
             LogWishTalkError(e);
         }
@@ -308,10 +372,17 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for QuestItemBoard.AcceptDonation: a donation needs the partner close by and able to pay too, since both
-    /// players pay it, and not using the board themselves. Otherwise the board goes back to its list.
+    /// players pay it, and not using the board themselves. Otherwise the board goes back to its list. A wish that the
+    /// partner completed while the board asked is never paid again.
     /// </summary>
     private void OnBoardAcceptDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
+        _donationPrompt = null;
         try {
+            if (BoardYesNoQuestField?.GetValue(self) is FullQuestBase { IsCompleted: true } done && done != null) {
+                self.DeclineDonation();
+                return;
+            }
+
             if (_everChecked && GetCurrentMarker() is { } marker &&
                 BoardYesNoQuestField?.GetValue(self) is FullQuestBase quest && quest != null &&
                 !TryStartDonation(self, quest, marker)) {
@@ -323,6 +394,72 @@ internal partial class CoopSave {
         }
 
         orig(self);
+    }
+
+    /// <summary>
+    /// Hook for QuestItemBoard.DeclineDonation: the board goes back to its list, and closes when the list has nothing
+    /// left. The game only ever goes back, because on its own the list keeps the wish that it asks about; the partner
+    /// can take the last wishes off it meanwhile, by turning them in or accepting them, which used to leave the local
+    /// player in front of a question with no way out.
+    /// </summary>
+    private void OnBoardDeclineDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
+        if (_donationPrompt == self) {
+            _donationPrompt = null;
+        }
+
+        var closing = false;
+        try {
+            if (self.AvailableQuestsCount <= 0 && BoardCloseMethod != null) {
+                closing = true;
+                if (BoardYesNoQuestField?.GetValue(self) is FullQuestBase quest && quest != null) {
+                    self.HideCurrencyCounters(quest);
+                }
+
+                BoardYesNoQuestField?.SetValue(self, null);
+
+                // A change of what the board shows that closing cuts off never finishes, and the board never took input
+                // again the next time it opened
+                if (BoardFadeRoutineField?.GetValue(self) is Coroutine fade) {
+                    self.StopCoroutine(fade);
+                    BoardFadeRoutineField.SetValue(self, null);
+                }
+
+                BoardCloseMethod.Invoke(self, null);
+                return;
+            }
+        } catch (Exception e) {
+            LogWishTalkError(e);
+
+            // The game's own way back would hide the counters of a question that isn't there any more, and throw
+            if (closing) {
+                return;
+            }
+        }
+
+        orig(self);
+    }
+
+    /// <summary>
+    /// Takes down the question of a board whether to donate once the partner completed the wish that it asks about, as
+    /// the chat about their turn-in says, so the local player isn't asked to pay for a wish that is done.
+    /// </summary>
+    private void UpdateDonationPrompt() {
+        if (_donationPrompt is not { } board) {
+            return;
+        }
+
+        // Not by the state of the board: it only switches to the question once the list faded out
+        if (board == null || BoardYesNoQuestField?.GetValue(board) is not FullQuestBase quest || quest == null) {
+            _donationPrompt = null;
+            return;
+        }
+
+        // Only once the question is up: the board takes nothing while it fades from one to the other, and going back or
+        // closing in the middle of that left it half way
+        if (quest.IsCompleted && BoardFadeRoutineField?.GetValue(board) == null) {
+            Logger.Info($"The donation '{quest.name}' that the board asked about was completed, so the board stops asking");
+            board.DeclineDonation();
+        }
     }
 
     /// <summary>

@@ -877,7 +877,19 @@ internal partial class CoopSave {
             }
 
             UpdateWishConfirm();
+        } catch (Exception e) {
+            LogWishTalkError(e);
+        }
 
+        // Each in its own try: something above that throws on every frame must neither leave a question on the screen
+        // nor keep the partner from hearing what the local player carries, which is what every copy they check reads
+        try {
+            UpdateDonationPrompt();
+        } catch (Exception e) {
+            LogWishTalkError(e);
+        }
+
+        try {
             if (partner != null && _checkedWith == partner.Id) {
                 UpdateWishProgress(partner);
             }
@@ -921,6 +933,7 @@ internal partial class CoopSave {
         }
 
         _partnerTalk = null;
+        _donationPrompt = null;
         _wishActions.Clear();
         _talkStates.Clear();
         ResetWishConfirm();
@@ -932,6 +945,7 @@ internal partial class CoopSave {
     private void ResetWishTalk() {
         _wishTalk = null;
         _partnerTalk = null;
+        _donationPrompt = null;
         _wishActions.Clear();
         _talkStates.Clear();
         _pendingWishTurnIns.Clear();
@@ -2224,12 +2238,26 @@ internal partial class CoopSave {
         }
 
         var name = self.name;
-        if (_differentWishNames.Contains(name)) {
+        if (_differentWishNames.Contains(name) || !PartnerLacksCopy(self, out var amount, out var needed, out _)) {
             return true;
         }
 
-        _partnerWishProgress.TryGetValue(name, out var partnerAmounts);
-        var targets = self.Targets;
+        NoticeMissingCopy(name, amount, needed);
+        return false;
+    }
+
+    /// <summary>
+    /// Finds the first thing that a wish takes which the partner doesn't have a full copy of, by the progress that the
+    /// partner's game sent.
+    /// </summary>
+    /// <param name="quest">The wish.</param>
+    /// <param name="amount">How much of it the partner has, or -1 while their game didn't send it yet.</param>
+    /// <param name="needed">How much the wish takes of it.</param>
+    /// <param name="counter">What the wish counts it with.</param>
+    /// <returns>Whether the partner lacks a full copy of something that the wish takes.</returns>
+    private bool PartnerLacksCopy(FullQuestBase quest, out int amount, out int needed, out QuestTargetCounter? counter) {
+        _partnerWishProgress.TryGetValue(quest.name, out var partnerAmounts);
+        var targets = quest.Targets;
         for (var i = 0; i < targets.Count; i++) {
             var target = targets[i];
             if (target.Counter == null || target.Count <= 0 || target.Counter is DeliveryQuestItem ||
@@ -2238,16 +2266,20 @@ internal partial class CoopSave {
             }
 
             // Progress that the partner's game didn't send yet doesn't count as a copy
-            var amount = partnerAmounts != null && i < partnerAmounts.Length ? partnerAmounts[i] : -1;
+            amount = partnerAmounts != null && i < partnerAmounts.Length ? partnerAmounts[i] : -1;
             if (amount >= target.Count) {
                 continue;
             }
 
-            NoticeMissingCopy(name, amount, target.Count);
-            return false;
+            needed = target.Count;
+            counter = target.Counter;
+            return true;
         }
 
-        return true;
+        amount = 0;
+        needed = 0;
+        counter = null;
+        return false;
     }
 
     /// <summary>
