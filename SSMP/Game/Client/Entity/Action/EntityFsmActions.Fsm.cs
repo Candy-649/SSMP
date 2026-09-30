@@ -244,6 +244,14 @@ internal static partial class EntityFsmActions {
     ];
 
     /// <summary>
+    /// Whether an event is one about this game's player that a creature has just dealt with (see
+    /// <see cref="PlayerEvents"/>).
+    /// </summary>
+    internal static bool IsPlayerEvent(string eventName) {
+        return PlayerEvents.Contains(eventName);
+    }
+
+    /// <summary>
     /// Events of a festival game that a flea sends when it scores or is dropped. Both players play such a game with the
     /// same fleas, so they count in both games: a point is a point for both players, whoever hit the flea or got past
     /// it, and a dropped flea counts against both. Only the game the flea belongs to takes them, though: broadcast to

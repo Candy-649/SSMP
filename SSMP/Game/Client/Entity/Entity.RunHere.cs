@@ -41,6 +41,14 @@ namespace SSMP.Game.Client.Entity;
 /// the combo it starts, all of it about the player caught, so the copy plays them by itself and takes none of them
 /// from the scene host, which leaves the player's part of them out (see <see cref="_runHereCombo"/>).
 ///
+/// A catch that one of the copy's parts felt for itself - a tendril that grabs the player, a charge that seizes them
+/// to drain their silk, a maw that takes a thing of theirs - goes further in another way: the game of the player it
+/// caught leads it. What the creature does with them from there is theirs to decide: whether they struggle free,
+/// whether they are eaten, how much silk they have left to be drained. Played by the scene host by itself, without
+/// them, it waited for struggles that nobody made and chewed on nobody for good. So the copy tells the scene host each
+/// state it goes to, and the scene host's FSM goes there too and nowhere else, but out of the catch by its own way - its
+/// death, a stun, the catch ending by its own clock (see <see cref="TakeCatchState"/>).
+///
 /// The end of a boss goes on further still, and for good: from the state that its registry entry names, each game
 /// plays the rest of that FSM for its own player (see <see cref="RunEachGamePart"/>).
 /// </summary>
@@ -83,10 +91,42 @@ internal partial class Entity {
     private static readonly Dictionary<HutongGames.PlayMaker.Fsm, Entity> HeldFsms = new();
 
     /// <summary>
-    /// The hook that keeps the FSMs in <see cref="HeldFsms"/> where they are, put in place the first time a copy runs
-    /// here.
+    /// The hook that keeps the FSMs in <see cref="HeldFsms"/> where they are, and those in <see cref="LedFsms"/> on the
+    /// way the partner's game leads them, put in place the first time either is needed.
     /// </summary>
     private static Hook? _switchStateHook;
+
+    /// <summary>
+    /// The FSM of a copy that plays an input of the local player right now, whose way through the states is noted for
+    /// a catch that this game leads (see <see cref="PlayHere"/>), or null.
+    /// </summary>
+    private static HutongGames.PlayMaker.Fsm? _recordedFsm;
+
+    /// <summary>
+    /// The states that <see cref="_recordedFsm"/> has gone to so far, in order.
+    /// </summary>
+    private static List<FsmState>? _recordedPath;
+
+    /// <summary>
+    /// The FSMs of the room's own objects that play a catch of the partner's which the partner's game leads, with what
+    /// they follow (see <see cref="TakeCatchState"/>).
+    /// </summary>
+    private static readonly Dictionary<HutongGames.PlayMaker.Fsm, Lead> LedFsms = new();
+
+    /// <summary>
+    /// How long an FSM that plays a catch of the partner's which their game leads goes on waiting to hear where it
+    /// goes next, in seconds, before it lets go by itself (see <see cref="UpdateLeads"/>). A creature that holds a
+    /// player changes state every few moments while it does - each struggle, each bite - so this only runs out when the
+    /// partner's game has stopped saying anything: it left the room, or the connection dropped.
+    /// </summary>
+    private const float LeadTimeout = 15f;
+
+    /// <summary>
+    /// Raised on a scene client when the FSM of a copy that runs here for a catch this game leads goes to another state
+    /// of the catch, or would go out of it (see <see cref="PlayHere"/>): the entity, the index of the FSM, the number
+    /// that the catch went under, the number of this step of it, counting from one after the input, and the state.
+    /// </summary>
+    public static event Action<Entity, byte, byte, byte, string>? CatchWentOn;
 
     /// <summary>
     /// The kinds of action, by name, whose effect reaches beyond the entity to what both games share, which a copy that
@@ -153,6 +193,54 @@ internal partial class Entity {
     private HashSet<FsmState>? _runHereCombo;
 
     /// <summary>
+    /// Whether <see cref="_runHere"/> runs for a catch that one of the copy's parts felt for itself, which this game
+    /// leads: every state it goes to is said to the scene host, whose FSM goes there too (see
+    /// <see cref="TellCatchWentOn"/>). <see cref="_runHereCombo"/> is then every state that the catch alone leads to.
+    /// </summary>
+    private bool _runHereLed;
+
+    /// <summary>
+    /// The number that the input of the catch this game leads went under (see <see cref="_runHereLed"/>).
+    /// </summary>
+    private byte _runHereCatch;
+
+    /// <summary>
+    /// How many steps of the catch this game leads have been said to the scene host.
+    /// </summary>
+    private byte _runHereStep;
+
+    /// <summary>
+    /// The state out of the catch this game leads that the scene host has been told of, which <see cref="_runHere"/>
+    /// waits for the scene host to go to first, or null.
+    /// </summary>
+    private FsmState? _runHereExit;
+
+    /// <summary>
+    /// The catches of the partner's that FSMs of the room's own object play as the partner's game leads them.
+    /// </summary>
+    private readonly List<Lead> _leads = [];
+
+    /// <summary>
+    /// Whether the FSM of the copy that runs here does so for a catch that this game leads.
+    /// </summary>
+    public bool LeadsACatch => _runHere != null && _runHereLed;
+
+    /// <summary>
+    /// Whether the copy of any entity but the given one plays a catch that this game leads, which may hold the local
+    /// player now: nothing else lets them go then (see <see cref="EntityFsmActions.LetGoOfTheHeldLocalPlayer"/>).
+    /// </summary>
+    /// <param name="but">The entity left out, or null.</param>
+    public static bool AnyLeadsACatch(Entity? but = null) {
+        foreach (var entity in EntitiesByCopy.Values) {
+            if (entity != but && entity.LeadsACatch) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Whether <see cref="_runHere"/> runs the part of its FSM that each game runs by itself (see
     /// <see cref="RunEachGamePart"/>), which it does for as long as the entity is in the room: nothing the scene host
     /// says of that FSM takes it back.
@@ -214,7 +302,9 @@ internal partial class Entity {
     /// <param name="fsmIndex">The index of the FSM.</param>
     /// <param name="eventName">The event that the strike, touch or catch told the FSM.</param>
     /// <param name="caught">For a catch, what the part that caught set on the FSM along with the event, which the
-    /// scene host sets on its FSM too; null for a strike or a touch.</param>
+    /// scene host sets on its FSM too; null for a strike or a touch. A catch other than one of the
+    /// <see cref="CatchEvents"/> is one that a part felt for itself, which this game leads (see
+    /// <see cref="_runHereLed"/>).</param>
     /// <returns>What the scene host is sent to play the same, or null if it was not played here.</returns>
     public InputStart? PlayHere(byte fsmIndex, string eventName, ToldValues? caught = null) {
         if (CatchEvents.Contains(eventName)) {
@@ -246,23 +336,71 @@ internal partial class Entity {
             motion = new InputStart.BodyMotion(body.linearVelocity, body.rotation, body.angularVelocity);
         }
 
+        // The way it goes, which the scene host follows for a catch that this game leads
+        var led = caught != null && !CatchEvents.Contains(eventName);
+        var path = new List<FsmState>();
+
         HeldFsms.Remove(fsm);
         int[] dice;
         try {
+            _recordedFsm = fsm;
+            _recordedPath = path;
             dice = SharedDice.Record(() => {
                 fsm.Event(eventName);
                 Settle(fsm);
             }, fsm);
         } finally {
+            _recordedFsm = null;
+            _recordedPath = null;
             HeldFsms[fsm] = this;
         }
 
         _runHereIndex = fsmIndex;
         _runHereReached = fsm.ActiveStateName;
-        _runHereCombo = caught != null ? RestOfTheInput(fsm) : null;
+        _runHereLed = led && path.Count > 0;
+        _runHereCombo = _runHereLed
+            ? EntityFsmActions.StatesOnlyThrough(fsm, path[0])
+            : caught != null
+                ? RestOfTheInput(fsm)
+                : null;
+        _runHereStep = 0;
+        _runHereExit = null;
         _runHereAwaited = BeginAnticipation();
+        _runHereCatch = _runHereAwaited;
         _runHereExpiry = Time.unscaledTime + AnticipationHoldTime;
-        return new InputStart(_runHereReached, position, motion, dice, _runHereAwaited, caught);
+        return new InputStart(
+            _runHereReached, position, motion, dice, _runHereAwaited, caught,
+            _runHereLed ? path.ConvertAll(state => state.Name).ToArray() : null
+        );
+    }
+
+    /// <summary>
+    /// Tells the scene host that the FSM that runs here for a catch this game leads went on to one of its states
+    /// (see <see cref="_runHereLed"/>).
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private void TellCatchWentOn(FsmState state) {
+        if (_runHereLed) {
+            CatchWentOn?.Invoke(this, _runHereIndex, _runHereCatch, ++_runHereStep, state.Name);
+        }
+    }
+
+    /// <summary>
+    /// Tells the scene host, once, the way out of a catch this game leads that the FSM that runs here would now take
+    /// from the state of the catch it is in. It is kept where it is (see <see cref="OnSwitchState"/>) until the scene
+    /// host's FSM has gone that way, and follows it again from there.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="toState">The state out of the catch.</param>
+    private void TellCatchLeft(HutongGames.PlayMaker.Fsm fsm, FsmState toState) {
+        if (!_runHereLed || _runHereExit == toState || fsm.ActiveState is not { } state ||
+            _runHereCombo?.Contains(state) != true ||
+            !Array.Exists(state.Transitions, transition => transition.ToFsmState == toState)) {
+            return;
+        }
+
+        _runHereExit = toState;
+        CatchWentOn?.Invoke(this, _runHereIndex, _runHereCatch, ++_runHereStep, toState.Name);
     }
 
     /// <summary>
@@ -308,13 +446,42 @@ internal partial class Entity {
         var isCatch = start.Caught != null || CatchEvents.Contains(eventName);
         start.Caught?.ApplyTo(fsm);
 
+        // Whatever the partner's game led on this FSM before is over: this comes after all of it
+        EndLeadOf(fsm);
+
+        // A catch that the partner's game leads goes the way it went there, and on as it says (TakeCatchState)
+        Lead? lead = null;
+        var path = start.Path;
+        if (path is { Length: > 0 } && EntityFsmActions.FindTransition(fsm, state, eventName) is { } into) {
+            lead = new Lead(this, hostFsm, fsmIndex, start.Anticipation, EntityFsmActions.StatesOnlyThrough(fsm, into),
+                state) {
+                Allowed = into
+            };
+            BeginLead(lead);
+        }
+
         PlayForPartner(hostFsm, isCatch, () => SharedDice.Throw(start.Dice, () => {
             fsm.Event(eventName);
-            Settle(fsm);
-        }, fsm));
+            if (lead == null) {
+                Settle(fsm);
+                return;
+            }
+
+            for (var i = 1; i < path!.Length && _leads.Contains(lead); i++) {
+                FollowCatch(lead, path[i]);
+            }
+        }, fsm), lead?.States);
 
         var reached = fsm.ActiveState;
         var sameWay = reached != null && reached.Name == start.State;
+
+        // Gone another way, which the partner's copy follows from here: it lets go of nobody by itself
+        if (lead != null && !sameWay && _leads.Contains(lead)) {
+            EndLead(lead);
+            LetGo(lead, "went another way than the partner's copy");
+            reached = fsm.ActiveState;
+        }
+
         if (sameWay) {
             CarryEasesOn(reached!, elapsed);
             if (body != null) {
@@ -609,7 +776,15 @@ internal partial class Entity {
     /// <param name="hostFsm">The FSM.</param>
     /// <param name="isCatch">Whether it is a catch rather than a strike or a touch.</param>
     /// <param name="play">What plays it on the FSM.</param>
-    public void PlayForPartner(PlayMakerFSM hostFsm, bool isCatch, System.Action play) {
+    /// <param name="catchStates">The states of a catch that the partner's game leads, for which the actions stay off
+    /// however the FSM goes through them; null for the state it stands in once played and those it alone leads to.
+    /// </param>
+    public void PlayForPartner(
+        PlayMakerFSM hostFsm,
+        bool isCatch,
+        System.Action play,
+        HashSet<FsmState>? catchStates = null
+    ) {
         if (!isCatch) {
             play();
             return;
@@ -625,19 +800,23 @@ internal partial class Entity {
         try {
             play();
         } finally {
-            KeepOffForWhatIsLeft(fsm, muted);
+            KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm));
         }
     }
 
     /// <summary>
     /// Switches back on the actions kept off this game's player while an FSM played something of the partner's, but
-    /// for those of the state it stands in now and of the states that only that state leads to, which are the rest of
-    /// what it played; those stay off until it has left them (see <see cref="LetThePlayerBackIn"/>).
+    /// for those of the given states, which are the rest of what it played; those stay off until it has left them
+    /// (see <see cref="LetThePlayerBackIn"/>).
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="muted">The actions that were switched off.</param>
-    private void KeepOffForWhatIsLeft(HutongGames.PlayMaker.Fsm fsm, List<FsmStateAction> muted) {
-        var states = RestOfTheInput(fsm);
+    /// <param name="states">The states.</param>
+    private void KeepOffForWhatIsLeft(
+        HutongGames.PlayMaker.Fsm fsm,
+        List<FsmStateAction> muted,
+        HashSet<FsmState> states
+    ) {
         muted.RemoveAll(action => {
             if (states.Contains(action.State)) {
                 return false;
@@ -730,6 +909,14 @@ internal partial class Entity {
         }
 
         _runHere = copyFsm;
+        HookSwitchState();
+        HeldFsms[fsm] = this;
+    }
+
+    /// <summary>
+    /// Puts <see cref="_switchStateHook"/> in place, if it is not yet.
+    /// </summary>
+    private static void HookSwitchState() {
         _switchStateHook ??= new Hook(
             typeof(HutongGames.PlayMaker.Fsm).GetMethod(
                 "SwitchState", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
@@ -737,19 +924,24 @@ internal partial class Entity {
             )!,
             new Action<Action<HutongGames.PlayMaker.Fsm, FsmState>, HutongGames.PlayMaker.Fsm, FsmState>(OnSwitchState)
         );
-        HeldFsms[fsm] = this;
     }
 
     /// <summary>
-    /// Stops the copy's FSM running here, after which the copy follows the scene host again from where it is.
+    /// Stops the copy's FSM running here, after which the copy follows the scene host again from where it is. A catch
+    /// that this game led is over with it: a player that the creature still holds is let go, since what lets them go
+    /// in the end was the copy's own FSM to do, and the scene host's FSM does not do it to them.
     /// </summary>
-    private void StopRunningHere() {
+    /// <param name="letGoOfThePlayer">Whether a player held by a catch that this game led is let go, which they are
+    /// not when the room's own creature takes over and goes on holding them.</param>
+    private void StopRunningHere(bool letGoOfThePlayer = true) {
         if (_runHere is not { } copyFsm) {
             return;
         }
 
+        var led = _runHereLed;
         _runHere = null;
         _runHereCombo = null;
+        _runHereLed = false;
         _runHereForGood = false;
         _runHereAwaited = 0;
         _heldData.Clear();
@@ -767,6 +959,10 @@ internal partial class Entity {
         }
 
         HeldFsms.Remove(fsm);
+
+        if (led && letGoOfThePlayer && !AnyLeadsACatch(this)) {
+            EntityFsmActions.LetGoOfTheHeldLocalPlayer($"the copy of entity {Id} no longer plays the catch");
+        }
     }
 
     /// <summary>
@@ -780,26 +976,298 @@ internal partial class Entity {
 
         HeldFsms.Remove(copyFsm.Fsm);
         _runHere = null;
+        _runHereLed = false;
     }
 
     /// <summary>
     /// Hook for an FSM going to another state, which keeps the FSM of a copy that runs here where it is unless an input
-    /// of the local player takes it on, or it goes on through the combo of a catch (see <see cref="HeldFsms"/>). The
-    /// state it was about to go to is cleared, as the game clears it once it has gone there, so that the game does not
-    /// try again.
+    /// of the local player takes it on, or it goes on through the combo of a catch (see <see cref="HeldFsms"/>), and
+    /// the FSM of the room's own object that plays a catch that the partner's game leads on the way that game says (see
+    /// <see cref="LetsLedFsmGo"/>). The state it was about to go to is cleared, as the game clears it once it has gone
+    /// there, so that the game does not try again. For a catch this game leads, every state the copy goes to is said
+    /// to the scene host, and so is the way out it waits at (see <see cref="TellCatchWentOn"/>).
     /// </summary>
     private static void OnSwitchState(
         Action<HutongGames.PlayMaker.Fsm, FsmState> orig,
         HutongGames.PlayMaker.Fsm self,
         FsmState toState
     ) {
-        if (HeldFsms.Count == 0 || !HeldFsms.TryGetValue(self, out var entity) ||
-            entity._runHereCombo?.Contains(toState) == true) {
+        if (self == _recordedFsm) {
+            _recordedPath?.Add(toState);
             orig(self, toState);
             return;
         }
 
-        SwitchToStateField!.SetValue(self, null);
+        if (HeldFsms.Count > 0 && HeldFsms.TryGetValue(self, out var entity)) {
+            if (entity._runHereCombo?.Contains(toState) == true) {
+                // Said before it goes there, since going there may take it on further at once
+                entity.TellCatchWentOn(toState);
+                orig(self, toState);
+                return;
+            }
+
+            SwitchToStateField!.SetValue(self, null);
+            entity.TellCatchLeft(self, toState);
+            return;
+        }
+
+        if (LedFsms.Count > 0 && LedFsms.TryGetValue(self, out var lead) && !lead.Owner.LetsLedFsmGo(lead, toState)) {
+            SwitchToStateField!.SetValue(self, null);
+            return;
+        }
+
+        orig(self, toState);
+    }
+
+    /// <summary>
+    /// Takes a state that the partner's copy of the entity went to in a catch that their game leads, on the scene
+    /// host (see <see cref="CatchWentOn"/>): the FSM of the room's own object that plays the catch goes there too,
+    /// unless it has already left the catch its own way. What it does there is this game's but for what is this
+    /// game's player's own (see <see cref="PlayForPartner"/>).
+    /// </summary>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="catchNumber">The number that the catch went under.</param>
+    /// <param name="step">The number of the step, counting from one after the input.</param>
+    /// <param name="stateName">The state.</param>
+    public void TakeCatchState(byte fsmIndex, byte catchNumber, byte step, string stateName) {
+        var lead = _leads.Find(led => led.FsmIndex == fsmIndex);
+
+        // Steps are compared by the sign of their difference, so that going round from the largest to one reads as
+        // one forward; an older one, come late, says nothing any more
+        if (_isControlled || lead == null || lead.Number != catchNumber || (sbyte) (step - lead.Step) <= 0) {
+            return;
+        }
+
+        lead.Step = step;
+        lead.LastHeard = Time.unscaledTime;
+        FollowCatch(lead, stateName);
+    }
+
+    /// <summary>
+    /// Takes the FSM that plays a catch the partner's game leads to a state of it that the partner's copy went to, or
+    /// out of it the way the partner's copy would go, which ends the lead.
+    /// </summary>
+    /// <param name="lead">The catch.</param>
+    /// <param name="stateName">The state.</param>
+    private void FollowCatch(Lead lead, string stateName) {
+        var fsm = lead.Fsm;
+        if (fsm.GetState(stateName) is not { } state) {
+            return;
+        }
+
+        lead.Allowed = state;
+        try {
+            fsm.SetState(stateName);
+        } finally {
+            lead.Allowed = null;
+        }
+
+        if (!lead.States.Contains(state)) {
+            EndLead(lead);
+        }
+    }
+
+    /// <summary>
+    /// Whether an FSM of the room's own object that plays a catch of the partner's which their game leads may go to a
+    /// state by itself. It goes where the partner's game says (see <see cref="TakeCatchState"/>), and by itself only
+    /// out of the catch: its death, a stun, the catch ending by its own clock. Nothing of this game's player moves it:
+    /// their being hurt, which tells the whole room, nor anything else the catch waits for, like a struggle. Going out
+    /// of the catch by a global transition - killed while it held the partner - it lets go of the partner there, and
+    /// what it does to "the player" on the way is kept off this game's player (see
+    /// <see cref="KeepOffForTheAftermath"/>).
+    /// </summary>
+    /// <param name="lead">The catch.</param>
+    /// <param name="toState">The state.</param>
+    private bool LetsLedFsmGo(Lead lead, FsmState? toState) {
+        if (toState == null) {
+            return true;
+        }
+
+        if (lead.Allowed == toState) {
+            lead.Allowed = null;
+            return true;
+        }
+
+        var fsm = lead.Fsm;
+        var transition = fsm.LastTransition;
+        if (lead.States.Contains(toState) ||
+            transition != null && EntityFsmActions.IsPlayerEvent(transition.EventName)) {
+            return false;
+        }
+
+        EndLead(lead);
+        if (transition != null && Array.IndexOf(fsm.GlobalTransitions, transition) >= 0) {
+            KeepOffForTheAftermath(lead, toState);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Keeps what is this game's player's own off the states that an FSM playing a catch of the partner's goes into by
+    /// a global transition, and those only that state leads to, until it has left them (see
+    /// <see cref="LetThePlayerBackIn"/>): a creature killed while it holds a player lets go of them, with a last
+    /// blow, and here that player is the partner. Not if that takes it back to where it was before the catch, which is
+    /// its own life again.
+    /// </summary>
+    /// <param name="lead">The catch.</param>
+    /// <param name="to">The state that the global transition leads to.</param>
+    private void KeepOffForTheAftermath(Lead lead, FsmState to) {
+        var fsm = lead.Fsm;
+        var after = EntityFsmActions.StatesOnlyThrough(fsm, to);
+        if (after.Contains(lead.From)) {
+            return;
+        }
+
+        var muted = EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(action => after.Contains(action.State));
+        foreach (var action in muted) {
+            action.Enabled = false;
+        }
+
+        var index = _playedForPartner.FindIndex(played => played.Fsm == fsm);
+        if (index < 0) {
+            _playedForPartner.Add((fsm, after, muted));
+        } else {
+            _playedForPartner[index].States.UnionWith(after);
+            _playedForPartner[index].Muted.AddRange(muted);
+        }
+    }
+
+    /// <summary>
+    /// Starts an FSM of the room's own object following a catch that the partner's game leads.
+    /// </summary>
+    private void BeginLead(Lead lead) {
+        HookSwitchState();
+        _leads.Add(lead);
+        LedFsms[lead.Fsm] = lead;
+    }
+
+    /// <summary>
+    /// Stops an FSM following a catch that the partner's game led. It goes its own way from here.
+    /// </summary>
+    private void EndLead(Lead lead) {
+        if (!_leads.Remove(lead)) {
+            return;
+        }
+
+        if (LedFsms.TryGetValue(lead.Fsm, out var led) && led == lead) {
+            LedFsms.Remove(lead.Fsm);
+        }
+    }
+
+    /// <summary>
+    /// Stops the given FSM following a catch that the partner's game led, if it does.
+    /// </summary>
+    private void EndLeadOf(HutongGames.PlayMaker.Fsm fsm) {
+        if (_leads.Find(lead => lead.Fsm == fsm) is { } lead) {
+            EndLead(lead);
+        }
+    }
+
+    /// <summary>
+    /// Stops every FSM of the entity following a catch that the partner's game led.
+    /// </summary>
+    private void EndAllLeads() {
+        for (var i = _leads.Count - 1; i >= 0; i--) {
+            EndLead(_leads[i]);
+        }
+    }
+
+    /// <summary>
+    /// Looks at the catches of the partner's that FSMs of the room's own object follow, on the scene host, once a
+    /// frame. One whose FSM has left it by a way that the hook did not see is over. One that the partner's game has
+    /// said nothing more of for <see cref="LeadTimeout"/> lets go by itself (see <see cref="LetGo"/>): the player it
+    /// held left, and the FSM would otherwise wait for their struggles for good.
+    /// </summary>
+    private void UpdateLeads() {
+        for (var i = _leads.Count - 1; i >= 0; i--) {
+            var lead = _leads[i];
+            if (lead.Fsm.ActiveState is not { } state || !lead.States.Contains(state)) {
+                EndLead(lead);
+                continue;
+            }
+
+            if (Time.unscaledTime - lead.LastHeard >= LeadTimeout) {
+                EndLead(lead);
+                LetGo(lead, $"heard nothing more of the catch for {LeadTimeout} s");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Takes an FSM that followed a catch the partner's game led, and follows it no more, out of the catch the
+    /// shortest way there is from the state of it that it stands in, if it stands in one: the creature lets go of a
+    /// player it has nobody to hold for.
+    /// </summary>
+    /// <param name="lead">The catch, over.</param>
+    /// <param name="why">Why, for the log.</param>
+    private void LetGo(Lead lead, string why) {
+        var fsm = lead.Fsm;
+        if (fsm.ActiveState is not { } from || !lead.States.Contains(from)) {
+            return;
+        }
+
+        var seen = new HashSet<FsmState> { from };
+        var toGo = new Queue<FsmState>();
+        toGo.Enqueue(from);
+        while (toGo.Count > 0) {
+            foreach (var transition in toGo.Dequeue().Transitions) {
+                if (transition.ToFsmState is not { } to || !seen.Add(to)) {
+                    continue;
+                }
+
+                if (!lead.States.Contains(to)) {
+                    Logger.Info($"The '{fsm.Name}' of entity {Id} {why}, so it goes from '{from.Name}' to '{to.Name}'");
+                    fsm.SetState(to.Name);
+                    return;
+                }
+
+                toGo.Enqueue(to);
+            }
+        }
+
+        Logger.Info($"The '{fsm.Name}' of entity {Id} {why}, and has no way out of '{from.Name}'");
+    }
+
+    /// <summary>
+    /// A catch of the partner's that an FSM of the room's own object plays as the partner's game leads it (see
+    /// <see cref="TakeCatchState"/>).
+    /// </summary>
+    /// <param name="owner">The entity.</param>
+    /// <param name="hostFsm">The FSM.</param>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="number">The number that the catch went under.</param>
+    /// <param name="states">The states of the catch: those that the state it went to alone leads to.</param>
+    /// <param name="from">The state the FSM took the catch in.</param>
+    private sealed class Lead(
+        Entity owner,
+        PlayMakerFSM hostFsm,
+        byte fsmIndex,
+        byte number,
+        HashSet<FsmState> states,
+        FsmState from
+    ) {
+        public Entity Owner { get; } = owner;
+        public HutongGames.PlayMaker.Fsm Fsm { get; } = hostFsm.Fsm;
+        public byte FsmIndex { get; } = fsmIndex;
+        public byte Number { get; } = number;
+        public HashSet<FsmState> States { get; } = states;
+        public FsmState From { get; } = from;
+
+        /// <summary>
+        /// The last step that the partner's game said.
+        /// </summary>
+        public byte Step { get; set; }
+
+        /// <summary>
+        /// When the partner's game last said anything of the catch.
+        /// </summary>
+        public float LastHeard { get; set; } = Time.unscaledTime;
+
+        /// <summary>
+        /// The one state that the FSM is let go to next, however it goes there, or null.
+        /// </summary>
+        public FsmState? Allowed { get; set; }
     }
 
     /// <summary>

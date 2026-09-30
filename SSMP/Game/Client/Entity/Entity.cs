@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
@@ -463,6 +464,13 @@ internal partial class Entity {
                 SSMP.Logging.Logger.Warn("Could not find how an FSM tells another FSM by name, so catches of the " +
                                          "local player's things by the parts of copies go unheard");
             }
+
+            _triggerEnterHook = new Hook(
+                typeof(HutongGames.PlayMaker.Fsm).GetMethod(
+                    nameof(HutongGames.PlayMaker.Fsm.OnTriggerEnter2D), [typeof(Collider2D)]
+                )!,
+                OnFsmTriggerEnter2D
+            );
         }
 
         _hookedActions = new Dictionary<FsmStateAction, HookedEntityAction>();
@@ -1144,6 +1152,7 @@ internal partial class Entity {
             return;
         }
 
+        UpdateLeads();
         LetThePlayerBackIn(false);
 
         foreach (var entityComponent in _updatableComponents) {
@@ -1904,7 +1913,8 @@ internal partial class Entity {
             ((OwnMotionComponent) ownMotion).TakeMotionFromCopy();
         }
 
-        StopRunningHere();
+        // A player that the copy holds stays held by the room's own creature, which goes on from there
+        StopRunningHere(letGoOfThePlayer: false);
         EntityFsmActions.LeaveStatesOf(_fsms.Client);
 
         // What the copy kept in the save goes to the room's own creature, which saves it from now on
@@ -1942,11 +1952,12 @@ internal partial class Entity {
 
     /// <summary>
     /// Raised on a scene client when its player touched the copy of an entity, or one of the copy's parts caught them
-    /// or a thing of theirs: the entity, the index of the FSM, the event that the FSM is sent for it, and for a catch
-    /// what the part set on the FSM along with it (null for a touch). What the event leads to is played on the copy at
-    /// once where the entity or the catch says so (see <see cref="PlayHere"/>) and sent to the scene host.
+    /// or a thing of theirs: the entity, the index of the FSM, the event that the FSM is sent for it, for a catch what
+    /// the part set on the FSM along with it (null for a touch), and whether the part that told it felt the player
+    /// themselves (see <see cref="HearCopyTold"/>). What the event leads to is played on the copy at once where the
+    /// entity or the catch says so (see <see cref="PlayHere"/>) and sent to the scene host.
     /// </summary>
-    public static event Action<Entity, byte, string, ToldValues?>? CopyTouchedLocalPlayer;
+    public static event Action<Entity, byte, string, ToldValues?, bool>? CopyTouchedLocalPlayer;
 
     /// <summary>
     /// The events with which the game's catching parts - a blade, a claw, a coil that holds the player for a string of
@@ -1973,6 +1984,44 @@ internal partial class Entity {
     /// Whether <see cref="_sendToFsmHook"/> was looked for, so that a game without the method says so only once.
     /// </summary>
     private static bool _sendToFsmHookTried;
+
+    /// <summary>
+    /// The hook that notes which FSM a collider is entering the trigger of (see <see cref="_triggeredFsm"/>), put in
+    /// place with the first entity.
+    /// </summary>
+    private static Hook? _triggerEnterHook;
+
+    /// <summary>
+    /// The FSM that a collider is entering the trigger of right now, while the FSM does what that sets off, or null.
+    /// The collider it keeps as the one that set it off stays there after that, until the next one enters.
+    /// </summary>
+    private static HutongGames.PlayMaker.Fsm? _triggeredFsm;
+
+    /// <summary>
+    /// The layer of the player's body.
+    /// </summary>
+    private const int PlayerLayer = 9;
+
+    /// <summary>
+    /// The layer of the player's hit box.
+    /// </summary>
+    private const int HeroBoxLayer = 20;
+
+    /// <summary>
+    /// Whether each FSM of the parts of copies feels the player, found the first time it tells its copy anything (see
+    /// <see cref="FeelsThePlayer"/>).
+    /// </summary>
+    private static readonly ConditionalWeakTable<HutongGames.PlayMaker.Fsm, StrongBox<bool>> FeelingFsms = new();
+
+    /// <summary>
+    /// The field of each kind of action that holds the layer of what sets it off, by type, or null for one without.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo?> CollideLayerFields = new();
+
+    /// <summary>
+    /// The local player's character and the collider of their hit box, found once for each character.
+    /// </summary>
+    private static (HeroController Hero, Collider2D? Box)? _heroBox;
 
     /// <summary>
     /// Makes the copy of this entity answer the local player touching it, the way the entity itself answers its own
@@ -2010,7 +2059,7 @@ internal partial class Entity {
 
             foreach (var transition in state.Transitions) {
                 if (_touchEvents.Contains(transition.EventName) && transition.ToFsmState != null) {
-                    CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, transition.EventName, null);
+                    CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, transition.EventName, null, false);
                     return;
                 }
             }
@@ -2068,11 +2117,14 @@ internal partial class Entity {
 
     /// <summary>
     /// Hears an FSM that runs in this game telling the copy of an entity an event, as a part of the creature does once
-    /// it caught something: the local player, which the game's catching parts say with <see cref="CatchEvents"/>, or a
-    /// thing of theirs that the game marks for catching (see <see cref="IsCatchableThingOfTheLocalPlayer"/>). The part
-    /// runs by itself in this game, and did to what it caught all that it does to it, but the copy's own FSMs are
-    /// switched off and did not hear it: the player's flier that a tendril took simply was gone, and the creature never
-    /// ate it in either game. An FSM that is switched off only sends what the scene host's game did, replayed on it.
+    /// it caught something: the local player, which the game's catching parts say with <see cref="CatchEvents"/>, or
+    /// which a part that feels for the player tells from where it is touching them (see <see cref="FeelsThePlayer"/>) -
+    /// a tendril that grabs them, a charge that seizes them to drain their silk - or a thing of theirs that the game
+    /// marks for catching (see <see cref="IsCatchableThingOfTheLocalPlayer"/>). The part runs by itself in this game,
+    /// and did to what it caught all that it does to it, but the copy's own FSMs are switched off and did not hear it:
+    /// the player's flier that a tendril took simply was gone, and the creature never ate it in either game; a player
+    /// that a charge seized was held, hidden, for good. An FSM that is switched off only sends what the scene host's
+    /// game did, replayed on it.
     /// </summary>
     /// <param name="sender">The FSM that sends the event.</param>
     /// <param name="target">The object that it sends the event to.</param>
@@ -2089,12 +2141,26 @@ internal partial class Entity {
             return;
         }
 
-        // A thing counts only for a part of the copy itself, which caught it here: whatever else tells the creature
-        // something about the player's things does so in the scene host's game as well
-        if (CatchEvents.Contains(eventName) ||
-            sender.GameObject is { } part && part != target && part.transform.IsChildOf(target.transform) &&
-            IsCatchableThingOfTheLocalPlayer(sender.TriggerCollider2D)) {
-            entity.OnCopyCaught(sender, fsmName, eventName);
+        if (CatchEvents.Contains(eventName)) {
+            entity.OnCopyCaught(sender, fsmName, eventName, false);
+            return;
+        }
+
+        // Anything else counts only from a part of the copy itself, which caught it here: whatever else tells the
+        // creature something about the player or their things does so in the scene host's game as well
+        if (sender.GameObject is not { } part || part == target || !part.transform.IsChildOf(target.transform)) {
+            return;
+        }
+
+        // A thing counts only while it is entering the part, the collider that the part keeps as the one that set it
+        // off being that thing's; the one that set it off last stays there after
+        if (sender == _triggeredFsm && IsCatchableThingOfTheLocalPlayer(sender.TriggerCollider2D)) {
+            entity.OnCopyCaught(sender, fsmName, eventName, false);
+        } else if (FeelsThePlayer(sender) && TouchesTheLocalPlayer(part) &&
+                   !entity.OnCopyCaught(sender, fsmName, eventName, true) && !AnyLeadsACatch()) {
+            // A part may grab the player itself before it tells the creature, and nothing goes on with a catch that
+            // no FSM of the copy can take from where it is: the player is let go at once
+            EntityFsmActions.LetGoOfTheHeldLocalPlayer($"no FSM of the copy of entity {entity.Id} takes '{eventName}'");
         }
     }
 
@@ -2109,10 +2175,15 @@ internal partial class Entity {
     /// <param name="sender">The FSM of the part.</param>
     /// <param name="fsmName">The name of the FSM that the part told, or null for all of them.</param>
     /// <param name="eventName">The event with which the part told the copy.</param>
-    private void OnCopyCaught(HutongGames.PlayMaker.Fsm sender, string? fsmName, string eventName) {
+    /// <param name="feltThePlayer">Whether the part felt the player themselves, rather than being one that names its
+    /// catch or having caught a thing of theirs.</param>
+    /// <returns>Whether any FSM of the copy took the event.</returns>
+    private bool OnCopyCaught(HutongGames.PlayMaker.Fsm sender, string? fsmName, string eventName, bool feltThePlayer) {
         if (!_isControlled || Object.Client == null) {
-            return;
+            return false;
         }
+
+        var taken = false;
 
         for (var fsmIndex = 0; fsmIndex < _fsms.Client.Count; fsmIndex++) {
             var fsm = _fsms.Client[fsmIndex];
@@ -2123,7 +2194,30 @@ internal partial class Entity {
                 continue;
             }
 
-            CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, eventName, ToldValues.From(sender, Object.Client, fsm));
+            taken = true;
+            CopyTouchedLocalPlayer?.Invoke(
+                this, (byte) fsmIndex, eventName, ToldValues.From(sender, Object.Client, fsm), feltThePlayer
+            );
+        }
+
+        return taken;
+    }
+
+    /// <summary>
+    /// Hook for a collider entering the trigger of an FSM, which notes the FSM while it does what that sets off (see
+    /// <see cref="_triggeredFsm"/>).
+    /// </summary>
+    private static void OnFsmTriggerEnter2D(
+        Action<HutongGames.PlayMaker.Fsm, Collider2D> orig,
+        HutongGames.PlayMaker.Fsm self,
+        Collider2D other
+    ) {
+        var outer = _triggeredFsm;
+        _triggeredFsm = self;
+        try {
+            orig(self, other);
+        } finally {
+            _triggeredFsm = outer;
         }
     }
 
@@ -2134,10 +2228,86 @@ internal partial class Entity {
     /// game's player's own things count: those of the partner here are copies, and the partner's game catches the real
     /// ones and says so.
     /// </summary>
-    /// <param name="collider">The collider that last set the part's FSM off.</param>
+    /// <param name="collider">The collider that set the part's FSM off.</param>
     private static bool IsCatchableThingOfTheLocalPlayer(Collider2D? collider) {
         return collider != null && collider.GetComponent<CustomTag>() != null &&
                LocalToolComponent.IsLocalTool(collider.gameObject);
+    }
+
+    /// <summary>
+    /// Whether an FSM of a part feels for the player: something that touches the part on the layer of the player's
+    /// body or hit box sets it off, or it asks whether the player can be grabbed. Found once for each FSM. The
+    /// partner's figure in this game touches nothing of the kind (it is on the default layer), so what such a part
+    /// feels here is the local player.
+    /// </summary>
+    private static bool FeelsThePlayer(HutongGames.PlayMaker.Fsm fsm) {
+        if (FeelingFsms.TryGetValue(fsm, out var known)) {
+            return known.Value;
+        }
+
+        var feels = false;
+        foreach (var state in fsm.States) {
+            foreach (var action in state.Actions) {
+                if (action.GetType().Name.StartsWith("CanHeroBeGrabbed", StringComparison.Ordinal) ||
+                    CollideLayerOf(action) is PlayerLayer or HeroBoxLayer) {
+                    feels = true;
+                    break;
+                }
+            }
+
+            if (feels) {
+                break;
+            }
+        }
+
+        FeelingFsms.Add(fsm, new StrongBox<bool>(feels));
+        return feels;
+    }
+
+    /// <summary>
+    /// The layer of what sets an action off, for the actions that are set off by what touches them, or null.
+    /// </summary>
+    private static int? CollideLayerOf(FsmStateAction action) {
+        var type = action.GetType();
+        if (!CollideLayerFields.TryGetValue(type, out var field)) {
+            field = type.GetField("collideLayer", BindingFlags.Instance | BindingFlags.Public);
+            CollideLayerFields[type] = field;
+        }
+
+        return field?.GetValue(action) switch {
+            FsmInt layer => layer.Value,
+            int layer => layer,
+            _ => null
+        };
+    }
+
+    /// <summary>
+    /// Whether a collider of a part is touching the body or the hit box of the local player right now.
+    /// </summary>
+    private static bool TouchesTheLocalPlayer(GameObject part) {
+        var hero = HeroController.SilentInstance;
+        if (hero == null) {
+            return false;
+        }
+
+        if (_heroBox is not { } known || known.Hero != hero) {
+            var box = hero.GetComponentInChildren<HeroBox>(true);
+            _heroBox = known = (hero, box != null ? box.GetComponent<Collider2D>() : null);
+        }
+
+        var body = hero.GetComponent<Collider2D>();
+        foreach (var collider in part.GetComponents<Collider2D>()) {
+            if (collider.isActiveAndEnabled && (Touches(collider, body) || Touches(collider, known.Box))) {
+                return true;
+            }
+        }
+
+        return false;
+
+        static bool Touches(Collider2D collider, Collider2D? other) {
+            return other != null && other.isActiveAndEnabled &&
+                   (collider.IsTouching(other) || collider.Distance(other).isOverlapped);
+        }
     }
 
     /// <summary>
@@ -2669,9 +2839,10 @@ internal partial class Entity {
             // What the scene host's FSM held before it took the local player's input is not written into the copy's
             // FSM that runs here for it meanwhile, which has gone on from there: the copy is given it only if the
             // scene host went another way (PlayHere). Nor is anything written into the part that each game runs by
-            // itself, whose count of binds left is the local player's (RunEachGamePart).
+            // itself, whose count of binds left is the local player's (RunEachGamePart), nor into a catch that this
+            // game leads, whose count of struggles is (_runHereLed).
             var clientFsm = _fsms.Client[fsmIndex];
-            var writesCopy = clientFsm != _runHere || !WaitsForEcho && !_runHereForGood;
+            var writesCopy = clientFsm != _runHere || !WaitsForEcho && !_runHereForGood && !_runHereLed;
 
             if (data.Types.Contains(EntityHostFsmData.Type.Floats)) {
                 foreach (var (index, val) in data.Floats) {
@@ -2760,6 +2931,7 @@ internal partial class Entity {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
         LetGoOfRunHere();
+        EndAllLeads();
         LetThePlayerBackIn(true);
         EntitiesByCopy.Remove(Object.Client);
 

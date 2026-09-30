@@ -316,14 +316,15 @@ internal static partial class EntityFsmActions {
     #endregion
 
     /// <summary>
-    /// Actions that do something to the player character or check whether it can be hit or caught.
+    /// Actions that do something to the player character or check whether it can be hit or caught, or show on the
+    /// player's silk that a creature drains it.
     /// </summary>
     private static readonly HashSet<string> PlayerActionNames = [
         "SetHeroCState", "SetHeroCStateDelay", "HeroControllerMethods", "ClearHeroEffects", "ClearHeroEffectsInstant",
         "ClearHeroEffectsLite", "DamageHeroDirectly", "DamageHeroDirectlyV2", "CanHeroTakeDamage",
         "CanHeroTakeDamageIgnoreInvul", "CanHeroBeGrabbed", "CanHeroBeGrabbedV2", "SetHeroParent", "SetHeroStunned",
         "SetHeroMaggoted", "HeroRelinquishControlDynamic", "HeroInvulnerability", "HeroLockState", "HeroBoxControl",
-        "DoHeroRecoil", "AddHeroInputBlocker", "SetHeroAffectedByGravity"
+        "DoHeroRecoil", "AddHeroInputBlocker", "SetHeroAffectedByGravity", "AddUsingSilk", "RemoveUsingSilk"
     ];
 
     /// <summary>
@@ -423,6 +424,66 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The states of an FSM that it only ever gets to through the given one: that state, and every state it leads to
+    /// that is entered from those states alone - loops among them too, which <see cref="AddStatesEnteredOnlyFrom"/>
+    /// leaves out, like a tendril that reels the player up and back each time they struggle. The first state and a
+    /// state that a global transition leads to can be entered from outside, and so can every state after them.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="through">The state.</param>
+    internal static HashSet<FsmState> StatesOnlyThrough(HutongGames.PlayMaker.Fsm fsm, FsmState through) {
+        var found = new HashSet<FsmState> { through };
+        var toGo = new Stack<FsmState>();
+        toGo.Push(through);
+        while (toGo.Count > 0) {
+            foreach (var transition in toGo.Pop().Transitions) {
+                if (transition.ToFsmState is { } to && found.Add(to)) {
+                    toGo.Push(to);
+                }
+            }
+        }
+
+        var entries = new HashSet<string>();
+        foreach (var transition in fsm.GlobalTransitions) {
+            entries.Add(transition.ToState);
+        }
+
+        entries.Add(fsm.StartState);
+
+        var sources = new Dictionary<FsmState, List<FsmState>>();
+        foreach (var state in fsm.States) {
+            foreach (var transition in state.Transitions) {
+                if (transition.ToFsmState is not { } to) {
+                    continue;
+                }
+
+                if (!sources.TryGetValue(to, out var from)) {
+                    sources[to] = from = [];
+                }
+
+                from.Add(state);
+            }
+        }
+
+        // Every state that it gets to is taken away again if it can be entered some other way, until none can
+        bool removed;
+        do {
+            removed = false;
+            foreach (var state in new List<FsmState>(found)) {
+                if (state == through || !entries.Contains(state.Name) &&
+                    (!sources.TryGetValue(state, out var from) || from.TrueForAll(found.Contains))) {
+                    continue;
+                }
+
+                found.Remove(state);
+                removed = true;
+            }
+        } while (removed);
+
+        return found;
+    }
+
+    /// <summary>
     /// Whether an action of a state does something to the player character, checks whether it can be hit or caught,
     /// sends it the event of being wounded or caught, or tells the room about it.
     /// </summary>
@@ -432,17 +493,7 @@ internal static partial class EntityFsmActions {
                 continue;
             }
 
-            if (PlayerActionNames.Contains(action.GetType().Name)) {
-                return true;
-            }
-
-            var broadcast = action switch {
-                SendEventToRegister register => register.eventName.Value,
-                SendEventToRegisterV2 register => register.EventName.Value,
-                SendEventToRegisterDelay register => register.EventName.Value,
-                _ => null
-            };
-            if (broadcast != null && PlayerEvents.Contains(broadcast)) {
+            if (PlayerActionNames.Contains(action.GetType().Name) || TellsTheRoomAboutThePlayer(action)) {
                 return true;
             }
 
@@ -462,12 +513,39 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// Whether an action tells the whole room one of the events about the player that a creature has just dealt with
+    /// (see <see cref="PlayerEvents"/>): the player was hurt, caught in a tendril, let go.
+    /// </summary>
+    private static bool TellsTheRoomAboutThePlayer(FsmStateAction action) {
+        var broadcast = action switch {
+            SendEventToRegister register => register.eventName.Value,
+            SendEventToRegisterV2 register => register.EventName.Value,
+            SendEventToRegisterDelay register => register.EventName.Value,
+            _ => null
+        };
+        return broadcast != null && PlayerEvents.Contains(broadcast);
+    }
+
+    /// <summary>
     /// The kinds of action that shake the camera or flash the screen.
     /// </summary>
     private static readonly HashSet<string> ShakeAndFlashNames = [
         "ScreenFlash", "ScreenFlashTrobbio", "DoCameraShake", "DoCameraShakeV2", "DoCameraShakeV3", "DoCameraShakeV4",
         "DoCameraShakeRepeating", "DoCameraShakeRepeatingV2"
     ];
+
+    /// <summary>
+    /// The kinds of action that change how the whole game sounds, like the music muffled while a creature chews on the
+    /// player, which in a state that deals with the player is theirs the way a shake there is.
+    /// </summary>
+    private static readonly HashSet<string> PlayerMoodNames = ["TransitionToAudioSnapshot"];
+
+    /// <summary>
+    /// The field of an action that runs a template of an FSM which holds the FSM it runs.
+    /// </summary>
+    private static readonly FieldInfo? RunFsmField = typeof(RunFSMAction).GetField(
+        "runFsm", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+    );
 
     /// <summary>
     /// The fields of each kind of action that hold an object, by type.
@@ -504,9 +582,12 @@ internal static partial class EntityFsmActions {
     /// <summary>
     /// Whether an action of a creature's FSM is this game's player's own: it does something to the player character -
     /// moves, holds or turns them, tells them or their FSMs something, plays or spawns something at them, looks at
-    /// them - or it shakes the camera or flashes the screen in a state that deals with them (see
+    /// them - or to the camera that follows them, it runs a template that does any of that, like the one that grabs
+    /// and hides them, or it tells the room that the player was caught or hurt. So is a shake of the camera, a flash
+    /// of the screen or a change of how the game sounds in a state that deals with them (see
     /// <see cref="IsAboutThePlayer"/>). An action that may send its FSM on to another state is never counted, so that
-    /// an FSM without these actions still goes where it would have gone.
+    /// an FSM without these actions still goes where it would have gone - except one that listens for what the player
+    /// presses: whether they struggle is theirs to say, and nobody else's buttons.
     ///
     /// A copy that plays what the local player did, or what caught them, runs these on the local player, whose own
     /// they are (see Entity.IsLeftToSceneHost). The scene host, playing the same for its partner, leaves them out: its
@@ -514,15 +595,39 @@ internal static partial class EntityFsmActions {
     /// </summary>
     internal static bool IsThePlayersOwn(FsmStateAction action) {
         var name = action.GetType().Name;
-        var own = ShakeAndFlashNames.Contains(name)
+        if (name.StartsWith("ListenFor", StringComparison.Ordinal)) {
+            return true;
+        }
+
+        var own = ShakeAndFlashNames.Contains(name) || PlayerMoodNames.Contains(name)
             ? action.State != null && IsAboutThePlayer(action.State)
-            : PlayerActionNames.Contains(name) || NamesThePlayer(action);
+            : PlayerActionNames.Contains(name) || NamesThePlayer(action) || TellsTheRoomAboutThePlayer(action) ||
+              RunsSomethingOnThePlayer(action);
         return own && !DecidesWhereItGoes(action);
     }
 
     /// <summary>
+    /// Whether an action runs a template of an FSM that deals with the player character (see
+    /// <see cref="DealsWithThePlayer"/>), like the one with which a creature grabs the player, hides them and takes
+    /// a mask.
+    /// </summary>
+    private static bool RunsSomethingOnThePlayer(FsmStateAction action) {
+        if (action is not RunFSMAction || RunFsmField?.GetValue(action) is not HutongGames.PlayMaker.Fsm { States: { } states }) {
+            return false;
+        }
+
+        foreach (var state in states) {
+            if (DealsWithThePlayer(state)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Whether any object that an action is given, under any name, is this game's player character or something they
-    /// carry.
+    /// carry, or the camera that follows them, which a creature tells to rise with a player it reels up.
     /// </summary>
     private static bool NamesThePlayer(FsmStateAction action) {
         var hero = HeroController.instance;
@@ -530,8 +635,10 @@ internal static partial class EntityFsmActions {
             return false;
         }
 
+        var cameras = GameCameras.instance;
         foreach (var field in FieldsOf(action.GetType(), ObjectFields, IsObjectField)) {
-            if (IsOnThePlayer(action, field, hero)) {
+            if (IsOnThePlayer(action, field, hero) ||
+                cameras != null && ObjectIn(action, field) is { } target && target.transform.IsChildOf(cameras.transform)) {
                 return true;
             }
         }

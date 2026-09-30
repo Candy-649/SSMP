@@ -147,5 +147,14 @@ internal enum CoopHitKind : byte {
     /// the sender's round trip to the server, how the body of the copy moved if it moves by itself and the dice the FSM
     /// rolled; the game of the scene host plays the same from there with the same dice, and answers.
     /// </summary>
-    EntityInput
+    EntityInput,
+
+    /// <summary>
+    /// An entity, found by the ID of its entity, whose copy plays a catch that the sender's game leads, because one of
+    /// the copy's parts felt the sender's player or a thing of theirs. Its FSM at <see cref="CoopHitUpdate.Index"/> went
+    /// to the state named by <see cref="CoopHitUpdate.Responder"/>, or would go out of the catch there.
+    /// <see cref="CoopHitUpdate.Hit"/> holds the number that the catch went under and the number of this step of it;
+    /// the game of the scene host takes its own FSM there too.
+    /// </summary>
+    EntityCatchState
 }

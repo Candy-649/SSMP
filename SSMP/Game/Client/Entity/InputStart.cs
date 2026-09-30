@@ -15,7 +15,8 @@ internal readonly struct InputStart {
         BodyMotion? motion,
         int[] dice,
         byte anticipation,
-        ToldValues? caught = null
+        ToldValues? caught = null,
+        string[]? path = null
     ) {
         State = state;
         Position = position;
@@ -23,6 +24,7 @@ internal readonly struct InputStart {
         Dice = dice;
         Anticipation = anticipation;
         Caught = caught;
+        Path = path;
     }
 
     /// <summary>
@@ -57,6 +59,13 @@ internal readonly struct InputStart {
     /// on the FSM along with it; null for a strike or a touch.
     /// </summary>
     public ToldValues? Caught { get; }
+
+    /// <summary>
+    /// For a catch that a part of the copy felt for itself, which the game of the player it caught leads (see
+    /// <see cref="Entity.PlayHere"/>), the states the FSM went through for it, in order: the first is the one the event
+    /// took it to, and the last is <see cref="State"/>. Null for any other input.
+    /// </summary>
+    public string[]? Path { get; }
 
     /// <summary>
     /// How a body that moves by itself was moving: how fast, which way it was turned in degrees, and how fast it was

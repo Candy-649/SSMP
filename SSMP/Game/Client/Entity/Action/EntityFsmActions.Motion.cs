@@ -756,6 +756,36 @@ internal static partial class EntityFsmActions {
         }
     }
 
+    /// <summary>
+    /// Lets the local player out of the hold of a creature that grabbed them with the game's own grab (HERO GRAB),
+    /// when nothing in this game is left to let them go. The hold hides the player, stuns them and takes their
+    /// control away, and it has no end of its own: only the creature that holds them ends it, with the blow, the spit
+    /// or the release that its own FSM comes to. A copy that stopped playing such a creature before that - the scene
+    /// host went another way, or never took the catch - left the player hidden and frozen for good. They are let go
+    /// the way a creature lets go of a player who struggled free.
+    /// </summary>
+    /// <param name="why">Why, for the log.</param>
+    internal static void LetGoOfTheHeldLocalPlayer(string why) {
+        var hero = HeroController.instance;
+        if (hero == null) {
+            return;
+        }
+
+        foreach (var fsm in hero.GetComponents<PlayMakerFSM>()) {
+            if (fsm.FsmName != "Roar and Wound States") {
+                continue;
+            }
+
+            if (fsm.ActiveStateName != "Hero Grab") {
+                return;
+            }
+
+            SSMP.Logging.Logger.Info($"Letting the player go from the hold of a creature: {why}");
+            fsm.SendEvent("HERO GRAB RELEASE");
+            return;
+        }
+    }
+
     #region MoveLiftChain
 
     /// <summary>Builds network data from the FSM action.</summary>

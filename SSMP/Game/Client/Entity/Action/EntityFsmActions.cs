@@ -341,6 +341,15 @@ internal static partial class EntityFsmActions {
     /// goes - is the given player character or something they carry.
     /// </summary>
     private static bool IsOnThePlayer(FsmStateAction action, FieldInfo field, HeroController hero) {
+        var target = ObjectIn(action, field);
+        return target != null && target.transform.IsChildOf(hero.transform);
+    }
+
+    /// <summary>
+    /// The object that an action is given in a field - as the object itself, as the owner or as where an event goes -
+    /// or null.
+    /// </summary>
+    private static GameObject? ObjectIn(FsmStateAction action, FieldInfo field) {
         var target = field.GetValue(action) switch {
             FsmOwnerDefault owner => action.Fsm.GetOwnerDefaultTarget(owner),
             FsmGameObject gameObject => gameObject.Value,
@@ -350,7 +359,7 @@ internal static partial class EntityFsmActions {
             _ => null
         };
 
-        return target != null && target.transform.IsChildOf(hero.transform);
+        return target != null ? target : null;
     }
 
     /// <summary>
