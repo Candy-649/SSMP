@@ -1,5 +1,8 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Reflection;
+using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Entity.Component;
 using SSMP.Networking.Packet.Data;
@@ -410,6 +413,231 @@ internal static partial class EntityFsmActions {
     }
 
     #endregion
+
+    #region AnimatePositionTo
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimatePositionTo action) {
+        return WriteMovingPart(data, action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AnimatePositionTo action) {
+        MovePartHere(data, action, action.Fsm.GetOwnerDefaultTarget(action.gameObject), false);
+    }
+
+    #endregion
+
+    #region AnimatePositionToV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimatePositionToV2 action) {
+        return WriteMovingPart(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AnimatePositionToV2 action) {
+        MovePartHere(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject), false);
+    }
+
+    #endregion
+
+    #region AnimateXPositionTo
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimateXPositionTo action) {
+        return WriteMovingPart(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AnimateXPositionTo action) {
+        MovePartHere(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject), false);
+    }
+
+    #endregion
+
+    #region AnimateYPositionTo
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimateYPositionTo action) {
+        return WriteMovingPart(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AnimateYPositionTo action) {
+        MovePartHere(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject), false);
+    }
+
+    #endregion
+
+    #region AnimateZPositionTo
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimateZPositionTo action) {
+        return WriteMovingPart(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AnimateZPositionTo action) {
+        MovePartHere(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject), false);
+    }
+
+    #endregion
+
+    /// <summary>
+    /// The fields of each kind of action by which it is given numbers, points and switches, by type (see
+    /// <see cref="WriteValues"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> ValueFields = new();
+
+    /// <summary>
+    /// Writes where an action that moves a part of its creature over a while - every frame from then on, or sliding it
+    /// somewhere over a given time - starts it, and all that the action is given as it starts in this game, whether
+    /// set in the FSM or held by its variables, for the copy to move its own part the same way (see
+    /// <see cref="MovePartHere"/>). Only the decision goes: the moving is each game's own, and goes on through a
+    /// stall in between. The creature itself is left out, which is kept in step by its own position, and so is
+    /// anything not its own.
+    /// </summary>
+    /// <param name="data">The network data.</param>
+    /// <param name="action">The action.</param>
+    /// <param name="gameObject">The object that the action moves.</param>
+    /// <returns>Whether it moves a part of its creature, and so anything was written.</returns>
+    private static bool WriteMovingPart(EntityNetworkData data, FsmStateAction action, GameObject? gameObject) {
+        var creature = action.Fsm.GameObject;
+        if (gameObject == null || creature == null || !gameObject.transform.IsChildOf(creature.transform) ||
+            !WritePlace(data, action, gameObject)) {
+            return false;
+        }
+
+        WriteValues(data, action);
+        return true;
+    }
+
+    /// <summary>
+    /// Moves a part of the copy the way the game that runs the creature moves its own (see
+    /// <see cref="WriteMovingPart"/>): puts it where it starts there, gives the action all that it was given there,
+    /// and runs it here until the scene host's FSM leaves the state. What it is given as it goes on, like the speed of
+    /// a tendril that eases up, reaches the copy's FSM variables as the scene host sends them. Not in the replay that
+    /// sets up a creature's first states, which has nothing to go by: the part would move on from wherever it was.
+    /// </summary>
+    /// <param name="data">The network data, or null when it sets up the creature's first states.</param>
+    /// <param name="action">The action.</param>
+    /// <param name="gameObject">The part that the action moves.</param>
+    /// <param name="everyStep">Whether the action moves it in each step of physics.</param>
+    private static void MovePartHere(EntityNetworkData? data, FsmStateAction action, GameObject? gameObject,
+        bool everyStep) {
+        if (data == null) {
+            return;
+        }
+
+        ReadPlace(data, gameObject);
+        var ownValues = ReadValues(data, action);
+        RunInState(action, everyStep);
+        PutBack(ownValues);
+    }
+
+    /// <summary>
+    /// Writes what an action is given by each of its numbers, points and switches, as it is in this game: what the FSM
+    /// sets, or what its variables hold (see <see cref="ReadValues"/>).
+    /// </summary>
+    private static void WriteValues(EntityNetworkData data, FsmStateAction action) {
+        foreach (var field in ValueFieldsOf(action.GetType())) {
+            var value = field.GetValue(action);
+            if (field.FieldType == typeof(FsmFloat)) {
+                data.Packet.Write(value is FsmFloat number ? number.Value : 0f);
+            } else if (field.FieldType == typeof(FsmInt)) {
+                data.Packet.Write(value is FsmInt number ? number.Value : 0);
+            } else if (field.FieldType == typeof(FsmBool)) {
+                data.Packet.Write(value is FsmBool flag && flag.Value);
+            } else if (field.FieldType == typeof(FsmVector2)) {
+                var point = value is FsmVector2 vector ? vector.Value : Vector2.zero;
+                data.Packet.Write(point.x);
+                data.Packet.Write(point.y);
+            } else {
+                var point = value is FsmVector3 vector ? vector.Value : Vector3.zero;
+                data.Packet.Write(point.x);
+                data.Packet.Write(point.y);
+                data.Packet.Write(point.z);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gives an action of the copy what the same action was given in the game that runs the creature (see
+    /// <see cref="WriteValues"/>). Where a variable holds it, the copy's variable takes it for the action to start
+    /// with, and gets back what it held before once the action has started (see <see cref="PutBack"/>): the scene host
+    /// sends its variables before the actions that read them, so the variable may already hold a newer value, which it
+    /// would not send again.
+    /// </summary>
+    /// <returns>The variables that were given a value, with what they held before and what they were given.</returns>
+    private static List<(NamedVariable Variable, object Own, object Given)>? ReadValues(
+        EntityNetworkData data,
+        FsmStateAction action
+    ) {
+        List<(NamedVariable, object, object)>? ownValues = null;
+        foreach (var field in ValueFieldsOf(action.GetType())) {
+            object given;
+            if (field.FieldType == typeof(FsmFloat)) {
+                given = data.Packet.ReadFloat();
+            } else if (field.FieldType == typeof(FsmInt)) {
+                given = data.Packet.ReadInt();
+            } else if (field.FieldType == typeof(FsmBool)) {
+                given = data.Packet.ReadBool();
+            } else if (field.FieldType == typeof(FsmVector2)) {
+                given = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
+            } else {
+                given = new Vector3(data.Packet.ReadFloat(), data.Packet.ReadFloat(), data.Packet.ReadFloat());
+            }
+
+            if (field.GetValue(action) is not NamedVariable value) {
+                continue;
+            }
+
+            // A variable has a name, which a number set in the FSM itself does not
+            if (!string.IsNullOrEmpty(value.Name)) {
+                (ownValues ??= []).Add((value, value.RawValue, given));
+            }
+
+            value.RawValue = given;
+        }
+
+        return ownValues;
+    }
+
+    /// <summary>
+    /// Gives the copy's variables back what they held before an action that reads them was given the values that it
+    /// started with in the game that runs the creature (see <see cref="ReadValues"/>), unless starting the action
+    /// changed them.
+    /// </summary>
+    private static void PutBack(List<(NamedVariable Variable, object Own, object Given)>? ownValues) {
+        if (ownValues == null) {
+            return;
+        }
+
+        foreach (var (variable, own, given) in ownValues) {
+            if (Equals(variable.RawValue, given)) {
+                variable.RawValue = own;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The fields of a kind of action by which it is given numbers, points and switches, in the same order in both
+    /// games.
+    /// </summary>
+    private static FieldInfo[] ValueFieldsOf(Type type) {
+        if (!ValueFields.TryGetValue(type, out var fields)) {
+            fields = Array.FindAll(
+                type.GetFields(BindingFlags.Instance | BindingFlags.Public),
+                field => field.FieldType == typeof(FsmFloat) || field.FieldType == typeof(FsmInt) ||
+                         field.FieldType == typeof(FsmBool) || field.FieldType == typeof(FsmVector2) ||
+                         field.FieldType == typeof(FsmVector3)
+            );
+            ValueFields[type] = fields;
+        }
+
+        return fields;
+    }
 
     #region iTweenMoveBy
 

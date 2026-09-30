@@ -106,17 +106,19 @@ internal static partial class EntityFsmActions {
         return true;
     }
 
-    /// <summary>Puts an object where the game running the creature left it.</summary>
+    /// <summary>
+    /// Puts an object where the game running the creature left it. The place is read even when the copy has no such
+    /// object, so that what the data says after it is read from where it starts.
+    /// </summary>
     private static void ReadPlace(EntityNetworkData? data, GameObject? gameObject) {
-        if (data == null || gameObject == null) {
+        if (data == null) {
             return;
         }
 
-        gameObject.transform.localPosition = new Vector3(
-            data.Packet.ReadFloat(),
-            data.Packet.ReadFloat(),
-            data.Packet.ReadFloat()
-        );
+        var place = new Vector3(data.Packet.ReadFloat(), data.Packet.ReadFloat(), data.Packet.ReadFloat());
+        if (gameObject != null) {
+            gameObject.transform.localPosition = place;
+        }
     }
 
     #region MatchScaleSign
@@ -315,17 +317,27 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, Translate action) {
-        // Moved every frame or step from then on, it was not moved yet
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+
+        // Moved every frame or step from then on, it was not moved yet. A part of the creature is then moved by the
+        // copy itself, from where it starts here and by what it is moved by at first (see WriteMovingPart): the
+        // tendril that reels a caught player up to the maw stayed hanging where it caught them.
         if (action.everyFrame || action.lateUpdate || action.fixedUpdate) {
-            return false;
+            return !action.lateUpdate && WriteMovingPart(data, action, gameObject);
         }
 
-        return WritePlace(data, action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        return WritePlace(data, action, gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, Translate action) {
-        ReadPlace(data, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (action.everyFrame || action.fixedUpdate) {
+            MovePartHere(data, action, gameObject, action.fixedUpdate);
+            return;
+        }
+
+        ReadPlace(data, gameObject);
     }
 
     #endregion

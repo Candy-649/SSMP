@@ -686,9 +686,10 @@ internal static partial class EntityFsmActions {
 
         System.Action? step = null;
         if (everyStep && !action.Finished) {
+            // Like its updates, the game runs an action in the steps of physics only until it finishes
             step = () => {
                 var owner = action.Fsm.GameObject;
-                if (owner != null && owner.activeInHierarchy) {
+                if (owner != null && owner.activeInHierarchy && !action.Finished) {
                     action.OnFixedUpdate();
                 }
             };
