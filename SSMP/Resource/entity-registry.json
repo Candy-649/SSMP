@@ -819,6 +819,9 @@
       "Control",
       "Detect Grab",
       "Land Control"
+    ],
+    "each_game_fsms": [
+      "Detect Grab"
     ]
   },
   {
@@ -3119,6 +3122,9 @@
       "Run Msg",
       "Run Vox",
       "harpoon hack"
+    ],
+    "each_game_fsms": [
+      "Detect Grab"
     ]
   },
   {
@@ -3263,6 +3269,9 @@
     "internal_name": "Gloomfly",
     "fsm_names": [
       "Control",
+      "Detect Grab"
+    ],
+    "each_game_fsms": [
       "Detect Grab"
     ]
   },

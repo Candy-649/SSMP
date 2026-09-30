@@ -322,6 +322,10 @@ internal class EntityRegistryEntry {
     /// partner as their game sends them (CoopHits.ApplyHitEffect). Run by the scene host alone, the nest showed only
     /// the blows of the scene host's player, and to the other player striking it felt like striking a thing of the
     /// room rather than a creature.
+    /// And some watch for the player to grab, like the grab box of a creature that pounces on the player whole and
+    /// carries them off: each game's notices its own player, and the game of the player it caught leads what the
+    /// creature does with them (Entity.HearCopyTold). Run by the scene host alone, it never noticed the other player,
+    /// and the creature went through them.
     /// </summary>
     [JsonProperty("each_game_fsms")]
     public List<string>? EachGameFsms { get; set; }

@@ -2115,7 +2115,8 @@ internal partial class Entity {
     /// Hears an FSM that runs in this game telling the copy of an entity an event, as a part of the creature does once
     /// it caught something: the local player, which the game's catching parts say with <see cref="CatchEvents"/>, or
     /// which a part that grabs the player tells from where it is touching them (see <see cref="GrabsThePlayer"/>) - a
-    /// tendril that reels them in, a charge that seizes them to drain their silk - or a thing of theirs that the game
+    /// tendril that reels them in, a charge that seizes them to drain their silk, the grab box of a creature that
+    /// pounces on them whole and carries them off - or a thing of theirs that the game
     /// marks for catching (see <see cref="IsCatchableThingOfTheLocalPlayer"/>). The part runs by itself in this game,
     /// and did to what it caught all that it does to it, but the copy's own FSMs are switched off and did not hear it:
     /// the player's flier that a tendril took simply was gone, and the creature never ate it in either game; a player
@@ -2144,7 +2145,20 @@ internal partial class Entity {
 
         // Anything else counts only from a part of the copy itself, which caught it here: whatever else tells the
         // creature something about the player or their things does so in the scene host's game as well
-        if (sender.GameObject is not { } part || part == target || !part.transform.IsChildOf(target.transform)) {
+        if (sender.GameObject is not { } part || !part.transform.IsChildOf(target.transform)) {
+            return;
+        }
+
+        // Or from an FSM of the copy itself that runs here, which only one that each game runs by itself does
+        // (EntityRegistryEntry.EachGameFsms): what watches the grab box of a creature that pounces on the player whole
+        // and tells the FSM that carries them off, by its name. It grabs nobody itself - that FSM does, once it takes
+        // the grab - so a grab that no FSM of the copy takes leaves nobody to let go.
+        if (part == target) {
+            if (!string.IsNullOrEmpty(fsmName) && fsmName != sender.Name && !entity.PlaysACombo &&
+                GrabsThePlayer(sender) && TouchesWhatItWatches(sender)) {
+                entity.OnCopyCaught(sender, fsmName, eventName, true);
+            }
+
             return;
         }
 
@@ -2317,6 +2331,28 @@ internal partial class Entity {
             return other != null && other.isActiveAndEnabled &&
                    (collider.IsTouching(other) || collider.Distance(other).isOverlapped);
         }
+    }
+
+    /// <summary>
+    /// Whether the local player is touching an object whose trigger an FSM watches right now, for an FSM on the
+    /// creature itself (see <see cref="HearCopyTold"/>): its own colliders are its body, and what it grabs the player
+    /// with is a box of its own that it watches.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    private static bool TouchesWhatItWatches(HutongGames.PlayMaker.Fsm fsm) {
+        foreach (var state in fsm.States) {
+            foreach (var action in state.Actions) {
+                var type = action.GetType();
+                if (type.Name.StartsWith("Trigger2dEvent", StringComparison.Ordinal) &&
+                    type.GetField("gameObject", BindingFlags.Instance | BindingFlags.Public)?.GetValue(action) is
+                        FsmOwnerDefault watched &&
+                    fsm.GetOwnerDefaultTarget(watched) is { } watchedObject && TouchesTheLocalPlayer(watchedObject)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -2775,10 +2811,12 @@ internal partial class Entity {
                 // Played here by the copy's own FSM until the scene host has answered its input, and held till then:
                 // all but what the copy leaves to the scene host, which only comes from there (PlayHere). The combo of
                 // a catch is played here all through, and not again from what the scene host sends of it, and so is
-                // the part of an FSM that each game runs by itself (RunEachGamePart).
+                // the part of an FSM that each game runs by itself (RunEachGamePart). What comes after what the copy
+                // plays by itself out of a catch that this game led is held until it has played that
+                // (HoldsForTheAftermath).
                 HearFromSceneHost(fsm, state);
                 if (fsm == _runHere && !_mutedHere.Contains(action)) {
-                    if (WaitsForEcho) {
+                    if (WaitsForEcho || HoldsForTheAftermath(state)) {
                         HoldForEcho(data);
                         continue;
                     }

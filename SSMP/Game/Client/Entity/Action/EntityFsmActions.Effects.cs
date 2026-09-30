@@ -339,6 +339,40 @@ internal static partial class EntityFsmActions {
     ];
 
     /// <summary>
+    /// The events with which a creature lets go of the player character it holds, which end the hold in the player
+    /// character's own FSM (see <see cref="LetsGoOfThePlayer"/>).
+    /// </summary>
+    private static readonly HashSet<string> PlayerReleaseEvents = [
+        "HERO GRAB END", "HERO GRAB RELEASE", "HERO GRAB RELEASE FORCED", "HERO GRAB RELEASE SOFT", "HERO SPIT",
+        "WOUND END", "MULTI HIT RELEASE"
+    ];
+
+    /// <summary>
+    /// Whether an action lets go of the player character that a creature holds: it sends one of the events that end
+    /// the hold (see <see cref="PlayerReleaseEvents"/>), itself or in a template it runs, like the one with which a
+    /// creature throws the player off at the end.
+    /// </summary>
+    internal static bool LetsGoOfThePlayer(FsmStateAction action) {
+        if (SentEventName(action) is { } sent && PlayerReleaseEvents.Contains(sent)) {
+            return true;
+        }
+
+        if (SubFsmOf(action) is not { States: { } states }) {
+            return false;
+        }
+
+        foreach (var state in states) {
+            foreach (var inner in state.Actions) {
+                if (SentEventName(inner) is { } innerSent && PlayerReleaseEvents.Contains(innerSent)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The states of each FSM of the scene host's creatures that deal with the player character, found the first time
     /// one of its states shakes or flashes.
     /// </summary>
