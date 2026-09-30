@@ -4,6 +4,7 @@ using System.Diagnostics;
 using GlobalEnums;
 using Steamworks;
 using SSMP.Animation;
+using SSMP.Animation.Effects;
 using SSMP.Animation.Effects.Tools;
 using SSMP.Api.Client;
 using SSMP.Api.Server;
@@ -1173,6 +1174,16 @@ internal class ClientManager : IClientManager {
         );
         _animationManager.UpdatePlayerAnimation(id, enterSceneData.AnimationClipId, 0, playerData.CrestType);
 
+        // Whether the game hides them or shows them by a figure of the room is heard only after they come in, and the
+        // player who came in hears it of this one at once
+        var playerObject = _playerManager.GetPlayerObject(id);
+        if (playerObject != null) {
+            HeroHidden.HideNewcomer(playerObject);
+        }
+
+        HeroHidden.SayAgainSoon();
+        HeroRoomFigure.SayAgainSoon();
+
         _arenaCoop.OnPlayerEnterScene();
         _bossRoomCoop.OnPlayerEnterScene();
         _entityManager.OnPlayerEnterScene();
@@ -1657,6 +1668,11 @@ internal class ClientManager : IClientManager {
             scale.x > 0,
             animationClipId
         );
+
+        // A room that hides the hero as they come in does so right after this, and a word of it sent before the server
+        // moved the player would go to the room they came from
+        HeroHidden.SayAgainSoon();
+        HeroRoomFigure.SayAgainSoon();
 
         // An answer is owed to this, and until it arrives this game does not know who else is here or whether it is
         // the one running the room

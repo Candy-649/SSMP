@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.IO;
 using System.Reflection;
 using HutongGames.PlayMaker;
@@ -6,6 +7,7 @@ using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client;
 using SSMP.Internals;
+using TeamCherry.NestedFadeGroup;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
@@ -13,14 +15,16 @@ using Object = UnityEngine.Object;
 namespace SSMP.Animation.Effects;
 
 /// <summary>
-/// A figure of the hero that a bench shows in the hero's place. A bed does: a while after the hero sits down on it, it
+/// A figure of the hero that the room shows in the hero's place. A bed does: a while after the hero sits down on it, it
 /// hides the hero and plays lying down, lying there and sitting up again on a figure of the hero that belongs to the
-/// bed, which lies where the bed put it. Only the hero's own animation reached the other players, so they saw the
-/// player go on sitting while the player saw themselves lie down. While the bench shows a player so, their character
-/// now hides for the other players too, and a copy of the bench's own figure plays there what it plays for the player,
-/// in the same place: two players lying on one bed lie one over the other, where the bed lays down anyone, rather than
-/// on the sides of it that they sit on (see <see cref="Game.Client.BenchCoop"/>), which on a bed seen from its side
-/// would put one on top of the other.
+/// bed, which lies where the bed put it; and so do a web that catches the hero, a game of dice that the hero kneels
+/// at, and a scene or two. Only the hero's own animation reached the other players, so they saw the player go on
+/// sitting while the player saw themselves lie down. While the room shows a player so, their character hides for the
+/// other players (see <see cref="HeroHidden"/>), and a copy of the room's own figure plays there what it plays for the
+/// player, in the same place: two players lying on one bed lie one over the other, where the bed lays down anyone,
+/// rather than on the sides of it that they sit on (see <see cref="Game.Client.BenchCoop"/>), which on a bed seen from
+/// its side would put one on top of the other. A figure that moves in the player's game stays where it started in the
+/// copy.
 /// </summary>
 internal class HeroRoomFigure : AnimationEffect {
     /// <summary>
@@ -43,9 +47,11 @@ internal class HeroRoomFigure : AnimationEffect {
 
     /// <summary>
     /// How far behind the room's own figure its copy is drawn, in units, the way the characters of other players are
-    /// drawn behind the local hero: where two players lie in one place, each sees their own figure in front.
+    /// drawn behind the local hero: where two players lie in one place, each sees their own figure in front. Less than
+    /// what lies between a figure and what the room draws right behind it: the chair of the desk is drawn 0.0001 behind
+    /// the figure that sits on it.
     /// </summary>
-    private const float CopyBehind = 0.0001f;
+    private const float CopyBehind = 0.00001f;
 
     /// <summary>
     /// How long a word that the room shows a player no more keeps words that were said before it from showing the
@@ -87,6 +93,32 @@ internal class HeroRoomFigure : AnimationEffect {
     private static Hook? _playHook;
 
     /// <summary>
+    /// The hook of the routine that seats the hero at the desk that shows the collection, which hides the hero from code
+    /// rather than from an FSM and shows a figure of its own, and stays for as long as the game runs.
+    /// </summary>
+    private static Hook? _deskHook;
+
+    /// <summary>
+    /// The hook of the routine of the lift that carries the hero up or down its shaft, which hides the hero from code
+    /// on the way, and stays for as long as the game runs.
+    /// </summary>
+    private static Hook? _liftHook;
+
+    /// <summary>
+    /// Whether the routines that hide the hero from code were hooked, or tried to be: a routine that is not there is
+    /// looked for once.
+    /// </summary>
+    private static bool _routinesHooked;
+
+    /// <summary>
+    /// The figure of the hero sitting at the desk that shows the collection.
+    /// </summary>
+    private static readonly FieldInfo? DeskFigureField = typeof(CollectionViewerDesk).GetField(
+        "sitDownHornet",
+        BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+    );
+
+    /// <summary>
     /// Starts watching whether the room shows the local hero by a figure of its own, which may be a new hero or the same
     /// one again. Like the other watches of the hero, this can run while the hero is still being made (see
     /// <see cref="HeroChildEffects.Watch"/>).
@@ -113,6 +145,28 @@ internal class HeroRoomFigure : AnimationEffect {
             }
         }
 
+        if (!_routinesHooked) {
+            _routinesHooked = true;
+            _deskHook = HookRoutine(
+                typeof(CollectionViewerDesk),
+                "SitDownSequence",
+                new Func<Func<CollectionViewerDesk, int, IEnumerator>, CollectionViewerDesk, int, IEnumerator>(
+                    OnDeskSitDown
+                )
+            );
+            _liftHook = HookRoutine(
+                typeof(WeaverLift),
+                "TeleportRoutine",
+                new Func<
+                    Func<WeaverLift, WeaverLift, NestedFadeGroupBase, IEnumerator>,
+                    WeaverLift,
+                    WeaverLift,
+                    NestedFadeGroupBase,
+                    IEnumerator
+                >(OnLiftTeleport)
+            );
+        }
+
         if (_playHook != null) {
             return;
         }
@@ -133,25 +187,108 @@ internal class HeroRoomFigure : AnimationEffect {
     }
 
     /// <summary>
-    /// Switches a sprite on or off, and when it switches on the figure that the room shows in place of the local hero,
-    /// which the same state of the FSM hides, starts telling the other players about the figure.
+    /// Switches a sprite on or off. When an FSM of the room, or of a creature, switches the sprite of the local hero off,
+    /// the hero is hidden by it (see <see cref="HeroHidden"/>); and when it switches on a figure of its own in a state
+    /// that hides the hero, the other players are told about the figure. The hero's own FSMs hide it for moves that
+    /// show it by effects of their own, which reach the other players otherwise.
     /// </summary>
     private static void OnSetMeshRendererEnter(Action<SetMeshRenderer> orig, SetMeshRenderer self) {
         orig(self);
 
         var watcher = _watcher;
-        if (watcher == null || self.active is not { Value: true }) {
-            return;
-        }
-
         var fsm = self.Fsm;
-        var figure = fsm?.GetOwnerDefaultTarget(self.gameObject);
-        if (fsm == null || figure == null || figure == watcher.gameObject ||
-            !HidesTheHero(self.State, fsm, watcher.gameObject) || !BelongsToABench(fsm)) {
+        if (watcher == null || fsm == null || self.active == null) {
             return;
         }
 
-        watcher.Show(figure);
+        var hero = watcher.gameObject;
+        var target = fsm.GetOwnerDefaultTarget(self.gameObject);
+        if (target == null) {
+            return;
+        }
+
+        if (!self.active.Value) {
+            if (target == hero && !IsTheHerosOwn(fsm, hero)) {
+                HeroHidden.HiddenByTheRoom();
+            }
+
+            return;
+        }
+
+        // A creature shows the hero it holds itself, on its copy in the other players' games too
+        if (target != hero && !IsTheHerosOwn(fsm, hero) && HidesTheHero(self.State, fsm, hero) &&
+            !IsPartOfACreature(target)) {
+            watcher.Show(target);
+        }
+    }
+
+    /// <summary>
+    /// Hooks a routine of the game that hides the hero from code.
+    /// </summary>
+    private static Hook? HookRoutine(Type type, string name, Delegate detour) {
+        var method = type.GetMethod(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+        if (method == null) {
+            Logger.Error($"Could not find {type.Name}#{name}; the hero hidden by it will show to other players");
+            return null;
+        }
+
+        try {
+            return new Hook(method, detour);
+        } catch (Exception e) {
+            Logger.Error($"Could not hook {type.Name}#{name}; the hero hidden by it will show to other players: {e}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Seats the hero at the desk that shows the collection, which hides the hero and shows the desk's figure of them.
+    /// </summary>
+    private static IEnumerator OnDeskSitDown(
+        Func<CollectionViewerDesk, int, IEnumerator> orig,
+        CollectionViewerDesk self,
+        int constructIndex
+    ) {
+        var figure = DeskFigureField?.GetValue(self) as tk2dSpriteAnimator;
+        return WhileHiding(orig(self, constructIndex), figure != null ? figure.gameObject : null);
+    }
+
+    /// <summary>
+    /// Carries the hero from one lift to another, which hides the hero on the way.
+    /// </summary>
+    private static IEnumerator OnLiftTeleport(
+        Func<WeaverLift, WeaverLift, NestedFadeGroupBase, IEnumerator> orig,
+        WeaverLift self,
+        WeaverLift target,
+        NestedFadeGroupBase shaftGlows
+    ) {
+        return WhileHiding(orig(self, target, shaftGlows), null);
+    }
+
+    /// <summary>
+    /// Runs a routine that hides the hero from code, step by step as the game would, and after each step tells whether
+    /// the hero is hidden: then the room hid it (see <see cref="HeroHidden"/>), and a figure that the routine shows in
+    /// its place goes to the other players.
+    /// </summary>
+    /// <param name="routine">The routine.</param>
+    /// <param name="figure">The figure of the hero that the routine shows, or null if it shows none.</param>
+    private static IEnumerator WhileHiding(IEnumerator routine, GameObject? figure) {
+        while (true) {
+            var more = routine.MoveNext();
+
+            var watcher = _watcher;
+            if (watcher != null && watcher.TryGetComponent<MeshRenderer>(out var body) && !body.enabled) {
+                HeroHidden.HiddenByTheRoom();
+                if (figure != null && figure.activeInHierarchy) {
+                    watcher.Show(figure);
+                }
+            }
+
+            if (!more) {
+                yield break;
+            }
+
+            yield return routine.Current;
+        }
     }
 
     /// <summary>
@@ -174,34 +311,18 @@ internal class HeroRoomFigure : AnimationEffect {
     }
 
     /// <summary>
-    /// Whether an FSM belongs to a bench, which it goes by the events of resting on it: only the figures of benches go
-    /// to the other players, like the bed that lays the hero down. The game hides the hero in other places too, for a
-    /// creature that holds them, which shows them itself on its copy in the other players' games (see
-    /// <see cref="HeroHeld"/>), and for doors, rides and scenes, which are left as they were.
+    /// Whether an FSM is the hero's own, or one of its parts'.
     /// </summary>
-    private static bool BelongsToABench(HutongGames.PlayMaker.Fsm fsm) {
-        foreach (var transition in fsm.GlobalTransitions ?? []) {
-            if (IsRestEvent(transition)) {
-                return true;
-            }
-        }
-
-        foreach (var state in fsm.States ?? []) {
-            foreach (var transition in state.Transitions ?? []) {
-                if (IsRestEvent(transition)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+    private static bool IsTheHerosOwn(HutongGames.PlayMaker.Fsm fsm, GameObject hero) {
+        var owner = fsm.GameObject;
+        return owner != null && owner.transform.IsChildOf(hero.transform);
     }
 
     /// <summary>
-    /// Whether a transition goes by an event of resting on a bench.
+    /// Whether an object belongs to a creature, which has health.
     /// </summary>
-    private static bool IsRestEvent(FsmTransition transition) {
-        return transition.EventName?.StartsWith("BENCHREST", StringComparison.Ordinal) == true;
+    private static bool IsPartOfACreature(GameObject gameObject) {
+        return gameObject.GetComponentInParent<HealthManager>(true) != null;
     }
 
     /// <summary>
@@ -250,6 +371,14 @@ internal class HeroRoomFigure : AnimationEffect {
         writer.Write(figure.ClipFps);
         writer.Flush();
         return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Says often for a while what the room's figure of the local hero plays, once the local player or another one came
+    /// into the room (see <see cref="HeroHidden.SayAgainSoon"/>).
+    /// </summary>
+    internal static void SayAgainSoon() {
+        _watcher?.SayAgainSoon();
     }
 
     /// <summary>
@@ -332,9 +461,12 @@ internal class HeroRoomFigure : AnimationEffect {
     /// <param name="path">The path of the figure in its room.</param>
     /// <returns>The copy, or null if the room has no such figure.</returns>
     internal static GameObject? MakeCopy(string path) {
-        // A figure in a part of the room that is switched off here would make a copy that never shows
+        // A figure in a part of the room that is switched off here would make a copy that never shows. The figure
+        // itself may be off, as the room switches it on only for the player it shows.
         var original = ScenePath.Find(path);
-        if (original == null || !original.activeInHierarchy || !original.TryGetComponent<tk2dSpriteAnimator>(out _)) {
+        var parent = original != null ? original.transform.parent : null;
+        if (original == null || parent != null && !parent.gameObject.activeInHierarchy ||
+            !original.TryGetComponent<tk2dSpriteAnimator>(out _)) {
             return null;
         }
 
@@ -346,10 +478,15 @@ internal class HeroRoomFigure : AnimationEffect {
         var copy = Object.Instantiate(original, holder.transform, false);
         copy.name = original.name + " (Other Player)";
 
+        // Other renderers go last, as what they draw for depends on them: particles on their renderer
         var components = copy.GetComponentsInChildren<Component>(true);
-        for (var i = components.Length - 1; i >= 0; i--) {
-            if (components[i] is not (Transform or MeshFilter or MeshRenderer or tk2dBaseSprite or tk2dSpriteAnimator)) {
-                Object.DestroyImmediate(components[i]);
+        foreach (var lastOnes in new[] { false, true }) {
+            for (var i = components.Length - 1; i >= 0; i--) {
+                var component = components[i];
+                if (component != null && component is Renderer == lastOnes &&
+                    component is not (Transform or MeshFilter or MeshRenderer or tk2dBaseSprite or tk2dSpriteAnimator)) {
+                    Object.DestroyImmediate(component);
+                }
             }
         }
 
@@ -430,6 +567,12 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
     private float _sayAgainAt;
 
     /// <summary>
+    /// Until when the other players are told often (see <see cref="HeroHidden.SayAgainSoon"/>), in unscaled time.
+    /// </summary>
+    [NonSerialized]
+    private float _sayOftenUntil;
+
+    /// <summary>
     /// Starts watching again, telling the other players with the given callback, for a hero that may be shown by a
     /// figure already: a player who connects again while lying in a bed is said to lie there at once, and a figure
     /// that is gone meanwhile is found gone at the next look.
@@ -441,11 +584,19 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
     }
 
     /// <summary>
-    /// Takes a figure that the room just switched on in place of the hero.
+    /// Tells the other players often for a while (see <see cref="HeroHidden.SayAgainSoon"/>), starting now.
+    /// </summary>
+    public void SayAgainSoon() {
+        _sayOftenUntil = Time.unscaledTime + HeroHidden.SayOftenFor;
+        _changed = _figure != null;
+    }
+
+    /// <summary>
+    /// Takes a figure that the room just switched on in place of the hero, unless it is the one that shows already.
     /// </summary>
     public void Show(GameObject figure) {
         if (_send == null || !figure.TryGetComponent<tk2dSpriteAnimator>(out var animator) ||
-            !figure.TryGetComponent<MeshRenderer>(out var body)) {
+            !figure.TryGetComponent<MeshRenderer>(out var body) || ReferenceEquals(animator, _figure)) {
             return;
         }
 
@@ -501,7 +652,9 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
 
         _shown = true;
         _changed = false;
-        _sayAgainAt = Time.unscaledTime + HeroRoomFigure.SayAgainAfter;
+        _sayAgainAt = Time.unscaledTime + (Time.unscaledTime < _sayOftenUntil
+            ? HeroHidden.SayOftenEvery
+            : HeroRoomFigure.SayAgainAfter);
         _send(effectInfo);
     }
 }

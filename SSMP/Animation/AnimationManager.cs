@@ -730,8 +730,8 @@ internal class AnimationManager {
         { AnimationClip.HeroPartClip, HeroPartClips.Instance },
         { AnimationClip.HeroChildParticle, HeroChildParticles.Instance },
 
-        // A creature holding the hero, which hides it, and a figure of the hero that the room shows in its place
-        { AnimationClip.HeroHeld, HeroHeld.Instance },
+        // The game hiding the hero, and a figure of the hero that the room shows in its place
+        { AnimationClip.HeroHidden, HeroHidden.Instance },
         { AnimationClip.HeroRoomFigure, HeroRoomFigure.Instance }
     };
 
@@ -1192,7 +1192,7 @@ internal class AnimationManager {
         HeroChildEffects.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildEffect, effectInfo));
         HeroPartClips.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroPartClip, effectInfo));
         HeroChildParticles.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildParticle, effectInfo));
-        HeroHeld.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHeld, effectInfo));
+        HeroHidden.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHidden, effectInfo));
         HeroRoomFigure.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroRoomFigure, effectInfo));
         BeamShot.Watch(hc, OnToolMessage);
         if (hc.silkSpecialFSM != null) {
