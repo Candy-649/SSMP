@@ -878,38 +878,14 @@
    "Breakable Wall",
    "Breakable Wall (1)",
    "Song_lever_side",
-   "aspid_sealed_gate_stone",
-   "pustule_set_large_single_black_thread"
+   "aspid_sealed_gate_stone"
   ],
   "crawl_03": [
-   "Breakable Wall (1)",
-   "pustule_set_large_single_black_thread",
-   "pustule_set_large_single_black_thread (2)",
-   "pustule_set_small (1)"
-  ],
-  "crawl_03b": [
-   "pustule_set_large_single_black_thread",
-   "pustule_set_large_single_black_thread (1)",
-   "pustule_set_large_single_black_thread (2)"
-  ],
-  "crawl_05": [
-   "pustule_set_large_single_black_thread (1)"
-  ],
-  "crawl_07": [
-   "pustule_set_small (1)",
-   "pustule_set_small 3"
-  ],
-  "crawl_08": [
-   "pustule_set_large_single_black_thread",
-   "pustule_set_large_single_black_thread (1)",
-   "pustule_set_large_single_black_thread (2)"
+   "Breakable Wall (1)"
   ],
   "crawl_09": [
    "Breakable Wall",
-   "Breakable Wall (1)",
-   "pustule_set_large_single_black_thread (1)",
-   "pustule_set_large_single_black_thread (2)",
-   "pustule_set_small (1)"
+   "Breakable Wall (1)"
   ],
   "dock_01": [
    "Song_lever_side",
