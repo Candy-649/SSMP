@@ -875,6 +875,26 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Switches back on at once what is this game's player's own in an FSM that has just left a catch of the partner's
+    /// which their game led, the way it left it being no global transition: the states of the catch are all that was
+    /// kept off, and it may go straight back into them for a catch of this game's own player, before the look once a
+    /// frame (see <see cref="LetThePlayerBackIn"/>) would see that it left them.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    private void LetThePlayerBackInTo(HutongGames.PlayMaker.Fsm fsm) {
+        var index = _playedForPartner.FindIndex(played => played.Fsm == fsm);
+        if (index < 0) {
+            return;
+        }
+
+        foreach (var action in _playedForPartner[index].Muted) {
+            action.Enabled = true;
+        }
+
+        _playedForPartner.RemoveAt(index);
+    }
+
+    /// <summary>
     /// Starts the copy's FSM running here, in the state it takes the input in.
     /// </summary>
     /// <param name="copyFsm">The FSM of the copy.</param>
@@ -1064,6 +1084,7 @@ internal partial class Entity {
 
         if (!lead.States.Contains(state)) {
             EndLead(lead);
+            LetThePlayerBackInTo(fsm);
         }
     }
 
@@ -1098,6 +1119,8 @@ internal partial class Entity {
         EndLead(lead);
         if (transition != null && Array.IndexOf(fsm.GlobalTransitions, transition) >= 0) {
             KeepOffForTheAftermath(lead, toState);
+        } else {
+            LetThePlayerBackInTo(fsm);
         }
 
         return true;
@@ -1219,6 +1242,7 @@ internal partial class Entity {
                 if (!lead.States.Contains(to)) {
                     Logger.Info($"The '{fsm.Name}' of entity {Id} {why}, so it goes from '{from.Name}' to '{to.Name}'");
                     fsm.SetState(to.Name);
+                    LetThePlayerBackInTo(fsm);
                     return;
                 }
 
