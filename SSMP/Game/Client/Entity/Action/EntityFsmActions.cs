@@ -568,12 +568,22 @@ internal static partial class EntityFsmActions {
                     var path = data.Packet.ReadString();
                     var owner = action.Fsm?.GameObject;
 
-                    // Parts can share a name - every spine a floater grows is called the same - and a path then
-                    // finds the first of them each time, so each spine was turned in place of the first one while
-                    // the others kept pointing down. The copy's own variable already holds the right one where the
-                    // copy's own replays put it there, so an object it holds at the same place is kept.
+                    // Parts can share a name - every spine a floater grows is called the same - and a path then finds
+                    // the first of them each time. An object that the copy's own replays already put at that place,
+                    // which its variable holds, is kept: turning a spine turns that one and not the first.
+                    //
+                    // The scene host names the object after its action ran, so what the action puts under another
+                    // object is named at the place it was put. Here it is read before the action, when the object
+                    // that the copy's own spawn just stored is still loose: the path found nothing, so no spine was
+                    // ever put under the floater, and every one stayed where it grew, pointing down, and never
+                    // flew. A loose object that the action is about to put there is kept by its name. One that is
+                    // put away, or already somewhere under the creature, is left to the path as before.
                     var held = variable.Value;
-                    if (held != null && owner != null && PathFromOwner(owner, held) == path) {
+                    if (held != null && owner != null && (PathFromOwner(owner, held) == path ||
+                                                          IsMovedByTheAction(action, variable) &&
+                                                          held.activeInHierarchy &&
+                                                          PathFromOwner(owner, held) == null &&
+                                                          held.name == path.Substring(path.LastIndexOf('/') + 1))) {
                         break;
                     }
 
@@ -594,6 +604,16 @@ internal static partial class EntityFsmActions {
             }
         }
     }
+
+    /// <summary>
+    /// Whether a variable holds the object that an action puts somewhere else in the tree of objects: the child that
+    /// it puts under a parent.
+    /// </summary>
+    private static bool IsMovedByTheAction(FsmStateAction action, FsmGameObject variable) => action switch {
+        SetParent setParent => ReferenceEquals(setParent.gameObject?.GameObject, variable),
+        SetTransformParent setTransformParent => ReferenceEquals(setTransformParent.gameObject?.GameObject, variable),
+        _ => false
+    };
 
     /// <summary>
     /// The scene and the path within it of something the room itself is made of, by which the other game, which has
