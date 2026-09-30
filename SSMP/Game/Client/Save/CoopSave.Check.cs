@@ -183,6 +183,7 @@ internal partial class CoopSave {
         _sentWorldItems = [];
         _sentWishEntries = [];
         _mergedWishKeys.Clear();
+        _giftedWishKeys.Clear();
         _differentWishNames.Clear();
         _agreedStoryValues = null;
         ResetWishProgress();
@@ -634,16 +635,20 @@ internal partial class CoopSave {
         }
 
         OverrideLoadedItems(loadedItems);
-        var wishes = AddWishes(
-            parts.SelectMany(part => part.WishNames.Zip(part.WishValues, (name, value) => (name, value)))
-        );
+        var partnerWishes = parts
+            .SelectMany(part => part.WishNames.Zip(part.WishValues, (name, value) => (name, value)))
+            .ToList();
+        var wishes = AddWishes(partnerWishes);
+        var acceptTalks = GiveBackAcceptTalks();
+        ForgetSharedAcceptTalks(partnerWishes);
         var storyFlags = AddStoryFlags(partner, parts);
 
         _addedChanges = items + wishes + storyFlags;
         Logger.Info(
             $"Added world progress of {partner.Username}: {items} saved objects, {flags} player data flags, " +
-            $"{wishes} entries of the wish log and {storyFlags} story flags, with {_differentWishes} wishes completed " +
-            $"in only one save and {_differentStoryFlags} story flags that differed"
+            $"{wishes} entries of the wish log with what {acceptTalks} dialogues gave along with them, and " +
+            $"{storyFlags} story flags, with {_differentWishes} wishes completed in only one save and " +
+            $"{_differentStoryFlags} story flags that differed"
         );
     }
 

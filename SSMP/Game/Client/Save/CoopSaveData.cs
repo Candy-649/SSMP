@@ -68,6 +68,74 @@ internal class CoopSaveMarker {
     /// </summary>
     [JsonProperty("bossDefeats")]
     public int BossDefeats { get; set; }
+
+    /// <summary>
+    /// Dialogue that accepted wishes, with what it gave and set, from the moment it ended until a check finds both saves
+    /// with those wishes (see CoopSave.GiveBackAcceptTalks). It is kept here rather than in the game's save, which a game
+    /// that closes before saving loses along with the accept itself.
+    /// </summary>
+    [JsonProperty("acceptTalks")]
+    public List<CoopAcceptTalk> AcceptTalks { get; set; } = [];
+}
+
+/// <summary>
+/// Dialogue that accepted wishes and did nothing else, as it went to the partner or came from them
+/// (CoopSaveUpdateKind.WishTurnIn): the wishes, and what it took from the player, gave them and set.
+/// </summary>
+internal class CoopAcceptTalk {
+    /// <summary>
+    /// The wishes and rumours that the dialogue accepted.
+    /// </summary>
+    [JsonProperty("wishNames")]
+    public List<string> WishNames { get; set; } = [];
+
+    /// <summary>
+    /// The packed state of each of them right after the dialogue accepted it.
+    /// </summary>
+    [JsonProperty("wishValues")]
+    public List<int> WishValues { get; set; } = [];
+
+    /// <summary>
+    /// What the dialogue took and gave, each with the index of the change it belongs to before it.
+    /// </summary>
+    [JsonProperty("itemIds")]
+    public List<string> ItemIds { get; set; } = [];
+
+    /// <summary>
+    /// How many of each of <see cref="ItemIds"/>.
+    /// </summary>
+    [JsonProperty("amounts")]
+    public List<int> Amounts { get; set; } = [];
+
+    /// <summary>
+    /// The flags of the player data that the dialogue set.
+    /// </summary>
+    [JsonProperty("flagNames")]
+    public List<string> FlagNames { get; set; } = [];
+
+    /// <summary>
+    /// The values that the dialogue set them to.
+    /// </summary>
+    [JsonProperty("flagValues")]
+    public List<int> FlagValues { get; set; } = [];
+
+    /// <summary>
+    /// The scene of the character, for the log.
+    /// </summary>
+    [JsonProperty("scene")]
+    public string Scene { get; set; } = "";
+
+    /// <summary>
+    /// The path of the character in its scene, for the log.
+    /// </summary>
+    [JsonProperty("path")]
+    public string Path { get; set; } = "";
+
+    /// <summary>
+    /// When the dialogue was kept.
+    /// </summary>
+    [JsonProperty("utc")]
+    public DateTime Utc { get; set; }
 }
 
 /// <summary>

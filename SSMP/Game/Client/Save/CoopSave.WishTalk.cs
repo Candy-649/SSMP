@@ -1393,6 +1393,9 @@ internal partial class CoopSave {
             }
         }
 
+        // Kept in case this save loses the accept before it is saved, for the next check to give back with it
+        KeepAcceptTalk(update);
+
         if (_checkedWith != partner.Id) {
             // The game checks the save with the partner again, which sends these wishes as they were before, so the
             // dialogue goes to the partner once the check is done
@@ -1802,6 +1805,11 @@ internal partial class CoopSave {
                 } finally {
                     _applyingPartnerTalk = false;
                 }
+            }
+
+            // Kept in case this save loses the accept before it is saved, for the next check to give back with it
+            if (anyNewApplies) {
+                KeepAcceptTalk(update);
             }
 
             // An item that the dialogue gave the partner but the local player didn't get, like one that they can't get
