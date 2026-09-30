@@ -105,6 +105,12 @@ internal partial class Entity {
         _copySaveFsm = copyFsm;
         _hostSaveWasOff = hostSave.dontSave;
 
+        // The room's own item reads the save now, which it does as its object first starts - and in a scene client's
+        // game that object is switched off before it ever starts. Whatever it saves from here on is then the save's
+        // number or one counted from it, and never the number it was built with: saved over the real one, that
+        // brought a creature back to life with nothing left to fling
+        hostSave.LoadIfNeverStarted();
+
         // Until it is known which game runs the creature, the room's own item saves as it always did
         SaveWhereItRuns(copyRuns: false);
     }
@@ -115,6 +121,12 @@ internal partial class Entity {
     /// <param name="copyRuns">Whether the copy runs in this game, as it does in a scene client's.</param>
     private void SaveWhereItRuns(bool copyRuns) {
         if (_hostSave != null) {
+            // What the room's own creature counted until now goes into the save first, which the copy reads as it
+            // starts: a game that expected to run the room ran its own creature for a moment before it knew otherwise
+            if (copyRuns) {
+                _hostSave.SaveState();
+            }
+
             _hostSave.dontSave = copyRuns || _hostSaveWasOff;
         }
 
@@ -133,16 +145,18 @@ internal partial class Entity {
             return;
         }
 
+        // A copy whose item never started never read the save, and counted nothing: it stayed hidden all along. The
+        // room's own FSM keeps the number it read from the save then
         var hostValue = _hostSaveFsm.FsmVariables.FindFsmInt(SavedIntName);
         var copyValue = _copySaveFsm.FsmVariables.FindFsmInt(SavedIntName);
-        if (hostValue == null || copyValue == null) {
+        if (hostValue == null || copyValue == null || !_copySave.started) {
             return;
         }
 
         hostValue.Value = copyValue.Value;
 
-        // Saved now as well, while the copy's item still saves: a room's own item that never started yet reads the save
-        // as it starts, and would put the number from before back into the FSM
+        // Saved now as well, while the copy's item still saves: the room's own item reads the save again as its object
+        // first starts, and would put the number from before back into the FSM
         _copySave.SaveState();
         Logger.Info(
             $"Handed the saved '{SavedIntName}' {copyValue.Value} of '{_copySaveFsm.FsmName}' from the copy of entity " +
