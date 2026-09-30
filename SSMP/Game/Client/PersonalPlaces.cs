@@ -21,7 +21,11 @@ internal static class PersonalPlaces {
     private static readonly string[][] Places = [
         // The festival's game of landing on fleas from above. Both players went for the same fleas, and one of them was
         // soon left with nothing to land on
-        ["Caravan_States", "Flea Festival", "Flea Game - Bouncing"]
+        ["Caravan_States", "Flea Festival", "Flea Game - Bouncing"],
+
+        // The contest of throwing pins at small targets, which each player enters, pays for and wins on their own. A hit
+        // of one player on a target was sent to the other game, where it scored for whoever was playing there
+        ["Black Thread States", "Normal World", "Pin Gallery States", "Here"]
     ];
 
     /// <summary>

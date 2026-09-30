@@ -263,6 +263,10 @@ internal static class ToolCopies {
             new Func<Func<ToolItem, bool>, ToolItem, bool>(OnIsEquipped)
         );
         AddHook(
+            typeof(ToolPin).GetMethod("ReportEnded", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<ToolPin>, ToolPin>(OnPinEnded)
+        );
+        AddHook(
             typeof(ToolBoomerang).GetMethod("CheckPoison", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<ToolBoomerang>, ToolBoomerang>(OnClawsCheckPoison)
         );
@@ -565,6 +569,19 @@ internal static class ToolCopies {
         }
 
         return orig(self);
+    }
+
+    /// <summary>
+    /// Tells the room that a pin stopped, as one that sticks in a wall or breaks does, for the local player's pins only.
+    /// A contest of throwing pins at targets counts every pin that stops without a hit as a miss of the player who is
+    /// taking part, and it counted the copies of the partner's pins too, which fly wherever the partner throws them.
+    /// </summary>
+    private static void OnPinEnded(Action<ToolPin> orig, ToolPin self) {
+        if (RemoteAttackComponent.IsRemoteAttack(self.gameObject)) {
+            return;
+        }
+
+        orig(self);
     }
 
     /// <summary>
