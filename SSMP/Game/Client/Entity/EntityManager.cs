@@ -56,6 +56,16 @@ internal class EntityManager {
     private Hook? _flockFlyerAwakeHook, _flockFlyerEnableHook;
 
     /// <summary>
+    /// Detour hook for a room picking which one of a group of its creatures comes out (<see cref="OnPickRandomChild"/>).
+    /// </summary>
+    private Hook? _pickRandomChildHook;
+
+    /// <summary>
+    /// The groups of creatures in this room whose pick was left to the other game, each said once.
+    /// </summary>
+    private readonly HashSet<ActivateRandomChild> _picksLeftToTheOtherGame = [];
+
+    /// <summary>
     /// The creatures that the room makes rather than a creature, which only the scene host's game makes.
     /// </summary>
     private readonly RoomCreatures _roomCreatures;
@@ -148,6 +158,10 @@ internal class EntityManager {
             typeof(FlockFlyer).GetMethod("OnEnable", instance),
             (Action<FlockFlyer> orig, FlockFlyer self) => RollAlike(orig, self, "OnEnable")
         );
+        _pickRandomChildHook = new Hook(
+            typeof(ActivateRandomChild).GetMethod("DoActivateRandomChildren", instance),
+            OnPickRandomChild
+        );
 
         _roomCreatures.RegisterHooks();
     }
@@ -173,6 +187,9 @@ internal class EntityManager {
         _flockFlyerAwakeHook = null;
         _flockFlyerEnableHook?.Dispose();
         _flockFlyerEnableHook = null;
+
+        _pickRandomChildHook?.Dispose();
+        _pickRandomChildHook = null;
 
         _roomCreatures.DeregisterHooks();
 
@@ -378,6 +395,7 @@ internal class EntityManager {
         Logger.Info("Scene changed, clearing registered entities");
         EntityFsmActions.ForgetActionsInState();
         ClearEntities();
+        _picksLeftToTheOtherGame.Clear();
 
         if (!_netClient.IsConnected) return;
 
@@ -700,6 +718,42 @@ internal class EntityManager {
                 if (entity.Object.Client == current.gameObject) {
                     return true;
                 }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Leaves it to the game that runs a room to pick which one of a group of its creatures comes out.
+    ///
+    /// Some rooms keep a few of the same creature under one object that lets one of them out at random, and has one
+    /// picked again each time a creature has dug back into the ground. The creature asks for that itself, and the
+    /// scene client's copy of it asked the same of the group here, so each game rolled for itself. The roll here
+    /// switched on one of the room's own sleeping creatures, which started over and was put straight back to sleep.
+    /// It never reached the copies, which are not under the group: the object a copy's creature settles back into is
+    /// looked up from the copy itself, which stands at the top of the room. Nothing here should pick at all, though:
+    /// which of them come out reaches this game as each creature being switched on or off, like anything else the
+    /// other game does to them, and the room's own creatures are left asleep where the room put them for a take-over.
+    /// </summary>
+    private void OnPickRandomChild(Action<ActivateRandomChild> orig, ActivateRandomChild self) {
+        if (RunsTheRoom || !HoldsCreatures(self.transform)) {
+            orig(self);
+            return;
+        }
+
+        if (_picksLeftToTheOtherGame.Add(self)) {
+            Logger.Info($"Leaving the pick of which of the creatures under '{self.name}' comes out to the other game");
+        }
+    }
+
+    /// <summary>
+    /// Whether any of the objects right under the given one is a creature of the room that is an entity.
+    /// </summary>
+    private static bool HoldsCreatures(Transform parent) {
+        for (var i = 0; i < parent.childCount; i++) {
+            if (EntityProcessor.IsRegistered(parent.GetChild(i).gameObject)) {
+                return true;
             }
         }
 
