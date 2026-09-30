@@ -213,9 +213,15 @@ internal partial class Entity {
     /// </summary>
     /// <param name="fsmIndex">The index of the FSM.</param>
     /// <param name="eventName">The event that the strike, touch or catch told the FSM.</param>
+    /// <param name="caught">For a catch, what the part that caught set on the FSM along with the event, which the
+    /// scene host sets on its FSM too; null for a strike or a touch.</param>
     /// <returns>What the scene host is sent to play the same, or null if it was not played here.</returns>
-    public InputStart? PlayHere(byte fsmIndex, string eventName) {
-        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && !CatchEvents.Contains(eventName) ||
+    public InputStart? PlayHere(byte fsmIndex, string eventName, ToldValues? caught = null) {
+        if (CatchEvents.Contains(eventName)) {
+            caught ??= ToldValues.None;
+        }
+
+        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && caught == null ||
             SwitchToStateField == null ||
             fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null ||
             Object.Client == null || _runHere != null && _runHere != copyFsm) {
@@ -253,10 +259,10 @@ internal partial class Entity {
 
         _runHereIndex = fsmIndex;
         _runHereReached = fsm.ActiveStateName;
-        _runHereCombo = CatchEvents.Contains(eventName) ? RestOfTheInput(fsm) : null;
+        _runHereCombo = caught != null ? RestOfTheInput(fsm) : null;
         _runHereAwaited = BeginAnticipation();
         _runHereExpiry = Time.unscaledTime + AnticipationHoldTime;
-        return new InputStart(_runHereReached, position, motion, dice, _runHereAwaited);
+        return new InputStart(_runHereReached, position, motion, dice, _runHereAwaited, caught);
     }
 
     /// <summary>
@@ -298,7 +304,11 @@ internal partial class Entity {
             transform.position = new Vector3(start.Position.x, start.Position.y, transform.position.z);
         }
 
-        PlayForPartner(hostFsm, eventName, () => SharedDice.Throw(start.Dice, () => {
+        // What the part that caught set on the copy's FSM along with the catch, which the part here never did
+        var isCatch = start.Caught != null || CatchEvents.Contains(eventName);
+        start.Caught?.ApplyTo(fsm);
+
+        PlayForPartner(hostFsm, isCatch, () => SharedDice.Throw(start.Dice, () => {
             fsm.Event(eventName);
             Settle(fsm);
         }, fsm));
@@ -597,10 +607,10 @@ internal partial class Entity {
     /// whole round of the creature's attacks, which goes on at this game's player too.
     /// </summary>
     /// <param name="hostFsm">The FSM.</param>
-    /// <param name="eventName">The event that the partner's strike, touch or catch told the FSM.</param>
+    /// <param name="isCatch">Whether it is a catch rather than a strike or a touch.</param>
     /// <param name="play">What plays it on the FSM.</param>
-    public void PlayForPartner(PlayMakerFSM hostFsm, string eventName, System.Action play) {
-        if (!CatchEvents.Contains(eventName)) {
+    public void PlayForPartner(PlayMakerFSM hostFsm, bool isCatch, System.Action play) {
+        if (!isCatch) {
             play();
             return;
         }

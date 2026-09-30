@@ -1462,13 +1462,19 @@ internal class CoopHits {
 
     /// <summary>
     /// Says that the copy of an entity touched the local player (see <see cref="Entity.Entity.ListenForTouches"/>), or
-    /// that one of its parts caught them (see <see cref="Entity.Entity.CatchEvents"/>).
+    /// that one of its parts caught them or a thing of theirs (see <see cref="Entity.Entity.CatchEvents"/>).
     /// </summary>
     /// <param name="copied">The entity.</param>
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
-    /// <param name="eventName">The event that the FSM sends itself for a touch.</param>
-    private void OnCopyTouchedLocalPlayer(Entity.Entity copied, byte fsmIndex, string eventName) {
-        PlayOrSend(copied, fsmIndex, eventName, "touched");
+    /// <param name="eventName">The event that the FSM sends itself for a touch, or that the part told it.</param>
+    /// <param name="caught">For a catch, what the part set on the FSM along with the event; null for a touch.</param>
+    private void OnCopyTouchedLocalPlayer(
+        Entity.Entity copied,
+        byte fsmIndex,
+        string eventName,
+        Entity.ToldValues? caught
+    ) {
+        PlayOrSend(copied, fsmIndex, eventName, caught == null ? "touched" : "had something caught by", caught);
     }
 
     /// <summary>
@@ -1482,12 +1488,20 @@ internal class CoopHits {
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
     /// <param name="eventName">The event.</param>
     /// <param name="what">What the local player did to the copy, for the log.</param>
-    private void PlayOrSend(Entity.Entity copied, byte fsmIndex, string eventName, string what) {
+    /// <param name="caught">For a catch, what the part that caught set on the FSM along with the event; null for a
+    /// strike or a touch.</param>
+    private void PlayOrSend(
+        Entity.Entity copied,
+        byte fsmIndex,
+        string eventName,
+        string what,
+        Entity.ToldValues? caught = null
+    ) {
         if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
             return;
         }
 
-        if (copied.PlayHere(fsmIndex, eventName) is { } input) {
+        if (copied.PlayHere(fsmIndex, eventName, caught) is { } input) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                 $"went to '{input.State}', and the scene host is sent it with where the copy was"
@@ -1497,13 +1511,24 @@ internal class CoopHits {
         }
 
         Logger.Info($"The local player {what} the copy of entity {copied.Id}, so the scene host is sent '{eventName}'");
+
+        // A catch goes with what the part that caught set on the FSM along with it
+        byte[] told = [];
+        if (caught != null) {
+            using var stream = new MemoryStream();
+            using var writer = new BinaryWriter(stream);
+            caught.Write(writer);
+            writer.Flush();
+            told = stream.ToArray();
+        }
+
         _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
             TargetId = partnerId,
             Kind = CoopHitKind.EntityTouch,
             EntityId = copied.Id,
             Index = fsmIndex,
             Responder = eventName,
-            Hit = []
+            Hit = told
         });
     }
 
@@ -1540,6 +1565,10 @@ internal class CoopHits {
         }
 
         SharedDice.Write(writer, input.Dice);
+
+        // Whether it was a catch, and what the part that caught set on the FSM along with it
+        writer.Write(input.Caught != null);
+        input.Caught?.Write(writer);
         writer.Flush();
 
         _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
@@ -1575,7 +1604,11 @@ internal class CoopHits {
                     new Vector2(reader.ReadSingle(), reader.ReadSingle()), reader.ReadSingle(), reader.ReadSingle()
                 )
                 : null;
-            input = new Entity.InputStart(state, position, motion, SharedDice.Read(reader) ?? [], anticipation);
+            var dice = SharedDice.Read(reader) ?? [];
+            var caught = reader.BaseStream.Position < reader.BaseStream.Length && reader.ReadBoolean()
+                ? Entity.ToldValues.Read(reader)
+                : null;
+            input = new Entity.InputStart(state, position, motion, dice, anticipation, caught);
         } catch (IOException e) {
             Logger.Warn($"Could not read what the partner did to the copy of entity {update.EntityId}: {e.Message}");
             return;
@@ -1601,9 +1634,10 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Sends an entity the event that the partner's copy of it was touched, struck or caught them with, if this game is
-    /// the scene host and so runs it (see <see cref="Entity.Entity.PlayForPartner"/>). An FSM that has already moved on
-    /// from where the event leads anywhere takes no notice of it.
+    /// Sends an entity the event that the partner's copy of it was touched, struck or caught them or a thing of theirs
+    /// with, if this game is the scene host and so runs it (see <see cref="Entity.Entity.PlayForPartner"/>), after what
+    /// the part that caught set on the FSM along with a catch. An FSM that has already moved on from where the event
+    /// leads anywhere takes no notice of it.
     /// </summary>
     /// <param name="update">The update of the partner's touch.</param>
     private void ApplyEntityTouch(CoopHitUpdate update) {
@@ -1616,10 +1650,28 @@ internal class CoopHits {
             $"The partner touched or struck the copy of entity {update.EntityId} in its '{fsm.ActiveStateName}', so " +
             $"it is sent '{update.Responder}' here too"
         );
-        if (fsm.Fsm.ActiveState is { } state &&
-            Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) != null) {
-            entity.PlayForPartner(fsm, update.Responder, () => fsm.SendEvent(update.Responder));
+        if (fsm.Fsm.ActiveState is not { } state ||
+            Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) == null) {
+            return;
         }
+
+        // A catch comes with what the part that caught set on the FSM along with it
+        Entity.ToldValues? caught = null;
+        if (update.Hit.Length > 0) {
+            try {
+                caught = Entity.ToldValues.Read(new BinaryReader(new MemoryStream(update.Hit)));
+            } catch (IOException e) {
+                Logger.Warn($"Could not read what caught the partner's thing on entity {update.EntityId}: {e.Message}");
+                return;
+            }
+        }
+
+        caught?.ApplyTo(fsm.Fsm);
+        entity.PlayForPartner(
+            fsm,
+            caught != null || Entity.Entity.CatchEvents.Contains(update.Responder),
+            () => fsm.SendEvent(update.Responder)
+        );
     }
 
     /// <summary>

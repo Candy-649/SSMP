@@ -9,12 +9,20 @@ namespace SSMP.Game.Client.Entity;
 /// same dice (see <see cref="Entity.TakeInput"/>), so that it goes the way the player already sees it go.
 /// </summary>
 internal readonly struct InputStart {
-    public InputStart(string state, Vector2 position, BodyMotion? motion, int[] dice, byte anticipation) {
+    public InputStart(
+        string state,
+        Vector2 position,
+        BodyMotion? motion,
+        int[] dice,
+        byte anticipation,
+        ToldValues? caught = null
+    ) {
         State = state;
         Position = position;
         Motion = motion;
         Dice = dice;
         Anticipation = anticipation;
+        Caught = caught;
     }
 
     /// <summary>
@@ -43,6 +51,12 @@ internal readonly struct InputStart {
     /// <see cref="Entity.BeginAnticipation"/>).
     /// </summary>
     public byte Anticipation { get; }
+
+    /// <summary>
+    /// For a catch - a part of the copy caught the player or a thing of theirs, and told the FSM so - what the part set
+    /// on the FSM along with it; null for a strike or a touch.
+    /// </summary>
+    public ToldValues? Caught { get; }
 
     /// <summary>
     /// How a body that moves by itself was moving: how fast, which way it was turned in degrees, and how fast it was

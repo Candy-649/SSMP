@@ -451,6 +451,19 @@ internal partial class Entity {
             ),
             OnBroadcastToObject
         );
+        if (!_sendToFsmHookTried) {
+            _sendToFsmHookTried = true;
+            var sendToFsm = typeof(HutongGames.PlayMaker.Fsm).GetMethod(
+                "SendEventToFsmOnGameObject", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                [typeof(GameObject), typeof(string), typeof(FsmEvent)], null
+            );
+            if (sendToFsm != null) {
+                _sendToFsmHook = new Hook(sendToFsm, OnSendToFsmOnObject);
+            } else {
+                SSMP.Logging.Logger.Warn("Could not find how an FSM tells another FSM by name, so catches of the " +
+                                         "local player's things by the parts of copies go unheard");
+            }
+        }
 
         _hookedActions = new Dictionary<FsmStateAction, HookedEntityAction>();
         _hookedTypes = [];
@@ -1928,11 +1941,12 @@ internal partial class Entity {
     private const float StrikeCastSkin = 0.02f;
 
     /// <summary>
-    /// Raised on a scene client when its player touched the copy of an entity, or one of the copy's parts caught them:
-    /// the entity, the index of the FSM and the event that the FSM is sent for it, which is played on the copy at once
-    /// where the entity or the catch says so (see <see cref="PlayHere"/>) and sent to the scene host.
+    /// Raised on a scene client when its player touched the copy of an entity, or one of the copy's parts caught them
+    /// or a thing of theirs: the entity, the index of the FSM, the event that the FSM is sent for it, and for a catch
+    /// what the part set on the FSM along with it (null for a touch). What the event leads to is played on the copy at
+    /// once where the entity or the catch says so (see <see cref="PlayHere"/>) and sent to the scene host.
     /// </summary>
-    public static event Action<Entity, byte, string>? CopyTouchedLocalPlayer;
+    public static event Action<Entity, byte, string, ToldValues?>? CopyTouchedLocalPlayer;
 
     /// <summary>
     /// The events with which the game's catching parts - a blade, a claw, a coil that holds the player for a string of
@@ -1949,6 +1963,16 @@ internal partial class Entity {
     /// The hook that hears events sent to the objects of copies, put in place with the first entity.
     /// </summary>
     private static Hook? _broadcastHook;
+
+    /// <summary>
+    /// The hook that hears events sent by name to one FSM of the objects of copies, put in place with the first entity.
+    /// </summary>
+    private static Hook? _sendToFsmHook;
+
+    /// <summary>
+    /// Whether <see cref="_sendToFsmHook"/> was looked for, so that a game without the method says so only once.
+    /// </summary>
+    private static bool _sendToFsmHookTried;
 
     /// <summary>
     /// Makes the copy of this entity answer the local player touching it, the way the entity itself answers its own
@@ -1986,7 +2010,7 @@ internal partial class Entity {
 
             foreach (var transition in state.Transitions) {
                 if (_touchEvents.Contains(transition.EventName) && transition.ToFsmState != null) {
-                    CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, transition.EventName);
+                    CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, transition.EventName, null);
                     return;
                 }
             }
@@ -2005,9 +2029,7 @@ internal partial class Entity {
 
     /// <summary>
     /// Hook for an FSM sending an event to the FSMs of an object, which hears one of the parts of a copy catching the
-    /// local player (see <see cref="CatchEvents"/>). The part runs by itself in this game and caught this game's
-    /// player; the copy's own FSMs are switched off and did not hear it. An FSM that is switched off only sends what
-    /// the scene host's game did, replayed on it.
+    /// local player or a thing of theirs (see <see cref="HearCopyTold"/>).
     /// </summary>
     private static void OnBroadcastToObject(
         Action<HutongGames.PlayMaker.Fsm, GameObject, FsmEvent, FsmEventData, bool, bool> orig,
@@ -2020,21 +2042,75 @@ internal partial class Entity {
     ) {
         orig(self, go, fsmEvent, eventData, sendToChildren, excludeSelf);
 
-        if (go != null && fsmEvent != null && CatchEvents.Contains(fsmEvent.Name) &&
-            self.Owner is PlayMakerFSM { enabled: true } && EntitiesByCopy.TryGetValue(go, out var entity)) {
-            entity.OnCopyCaughtThePlayer(fsmEvent.Name);
+        if (go != null && fsmEvent != null) {
+            HearCopyTold(self, go, null, fsmEvent.Name);
         }
     }
 
     /// <summary>
-    /// Takes it that a part of the copy caught the local player and told the copy so. In the game that runs the
-    /// creature, its FSM goes from there into the combo that holds the player and strikes them; here the part held the
-    /// player while the copy flew on. Each FSM of the copy that goes anywhere on the event from the state it is in is
-    /// played as a touch: at once here, where the combo is theirs, and on the scene host (see <see cref="PlayHere"/>).
+    /// Hook for an FSM sending an event to the FSM of an object that has a given name, which hears one of the parts of a
+    /// copy catching the local player or a thing of theirs (see <see cref="HearCopyTold"/>). A tendril tells the
+    /// creature it grows from by the name of its FSM.
     /// </summary>
+    private static void OnSendToFsmOnObject(
+        Action<HutongGames.PlayMaker.Fsm, GameObject, string, FsmEvent> orig,
+        HutongGames.PlayMaker.Fsm self,
+        GameObject go,
+        string fsmName,
+        FsmEvent fsmEvent
+    ) {
+        orig(self, go, fsmName, fsmEvent);
+
+        if (go != null && fsmEvent != null) {
+            HearCopyTold(self, go, fsmName, fsmEvent.Name);
+        }
+    }
+
+    /// <summary>
+    /// Hears an FSM that runs in this game telling the copy of an entity an event, as a part of the creature does once
+    /// it caught something: the local player, which the game's catching parts say with <see cref="CatchEvents"/>, or a
+    /// thing of theirs that the game marks for catching (see <see cref="IsCatchableThingOfTheLocalPlayer"/>). The part
+    /// runs by itself in this game, and did to what it caught all that it does to it, but the copy's own FSMs are
+    /// switched off and did not hear it: the player's flier that a tendril took simply was gone, and the creature never
+    /// ate it in either game. An FSM that is switched off only sends what the scene host's game did, replayed on it.
+    /// </summary>
+    /// <param name="sender">The FSM that sends the event.</param>
+    /// <param name="target">The object that it sends the event to.</param>
+    /// <param name="fsmName">The name of the FSM of the object that it sends the event to, or null for all of them.
+    /// </param>
+    /// <param name="eventName">The event.</param>
+    private static void HearCopyTold(
+        HutongGames.PlayMaker.Fsm sender,
+        GameObject target,
+        string? fsmName,
+        string eventName
+    ) {
+        if (sender.Owner is not PlayMakerFSM { enabled: true } || !EntitiesByCopy.TryGetValue(target, out var entity)) {
+            return;
+        }
+
+        // A thing counts only for a part of the copy itself, which caught it here: whatever else tells the creature
+        // something about the player's things does so in the scene host's game as well
+        if (CatchEvents.Contains(eventName) ||
+            sender.GameObject is { } part && part != target && part.transform.IsChildOf(target.transform) &&
+            IsCatchableThingOfTheLocalPlayer(sender.TriggerCollider2D)) {
+            entity.OnCopyCaught(sender, fsmName, eventName);
+        }
+    }
+
+    /// <summary>
+    /// Takes it that a part of the copy caught the local player or a thing of theirs and told the copy so. In the game
+    /// that runs the creature, its FSM goes from there into what it does with the catch - the combo that holds the
+    /// player and strikes them, the maw that a tendril reels a thing into; here the part held the player while the copy
+    /// flew on, or took the thing and the copy never moved. Each FSM of the copy that goes anywhere on the event from
+    /// the state it is in is played as a catch: at once here, where the catch is theirs, and on the scene host with
+    /// what the part set on that FSM along with the event (see <see cref="PlayHere"/>).
+    /// </summary>
+    /// <param name="sender">The FSM of the part.</param>
+    /// <param name="fsmName">The name of the FSM that the part told, or null for all of them.</param>
     /// <param name="eventName">The event with which the part told the copy.</param>
-    private void OnCopyCaughtThePlayer(string eventName) {
-        if (!_isControlled) {
+    private void OnCopyCaught(HutongGames.PlayMaker.Fsm sender, string? fsmName, string eventName) {
+        if (!_isControlled || Object.Client == null) {
             return;
         }
 
@@ -2042,13 +2118,26 @@ internal partial class Entity {
             var fsm = _fsms.Client[fsmIndex];
 
             // One that runs by itself on the copy heard the event
-            if (fsm == null || fsm.enabled || StateOfCopy(fsm) is not { } state ||
-                EntityFsmActions.FindTransition(fsm.Fsm, state, eventName) == null) {
+            if (fsm == null || fsm.enabled || !string.IsNullOrEmpty(fsmName) && fsm.FsmName != fsmName ||
+                StateOfCopy(fsm) is not { } state || EntityFsmActions.FindTransition(fsm.Fsm, state, eventName) == null) {
                 continue;
             }
 
-            CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, eventName);
+            CopyTouchedLocalPlayer?.Invoke(this, (byte) fsmIndex, eventName, ToldValues.From(sender, Object.Client, fsm));
         }
+    }
+
+    /// <summary>
+    /// Whether what set a part off is a thing of the local player that the game marks for catching. The bombs, the
+    /// flier, the bola and the like carry a <see cref="CustomTag"/>, by which the parts that catch things - a tendril
+    /// that reels them in, a maw that sucks them up - tell what they caught, and which kind of catch it is. Only this
+    /// game's player's own things count: those of the partner here are copies, and the partner's game catches the real
+    /// ones and says so.
+    /// </summary>
+    /// <param name="collider">The collider that last set the part's FSM off.</param>
+    private static bool IsCatchableThingOfTheLocalPlayer(Collider2D? collider) {
+        return collider != null && collider.GetComponent<CustomTag>() != null &&
+               LocalToolComponent.IsLocalTool(collider.gameObject);
     }
 
     /// <summary>
