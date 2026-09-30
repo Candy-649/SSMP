@@ -469,6 +469,8 @@ internal partial class Entity {
             ProcessClientFsm(fsm);
         }
 
+        KeepSavesOfTheCopy();
+
         _components = new Dictionary<EntityComponentType, EntityComponent>();
         HandleComponents(types);
 
@@ -602,10 +604,10 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether an FSM is one that each game runs by itself, as the registry entry of the entity says (see
-    /// <see cref="EntityRegistryEntry.EachGameFsms"/>).
+    /// <see cref="EntityRegistryEntry.EachGameFsms"/> and <see cref="EntityRegistryEntry.HitterGameFsms"/>).
     /// </summary>
     private bool IsRunByEachGame(PlayMakerFSM fsm) {
-        return EntityRegistry.IsEachGameFsm(Type, fsm.FsmName);
+        return EntityRegistry.IsRunByEachGame(Type, fsm.FsmName);
     }
 
     /// <summary>
@@ -640,6 +642,13 @@ internal partial class Entity {
                         }
 
                         _motionReadsOfTheCopy.Add(getVelocity);
+                        break;
+                    // Whether the copy is there at all is the scene host's to say. A creature that the save of this
+                    // game calls dead switches itself off as it starts, while the save of the scene host's player may
+                    // call it alive: the copy was gone for this player while the other went on fighting it
+                    case ActivateGameObject { gameObject.OwnerOption: OwnerDefaultOption.UseOwner } switchOff
+                        when !switchOff.activate.UsesVariable && !switchOff.activate.Value:
+                        switchOff.Enabled = false;
                         break;
                 }
             }
@@ -685,7 +694,8 @@ internal partial class Entity {
                 _netClient,
                 Id,
                 Object,
-                healthManager
+                healthManager,
+                Type
             );
             _components[EntityComponentType.Death] = hmComponent;
             _components[EntityComponentType.Health] = hmComponent;
@@ -1534,6 +1544,7 @@ internal partial class Entity {
 
         _isControlled = false;
         _isSceneHostDetermined = true;
+        SaveWhereItRuns(copyRuns: false);
 
         foreach (var component in _components.Values) {
             component.IsControlled = false;
@@ -1563,6 +1574,7 @@ internal partial class Entity {
         }
 
         _isSceneHostDetermined = true;
+        SaveWhereItRuns(copyRuns: true);
 
         // The hook stays while the other game runs this creature: it is what keeps the room's own copy from being
         // switched on behind our back and flashing on screen. It goes when this game takes the creature over.
@@ -1711,6 +1723,7 @@ internal partial class Entity {
             }
 
             _isControlled = false;
+            SaveWhereItRuns(copyRuns: false);
 
             foreach (var component in _components.Values) {
                 component.IsControlled = false;
@@ -1880,6 +1893,10 @@ internal partial class Entity {
 
         StopRunningHere();
         EntityFsmActions.LeaveStatesOf(_fsms.Client);
+
+        // What the copy kept in the save goes to the room's own creature, which saves it from now on
+        HandSaveToTheRoom();
+        SaveWhereItRuns(copyRuns: false);
 
         var clientActive = Object.Client.activeSelf;
         Object.Client.SetActive(false);

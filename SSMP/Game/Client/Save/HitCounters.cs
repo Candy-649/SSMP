@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Entity;
 
 namespace SSMP.Game.Client.Save;
 
@@ -26,13 +27,17 @@ internal static class HitCounters {
     /// A blow that takes the last of its health is told of once more, before the creature dies
     /// (HealthManagerComponent). That usually comes in the same packet as this, and a thorn that counted it then waits
     /// a moment in which it hears nothing.
+    /// A state machine that each game runs by itself is left out: one that shows the hits hears of the partner's
+    /// elsewhere, and one that pays the player who struck, like the shards a creature flings, never hears of them, or
+    /// the scene host's player was paid for the partner's blows.
     /// </summary>
     /// <param name="healthManager">The creature.</param>
     /// <param name="hit">The hit of the partner.</param>
-    public static void Count(HealthManager healthManager, HitInstance hit) {
+    /// <param name="type">The type of the creature's entity.</param>
+    public static void Count(HealthManager healthManager, HitInstance hit, EntityType type) {
         foreach (var eventName in EventsOf(hit)) {
             foreach (var fsm in healthManager.GetComponents<PlayMakerFSM>()) {
-                if (CountsOn(fsm, eventName)) {
+                if (!EntityRegistry.IsRunByEachGame(type, fsm.FsmName) && CountsOn(fsm, eventName)) {
                     fsm.SendEvent(eventName);
                 }
             }

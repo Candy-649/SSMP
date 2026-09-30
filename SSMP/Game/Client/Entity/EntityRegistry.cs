@@ -41,6 +41,12 @@ internal static class EntityRegistry {
     private static readonly Dictionary<EntityType, HashSet<string>> EachGameFsms = new();
 
     /// <summary>
+    /// For each type of entity whose entry names any, the FSMs that each game runs by itself for the hits of its own
+    /// player only (see <see cref="EntityRegistryEntry.HitterGameFsms"/>).
+    /// </summary>
+    private static readonly Dictionary<EntityType, HashSet<string>> HitterGameFsms = new();
+
+    /// <summary>
     /// For each type of entity whose entry names any, the FSMs that each game runs by itself from a state on, with that
     /// state (see <see cref="EntityRegistryEntry.EachGameFrom"/>).
     /// </summary>
@@ -65,6 +71,22 @@ internal static class EntityRegistry {
     /// </summary>
     public static bool IsEachGameFsm(EntityType type, string fsmName) {
         return EachGameFsms.TryGetValue(type, out var names) && names.Contains(fsmName);
+    }
+
+    /// <summary>
+    /// Whether an FSM of an entity of the given type is one that each game runs by itself for the hits of its own player
+    /// only (see <see cref="EntityRegistryEntry.HitterGameFsms"/>).
+    /// </summary>
+    public static bool IsHitterGameFsm(EntityType type, string fsmName) {
+        return HitterGameFsms.TryGetValue(type, out var names) && names.Contains(fsmName);
+    }
+
+    /// <summary>
+    /// Whether an FSM of an entity of the given type is run by each game by itself, whichever of the two kinds it is:
+    /// none of what it does is sent, and the copy of a scene client runs it too.
+    /// </summary>
+    public static bool IsRunByEachGame(EntityType type, string fsmName) {
+        return IsEachGameFsm(type, fsmName) || IsHitterGameFsm(type, fsmName);
     }
 
     /// <summary>
@@ -107,6 +129,14 @@ internal static class EntityRegistry {
                 }
 
                 names.UnionWith(eachGameFsms);
+            }
+
+            if (entry.HitterGameFsms is { Count: > 0 } hitterGameFsms) {
+                if (!HitterGameFsms.TryGetValue(entry.Type, out var names)) {
+                    HitterGameFsms[entry.Type] = names = new HashSet<string>(StringComparer.Ordinal);
+                }
+
+                names.UnionWith(hitterGameFsms);
             }
 
             if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {
@@ -295,6 +325,18 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("each_game_fsms")]
     public List<string>? EachGameFsms { get; set; }
+
+    /// <summary>
+    /// FSMs of the entity that each game runs by itself for the hits of its own player only, like the one that flings
+    /// shards at whoever strikes the creature. Each game runs it on the creature it shows - the room's own in the scene
+    /// host's game, the copy in a scene client's - and neither hears of the partner's hits, so each player is paid for
+    /// their own and the partner's blows pay nothing here. None of what it does is sent, and what it keeps in the save,
+    /// like how many shards are left, each save keeps for its own player (Entity.KeepSavesOfTheCopy). Run by the scene
+    /// host alone, it flung shards in the scene host's game for the hits of both players, and the other player never
+    /// got one.
+    /// </summary>
+    [JsonProperty("hitter_game_fsms")]
+    public List<string>? HitterGameFsms { get; set; }
 
     /// <summary>
     /// FSMs of the entity that each game runs by itself from a state on, by name, with that state: the end of a boss

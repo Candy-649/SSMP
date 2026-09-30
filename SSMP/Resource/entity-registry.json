@@ -855,6 +855,9 @@
     "fsm_names": [
       "Control",
       "Drop Shards"
+    ],
+    "hitter_game_fsms": [
+      "Drop Shards"
     ]
   },
   {

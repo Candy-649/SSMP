@@ -23,6 +23,11 @@ internal class HealthManagerComponent : EntityComponent {
     private readonly HostClientPair<HealthManager> _healthManager;
 
     /// <summary>
+    /// The type of the entity, which says which of its FSMs hear of the hits of the player of their own game only.
+    /// </summary>
+    private readonly EntityType _type;
+
+    /// <summary>
     /// Host death effects used to capture the emitted corpse snapshot.
     /// </summary>
     private readonly EnemyDeathEffects? _hostDeathEffects;
@@ -97,9 +102,11 @@ internal class HealthManagerComponent : EntityComponent {
         NetClient netClient,
         ushort entityId,
         HostClientPair<GameObject> gameObject,
-        HostClientPair<HealthManager> healthManager
+        HostClientPair<HealthManager> healthManager,
+        EntityType type
     ) : base(netClient, entityId, gameObject) {
         _healthManager = healthManager;
+        _type = type;
 
         _hostDeathEffects = gameObject.Host.GetComponent<EnemyDeathEffects>();
         if (_hostDeathEffects != null) {
@@ -532,8 +539,8 @@ internal class HealthManagerComponent : EntityComponent {
         // The partner's blow arrives here as health alone, so the creature is told the same as for a blow of its own.
         if (killsHost) {
             var hostObject = _healthManager.Host!.gameObject;
-            FSMUtility.SendEventToGameObject(hostObject, "HIT", false);
-            FSMUtility.SendEventToGameObject(hostObject, "TOOK DAMAGE", false);
+            TellOfPartnerBlow(hostObject, "HIT");
+            TellOfPartnerBlow(hostObject, "TOOK DAMAGE");
         }
 
         _lastHp = newHp;
@@ -548,6 +555,22 @@ internal class HealthManagerComponent : EntityComponent {
 
         if (killsHost) {
             _healthManager.Host!.Die(null, AttackTypes.Generic, true);
+        }
+    }
+
+    /// <summary>
+    /// Tells the FSMs of the creature an event of the partner's last blow, the way the game's own FSMUtility tells all of
+    /// them, except those that each game runs for the hits of its own player only: one of those pays whoever struck, and
+    /// this blow was the partner's (see <see cref="EntityRegistryEntry.HitterGameFsms"/>).
+    /// </summary>
+    /// <param name="hostObject">The room's own creature.</param>
+    /// <param name="eventName">The name of the event.</param>
+    private void TellOfPartnerBlow(GameObject hostObject, string eventName) {
+        var fsmEvent = HutongGames.PlayMaker.FsmEvent.FindEvent(eventName);
+        foreach (var fsm in hostObject.GetComponents<PlayMakerFSM>()) {
+            if (!EntityRegistry.IsHitterGameFsm(_type, fsm.FsmName)) {
+                fsm.Fsm.Event(fsmEvent);
+            }
         }
     }
 
