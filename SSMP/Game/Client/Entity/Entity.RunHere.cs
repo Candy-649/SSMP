@@ -226,6 +226,24 @@ internal partial class Entity {
     public bool LeadsACatch => _runHere != null && _runHereLed;
 
     /// <summary>
+    /// Whether the FSM of the copy that runs here plays the combo of a catch that one of the game's catching parts
+    /// named (see <see cref="CatchEvents"/>), which the scene host plays by itself.
+    /// </summary>
+    private bool PlaysACombo => _runHere != null && !_runHereLed && !_runHereForGood && _runHereCombo != null;
+
+    /// <summary>
+    /// The states of catches that the partner's game leads which came before the input they belong to - the packet of
+    /// the input was lost on the way and sent again - kept for a while for the input to take (see
+    /// <see cref="TakeEarlyCatchStates"/>).
+    /// </summary>
+    private readonly List<(byte FsmIndex, byte Number, byte Step, string State, float Heard)> _earlyCatchStates = [];
+
+    /// <summary>
+    /// How long a state of a catch that came before its input is kept, in seconds.
+    /// </summary>
+    private const float EarlyCatchStateLife = 5f;
+
+    /// <summary>
     /// Whether the copy of any entity but the given one plays a catch that this game leads, which may hold the local
     /// player now: nothing else lets them go then (see <see cref="EntityFsmActions.LetGoOfTheHeldLocalPlayer"/>).
     /// </summary>
@@ -498,6 +516,12 @@ internal partial class Entity {
         // of: a state that runs nothing that is sent is otherwise only sent at the next look at the FSMs
         SendStateChange(fsmIndex);
         SendEcho(start.Anticipation, fsmIndex, reached == null ? NotTaken : (byte) Array.IndexOf(fsm.States, reached));
+
+        // Only after the echo, which says where the input itself took it
+        if (lead != null && _leads.Contains(lead)) {
+            TakeEarlyCatchStates(lead);
+        }
+
         return sameWay;
     }
 
@@ -959,6 +983,7 @@ internal partial class Entity {
         }
 
         var led = _runHereLed;
+        var (ledIndex, ledCatch, ledStep) = (_runHereIndex, _runHereCatch, _runHereStep);
         _runHere = null;
         _runHereCombo = null;
         _runHereLed = false;
@@ -980,7 +1005,13 @@ internal partial class Entity {
 
         HeldFsms.Remove(fsm);
 
-        if (led && letGoOfThePlayer && !AnyLeadsACatch(this)) {
+        if (!led || !letGoOfThePlayer) {
+            return;
+        }
+
+        // The scene host's FSM lets go too, rather than hold nobody until it gives up waiting (an empty state)
+        CatchWentOn?.Invoke(this, ledIndex, ledCatch, (byte) (ledStep + 1), "");
+        if (!AnyLeadsACatch(this)) {
             EntityFsmActions.LetGoOfTheHeldLocalPlayer($"the copy of entity {Id} no longer plays the catch");
         }
     }
@@ -1049,18 +1080,69 @@ internal partial class Entity {
     /// <param name="catchNumber">The number that the catch went under.</param>
     /// <param name="step">The number of the step, counting from one after the input.</param>
     /// <param name="stateName">The state.</param>
+    /// <remarks>An empty state says that the partner's copy stopped playing the catch before it was over: the FSM
+    /// lets go at once (see <see cref="LetGo"/>).</remarks>
     public void TakeCatchState(byte fsmIndex, byte catchNumber, byte step, string stateName) {
-        var lead = _leads.Find(led => led.FsmIndex == fsmIndex);
+        if (_isControlled) {
+            return;
+        }
 
-        // Steps are compared by the sign of their difference, so that going round from the largest to one reads as
-        // one forward; an older one, come late, says nothing any more
-        if (_isControlled || lead == null || lead.Number != catchNumber || (sbyte) (step - lead.Step) <= 0) {
+        var lead = _leads.Find(led => led.FsmIndex == fsmIndex);
+        if (lead == null || lead.Number != catchNumber) {
+            // Its input may still be on the way
+            var now = Time.unscaledTime;
+            _earlyCatchStates.RemoveAll(early => now - early.Heard > EarlyCatchStateLife);
+            _earlyCatchStates.Add((fsmIndex, catchNumber, step, stateName, now));
+            return;
+        }
+
+        TakeCatchStep(lead, step, stateName);
+    }
+
+    /// <summary>
+    /// Takes a step of a catch that the partner's game leads, on the FSM that follows it, unless a later step has
+    /// been taken already. Steps are compared by the sign of their difference, so that going round from the largest to
+    /// one reads as one forward; an older one, come late, says nothing any more.
+    /// </summary>
+    /// <param name="lead">The catch.</param>
+    /// <param name="step">The number of the step.</param>
+    /// <param name="stateName">The state, or an empty one if the partner's copy stopped playing the catch.</param>
+    private void TakeCatchStep(Lead lead, byte step, string stateName) {
+        if ((sbyte) (step - lead.Step) <= 0) {
             return;
         }
 
         lead.Step = step;
         lead.LastHeard = Time.unscaledTime;
-        FollowCatch(lead, stateName);
+        if (stateName.Length > 0) {
+            FollowCatch(lead, stateName);
+            return;
+        }
+
+        EndLead(lead);
+        LetGo(lead, "was told that the partner's copy stopped playing the catch");
+    }
+
+    /// <summary>
+    /// Takes the states of a catch that the partner's game leads which came before its input (see
+    /// <see cref="_earlyCatchStates"/>), in the order of their steps, now that the FSM follows the catch.
+    /// </summary>
+    /// <param name="lead">The catch.</param>
+    private void TakeEarlyCatchStates(Lead lead) {
+        var early = _earlyCatchStates.FindAll(state => state.FsmIndex == lead.FsmIndex && state.Number == lead.Number);
+        if (early.Count == 0) {
+            return;
+        }
+
+        _earlyCatchStates.RemoveAll(state => state.FsmIndex == lead.FsmIndex && state.Number == lead.Number);
+        early.Sort((a, b) => ((sbyte) (a.Step - b.Step)).CompareTo(0));
+        foreach (var state in early) {
+            if (!_leads.Contains(lead)) {
+                return;
+            }
+
+            TakeCatchStep(lead, state.Step, state.State);
+        }
     }
 
     /// <summary>

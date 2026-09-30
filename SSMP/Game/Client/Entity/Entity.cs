@@ -1953,7 +1953,7 @@ internal partial class Entity {
     /// <summary>
     /// Raised on a scene client when its player touched the copy of an entity, or one of the copy's parts caught them
     /// or a thing of theirs: the entity, the index of the FSM, the event that the FSM is sent for it, for a catch what
-    /// the part set on the FSM along with it (null for a touch), and whether the part that told it felt the player
+    /// the part set on the FSM along with it (null for a touch), and whether the part that told it grabbed the player
     /// themselves (see <see cref="HearCopyTold"/>). What the event leads to is played on the copy at once where the
     /// entity or the catch says so (see <see cref="PlayHere"/>) and sent to the scene host.
     /// </summary>
@@ -1998,25 +1998,21 @@ internal partial class Entity {
     private static HutongGames.PlayMaker.Fsm? _triggeredFsm;
 
     /// <summary>
-    /// The layer of the player's body.
+    /// The events with which the game grabs the player: holds them, stuns them and hides them, until the creature that
+    /// grabbed them lets go.
     /// </summary>
-    private const int PlayerLayer = 9;
+    private static readonly HashSet<string> GrabEvents = ["HERO GRAB", "HERO GRAB VULNERABLE"];
 
     /// <summary>
-    /// The layer of the player's hit box.
+    /// Whether each state of the FSMs of the parts of copies grabs the player, found the first time a part tells its
+    /// copy anything from there (see <see cref="GrabsThePlayer"/>).
     /// </summary>
-    private const int HeroBoxLayer = 20;
+    private static readonly ConditionalWeakTable<FsmState, StrongBox<bool>> GrabbingStates = new();
 
     /// <summary>
-    /// Whether each FSM of the parts of copies feels the player, found the first time it tells its copy anything (see
-    /// <see cref="FeelsThePlayer"/>).
+    /// The fields of each kind of action that hold the name of an event or an event, by type.
     /// </summary>
-    private static readonly ConditionalWeakTable<HutongGames.PlayMaker.Fsm, StrongBox<bool>> FeelingFsms = new();
-
-    /// <summary>
-    /// The field of each kind of action that holds the layer of what sets it off, by type, or null for one without.
-    /// </summary>
-    private static readonly Dictionary<Type, FieldInfo?> CollideLayerFields = new();
+    private static readonly Dictionary<Type, FieldInfo[]> EventNameFields = new();
 
     /// <summary>
     /// The local player's character and the collider of their hit box, found once for each character.
@@ -2118,8 +2114,8 @@ internal partial class Entity {
     /// <summary>
     /// Hears an FSM that runs in this game telling the copy of an entity an event, as a part of the creature does once
     /// it caught something: the local player, which the game's catching parts say with <see cref="CatchEvents"/>, or
-    /// which a part that feels for the player tells from where it is touching them (see <see cref="FeelsThePlayer"/>) -
-    /// a tendril that grabs them, a charge that seizes them to drain their silk - or a thing of theirs that the game
+    /// which a part that grabs the player tells from where it is touching them (see <see cref="GrabsThePlayer"/>) - a
+    /// tendril that reels them in, a charge that seizes them to drain their silk - or a thing of theirs that the game
     /// marks for catching (see <see cref="IsCatchableThingOfTheLocalPlayer"/>). The part runs by itself in this game,
     /// and did to what it caught all that it does to it, but the copy's own FSMs are switched off and did not hear it:
     /// the player's flier that a tendril took simply was gone, and the creature never ate it in either game; a player
@@ -2153,10 +2149,11 @@ internal partial class Entity {
         }
 
         // A thing counts only while it is entering the part, the collider that the part keeps as the one that set it
-        // off being that thing's; the one that set it off last stays there after
+        // off being that thing's; the one that set it off last stays there after. What the parts say while the copy
+        // plays the combo of a catch of the local player is part of that combo.
         if (sender == _triggeredFsm && IsCatchableThingOfTheLocalPlayer(sender.TriggerCollider2D)) {
             entity.OnCopyCaught(sender, fsmName, eventName, false);
-        } else if (FeelsThePlayer(sender) && TouchesTheLocalPlayer(part) &&
+        } else if (!entity.PlaysACombo && GrabsThePlayer(sender) && TouchesTheLocalPlayer(part) &&
                    !entity.OnCopyCaught(sender, fsmName, eventName, true) && !AnyLeadsACatch()) {
             // A part may grab the player itself before it tells the creature, and nothing goes on with a catch that
             // no FSM of the copy can take from where it is: the player is let go at once
@@ -2175,10 +2172,10 @@ internal partial class Entity {
     /// <param name="sender">The FSM of the part.</param>
     /// <param name="fsmName">The name of the FSM that the part told, or null for all of them.</param>
     /// <param name="eventName">The event with which the part told the copy.</param>
-    /// <param name="feltThePlayer">Whether the part felt the player themselves, rather than being one that names its
-    /// catch or having caught a thing of theirs.</param>
+    /// <param name="grabbedThePlayer">Whether the part grabbed the player themselves, rather than being one that names
+    /// its catch or having caught a thing of theirs.</param>
     /// <returns>Whether any FSM of the copy took the event.</returns>
-    private bool OnCopyCaught(HutongGames.PlayMaker.Fsm sender, string? fsmName, string eventName, bool feltThePlayer) {
+    private bool OnCopyCaught(HutongGames.PlayMaker.Fsm sender, string? fsmName, string eventName, bool grabbedThePlayer) {
         if (!_isControlled || Object.Client == null) {
             return false;
         }
@@ -2196,7 +2193,7 @@ internal partial class Entity {
 
             taken = true;
             CopyTouchedLocalPlayer?.Invoke(
-                this, (byte) fsmIndex, eventName, ToldValues.From(sender, Object.Client, fsm), feltThePlayer
+                this, (byte) fsmIndex, eventName, ToldValues.From(sender, Object.Client, fsm), grabbedThePlayer
             );
         }
 
@@ -2235,50 +2232,62 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether an FSM of a part feels for the player: something that touches the part on the layer of the player's
-    /// body or hit box sets it off, or it asks whether the player can be grabbed. Found once for each FSM. The
-    /// partner's figure in this game touches nothing of the kind (it is on the default layer), so what such a part
-    /// feels here is the local player.
+    /// Whether an FSM of a part grabs the player with what it tells its creature now: the state it tells it from, or
+    /// the one it came there from, asks whether they can be grabbed or names the game's grab (see
+    /// <see cref="GrabEvents"/>), itself or in a template it runs. What else the same part tells - a thing it took
+    /// from someone - is no grab, nor is anything a part tells that only strikes the player - a blade, a coil - like a
+    /// parry: the ones that catch the player for a combo say so by name (<see cref="CatchEvents"/>). The partner's
+    /// figure in this game touches nothing (it is on the default layer), so the player such a part grabs here is the
+    /// local one.
     /// </summary>
-    private static bool FeelsThePlayer(HutongGames.PlayMaker.Fsm fsm) {
-        if (FeelingFsms.TryGetValue(fsm, out var known)) {
-            return known.Value;
-        }
+    private static bool GrabsThePlayer(HutongGames.PlayMaker.Fsm fsm) {
+        return fsm.ActiveState is { } state && Grabs(state) || fsm.PreviousActiveState is { } previous && Grabs(previous);
 
-        var feels = false;
-        foreach (var state in fsm.States) {
-            foreach (var action in state.Actions) {
-                if (action.GetType().Name.StartsWith("CanHeroBeGrabbed", StringComparison.Ordinal) ||
-                    CollideLayerOf(action) is PlayerLayer or HeroBoxLayer) {
-                    feels = true;
-                    break;
-                }
+        static bool Grabs(FsmState state) {
+            if (GrabbingStates.TryGetValue(state, out var known)) {
+                return known.Value;
             }
 
-            if (feels) {
-                break;
-            }
+            var grabs = Array.Exists(
+                state.Actions,
+                action => AsksOrNamesTheGrab(action) ||
+                          EntityFsmActions.SubFsmOf(action) is { States: { } states } &&
+                          Array.Exists(states, sub => Array.Exists(sub.Actions, AsksOrNamesTheGrab))
+            );
+            GrabbingStates.Add(state, new StrongBox<bool>(grabs));
+            return grabs;
         }
 
-        FeelingFsms.Add(fsm, new StrongBox<bool>(feels));
-        return feels;
+        static bool AsksOrNamesTheGrab(FsmStateAction action) {
+            return action.GetType().Name.StartsWith("CanHeroBeGrabbed", StringComparison.Ordinal) ||
+                   NamesAGrabEvent(action);
+        }
     }
 
     /// <summary>
-    /// The layer of what sets an action off, for the actions that are set off by what touches them, or null.
+    /// Whether an action is given one of the <see cref="GrabEvents"/>, as an event or by its name.
     /// </summary>
-    private static int? CollideLayerOf(FsmStateAction action) {
+    private static bool NamesAGrabEvent(FsmStateAction action) {
         var type = action.GetType();
-        if (!CollideLayerFields.TryGetValue(type, out var field)) {
-            field = type.GetField("collideLayer", BindingFlags.Instance | BindingFlags.Public);
-            CollideLayerFields[type] = field;
+        if (!EventNameFields.TryGetValue(type, out var fields)) {
+            fields = Array.FindAll(
+                type.GetFields(BindingFlags.Instance | BindingFlags.Public),
+                field => field.FieldType == typeof(FsmString) || field.FieldType == typeof(FsmString[]) ||
+                         field.FieldType == typeof(FsmEvent)
+            );
+            EventNameFields[type] = fields;
         }
 
-        return field?.GetValue(action) switch {
-            FsmInt layer => layer.Value,
-            int layer => layer,
-            _ => null
-        };
+        foreach (var field in fields) {
+            switch (field.GetValue(action)) {
+                case FsmString { Value: { } name } when GrabEvents.Contains(name):
+                case FsmEvent { Name: { } eventName } when GrabEvents.Contains(eventName):
+                case FsmString[] names when Array.Exists(names, name => name?.Value is { } value && GrabEvents.Contains(value)):
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

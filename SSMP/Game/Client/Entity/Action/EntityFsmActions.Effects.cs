@@ -517,13 +517,19 @@ internal static partial class EntityFsmActions {
     /// (see <see cref="PlayerEvents"/>): the player was hurt, caught in a tendril, let go.
     /// </summary>
     private static bool TellsTheRoomAboutThePlayer(FsmStateAction action) {
-        var broadcast = action switch {
+        return BroadcastOf(action) is { } broadcast && PlayerEvents.Contains(broadcast);
+    }
+
+    /// <summary>
+    /// The event that an action tells the whole room, for the actions that do, or null.
+    /// </summary>
+    private static string? BroadcastOf(FsmStateAction action) {
+        return action switch {
             SendEventToRegister register => register.eventName.Value,
             SendEventToRegisterV2 register => register.EventName.Value,
             SendEventToRegisterDelay register => register.EventName.Value,
             _ => null
         };
-        return broadcast != null && PlayerEvents.Contains(broadcast);
     }
 
     /// <summary>
@@ -599,9 +605,11 @@ internal static partial class EntityFsmActions {
             return true;
         }
 
+        // A festival flea being tinked is not the player's: only the game that runs the fleas counts it
         var own = ShakeAndFlashNames.Contains(name) || PlayerMoodNames.Contains(name)
             ? action.State != null && IsAboutThePlayer(action.State)
-            : PlayerActionNames.Contains(name) || NamesThePlayer(action) || TellsTheRoomAboutThePlayer(action) ||
+            : PlayerActionNames.Contains(name) || NamesThePlayer(action) ||
+              TellsTheRoomAboutThePlayer(action) && BroadcastOf(action) != "FLEA TINKED" ||
               RunsSomethingOnThePlayer(action);
         return own && !DecidesWhereItGoes(action);
     }
@@ -612,7 +620,7 @@ internal static partial class EntityFsmActions {
     /// a mask.
     /// </summary>
     private static bool RunsSomethingOnThePlayer(FsmStateAction action) {
-        if (action is not RunFSMAction || RunFsmField?.GetValue(action) is not HutongGames.PlayMaker.Fsm { States: { } states }) {
+        if (SubFsmOf(action) is not { States: { } states }) {
             return false;
         }
 
@@ -623,6 +631,13 @@ internal static partial class EntityFsmActions {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// The FSM that an action runs from a template, for the actions that do, or null.
+    /// </summary>
+    internal static HutongGames.PlayMaker.Fsm? SubFsmOf(FsmStateAction action) {
+        return action is RunFSMAction ? RunFsmField?.GetValue(action) as HutongGames.PlayMaker.Fsm : null;
     }
 
     /// <summary>

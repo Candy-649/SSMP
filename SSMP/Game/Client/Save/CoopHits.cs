@@ -1475,18 +1475,18 @@ internal class CoopHits {
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
     /// <param name="eventName">The event that the FSM sends itself for a touch, or that the part told it.</param>
     /// <param name="caught">For a catch, what the part set on the FSM along with the event; null for a touch.</param>
-    /// <param name="feltThePlayer">Whether the part that told it felt the player themselves.</param>
+    /// <param name="grabbedThePlayer">Whether the part that told it grabbed the player themselves.</param>
     private void OnCopyTouchedLocalPlayer(
         Entity.Entity copied,
         byte fsmIndex,
         string eventName,
         Entity.ToldValues? caught,
-        bool feltThePlayer
+        bool grabbedThePlayer
     ) {
         PlayOrSend(
             copied, fsmIndex, eventName,
-            caught == null ? "touched" : feltThePlayer ? "was caught by" : "had something caught by", caught,
-            feltThePlayer
+            caught == null ? "touched" : grabbedThePlayer ? "was grabbed by" : "had something caught by", caught,
+            grabbedThePlayer
         );
     }
 
@@ -1503,18 +1503,18 @@ internal class CoopHits {
     /// <param name="what">What the local player did to the copy, for the log.</param>
     /// <param name="caught">For a catch, what the part that caught set on the FSM along with the event; null for a
     /// strike or a touch.</param>
-    /// <param name="feltThePlayer">Whether the part that told it felt the player themselves.</param>
+    /// <param name="grabbedThePlayer">Whether the part that told it grabbed the player themselves.</param>
     private void PlayOrSend(
         Entity.Entity copied,
         byte fsmIndex,
         string eventName,
         string what,
         Entity.ToldValues? caught = null,
-        bool feltThePlayer = false
+        bool grabbedThePlayer = false
     ) {
         if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
             // Alone in the room nothing goes on with the catch, which the part may have started on the player already
-            if (feltThePlayer && !Entity.Entity.AnyLeadsACatch()) {
+            if (grabbedThePlayer && !Entity.Entity.AnyLeadsACatch()) {
                 Entity.Action.EntityFsmActions.LetGoOfTheHeldLocalPlayer(
                     $"the partner is not there to take the catch on entity {copied.Id}"
                 );
@@ -1532,10 +1532,10 @@ internal class CoopHits {
             return;
         }
 
-        // What a creature does with a player that one of its parts felt is up to that player's game (PlayHere). Sent
+        // What a creature does with a player that one of its parts grabbed is up to that player's game (PlayHere). Sent
         // on its own, the scene host would hold nobody and wait on their struggles for good, so it is dropped here,
         // and a player that the part already held is let go, unless a copy plays a catch of them already
-        if (feltThePlayer) {
+        if (grabbedThePlayer) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which could not take '{eventName}' here, so " +
                 "nothing comes of it"
