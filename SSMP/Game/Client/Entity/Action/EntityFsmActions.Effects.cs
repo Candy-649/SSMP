@@ -615,6 +615,81 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The actions with which a creature puts one of its own things at the player character, turns it the way the
+    /// player faces, or takes where the player is, by the name of their type: the field that names the player, and the
+    /// field that names the thing that goes there or turns, if any.
+    /// </summary>
+    private static readonly Dictionary<string, (string Player, string? Thing)> PlayerReferences = new() {
+        ["SetPositionToObject"] = ("targetObject", "gameObject"),
+        ["SetPositionToObject2D"] = ("targetObject", "gameObject"),
+        ["MatchScaleSign"] = ("MatchTo", "Target"),
+        ["GetPosition"] = ("gameObject", null),
+        ["GetPosition2D"] = ("gameObject", null),
+        ["GetPosition2d"] = ("gameObject", null)
+    };
+
+    /// <summary>
+    /// Points an action at another figure instead of this game's player character, when with it a creature puts one of
+    /// its own things at the player - the creature itself, the stand-in of the player that it carries, a point it
+    /// flies to - turns one the way the player faces, or takes where the player is for its own things to go by: the
+    /// stand-in of a player it caught slides to the height it took. Nothing of the camera's is pointed elsewhere: the
+    /// camera follows this game's player, whatever the creature does.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="figure">The figure.</param>
+    /// <returns>The field that named the player, with what it held, to point the action back with (see
+    /// <see cref="PointBack"/>); null for any other action, which is left as it is.</returns>
+    internal static (FieldInfo Field, object? Before)? PointAtFigure(FsmStateAction action, UnityEngine.GameObject figure) {
+        var type = action.GetType();
+        var hero = HeroController.instance;
+        if (!PlayerReferences.TryGetValue(type.Name, out var names) || hero == null || action.Fsm == null) {
+            return null;
+        }
+
+        var heroObject = hero.gameObject;
+        var field = type.GetField(names.Player, BindingFlags.Instance | BindingFlags.Public);
+        if (field == null || ObjectIn(action, field) != heroObject) {
+            return null;
+        }
+
+        if (names.Thing != null) {
+            var thingField = type.GetField(names.Thing, BindingFlags.Instance | BindingFlags.Public);
+            var thing = thingField != null ? ObjectIn(action, thingField) : null;
+            var cameras = GameCameras.instance;
+            if (thing == null || thing.transform.IsChildOf(heroObject.transform) ||
+                cameras != null && thing.transform.IsChildOf(cameras.transform)) {
+                return null;
+            }
+        }
+
+        object? pointed = field.FieldType == typeof(FsmGameObject)
+            ? new FsmGameObject { Value = figure }
+            : field.FieldType == typeof(FsmOwnerDefault)
+                ? new FsmOwnerDefault {
+                    OwnerOption = OwnerDefaultOption.SpecifyGameObject,
+                    GameObject = new FsmGameObject { Value = figure }
+                }
+                : null;
+        if (pointed == null) {
+            return null;
+        }
+
+        var before = field.GetValue(action);
+        field.SetValue(action, pointed);
+        return (field, before);
+    }
+
+    /// <summary>
+    /// Points an action that <see cref="PointAtFigure"/> pointed at another figure back at what it named before.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="field">The field that named the player.</param>
+    /// <param name="before">What the field held before.</param>
+    internal static void PointBack(FsmStateAction action, FieldInfo field, object? before) {
+        field.SetValue(action, before);
+    }
+
+    /// <summary>
     /// Whether an action runs a template of an FSM that deals with the player character (see
     /// <see cref="DealsWithThePlayer"/>), like the one with which a creature grabs the player, hides them and takes
     /// a mask.

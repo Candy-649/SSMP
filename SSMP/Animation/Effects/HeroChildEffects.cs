@@ -230,7 +230,7 @@ internal class HeroChildEffects : AnimationEffect {
             }
         }
 
-        ShowBodyUnlessStoodIn(playerObject);
+        ShowBodyUnlessHidden(playerObject);
     }
 
     /// <summary>
@@ -247,20 +247,21 @@ internal class HeroChildEffects : AnimationEffect {
             }
         }
 
-        ShowBodyUnlessStoodIn(playerObject);
+        ShowBodyUnlessHidden(playerObject);
     }
 
     /// <summary>
-    /// Hides the own sprite of the character of another player while the copy of the stand-in is on, as the game hides
-    /// the hero's own sprite while its stand-in shows, and shows it otherwise.
+    /// Hides the own sprite of the character of another player while the game hides the hero's own sprite there - while
+    /// the copy of the stand-in is on, which shows in its place, and while a creature holds them, which shows them
+    /// itself (see <see cref="HeroHeld"/>) - and shows it otherwise.
     /// </summary>
-    private static void ShowBodyUnlessStoodIn(GameObject playerObject) {
+    internal static void ShowBodyUnlessHidden(GameObject playerObject) {
         if (!playerObject.TryGetComponent<MeshRenderer>(out var body)) {
             return;
         }
 
         var standIn = GetCopy(playerObject, StandInPath, false);
-        body.enabled = standIn == null || !standIn.activeSelf;
+        body.enabled = (standIn == null || !standIn.activeSelf) && !HeroHeld.IsHeld(playerObject);
     }
 
     /// <summary>

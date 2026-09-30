@@ -312,6 +312,13 @@ internal partial class Entity {
         _playedForPartner = [];
 
     /// <summary>
+    /// The actions of the FSMs that play a catch the partner's game leads with which the creature puts its own things
+    /// at this game's player or takes where the player is, pointed at the partner's figure instead for as long as the
+    /// others are kept off (see <see cref="KeepOff"/>), each with the field that named the player and what it held.
+    /// </summary>
+    private readonly Dictionary<FsmStateAction, (FieldInfo Field, object? Before)> _pointedAtPartner = new();
+
+    /// <summary>
     /// Plays at once what the local player's strike or touch makes the FSM at the given index of the copy do, for an
     /// entity whose registry entry says so, or what one of the copy's parts catching the local player makes it do: the
     /// copy's own FSM takes the event in the state the scene host says it is in - or where it is, if it runs here
@@ -816,8 +823,13 @@ internal partial class Entity {
 
         var fsm = hostFsm.Fsm;
         var muted = EntityFsmActions.PlayersOwnActionsOf(fsm);
+
+        // In a catch that the partner's game leads, what the creature puts at the player it caught goes to the
+        // partner's figure, and what it takes of where they are is taken from there: the stand-in of them that it
+        // carries was left where it was last, far from them, or slid off to the height of this game's player
+        var figure = catchStates != null ? PartnerFigure() : null;
         foreach (var action in muted) {
-            action.Enabled = false;
+            KeepOff(action, figure);
         }
 
         // Whatever the game's code does on the way, what is switched off is never left off for good
@@ -846,7 +858,7 @@ internal partial class Entity {
                 return false;
             }
 
-            action.Enabled = true;
+            LetBackIn(action);
             return true;
         });
 
@@ -891,7 +903,7 @@ internal partial class Entity {
             }
 
             foreach (var action in muted) {
-                action.Enabled = true;
+                LetBackIn(action);
             }
 
             _playedForPartner.RemoveAt(i);
@@ -912,10 +924,69 @@ internal partial class Entity {
         }
 
         foreach (var action in _playedForPartner[index].Muted) {
-            action.Enabled = true;
+            LetBackIn(action);
         }
 
         _playedForPartner.RemoveAt(index);
+    }
+
+    /// <summary>
+    /// Keeps an action that is this game's player's own off them while an FSM plays something of the partner's: one
+    /// with which the creature puts its own things at the player, or takes where the player is, goes by the partner's
+    /// figure instead when there is one (see <see cref="EntityFsmActions.PointAtFigure"/>), and any other is switched
+    /// off.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="figure">The partner's figure, or null to switch every such action off.</param>
+    private void KeepOff(FsmStateAction action, GameObject? figure) {
+        if (figure != null && EntityFsmActions.PointAtFigure(action, figure) is { } pointed) {
+            _pointedAtPartner[action] = pointed;
+            return;
+        }
+
+        action.Enabled = false;
+    }
+
+    /// <summary>
+    /// Lets an action that was kept off this game's player (see <see cref="KeepOff"/>) back at them.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    private void LetBackIn(FsmStateAction action) {
+        if (_pointedAtPartner.TryGetValue(action, out var pointed)) {
+            _pointedAtPartner.Remove(action);
+            EntityFsmActions.PointBack(action, pointed.Field, pointed.Before);
+            return;
+        }
+
+        action.Enabled = true;
+    }
+
+    /// <summary>
+    /// The figure of the partner nearest to the room's own object, whom a catch that their game leads is about, or
+    /// null if there is none in the room. There are two players, so the other one in the room is the partner.
+    /// </summary>
+    private GameObject? PartnerFigure() {
+        if (Object.Host == null) {
+            return null;
+        }
+
+        var hero = HeroController.instance != null ? HeroController.instance.gameObject : null;
+        var from = Object.Host.transform.position;
+        GameObject? nearest = null;
+        var nearestDistance = float.MaxValue;
+        foreach (var player in PlayerTargetRegistry.GetTrackedPlayers()) {
+            if (player == hero) {
+                continue;
+            }
+
+            var distance = (player.transform.position - from).sqrMagnitude;
+            if (distance < nearestDistance) {
+                nearest = player;
+                nearestDistance = distance;
+            }
+        }
+
+        return nearest;
     }
 
     /// <summary>
@@ -1225,8 +1296,9 @@ internal partial class Entity {
         }
 
         var muted = EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(action => after.Contains(action.State));
+        var figure = PartnerFigure();
         foreach (var action in muted) {
-            action.Enabled = false;
+            KeepOff(action, figure);
         }
 
         var index = _playedForPartner.FindIndex(played => played.Fsm == fsm);

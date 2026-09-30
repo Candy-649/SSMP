@@ -807,5 +807,8 @@ internal enum AnimationClip {
 
     // A clip that a part of the hero with an animation of its own plays, and particles on the hero that start or stop
     HeroPartClip,
-    HeroChildParticle
+    HeroChildParticle,
+
+    // Whether a creature holds the hero, which the game hides while it does
+    HeroHeld
 }
