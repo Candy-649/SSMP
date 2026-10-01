@@ -1845,6 +1845,25 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Gives the room's own creature the tint of the copy as this game takes it over. The copy has been tinted by the
+    /// scene host's colour actions all along, and the FSM goes on from where the copy was, without the state that tinted
+    /// it last. A crow that roosts in front of the room is drawn black until it flies at the player: the room's own one
+    /// had been made black by its own first states, before it was put to sleep for the other game to run, and went on
+    /// fighting black once this game took it over.
+    /// </summary>
+    private void TakeTintFromCopy() {
+        if (Object.Client.TryGetComponent<tk2dBaseSprite>(out var copySprite) &&
+            Object.Host.TryGetComponent<tk2dBaseSprite>(out var roomSprite)) {
+            roomSprite.color = copySprite.color;
+        }
+
+        if (Object.Client.TryGetComponent<SpriteRenderer>(out var copyRenderer) &&
+            Object.Host.TryGetComponent<SpriteRenderer>(out var roomRenderer)) {
+            roomRenderer.color = copyRenderer.color;
+        }
+    }
+
+    /// <summary>
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
@@ -2028,6 +2047,8 @@ internal partial class Entity {
                 LateUpdateAnimation(_animator.Host, clientAnimation, wrapMode);
             }
         }
+
+        TakeTintFromCopy();
 
         // How the copy was moving by itself is taken before its replays are stopped and it is switched off, for the
         // room's own object to carry on with (OwnMotionComponent)
