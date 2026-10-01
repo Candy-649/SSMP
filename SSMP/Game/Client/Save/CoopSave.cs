@@ -630,6 +630,8 @@ internal partial class CoopSave {
             return;
         }
 
+        // First, so that none of the others throwing on the way can keep it from running
+        GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
         ResetInteractions();
         OnWishTalkSceneChanged();
