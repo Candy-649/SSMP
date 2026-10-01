@@ -503,6 +503,69 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region GetScale
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, GetScale action) {
+        return false;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action, which is only done as a copy is set up (see
+    /// <see cref="EntityInitializer.InitializeFsm"/>): the copy notes its own size, as the room's own creature does as it
+    /// starts. A creature that hides by setting itself back to the size it noted was otherwise set to the 0 its variable
+    /// still held, and the burrowing worms could be seen by nobody but the scene host: only the dust they threw up.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, GetScale action) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null) {
+            return;
+        }
+
+        var scale = action.space == Space.World ? gameObject.transform.lossyScale : gameObject.transform.localScale;
+        action.vector.Value = scale;
+        action.xScale.Value = scale.x;
+        action.yScale.Value = scale.y;
+        action.zScale.Value = scale.z;
+    }
+
+    #endregion
+
+    #region GetRotation
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, GetRotation action) {
+        return false;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action, which is only done as a copy is set up, like <see cref="GetScale"/>:
+    /// the copy notes how it is turned, for the turning back it does when it hides.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, GetRotation action) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null) {
+            return;
+        }
+
+        var transform = gameObject.transform;
+        Vector3 angles;
+        if (action.space == Space.World) {
+            action.quaternion.Value = transform.rotation;
+            angles = transform.eulerAngles;
+        } else {
+            angles = transform.localEulerAngles;
+            action.quaternion.Value = Quaternion.Euler(angles);
+        }
+
+        action.vector.Value = angles;
+        action.xAngle.Value = angles.x;
+        action.yAngle.Value = angles.y;
+        action.zAngle.Value = angles.z;
+    }
+
+    #endregion
+
     #region PreSpawnGameObjects
 
     /// <summary>Builds network data from the FSM action.</summary>

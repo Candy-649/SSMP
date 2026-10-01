@@ -275,7 +275,8 @@ internal static partial class EntityFsmActions {
     /// </summary>
     private static readonly HashSet<string> ReadsWithoutActing = [
         "FindChild", "FindNamedChild", "GetChild", "GetParent", "GetRandomChild", "GetOwner", "GetHero",
-        "FindGameObject", "FindAlertRange", "GetPosition", "SetGameObject", "SpawnObjectFromGlobalPool", "FireAtTarget"
+        "FindGameObject", "FindAlertRange", "GetPosition", "GetScale", "GetRotation", "SetGameObject",
+        "SpawnObjectFromGlobalPool", "FireAtTarget"
     ];
 
     /// <summary>
