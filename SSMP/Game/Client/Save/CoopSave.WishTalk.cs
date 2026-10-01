@@ -967,26 +967,17 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="NPCControlBase.Interact"/>: key dialogue only starts while the partner is close by, and
-    /// otherwise the local player hears who is missing. The character that the partner talks to doesn't talk.
+    /// otherwise the local player hears who is missing.
     /// </summary>
     private void OnNpcInteract(Action<NPCControlBase> orig, NPCControlBase self) {
         var allowed = true;
         try {
-            if (_everChecked && GetCurrentMarker() is { } marker) {
-                // Only a board. Two players may talk to the same character at the same time, and for a wish they
-                // have to: each of them is asked by their own game, in their own conversation, and a wish is only
-                // taken when both have said yes at their own prompt. Turning one of them away from the character
-                // would be turning them away from the question. A board is different - there is one of it, and what
-                // is pinned to it changes as it is used - so that one still waits its turn.
-                if (self is QuestBoardInteractable && _partnerTalk?.Npc is { } partnerNpc && partnerNpc == self) {
-                    Chat(Lang.Pick(
-                        $"{GetPartnerName()} is using this board right now.",
-                        $"{GetPartnerName()} 正在用这块板子。"
-                    ));
-                    allowed = false;
-                } else if (self is PlayMakerNPC npc) {
-                    allowed = TryStartWishTalk(npc, marker);
-                }
+            // Two players may talk to the same character at the same time, and for a wish they have to: each of them
+            // is asked by their own game, in their own conversation, and a wish is only taken when both have said yes
+            // at their own prompt. Both may look at a board at once too; what one of them turns in or donates there
+            // meanwhile waits for the other (StartBoardTalk, CanDonateTogether)
+            if (_everChecked && GetCurrentMarker() is { } marker && self is PlayMakerNPC npc) {
+                allowed = TryStartWishTalk(npc, marker);
             }
         } catch (Exception e) {
             LogWishTalkError(e);

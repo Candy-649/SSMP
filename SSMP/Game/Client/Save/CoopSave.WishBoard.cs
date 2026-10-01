@@ -13,8 +13,9 @@ namespace SSMP.Game.Client.Save;
 /// wishes (see CoopSave.WishTalk): they need the partner close by, and the partner pays their own copy of what the board
 /// takes and gets the reward too. Whether the partner has that copy is asked right then (see CoopSave.WishCopyCheck), and
 /// a wish they are short for stays on the board. Without the partner close by, the board still opens to look at and
-/// accept wishes, and its wishes that are ready to turn in stay on it. Nobody else uses a board while a player turns in
-/// or donates there.
+/// accept wishes, and its wishes that are ready to turn in stay on it. Both players can look at a board at the same
+/// time; while one of them turns in or donates there, the other's board opens without turning in and doesn't take a
+/// donation.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -193,8 +194,9 @@ internal partial class CoopSave {
         // The partner started to turn in or donate here while the local hero walked up to the board
         if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
             Chat(Lang.Pick(
-                $"{GetPartnerName()} is using this board right now, so it opens without turning in wishes.",
-                $"{GetPartnerName()} 正在用这块板子，所以这次只打开，不交愿望。"
+                $"{GetPartnerName()} is turning in or donating at this board right now, so it opens without " +
+                "turning in wishes.",
+                $"{GetPartnerName()} 正在这块板子上交愿望或捐赠，所以这次只打开，不交愿望。"
             ));
             _wishTalk = new WishTalk(board, fsms, false);
             return true;
@@ -518,7 +520,10 @@ internal partial class CoopSave {
         }
 
         if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
-            Chat(Lang.Pick($"{GetPartnerName()} is using this board right now.", $"{GetPartnerName()} 正在用这块板子。"));
+            Chat(Lang.Pick(
+                $"{GetPartnerName()} is turning in or donating at this board right now. Donate once they are done.",
+                $"{GetPartnerName()} 正在这块板子上交愿望或捐赠，等交完再捐。"
+            ));
             return false;
         }
 
