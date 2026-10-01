@@ -117,8 +117,10 @@ internal partial class CoopSave {
         // left. The room counts what is still in the group of those creatures every few seconds, and in the game of the
         // player who doesn't run the room the room's own creatures only sleep there while their copies fight and die,
         // so it never counted down to none, and the character never got up to talk to that player. There is no event
-        // that takes it there from where it waits, so its state is set.
-        new(["Courier Scene"], "Save Courier", "", "Send Event", ["Count Enemies"], ["Idle", "Count Enemies"])
+        // that takes it there from where it waits, so its state is set. It stays rescued until the room loads again,
+        // so a partner who walks in later is told too, or they never have the conversation that follows.
+        new(["Courier Scene"], "Save Courier", "", "Send Event", ["Count Enemies"], ["Idle", "Count Enemies"],
+            lasting: true)
     ];
 
     /// <summary>
@@ -241,6 +243,44 @@ internal partial class CoopSave {
         Logger.Info(
             leaving ? $"Sent getting off the plate '{path}' to the partner" : $"Sent the plate '{path}' to the partner"
         );
+    }
+
+    /// <summary>
+    /// Sends a partner who has just walked into the room the ones of <see cref="WorldTriggerKinds"/> that went off here
+    /// and stay that way until the room loads again (<see cref="WorldTriggerKind.Lasting"/>). Otherwise what goes off
+    /// is only sent at the moment it does, which a partner who came in later never hears: the character that the room
+    /// had them rescue stayed cowering in their game, and the conversation that follows was lost to them.
+    /// </summary>
+    /// <param name="player">The player who walked in.</param>
+    internal void OnPlayerEnterScene(ClientPlayerData player) {
+        try {
+            if (_checkedWith != player.Id || GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+                return;
+            }
+
+            foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(
+                         FindObjectsInactive.Exclude, FindObjectsSortMode.None
+                     )) {
+                if (fsm == null || fsm.ActiveStateName is not { } stateName ||
+                    !WorldTriggerGoneOffStateNames.Contains(stateName) ||
+                    FindWorldTriggerKind(fsm.gameObject, fsm.FsmName, stateName) is not { Lasting: true }) {
+                    continue;
+                }
+
+                var path = ScenePath.Get(fsm.transform);
+                Send(new CoopSaveUpdate {
+                    TargetId = player.Id,
+                    Kind = CoopSaveUpdateKind.WorldTrigger,
+                    Scene = fsm.gameObject.scene.name,
+                    ObjectPath = path,
+                    FsmName = fsm.FsmName,
+                    StateName = stateName
+                });
+                Logger.Info($"Sent '{path}', which went off here before {player.Username} came in, to them");
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not send what went off here to {player.Username}, who came in: {e.Message}");
+        }
     }
 
     /// <summary>
@@ -504,7 +544,8 @@ internal partial class CoopSave {
             string goneOffStateName,
             string[] fromStateNames,
             string[] waitingStateNames,
-            bool keepOffThePlayer = false
+            bool keepOffThePlayer = false,
+            bool lasting = false
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -513,6 +554,7 @@ internal partial class CoopSave {
             FromStateNames = fromStateNames;
             WaitingStateNames = waitingStateNames;
             KeepOffThePlayer = keepOffThePlayer;
+            Lasting = lasting;
         }
 
         /// <summary>
@@ -556,5 +598,11 @@ internal partial class CoopSave {
         /// event sent by hand plays everything of the trap except what happens to that player.
         /// </summary>
         public bool KeepOffThePlayer { get; }
+
+        /// <summary>
+        /// Whether it stays in <see cref="GoneOffStateName"/> until its room loads again, so that a partner who walks
+        /// in afterwards is sent it too (<see cref="OnPlayerEnterScene"/>).
+        /// </summary>
+        public bool Lasting { get; }
     }
 }

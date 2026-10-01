@@ -1187,6 +1187,7 @@ internal class ClientManager : IClientManager {
         _arenaCoop.OnPlayerEnterScene();
         _bossRoomCoop.OnPlayerEnterScene();
         _entityManager.OnPlayerEnterScene();
+        _coopSave.OnPlayerEnterScene(playerData);
 
         try {
             PlayerEnterSceneEvent?.Invoke(playerData);
