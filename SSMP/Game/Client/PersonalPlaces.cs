@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -29,19 +30,45 @@ internal static class PersonalPlaces {
     ];
 
     /// <summary>
-    /// The loaded rooms that were looked through already, by their handle.
+    /// The things that each player has to themselves wherever a room has them, by how their names start, each with
+    /// what is under it: the floors that crumble under a player, or under their attack, and come back a moment later.
+    /// Both games used to break them together, so a floor that the partner stood on was gone under this player as
+    /// well, who then had to wait for it to come back - or, where lava rises behind them, fell in. The partner's body
+    /// sets none of them off here, so a floor stays whole here under a partner who is seen to fall through it. Floors
+    /// that stay broken are still shared, since the save keeps them (see CoopSave.WorldTriggerKinds).
     /// </summary>
-    private static readonly HashSet<int> LookedThrough = [];
+    private static readonly string[] Things = [
+        "moss_crumble_plat",
+        "lava_crumble_plat",
+        "bone_plat_01_crumble",
+        "bone_plat_02_crumble",
+        "bone_plat_crumble",
+        "crumble_plat_peak_",
+        "memory_ground_plat"
+    ];
 
     /// <summary>
-    /// What was in a place when its room was looked through, by instance ID.
+    /// The loaded rooms that were looked through already, by their handle, each with the instance IDs of what was taken
+    /// down in it.
+    /// </summary>
+    private static readonly Dictionary<int, List<int>> LookedThrough = [];
+
+    /// <summary>
+    /// What was in a place or a thing when its room was looked through, by instance ID.
     /// </summary>
     private static readonly HashSet<int> InPlace = [];
 
+    /// <summary>
+    /// The objects of the room being looked through.
+    /// </summary>
+    private static readonly List<Transform> Parts = [];
+
     static PersonalPlaces() {
         // A room is looked through as it loads, before its things have started. One that was loaded before anything
-        // was asked is looked through when one of its things is first asked about
+        // was asked is looked through when one of its things is first asked about. What was in a room is forgotten
+        // when the room is gone
         SceneManager.sceneLoaded += (scene, _) => LookThrough(scene);
+        SceneManager.sceneUnloaded += Forget;
     }
 
     /// <summary>
@@ -64,10 +91,18 @@ internal static class PersonalPlaces {
     }
 
     /// <summary>
-    /// Takes down what is in the places of a room, once per loaded room.
+    /// Takes down what is in the places and things of a room, once per loaded room.
     /// </summary>
     private static void LookThrough(Scene scene) {
-        if (!scene.IsValid() || !scene.isLoaded || !LookedThrough.Add(scene.handle)) {
+        if (!scene.IsValid() || !scene.isLoaded || LookedThrough.ContainsKey(scene.handle)) {
+            return;
+        }
+
+        var takenDown = new List<int>();
+        LookedThrough[scene.handle] = takenDown;
+
+        // What is kept across rooms is in none of them
+        if (scene.name == "DontDestroyOnLoad") {
             return;
         }
 
@@ -82,14 +117,58 @@ internal static class PersonalPlaces {
                     place = place.Find(path[index]);
                 }
 
-                if (place == null) {
-                    continue;
-                }
-
-                foreach (var part in place.GetComponentsInChildren<Transform>(true)) {
-                    InPlace.Add(part.gameObject.GetInstanceID());
+                if (place != null) {
+                    TakeDown(place, takenDown);
                 }
             }
+
+            top.GetComponentsInChildren(true, Parts);
+            foreach (var part in Parts) {
+                if (IsThing(part.name)) {
+                    TakeDown(part, takenDown);
+                }
+            }
+        }
+
+        Parts.Clear();
+    }
+
+    /// <summary>
+    /// Takes down an object and everything under it.
+    /// </summary>
+    private static void TakeDown(Transform root, List<int> takenDown) {
+        foreach (var part in root.GetComponentsInChildren<Transform>(true)) {
+            var id = part.gameObject.GetInstanceID();
+            if (InPlace.Add(id)) {
+                takenDown.Add(id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an object of this name is one of <see cref="Things"/>.
+    /// </summary>
+    private static bool IsThing(string name) {
+        foreach (var start in Things) {
+            if (name.StartsWith(start, StringComparison.Ordinal)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Forgets what was taken down in a room that is gone.
+    /// </summary>
+    private static void Forget(Scene scene) {
+        if (!LookedThrough.TryGetValue(scene.handle, out var takenDown)) {
+            return;
+        }
+
+        LookedThrough.Remove(scene.handle);
+        foreach (var id in takenDown) {
+            InPlace.Remove(id);
         }
     }
 }

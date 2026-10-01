@@ -81,12 +81,8 @@ internal partial class CoopSave {
         new(["Bone_Boulder"], "Control", "DROP", "Drop Antic", ["Idle", "Shake", "Drop Skip"],
             ["Idle", "Shake", "Idle Inert"]),
 
-        // Floors that crumble under a player. The two kinds are told apart by the event: one is sent what its
-        // collision sends, the other is sent the crumble directly, because its collision branch stops to read a
-        // collision that did not happen here.
-        new(["moss_crumble_plat", "lava_crumble_plat"], "Control", "COLLIDE", "Drop Antic", ["Idle"], ["Idle"]),
-        new(["bone_plat_", "crumble_plat_peak_"], "bone_crumble_plat", "CRUMBLE", "Crumble Antic", ["Idle"], ["Idle"]),
-        new(["bone_plat_", "crumble_plat_peak_"], "Control", "CRUMBLE", "Crumble Antic", ["Idle"], ["Idle"]),
+        // Floors that crumble under a player and come back a moment later are not here: each player has their own (see
+        // PersonalPlaces). Breaking them together left the other player waiting for the floor, or falling into lava.
 
         // Spikes that a step brings out of the floor, and spikes that a step brings down from above
         new(["Dust Trap Spike Plate"], "Control", "STEP", "Step", ["Idle"], ["Idle"]),
