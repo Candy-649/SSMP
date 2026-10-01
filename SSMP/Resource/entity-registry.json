@@ -800,7 +800,8 @@
     "type": "CrawJuror",
     "parent_name": null,
     "components": [
-      "Rotation"
+      "Rotation",
+      "Tint"
     ],
     "internal_name": "Crowman Juror Tiny",
     "fsm_names": [
@@ -3398,7 +3399,8 @@
     "type": "Craw",
     "parent_name": null,
     "components": [
-      "Rotation"
+      "Rotation",
+      "Tint"
     ],
     "internal_name": "Crow",
     "fsm_names": [

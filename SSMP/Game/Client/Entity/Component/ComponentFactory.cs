@@ -78,6 +78,8 @@ internal static class ComponentFactory {
                 return new HazardRespawnComponent(netClient, entityId, objects);
             case EntityComponentType.OwnMotion:
                 return new OwnMotionComponent(netClient, entityId, objects);
+            case EntityComponentType.Tint:
+                return new TintComponent(netClient, entityId, objects);
             default:
                 throw new ArgumentOutOfRangeException(nameof(type), type, $"Could not instantiate entity component for type: {type}");
         }

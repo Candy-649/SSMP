@@ -129,5 +129,11 @@ internal enum EntityComponentType : ushort {
     /// Not a component: the scene host's answer to something the player of a scene client did to the entity that their
     /// game played at once, sent in order with the rest (see <see cref="Entity.HearEcho"/>).
     /// </summary>
-    Echo
+    Echo,
+
+    /// <summary>
+    /// The colour of the sprite, for a player who walks in after the creature changed it (see
+    /// <see cref="TintComponent"/>).
+    /// </summary>
+    Tint
 }

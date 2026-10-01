@@ -1846,10 +1846,11 @@ internal partial class Entity {
 
     /// <summary>
     /// Gives the room's own creature the tint of the copy as this game takes it over. The copy has been tinted by the
-    /// scene host's colour actions all along, and the FSM goes on from where the copy was, without the state that tinted
-    /// it last. A crow that roosts in front of the room is drawn black until it flies at the player: the room's own one
-    /// had been made black by its own first states, before it was put to sleep for the other game to run, and went on
-    /// fighting black once this game took it over.
+    /// scene host's colour actions all along, and by the colour it had when this game walked in (TintComponent), and the
+    /// FSM goes on from where the copy was, without the state that tinted it last. A crow that roosts in front of the
+    /// room is drawn black until it flies at the player: the room's own one had been made black by its own first
+    /// states, before it was put to sleep for the other game to run, and went on fighting black once this game took it
+    /// over.
     /// </summary>
     private void TakeTintFromCopy() {
         if (Object.Client.TryGetComponent<tk2dBaseSprite>(out var copySprite) &&
