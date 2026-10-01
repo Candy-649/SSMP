@@ -672,7 +672,8 @@ internal partial class CoopSave {
                         : Lang.Pick($"{player.Username} agreed.", $"{player.Username} 同意了。"));
                     break;
                 case WishConfirmNo:
-                    AnswerHeldConfirm(update.Key, false, IsRaceHold(update.Key)
+                    // A turn-in that the partner's game refused because their copy is short says what they have
+                    AnswerHeldConfirm(update.Key, false, GetShortCopyRefusal(player, update) ?? (IsRaceHold(update.Key)
                         ? Lang.Pick(
                             $"{player.Username} didn't say yes, so the race didn't start.",
                             $"{player.Username} 没有选「是」，比赛没有开始。"
@@ -690,7 +691,7 @@ internal partial class CoopSave {
                         : Lang.Pick(
                             $"{player.Username} didn't agree, so nothing was taken.",
                             $"{player.Username} 没有同意，所以什么都没有拿走。"
-                        ));
+                        )));
                     break;
                 case WishConfirmGone:
                     if (_pendingConfirmAsk is { } waiting && waiting.Update.Key == update.Key) {
@@ -874,6 +875,13 @@ internal partial class CoopSave {
             return;
         }
 
+        // A turn-in takes a full copy from this save too, and this game looks in its own bag right now. When it is
+        // short, the partner hears it at once, with what this save has, rather than standing at their prompt until
+        // their time runs out for a yes that could never come
+        if (RefuseTurnInThisSaveCannotPay(player, update)) {
+            return;
+        }
+
         // A wish is never put in front of this player in a box of ours. Both of them walk up to the character
         // themselves, both are asked by their own game in their own conversation, and both answer their own box -
         // which is the whole of what makes it their decision rather than a copy of somebody else's. All that crosses
@@ -1004,6 +1012,42 @@ internal partial class CoopSave {
             WishConfirmAid => playerData.GetBool(update.WishNames[0]),
             _ => false
         };
+    }
+
+    /// <summary>
+    /// Answers no to a turn-in of the partner when this save is short of what it takes, with what this save has, and
+    /// tells the local player.
+    /// </summary>
+    /// <returns>Whether the turn-in was refused.</returns>
+    private bool RefuseTurnInThisSaveCannotPay(ClientPlayerData player, CoopSaveUpdate update) {
+        if (GetAskWish(update) is not { Kind: WishConfirmTurnIn } turnIn || FindQuest(turnIn.Wish) is not { } quest ||
+            PlayerData.instance is not { } playerData || _differentWishNames.Contains(quest.name)) {
+            return false;
+        }
+
+        var amounts = GetLocalWishProgress(quest, playerData.QuestCompletionData.GetData(quest.name));
+        if (!LacksCopy(quest, amounts, out var amount, out var needed, out var counter)) {
+            return false;
+        }
+
+        var refusal = new CoopSaveUpdate {
+            TargetId = player.Id,
+            Kind = CoopSaveUpdateKind.WishConfirm,
+            PartCount = WishConfirmNo,
+            Key = update.Key
+        };
+        AddCopyEntries(refusal, quest, playerData);
+        Send(refusal);
+
+        Chat(DescribeShortCopy(null, amount, needed, counter) + Lang.Pick(
+            $" So {player.Username} couldn't hand this wish in. Both of you pay one to hand it in.",
+            $"所以 {player.Username} 这次交不了这个愿望。要交的话，你们两个各出一份。"
+        ));
+        Logger.Info(
+            $"Refused the turn-in of '{quest.name}' by {player.Username}, because this save has {amount} of the " +
+            $"{needed} it takes"
+        );
+        return true;
     }
 
     /// <summary>

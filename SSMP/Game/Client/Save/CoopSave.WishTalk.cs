@@ -21,9 +21,10 @@ using SSMP.Util;
 /// character doesn't talk to the partner meanwhile. Whenever dialogue with a character who deals in wishes accepts or
 /// completes a wish, the save of the partner gets that change of the wish together with what the dialogue took from the
 /// local player and gave them, so both pay a full copy and both get the reward. Turning in a wish needs a full copy of
-/// what it takes in both inventories, while progress that isn't taken, like kills, counts from either player. A wish
-/// that only one save completed before is turned in by the other player with their own copy alone. A delivery that runs
-/// against time is turned in by whoever gets there first. Other talk stays with the player who talks.
+/// what it takes in both inventories, which each game checks in its own inventory at the moment of the turn-in (see
+/// CoopSave.WishCopyCheck), while progress that isn't taken, like kills, counts from either player. A wish that only one
+/// save completed before is turned in by the other player with their own copy alone. A delivery that runs against time
+/// is turned in by whoever gets there first. Other talk stays with the player who talks.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -62,11 +63,6 @@ internal partial class CoopSave {
     /// How many targets of wishes one update with progress holds at most.
     /// </summary>
     private const int WishProgressEntriesPerUpdate = 64;
-
-    /// <summary>
-    /// How long, in seconds, until the local player hears again that the partner lacks a full copy for a wish.
-    /// </summary>
-    private const float MissingCopyNoticeInterval = 10f;
 
     /// <summary>
     /// The most targets of a wish whose progress is kept for the partner.
@@ -179,7 +175,8 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, (string Event, HashSet<string> States)> _talkStates = new();
 
     /// <summary>
-    /// The progress of each target of the wishes in the save of the partner, by wish.
+    /// The progress of each target of the accepted wishes in the save of the partner that counts from either player,
+    /// like kills, by wish. What a wish takes isn't among it: that is asked when the wish is handed in.
     /// </summary>
     private readonly Dictionary<string, int[]> _partnerWishProgress = new(StringComparer.Ordinal);
 
@@ -202,11 +199,6 @@ internal partial class CoopSave {
     /// When the progress of the wishes is compared next.
     /// </summary>
     private float _nextWishProgressTime;
-
-    /// <summary>
-    /// When the local player can hear again that the partner lacks a full copy for a wish, by wish.
-    /// </summary>
-    private readonly Dictionary<string, float> _nextMissingCopyNotices = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Whether the local game plays dialogue of the partner, whose changes aren't recorded for the partner again.
@@ -654,11 +646,6 @@ internal partial class CoopSave {
             new Func<Func<FullQuestBase, IEnumerable<int>>, FullQuestBase, IEnumerable<int>>(OnGetWishCounters)
         );
         AddWishTalkHook(
-            typeof(FullQuestBase).GetProperty("CanComplete", InstanceFlags | BindingFlags.DeclaredOnly)
-                ?.GetGetMethod(true),
-            new Func<Func<FullQuestBase, bool>, FullQuestBase, bool>(OnGetWishCanComplete)
-        );
-        AddWishTalkHook(
             typeof(FullQuestBase).GetMethod("BeginQuest", InstanceFlags, null, [typeof(Action), typeof(bool)], null),
             new Action<Action<FullQuestBase, Action?, bool>, FullQuestBase, Action?, bool>(OnBeginWish)
         );
@@ -881,10 +868,17 @@ internal partial class CoopSave {
             LogWishTalkError(e);
         }
 
-        // Each in its own try: something above that throws on every frame must neither leave a question on the screen
-        // nor keep the partner from hearing what the local player carries, which is what every copy they check reads
+        // Each in its own try: something above that throws on every frame must neither leave a question on the screen,
+        // nor leave the hero standing at a board that waits for the partner's answer, nor keep the partner from hearing
+        // the progress that counts from either player
         try {
             UpdateDonationPrompt();
+        } catch (Exception e) {
+            LogWishTalkError(e);
+        }
+
+        try {
+            UpdateWishCopyChecks();
         } catch (Exception e) {
             LogWishTalkError(e);
         }
@@ -937,6 +931,7 @@ internal partial class CoopSave {
         _wishActions.Clear();
         _talkStates.Clear();
         ResetWishConfirm();
+        ResetWishCopyChecks();
     }
 
     /// <summary>
@@ -949,9 +944,13 @@ internal partial class CoopSave {
         _wishActions.Clear();
         _talkStates.Clear();
         _pendingWishTurnIns.Clear();
-        _nextMissingCopyNotices.Clear();
         ResetWishConfirm();
         ResetWishProgress();
+
+        // A donation asked about is asked again by the next yes. A board that waits for the partner's answer is kept:
+        // the hero stands in its dialogue until it opens, which it does once the wait runs out, without handing
+        // anything in now that the save isn't shared, and only a room change takes the board away
+        _donationHold = null;
     }
 
     /// <summary>
@@ -2073,9 +2072,10 @@ internal partial class CoopSave {
     #region Progress
 
     /// <summary>
-    /// Sends the progress of the targets of wishes that changed since the partner last got it: of the accepted wishes,
-    /// and of the wishes that take something, whose copies the partner checks before a turn-in, also before they are
-    /// accepted.
+    /// Sends the progress of the targets of the accepted wishes that changed since the partner last got it. Only
+    /// progress that counts from either player, like kills, goes: what a wish takes counts for each player alone and
+    /// is asked for at the moment the wish is handed in (see CoopSave.WishCopyCheck), so it is sent as nothing here,
+    /// and money or items changing never sends anything.
     /// </summary>
     private void UpdateWishProgress(ClientPlayerData partner) {
         var playerData = PlayerData.instance;
@@ -2094,11 +2094,17 @@ internal partial class CoopSave {
             var name = quest.name;
             int[] amounts;
             try {
-                if (quest.IsCompleted || (!quest.IsAccepted && !HasConsumableTarget(quest))) {
+                if (quest.IsCompleted || !quest.IsAccepted) {
                     continue;
                 }
 
                 amounts = GetLocalWishProgress(quest, playerData.QuestCompletionData.GetData(name));
+                var targets = quest.Targets;
+                for (var i = 0; i < amounts.Length && i < targets.Count; i++) {
+                    if (targets[i].Counter != null && targets[i].Counter.CanConsume) {
+                        amounts[i] = 0;
+                    }
+                }
             } catch (Exception e) {
                 // A wish whose progress can't be read doesn't hold back the others
                 LogWishTalkError(e);
@@ -2133,19 +2139,6 @@ internal partial class CoopSave {
         if (update != null) {
             Send(update);
         }
-    }
-
-    /// <summary>
-    /// Whether a wish takes something to turn it in.
-    /// </summary>
-    private static bool HasConsumableTarget(FullQuestBase quest) {
-        foreach (var target in quest.Targets) {
-            if (target.Counter != null && target.Count > 0 && target.Counter.CanConsume) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -2224,87 +2217,6 @@ internal partial class CoopSave {
                 : amount;
             index++;
         }
-    }
-
-    /// <summary>
-    /// Hook for <see cref="FullQuestBase.CanComplete"/>: a wish that takes something can only be completed while the
-    /// partner has a full copy of it too, since both pay. A wish that the check left completed in only one save needs
-    /// the local copy alone, and a delivery runs against time for each carrier on their own.
-    /// </summary>
-    private bool OnGetWishCanComplete(Func<FullQuestBase, bool> orig, FullQuestBase self) {
-        var canComplete = orig(self);
-        if (!canComplete || _checkedWith == null || self == null || _localCopiesOnly) {
-            return canComplete;
-        }
-
-        var name = self.name;
-        if (_differentWishNames.Contains(name) || !PartnerLacksCopy(self, out var amount, out var needed, out _)) {
-            return true;
-        }
-
-        NoticeMissingCopy(name, amount, needed);
-        return false;
-    }
-
-    /// <summary>
-    /// Finds the first thing that a wish takes which the partner doesn't have a full copy of, by the progress that the
-    /// partner's game sent.
-    /// </summary>
-    /// <param name="quest">The wish.</param>
-    /// <param name="amount">How much of it the partner has, or -1 while their game didn't send it yet.</param>
-    /// <param name="needed">How much the wish takes of it.</param>
-    /// <param name="counter">What the wish counts it with.</param>
-    /// <returns>Whether the partner lacks a full copy of something that the wish takes.</returns>
-    private bool PartnerLacksCopy(FullQuestBase quest, out int amount, out int needed, out QuestTargetCounter? counter) {
-        _partnerWishProgress.TryGetValue(quest.name, out var partnerAmounts);
-        var targets = quest.Targets;
-        for (var i = 0; i < targets.Count; i++) {
-            var target = targets[i];
-            if (target.Counter == null || target.Count <= 0 || target.Counter is DeliveryQuestItem ||
-                !target.Counter.CanConsume) {
-                continue;
-            }
-
-            // Progress that the partner's game didn't send yet doesn't count as a copy
-            amount = partnerAmounts != null && i < partnerAmounts.Length ? partnerAmounts[i] : -1;
-            if (amount >= target.Count) {
-                continue;
-            }
-
-            needed = target.Count;
-            counter = target.Counter;
-            return true;
-        }
-
-        amount = 0;
-        needed = 0;
-        counter = null;
-        return false;
-    }
-
-    /// <summary>
-    /// Tells the local player that the partner lacks a full copy for a wish, when a character that the local player
-    /// talks to checks it.
-    /// </summary>
-    private void NoticeMissingCopy(string wish, int amount, int needed) {
-        if (_wishTalk is not { } talk || !talk.IsTalkFsm(FsmExecutionStack.ExecutingFsm) ||
-            (_nextMissingCopyNotices.TryGetValue(wish, out var next) && Time.unscaledTime < next)) {
-            return;
-        }
-
-        _nextMissingCopyNotices[wish] = Time.unscaledTime + MissingCopyNoticeInterval;
-        Chat(
-            amount < 0
-                ? Lang.Pick(
-                    $"Your game doesn't know yet what {GetPartnerName()} carries for this wish. Try again in a moment.",
-                    $"你的游戏还不知道 {GetPartnerName()} 身上这个愿望要交的东西有多少。过一会儿再试。"
-                )
-                : Lang.Pick(
-                    $"{GetPartnerName()} doesn't have a full copy of what this wish takes yet ({amount} of {needed}). " +
-                    "Both of you pay one to turn it in.",
-                    $"{GetPartnerName()} 还没凑齐这个愿望要交的东西（{amount}/{needed}）。要交的话，你们两个各出一份。"
-                )
-        );
     }
 
     #endregion

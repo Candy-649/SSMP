@@ -433,6 +433,15 @@ internal partial class CoopSave {
         if (marker == null) {
             FinishSummon(hero);
             ReleaseHold(hero);
+
+            // A board that waited for the partner's answer when the save stopped being paired still has to open, or
+            // the hero would stand in its dialogue for good
+            try {
+                UpdateWishCopyChecks();
+            } catch (Exception e) {
+                LogWishTalkError(e);
+            }
+
             return;
         }
 
@@ -849,6 +858,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WishProgress:
                 OnWishProgress(player, update);
+                break;
+            case CoopSaveUpdateKind.WishCopyCheck:
+                OnWishCopyCheck(player, update);
                 break;
             case CoopSaveUpdateKind.LiftMove:
                 OnLiftMove(player, update);

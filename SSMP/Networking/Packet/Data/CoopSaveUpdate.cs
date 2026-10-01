@@ -93,13 +93,14 @@ internal class CoopSaveUpdate : IPacketData {
     /// <summary>
     /// For changes of the wish log and world progress, the names of wishes and rumours, in the order of
     /// <see cref="WishValues"/>. For dialogue, the wishes that it accepted or completed, and for the progress of
-    /// wishes, a wish for each of its targets.
+    /// wishes, a wish for each of its targets. For a question about what the other player carries for wishes, the
+    /// wishes, and for its answer, or for a refused turn-in, a wish for each of its targets.
     /// </summary>
     public List<string> WishNames { get; set; } = [];
 
     /// <summary>
-    /// The packed states of the wishes and rumours in <see cref="WishNames"/>. For the progress of wishes, the index of
-    /// each target.
+    /// The packed states of the wishes and rumours in <see cref="WishNames"/>. For the progress of wishes and for what
+    /// the sender carries for them, the index of each target.
     /// </summary>
     public List<int> WishValues { get; set; } = [];
 
@@ -118,8 +119,8 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For key dialogue, the amounts of what it took and gave in <see cref="ItemIds"/>, and for the progress of wishes,
-    /// the progress of the targets in <see cref="WishNames"/>. For a trap going off, the dice of the sender's game as
-    /// it went off (see <c>SharedDice</c>).
+    /// the progress of the targets in <see cref="WishNames"/>. For what the sender carries for wishes, how much of each
+    /// target. For a trap going off, the dice of the sender's game as it went off (see <c>SharedDice</c>).
     /// </summary>
     public List<int> Amounts { get; set; } = [];
 
@@ -588,5 +589,19 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    LiftUnlock
+    LiftUnlock,
+
+    /// <summary>
+    /// The sender is handing wishes in, or donating, right now and asks how much the other player carries of what
+    /// those wishes take, or answers such a question with what they carry. <see cref="CoopSaveUpdate.PartCount"/> is
+    /// 0 for the question and 1 for the answer, and <see cref="CoopSaveUpdate.Key"/> pairs the two. The question lists
+    /// the wishes in <see cref="CoopSaveUpdate.WishNames"/>; the answer has an entry for each target of each wish in
+    /// <see cref="CoopSaveUpdate.WishNames"/>, with the index of the target in <see cref="CoopSaveUpdate.WishValues"/>
+    /// (-1 for a wish that the save of the sender completed already) and what they carry in
+    /// <see cref="CoopSaveUpdate.Amounts"/>.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    WishCopyCheck
 }

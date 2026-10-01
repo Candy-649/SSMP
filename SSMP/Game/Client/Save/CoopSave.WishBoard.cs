@@ -11,8 +11,10 @@ namespace SSMP.Game.Client.Save;
 /// <summary>
 /// Wish boards in a checked two-player save. Turning in wishes at a board and donating at it work like key dialogue about
 /// wishes (see CoopSave.WishTalk): they need the partner close by, and the partner pays their own copy of what the board
-/// takes and gets the reward too. Without the partner close by, the board still opens to look at and accept wishes, and
-/// its wishes that are ready to turn in stay on it. Nobody else uses a board while a player turns in or donates there.
+/// takes and gets the reward too. Whether the partner has that copy is asked right then (see CoopSave.WishCopyCheck), and
+/// a wish they are short for stays on the board. Without the partner close by, the board still opens to look at and
+/// accept wishes, and its wishes that are ready to turn in stay on it. Nobody else uses a board while a player turns in
+/// or donates there.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -45,6 +47,8 @@ internal partial class CoopSave {
     private static readonly FieldInfo? BoardFadeRoutineField =
         typeof(QuestItemBoard).GetField("fadeStateRoutine", InstanceFlags);
 
+    private static readonly FieldInfo? BoardPaneField = typeof(QuestItemBoard).GetField("pane", InstanceFlags);
+
     /// <summary>
     /// The board that asks the local player whether to donate right now. The partner can complete the wish that it asks
     /// about meanwhile.
@@ -61,11 +65,6 @@ internal partial class CoopSave {
     /// How many completions of wishes by a board run right now, whose rewards the board gives itself.
     /// </summary>
     private int _boardCompletionDepth;
-
-    /// <summary>
-    /// Whether only the local copies count for whether a wish can be completed, to tell what only the partner lacks.
-    /// </summary>
-    private bool _localCopiesOnly;
 
     /// <summary>
     /// When opening a board without the partner tells both players again why its wishes stay on it.
@@ -110,51 +109,83 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for QuestBoardInteractable.OnStartDialogue: the use of a board is recorded like dialogue about wishes, and its
-    /// wishes that are ready to turn in stay on it while the partner isn't close by or uses the board.
+    /// wishes that are ready to turn in stay on it while the partner isn't close by or uses the board. Before it hands in
+    /// wishes that take something from both players, it waits for the partner's game to say what they carry, and the
+    /// wishes they are short for stay on it.
     /// </summary>
     private void OnBoardStartDialogue(Action<QuestBoardInteractable> orig, QuestBoardInteractable self) {
+        var resumed = _resumedBoardOpen;
         var holdTurnIns = false;
+        HashSet<string>? leftOut = null;
         try {
             if (_everChecked && GetCurrentMarker() is { } marker) {
-                holdTurnIns = StartBoardTalk(self, marker);
+                // Runs again from UpdateWishCopyChecks once the partner answered or the wait ran out
+                if (resumed == null && AskBeforeBoardTurnIns(self, marker, () => OnBoardStartDialogue(orig, self))) {
+                    return;
+                }
+
+                holdTurnIns = StartBoardTalk(self, marker, resumed, out leftOut);
+            } else if (resumed != null) {
+                // The save stopped being shared while the board waited, so nothing is handed in for both
+                holdTurnIns = true;
             }
         } catch (Exception e) {
             LogWishTalkError(e);
+
+            // Handing wishes in without having checked the partner's copy would give them the wish for nothing
+            holdTurnIns = _everChecked;
+            leftOut = null;
         }
 
-        if (!holdTurnIns) {
+        if (!holdTurnIns && leftOut == null) {
             orig(self);
             return;
         }
 
         // Without wishes to turn in, the board opens its list instead
-        _boardTurnInBlockDepth++;
+        if (holdTurnIns) {
+            _boardTurnInBlockDepth++;
+        }
+
+        _boardTurnInsLeftOut = leftOut;
         try {
             orig(self);
         } finally {
-            _boardTurnInBlockDepth--;
+            _boardTurnInsLeftOut = null;
+            if (holdTurnIns) {
+                _boardTurnInBlockDepth--;
+            }
         }
     }
 
     /// <summary>
     /// Starts recording the use of a board. A board with wishes that are ready to turn in is used like key dialogue,
-    /// which needs the partner close by.
+    /// which needs the partner close by. Once the partner's game said what they carry, the wishes they are short for
+    /// stay on the board.
     /// </summary>
-    /// <returns>Whether the wishes that are ready to turn in stay on the board.</returns>
-    private bool StartBoardTalk(QuestBoardInteractable board, CoopSaveMarker marker) {
+    /// <param name="board">The board.</param>
+    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="resumed">The opening that waited for the partner's answer, or null if it didn't wait.</param>
+    /// <param name="leftOut">The wishes that stay on the board while the others are turned in, or null.</param>
+    /// <returns>Whether all the wishes that are ready to turn in stay on the board.</returns>
+    private bool StartBoardTalk(
+        QuestBoardInteractable board,
+        CoopSaveMarker marker,
+        BoardOpenHold? resumed,
+        out HashSet<string>? leftOut
+    ) {
+        leftOut = null;
         var fsms = GetBoardFsms(board);
         EndWishTalk();
 
-        var anyReady = false;
+        var ready = new List<FullQuestBase>();
         foreach (var quest in GetBoardQuests(board)) {
             if (quest.GetIsReadyToTurnIn(true)) {
-                anyReady = true;
-                break;
+                ready.Add(quest);
             }
         }
 
-        if (!anyReady) {
-            NoticeBoardMissingCopies(board);
+        if (ready.Count == 0) {
             _wishTalk = new WishTalk(board, fsms, false);
             return false;
         }
@@ -195,39 +226,21 @@ internal partial class CoopSave {
             return true;
         }
 
+        if (resumed != null) {
+            leftOut = GetBoardTurnInsLeftOut(ready, resumed);
+            if (leftOut != null && leftOut.Count >= ready.Count) {
+                // Nothing is left to turn in, so the board opens its list
+                leftOut = null;
+                _wishTalk = new WishTalk(board, fsms, false);
+                return true;
+            }
+        }
+
         var talk = new WishTalk(board, fsms, true);
         _wishTalk = talk;
         Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
         Logger.Info($"Wishes are turned in at the board '{board.name}' with {partner.Username} close by");
         return false;
-    }
-
-    /// <summary>
-    /// Tells the local player about a wish on a board that they could turn in there with their own copy, but that the
-    /// partner lacks a full copy for.
-    /// </summary>
-    private void NoticeBoardMissingCopies(QuestBoardInteractable board) {
-        if (_checkedWith == null) {
-            return;
-        }
-
-        foreach (var quest in GetBoardQuests(board)) {
-            var name = quest.name;
-            if ((_nextMissingCopyNotices.TryGetValue(name, out var next) && Time.unscaledTime < next) ||
-                !WithLocalCopiesOnly(() => quest.GetIsReadyToTurnIn(true))) {
-                continue;
-            }
-
-            _nextMissingCopyNotices[name] = Time.unscaledTime + MissingCopyNoticeInterval;
-            Chat(
-                Lang.Pick(
-                    $"{GetPartnerName()} doesn't have a full copy of what a wish on this board takes yet. Both of you pay " +
-                    "one to turn it in here.",
-                    $"{GetPartnerName()} 还没凑齐这块板子上某个愿望要交的东西。在这里交，需要你们两个各出一份。"
-                )
-            );
-            return;
-        }
     }
 
     /// <summary>
@@ -293,16 +306,22 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="FullQuestBase.GetIsReadyToTurnIn"/>: while a board opens without turning in wishes, no wish is
-    /// ready to turn in at a board.
+    /// ready to turn in at a board, and while it opens without the wishes that the partner is short for, those aren't.
     /// </summary>
     private bool OnGetIsReadyToTurnIn(Func<FullQuestBase, bool, bool> orig, FullQuestBase self, bool atQuestBoard) {
-        return (!atQuestBoard || _boardTurnInBlockDepth == 0) && orig(self, atQuestBoard);
+        if (atQuestBoard && (_boardTurnInBlockDepth > 0 ||
+                             (_boardTurnInsLeftOut != null && self != null && _boardTurnInsLeftOut.Contains(self.name)))) {
+            return false;
+        }
+
+        return orig(self!, atQuestBoard);
     }
 
     /// <summary>
-    /// Hook for QuestItemBoard.SubmitQuestSelection: a donation that the local player could pay but the partner can't
-    /// shows as not enough, so the local player hears why, with how much the partner has as far as this game knows. A
-    /// wish that the partner turned in meanwhile is taken off the list instead.
+    /// Hook for QuestItemBoard.SubmitQuestSelection: a wish that the partner turned in meanwhile is taken off the list
+    /// instead of asking the local player to pay for it, and a question whether to donate is watched, so that it is taken
+    /// down once the partner completes its wish. Whether the partner can pay a donation too is asked once the local
+    /// player says yes (see CoopSave.WishCopyCheck).
     /// </summary>
     private void OnBoardSubmitSelection(
         Action<QuestItemBoard, BasicQuestBase> orig,
@@ -327,44 +346,10 @@ internal partial class CoopSave {
 
         orig(self, quest);
         try {
-            if (_checkedWith == null || quest is not FullQuestBase { IsDonateType: true } donation || donation == null ||
-                BoardYesNoQuestField?.GetValue(self) as FullQuestBase != donation) {
-                return;
+            if (_checkedWith != null && quest is FullQuestBase { IsDonateType: true } donation && donation != null &&
+                BoardYesNoQuestField?.GetValue(self) as FullQuestBase == donation) {
+                _donationPrompt = self;
             }
-
-            _donationPrompt = self;
-            if (donation.CanComplete || !WithLocalCopiesOnly(() => donation.CanComplete) ||
-                !PartnerLacksCopy(donation, out var amount, out var needed, out var target)) {
-                return;
-            }
-
-            Logger.Info(
-                $"The donation '{donation.name}' can't go through, because {GetPartnerName()} has " +
-                (amount < 0 ? "an amount this game doesn't know yet" : $"{amount}") + $" of the {needed} it takes"
-            );
-
-            if (amount < 0) {
-                Chat(Lang.Pick(
-                    $"Your game doesn't know yet how much {GetPartnerName()} has for this donation. Try again in a moment.",
-                    $"你的游戏还不知道 {GetPartnerName()} 身上有多少可以捐。过一会儿再试。"
-                ));
-                return;
-            }
-
-            // Only loose rosaries count for a donation in the game itself, so a partner who keeps theirs on strings
-            // can have plenty and still be short here
-            var rosaries = target is QuestTargetCurrency { CurrencyType: CurrencyType.Money };
-            Chat(rosaries
-                ? Lang.Pick(
-                    $"{GetPartnerName()} has only {amount} of the {needed} loose rosaries this donation takes (rosaries " +
-                    "on strings only count once they are broken off). Both of you pay the donation.",
-                    $"{GetPartnerName()} 身上的念珠只有 {amount}/{needed}（念珠串不算，要先拆开）。捐赠需要你们两个各出一份。"
-                )
-                : Lang.Pick(
-                    $"{GetPartnerName()} has only {amount} of the {needed} this donation takes. Both of you pay the " +
-                    "donation.",
-                    $"{GetPartnerName()} 身上只有 {amount}/{needed}，不够捐。捐赠需要你们两个各出一份。"
-                ));
         } catch (Exception e) {
             LogWishTalkError(e);
         }
@@ -372,25 +357,65 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for QuestItemBoard.AcceptDonation: a donation needs the partner close by and able to pay too, since both
-    /// players pay it, and not using the board themselves. Otherwise the board goes back to its list. A wish that the
-    /// partner completed while the board asked is never paid again.
+    /// players pay it, and not using the board themselves. Whether they can pay is asked right then: the yes waits for
+    /// their game's answer and runs again once it came (see CoopSave.WishCopyCheck). Otherwise the board goes back to its
+    /// list. A wish that the partner completed while the board asked is never paid again.
     /// </summary>
     private void OnBoardAcceptDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
         _donationPrompt = null;
+        var resumed = _resumedDonation;
         try {
             if (BoardYesNoQuestField?.GetValue(self) is FullQuestBase { IsCompleted: true } done && done != null) {
                 self.DeclineDonation();
                 return;
             }
 
+            // Pressing yes again while the partner's game is being asked does nothing more
+            if (resumed == null && _donationHold is { } waiting) {
+                if (waiting.ItemBoard == self) {
+                    return;
+                }
+
+                _donationHold = null;
+            }
+
             if (_everChecked && GetCurrentMarker() is { } marker &&
-                BoardYesNoQuestField?.GetValue(self) is FullQuestBase quest && quest != null &&
-                !TryStartDonation(self, quest, marker)) {
+                BoardYesNoQuestField?.GetValue(self) is FullQuestBase quest && quest != null) {
+                if (!CanDonateTogether(self, quest, marker, out var board, out var partner)) {
+                    self.DeclineDonation();
+                    return;
+                }
+
+                if (board != null && partner != null) {
+                    if (NeedsPartnerCopy(quest)) {
+                        if (resumed == null) {
+                            // Runs again from UpdateWishCopyChecks once the partner answered or the wait ran out
+                            AskBeforeDonation(self, quest, partner, () => OnBoardAcceptDonation(orig, self));
+                            return;
+                        }
+
+                        if (!CanPartnerPayDonation(quest, resumed)) {
+                            self.DeclineDonation();
+                            return;
+                        }
+                    }
+
+                    StartDonationTalk(board, partner, quest);
+                }
+            } else if (resumed != null) {
+                // The save stopped being shared while the donation waited, so it isn't paid for both
                 self.DeclineDonation();
                 return;
             }
         } catch (Exception e) {
             LogWishTalkError(e);
+
+            // A donation that goes through without having checked the partner's copy would give them the wish for
+            // nothing
+            if (_everChecked) {
+                self.DeclineDonation();
+                return;
+            }
         }
 
         orig(self);
@@ -400,11 +425,17 @@ internal partial class CoopSave {
     /// Hook for QuestItemBoard.DeclineDonation: the board goes back to its list, and closes when the list has nothing
     /// left. The game only ever goes back, because on its own the list keeps the wish that it asks about; the partner
     /// can take the last wishes off it meanwhile, by turning them in or accepting them, which used to leave the local
-    /// player in front of a question with no way out.
+    /// player in front of a question with no way out. Answering no while the partner's game is asked about a yes takes
+    /// that yes back.
     /// </summary>
     private void OnBoardDeclineDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
         if (_donationPrompt == self) {
             _donationPrompt = null;
+        }
+
+        if (_donationHold is { } waiting && waiting.ItemBoard == self) {
+            _donationHold = null;
+            Logger.Info($"The donation '{waiting.Quest.name}' was taken back while the partner's game was asked");
         }
 
         var closing = false;
@@ -463,12 +494,24 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Checks that a donation at a board can go through, and records it with the use of that board, which the partner
-    /// can't use until it went through.
+    /// Checks that a donation at a board can go through with the partner: close by, and not using the board
+    /// themselves. The local player hears why not.
     /// </summary>
+    /// <param name="itemBoard">The list of the board that asked.</param>
+    /// <param name="quest">The wish that the donation completes.</param>
+    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="board">The board, or null if it can't be found, in which case the partner doesn't pay.</param>
+    /// <param name="partner">The partner who pays too, or null if they don't.</param>
     /// <returns>Whether the donation may go through.</returns>
-    private bool TryStartDonation(QuestItemBoard itemBoard, FullQuestBase quest, CoopSaveMarker marker) {
-        var board = FindBoard(itemBoard);
+    private bool CanDonateTogether(
+        QuestItemBoard itemBoard,
+        FullQuestBase quest,
+        CoopSaveMarker marker,
+        out QuestBoardInteractable? board,
+        out ClientPlayerData? partner
+    ) {
+        partner = null;
+        board = FindBoard(itemBoard);
         if (board == null) {
             Logger.Warn($"Could not find the board of the donation '{quest.name}', so the partner doesn't pay it");
             return true;
@@ -479,7 +522,7 @@ internal partial class CoopSave {
             return false;
         }
 
-        var partner = GetCheckedPartner();
+        partner = GetCheckedPartner();
         var absence = GetBoardAbsence(
             partner,
             marker,
@@ -496,15 +539,14 @@ internal partial class CoopSave {
             return false;
         }
 
-        // The board doesn't let the local player pay what they lack, but the money of the partner can change meanwhile
-        if (!quest.CanComplete) {
-            Chat(Lang.Pick(
-                $"{partner.Username} doesn't have enough to donate too. Both of you pay the donation.",
-                $"{partner.Username} 那边也不够捐。捐赠需要你们两个各出一份。"
-            ));
-            return false;
-        }
+        return true;
+    }
 
+    /// <summary>
+    /// Records a donation that goes through with the use of its board, which the partner can't use until it went
+    /// through.
+    /// </summary>
+    private void StartDonationTalk(QuestBoardInteractable board, ClientPlayerData partner, FullQuestBase quest) {
         // The use of the board may have stopped recording while its list stayed open for long
         var talk = _wishTalk;
         if (talk == null || talk.Npc != board) {
@@ -518,7 +560,6 @@ internal partial class CoopSave {
         }
 
         Logger.Info($"Donation '{quest.name}' goes through with {partner.Username} close by");
-        return true;
     }
 
     /// <summary>
@@ -576,16 +617,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Checks something about wishes with only the local copies counting for whether a wish can be completed.
+    /// Whether the list of a board is open, or the question whether to donate that it shows. A list whose panel can't
+    /// be read counts as open.
     /// </summary>
-    private bool WithLocalCopiesOnly(Func<bool> check) {
-        var outer = _localCopiesOnly;
-        _localCopiesOnly = true;
-        try {
-            return check();
-        } finally {
-            _localCopiesOnly = outer;
-        }
+    private static bool IsBoardListOpen(QuestItemBoard itemBoard) {
+        return BoardPaneField?.GetValue(itemBoard) is not InventoryPaneBase pane || pane == null || pane.IsPaneActive;
     }
 
     /// <summary>
