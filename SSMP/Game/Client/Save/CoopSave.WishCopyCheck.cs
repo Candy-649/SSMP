@@ -463,11 +463,10 @@ internal partial class CoopSave {
 
         if (leftOut != null && resumed.Answer == null) {
             Chat(Lang.Pick(
-                $"{resumed.PartnerName}'s game didn't say what they carry, so the wishes that take something from both " +
-                "of you stay on the board this time. Try again in a moment; if it keeps happening, their mod may be " +
-                "older than yours.",
-                $"没收到 {resumed.PartnerName} 那边的回应，所以要两个人都出东西的愿望这次留在板子上没交。过一会儿再试；" +
-                "一直这样的话，可能是对方的模组版本比你的旧。"
+                $"{resumed.PartnerName}'s game didn't answer in time (the connection may be lagging), so the wishes " +
+                "that take something from both of you stay on the board this time. Try again in a moment.",
+                $"没及时收到 {resumed.PartnerName} 那边的回应（可能是网络卡了），所以要两个人都出东西的愿望这次留在板子上没交。" +
+                "过一会儿再试。"
             ));
         }
 
@@ -499,9 +498,9 @@ internal partial class CoopSave {
     private bool CanPartnerPayDonation(FullQuestBase quest, DonationHold resumed) {
         if (resumed.Answer == null) {
             Chat(Lang.Pick(
-                $"{resumed.PartnerName}'s game didn't say what they carry, so nothing was donated. Try again in a moment; " +
-                "if it keeps happening, their mod may be older than yours.",
-                $"没收到 {resumed.PartnerName} 那边的回应，所以这次没捐。过一会儿再试；一直这样的话，可能是对方的模组版本比你的旧。"
+                $"{resumed.PartnerName}'s game didn't answer in time (the connection may be lagging), so nothing was " +
+                "donated. Try again in a moment.",
+                $"没及时收到 {resumed.PartnerName} 那边的回应（可能是网络卡了），所以这次没捐。过一会儿再试。"
             ));
             Logger.Info($"The donation '{quest.name}' didn't go through, because the partner's game didn't answer");
             return false;
