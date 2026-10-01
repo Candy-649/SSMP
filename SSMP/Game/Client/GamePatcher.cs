@@ -207,6 +207,8 @@ internal partial class GamePatcher {
         );
 
         AddHook(typeof(CollectableItem), nameof(CollectableItem.IsAtMax), CollectableItemOnIsAtMax);
+
+        RegisterPooledEffectHooks();
     }
 
     /// <summary>
@@ -363,6 +365,7 @@ internal partial class GamePatcher {
 
         _hooks.Clear();
         _suppressHeroKnockback = false;
+        StuckEffects.Clear();
     }
 
     /// <summary>

@@ -321,21 +321,46 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetParent action) {
+        // Where the child sits under its new parent, for the copy's own child that came from outside the creature
+        var child = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        var placed = child != null && action.parent.Value != null && !action.resetLocalPosition.Value;
+        data.Packet.Write(placed);
+        if (placed) {
+            var place = child!.transform.localPosition;
+            data.Packet.Write(place.x);
+            data.Packet.Write(place.y);
+            data.Packet.Write(place.z);
+        }
+
         return true;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
-    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetParent action) {
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetParent action) {
+        Vector3? hostPlace = null;
+        if (data != null && data.Packet.ReadBool()) {
+            hostPlace = new Vector3(data.Packet.ReadFloat(), data.Packet.ReadFloat(), data.Packet.ReadFloat());
+        }
+
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
             return;
         }
+
+        // What the copy's own replay just spawned is where the scene host's creature stood when it spawned it, and
+        // the copy is a little behind: a daze ring put on the copy from there hung beside its head, as far off as the
+        // copy was, for the whole daze. Something from outside the creature is put where the scene host put it under
+        // the parent. Its own parts are already where the copy's parts are, and another creature goes where its own
+        // updates say.
+        var fromOutside = PathFromOwner(action.Fsm.GameObject, gameObject) == null && !IsObjectInRegistry(gameObject);
 
         var parent = action.parent.Value;
         gameObject.transform.parent = parent != null ? parent.transform : null;
 
         if (action.resetLocalPosition.Value) {
             gameObject.transform.localPosition = Vector3.zero;
+        } else if (hostPlace is { } place && parent != null && fromOutside) {
+            gameObject.transform.localPosition = place;
         }
 
         if (action.resetLocalRotation.Value) {
