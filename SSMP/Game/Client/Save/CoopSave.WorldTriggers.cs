@@ -111,7 +111,14 @@ internal partial class CoopSave {
         // A bench that gives way under whoever sits on it and drops them down with it. It is written into the save as
         // well; this is the floor going here as it goes over there. The copy here only falls: taking the sitter off
         // the bench, carrying them down, the camera on them and handing them back their controls are about them.
-        new(["Fake Bench Collapser"], "Control", "FAKE BENCH SIT", "Antic", ["Idle"], ["Idle"], keepOffThePlayer: true)
+        new(["Fake Bench Collapser"], "Control", "FAKE BENCH SIT", "Antic", ["Idle"], ["Idle"], keepOffThePlayer: true),
+
+        // Not a trap, but it goes the same way: a character cowering among creatures, who stops once none of them is
+        // left. The room counts what is still in the group of those creatures every few seconds, and in the game of the
+        // player who doesn't run the room the room's own creatures only sleep there while their copies fight and die,
+        // so it never counted down to none, and the character never got up to talk to that player. There is no event
+        // that takes it there from where it waits, so its state is set.
+        new(["Courier Scene"], "Save Courier", "", "Send Event", ["Count Enemies"], ["Idle", "Count Enemies"])
     ];
 
     /// <summary>
@@ -348,7 +355,13 @@ internal partial class CoopSave {
         _replayingWorldTrigger = true;
         try {
             var keptOff = kind.KeepOffThePlayer ? KeepTrapOffThePlayer(fsm) : 0;
-            SharedDice.Throw(dice, () => fsm.SendEvent(kind.EventName));
+            SharedDice.Throw(dice, () => {
+                if (kind.EventName.Length == 0) {
+                    fsm.SetState(kind.GoneOffStateName);
+                } else {
+                    fsm.SendEvent(kind.EventName);
+                }
+            });
             Logger.Info(
                 keptOff > 0
                     ? $"Set off '{name}' the way {username} did, without the {keptOff} of its actions about them"
@@ -515,7 +528,8 @@ internal partial class CoopSave {
         public string FsmName { get; }
 
         /// <summary>
-        /// The event that sets it off, which the game itself sends when its own trigger sees the hero.
+        /// The event that sets it off, which the game itself sends when its own trigger sees the hero, or empty for one
+        /// that no event takes from where it waits to where it goes off, whose state is set instead.
         /// </summary>
         public string EventName { get; }
 
