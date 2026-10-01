@@ -1865,6 +1865,40 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Gives a bell creature that burrows, as this game takes it over, the corpse and the animations that its state
+    /// deciding whether it is a silver one sets as properties ("Normal" or "Silver" of "Control"). The room has neither
+    /// on it: the creature gets them from that state, which it goes through before anything can kill it. The room's own
+    /// creature never went through it here while the other game ran the room, so once taken over it had no corpse, the
+    /// first thing it does as it dies threw, and the rest of dying - going under the ground out of reach - never
+    /// happened. On spikes it was killed again every step, without end.
+    /// </summary>
+    private void GiveTakenOverFurmItsCorpse() {
+        if (Type != EntityType.Furm) {
+            return;
+        }
+
+        foreach (var fsm in _fsms.Host) {
+            if (fsm == null || fsm.FsmName != "Control") {
+                continue;
+            }
+
+            // Which of the two it is was said by the other game, whose variables were just put on it
+            var state = fsm.GetStateOrNull(fsm.FsmVariables.FindFsmBool("Is Silver") is { Value: true }
+                ? "Silver"
+                : "Normal");
+            if (state == null) {
+                continue;
+            }
+
+            foreach (var action in state.Actions) {
+                if (action is SetPropertyV2 { Enabled: true } property) {
+                    property.TargetProperty.SetValue();
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
@@ -1947,6 +1981,8 @@ internal partial class Entity {
                 fsm.FsmVariables.Vector3Variables[i].Value = snapshot.Vector3s[i];
             }
         }
+
+        GiveTakenOverFurmItsCorpse();
 
         // Only now to where the copy stands. The setting up above is done where the room put the creature, as in a
         // game where it started with the room: a creature that lets go of the markers it hides at, so that they stay
