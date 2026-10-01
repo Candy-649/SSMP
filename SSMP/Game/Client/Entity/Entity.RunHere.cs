@@ -181,6 +181,13 @@ internal partial class Entity {
     private PlayMakerFSM? _runHere;
 
     /// <summary>
+    /// The PlayMaker FSM of <see cref="_runHere"/>, kept by itself: the game takes it out of the component when it
+    /// destroys the copy, as a creature that dies while its copy runs here may do, and it is what
+    /// <see cref="HeldFsms"/> knows the copy by.
+    /// </summary>
+    private HutongGames.PlayMaker.Fsm? _runHereFsm;
+
+    /// <summary>
     /// The index of <see cref="_runHere"/> among the FSMs of the entity.
     /// </summary>
     private byte _runHereIndex;
@@ -643,7 +650,7 @@ internal partial class Entity {
     /// <param name="stateName">A state that the scene host's FSM went to, or one it sent something of.</param>
     /// <returns>Whether the copy went that way.</returns>
     private bool FollowIntoTheAftermath(string stateName) {
-        if (_runHere is not { } copyFsm || !_runHereLed || _aftermath != null || WaitsForEcho) {
+        if (_runHere is not { } copyFsm || copyFsm == null || !_runHereLed || _aftermath != null || WaitsForEcho) {
             return false;
         }
 
@@ -1147,7 +1154,8 @@ internal partial class Entity {
     /// itself (see <see cref="_runHereCombo"/>).
     /// </summary>
     private bool IsInCombo(string? stateName) {
-        return stateName != null && _runHereCombo?.Contains(_runHere!.Fsm.GetState(stateName)) == true;
+        return stateName != null && _runHere != null &&
+               _runHereCombo?.Contains(_runHere.Fsm.GetState(stateName)) == true;
     }
 
     /// <summary>
@@ -1381,6 +1389,7 @@ internal partial class Entity {
         }
 
         _runHere = copyFsm;
+        _runHereFsm = fsm;
         HookSwitchState();
         HeldFsms[fsm] = this;
     }
@@ -1512,7 +1521,7 @@ internal partial class Entity {
     /// <param name="letGoOfThePlayer">Whether a player held by a catch that this game led is let go, which they are
     /// not when the room's own creature takes over and goes on holding them.</param>
     private void StopRunningHere(bool letGoOfThePlayer = true) {
-        if (_runHere is not { } copyFsm) {
+        if (_runHere is not { } copyFsm || _runHereFsm is not { } fsm) {
             return;
         }
 
@@ -1520,6 +1529,7 @@ internal partial class Entity {
         var over = _aftermath != null;
         var (ledIndex, ledCatch, ledStep) = (_runHereIndex, _runHereCatch, _runHereStep);
         _runHere = null;
+        _runHereFsm = null;
         _runHereCombo = null;
         _runHereLed = false;
         _aftermath = null;
@@ -1536,8 +1546,8 @@ internal partial class Entity {
         _mutedHere.Clear();
         StopSteppingRunHere();
 
-        // Let go only once stopped: stopping tells the FSM that it is switched off, which some take somewhere
-        var fsm = copyFsm.Fsm;
+        // Let go only once stopped: stopping tells the FSM that it is switched off, which some take somewhere. A copy
+        // that was destroyed has stopped already
         if (copyFsm != null) {
             fsm.Stop();
         }
@@ -1565,20 +1575,23 @@ internal partial class Entity {
     /// that it held for a catch this game led is let go all the same, since nothing else would.
     /// </summary>
     private void LetGoOfRunHere() {
-        if (_runHere is not { } copyFsm) {
+        // Not the component's FSM: a copy that the game destroyed, as one that died while it ran here, has none any
+        // more, and asking it for one stopped the room from being let go of at all
+        if (_runHereFsm is not { } fsm) {
             return;
         }
 
         var led = _runHereLed;
-        HeldFsms.Remove(copyFsm.Fsm);
+        HeldFsms.Remove(fsm);
         _runHere = null;
+        _runHereFsm = null;
         _runHereLed = false;
         _aftermath = null;
         StopSteppingRunHere();
         TakeTheCopysBodyBack();
 
         if (led) {
-            FreeTheLocalPlayer(copyFsm.Fsm);
+            FreeTheLocalPlayer(fsm);
         } else {
             _moods.Clear();
         }

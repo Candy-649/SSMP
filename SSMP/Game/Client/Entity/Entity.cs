@@ -3115,26 +3115,32 @@ internal partial class Entity {
     public void Destroy() {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
-        LetGoOfRunHere();
-        EndAllLeads();
-        LetThePlayerBackIn(true);
-        EntitiesByCopy.Remove(Object.Client);
 
-        _spriteAnimatorPlayHook?.Dispose();
-        _spriteAnimatorPlayHook = null;
+        // What the entity was doing to the local player is undone first. Its hooks and parts go whatever happens there:
+        // left behind, they would go on acting for a room that is gone
+        try {
+            LetGoOfRunHere();
+            EndAllLeads();
+            LetThePlayerBackIn(true);
+        } finally {
+            EntitiesByCopy.Remove(Object.Client);
 
-        _objectPoolRecycleHook?.Dispose();
-        _objectPoolRecycleHook = null;
+            _spriteAnimatorPlayHook?.Dispose();
+            _spriteAnimatorPlayHook = null;
 
-        _activateGameObjectHook?.Dispose();
-        _activateGameObjectHook = null;
+            _objectPoolRecycleHook?.Dispose();
+            _objectPoolRecycleHook = null;
 
-        foreach (var component in _components.Values.Distinct()) {
-            component.Destroy();
+            _activateGameObjectHook?.Dispose();
+            _activateGameObjectHook = null;
+
+            foreach (var component in _components.Values.Distinct()) {
+                component.Destroy();
+            }
+
+            GamePatcher.OnEntityDestroyed(Object.Host);
+            GamePatcher.OnEntityDestroyed(Object.Client);
         }
-
-        GamePatcher.OnEntityDestroyed(Object.Host);
-        GamePatcher.OnEntityDestroyed(Object.Client);
     }
 
     /// <summary>

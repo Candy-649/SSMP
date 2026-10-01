@@ -202,7 +202,7 @@ internal class EntityManager {
     public void InitializeSceneHost(uint sceneHostEpoch = 0) {
         Logger.Info($"We are scene host, releasing control of all registered entities (epoch {sceneHostEpoch})");
         IsSceneHost = true;
-        foreach (var entity in _entities.Values) entity.InitializeHost(sceneHostEpoch);
+        ForEachEntity("release", entity => entity.InitializeHost(sceneHostEpoch));
         _sceneRoleDetermined = true;
         _expectsToRunRoom = false;
 
@@ -229,7 +229,7 @@ internal class EntityManager {
         _spawnsToTell.Clear();
 
         IsSceneHost = false;
-        foreach (var entity in _entities.Values) entity.InitializeClient(sceneHostEpoch);
+        ForEachEntity("take control of", entity => entity.InitializeClient(sceneHostEpoch));
         _sceneRoleDetermined = true;
         _roomCreatures.Settle(share: false);
         DrainPendingUpdates();
@@ -255,7 +255,7 @@ internal class EntityManager {
     public void BecomeSceneHost(uint sceneHostEpoch = 0) {
         Logger.Info($"Becoming scene host (epoch {sceneHostEpoch})");
         IsSceneHost = true;
-        foreach (var entity in _entities.Values) entity.MakeHost(sceneHostEpoch);
+        ForEachEntity("take over", entity => entity.MakeHost(sceneHostEpoch));
 
         // Immediately refresh targeting fields for all active enemies
         GamePatcher.ForceImmediateRetarget();
@@ -612,10 +612,29 @@ internal class EntityManager {
     }
 
     /// <summary>
+    /// Does something to every registered entity, each on its own: one that fails is written down and the rest still
+    /// have it done. One whose copy the game had destroyed used to stop it there. Clearing the room stopped before the
+    /// list was emptied, so no room after it got its creatures registered, and taking over a room left every creature
+    /// after that one standing still for both players. It goes through the entities as they were when it began, since
+    /// a creature switched on here may make another that is registered at once.
+    /// </summary>
+    /// <param name="what">What is done, for the log.</param>
+    /// <param name="act">What is done to each entity.</param>
+    private void ForEachEntity(string what, System.Action<Entity> act) {
+        foreach (var entity in _entities.Values.ToList()) {
+            try {
+                act(entity);
+            } catch (Exception e) {
+                Logger.Error($"Could not {what} entity {entity.Id} ({entity.Type}):\n{e}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Clears all the registered entities, and resets static components.
     /// </summary>
     private void ClearEntities() {
-        foreach (var entity in _entities.Values) entity.Destroy();
+        ForEachEntity("clear away", entity => entity.Destroy());
         _entities.Clear();
 
         foreach (var pendingUpdate in _pendingUpdates) {
