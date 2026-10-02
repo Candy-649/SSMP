@@ -3061,6 +3061,7 @@
     "type": "Grom",
     "parent_name": null,
     "components": [
+      "OwnMotion",
       "Rotation"
     ],
     "internal_name": "Bone Worm",
