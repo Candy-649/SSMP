@@ -142,6 +142,20 @@ internal static class PlayerTargetRegistry {
     /// <returns>A pre-allocated list containing the local hero root and active registered remote player roots.</returns>
     public static List<GameObject> GetTrackedPlayers() {
         TrackedPlayersCache.Clear();
+
+        // Nobody stands anywhere while the local player is between two rooms. Until they are put at the door of the
+        // room they walk into, their own figure is still where they left the last room, and so is the partner's
+        // figure, which only goes once the room has changed: both stand in the coordinates of the room next door. The
+        // room being walked into already runs by then, and what in it asked who stood where was answered from the
+        // other room. A boss that lies in wait under the roof of its room heard that a player stood right beside it,
+        // from the door of the room next door, and woke while both players were still at the far end of its room.
+        // It heard it in the very step that hides it under the roof, and the game does nothing more of a step once
+        // something in it has sent the creature on (FsmState.ActivateActions), so the boss never took off what it
+        // wears while it sleeps, and fought in it in the games of both players.
+        if (IsLocalPlayerBetweenRooms()) {
+            return TrackedPlayersCache;
+        }
+
         if (HeroController.instance != null && !IsPlayerDown(HeroController.instance.gameObject)) {
             TrackedPlayersCache.Add(HeroController.instance.gameObject);
         }
@@ -153,6 +167,17 @@ internal static class PlayerTargetRegistry {
         }
 
         return TrackedPlayersCache;
+    }
+
+    /// <summary>
+    /// Whether the local player has gone out of one room and not yet been put at the door of the next. The game says so
+    /// from the moment the player walks out through a door (HeroController.LeaveScene) until the next room is ready,
+    /// and it puts the player at the door they come in by in the same frame as it says the next thing
+    /// (HeroController.EnterScene), so nothing in between ever sees the player at the door with this still said.
+    /// </summary>
+    private static bool IsLocalPlayerBetweenRooms() {
+        var hero = HeroController.instance;
+        return hero != null && hero.transitionState == GlobalEnums.HeroTransitionState.EXITING_SCENE;
     }
 
     /// <summary>
