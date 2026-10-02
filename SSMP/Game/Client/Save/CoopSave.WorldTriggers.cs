@@ -120,7 +120,14 @@ internal partial class CoopSave {
         // that takes it there from where it waits, so its state is set. It stays rescued until the room loads again,
         // so a partner who walks in later is told too, or they never have the conversation that follows.
         new(["Courier Scene"], "Save Courier", "", "Send Event", ["Count Enemies"], ["Idle", "Count Enemies"],
-            lasting: true)
+            lasting: true),
+
+        // Crows perched about a room for show, which fly off when the crows there that fight wake up, and are gone
+        // until the room loads again. While both players are in the room the waking plays in both games, so nothing is
+        // sent at the moment itself. A partner who walked in later had them perched again with nothing left to wake
+        // them, and walking up to them did nothing; now they are sent the ones that flew, which fly off as they come in.
+        new(["FlyAway Crow"], "Control", "FLY AWAY", "Deactivate", [], ["Init", "Idle L", "Idle R"],
+            lasting: true, endsSwitchedOff: true)
     ];
 
     /// <summary>
@@ -258,12 +265,11 @@ internal partial class CoopSave {
                 return;
             }
 
+            // Switched off ones too, since some of these switch themselves off as they end
             foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(
-                         FindObjectsInactive.Exclude, FindObjectsSortMode.None
+                         FindObjectsInactive.Include, FindObjectsSortMode.None
                      )) {
-                if (fsm == null || fsm.ActiveStateName is not { } stateName ||
-                    !WorldTriggerGoneOffStateNames.Contains(stateName) ||
-                    FindWorldTriggerKind(fsm.gameObject, fsm.FsmName, stateName) is not { Lasting: true }) {
+                if (fsm == null || GetLastingGoneOffStateName(fsm) is not { } stateName) {
                     continue;
                 }
 
@@ -281,6 +287,36 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Warn($"Could not send what went off here to {player.Username}, who came in: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// The state that one of <see cref="WorldTriggerKinds"/> that lasts went off into here, or null if the FSM is none
+    /// of them or hasn't gone off. One that switches itself off as it ends forgets its state as it goes off (it starts
+    /// over when switched on), so it is known by being off, having run, while what it is in is on.
+    /// </summary>
+    private static string? GetLastingGoneOffStateName(PlayMakerFSM fsm) {
+        var gameObject = fsm.gameObject;
+        if (gameObject.activeInHierarchy) {
+            return fsm.ActiveStateName is { } stateName && WorldTriggerGoneOffStateNames.Contains(stateName) &&
+                   FindWorldTriggerKind(gameObject, fsm.FsmName, stateName) is { Lasting: true }
+                ? stateName
+                : null;
+        }
+
+        // One that its room keeps off never started, and one whose parent is off went off with it, not by itself
+        if (gameObject.activeSelf || fsm.Fsm is not { Started: true } ||
+            gameObject.transform.parent is { } parent && !parent.gameObject.activeInHierarchy) {
+            return null;
+        }
+
+        foreach (var kind in WorldTriggerKinds) {
+            if (kind is { Lasting: true, EndsSwitchedOff: true } && kind.FsmName == fsm.FsmName &&
+                FindWorldTriggerKind(gameObject, fsm.FsmName, kind.GoneOffStateName) == kind) {
+                return kind.GoneOffStateName;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -545,7 +581,8 @@ internal partial class CoopSave {
             string[] fromStateNames,
             string[] waitingStateNames,
             bool keepOffThePlayer = false,
-            bool lasting = false
+            bool lasting = false,
+            bool endsSwitchedOff = false
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -555,6 +592,7 @@ internal partial class CoopSave {
             WaitingStateNames = waitingStateNames;
             KeepOffThePlayer = keepOffThePlayer;
             Lasting = lasting;
+            EndsSwitchedOff = endsSwitchedOff;
         }
 
         /// <summary>
@@ -600,9 +638,16 @@ internal partial class CoopSave {
         public bool KeepOffThePlayer { get; }
 
         /// <summary>
-        /// Whether it stays in <see cref="GoneOffStateName"/> until its room loads again, so that a partner who walks
-        /// in afterwards is sent it too (<see cref="OnPlayerEnterScene"/>).
+        /// Whether it stays gone off until its room loads again, in <see cref="GoneOffStateName"/> or switched off
+        /// (<see cref="EndsSwitchedOff"/>), so that a partner who walks in afterwards is sent it too
+        /// (<see cref="OnPlayerEnterScene"/>).
         /// </summary>
         public bool Lasting { get; }
+
+        /// <summary>
+        /// Whether going off ends with it switching its own object off, which also makes its FSM forget its state, so
+        /// one that lasts is found by being off rather than by its state.
+        /// </summary>
+        public bool EndsSwitchedOff { get; }
     }
 }
