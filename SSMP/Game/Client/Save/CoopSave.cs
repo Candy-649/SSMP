@@ -312,6 +312,12 @@ internal partial class CoopSave {
     public ushort? CheckedPartnerId => _checkedWith;
 
     /// <summary>
+    /// Takes the name of a flag of the player data that the partner's game set and that the local save got from it,
+    /// live or in a check.
+    /// </summary>
+    public Action<string>? OnPartnerFlagSet { get; set; }
+
+    /// <summary>
     /// Takes how many fleas the partner has hit in the game of the festival they are playing.
     /// </summary>
     public Action<ClientPlayerData, CoopSaveUpdate>? OnFleaGameScore { get; set; }

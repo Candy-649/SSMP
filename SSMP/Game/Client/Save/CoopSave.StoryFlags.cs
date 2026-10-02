@@ -43,6 +43,12 @@ internal partial class CoopSave {
     private static readonly Dictionary<string, int> StoryFieldIndices = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The names of the story flags that record something done for good, like the win of an arena, which a check keeps
+    /// if either save has them.
+    /// </summary>
+    private static readonly HashSet<string> StoryRecordNames = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The values of the story fields as both games last knew them, or null before a check made both saves agree.
     /// </summary>
     private int[]? _knownStoryValues;
@@ -292,8 +298,9 @@ internal partial class CoopSave {
     /// both games compare the same values. The flags that differ are taken from the save that was played longer since
     /// both players last played together, or from the save with the larger key if both were played equally long, so
     /// both games choose the same save. A boolean that a saved object of the world sets stays set if either save has
-    /// that object, since the check gives it to both saves. Flags that changed live during the check are newer than
-    /// both saves and stay as they are.
+    /// that object, since the check gives it to both saves, and so does a record of something done for good, like an
+    /// arena that either player won. Flags that changed live during the check are newer than both saves and stay as
+    /// they are.
     /// </summary>
     /// <returns>How many story flags changed in the local save.</returns>
     private int AddStoryFlags(ClientPlayerData partner, List<CoopSaveUpdate> parts) {
@@ -322,7 +329,8 @@ internal partial class CoopSave {
 
                 _differentStoryFlags++;
                 var value = _storyFlagsFromPartner ? partnerValue : localValue;
-                if (fields[index].FieldType == typeof(bool) && worldItemFlags.Contains(name)) {
+                if (fields[index].FieldType == typeof(bool) &&
+                    (worldItemFlags.Contains(name) || StoryRecordNames.Contains(name))) {
                     value = 1;
                 }
 
@@ -382,6 +390,8 @@ internal partial class CoopSave {
             AddStoryFields(fields, storyFlags.Bools, type => type == typeof(bool));
             AddStoryFields(fields, storyFlags.Ints, type => type == typeof(int));
             AddStoryFields(fields, storyFlags.Enums, type => type.IsEnum);
+            StoryRecordNames.Clear();
+            StoryRecordNames.UnionWith(storyFlags.Records);
         }
 
         _storyFields = fields.ToArray();

@@ -445,7 +445,7 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// Gets the bounds of a collider in the world, also for colliders that are inactive.
     /// </summary>
-    private static Rect? GetWorldBounds(Collider2D collider) {
+    internal static Rect? GetWorldBounds(Collider2D collider) {
         var offset = collider.offset;
         var points = new List<Vector2>();
         switch (collider) {

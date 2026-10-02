@@ -433,6 +433,14 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Tells the other players, wherever they are, that the local player waits for them in a room. Arenas that count as
+    /// bosses wait for every player the same way.
+    /// </summary>
+    public void TellTeammatesWaiting() {
+        Send(BossRoomUpdateKind.Waiting, "", "", "", "", "");
+    }
+
+    /// <summary>
     /// Tells a player who entered the local scene which rooms the local player already reached, and shares the dialogue
     /// that is still being read.
     /// </summary>
@@ -1581,7 +1589,7 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// Whether a collider contains a point. Inactive colliders are checked by their shape, since physics ignores them.
     /// </summary>
-    private static bool ContainsPoint(Collider2D collider, Vector2 point) {
+    internal static bool ContainsPoint(Collider2D collider, Vector2 point) {
         if (collider.enabled && collider.gameObject.activeInHierarchy) {
             return collider.OverlapPoint(point);
         }

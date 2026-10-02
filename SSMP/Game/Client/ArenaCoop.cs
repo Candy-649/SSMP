@@ -23,9 +23,12 @@ namespace SSMP.Game.Client;
 /// The scene host controls the enemies, so its game counts them, starts the waves and wins the battle, and the games of
 /// the other players follow it. If the scene host dies or leaves, the next scene host continues from the last state it
 /// received. After every player left the room, the battle starts over like it does alone.
-/// A battle that the scene host had already won before is not fought again, so other players can walk through it.
+/// A battle that the scene host had already won before is not fought again, so other players can walk through it. In a
+/// two-player save the world is one, so an arena that one player won is won for both, wherever the other one was: the
+/// saves share the win, and an arena that the partner won a moment ago shows as won right away. Arenas that count as
+/// bosses are fought together instead (<see cref="BossArenaScenes"/>).
 /// </summary>
-internal class ArenaCoop {
+internal partial class ArenaCoop {
     /// <summary>
     /// Binding flags for the private members of the game.
     /// </summary>
@@ -150,6 +153,36 @@ internal class ArenaCoop {
     private static readonly MethodInfo? WaveSetActiveMethod = typeof(BattleWave).GetMethod("SetActive", InstanceFlags);
 
     /// <summary>
+    /// Reflected method that shows an arena as won when its room loads: it turns the triggers off, opens the gates at
+    /// once and switches the waves off.
+    /// </summary>
+    private static readonly MethodInfo? BattleCompletedMethod =
+        typeof(BattleScene).GetMethod("BattleCompleted", InstanceFlags);
+
+    /// <summary>
+    /// Reflected coroutine method that switches the objects of an arena that depend on its win on or off, half a second
+    /// after its room loaded.
+    /// </summary>
+    private static readonly MethodInfo? CheckCompletionMethod =
+        typeof(BattleScene).GetMethod("CheckCompletion", InstanceFlags);
+
+    /// <summary>
+    /// The scenes whose arena counts as a boss, which both players fight together, so that its win is not given to a
+    /// player who wasn't there. These are the arenas where a boss shows its title, which the user decided count as
+    /// bosses on 2026-10-02 ("按首领算"), and the bosses that are fought in an arena. tools/coop_world_items.py keeps
+    /// the same list, which leaves their saved wins out of the ones that two-player saves share.
+    /// </summary>
+    internal static readonly HashSet<string> BossArenaScenes = new(StringComparer.OrdinalIgnoreCase) {
+        "tut_03", "room_crowcourt_02", "shadow_18", "coral_27", "dust_chef", "bone_steel_servant", "song_04",
+        "weave_03", "slab_16b"
+    };
+
+    /// <summary>
+    /// The start of the names of the scenes that play a memory, whose arenas are no win of the world.
+    /// </summary>
+    private const string MemoryScenePrefix = "memory_";
+
+    /// <summary>
     /// Delegate for the original <c>BattleWave.WaveStarted</c>, which adds the enemies of a wave to a count.
     /// </summary>
     private delegate void WaveStartedOrig(BattleWave self, bool activateEnemies, ref int currentEnemies);
@@ -184,6 +217,12 @@ internal class ArenaCoop {
     /// separately.
     /// </summary>
     private readonly Func<bool> _isFullSynchronisation;
+
+    /// <summary>
+    /// Whether the local player plays a checked two-player save with the players around them, whose world is one, so
+    /// that an arena that one of them won is won for both.
+    /// </summary>
+    private readonly Func<bool> _isSharedSave;
 
     /// <summary>
     /// The co-op state of the arenas in the current scene.
@@ -235,12 +274,18 @@ internal class ArenaCoop {
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
-        Func<bool> isFullSynchronisation
+        Func<bool> isFullSynchronisation,
+        Func<bool> isSharedSave,
+        Func<bool> isPartnerMissing,
+        Action tellTeammatesWaiting
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _entityManager = entityManager;
         _isFullSynchronisation = isFullSynchronisation;
+        _isSharedSave = isSharedSave;
+        _isPartnerMissing = isPartnerMissing;
+        _tellTeammatesWaiting = tellTeammatesWaiting;
     }
 
     /// <summary>
@@ -250,7 +295,8 @@ internal class ArenaCoop {
         if (CompletedField == null || CurrentEnemiesField == null || LoopsUntilDeactivateField == null ||
             WavesField == null || CamLocksField == null || BoxColliderField == null || PolygonColliderField == null ||
             StartBattleMethod == null || LockInBattleMethod == null || StartWaveMethod == null ||
-            EndBattleMethod == null || SendEventToChildrenMethod == null || WaveSetActiveMethod == null) {
+            EndBattleMethod == null || SendEventToChildrenMethod == null || WaveSetActiveMethod == null ||
+            BattleCompletedMethod == null || CheckCompletionMethod == null) {
             Logger.Error("Could not find the arena members of the game; arena co-op is disabled");
             return;
         }
@@ -284,6 +330,8 @@ internal class ArenaCoop {
 
         AddHook(typeof(BattleScene), "Update", new Action<Action<BattleScene>, BattleScene>(OnUpdate));
         AddHook(typeof(BattleWave), "WaveStarted", new WaveStartedHook(OnWaveStarted));
+        RegisterBossArenaHooks();
+        RegisterSharedWinHooks();
 
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
     }
@@ -297,6 +345,8 @@ internal class ArenaCoop {
         }
 
         _hooks.Clear();
+        DeregisterBossArenaHooks();
+        DeregisterSharedWinHooks();
 
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
         _arenas.Clear();
@@ -328,6 +378,16 @@ internal class ArenaCoop {
     public void OnBattleSceneUpdate(BattleSceneUpdate update) {
         if (!_isFullSynchronisation() || SceneManager.GetActiveScene().name != update.SceneName) {
             return;
+        }
+
+        // Word from any player about a boss arena, not only from the scene host
+        switch (update.Status) {
+            case BattleSceneStatus.Waiting:
+                OnBossWaiting();
+                return;
+            case BattleSceneStatus.TalkDone:
+                OnBossTalkDone(update.Path);
+                return;
         }
 
         var battleScene = FindBattleScene(update.Path);
@@ -437,6 +497,16 @@ internal class ArenaCoop {
     private void OnStartBattle(Action<BattleScene> orig, BattleScene self) {
         var state = GetState(self);
         var isRemote = IsRemoteTarget(self);
+
+        // An arena whose end is played for the local player without the fight is not fought again
+        if (state.LiveEndOwed || state.LiveEndPlayed) {
+            return;
+        }
+
+        // A boss arena starts once every player is in it
+        if (TryHoldBossTriggerStart(self, state)) {
+            return;
+        }
 
         if (isRemote || !IsFollower()) {
             // The battle only starts once. Players who walk in after it started are locked in by OnTriggerEnter2D.
@@ -613,6 +683,11 @@ internal class ArenaCoop {
                 Logger.Info($"Won arena '{state.Path}'");
                 Send(state.Path, BattleSceneStatus.Won);
             }
+
+            // An arena that doesn't save its win leaves a mark of it, which the partner's save gets too
+            if (_isSharedSave()) {
+                LeaveWonMark(self, state);
+            }
         }
 
         return orig(self, waitExtra);
@@ -780,6 +855,9 @@ internal class ArenaCoop {
             PayTheWaveStartsThatAreOwed();
         }
 
+        ReleaseHeldTriggerStart(self, state);
+        ReleaseHeldBossEvents(self, state);
+        UpdateLiveEnd(self, state);
         WatchForABattleThatStopped(self, state);
 
         if (!IsOtherPlayerInScene()) {
@@ -827,6 +905,7 @@ internal class ArenaCoop {
 
                 if (!state.Started) {
                     StartForOtherPlayer(battleScene);
+                    LockInIfInBossArena(battleScene, state);
                 }
 
                 if (update.Wave > state.Wave) {
@@ -846,12 +925,51 @@ internal class ArenaCoop {
 
                 break;
             case BattleSceneStatus.AlreadyWon:
+                if (state.LockedIn) {
+                    Release(battleScene, state);
+                }
+
+                if (!IsCompleted(battleScene) && SharesWin(battleScene)) {
+                    if (FindLiveEnd(battleScene) != null) {
+                        BeginLiveEnd(battleScene, state, "the scene host won it");
+                    } else {
+                        ShowWonBefore(battleScene, state);
+                    }
+                }
+
+                break;
             case BattleSceneStatus.Unavailable:
                 if (state.LockedIn) {
                     Release(battleScene, state);
                 }
 
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Whether the win of an arena is one for both players, which it is in a two-player save, whose world is one,
+    /// except in the arenas that count as bosses and in memories.
+    /// </summary>
+    private bool SharesWin(BattleScene battleScene) {
+        var sceneName = battleScene.gameObject.scene.name;
+        return _isSharedSave() && !BossArenaScenes.Contains(sceneName) &&
+               !sceneName.StartsWith(MemoryScenePrefix, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Shows an arena that the scene host won before as won for the local player as well, the way the game shows an
+    /// arena that was won when its room loads: its triggers and waves off, its gates open at once, and the objects that
+    /// depend on its win switched over half a second later. An arena that one player won counts as won for both, and
+    /// the save of the local player gets the win from the save of the partner too, which usually happened before the
+    /// room loaded. This is for when it didn't, like when the partner won it a moment ago.
+    /// </summary>
+    private static void ShowWonBefore(BattleScene battleScene, ArenaState state) {
+        Logger.Info($"Arena '{state.Path}' was won before by the scene host, showing it as won here too");
+        CompletedField!.SetValue(battleScene, true);
+        CallArenaMethod(BattleCompletedMethod!, battleScene);
+        if (CallArenaMethod(CheckCompletionMethod!, battleScene) is IEnumerator routine) {
+            battleScene.StartCoroutine(routine);
         }
     }
 
@@ -1360,6 +1478,8 @@ internal class ArenaCoop {
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _arenas.Clear();
+        _heldBossEvents.Clear();
+        OnRescueSceneChanged(newScene.name);
         _owedWaveStarts.Clear();
         _waveEnemyPlaces.Clear();
         _putBackEnemies.Clear();
@@ -1432,6 +1552,42 @@ internal class ArenaCoop {
         /// they walk in.
         /// </summary>
         public readonly List<Gate> HeldGates = [];
+
+        /// <summary>
+        /// Whether the local player walked into the trigger of a boss arena whose start waits for the other players.
+        /// </summary>
+        public bool TriggerStartHeld;
+
+        /// <summary>
+        /// The part of the room that a boss arena takes, once it was worked out.
+        /// </summary>
+        public BossArenaShape? BossShape;
+
+        /// <summary>
+        /// Whether the local player finished the talk before the fight of a boss arena.
+        /// </summary>
+        public bool LocalTalkDone;
+
+        /// <summary>
+        /// Whether another player in the scene finished the talk before the fight of a boss arena.
+        /// </summary>
+        public bool OthersTalkDone;
+
+        /// <summary>
+        /// Whether the end of the fight of an arena without a saved win is still to be played for the local player,
+        /// who didn't fight it.
+        /// </summary>
+        public bool LiveEndOwed;
+
+        /// <summary>
+        /// Whether the end of the fight of an arena without a saved win was played for the local player.
+        /// </summary>
+        public bool LiveEndPlayed;
+
+        /// <summary>
+        /// Whether what starts the fight of such an arena was switched off for the end that is played.
+        /// </summary>
+        public bool LiveEndStarterOff;
 
         public ArenaState(string path) {
             Path = path;

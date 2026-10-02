@@ -320,7 +320,16 @@ internal class ClientManager : IClientManager {
         _benchCoop = new BenchCoop(netClient, _playerData, _saveManager);
         _enemyHealthCoop = new EnemyHealthCoop(_playerData);
         _bindCoop = new BindCoop();
-        _arenaCoop = new ArenaCoop(netClient, _playerData, _entityManager, () => _fullSynchronisation);
+        _arenaCoop = new ArenaCoop(
+            netClient,
+            _playerData,
+            _entityManager,
+            () => _fullSynchronisation,
+            // Made here and called later, by which time the two-player save and the boss rooms below exist
+            () => _coopSave!.CheckedPartnerId != null,
+            () => _coopSave!.IsPartnerMissing(),
+            () => _bossRoomCoop!.TellTeammatesWaiting()
+        );
         _bossRoomCoop = new BossRoomCoop(
             netClient,
             _playerData,
@@ -353,6 +362,7 @@ internal class ClientManager : IClientManager {
             netClient, _playerData, _entityManager, _coopSave, () => _coopSave.CheckedPartnerId
         );
         _coopSave.OnFleaGameScore = _fleaGameCoop.OnPartnerScore;
+        _coopSave.OnPartnerFlagSet = _arenaCoop.OnPartnerFlagSet;
         _coopSave.OnFleaGamesOutroReady = _fleaGameCoop.OnPartnerOutroReady;
         _fsmPatcher = new FsmPatcher();
 

@@ -752,7 +752,7 @@ internal partial class BossRoomCoop {
     /// Gives control back to the local player while their room waits for the other players, so that they can move and
     /// pause instead of standing still for as long as that takes. What was changed is remembered to restore it.
     /// </summary>
-    private static void FreeHero(FreedHero freed) {
+    internal static void FreeHero(FreedHero freed) {
         _changingHero = true;
         try {
             var heroController = HeroController.instance;
@@ -781,7 +781,7 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// Takes control from the local player again as their room took it, before the room continues to its fight.
     /// </summary>
-    private static void RestoreHero(FreedHero freed) {
+    internal static void RestoreHero(FreedHero freed) {
         _changingHero = true;
         try {
             var heroController = HeroController.instance;
@@ -1240,7 +1240,7 @@ internal partial class BossRoomCoop {
     /// What was given back to the local player while something waits for the other players, which is taken again once
     /// it goes on.
     /// </summary>
-    private class FreedHero {
+    internal class FreedHero {
         /// <summary>
         /// Whether control was given back to the local player while waiting.
         /// </summary>

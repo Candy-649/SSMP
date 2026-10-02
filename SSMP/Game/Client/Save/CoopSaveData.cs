@@ -185,6 +185,13 @@ internal class CoopStoryFlags {
     /// </summary>
     [JsonProperty("Enums")]
     public List<string> Enums { get; set; } = [];
+
+    /// <summary>
+    /// The names of the boolean fields among <see cref="Bools"/> that record something done for good, like the win of
+    /// an arena, which a check keeps if either save has them.
+    /// </summary>
+    [JsonProperty("Records")]
+    public List<string> Records { get; set; } = [];
 }
 
 /// <summary>

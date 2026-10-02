@@ -81,5 +81,16 @@ internal enum BattleSceneStatus : byte {
     /// <summary>
     /// The arena is not active for the scene host, so its battle can't run.
     /// </summary>
-    Unavailable
+    Unavailable,
+
+    /// <summary>
+    /// The fight of an arena that counts as a boss waits for a player who is not in it yet, while the player who gets
+    /// this stands in it.
+    /// </summary>
+    Waiting,
+
+    /// <summary>
+    /// The player finished the talk before the fight of an arena that counts as a boss.
+    /// </summary>
+    TalkDone
 }

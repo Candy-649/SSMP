@@ -1303,6 +1303,9 @@ internal partial class CoopSave {
                 if (playerData.GetBool(name) != (value != 0)) {
                     playerData.SetBool(name, value != 0);
                     changed++;
+                    if (value != 0) {
+                        OnPartnerFlagSet?.Invoke(name);
+                    }
                 }
             } else if (field?.FieldType == typeof(int)) {
                 if (playerData.GetInt(name) != value) {
