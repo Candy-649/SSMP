@@ -1290,6 +1290,7 @@ internal partial class CoopSave {
 
         var changed = 0;
         var applied = new List<string>();
+        List<string>? setHere = null;
         for (var i = 0; i < update.FlagNames.Count && i < update.FlagValues.Count; i++) {
             var name = update.FlagNames[i];
             var value = update.FlagValues[i];
@@ -1305,6 +1306,7 @@ internal partial class CoopSave {
                     changed++;
                     if (value != 0) {
                         OnPartnerFlagSet?.Invoke(name);
+                        (setHere ??= []).Add(name);
                     }
                 }
             } else if (field?.FieldType == typeof(int)) {
@@ -1319,6 +1321,11 @@ internal partial class CoopSave {
         }
 
         RememberStoryValues(applied);
+
+        if (setHere != null) {
+            FinishLoadedShrines(setHere);
+        }
+
         return changed;
     }
 
