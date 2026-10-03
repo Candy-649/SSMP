@@ -1,5 +1,7 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Util;
 
@@ -145,6 +147,18 @@ internal static class CopyUtil {
         GameObject targetObject,
         Dictionary<object, object> objectDict
     ) {
+        // What each sprite is drawn with is filled in only when its collection is first used (Init, through inst), and
+        // the copy never fills it in itself: its own Init does nothing once it has materials. The character of another
+        // player is copied when it is first made, early on, so a sprite of a collection that the local hero had not
+        // drawn yet by then was copied with nothing to draw it with, and showed as a flat purple square - the other
+        // player playing to a door that opens to the needolin, with sprites drawn for that alone. The original is set
+        // up first, as the game sets it up the first time it draws from it.
+        try {
+            _ = original.inst;
+        } catch (Exception e) {
+            Logger.Warn($"Could not set up sprite collection '{original.spriteCollectionName}' before copying it: {e.Message}");
+        }
+
         var newSpriteCollectionData = targetObject.AddComponent<tk2dSpriteCollectionData>();
 
         newSpriteCollectionData.version = original.version;
