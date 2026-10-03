@@ -933,12 +933,12 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Hook for <see cref="CollectableItem"/>.<see cref="CollectableItem.IsAtMax"/> to let a player carry 99 of each
-    /// kind of rosary string rather than 20. Every item that is used up is held to the one cap of the game unless it
-    /// has one of its own, and the strings have none; nothing else changes. Shops, pickups and the inventory all ask
-    /// here.
+    /// kind of rosary string, and 99 shard pouches, rather than 20. Every item that is used up is held to the one cap
+    /// of the game unless it has one of its own, and the strings and the pouch have none; nothing else changes. Shops,
+    /// pickups and the inventory all ask here.
     /// </summary>
     private static bool CollectableItemOnIsAtMax(Func<CollectableItem, bool> orig, CollectableItem self) {
-        if (!self.name.StartsWith("Rosary_Set_")) {
+        if (!self.name.StartsWith("Rosary_Set_") && self.name != "Shard Pouch") {
             return orig(self);
         }
 
