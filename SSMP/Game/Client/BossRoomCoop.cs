@@ -905,6 +905,14 @@ internal partial class BossRoomCoop {
                      FindObjectsInactive.Include,
                      FindObjectsSortMode.None
                  )) {
+            // Only rooms start fights. What is kept from room to room - the hero, the menus, the inventory - was looked
+            // at again in every room, and much of it was never switched on: PlayMaker complains about every state of
+            // such an FSM that it is asked for, so every room that loaded wrote a few hundred errors, each with an
+            // exception, to the game's log
+            if (playMakerFsm.gameObject.scene.name == "DontDestroyOnLoad") {
+                continue;
+            }
+
             // FSMs that never woke up haven't loaded their actions yet
             var fsm = playMakerFsm.Fsm;
             if (fsm == null || fsm.Owner == null || !_scannedFsms.Add(fsm)) {
