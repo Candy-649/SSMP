@@ -373,7 +373,159 @@ internal partial class GamePatcher {
             EnemyTargetLocks.Remove(owner);
         }
 
-        Logger.Info($"{owners.Count} enemy(s) were going after a player who is now down, and have been let go");
+        var turned = TurnEnemiesAwayFrom(player, owners);
+        Logger.Info(
+            $"{owners.Count} enemy(s) were going after a player who is now down, and have been let go; " +
+            $"{turned} aim(s) were turned to who still stands"
+        );
+    }
+
+    /// <summary>
+    /// Points what the given enemies aim at the given player, who went down, at whoever still stands nearest to each of
+    /// them instead, without settling the enemy on anyone. Letting an enemy go of a player clears whom it settled on,
+    /// but its actions stay pointed where they were until it settles on someone else, and only its own look around for
+    /// players does that: an enemy with nobody else in its reach or in its sight went on striking the cocoon. Pointed at
+    /// the player who still stands, it does what it does while it has settled on no one - what the game itself does
+    /// with its one player - and its own look around decides from there.
+    /// </summary>
+    /// <param name="player">The player who went down.</param>
+    /// <param name="owners">The instance IDs of the enemies that were going after them.</param>
+    /// <returns>How many aims were turned.</returns>
+    private static int TurnEnemiesAwayFrom(GameObject player, List<int> owners) {
+        if (_entityManagerInstance == null) {
+            return 0;
+        }
+
+        var turned = 0;
+        foreach (var entity in _entityManagerInstance.ActiveEntities) {
+            if (entity == null) {
+                continue;
+            }
+
+            foreach (var fsm in entity.HostFsms) {
+                turned += TurnAwayFrom(fsm, player, owners);
+            }
+
+            if (entity.ClientFsms != null) {
+                foreach (var fsm in entity.ClientFsms) {
+                    turned += TurnAwayFrom(fsm, player, owners);
+                }
+            }
+
+            foreach (var root in new[] { entity.Object.Host, entity.Object.Client }) {
+                turned += TurnCachedTargetAwayFrom<WalkerV2>(root, WalkerV2HeroField, player, owners);
+                turned += TurnCachedTargetAwayFrom<ScuttlerControl>(root, ScuttlerControlHeroField, player, owners);
+            }
+        }
+
+        return turned;
+    }
+
+    /// <summary>
+    /// Points what the actions of one FSM of an enemy that was going after a player who went down aim at that player at
+    /// whoever still stands nearest to the enemy (see <see cref="TurnEnemiesAwayFrom"/>), in every state of it: the
+    /// actions of a state are pointed as the state is gone into, and were pointed at the player while they were the one
+    /// the enemy had settled on, so a state it goes into later would still have aimed at them.
+    /// </summary>
+    /// <returns>How many aims were turned.</returns>
+    private static int TurnAwayFrom(PlayMakerFSM? fsm, GameObject player, List<int> owners) {
+        if (fsm == null || fsm.FsmStates == null) {
+            return 0;
+        }
+
+        var owner = GetEnemyTargetOwner(fsm.gameObject);
+        if (owner == null || !owners.Contains(owner.GetInstanceID())) {
+            return 0;
+        }
+
+        var standing = PlayerTargetRegistry.GetNearestPlayer(owner);
+        if (standing == null) {
+            return 0;
+        }
+
+        var turned = 0;
+        foreach (var state in fsm.FsmStates) {
+            if (state?.Actions == null) {
+                continue;
+            }
+
+            foreach (var action in state.Actions) {
+                if (action == null || !ActionRegistry.TargetedFsmActionTypes.Contains(action.GetType().Name)) {
+                    continue;
+                }
+
+                foreach (var field in GetFsmGameObjectFields(action.GetType())) {
+                    if (field.GetValue(action) is FsmGameObject aim && aim.Value == player &&
+                        CanRetargetFsmGameObjectField(action, field, aim)) {
+                        field.SetValue(action, new FsmGameObject { Value = standing });
+                        turned++;
+                    }
+                }
+
+                foreach (var field in GetFsmOwnerDefaultFields(action.GetType())) {
+                    if (field.GetValue(action) is FsmOwnerDefault {
+                            OwnerOption: OwnerDefaultOption.SpecifyGameObject, GameObject: { } aim
+                        } pair && aim.Value == player && CanRetargetFsmGameObjectField(action, field, aim)) {
+                        pair.GameObject = new FsmGameObject { Value = standing };
+                        turned++;
+                    }
+                }
+            }
+        }
+
+        return turned;
+    }
+
+    /// <summary>
+    /// Points the player that a creature's own component of the given type keeps at whoever still stands nearest to it,
+    /// when it is the player who went down and the creature was going after them (see
+    /// <see cref="TurnEnemiesAwayFrom"/>). The component is pointed at the player that the creature settled on every
+    /// little while, but only while it has settled on someone.
+    /// </summary>
+    /// <returns>1 when it was turned; otherwise 0.</returns>
+    private static int TurnCachedTargetAwayFrom<TComponent>(
+        GameObject? root,
+        FieldInfo? field,
+        GameObject player,
+        List<int> owners
+    ) where TComponent : Behaviour {
+        if (root == null || field == null) {
+            return 0;
+        }
+
+        var component = root.GetComponentInChildren<TComponent>();
+        if (component == null) {
+            return 0;
+        }
+
+        var aimedAt = field.GetValue(component) switch {
+            Transform transform when transform != null => transform.gameObject,
+            GameObject gameObject when gameObject != null => gameObject,
+            _ => null
+        };
+        if (aimedAt != player) {
+            return 0;
+        }
+
+        var owner = GetEnemyTargetOwner(component.gameObject);
+        if (owner == null || !owners.Contains(owner.GetInstanceID())) {
+            return 0;
+        }
+
+        var standing = PlayerTargetRegistry.GetNearestPlayer(owner);
+        if (standing == null) {
+            return 0;
+        }
+
+        if (field.FieldType == typeof(Transform)) {
+            field.SetValue(component, standing.transform);
+        } else if (field.FieldType == typeof(GameObject)) {
+            field.SetValue(component, standing);
+        } else {
+            return 0;
+        }
+
+        return 1;
     }
 
     /// <summary>

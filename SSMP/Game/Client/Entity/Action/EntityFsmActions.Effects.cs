@@ -315,6 +315,81 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region EnemyDeathEffectsRegular.SimulateDeath
+
+    // A creature whose death its own FSM plays (HealthManager.hasSpecialDeath) is only told by the game that its health
+    // ran out, and its FSM then throws out its body, bursts and counts the kill in the journal with one of these, often
+    // to go back into hiding and be called up again, like what a boss summons. The copy's FSM never plays that death,
+    // so on the other game the creature simply went out with nothing to show how it died. The copy dies the same way
+    // here, its own kill counted in this player's journal as a creature dying any other way is.
+
+    /// <summary>
+    /// Whether an action plays the death of a creature whose FSM plays its own death (see the replays below).
+    /// </summary>
+    /// <param name="action">The action.</param>
+    public static bool IsSimulatedDeath(FsmStateAction action) {
+        return action is EnemyDeathEffectsRegular.SimulateDeath or EnemyDeathEffectsRegular.SimulateDeathV2
+            or EnemyDeathEffectsRegular.SimulateDeathNoCorpse;
+    }
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(
+        EntityNetworkData data,
+        EnemyDeathEffectsRegular.SimulateDeath action
+    ) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(
+        EntityNetworkData? data,
+        EnemyDeathEffectsRegular.SimulateDeath action
+    ) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region EnemyDeathEffectsRegular.SimulateDeathV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(
+        EntityNetworkData data,
+        EnemyDeathEffectsRegular.SimulateDeathV2 action
+    ) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(
+        EntityNetworkData? data,
+        EnemyDeathEffectsRegular.SimulateDeathV2 action
+    ) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
+    #region EnemyDeathEffectsRegular.SimulateDeathNoCorpse
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(
+        EntityNetworkData data,
+        EnemyDeathEffectsRegular.SimulateDeathNoCorpse action
+    ) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(
+        EntityNetworkData? data,
+        EnemyDeathEffectsRegular.SimulateDeathNoCorpse action
+    ) {
+        RunMoment(data, action);
+    }
+
+    #endregion
+
     /// <summary>
     /// Actions that do something to the player character or check whether it can be hit or caught, or show on the
     /// player's silk that a creature drains it.

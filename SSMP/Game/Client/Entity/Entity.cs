@@ -3022,6 +3022,13 @@ internal partial class Entity {
                     }
                 }
 
+                // Nor the death that a boss dies in that part while it waits for the local player to be stood up or
+                // to come into the room: the copy dies it there itself once the part starts, from its first state
+                if (_eachGamePartWaiting is { } waiting && waiting.Fsm == fsm && waiting.Part.Contains(state) &&
+                    EntityFsmActions.IsSimulatedDeath(action)) {
+                    continue;
+                }
+
                 //Logger.Info(
                 //    $"Received entity network data for FSM: {fsm.Fsm.Name}, {state.Name}, {actionIndex} ({action.GetType()})"
                 //);

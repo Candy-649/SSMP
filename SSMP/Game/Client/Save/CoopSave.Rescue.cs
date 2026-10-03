@@ -2220,10 +2220,13 @@ internal partial class CoopSave {
                 animator.Stop();
                 sprite.SetSprite(HiddenSpriteName);
 
-                // Nothing should come looking for someone who is lying in a cocoon. This stops anything choosing
-                // them from here on; an enemy that had already fixed on them keeps swinging at the spot until it
-                // loses interest of its own accord, because the hold it has is kept somewhere this cannot reach.
+                // Nothing should come looking for someone who is lying in a cocoon. Off the list, nothing chooses
+                // them from here on; an enemy that had already chosen them is let go of them as well, as one is
+                // when this game's own player goes down. Left holding them, it kept them for as long as they lay in
+                // its sight, which is all of the wait: a boss went on striking the cocoon of the partner it had
+                // been fighting while the player still standing was right there.
                 PlayerTargetRegistry.UnregisterRemotePlayer(body);
+                GamePatcher.ForgetPlayerAsTarget(body);
 
                 return;
             }

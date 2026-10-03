@@ -48,6 +48,11 @@ internal class HealthManagerComponent : EntityComponent {
     private GameObject? _clientCorpse;
 
     /// <summary>
+    /// The frame in which <see cref="_clientCorpse"/> was emitted.
+    /// </summary>
+    private int _clientCorpseFrame = -1;
+
+    /// <summary>
     /// Boolean indicating whether the health manager of the client entity is allowed to die.
     /// </summary>
     private bool _allowDeath;
@@ -162,6 +167,7 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         _clientCorpse = corpse;
+        _clientCorpseFrame = Time.frameCount;
         RestoreCorpsePhysics(corpse);
     }
 
@@ -421,13 +427,20 @@ internal class HealthManagerComponent : EntityComponent {
                     corpseVelocity = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
                 }
 
+                // A creature whose FSM plays its own death threw out its body in the replay of that, which came just
+                // before this from the same death in the scene host's game (EntityFsmActions, SimulateDeath), and the
+                // copy's own death throws out none: the body whose place the scene host sent is that one. Only one
+                // thrown out this frame, as a body of an earlier death may since have been taken for another
+                var replayedCorpse = _clientCorpseFrame == Time.frameCount ? _clientCorpse : null;
+
                 // Set a boolean to indicate that the client health manager is allowed to execute the Die method
                 _allowDeath = true;
                 _clientCorpse = null;
                 _healthManager.Client.Die(attackDirection, attackType, ignoreEvasion);
 
-                if (hasCorpseSnapshot && _clientCorpse != null) {
-                    ApplyCorpseSnapshot(_clientCorpse, corpsePosition, corpseRotation, corpseVelocity);
+                var corpse = _clientCorpse != null ? _clientCorpse : replayedCorpse;
+                if (hasCorpseSnapshot && corpse != null) {
+                    ApplyCorpseSnapshot(corpse, corpsePosition, corpseRotation, corpseVelocity);
                 }
 
                 break;
