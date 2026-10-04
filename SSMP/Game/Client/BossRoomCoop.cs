@@ -469,6 +469,12 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        NoteOutOfStepEvent(self, eventName);
+        if (IsCatchUpDelivery(self, eventName)) {
+            orig(self, fsmEvent, eventData);
+            return;
+        }
+
         // Key dialogue of a two-player save waits for the partner to read it also where rooms don't wait
         if (self.ActiveState is { } activeState &&
             (IsHoldActive()
@@ -654,6 +660,18 @@ internal partial class BossRoomCoop {
             MarkFightBegan(self, toState.Name);
         }
 
+        TellSceneHostRoomStarted(self, fromState, toState);
+
+        // Last, since it may move the FSM on to another state
+        if (toState != null) {
+            CatchUpWithBoss(self, toState);
+        }
+    }
+
+    /// <summary>
+    /// Tells the scene host when a trigger of a room that the local player reached took an FSM from one state to another.
+    /// </summary>
+    private void TellSceneHostRoomStarted(Fsm self, FsmState? fromState, FsmState? toState) {
         if (fromState == null || toState == null || fromState == toState || !IsFollower()) {
             return;
         }
@@ -870,6 +888,7 @@ internal partial class BossRoomCoop {
         RunUpdateStep(ReleaseHeldStarts, nameof(ReleaseHeldStarts));
         RunUpdateStep(UpdateDialogues, nameof(UpdateDialogues));
         RunUpdateStep(UpdateEventStarts, nameof(UpdateEventStarts));
+        RunUpdateStep(UpdateCatchUps, nameof(UpdateCatchUps));
         RunUpdateStep(UpdateRoomWaits, nameof(UpdateRoomWaits));
         RunUpdateStep(CheckStartedRooms, nameof(CheckStartedRooms));
         RunUpdateStep(() => ClosePendingGates(previousPosition, position), nameof(ClosePendingGates));
@@ -1687,6 +1706,7 @@ internal partial class BossRoomCoop {
         _remotePositions.Clear();
         ClearDialogues();
         ClearEventStarts();
+        ClearCatchUps();
         _lastHeroPosition = null;
         _nextScanTime = 0f;
     }
