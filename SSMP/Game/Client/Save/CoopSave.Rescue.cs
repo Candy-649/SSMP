@@ -1703,10 +1703,13 @@ internal partial class CoopSave {
                 var safe = playerData.hazardRespawnLocation;
                 Logger.Info(
                     $"Standing back up at {safe} instead of {hero.transform.position}, which is in or over lava, " +
-                    "spikes or a drop"
+                    "spikes, a drop or sand that pulls players under"
                 );
                 hero.transform.position = safe;
             }
+
+            // Once the player stands where they will play on from, so that the camera locks to the area they are in
+            ReleaseHeldCamera();
 
             hero.cState.onGround = true;
             hero.cState.falling = false;
@@ -1851,10 +1854,46 @@ internal partial class CoopSave {
     /// Whether a collider hurts the player for the room rather than for a creature. The game reads the harm off the
     /// collider's own object (HeroBox.CheckForDamage), and answers every kind of it but a creature's attack and an
     /// explosion by putting the player back at the last safe place (HeroController.TakeDamage).
+    ///
+    /// The sand that creatures pull a player down into hurts without any of that: its trigger tells the group of
+    /// creatures (RangeAttackGroup.OnCustomDamageTriggerEntered), whose event drags the player under and puts them
+    /// back at the same safe place, so it is known by being the trigger of such a group.
     /// </summary>
     private static bool IsTheRoomsHarm(Collider2D collider) {
-        return collider.TryGetComponent<DamageHero>(out var damage) && damage.hazardType is not (
-            GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or GlobalEnums.HazardType.EXPLOSION);
+        if (collider.TryGetComponent<DamageHero>(out var damage) && damage.hazardType is not (
+                GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or GlobalEnums.HazardType.EXPLOSION)) {
+            return true;
+        }
+
+        return collider.TryGetComponent<TriggerEnterEvent>(out var trigger) &&
+               collider.GetComponentInParent<RangeAttackGroup>(true) is { } group &&
+               RangeAttackGroupDamageTriggerField?.GetValue(group) is TriggerEnterEvent groupTrigger &&
+               groupTrigger == trigger;
+    }
+
+    /// <summary>
+    /// The trigger through which a group of creatures that live in the ground hurts the player.
+    /// </summary>
+    private static readonly FieldInfo? RangeAttackGroupDamageTriggerField =
+        typeof(RangeAttackGroup).GetField("customDamageTrigger", InstanceFlags);
+
+    /// <summary>
+    /// Lets the camera follow the player again if it is still held where they went down. Some of the room's harm holds
+    /// it still as it pulls the player under - the sand of the creatures that drag a player in calls FreezeInPlace in
+    /// its hit - and only the way back to the room's mark or to the bench lets go of it again, neither of which comes
+    /// for a death that is held for a rescue. So the camera stayed where the player went under while they walked
+    /// away. This is the game's own way of letting go of it (the CameraStopFreeze action), which also locks it back
+    /// to the area of the room the player is in.
+    /// </summary>
+    private static void ReleaseHeldCamera() {
+        var cameras = GameCameras.instance;
+        var camera = cameras == null ? null : cameras.cameraController;
+        if (camera == null || camera.mode != CameraController.CameraMode.FROZEN) {
+            return;
+        }
+
+        Logger.Info("The camera was still held where the player went down: letting it follow them again");
+        camera.StopFreeze(true);
     }
 
     /// <summary>

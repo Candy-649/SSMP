@@ -1738,8 +1738,10 @@ internal class CoopHits {
     /// </summary>
     /// <param name="update">The update of the partner's touch.</param>
     private void ApplyEntityTouch(CoopHitUpdate update) {
+        // The FSM is gone along with its creature once that died here, which a touch sent just before can reach after
         if (!_entityManager.IsSceneHost || FindEntity(update.EntityId) is not { } entity ||
-            update.Index >= entity.HostFsms.Count || entity.HostFsms[update.Index] is not { } fsm) {
+            update.Index >= entity.HostFsms.Count || entity.HostFsms[update.Index] is not { } fsm || fsm == null ||
+            fsm.Fsm == null) {
             return;
         }
 
