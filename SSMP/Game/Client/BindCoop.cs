@@ -57,6 +57,22 @@ internal class BindCoop {
     private const string HealState = "Heal";
 
     /// <summary>
+    /// The state of that FSM that checks whether the player can heal when they ask to. A heal that gets past it spends
+    /// its silk in the same frame, on the ground.
+    /// </summary>
+    private const string CanHealState = "Can Bind?";
+
+    /// <summary>
+    /// The event with which that state turns a heal down.
+    /// </summary>
+    private const string TurnedDownEvent = "CANCEL";
+
+    /// <summary>
+    /// The variable of that FSM that keeps the player from healing at all while it is true.
+    /// </summary>
+    private const string HealLockedVariable = "Bind Locked";
+
+    /// <summary>
     /// The states of that FSM that a heal ends in, early or not: cancelled, ended, hit, and left behind by a scene change.
     /// </summary>
     private static readonly HashSet<string> HealEndStates = ["Cancel All", "End Bind", "Witch Binding?", "Leave Scene Bind?"];
@@ -76,6 +92,11 @@ internal class BindCoop {
     /// How the events of a short roar begin, which the game lets go of while the player heals.
     /// </summary>
     private const string RoarBurstPrefix = "ROAR BURST ";
+
+    /// <summary>
+    /// How the events begin with which a roar starts holding the player still: ROAR ENTER and ROAR ENTER FORCED.
+    /// </summary>
+    private const string RoarEnterPrefix = "ROAR ENTER";
 
     /// <summary>
     /// The events with which a roar stops holding the player.
@@ -246,6 +267,7 @@ internal class BindCoop {
 
         if (fsmName == RoarFsm) {
             if (!HoldRoarWhileHealing(hero, eventName)) {
+                SayRoarHoldsPlayer(hero, eventName);
                 orig(self, fsmEvent, eventData);
             }
 
@@ -258,8 +280,42 @@ internal class BindCoop {
             return;
         }
 
+        SayWhyHealWasTurnedDown(self, eventName, hero);
         SayWhatCutTheHealShort(self, eventName);
         orig(self, fsmEvent, eventData);
+    }
+
+    /// <summary>
+    /// Writes down a roar that starts holding the local player while they aren't healing, with what their heal is
+    /// doing, so that a heal asked for around it can be put in order with it.
+    /// </summary>
+    private static void SayRoarHoldsPlayer(HeroController hero, string eventName) {
+        if (_lettingRoarGoOn || !eventName.StartsWith(RoarEnterPrefix, StringComparison.Ordinal)) {
+            return;
+        }
+
+        Logger.Info(
+            $"{DateTime.Now:HH:mm:ss} A roar ('{eventName}') from {DescribeFsm(FsmExecutionStack.ExecutingFsm)} " +
+            $"reached the player while they weren't healing (heal in " +
+            $"'{hero.gameObject.LocateMyFSM(BindFsm)?.ActiveStateName}')"
+        );
+    }
+
+    /// <summary>
+    /// Writes down why the game turned down a heal that the local player asked for, which then spent no silk: whether
+    /// the player could act, and what the FSM that holds them during a roar was doing.
+    /// </summary>
+    private static void SayWhyHealWasTurnedDown(Fsm self, string eventName, HeroController hero) {
+        if (eventName != TurnedDownEvent || self.ActiveStateName != CanHealState) {
+            return;
+        }
+
+        Logger.Info(
+            $"{DateTime.Now:HH:mm:ss} The game turned down a heal the player asked for: can heal {hero.CanBind()}, " +
+            $"control taken {hero.controlReqlinquished}, taking input {hero.acceptingInput}, heal locked " +
+            $"{self.Variables.FindFsmBool(HealLockedVariable)?.Value}, roar FSM in " +
+            $"'{hero.gameObject.LocateMyFSM(RoarFsm)?.ActiveStateName}'"
+        );
     }
 
     /// <summary>
