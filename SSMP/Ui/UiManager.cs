@@ -227,6 +227,11 @@ internal class UiManager : IUiManager {
     private CoopPromptInterface _coopPromptInterface = null!;
 
     /// <summary>
+    /// The health bars of creatures that were hurt.
+    /// </summary>
+    private EnemyHealthBars? _enemyHealthBars;
+
+    /// <summary>
     /// Original event triggers for the save selection screen's back button.
     /// Stored when overridden to return to multiplayer menu instead of main menu.
     /// Restored when exiting save selection.
@@ -539,6 +544,9 @@ internal class UiManager : IUiManager {
         CreateEventSystem();
         CreateUiComponents();
         RegisterInterfaceCallbacks();
+
+        _enemyHealthBars = new EnemyHealthBars();
+        _enemyHealthBars.Start();
         
         TryAddMultiplayerScreen();
     }
