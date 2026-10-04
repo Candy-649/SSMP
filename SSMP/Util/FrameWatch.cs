@@ -278,6 +278,9 @@ internal static class FrameWatch {
     /// </summary>
     /// <param name="end">When the last frame counted in the stretch ended, in ticks of <see cref="Stopwatch"/>.</param>
     /// <param name="now">When the new stretch begins, in ticks of <see cref="Stopwatch"/>.</param>
+    /// <param name="update">The handlers of each frame.</param>
+    /// <param name="lateUpdate">The handlers of the last step of each frame.</param>
+    /// <param name="fixedUpdate">The handlers of each step of physics.</param>
     private static void EndStretch(long end, long now, TimedEvent update, TimedEvent lateUpdate, TimedEvent fixedUpdate) {
         var length = (end - _stretchStart) * TickTime;
         if (_stretchFrames > 0 && (_stretchTime / _stretchFrames >= SlowStretchFrameTime || _stretchLongFrames > 0 ||
