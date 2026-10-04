@@ -14,9 +14,23 @@ internal class MonoBehaviourUtil : MonoBehaviour {
     public static MonoBehaviourUtil Instance = null!;
 
     /// <summary>
+    /// The handlers of the events below, which keep the time they take for <see cref="FrameWatch"/>.
+    /// </summary>
+    private readonly TimedEvent _update = new();
+
+    /// <inheritdoc cref="_update"/>
+    private readonly TimedEvent _lateUpdate = new();
+
+    /// <inheritdoc cref="_update"/>
+    private readonly TimedEvent _fixedUpdate = new();
+
+    /// <summary>
     /// Event that is execute each Unity update tick.
     /// </summary>
-    public event Action? OnUpdateEvent;
+    public event Action? OnUpdateEvent {
+        add => _update.Add(value);
+        remove => _update.Remove(value);
+    }
 
     /// <summary>
     /// Event that is executed each Unity late update tick, which is the last thing that happens before the frame is
@@ -26,13 +40,19 @@ internal class MonoBehaviourUtil : MonoBehaviour {
     /// rest of the frame runs, so whatever ran after it has the rest of the frame to do it again and be drawn doing
     /// it. Nothing runs after this.
     /// </summary>
-    public event Action? OnLateUpdateEvent;
+    public event Action? OnLateUpdateEvent {
+        add => _lateUpdate.Add(value);
+        remove => _lateUpdate.Remove(value);
+    }
 
     /// <summary>
     /// Event that is executed each step of physics, before the step moves anything - where the FSMs of the game run
     /// the actions that work in steps of physics, like speeding a body up.
     /// </summary>
-    public event Action? OnFixedUpdateEvent;
+    public event Action? OnFixedUpdateEvent {
+        add => _fixedUpdate.Add(value);
+        remove => _fixedUpdate.Remove(value);
+    }
 
     public void Awake() {
         if (Instance != null) {
@@ -51,16 +71,17 @@ internal class MonoBehaviourUtil : MonoBehaviour {
     public static uint FixedStep { get; private set; }
 
     public void Update() {
-        OnUpdateEvent?.Invoke();
+        FrameWatch.OnFrame(_update, _lateUpdate, _fixedUpdate);
+        _update.Invoke();
     }
 
     public void LateUpdate() {
-        OnLateUpdateEvent?.Invoke();
+        _lateUpdate.Invoke();
     }
 
     public void FixedUpdate() {
         FixedStep++;
-        OnFixedUpdateEvent?.Invoke();
+        _fixedUpdate.Invoke();
     }
 
     /// <summary>

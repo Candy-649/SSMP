@@ -1,10 +1,13 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Reflection;
 using GlobalEnums;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
+using SSMP.Util;
 using TeamCherry.Localization;
 using Logger = SSMP.Logging.Logger;
 
@@ -186,11 +189,11 @@ public static class EventHooks {
     public static event Action<HeroController>? HeroControllerUpdate {
         add {
             _heroControllerUpdate += value;
-            _heroControllerUpdateListeners = _heroControllerUpdate?.GetInvocationList() ?? [];
+            KeepHeroControllerUpdateListeners();
         }
         remove {
             _heroControllerUpdate -= value;
-            _heroControllerUpdateListeners = _heroControllerUpdate?.GetInvocationList() ?? [];
+            KeepHeroControllerUpdateListeners();
         }
     }
 
@@ -201,9 +204,18 @@ public static class EventHooks {
 
     /// <summary>
     /// The listeners of <see cref="HeroControllerUpdate"/>, kept apart so that calling them one at a time costs
-    /// nothing per frame.
+    /// nothing per frame, each with the part of the mod's work of each frame that keeps the time it takes.
     /// </summary>
-    private static Delegate[] _heroControllerUpdateListeners = [];
+    private static (Delegate Listener, TimedPart Part)[] _heroControllerUpdateListeners = [];
+
+    /// <summary>
+    /// Keeps the listeners of <see cref="HeroControllerUpdate"/> apart, after one was added or removed.
+    /// </summary>
+    private static void KeepHeroControllerUpdateListeners() {
+        _heroControllerUpdateListeners = (_heroControllerUpdate?.GetInvocationList() ?? [])
+            .Select(listener => (listener, FrameWatch.Part(TimedEvent.Describe(listener))))
+            .ToArray();
+    }
 
     /// <summary>
     /// Which listeners of <see cref="HeroControllerUpdate"/> have thrown, so that one that throws every frame is
@@ -552,7 +564,9 @@ public static class EventHooks {
         // one of them straight out to the game. Every listener after that one would then never run again, so a fault
         // in the first of them could leave a player standing still for the rest of the session with nothing in the
         // log to say why.
-        foreach (var listener in _heroControllerUpdateListeners) {
+        var last = Stopwatch.GetTimestamp();
+        foreach (var (listener, part) in _heroControllerUpdateListeners) {
+            FrameWatch.Running = part.Name;
             try {
                 ((Action<HeroController>) listener)(self);
             } catch (Exception e) {
@@ -561,7 +575,13 @@ public static class EventHooks {
                     Logger.Error($"'{what}' threw on a frame, and the rest of the mod went on without it:\n{e}");
                 }
             }
+
+            var now = Stopwatch.GetTimestamp();
+            part.FrameTicks += now - last;
+            last = now;
         }
+
+        FrameWatch.Running = null;
     }
 
     private static IEnumerator OnHeroControllerDie(
