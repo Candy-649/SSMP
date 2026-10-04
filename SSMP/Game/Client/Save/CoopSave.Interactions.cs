@@ -479,6 +479,13 @@ internal partial class CoopSave {
             LogRaceError(e);
         }
 
+        // And toll benches, before the switch, which tells a payment of the local player from the state it leaves
+        try {
+            OnTollBenchSwitch(self, toState);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         CoopMechanism? mechanism = null;
         try {
             mechanism = GetMechanism(self);

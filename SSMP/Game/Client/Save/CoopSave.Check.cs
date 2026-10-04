@@ -197,6 +197,7 @@ internal partial class CoopSave {
         _flagSequences.Clear();
         _wishSequences.Clear();
         ResetTrapdoors();
+        ResetTollBenches();
     }
 
     /// <summary>

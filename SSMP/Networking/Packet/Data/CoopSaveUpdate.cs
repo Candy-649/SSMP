@@ -55,7 +55,8 @@ internal class CoopSaveUpdate : IPacketData {
     /// 1 while the sender holds its button. For a delivery that broke, 0 when it broke for the sender, 1 when the sender
     /// still carries theirs and 2 when the sender doesn't either. For dialogue about wishes, how many of its changes of
     /// wishes went to the other player before, which come again for what the dialogue changed afterwards. For a hatch,
-    /// 1 while the sender keeps it open and 0 once they don't.
+    /// 1 while the sender keeps it open and 0 once they don't. For a toll bench, 1 while the sender keeps it up and 0
+    /// once they don't.
     /// </summary>
     public ushort PartCount { get; set; }
 
@@ -114,6 +115,7 @@ internal class CoopSaveUpdate : IPacketData {
     /// For changes of the world, changes of the wish log, interactions and deliveries that broke for the sender, the
     /// check that the sender was in, in the upper half, and a count that grows with every such update of the sender, in
     /// the lower half. The network can deliver an update that it sent again after a newer one, which this tells apart.
+    /// For a toll bench, a count that grows with every such update of the sender, for the same reason.
     /// </summary>
     public ulong Sequence { get; set; }
 
@@ -126,12 +128,12 @@ internal class CoopSaveUpdate : IPacketData {
 
     /// <summary>
     /// For an interaction, the scene of the object that the sender used. For a lift, the scene of the lift. For a
-    /// delivery, the scene of the character that takes it in. For a hatch, the scene of the hatch.
+    /// delivery, the scene of the character that takes it in. For a hatch or a toll bench, its scene.
     /// </summary>
     public string Scene { get; set; } = "";
 
     /// <summary>
-    /// For an interaction, a lift or a hatch, the path of the object in its scene.
+    /// For an interaction, a lift, a hatch or a toll bench, the path of the object in its scene.
     /// </summary>
     public string ObjectPath { get; set; } = "";
 
@@ -603,5 +605,17 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    WishCopyCheck
+    WishCopyCheck,
+
+    /// <summary>
+    /// The sender keeps a toll bench up, one that flips back into its toll machine a few seconds after the last one
+    /// left it, by paying for it or by sitting on it, or no longer does. <see cref="CoopSaveUpdate.PartCount"/> is 1
+    /// while they keep it up and 0 once they don't, <see cref="CoopSaveUpdate.Scene"/> and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> name it, and <see cref="CoopSaveUpdate.Sequence"/> grows with every such
+    /// update of the sender.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    TollBench
 }

@@ -483,6 +483,9 @@ internal partial class CoopSave {
         UpdatePrisonCapture(hero);
         UpdateClothesGrab(hero);
 
+        // Also once the partner is gone, so that a bench they kept up flips back
+        UpdateTollBenches();
+
         if (partner != null && _checkedWith == partner.Id) {
             UpdateCheckedPlayTime(marker);
             UpdateInteractions(partner);
@@ -585,6 +588,11 @@ internal partial class CoopSave {
             return;
         }
 
+        // A toll bench here that the partner keeps up in their game doesn't flip back
+        if (_partnerTollBenches.Count > 0 && fsmEvent != null && HoldsTollBenchEvent(self, fsmEvent)) {
+            return;
+        }
+
         orig(self, fsmEvent!, eventData);
     }
 
@@ -656,6 +664,7 @@ internal partial class CoopSave {
         OnLavaChaseSceneChanged(newScene);
         OnCageSceneChanged();
         OnClothesGrabSceneChanged();
+        OnTollBenchSceneChanged();
         ResetRaces();
     }
 
@@ -852,6 +861,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.Trapdoor:
                 OnTrapdoor(player, update);
+                break;
+            case CoopSaveUpdateKind.TollBench:
+                OnTollBench(player, update);
                 break;
             case CoopSaveUpdateKind.WishChange:
                 OnWishChange(player, update);
