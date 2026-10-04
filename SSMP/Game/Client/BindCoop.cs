@@ -7,6 +7,7 @@ using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client;
 
@@ -34,6 +35,37 @@ internal class BindCoop {
     /// The name of the player character's FSM that heals them.
     /// </summary>
     private const string BindFsm = "Bind";
+
+    /// <summary>
+    /// The variable of that FSM that is true from the moment a heal begins, before it spends any silk, until it ends.
+    /// </summary>
+    private const string IsBindingVariable = "Is Binding";
+
+    /// <summary>
+    /// The state of that FSM that sets that variable, before any silk is spent.
+    /// </summary>
+    private const string HealStartState = "Quick Craft?";
+
+    /// <summary>
+    /// The state of that FSM that gives the health.
+    /// </summary>
+    private const string HealState = "Heal";
+
+    /// <summary>
+    /// The states of that FSM that a heal ends in, early or not: cancelled, ended, hit, and left behind by a scene change.
+    /// </summary>
+    private static readonly HashSet<string> HealEndStates = ["Cancel All", "End Bind", "Witch Binding?", "Leave Scene Bind?"];
+
+    /// <summary>
+    /// The player character's FSM that holds them during a roar, which waits for a heal to end first.
+    /// </summary>
+    private const string RoarFsm = "Roar and Wound States";
+
+    /// <summary>
+    /// How the events that a roar sends to the player begin: ROAR WOUND CANCEL and ROAR ENTER when it starts, with the
+    /// burst and forced forms of the latter, and ROAR EXIT when it stops.
+    /// </summary>
+    private const string RoarEventPrefix = "ROAR ";
 
     /// <summary>
     /// The event that a take-over sends to everything the player is doing, to cancel it.
@@ -155,16 +187,97 @@ internal class BindCoop {
         FsmEvent fsmEvent,
         FsmEventData eventData
     ) {
-        // The take-over is a sub-FSM, run by an action of the state that the FSM running it waits in
-        if (fsmEvent?.Name == CancelEvent && self.Name == BindFsm &&
-            self.GameObject.GetComponent<HeroController>() is { cState.isBinding: true } &&
-            FsmExecutionStack.ExecutingFsm?.Host?.ActiveState?.Actions.Any(action =>
-                action is RunFSM run && run.fsmTemplateControl.fsmTemplate?.name.StartsWith(TakeOverPrefix) == true
-            ) == true) {
+        var fsmName = self.Name;
+        if (fsmName != BindFsm && fsmName != RoarFsm || fsmEvent?.Name is not { } eventName ||
+            self.GameObject == null || self.GameObject.GetComponent<HeroController>() is not { } hero) {
+            orig(self, fsmEvent!, eventData);
             return;
         }
 
-        orig(self, fsmEvent!, eventData);
+        if (fsmName == RoarFsm) {
+            SayWhatTheRoarFound(self, hero, eventName);
+            orig(self, fsmEvent, eventData);
+            return;
+        }
+
+        // The take-over is a sub-FSM, run by an action of the state that the FSM running it waits in
+        if (eventName == CancelEvent && hero.cState.isBinding &&
+            FsmExecutionStack.ExecutingFsm?.Host?.ActiveState?.Actions.Any(action =>
+                action is RunFSM run && run.fsmTemplateControl.fsmTemplate?.name.StartsWith(TakeOverPrefix) == true
+            ) == true) {
+            Logger.Info($"Kept the cancel of a take-over by '{FsmExecutionStack.ExecutingFsm?.Host?.Name}' away from the heal");
+            return;
+        }
+
+        SayWhatCutTheHealShort(self, eventName);
+        orig(self, fsmEvent, eventData);
+    }
+
+    /// <summary>
+    /// Whether the heal going on now has healed already, so that its end is the ordinary one.
+    /// </summary>
+    private static bool _healReached;
+
+    /// <summary>
+    /// Says what ends the local player's heal after it spent its silk and before it healed, and who sent it: the heal
+    /// itself, another FSM, or something outside any FSM. A heal thrown away leaves nothing else behind, and one was
+    /// reported broken off by the roar of a boss, which in the game itself waits for a heal to end.
+    /// </summary>
+    private static void SayWhatCutTheHealShort(Fsm self, string eventName) {
+        if (self.ActiveState is not { } state) {
+            return;
+        }
+
+        var to = state.Transitions?.FirstOrDefault(transition => transition.EventName == eventName)?.ToState ??
+                 self.GlobalTransitions?.FirstOrDefault(transition => transition.EventName == eventName)?.ToState;
+        switch (to) {
+            case null:
+                return;
+            case HealStartState:
+                _healReached = false;
+                return;
+            case HealState:
+                _healReached = true;
+                return;
+        }
+
+        if (_healReached || !HealEndStates.Contains(to) ||
+            self.Variables.FindFsmBool(IsBindingVariable) is not { Value: true }) {
+            return;
+        }
+
+        var sender = FsmExecutionStack.ExecutingFsm;
+        var from = sender == self
+            ? "by the heal itself"
+            : sender == null
+                ? "from outside of any FSM"
+                : $"by '{(sender.GameObject == null ? "?" : sender.GameObject.name)}' ({sender.Name} in " +
+                  $"'{sender.ActiveStateName}'{(sender.Host == null ? "" : $", run by '{sender.Host.Name}'")})";
+        Logger.Info(
+            $"The heal was cut short in '{state.Name}' before it healed, by '{eventName}' {from}, taking it to '{to}' " +
+            $"(crest '{PlayerData.instance?.CurrentCrestID}')"
+        );
+    }
+
+    /// <summary>
+    /// Says what a roar found the local player's heal doing when it reached them, if a heal was going on. The game's own
+    /// roar holds a player who heals until the heal is over.
+    /// </summary>
+    private static void SayWhatTheRoarFound(Fsm self, HeroController hero, string eventName) {
+        if (!eventName.StartsWith(RoarEventPrefix, StringComparison.Ordinal)) {
+            return;
+        }
+
+        var bind = hero.gameObject.LocateMyFSM(BindFsm);
+        if (bind == null || bind.ActiveStateName is "Idle" or "Cooldown") {
+            return;
+        }
+
+        Logger.Info(
+            $"A roar ('{eventName}') reached the player while the heal was in '{bind.ActiveStateName}' " +
+            $"(Is Binding: {bind.FsmVariables.FindFsmBool(IsBindingVariable)?.Value}, " +
+            $"isBinding: {hero.cState.isBinding}), the roar handling being in '{self.ActiveStateName}'"
+        );
     }
 
     /// <summary>
@@ -181,6 +294,7 @@ internal class BindCoop {
 
         var held = _held.ToArray();
         _held.Clear();
+        Logger.Info($"The heal ended, doing the {held.Length} thing(s) that other objects did to the player during it");
         foreach (var (source, apply) in held) {
             if (source != null) {
                 apply();
