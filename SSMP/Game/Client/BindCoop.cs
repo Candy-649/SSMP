@@ -15,15 +15,19 @@ namespace SSMP.Game.Client;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Keeps the local player's heal (bind) from being thrown away by the intro of a fight that another player started.
+/// Keeps the local player's heal (bind) from being thrown away by a fight that another player started.
 ///
-/// Alone, a player starts an intro themselves by walking in, and can't be healing then. With two players the other one
-/// starts it, and some intros begin by cancelling everything the player is doing - a heal too, whose silk is spent the
-/// moment it starts - before they take hold of the player and strike a pose. The game itself already lets a heal
-/// finish before a roar holds the player. The rest of an intro now waits for the heal the same way, while the intro
-/// itself goes on: its take-over's cancel passes the heal by, and what other FSMs do to the player's control and
-/// animation during the heal is done when it ends, in the order they did it. By then the intro may have given control
-/// back or moved on to another pose, so the player ends up as the intro has them at that moment.
+/// Alone, a player starts a fight themselves by walking in, and can't be healing then. With two players the other one
+/// starts it, while this one may be in the middle of a heal, whose silk is spent the moment it starts. Only what ends a
+/// heal alone ends such a heal early now, like a hit or a creature catching the player:
+/// - A roar that holds the player waits until the heal is over, and holds them then if it still goes on. The game has
+///   its roar wait for a heal too, yet a roar of a fight that the other player started was seen cutting the heal short,
+///   so the player character's FSM for roars doesn't hear of one until the heal is over.
+/// - An intro that cancels whatever the player is doing, before it takes hold of them and strikes a pose, passes the
+///   heal by. Only the player character itself and creatures that catch it call the heal off.
+/// What other FSMs do to the player's control and animation during the heal is done when it ends, in the order they did
+/// it. By then the intro may have given control back or moved on to another pose, so the player ends up as the intro
+/// has them at that moment.
 /// </summary>
 internal class BindCoop {
     /// <summary>
@@ -38,6 +42,7 @@ internal class BindCoop {
 
     /// <summary>
     /// The variable of that FSM that is true from the moment a heal begins, before it spends any silk, until it ends.
+    /// The game's own roar waits for a heal while it is true.
     /// </summary>
     private const string IsBindingVariable = "Is Binding";
 
@@ -57,7 +62,7 @@ internal class BindCoop {
     private static readonly HashSet<string> HealEndStates = ["Cancel All", "End Bind", "Witch Binding?", "Leave Scene Bind?"];
 
     /// <summary>
-    /// The player character's FSM that holds them during a roar, which waits for a heal to end first.
+    /// The player character's FSM that holds them during a roar.
     /// </summary>
     private const string RoarFsm = "Roar and Wound States";
 
@@ -66,6 +71,26 @@ internal class BindCoop {
     /// burst and forced forms of the latter, and ROAR EXIT when it stops.
     /// </summary>
     private const string RoarEventPrefix = "ROAR ";
+
+    /// <summary>
+    /// How the events of a short roar begin, which the game lets go of while the player heals.
+    /// </summary>
+    private const string RoarBurstPrefix = "ROAR BURST ";
+
+    /// <summary>
+    /// The events with which a roar stops holding the player.
+    /// </summary>
+    private static readonly HashSet<string> RoarExitEvents = ["ROAR EXIT", "ROAR EXIT SCENE"];
+
+    /// <summary>
+    /// The events that end the game's own wait of a roar for a heal: being hit, and leaving the room.
+    /// </summary>
+    private static readonly HashSet<string> RoarWaitEndEvents = ["HERO DAMAGED", "LEAVING SCENE", "LEVEL LOADED"];
+
+    /// <summary>
+    /// The states of the player character's FSM for roars that hold the player during a roar, or wait to.
+    /// </summary>
+    private static readonly HashSet<string> RoarLockStates = ["Lock Grounded", "Lock Air", "Burst Lock", "Binding"];
 
     /// <summary>
     /// The event that a take-over sends to everything the player is doing, to cancel it.
@@ -83,6 +108,22 @@ internal class BindCoop {
     /// FSM that did it. A room that is left in the meantime takes its objects along, and what they did goes with them.
     /// </summary>
     private readonly List<(GameObject Source, Action Apply)> _held = [];
+
+    /// <summary>
+    /// The events of roars that reached the local player while they healed, in the order they came, which the player
+    /// character's FSM for roars hears once the heal is over.
+    /// </summary>
+    private static readonly List<string> HeldRoarEvents = [];
+
+    /// <summary>
+    /// The player character that the events of roars are held for.
+    /// </summary>
+    private static HeroController? _heldRoarHero;
+
+    /// <summary>
+    /// Whether the held events of roars are being let through now that the heal is over.
+    /// </summary>
+    private static bool _lettingRoarGoOn;
 
     /// <summary>
     /// The hooks, which are disposed together.
@@ -155,6 +196,8 @@ internal class BindCoop {
 
         _hooks.Clear();
         _held.Clear();
+        HeldRoarEvents.Clear();
+        _heldRoarHero = null;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
     }
 
@@ -178,8 +221,9 @@ internal class BindCoop {
     }
 
     /// <summary>
-    /// Hook for <see cref="Fsm"/>.ProcessEvent, which keeps a take-over's cancel away from the local player's heal.
-    /// Everything else the player was doing is cancelled all the same, and the heal ends by itself.
+    /// Hook for <see cref="Fsm"/>.ProcessEvent, which keeps a roar away from the local player's FSM for roars while
+    /// they heal, and keeps the cancel of a take-over away from the heal. Everything else the player was doing is
+    /// cancelled all the same, and the heal ends by itself.
     /// </summary>
     private static void OnProcessEvent(
         Action<Fsm, FsmEvent, FsmEventData> orig,
@@ -194,23 +238,137 @@ internal class BindCoop {
             return;
         }
 
+        // Like the game's own wait of a roar for a heal, a roar that waits doesn't hold a player who was hit or left
+        if (RoarWaitEndEvents.Contains(eventName) && HeldRoarEvents.Count > 0) {
+            Logger.Info($"Let go of the roar that waited for the heal to be over, because of '{eventName}'");
+            HeldRoarEvents.Clear();
+        }
+
         if (fsmName == RoarFsm) {
-            SayWhatTheRoarFound(self, hero, eventName);
-            orig(self, fsmEvent, eventData);
+            if (!HoldRoarWhileHealing(hero, eventName)) {
+                orig(self, fsmEvent, eventData);
+            }
+
             return;
         }
 
-        // The take-over is a sub-FSM, run by an action of the state that the FSM running it waits in
-        if (eventName == CancelEvent && hero.cState.isBinding &&
-            FsmExecutionStack.ExecutingFsm?.Host?.ActiveState?.Actions.Any(action =>
-                action is RunFSM run && run.fsmTemplateControl.fsmTemplate?.name.StartsWith(TakeOverPrefix) == true
-            ) == true) {
-            Logger.Info($"Kept the cancel of a take-over by '{FsmExecutionStack.ExecutingFsm?.Host?.Name}' away from the heal");
+        if (eventName == CancelEvent && IsHealing(hero) && FsmExecutionStack.ExecutingFsm is { } sender &&
+            IsTakeOver(sender, hero)) {
+            Logger.Info($"Kept the cancel from {DescribeFsm(sender)} away from the heal");
             return;
         }
 
         SayWhatCutTheHealShort(self, eventName);
         orig(self, fsmEvent, eventData);
+    }
+
+    /// <summary>
+    /// Whether an FSM that cancels what the local player is doing takes them over, like the intro of a fight or a
+    /// dialogue does, rather than catching them. The player character's own FSMs cancel a heal when the player is wounded
+    /// or grabbed, a creature's own FSM when it catches or knocks them, and the game outside of any FSM when they die or
+    /// leave the room: those end a heal alone too. A creature that takes the player over for its intro does so with one
+    /// of the game's take-overs.
+    /// </summary>
+    private static bool IsTakeOver(Fsm sender, HeroController hero) {
+        var source = sender.GameObject;
+        if (source == null) {
+            return true;
+        }
+
+        if (source.transform.IsChildOf(hero.transform)) {
+            return false;
+        }
+
+        // The take-over is a sub-FSM, run by an action of the state that the FSM running it waits in
+        return source.GetComponentInParent<HealthManager>(true) == null ||
+               sender.Host?.ActiveState?.Actions.Any(action =>
+                   action is RunFSM run && run.fsmTemplateControl.fsmTemplate?.name.StartsWith(TakeOverPrefix) == true
+               ) == true;
+    }
+
+    /// <summary>
+    /// Whether the local player is healing: from the moment the heal starts until it is over, whatever it was spent on.
+    /// </summary>
+    private static bool IsHealing(HeroController hero) {
+        return hero.cState.isBinding ||
+               hero.gameObject.LocateMyFSM(BindFsm)?.FsmVariables.FindFsmBool(IsBindingVariable) is { Value: true };
+    }
+
+    /// <summary>
+    /// Holds back an event of a roar from the local player's FSM for roars while they heal, together with the events of
+    /// roars that come after it before the heal is over. Taking control from the player and striking a pose, or giving
+    /// control back and playing their idle clip, would throw the heal away.
+    /// </summary>
+    /// <returns>Whether the event was held back.</returns>
+    private static bool HoldRoarWhileHealing(HeroController hero, string eventName) {
+        if (_lettingRoarGoOn || !eventName.StartsWith(RoarEventPrefix, StringComparison.Ordinal)) {
+            return false;
+        }
+
+        ForgetRoarOfOtherHero(hero);
+        if (HeldRoarEvents.Count == 0) {
+            if (!IsHealing(hero)) {
+                return false;
+            }
+
+            _heldRoarHero = hero;
+            Logger.Info(
+                $"A roar ('{eventName}') from {DescribeFsm(FsmExecutionStack.ExecutingFsm)} reached the player while " +
+                $"they healed ('{hero.gameObject.LocateMyFSM(BindFsm)?.ActiveStateName}'), so it waits for the heal " +
+                "to be over"
+            );
+        }
+
+        HeldRoarEvents.Add(eventName);
+        return true;
+    }
+
+    /// <summary>
+    /// Forgets the events of roars held for a player character that was replaced, like after going back to the menu.
+    /// </summary>
+    private static void ForgetRoarOfOtherHero(HeroController hero) {
+        if (HeldRoarEvents.Count > 0 && _heldRoarHero != hero) {
+            HeldRoarEvents.Clear();
+        }
+    }
+
+    /// <summary>
+    /// Lets the roars that reached the local player while they healed go on. Only a roar that still goes on holds the
+    /// player, like the game's own wait for a heal does it: one that stopped in the meantime holds nobody, and a short
+    /// one the game lets go of while the player heals. A roar that held the player before the heal still lets go of them,
+    /// and a player who is being caught or wounded by now is left to that.
+    /// </summary>
+    private static void LetHeldRoarGoOn(HeroController hero) {
+        var events = HeldRoarEvents.ToArray();
+        HeldRoarEvents.Clear();
+        if (hero.gameObject.LocateMyFSM(RoarFsm) is not { } roar) {
+            return;
+        }
+
+        var state = roar.ActiveStateName;
+        var lastExit = Array.FindLastIndex(events, RoarExitEvents.Contains);
+        var from = state == "Idle"
+            ? lastExit + 1
+            : RoarLockStates.Contains(state)
+                ? Mathf.Max(lastExit, 0)
+                : events.Length;
+        var goingOn = events.Skip(from)
+            .Where(eventName => !eventName.StartsWith(RoarBurstPrefix, StringComparison.Ordinal))
+            .ToArray();
+        if (goingOn.Length == 0) {
+            Logger.Info($"The heal is over, and the roar that waited for it holds nobody now ('{state}')");
+            return;
+        }
+
+        Logger.Info($"The heal is over, so the roar that waited for it goes on: {string.Join(", ", goingOn)}");
+        _lettingRoarGoOn = true;
+        try {
+            foreach (var eventName in goingOn) {
+                roar.SendEvent(eventName);
+            }
+        } finally {
+            _lettingRoarGoOn = false;
+        }
     }
 
     /// <summary>
@@ -247,12 +405,7 @@ internal class BindCoop {
         }
 
         var sender = FsmExecutionStack.ExecutingFsm;
-        var from = sender == self
-            ? "by the heal itself"
-            : sender == null
-                ? "from outside of any FSM"
-                : $"by '{(sender.GameObject == null ? "?" : sender.GameObject.name)}' ({sender.Name} in " +
-                  $"'{sender.ActiveStateName}'{(sender.Host == null ? "" : $", run by '{sender.Host.Name}'")})";
+        var from = sender == self ? "by the heal itself" : $"by {DescribeFsm(sender)}";
         Logger.Info(
             $"The heal was cut short in '{state.Name}' before it healed, by '{eventName}' {from}, taking it to '{to}' " +
             $"(crest '{PlayerData.instance?.CurrentCrestID}')"
@@ -260,45 +413,49 @@ internal class BindCoop {
     }
 
     /// <summary>
-    /// Says what a roar found the local player's heal doing when it reached them, if a heal was going on. The game's own
-    /// roar holds a player who heals until the heal is over.
+    /// Names an FSM that does something to the local player, for the log: its object, its name and state, and the FSM
+    /// that runs it if it is a sub-FSM.
     /// </summary>
-    private static void SayWhatTheRoarFound(Fsm self, HeroController hero, string eventName) {
-        if (!eventName.StartsWith(RoarEventPrefix, StringComparison.Ordinal)) {
-            return;
+    private static string DescribeFsm(Fsm? fsm) {
+        if (fsm == null) {
+            return "outside of any FSM";
         }
 
-        var bind = hero.gameObject.LocateMyFSM(BindFsm);
-        if (bind == null || bind.ActiveStateName is "Idle" or "Cooldown") {
-            return;
-        }
-
-        Logger.Info(
-            $"A roar ('{eventName}') reached the player while the heal was in '{bind.ActiveStateName}' " +
-            $"(Is Binding: {bind.FsmVariables.FindFsmBool(IsBindingVariable)?.Value}, " +
-            $"isBinding: {hero.cState.isBinding}), the roar handling being in '{self.ActiveStateName}'"
-        );
+        return $"'{(fsm.GameObject == null ? "?" : fsm.GameObject.name)}' ({fsm.Name} in '{fsm.ActiveStateName}'" +
+               $"{(fsm.Host == null ? "" : $", run by '{fsm.Host.Name}'")})";
     }
 
     /// <summary>
     /// Does what was held back from the local player once the heal has given control back to them: its FSM cools down
     /// or waits for the next heal again. With some crests that is one clip later than the heal itself ends, and that
-    /// clip only gives control back if nothing plays another one on the player in the meantime.
+    /// clip only gives control back if nothing plays another one on the player in the meantime. A roar that waited for
+    /// the heal goes on after that.
     /// </summary>
     private void OnUpdate() {
         var hero = HeroController.instance;
-        if (_held.Count == 0 || hero == null ||
+        if (hero == null) {
+            return;
+        }
+
+        ForgetRoarOfOtherHero(hero);
+        if (_held.Count == 0 && HeldRoarEvents.Count == 0 ||
             hero.gameObject.LocateMyFSM(BindFsm).ActiveStateName is not ("Idle" or "Cooldown")) {
             return;
         }
 
-        var held = _held.ToArray();
-        _held.Clear();
-        Logger.Info($"The heal ended, doing the {held.Length} thing(s) that other objects did to the player during it");
-        foreach (var (source, apply) in held) {
-            if (source != null) {
-                apply();
+        if (_held.Count > 0) {
+            var held = _held.ToArray();
+            _held.Clear();
+            Logger.Info($"The heal ended, doing the {held.Length} thing(s) that other objects did to the player during it");
+            foreach (var (source, apply) in held) {
+                if (source != null) {
+                    apply();
+                }
             }
+        }
+
+        if (HeldRoarEvents.Count > 0) {
+            LetHeldRoarGoOn(hero);
         }
     }
 }
