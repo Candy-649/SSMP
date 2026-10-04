@@ -339,7 +339,12 @@ internal class Bind : DamageAnimationEffect {
     /// <param name="bindEffects">The player's 'Bind Effects' object, or null if not found.</param>
     /// <returns>true if the 'Bind Effects' GameObject is successfully found and bound; otherwise, false.</returns>
     protected bool CreateObjects(GameObject playerObject, [MaybeNullWhen(false)] out GameObject bindEffects) {
-        _localBindEffects ??= HeroController.instance.gameObject.FindGameObjectInChildren("Bind Effects");
+        // The hero of an earlier load is destroyed, which ??= takes for one that is still there, as it only checks
+        // for no object at all
+        if (_localBindEffects == null && HeroController.UnsafeInstance is var hero && hero != null) {
+            _localBindEffects = hero.gameObject.FindGameObjectInChildren("Bind Effects");
+        }
+
         if (_localBindEffects == null) {
             Logger.Warn("Could not find local Bind Effects object in hero object");
             bindEffects = null;

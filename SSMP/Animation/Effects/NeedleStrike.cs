@@ -119,7 +119,20 @@ internal class NeedleStrike : DamageAnimationEffect {
             return;
         }
 
-        _localAttacks ??= HeroController.instance.gameObject.FindGameObjectInChildren("Attacks");
+        // The hero of an earlier load is destroyed with all of its slashes, which ??= takes for ones that are still
+        // there, as it only checks for no object at all
+        if (_localAttacks == null && HeroController.UnsafeInstance is var hero && hero != null) {
+            _localAttacks = hero.gameObject.FindGameObjectInChildren("Attacks");
+            _chargeSlashBasic = null;
+            _chargeSlashScythe = null;
+            _chargeSlashWitch = null;
+            _chargeSlashWanderer = null;
+            _chargeSlashArchitect = null;
+            _chargeSlashShaman = null;
+            _chargeSlashBeast = null;
+            _chargeSlashBeastRage = null;
+        }
+
         if (_localAttacks == null) {
             Logger.Warn("Could not find local Attacks object in hero object");
             return;

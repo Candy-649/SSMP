@@ -204,7 +204,12 @@ internal class Death : AnimationEffect {
         [MaybeNullWhen(false)] out GameObject deathParticles
     ) {
         // Find the reference object
-        _deathParticles ??= HeroController.instance.gameObject.FindGameObjectInChildren(DeathParticleObjectName);
+        // The hero of an earlier load is destroyed, which ??= takes for one that is still there, as it only checks
+        // for no object at all
+        if (_deathParticles == null && HeroController.UnsafeInstance is var hero && hero != null) {
+            _deathParticles = hero.gameObject.FindGameObjectInChildren(DeathParticleObjectName);
+        }
+
         if (_deathParticles == null) {
             Logger.Warn("Could not find local Bind Effects object in hero object");
             deathParticles = null;
