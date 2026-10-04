@@ -847,6 +847,8 @@ internal partial class ArenaCoop {
     private void OnUpdate(Action<BattleScene> orig, BattleScene self) {
         orig(self);
 
+        UnlockHatchForPlayerOutside(self);
+
         if (!_arenas.TryGetValue(self, out var state)) {
             return;
         }
@@ -1478,6 +1480,7 @@ internal partial class ArenaCoop {
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _arenas.Clear();
+        _lockingHatches.Clear();
         _heldBossEvents.Clear();
         OnRescueSceneChanged(newScene.name);
         _owedWaveStarts.Clear();
