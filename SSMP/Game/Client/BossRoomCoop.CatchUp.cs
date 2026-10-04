@@ -59,7 +59,7 @@ internal partial class BossRoomCoop {
 
         var sender = _networkSender ?? FsmExecutionStack.ExecutingFsm;
         if (sender == null || sender == self || CanTakeEvent(self, state, eventName) || !IsCoopActive() ||
-            GetBossRoom(self) is not { HasBossStarts: true } room || GetBossRoom(sender) != room) {
+            GetBossRoom(self) is not { HasBossStarts: true } room || !IsInRoomOrCopy(sender, room)) {
             return;
         }
 
@@ -99,6 +99,15 @@ internal partial class BossRoomCoop {
             _pushedCatchUps.Add(self);
             return;
         }
+    }
+
+    /// <summary>
+    /// Whether an FSM is in a boss room, or belongs to the copy of a creature of it that runs in a game that isn't the
+    /// scene host's. Such a copy is made outside of the room, but it tells the room what the boss in the scene host's
+    /// game tells it there.
+    /// </summary>
+    private bool IsInRoomOrCopy(Fsm fsm, BossRoom room) {
+        return GetBossRoom(fsm) is not { } fsmRoom ? GetInfo(fsm).IsEntity : fsmRoom == room;
     }
 
     /// <summary>
@@ -147,6 +156,14 @@ internal partial class BossRoomCoop {
     /// the intro plays in full.
     /// </summary>
     private void CatchUpWithBoss(Fsm self, FsmState toState) {
+        // One that went on by itself before it was moved on, like when the other player walked in, catches up all the
+        // same: it comes to the state that takes what it missed, or one on the way there
+        if (_pendingCatchUps.Count > 0 && _pendingCatchUps.TryGetValue(self, out var pending) &&
+            pending.StateName != toState.Name) {
+            _pendingCatchUps.Remove(self);
+            BeginCatchUp(self);
+        }
+
         if (_catchUpEnds.Count == 0 || !_catchUpEnds.TryGetValue(self, out var ends)) {
             return;
         }
