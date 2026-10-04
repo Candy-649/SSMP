@@ -909,6 +909,13 @@ internal partial class CoopSave {
             if (TryRevive(HeroController.instance, lying)) {
                 yield break;
             }
+
+            // A partner who went down while this player was being stood up waits for them, and this player is going
+            // to their bench after all: two deaths, two benches
+            if (_partnerWaitingRescue != null) {
+                lying.PartnerDown = true;
+                TellPartnerNobodyIsComing();
+            }
         }
 
         // Time only passes when both players are down. A partner who is still connected and did not go down as well
@@ -1996,8 +2003,10 @@ internal partial class CoopSave {
         // nobody is coming for the partner either: two deaths, two benches. Told to them even when this player's own
         // cocoon should have told them already, because it may not have reached them: a partner whose news was lost
         // in a stretch of the connection carrying nothing lay there waiting for someone who had long gone to their
-        // bench, and let no time pass for a death that both of them died.
-        if (HeroController.instance is { } hero &&
+        // bench, and let no time pass for a death that both of them died. A player whose cocoon the partner has just
+        // broken is standing up rather than down: the partner died right after pulling them up, and the news of both
+        // can arrive together, before this player is back on their feet.
+        if (HeroController.instance is { } hero && _rescue is not { Outcome: RescueOutcome.Rescued } &&
             (PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.dead)) {
             TellPartnerNobodyIsComing();
 
@@ -2194,6 +2203,11 @@ internal partial class CoopSave {
         });
 
         if (target.Hits >= RescueHits) {
+            // Counted as standing from here on, as a partner stood up in the chase of a lava is. Their game only says
+            // so once this hit has reached it and they are back on their feet, and a player who died in between - in
+            // a fight, right after pulling them up - was taken for the second of two deaths and sent to their bench,
+            // leaving the partner they had just saved standing alone
+            _partnerWaitingRescue = null;
             RemoveRescueTarget();
             Chat(Lang.Pick($"You broke {partner.Username} out.", $"你把 {partner.Username} 拉起来了。"));
         }
