@@ -46,7 +46,8 @@ internal class BossRoomUpdate : IPacketData {
     public string ToState { get; set; } = "";
 
     /// <summary>
-    /// The event that started the room, or the event that opened a gate.
+    /// The event that started the room, or the event that opened a gate, or the events that a boss told its room, one
+    /// on each line.
     /// </summary>
     public string EventName { get; set; } = "";
 
@@ -193,5 +194,11 @@ internal enum BossRoomUpdateKind : byte {
     /// An object of a player who isn't the scene host sent an event that starts the fight of a boss room, which the
     /// scene host sends to its bosses too.
     /// </summary>
-    RoomEvent
+    RoomEvent,
+
+    /// <summary>
+    /// What the boss of a room told the room in this visit, for a player who came into the scene after it said so. The
+    /// room of that player catches up with the fight when they walk in.
+    /// </summary>
+    BossEvents
 }

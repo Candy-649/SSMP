@@ -429,6 +429,9 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.RoomEvent:
                 OnRoomEvent(update);
                 break;
+            case BossRoomUpdateKind.BossEvents:
+                OnBossEvents(update);
+                break;
         }
     }
 
@@ -441,8 +444,8 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Tells a player who entered the local scene which rooms the local player already reached, and shares the dialogue
-    /// that is still being read.
+    /// Tells a player who entered the local scene which rooms the local player already reached and what their bosses
+    /// told them, and shares the dialogue that is still being read.
     /// </summary>
     public void OnPlayerEnterScene() {
         foreach (var pair in _arrivals) {
@@ -451,6 +454,7 @@ internal partial class BossRoomCoop {
             }
         }
 
+        TellBossEventsToNewPlayer();
         ShareDialoguesWithNewPlayers();
     }
 
@@ -472,6 +476,11 @@ internal partial class BossRoomCoop {
         NoteOutOfStepEvent(self, eventName);
         if (IsCatchUpDelivery(self, eventName)) {
             orig(self, fsmEvent, eventData);
+            return;
+        }
+
+        // A room doesn't shut its gate on the local player while they are still in its doorway
+        if (IsWalkInAtDoorway(self, eventName)) {
             return;
         }
 
