@@ -90,9 +90,13 @@ internal class DashSlash : SlashBase {
             var scale = dashStab.scale;
 
             // Remove the event subscribers of DamageEnemies components, because it will call a method relating to
-            // the local HeroController, which does not exist for this artificial slash
+            // the local HeroController, which does not exist for this artificial slash. All three that its Awake adds:
+            // the two that run as it is about to hit something were left, and on hitting a creature they threw while
+            // telling a hero that is not there of the hit
             foreach (var damageEnemies in slashObj.GetComponents<DamageEnemies>()) {
                 damageEnemies.EndedDamage -= dashStab.OnEndedDamage;
+                damageEnemies.WillDamageEnemyOptions -= dashStab.OnWillDamageEnemy;
+                damageEnemies.WillDamageEnemyCollider -= dashStab.OnWillDamageEnemyCollider;
             }
             Object.DestroyImmediate(dashStab);
 
