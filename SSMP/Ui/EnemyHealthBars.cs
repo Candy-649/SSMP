@@ -46,9 +46,10 @@ internal class EnemyHealthBars {
     private const float BossBarHeight = 11f;
 
     /// <summary>
-    /// The space between the bottom of the screen and the lowest bar of a boss.
+    /// The space between the bottom of the screen and the lowest bar of a boss. It puts the bar in the middle of the
+    /// ground below the hero's feet in a boss room, whose camera keeps that ground about 141 units high.
     /// </summary>
-    private const float BossBarBottom = 46f;
+    private const float BossBarBottom = 63f;
 
     /// <summary>
     /// The space between the bars of bosses that fight at the same time.
