@@ -1098,7 +1098,8 @@ internal partial class Entity {
     private void SendStateChange(int fsmIndex) {
         var fsm = _fsms.Host[fsmIndex];
         var snapshot = _fsmSnapshots[fsmIndex];
-        if (fsm.ActiveStateName == snapshot.CurrentState) {
+        // An action that works as its state is left (FsmActionHooks) runs while the FSM is in no state at all
+        if (fsm.ActiveStateName == snapshot.CurrentState || fsm.Fsm.ActiveState == null) {
             return;
         }
 

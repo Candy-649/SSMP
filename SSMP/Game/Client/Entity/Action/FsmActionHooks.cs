@@ -21,7 +21,8 @@ internal static class FsmActionHooks {
     /// state is left before.
     /// </summary>
     private static readonly Dictionary<Type, string> WorkMethodNames = new() {
-        [typeof(SendEventToRegisterDelay)] = "SendToRegister"
+        [typeof(SendEventToRegisterDelay)] = "SendToRegister",
+        [typeof(SendEventByNameOnExit)] = "OnExit"
     };
 
     /// <summary>

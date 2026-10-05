@@ -223,6 +223,29 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region SendEventByNameOnExit
+
+    // Sent when the scene host's creature leaves the state rather than on entering it (see FsmActionHooks). One creature
+    // makes a ring on entering its roar that goes on flashing until this ends it as the roar is over. The copy's ring
+    // in the other game, made by replaying that (CreateObject), was never told and flashed on for good.
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventByNameOnExit action) {
+        return action.eventTarget.gameObject.GameObject.Value != action.Fsm.GameObject.gameObject;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SendEventByNameOnExit action) {
+        // Only ever sent as a state is left, never part of setting a copy up
+        if (data == null) {
+            return;
+        }
+
+        BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
+    }
+
+    #endregion
+
     #region SendEventToRegister
 
     // A creature tells the room what it is doing by broadcasting an event to everything registered for it: the floor
