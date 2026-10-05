@@ -585,12 +585,30 @@ internal partial class Entity {
     private void ProcessHostFsm(PlayMakerFSM fsm) {
         //Logger.Info($"Processing host FSM: {fsm.Fsm.Name}");
 
+        // One made from a template is made only when its object is first switched on (in its Awake), and what this
+        // hooks until then is a stand-in that never runs (see HookSummoningMadeLater). Whether it has been made yet
+        // can't be told from the FSM: the room loading it already marks the stand-in set up. An object switched off
+        // after its Awake ran only leaves an entry here that never comes due, cleared with the entity (Destroy).
+        if (fsm.FsmTemplate != null && !fsm.gameObject.activeInHierarchy) {
+            WaitForTheFsmToBeMade(fsm);
+        }
+
         EntityInitializer.CheckPreProcessFsm(fsm);
 
         // Nothing of what an FSM that each game runs by itself does is sent (see IsRunByEachGame)
-        var sendsActions = !IsRunByEachGame(fsm);
+        if (!IsRunByEachGame(fsm)) {
+            HookActions(fsm);
+        }
 
-        for (var i = 0; sendsActions && i < fsm.FsmStates.Length; i++) {
+        _fsmSnapshots.Add(TakeSnapshot(fsm));
+    }
+
+    /// <summary>
+    /// Hooks the supported actions of an FSM of the room's own creature, so that what they do is sent to the other game.
+    /// </summary>
+    /// <param name="fsm">The Playmaker FSM to hook the actions of.</param>
+    private void HookActions(PlayMakerFSM fsm) {
+        for (var i = 0; i < fsm.FsmStates.Length; i++) {
             var state = fsm.FsmStates[i];
             //var stateName = state.Name;
 
@@ -626,8 +644,14 @@ internal partial class Entity {
                 }
             }
         }
+    }
 
-        var snapshot = new FsmSnapshot {
+    /// <summary>
+    /// What an FSM of the room's own creature is in now, which what it does from here on is told against.
+    /// </summary>
+    /// <param name="fsm">The Playmaker FSM.</param>
+    private static FsmSnapshot TakeSnapshot(PlayMakerFSM fsm) {
+        return new FsmSnapshot {
             CurrentState = fsm.ActiveStateName,
             Floats = fsm.FsmVariables.FloatVariables.Select(f => f.Value).ToArray(),
             Ints = fsm.FsmVariables.IntVariables.Select(i => i.Value).ToArray(),
@@ -636,8 +660,94 @@ internal partial class Entity {
             Vector2s = fsm.FsmVariables.Vector2Variables.Select(v => v.Value).ToArray(),
             Vector3s = fsm.FsmVariables.Vector3Variables.Select(v => v.Value).ToArray()
         };
+    }
 
-        _fsmSnapshots.Add(snapshot);
+    /// <summary>
+    /// The FSMs of the room's own creatures that are made from a template and are not made yet, each with the entity it
+    /// belongs to (see <see cref="HookSummoningMadeLater"/>).
+    /// </summary>
+    private static readonly Dictionary<PlayMakerFSM, Entity> FsmsMadeLater = new();
+
+    /// <summary>
+    /// The hook that hears an FSM being made, put in place with the first FSM that is waited for.
+    /// </summary>
+    private static Hook? _fsmInitHook;
+
+    /// <summary>
+    /// Whether <see cref="_fsmInitHook"/> was looked for, so that a game without the method says so only once.
+    /// </summary>
+    private static bool _fsmInitHookTried;
+
+    /// <summary>
+    /// Waits for an FSM of the room's own creature to be made from its template, which happens the first time its
+    /// object is switched on (PlayMakerFSM.Init).
+    /// </summary>
+    /// <param name="fsm">The Playmaker FSM.</param>
+    private void WaitForTheFsmToBeMade(PlayMakerFSM fsm) {
+        FsmsMadeLater[fsm] = this;
+
+        if (_fsmInitHookTried) {
+            return;
+        }
+
+        _fsmInitHookTried = true;
+
+        var init = typeof(PlayMakerFSM).GetMethod(
+            "Init",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            System.Type.EmptyTypes,
+            null
+        );
+        if (init == null) {
+            SSMP.Logging.Logger.Warn(
+                "Could not find how an FSM is made from its template, so what a creature that is switched on late " +
+                "summons stays in the game of the scene host"
+            );
+            return;
+        }
+
+        _fsmInitHook = new Hook(init, OnFsmInit);
+    }
+
+    /// <summary>
+    /// Callback for an FSM having been made, which hooks it if it is one that was waited for.
+    /// </summary>
+    private static void OnFsmInit(Action<PlayMakerFSM> orig, PlayMakerFSM self) {
+        orig(self);
+
+        if (FsmsMadeLater.Count == 0 || !FsmsMadeLater.Remove(self, out var entity)) {
+            return;
+        }
+
+        entity.HookSummoningMadeLater(self);
+    }
+
+    /// <summary>
+    /// Hooks an FSM of the room's own creature that the game has just made from its template, if it summons creatures.
+    ///
+    /// The game makes such an FSM afresh the first time its object is switched on, with actions of its own, so for a
+    /// creature that is switched off when its room loads it was the actions of a stand-in that got hooked, and those
+    /// never run. What the creature summoned was then made in the game of the scene host alone and the other player
+    /// never saw it: the creatures that march into one room only once it has loaded call others in this way. Only an
+    /// FSM that summons is hooked here. Many creatures that are switched on late have FSMs made from templates, and what
+    /// the rest of those do has never been sent - which nobody has reported as missing.
+    /// </summary>
+    /// <param name="fsm">The Playmaker FSM, just made.</param>
+    private void HookSummoningMadeLater(PlayMakerFSM fsm) {
+        var fsmIndex = _fsms.Host.IndexOf(fsm);
+        if (fsmIndex < 0 || fsmIndex >= _fsmSnapshots.Count || IsRunByEachGame(fsm) ||
+            !EntitySpawner.SpawnsCreatures(fsm)) {
+            return;
+        }
+
+        HookActions(fsm);
+        _fsmSnapshots[fsmIndex] = TakeSnapshot(fsm);
+
+        SSMP.Logging.Logger.Info(
+            $"'{Object.Host.name}' ({Id}, {Type}) made its '{fsm.FsmName}' only on being switched on, so what it " +
+            "summons is now kept in step"
+        );
     }
 
     /// <summary>
@@ -3189,6 +3299,13 @@ internal partial class Entity {
             LetThePlayerBackIn(true);
         } finally {
             EntitiesByCopy.Remove(Object.Client);
+
+            // An FSM that was still to be made is no longer this entity's to hook
+            foreach (var fsm in _fsms.Host) {
+                if (FsmsMadeLater.TryGetValue(fsm, out var waiting) && waiting == this) {
+                    FsmsMadeLater.Remove(fsm);
+                }
+            }
 
             _spriteAnimatorPlayHook?.Dispose();
             _spriteAnimatorPlayHook = null;

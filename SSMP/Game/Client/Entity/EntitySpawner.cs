@@ -71,6 +71,27 @@ internal static class EntitySpawner {
     }
 
     /// <summary>
+    /// Whether the given FSM spawns anything that is made an entity when spawned, named by the action itself the way
+    /// <see cref="FindPrefab"/> looks for it.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    public static bool SpawnsCreatures(PlayMakerFSM fsm) {
+        foreach (var state in fsm.FsmStates) {
+            foreach (var action in state.Actions) {
+                var field = PrefabOf(action, out _);
+                var prefab = field is { UseVariable: false } ? field.Value : null;
+                if (prefab != null &&
+                    EntityRegistry.TryGetEntry(prefab, out var entry) &&
+                    IsSpawnedAsEntity(prefab, entry.Type)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The parameter of a spawning action that holds what it spawns, or null for an action that spawns nothing.
     /// </summary>
     /// <param name="action">The action.</param>
