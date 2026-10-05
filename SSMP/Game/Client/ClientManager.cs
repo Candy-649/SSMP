@@ -1191,6 +1191,9 @@ internal class ClientManager : IClientManager {
             HeroHidden.HideNewcomer(playerObject);
         }
 
+        // After their last animation, which for a player lying in a cocoon is their death
+        _coopSave.HideCharacterOfPartnerInCocoon(playerData);
+
         HeroHidden.SayAgainSoon();
         HeroRoomFigure.SayAgainSoon();
 

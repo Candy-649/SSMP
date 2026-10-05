@@ -2239,6 +2239,23 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Takes the body of a partner who lies in the cocoon shown here off the screen again, now that their character
+    /// has been put in the room. Walking into the room where they lie shows the cocoon as soon as the room loads, but
+    /// their character only comes a moment later, once the server has said who is already here, and it comes playing
+    /// the last thing they did, which is their death. Nothing hid it after that, so their body stood beside their
+    /// cocoon for the rest of the wait.
+    /// </summary>
+    /// <param name="player">The player whose character was just put in the room.</param>
+    internal void HideCharacterOfPartnerInCocoon(ClientPlayerData player) {
+        if (_rescueTarget is not { } target || target.PlayerId != player.Id) {
+            return;
+        }
+
+        Logger.Info($"{player.Username} came into view lying in their cocoon here, so their body is hidden again");
+        SetPartnerBodyHidden(player.Id, true);
+    }
+
+    /// <summary>
     /// Takes the body of the partner off the screen while they are lying in their cocoon, and brings it back when
     /// they are not.
     ///
