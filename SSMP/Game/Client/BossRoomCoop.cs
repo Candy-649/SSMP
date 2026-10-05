@@ -487,7 +487,8 @@ internal partial class BossRoomCoop {
         // Key dialogue of a two-player save waits for the partner to read it also where rooms don't wait
         if (self.ActiveState is { } activeState &&
             (IsHoldActive()
-                ? TryHoldDialogueEnd(self, activeState, eventName) || TryHoldFightGate(self, activeState, eventName) ||
+                ? TryHoldStoryStart(self, activeState, eventName) ||
+                  TryHoldDialogueEnd(self, activeState, eventName) || TryHoldFightGate(self, activeState, eventName) ||
                   TryHoldStart(self, activeState, eventName) || TryHoldEventStart(self, activeState, eventName)
                 : _sharedDialogues.Count > 0 && TryHoldDialogueEnd(self, activeState, eventName))) {
             return;
@@ -895,6 +896,7 @@ internal partial class BossRoomCoop {
         }
 
         RunUpdateStep(ReleaseHeldStarts, nameof(ReleaseHeldStarts));
+        RunUpdateStep(ReleaseHeldStories, nameof(ReleaseHeldStories));
         RunUpdateStep(UpdateDialogues, nameof(UpdateDialogues));
         RunUpdateStep(UpdateEventStarts, nameof(UpdateEventStarts));
         RunUpdateStep(UpdateCatchUps, nameof(UpdateCatchUps));
@@ -1709,6 +1711,7 @@ internal partial class BossRoomCoop {
         _startFsms.Clear();
         _arrivals.Clear();
         _heldStarts.Clear();
+        ClearStories();
         _closedGates.Clear();
         _pendingCloses.Clear();
         _startChecks.Clear();

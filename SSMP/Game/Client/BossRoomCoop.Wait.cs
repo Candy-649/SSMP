@@ -423,7 +423,19 @@ internal partial class BossRoomCoop {
             }
         }
 
-        UiManager.InternalChatBox.AddMessage(gaveUp ? GaveUpMessage : NothingToGiveUpMessage);
+        // A story scene that waits starts for the local player alone
+        var gaveUpStory = GiveUpStories();
+        if (gaveUp) {
+            UiManager.InternalChatBox.AddMessage(GaveUpMessage);
+        }
+
+        if (gaveUpStory) {
+            UiManager.InternalChatBox.AddMessage(StoryGaveUpMessage);
+        }
+
+        if (!gaveUp && !gaveUpStory) {
+            UiManager.InternalChatBox.AddMessage(NothingToGiveUpMessage);
+        }
     }
 
     /// <summary>
