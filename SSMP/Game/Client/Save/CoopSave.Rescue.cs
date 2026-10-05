@@ -91,6 +91,18 @@ internal partial class CoopSave {
     private const string IdleClipName = "Idle";
 
     /// <summary>
+    /// How many of the animations held back from a body kept off the screen are written down, each time it is hidden.
+    /// </summary>
+    private const int HeldBackAnimationLines = 5;
+
+    /// <summary>
+    /// The players whose body is kept off the screen (<see cref="SetPartnerBodyHidden"/>), with how many of the
+    /// animations held back from it were written down. None of their animations is played on it until it is shown
+    /// again, since the first one would put their body back beside their cocoon.
+    /// </summary>
+    private static readonly Dictionary<ushort, int> BodiesKeptHidden = new();
+
+    /// <summary>
     /// How long the screen takes to come back, in seconds.
     /// </summary>
     private const float RescueFadeTime = 0.5f;
@@ -748,8 +760,9 @@ internal partial class CoopSave {
                 Kind = CoopSaveUpdateKind.RescueLost
             });
 
-            // Their cocoon goes now rather than when they answer: this player is on their way to a bench either way
-            RemoveRescueTarget();
+            // Their cocoon goes now rather than when they answer: this player is on their way to a bench either way.
+            // So are they, so their body is not stood up where they lay.
+            RemoveRescueTarget(false);
             _partnerWaitingRescue = null;
         } catch (Exception e) {
             LogRescueError(e);
@@ -2267,6 +2280,14 @@ internal partial class CoopSave {
     /// <param name="hidden">Whether to take it off the screen.</param>
     private void SetPartnerBodyHidden(ushort playerId, bool hidden) {
         try {
+            // Held off the screen whatever arrives for it in the meantime, before anything below can return early:
+            // a character that is only put in the room after this is held off it as well
+            if (hidden) {
+                BodiesKeptHidden.TryAdd(playerId, 0);
+            } else {
+                BodiesKeptHidden.Remove(playerId);
+            }
+
             if (!_playerData.TryGetValue(playerId, out var player)) {
                 return;
             }
@@ -2303,9 +2324,9 @@ internal partial class CoopSave {
 
             PlayerTargetRegistry.RegisterRemotePlayer(body);
 
-            // Any animation of theirs puts their own sprite back, so this only has to cover the player who is put
-            // back on their feet and then stands perfectly still: their game would send nothing, and a body that
-            // was taken off the screen for the wait would stay that way.
+            // From here on any animation of theirs puts their own sprite back, so this only has to cover the player
+            // who is put back on their feet and then stands perfectly still: their game would send nothing, and a
+            // body that was taken off the screen for the wait would stay that way.
             var idle = animator.GetClipByName(IdleClipName);
             if (idle != null) {
                 animator.Play(idle);
@@ -2313,6 +2334,26 @@ internal partial class CoopSave {
         } catch (Exception e) {
             LogRescueError(e);
         }
+    }
+
+    /// <summary>
+    /// Whether an animation of a player is to be held back from their body because it is kept off the screen, which
+    /// the animation would undo: their body would stand beside the cocoon they lie in. The first few held back each
+    /// time are written down, since nothing else tells which animation came.
+    /// </summary>
+    /// <param name="playerId">The player the animation is of.</param>
+    /// <param name="clipName">The name of the animation.</param>
+    internal static bool HoldsBackAnimation(ushort playerId, string clipName) {
+        if (!BodiesKeptHidden.TryGetValue(playerId, out var written)) {
+            return false;
+        }
+
+        if (written < HeldBackAnimationLines) {
+            BodiesKeptHidden[playerId] = written + 1;
+            Logger.Info($"Kept the body of player {playerId} off the screen rather than play '{clipName}' on it");
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -2350,21 +2391,31 @@ internal partial class CoopSave {
         _partnerWaitingRescue = null;
         _partnerCocoonScene = "";
         _uiManager.CoopPrompt.Hide();
+        BodiesKeptHidden.Clear();
     }
 
     /// <summary>
     /// Takes the cocoon of the partner out of the room again.
     /// </summary>
-    private void RemoveRescueTarget() {
+    /// <param name="standUp">Whether the partner stands up here, so that their body is put back on the screen. Not for
+    /// a partner on their way to their bench: in their own game they lie there until it takes them away, and their
+    /// body stood up beside the place their cocoon had been.</param>
+    private void RemoveRescueTarget(bool standUp = true) {
         if (_rescueTarget is { } target) {
             if (target.Cocoon != null) {
                 UnityEngine.Object.Destroy(target.Cocoon);
             }
 
-            // Whatever took the cocoon away - they were pulled up, they gave up, or this player walked out of the
-            // room - their body belongs back on the screen. Anything they do puts it there by itself, so this only
-            // has to cover someone who does nothing at all.
-            SetPartnerBodyHidden(target.PlayerId, false);
+            if (standUp) {
+                // Whatever else took the cocoon away - they were pulled up, the fall of a boss stood them up, they gave
+                // up, or this player walked out of the room - their body belongs back on the screen
+                SetPartnerBodyHidden(target.PlayerId, false);
+            } else {
+                // Still off the screen, but no longer held there: their game shows nothing more of them on the way to
+                // their bench (HeroController.Die plays nothing on the hero), and what it shows once they are back
+                // is shown again
+                BodiesKeptHidden.Remove(target.PlayerId);
+            }
 
             _rescueTarget = null;
         }

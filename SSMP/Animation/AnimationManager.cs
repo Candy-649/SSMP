@@ -9,6 +9,7 @@ using SSMP.Collection;
 using SSMP.Fsm;
 using SSMP.Game;
 using SSMP.Game.Client;
+using SSMP.Game.Client.Save;
 using SSMP.Game.Settings;
 using SSMP.Hooks;
 using SSMP.Internals;
@@ -1021,6 +1022,11 @@ internal class AnimationManager {
         }
 
         if (_debugLogAnimations) Logger.Info($"  clipName: {clipName}");
+
+        // The body of a player lying in their cocoon is kept off the screen, which playing a clip on it would undo
+        if (CoopSave.HoldsBackAnimation(id, clipName)) {
+            return;
+        }
 
         // Get the sprite animator and check whether this clip can be played before playing it
         var spriteAnimator = playerObject.GetComponent<tk2dSpriteAnimator>();
