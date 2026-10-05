@@ -125,6 +125,35 @@ internal class ChatBox : IChatBox {
             typeof(InputHandler).GetMethod("SetCursorEnabled", BindingFlags.NonPublic | BindingFlags.Static)!,
             (Action<Action<bool>, bool>) ((orig, isEnabled) => orig(isEnabled || IsOpen))
         );
+
+        // In a cutscene the game takes any key at all as its skip: the first press offers to skip and the next one
+        // skips, or the first one already in the travel scene. The chat can't be opened in a cutscene, so its key did
+        // nothing but that, and pressing it again to say something skipped the scene. It is now left out of both, and
+        // so are the letters typed into a chat that was already open when the cutscene began.
+        HookCutsceneInput("CutsceneInput");
+        HookCutsceneInput("StagCutsceneInput");
+    }
+
+    /// <summary>
+    /// Keeps a method of the game that skips a cutscene on any key from running while the chat is open or the key that
+    /// opens it is down.
+    /// </summary>
+    /// <param name="methodName">The name of the method of <see cref="InputHandler"/>.</param>
+    private void HookCutsceneInput(string methodName) {
+        var method = typeof(InputHandler).GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+        );
+        if (method == null) {
+            Logger.Warn($"Could not find InputHandler.{methodName}, so the chat key may still skip a cutscene");
+            return;
+        }
+
+        new Hook(method, (Action<Action<InputHandler>, InputHandler>) ((orig, self) => {
+            if (!IsOpen && !_modSettings.Keybinds.OpenChat.IsPressed) {
+                orig(self);
+            }
+        }));
     }
 
     /// <summary>
