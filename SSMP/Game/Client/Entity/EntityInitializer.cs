@@ -231,6 +231,18 @@ internal static class EntityInitializer {
     }
 
     /// <summary>
+    /// The body type each client-side rigidbody had before <see cref="ConfigureClientRigidbody"/> made it kinematic.
+    /// A copy's body that the game had made ahead of time is let out with the copy's death, and gets back the type the
+    /// game made it with (<see cref="RestoreBodyType"/>). Destroyed bodies are dropped when the list has grown.
+    /// </summary>
+    private static readonly Dictionary<Rigidbody2D, RigidbodyType2D> OriginalBodyTypes = new();
+
+    /// <summary>
+    /// The number of kept body types at which the destroyed ones are next dropped.
+    /// </summary>
+    private static int _bodyTypesPruneCount = 256;
+
+    /// <summary>
     /// Makes one client-side rigidbody non-authoritative unless it is owned by corpse logic.
     /// </summary>
     /// <param name="rigidbody">The client rigidbody to configure.</param>
@@ -239,7 +251,30 @@ internal static class EntityInitializer {
             return;
         }
 
+        if (!OriginalBodyTypes.ContainsKey(rigidbody)) {
+            if (OriginalBodyTypes.Count >= _bodyTypesPruneCount) {
+                foreach (var destroyed in OriginalBodyTypes.Keys.Where(body => body == null).ToList()) {
+                    OriginalBodyTypes.Remove(destroyed);
+                }
+
+                _bodyTypesPruneCount = System.Math.Max(256, OriginalBodyTypes.Count * 2);
+            }
+
+            OriginalBodyTypes[rigidbody] = rigidbody.bodyType;
+        }
+
         rigidbody.bodyType = RigidbodyType2D.Kinematic;
+    }
+
+    /// <summary>
+    /// Gives a rigidbody back the body type it had before <see cref="ConfigureClientRigidbody"/> changed it, and leaves
+    /// one that was never changed as it is.
+    /// </summary>
+    /// <param name="rigidbody">The rigidbody to restore.</param>
+    internal static void RestoreBodyType(Rigidbody2D rigidbody) {
+        if (OriginalBodyTypes.Remove(rigidbody, out var bodyType)) {
+            rigidbody.bodyType = bodyType;
+        }
     }
 
     /// <summary>

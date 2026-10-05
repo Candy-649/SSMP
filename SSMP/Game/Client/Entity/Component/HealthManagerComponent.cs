@@ -159,7 +159,7 @@ internal class HealthManagerComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Enables local physics for a remote corpse and all of its body parts.
+    /// Gives a remote corpse and all of its body parts back the bodies the game made them with.
     /// </summary>
     private void OnClientCorpseEmitted(GameObject corpse) {
         if (corpse == null) {
@@ -172,21 +172,21 @@ internal class HealthManagerComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Restores dynamic simulation for a corpse and all of its body parts on the local client.
+    /// Gives a corpse and all of its body parts back the body types the game made them with. A corpse the game made
+    /// ahead of time sits under the copy, whose bodies were all made kinematic when it was set up. Every body used to
+    /// be made dynamic here instead, but some boss corpses are kinematic by design and are dropped by their FSM to a set
+    /// height: made dynamic, one came to rest on the floor just above that height and its death never went on.
     /// </summary>
-    /// <param name="corpse">The emitted corpse to make physics-driven.</param>
+    /// <param name="corpse">The emitted corpse.</param>
     private static void RestoreCorpsePhysics(GameObject corpse) {
         if (corpse == null) {
             return;
         }
 
         foreach (var rigidbody in corpse.GetComponentsInChildren<Rigidbody2D>(true)) {
-            if (rigidbody == null) {
-                continue;
+            if (rigidbody != null) {
+                EntityInitializer.RestoreBodyType(rigidbody);
             }
-
-            rigidbody.simulated = true;
-            rigidbody.bodyType = RigidbodyType2D.Dynamic;
         }
     }
 
@@ -262,6 +262,10 @@ internal class HealthManagerComponent : EntityComponent {
 
         Logger.Info($"HealthManager Die was called on host entity '{self.name}'");
 
+        // Whether the creature's own FSM plays its deaths, as it is right now. Some rooms switch that off on the
+        // creature just before they kill it (SetSpecialDeath), only ever in the game that runs them
+        var hasSpecialDeath = self.hasSpecialDeath;
+
         _hostCorpse = null;
         InvokeOrig();
 
@@ -290,6 +294,9 @@ internal class HealthManagerComponent : EntityComponent {
             data.Packet.Write(corpseRigidbody?.linearVelocity.x ?? 0f);
             data.Packet.Write(corpseRigidbody?.linearVelocity.y ?? 0f);
         }
+
+        data.Packet.Write(hasSpecialDeath);
+        data.Packet.Write(overrideSpecialDeath);
 
         _hostCorpse = null;
 
@@ -427,6 +434,12 @@ internal class HealthManagerComponent : EntityComponent {
                     corpseVelocity = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
                 }
 
+                // The copy dies the way the creature did in the scene host's game. A room that switched the special
+                // death off before its final blow did so only there, and a copy that kept it only told its own
+                // switched-off FSM and was never seen to die
+                _healthManager.Client.hasSpecialDeath = data.Packet.ReadBool();
+                var overrideSpecialDeath = data.Packet.ReadBool();
+
                 // A creature whose FSM plays its own death threw out its body in the replay of that, which came just
                 // before this from the same death in the scene host's game (EntityFsmActions, SimulateDeath), and the
                 // copy's own death throws out none: the body whose place the scene host sent is that one. Only one
@@ -436,7 +449,10 @@ internal class HealthManagerComponent : EntityComponent {
                 // Set a boolean to indicate that the client health manager is allowed to execute the Die method
                 _allowDeath = true;
                 _clientCorpse = null;
-                _healthManager.Client.Die(attackDirection, attackType, ignoreEvasion);
+                // What the short overload passes, apart from whether the special death was passed over
+                _healthManager.Client.Die(
+                    attackDirection, attackType, NailElements.None, null, ignoreEvasion, 1f, overrideSpecialDeath, false
+                );
 
                 var corpse = _clientCorpse != null ? _clientCorpse : replayedCorpse;
                 if (hasCorpseSnapshot && corpse != null) {
