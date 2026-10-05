@@ -61,6 +61,21 @@ internal class EnemyHealthBars {
     private const float Edge = 1.5f;
 
     /// <summary>
+    /// The size of the number above a boss that fights together with others.
+    /// </summary>
+    private const int NumberAboveSize = 24;
+
+    /// <summary>
+    /// The size of the number at the left end of the bar of a boss that fights together with others.
+    /// </summary>
+    private const int NumberOnBarSize = 18;
+
+    /// <summary>
+    /// The space between the left end of the bar of a boss and its number.
+    /// </summary>
+    private const float NumberOnBarGap = 8f;
+
+    /// <summary>
     /// How long, in seconds, the part of the health that a hit took lingers before it drains away.
     /// </summary>
     private const float LostLingerTime = 0.35f;
@@ -257,12 +272,10 @@ internal class EnemyHealthBars {
             if (!bar.HasView) {
                 bar.IsBoss = IsBoss(healthManager);
                 bar.CreateView(_canvasTransform);
-                if (bar.IsBoss) {
-                    _bossBars.Add(bar);
-                    bossBarsChanged = true;
-                }
-            } else if (bar.IsBoss && !_bossBars.Contains(bar)) {
-                _bossBars.Add(bar);
+            }
+
+            if (bar.IsBoss && !_bossBars.Contains(bar)) {
+                AddBossBar(bar);
                 bossBarsChanged = true;
             }
 
@@ -280,6 +293,31 @@ internal class EnemyHealthBars {
         if (bossBarsChanged) {
             PlaceBossBars();
         }
+
+        // Bosses that fight together are told apart by a number above each of them and at the end of its bar
+        var showNumbers = _bossBars.Count >= 2;
+        foreach (var bossBar in _bossBars) {
+            bossBar.ShowNumber(showNumbers);
+            if (showNumbers) {
+                PlaceNumberAboveHead(bossBar, camera!, scale);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Adds the bar of a boss to the bars along the bottom of the screen, with a number that no other boss there has.
+    /// A boss that comes back keeps its number if it is still free.
+    /// </summary>
+    private void AddBossBar(Bar bar) {
+        if (bar.Number <= 0 || _bossBars.Exists(other => other.Number == bar.Number)) {
+            bar.Number = 1;
+            while (_bossBars.Exists(other => other.Number == bar.Number)) {
+                bar.Number++;
+            }
+        }
+
+        _bossBars.Add(bar);
+        _bossBars.Sort((a, b) => a.Number.CompareTo(b.Number));
     }
 
     /// <summary>
@@ -309,6 +347,24 @@ internal class EnemyHealthBars {
         if (isOnScreen) {
             bar.SetScreenPosition(new Vector2(point.x, point.y + (HeadBarGap + HeadBarHeight / 2f + Edge) * scale));
         }
+    }
+
+    /// <summary>
+    /// Puts the number of a boss above its head, or hides it while the boss is off the screen or can't be seen.
+    /// </summary>
+    private void PlaceNumberAboveHead(Bar bar, Camera camera, float scale) {
+        if (_canvasTransform == null || !bar.TryGetTop(out var top)) {
+            bar.SetNumberAbove(null, null);
+            return;
+        }
+
+        var point = camera.WorldToScreenPoint(top);
+        var isOnScreen = point.z > 0f && point.x > -ScreenMargin && point.x < Screen.width + ScreenMargin &&
+                         point.y > -ScreenMargin && point.y < Screen.height + ScreenMargin;
+        bar.SetNumberAbove(
+            _canvasTransform,
+            isOnScreen ? new Vector2(point.x, point.y + (HeadBarGap + NumberAboveSize / 2f) * scale) : null
+        );
     }
 
     /// <summary>
@@ -424,9 +480,24 @@ internal class EnemyHealthBars {
         private RectTransform? _left;
 
         /// <summary>
+        /// The number at the left end of the bar of a boss, shown while several bosses fight together.
+        /// </summary>
+        private Text? _numberOnBar;
+
+        /// <summary>
+        /// The number above the head of a boss, shown while several bosses fight together.
+        /// </summary>
+        private Text? _numberAbove;
+
+        /// <summary>
         /// The frame in which the game last counted the creature as active.
         /// </summary>
         public int SeenFrame;
+
+        /// <summary>
+        /// The number of a boss among the bosses that fight together, or 0 before it had one.
+        /// </summary>
+        public int Number;
 
         /// <summary>
         /// Whether the creature is a boss, whose bar is along the bottom of the screen.
@@ -493,6 +564,14 @@ internal class EnemyHealthBars {
                 _viewTransform.anchorMax = new Vector2(0.5f + BossBarWidthShare / 2f, 0f);
                 _viewTransform.pivot = new Vector2(0.5f, 0f);
                 _viewTransform.sizeDelta = new Vector2(0f, BossBarHeight + 2f * Edge);
+
+                _numberOnBar = CreateNumber(_viewTransform, "Number", NumberOnBarSize, TextAnchor.MiddleRight);
+                var numberTransform = _numberOnBar.rectTransform;
+                numberTransform.anchorMin = new Vector2(0f, 0.5f);
+                numberTransform.anchorMax = new Vector2(0f, 0.5f);
+                numberTransform.pivot = new Vector2(1f, 0.5f);
+                numberTransform.anchoredPosition = new Vector2(-NumberOnBarGap, 0f);
+                _numberOnBar.gameObject.SetActive(false);
             } else {
                 _viewTransform.anchorMin = Vector2.zero;
                 _viewTransform.anchorMax = Vector2.zero;
@@ -589,21 +668,110 @@ internal class EnemyHealthBars {
         }
 
         /// <summary>
-        /// Hides the bar.
+        /// Hides the bar, and the number above the creature.
         /// </summary>
         public void Hide() {
             SetVisible(false);
+            SetNumberAbove(null, null);
         }
 
         /// <summary>
-        /// Removes the objects that draw the bar.
+        /// Shows or hides the number at the left end of the bar of a boss, and hides the one above it with it.
+        /// </summary>
+        public void ShowNumber(bool isShown) {
+            if (_numberOnBar != null) {
+                var text = Number.ToString();
+                if (_numberOnBar.text != text) {
+                    _numberOnBar.text = text;
+                }
+
+                if (_numberOnBar.gameObject.activeSelf != isShown) {
+                    _numberOnBar.gameObject.SetActive(isShown);
+                }
+            }
+
+            if (!isShown) {
+                SetNumberAbove(null, null);
+            }
+        }
+
+        /// <summary>
+        /// Puts the number of a boss above it at a point on the screen, in pixels, or hides it without a point. The
+        /// number is made on the canvas the first time it is shown.
+        /// </summary>
+        public void SetNumberAbove(RectTransform? canvas, Vector2? point) {
+            if (point is not { } screenPoint) {
+                if (_numberAbove != null && _numberAbove.gameObject.activeSelf) {
+                    _numberAbove.gameObject.SetActive(false);
+                }
+
+                return;
+            }
+
+            if (_numberAbove == null) {
+                if (canvas == null) {
+                    return;
+                }
+
+                _numberAbove = CreateNumber(canvas, "Boss Number", NumberAboveSize, TextAnchor.MiddleCenter);
+                var numberTransform = _numberAbove.rectTransform;
+                numberTransform.anchorMin = Vector2.zero;
+                numberTransform.anchorMax = Vector2.zero;
+                numberTransform.pivot = new Vector2(0.5f, 0.5f);
+            }
+
+            var text = Number.ToString();
+            if (_numberAbove.text != text) {
+                _numberAbove.text = text;
+            }
+
+            if (!_numberAbove.gameObject.activeSelf) {
+                _numberAbove.gameObject.SetActive(true);
+            }
+
+            _numberAbove.rectTransform.position = screenPoint;
+        }
+
+        /// <summary>
+        /// Removes the objects that draw the bar, and the number above the creature.
         /// </summary>
         public void Destroy() {
             if (_view != null) {
                 Object.Destroy(_view);
             }
 
+            if (_numberAbove != null) {
+                Object.Destroy(_numberAbove.gameObject);
+            }
+
             _view = null;
+            _numberAbove = null;
+            _numberOnBar = null;
+        }
+
+        /// <summary>
+        /// Makes a number in the white of silk with a dark edge, which reads against any background.
+        /// </summary>
+        private static Text CreateNumber(RectTransform parent, string name, int size, TextAnchor alignment) {
+            var numberObject = new GameObject(name, typeof(RectTransform));
+            var numberTransform = (RectTransform) numberObject.transform;
+            numberTransform.SetParent(parent, false);
+            numberTransform.sizeDelta = new Vector2(size * 2f, size * 1.5f);
+
+            var text = numberObject.AddComponent<Text>();
+            text.font = Resources.FontManager.UIFontRegular;
+            text.fontSize = size;
+            text.fontStyle = FontStyle.Bold;
+            text.alignment = alignment;
+            text.color = HealthColor;
+            text.horizontalOverflow = HorizontalWrapMode.Overflow;
+            text.verticalOverflow = VerticalWrapMode.Overflow;
+            text.raycastTarget = false;
+
+            var outline = numberObject.AddComponent<Outline>();
+            outline.effectColor = new Color(0f, 0f, 0f, 0.85f);
+            outline.effectDistance = new Vector2(1.5f, -1.5f);
+            return text;
         }
 
         /// <summary>
