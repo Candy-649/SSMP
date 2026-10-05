@@ -488,6 +488,68 @@ internal partial class CoopSave {
             typeof(AudioPlayerOneShotSingle).GetMethod("OnEnter", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<AudioPlayerOneShotSingle>, AudioPlayerOneShotSingle>(OnDeathSound)
         );
+        _takeDamageHook = CreateHook(
+            typeof(HeroController).GetMethod(
+                "TakeDamage",
+                InstanceFlags,
+                null,
+                [
+                    typeof(GameObject), typeof(GlobalEnums.CollisionSide), typeof(int), typeof(GlobalEnums.HazardType),
+                    typeof(GlobalEnums.DamagePropertyFlags)
+                ],
+                null
+            ),
+            new Action<Action<HeroController, GameObject, GlobalEnums.CollisionSide, int, GlobalEnums.HazardType,
+                GlobalEnums.DamagePropertyFlags>, HeroController, GameObject, GlobalEnums.CollisionSide, int,
+                GlobalEnums.HazardType, GlobalEnums.DamagePropertyFlags>(OnTakeDamage)
+        );
+    }
+
+    /// <summary>
+    /// The hook on the player being hurt.
+    /// </summary>
+    private Hook? _takeDamageHook;
+
+    /// <summary>
+    /// How many hurts were kept off the player since they last went down, so that only the first of each wait is written
+    /// down.
+    /// </summary>
+    private static int _hurtsKeptOffLyingPlayer;
+
+    /// <summary>
+    /// Keeps every hurt off a player lying down, the harm of the room included.
+    ///
+    /// Going down takes the player out of reach of hits (<see cref="GoDown"/>), but the harm of a room - steam, spikes,
+    /// acid - goes through the invulnerability that is part of that (HeroController.TakeDamage), as it does for a player
+    /// standing in it. A player lying in the steam of a vent got a death every time it puffed, and with each one the
+    /// game put up the strike that shows the player being hit, with its sounds - on a body nobody can see. Each hurt
+    /// that gets that far also hands control back to the player. Nothing can hurt a player who is already lying in
+    /// their death, so the whole hurt is left out.
+    /// </summary>
+    private static void OnTakeDamage(
+        Action<HeroController, GameObject, GlobalEnums.CollisionSide, int, GlobalEnums.HazardType,
+            GlobalEnums.DamagePropertyFlags> orig,
+        HeroController self,
+        GameObject go,
+        GlobalEnums.CollisionSide damageSide,
+        int damageAmount,
+        GlobalEnums.HazardType hazardType,
+        GlobalEnums.DamagePropertyFlags damagePropertyFlags
+    ) {
+        if (PlayerTargetRegistry.IsPlayerDown(self.gameObject)) {
+            // How the room's harm reached a player whose hit box is switched off is not known yet, so the first one of
+            // each wait says what it was
+            if (_hurtsKeptOffLyingPlayer++ == 0) {
+                Logger.Info(
+                    $"Kept a hurt off the player lying down: {damageAmount} from '{(go == null ? "?" : go.name)}' " +
+                    $"({hazardType}), with the hit box {(HeroBox.Inactive ? "off" : "ON")}"
+                );
+            }
+
+            return;
+        }
+
+        orig(self, go, damageSide, damageAmount, hazardType, damagePropertyFlags);
     }
 
     /// <summary>
@@ -1031,6 +1093,7 @@ internal partial class CoopSave {
         hero.heroBox.HeroBoxOff();
         hero.AddInvulnerabilitySource(RescueInvulnerability);
         hero.renderer.enabled = false;
+        _hurtsKeptOffLyingPlayer = 0;
 
         if (hero.vibrationCtrl != null) {
             hero.vibrationCtrl.PlayHeroDeath();
