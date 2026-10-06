@@ -322,12 +322,15 @@ internal class EnemyHealthBars {
     }
 
     /// <summary>
-    /// Whether the player is playing: not in a menu, the inventory or a cutscene, and not between rooms.
+    /// Whether the player is playing: not in a menu, the inventory or a cutscene, not between rooms, and not dead on the
+    /// way to a bench or caught on the way back to the last safe place, while the screen goes black.
     /// </summary>
     private static bool IsPlaying() {
         var gameManager = GameManager.SilentInstance;
         return gameManager != null && gameManager.GameState == GameState.PLAYING && !gameManager.IsInSceneTransition &&
-               HeroController.SilentInstance != null && PlayerData.instance is { isInventoryOpen: false } &&
+               HeroController.SilentInstance is {
+                   cState: { dead: false, hazardDeath: false, hazardRespawning: false }
+               } && PlayerData.instance is { isInventoryOpen: false } &&
                GameCameras.SilentInstance is { IsInCinematic: false } &&
                !SceneUtil.IsNonGameplayScene(SceneManager.GetActiveScene().name);
     }
