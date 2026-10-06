@@ -1,12 +1,18 @@
 using System;
 using System.Diagnostics;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Util;
 
 /// <summary>
 /// An event that keeps the time that each of its handlers takes, for <see cref="FrameWatch"/>. It runs its handlers in
-/// the order they were added, like an ordinary event does, and an exception of one of them goes out of it the same way,
-/// leaving the handlers after it to the next run.
+/// the order they were added, like an ordinary event does. An exception of one of them ends only that one's run: it is
+/// written to the log, and the handlers after it run as ever.
+///
+/// Like an ordinary event, it used to go out of the event and leave the handlers after it to the next run. A handler
+/// that threw every frame then left them for good: one left behind by a room, failing on that room's particles once
+/// they were gone, kept every creature's copy in every room after from moving for the rest of the session. Nothing of
+/// it was in the log either, where a player's game cannot write Unity's own messages.
 /// </summary>
 internal sealed class TimedEvent {
     /// <summary>
@@ -17,6 +23,26 @@ internal sealed class TimedEvent {
         /// What the handler does.
         /// </summary>
         public readonly Action Action = action;
+
+        /// <summary>
+        /// How many times it threw.
+        /// </summary>
+        private int _failures;
+
+        /// <summary>
+        /// Writes down that the handler threw: the first time with all of it, and after that only how often, at every
+        /// tenfold, since a handler that throws once usually throws every frame.
+        /// </summary>
+        public void SayItFailed(Exception exception) {
+            _failures++;
+            if (_failures == 1) {
+                Logger.Error($"'{Name}', which runs every frame, failed; what runs after it still does:\n{exception}");
+            } else if (_failures is 10 or 100 or 1000 or 10000 or 100000) {
+                Logger.Error(
+                    $"'{Name}' has failed {_failures} times now: {exception.GetType().Name}: {exception.Message}"
+                );
+            }
+        }
     }
 
     /// <summary>
@@ -89,7 +115,11 @@ internal sealed class TimedEvent {
         try {
             foreach (var handler in handlers) {
                 FrameWatch.Running = handler.Name;
-                handler.Action();
+                try {
+                    handler.Action();
+                } catch (Exception e) {
+                    handler.SayItFailed(e);
+                }
 
                 var now = Stopwatch.GetTimestamp();
                 handler.FrameTicks += now - last;

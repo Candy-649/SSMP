@@ -3209,7 +3209,16 @@ internal partial class Entity {
 
             if (data.Types.Contains(EntityHostFsmData.Type.State)) {
                 var states = hostFsm.FsmStates;
-                if (states.Length <= data.CurrentState) {
+                if (data.CurrentState == byte.MaxValue) {
+                    // No state at all, which is how the scene host sends a state it cannot find: its FSM stopped, as it
+                    // does when its creature is switched off or dies. The game's FSM leaves the state it was in as it
+                    // stops, which ends what that state was doing, and so does the copy. A creature that died sucking
+                    // silk out of a player went on drawing the silk stream where it died, and what the stream did
+                    // every frame was never taken off. Only that number means it: the FSM here can be a stand-in with
+                    // fewer states than the scene host's (Entity.WaitForTheFsmToBeMade)
+                    snapshot.CurrentState = "";
+                    EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, "");
+                } else if (states.Length <= data.CurrentState) {
                     //Logger.Warn($"Tried to update host FSM state for unknown state index: {data.CurrentState}");
                 } else {
                     var stateName = states[data.CurrentState].Name;

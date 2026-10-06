@@ -1124,6 +1124,15 @@ internal static partial class EntityFsmActions {
         public System.Action? Step { private get; init; }
 
         /// <summary>
+        /// What does the action again in each frame, if it is done every frame, which stops when the state is exited
+        /// or the room is left. Taken off only as the state was left, it outlived a room left in the middle of it:
+        /// with the room's particles gone it threw every frame, and since the handlers of a frame run one after the
+        /// other, nothing after it ran again - the copies of every creature of every room after stood where they
+        /// first appeared.
+        /// </summary>
+        public System.Action? EveryFrame { private get; init; }
+
+        /// <summary>
         /// The action that should be executed when the state is exited.
         /// </summary>
         public System.Action ExitAction { private get; init; }
@@ -1154,6 +1163,10 @@ internal static partial class EntityFsmActions {
 
             if (Step != null) {
                 MonoBehaviourUtil.Instance.OnFixedUpdateEvent -= Step;
+            }
+
+            if (EveryFrame != null) {
+                MonoBehaviourUtil.Instance.OnUpdateEvent -= EveryFrame;
             }
         }
     }

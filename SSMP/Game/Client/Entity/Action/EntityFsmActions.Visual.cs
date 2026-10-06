@@ -89,16 +89,22 @@ internal static partial class EntityFsmActions {
         if (action.everyFrame) {
             MonoBehaviourUtil.Instance.OnUpdateEvent += Action;
 
+            // Taken off again with the state, or with the room (EveryFrame)
             new ActionInState {
                 Fsm = action.Fsm,
                 StateName = action.State.Name,
-                ExitAction = () => MonoBehaviourUtil.Instance.OnUpdateEvent -= Action
+                EveryFrame = Action
             }.Register();
         }
 
         return;
 
         void Action() {
+            // Gone with the creature or the room it was in, while still set to run
+            if (particleSystem == null) {
+                return;
+            }
+
 #pragma warning disable CS0618
             particleSystem.emissionRate = action.emissionRate.Value;
 #pragma warning restore CS0618
@@ -135,14 +141,20 @@ internal static partial class EntityFsmActions {
         if (action.everyFrame) {
             MonoBehaviourUtil.Instance.OnUpdateEvent += Action;
 
+            // Taken off again with the state, or with the room (EveryFrame)
             new ActionInState {
                 Fsm = action.Fsm,
                 StateName = action.State.Name,
-                ExitAction = () => MonoBehaviourUtil.Instance.OnUpdateEvent -= Action
+                EveryFrame = Action
             }.Register();
         }
 
         void Action() {
+            // Gone with the creature or the room it was in, while still set to run
+            if (particleSystem == null) {
+                return;
+            }
+
 #pragma warning disable CS0618
             particleSystem.startSpeed = action.emissionSpeed.Value;
 #pragma warning restore CS0618
