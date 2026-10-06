@@ -621,6 +621,13 @@ internal partial class CoopSave {
     /// <param name="orig">The original method.</param>
     /// <param name="self">The game manager.</param>
     private void OnTimePasses(Action<global::GameManager> orig, global::GameManager self) {
+        // An arrival that the partner had first, which already let time pass for both (see CoopSave.Arrivals)
+        if (IsArrivalReplay()) {
+            Logger.Info("Not letting time pass again for an arrival that the partner had first");
+
+            return;
+        }
+
         if (_deathPassesNoTime) {
             _deathPassesNoTime = false;
 

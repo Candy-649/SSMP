@@ -456,6 +456,15 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // And arrivals, which each player has on their own (see CoopSave.Arrivals)
+        string? hiddenLandingFlag = null;
+        try {
+            toState = RedirectArrival(self, toState);
+            hiddenLandingFlag = GetLandingFlagToHide(self, toState);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Traps of the world ride along with this hook rather than putting a second one on the same method. One that
         // goes off is sent once it has, with what it rolled
         CoopSaveUpdate? trap = null;
@@ -501,6 +510,8 @@ internal partial class CoopSave {
         try {
             if (trap != null) {
                 SetOffWorldTrigger(trap, () => orig(self, toState));
+            } else if (hiddenLandingFlag != null) {
+                WithoutFlag(hiddenLandingFlag, () => orig(self, toState));
             } else {
                 orig(self, toState);
             }
@@ -1301,7 +1312,11 @@ internal partial class CoopSave {
         for (var i = 0; i < update.FlagNames.Count && i < update.FlagValues.Count; i++) {
             var name = update.FlagNames[i];
             var value = update.FlagValues[i];
-            if (BossRoomCoop.IsHeroStateName(name) || !IsNewerChange(_flagSequences, update, name)) {
+
+            // A mark of the partner's own arrival is theirs alone, also in dialogue kept from before such marks stopped
+            // being sent (see CoopSave.Arrivals)
+            if (BossRoomCoop.IsHeroStateName(name) || IsOwnArrivalMark(name) ||
+                !IsNewerChange(_flagSequences, update, name)) {
                 continue;
             }
 
@@ -1313,6 +1328,7 @@ internal partial class CoopSave {
                     changed++;
                     if (value != 0) {
                         OnPartnerFlagSet?.Invoke(name);
+                        NoteArrivalToSee(name);
                         (setHere ??= []).Add(name);
                     }
                 }

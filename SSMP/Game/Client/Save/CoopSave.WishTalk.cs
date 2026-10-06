@@ -1485,6 +1485,14 @@ internal partial class CoopSave {
     /// it was completed.
     /// </summary>
     private void OnBeginWish(Action<FullQuestBase, Action?, bool> orig, FullQuestBase self, Action? afterPrompt, bool showPrompt) {
+        // An arrival that the partner had first doesn't begin the wish again once the partner finished it, which would
+        // open it again in both games (see CoopSave.Arrivals). What waits for the prompt goes on as if it was shown
+        if (self.IsCompleted && IsArrivalReplay()) {
+            Logger.Info($"Not beginning '{self.name}' again for an arrival that the partner had first, who finished it");
+            afterPrompt?.Invoke();
+            return;
+        }
+
         var wasActive = self.IsAccepted && !self.IsCompleted;
         orig(self, afterPrompt, showPrompt);
         if (!_applyingPartnerTalk && !wasActive && self.IsAccepted && !self.IsCompleted) {
@@ -1650,8 +1658,10 @@ internal partial class CoopSave {
             return;
         }
 
+        // The marks of arrivals stay each player's own, which their own arrival sets (see CoopSave.Arrivals)
         GetStoryFields();
-        if (StoryFieldIndices.ContainsKey(name) || GetPlayerDataField(name) is not { } field) {
+        if (StoryFieldIndices.ContainsKey(name) || IsOwnArrivalMark(name) ||
+            GetPlayerDataField(name) is not { } field) {
             return;
         }
 

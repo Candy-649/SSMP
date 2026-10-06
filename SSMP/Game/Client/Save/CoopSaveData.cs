@@ -76,6 +76,14 @@ internal class CoopSaveMarker {
     /// </summary>
     [JsonProperty("acceptTalks")]
     public List<CoopAcceptTalk> AcceptTalks { get; set; } = [];
+
+    /// <summary>
+    /// Arrivals that the partner had first and that the local player is still to see on their own arrival, by the flag
+    /// of the player data that the game marks each with (see CoopSave.Arrivals). The flag came from the partner, so the
+    /// save itself can't tell that the local player hasn't seen it.
+    /// </summary>
+    [JsonProperty("arrivalsToSee")]
+    public List<string> ArrivalsToSee { get; set; } = [];
 }
 
 /// <summary>

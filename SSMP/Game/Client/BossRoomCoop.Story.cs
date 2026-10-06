@@ -26,7 +26,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// other player to come into the room let them leave by another way before they got to the scene, and lose it. The
 /// player who waits can go where they like, and /giveup plays the scene for them alone. Only scenes that start as their
 /// player walks into them are held: one that plays as a player comes through a door, or that a room leaves out as it
-/// loads, has no start that could wait.
+/// loads, has no start that could wait, and plays for each player on their own arrival (CoopSave.Arrivals). So does a
+/// scene whose trigger the player only reaches while the scene that began at the door still steers them.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
