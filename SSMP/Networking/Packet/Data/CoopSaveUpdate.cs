@@ -617,5 +617,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    TollBench
+    TollBench,
+
+    /// <summary>
+    /// The sender was waiting to be pulled back up and is now on their feet again. The other player, whose hits pulled
+    /// them up, is told only then, since a hit that pulls them up doesn't stand them up when something comes first in
+    /// their game.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    RescueStoodUp
 }

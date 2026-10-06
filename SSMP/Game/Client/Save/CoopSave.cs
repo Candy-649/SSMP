@@ -926,6 +926,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.RescueLost:
                 OnRescueLost(player);
                 break;
+            case CoopSaveUpdateKind.RescueStoodUp:
+                OnRescueStoodUp(player);
+                break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);
                 break;

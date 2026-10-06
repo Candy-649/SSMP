@@ -108,6 +108,12 @@ internal partial class CoopSave {
     private const float RescueFadeTime = 0.5f;
 
     /// <summary>
+    /// How long, after the last hit on the partner's cocoon, their game's word that they are on their feet still counts
+    /// as the answer to it, in seconds.
+    /// </summary>
+    private const float StoodUpWordTime = 10f;
+
+    /// <summary>
     /// How long to wait for the death to finish playing itself out before the screen is brought back anyway, in
     /// seconds. The death's own ending takes a little over four.
     /// </summary>
@@ -434,6 +440,12 @@ internal partial class CoopSave {
     /// is standing in, and a partner who died somewhere else is still in no position to pull anyone up.
     /// </summary>
     private ushort? _partnerWaitingRescue;
+
+    /// <summary>
+    /// The partner whom the local player's last hit on their cocoon pulled up, and when, until their game says that
+    /// they are on their feet; null otherwise.
+    /// </summary>
+    private (ushort PlayerId, float Time)? _partnerBeingPulledUp;
 
     /// <summary>
     /// The room the waiting partner died in, or empty while none is waiting. Remembered even while the local player is
@@ -1896,6 +1908,14 @@ internal partial class CoopSave {
             Chat(Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。"));
             Logger.Info("Pulled back up after a death instead of going to the bench");
 
+            // The partner who pulled this player up hears it only now that they stand
+            if (GetCheckedPartner() is { } partner) {
+                Send(new CoopSaveUpdate {
+                    TargetId = partner.Id,
+                    Kind = CoopSaveUpdateKind.RescueStoodUp
+                });
+            }
+
             return true;
         } catch (Exception e) {
             LogRescueError(e);
@@ -2292,7 +2312,26 @@ internal partial class CoopSave {
             // leaving the partner they had just saved standing alone
             _partnerWaitingRescue = null;
             RemoveRescueTarget();
-            Chat(Lang.Pick($"You broke {partner.Username} out.", $"你把 {partner.Username} 拉起来了。"));
+
+            // Said once their game says that they stand: a hit that pulls them up doesn't stand them up when
+            // something comes first in their game, like this player going down right after it
+            _partnerBeingPulledUp = (partner.Id, Time.unscaledTime);
+        }
+    }
+
+    /// <summary>
+    /// The partner's game put them back on their feet. When the local player's hits pulled them up, the local player is
+    /// told now.
+    /// </summary>
+    /// <param name="player">The player the update came from.</param>
+    private void OnRescueStoodUp(ClientPlayerData player) {
+        if (_partnerBeingPulledUp is not { } pulled || pulled.PlayerId != player.Id) {
+            return;
+        }
+
+        _partnerBeingPulledUp = null;
+        if (Time.unscaledTime - pulled.Time <= StoodUpWordTime) {
+            Chat(Lang.Pick($"You broke {player.Username} out.", $"你把 {player.Username} 拉起来了。"));
         }
     }
 
@@ -2459,6 +2498,7 @@ internal partial class CoopSave {
 
         _chaseStandUp = null;
         _partnerWaitingRescue = null;
+        _partnerBeingPulledUp = null;
         _partnerCocoonScene = "";
         _uiManager.CoopPrompt.Hide();
         BodiesKeptHidden.Clear();
