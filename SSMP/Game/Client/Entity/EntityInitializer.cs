@@ -120,6 +120,13 @@ internal static class EntityInitializer {
                     continue;
                 }
 
+                // A creature that a first state summons, like the flies a conductor calls up as it starts, would be a
+                // real one apart from every entity, in each game and again on every handover; the game that runs the
+                // summoner makes it and shows it to the other game
+                if (EntitySpawner.SpawnsCreature(action)) {
+                    continue;
+                }
+
                 if (!EntityFsmActions.SupportedActionTypes.Contains(action.GetType())) {
                     continue;
                 }

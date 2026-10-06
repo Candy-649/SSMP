@@ -92,6 +92,20 @@ internal static class EntitySpawner {
     }
 
     /// <summary>
+    /// Whether an action spawns a creature: what it spawns has health, or the registry takes it for an entity that is
+    /// made one when spawned. The copy of a creature that first does what its first states do must not do these: the
+    /// creature that a copy's first state makes is a real one of the room, apart from every entity, which the game that
+    /// runs the creature makes once again and shows the other game as a spawn.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    public static bool SpawnsCreature(FsmStateAction action) {
+        var prefab = PrefabOf(action, out _)?.Value;
+        return prefab != null && (prefab.GetComponent<HealthManager>() != null ||
+                                  EntityRegistry.TryGetEntry(prefab, out var entry) &&
+                                  IsSpawnedAsEntity(prefab, entry.Type));
+    }
+
+    /// <summary>
     /// The parameter of a spawning action that holds what it spawns, or null for an action that spawns nothing.
     /// </summary>
     /// <param name="action">The action.</param>
