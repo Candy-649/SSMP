@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
@@ -161,6 +162,20 @@ internal partial class BossRoomCoop {
     private readonly HashSet<(string Username, StoryKey Story)> _storyStarts = [];
 
     /// <summary>
+    /// The number of the last word that the local player said about the story scenes that the game sets in several
+    /// rooms. It starts from the clock, so that the words of a game that was started again come after those it said
+    /// before.
+    /// </summary>
+    private long _storyReportCount = DateTime.UtcNow.Ticks;
+
+    /// <summary>
+    /// The number of the newest word that each other player said about the story scenes that the game sets in several
+    /// rooms, by their name. A word sent again late, after a newer one, is old news: that they wait, after they said
+    /// that they left.
+    /// </summary>
+    private readonly Dictionary<string, long> _storyReportNumbers = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// Holds back the start of a story scene until every player has reached it.
     /// </summary>
     /// <returns>Whether the event is held back.</returns>
@@ -184,7 +199,6 @@ internal partial class BossRoomCoop {
 
         if (_heldStories.TryAdd(fsm, held)) {
             Logger.Info($"Holding back the story scene '{GetPath(fsm)}' until the other players reach it");
-            TellWaitingAtStory(held);
         }
 
         var heroController = HeroController.instance;
@@ -192,6 +206,7 @@ internal partial class BossRoomCoop {
             held.Position = heroController.transform.position;
         }
 
+        UpdateStoryReport(held);
         return true;
     }
 
@@ -279,10 +294,8 @@ internal partial class BossRoomCoop {
                 continue;
             }
 
-            // Also while it waits only for the local player to be free to start it
-            if (Time.unscaledTime >= held.NextReportTime) {
-                TellWaitingAtStory(held);
-            }
+            // Said while the local player stands where it starts, also while it waits only for them to be free
+            UpdateStoryReport(held);
 
             if (!HaveAllReachedStory(held)) {
                 if (Time.unscaledTime >= held.NextNoticeTime) {
@@ -452,6 +465,27 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Tells the other players, wherever they are, whether the local player waits at a held story scene that the game
+    /// sets in several rooms: said again every so often while they stand where it starts, and taken back as they step
+    /// out. A player who set it off and walked away could be anywhere by the time it starts for the others, even
+    /// through the door, and would lose it.
+    /// </summary>
+    private void UpdateStoryReport(HeldStory held) {
+        if (held.Shared == null) {
+            return;
+        }
+
+        if (!IsLocalHeroInStoryTrigger(held)) {
+            TellLeftStory(held);
+            return;
+        }
+
+        if (Time.unscaledTime >= held.NextReportTime) {
+            TellWaitingAtStory(held);
+        }
+    }
+
+    /// <summary>
     /// Tells the other players, wherever they are, that the local player waits at a held story scene, if the game sets
     /// it in several rooms.
     /// </summary>
@@ -460,8 +494,9 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        held.IsReported = true;
         held.NextReportTime = Time.unscaledTime + StoryWaitReportInterval;
-        Send(BossRoomUpdateKind.WaitingAtStory, story.Path, story.FsmName, story.StateName, "", "");
+        SendStoryReport(BossRoomUpdateKind.WaitingAtStory, story);
     }
 
     /// <summary>
@@ -469,19 +504,35 @@ internal partial class BossRoomCoop {
     /// it in several rooms.
     /// </summary>
     private void TellStoryStarted(HeldStory held) {
-        if (held.Shared is { } story) {
-            Send(BossRoomUpdateKind.StartedStory, story.Path, story.FsmName, story.StateName, "", "");
+        if (held.Shared is not { } story) {
+            return;
         }
+
+        held.IsReported = false;
+        SendStoryReport(BossRoomUpdateKind.StartedStory, story);
     }
 
     /// <summary>
     /// Tells the other players, wherever they are, that the local player no longer waits at a held story scene that
-    /// didn't start, if the game sets it in several rooms.
+    /// didn't start, if the game sets it in several rooms and they were told that the player waits.
     /// </summary>
     private void TellLeftStory(HeldStory held) {
-        if (held.Shared is { } story) {
-            Send(BossRoomUpdateKind.LeftStory, story.Path, story.FsmName, story.StateName, "", "");
+        if (held.Shared is not { } story || !held.IsReported) {
+            return;
         }
+
+        held.IsReported = false;
+        held.NextReportTime = 0f;
+        SendStoryReport(BossRoomUpdateKind.LeftStory, story);
+    }
+
+    /// <summary>
+    /// Sends a word about a story scene that the game sets in several rooms to the other players, numbered after the
+    /// last.
+    /// </summary>
+    private void SendStoryReport(BossRoomUpdateKind kind, StoryKey story) {
+        var number = (++_storyReportCount).ToString(CultureInfo.InvariantCulture);
+        Send(kind, story.Path, story.FsmName, story.StateName, "", number);
     }
 
     /// <summary>
@@ -495,8 +546,18 @@ internal partial class BossRoomCoop {
         }
 
         var playerId = update.PlayerId;
+        var sender = _playerData.TryGetValue(playerId, out var playerData) ? playerData.Username : $"#{playerId}";
+        var number = long.TryParse(update.EventName, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed)
+            ? parsed
+            : 0L;
+        var isNewest = !_storyReportNumbers.TryGetValue(sender, out var newest) || number > newest;
+        if (isNewest) {
+            _storyReportNumbers[sender] = number;
+        }
+
         switch (update.Kind) {
-            case BossRoomUpdateKind.WaitingAtStory:
+            // That a player waits or left is only taken from their newest word
+            case BossRoomUpdateKind.WaitingAtStory when isNewest:
                 if (!_storyWaits.TryGetValue(playerId, out var wait) || wait.Story != story) {
                     Logger.Info($"Player {playerId} waits at the story scene '{story.Path}' in '{update.SceneName}'");
                 }
@@ -506,12 +567,12 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.StartedStory:
                 Logger.Info($"The story scene '{story.Path}' started for player {playerId} in '{update.SceneName}'");
                 _storyWaits.Remove(playerId);
-                if (_playerData.TryGetValue(playerId, out var playerData)) {
+                if (playerData != null) {
                     _storyStarts.Add((playerData.Username, story));
                 }
 
                 break;
-            case BossRoomUpdateKind.LeftStory:
+            case BossRoomUpdateKind.LeftStory when isNewest:
                 if (_storyWaits.TryGetValue(playerId, out var left) && left.Story == story) {
                     Logger.Info($"Player {playerId} no longer waits at the story scene '{story.Path}'");
                     _storyWaits.Remove(playerId);
@@ -543,6 +604,7 @@ internal partial class BossRoomCoop {
 
         _storyWaits.Clear();
         _storyStarts.Clear();
+        _storyReportNumbers.Clear();
     }
 
     /// <summary>
@@ -606,6 +668,11 @@ internal partial class BossRoomCoop {
         /// rooms, in unscaled seconds.
         /// </summary>
         public float NextReportTime;
+
+        /// <summary>
+        /// Whether the other games were told that the local player waits at the scene, and not since that they left.
+        /// </summary>
+        public bool IsReported;
 
         public HeldStory(string stateName, List<Collider2D> triggers, StoryKey? shared) {
             StateName = stateName;
