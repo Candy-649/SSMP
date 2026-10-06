@@ -28,6 +28,12 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// where the host's is and given the host's next way to go, since a grinder stopped by a catch in one game would go on
 /// from somewhere else. Machines that a controller sets going, the boxes and chutes of a pattern, start their rounds on
 /// the host's word as well, so they keep to the host's even where the controller here is late.
+///
+/// A grinder that catches a player stops, with the grinders that go with it, until the player is put back at the last
+/// safe place, and that only happened in the game of the player it caught. The user decided (10-06) that whoever is
+/// caught, they stop in both games: the other game stops the same grinders where they are, and they go on in both once
+/// the caught player's go on. A player who went down instead of being put back is stood up by their partner later, and
+/// the grinders wait for that as well.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -52,6 +58,54 @@ internal partial class CoopSave {
     /// The state in which a grinder picks its next way to go.
     /// </summary>
     private const string GrinderNextWayStateName = "Get Dir";
+
+    /// <summary>
+    /// The state that a grinder goes to as it catches the local player, which tells the grinders that go with it to stop.
+    /// </summary>
+    private const string GrinderCatchStateName = "Buddy?";
+
+    /// <summary>
+    /// The state in which a grinder that caught the local player waits for them to be put back at the last safe place.
+    /// </summary>
+    private const string GrinderHazardHitStateName = "Hazard Hit";
+
+    /// <summary>
+    /// The state in which a grinder that was told to stop waits to be told to go on.
+    /// </summary>
+    private const string GrinderStoppedStateName = "Buddy Stop";
+
+    /// <summary>
+    /// The event that stops a grinder where it is, which a grinder that caught the player sends the ones that go with it.
+    /// </summary>
+    private const string GrinderStopEventName = "BUDDY STOP";
+
+    /// <summary>
+    /// The event that sets a stopped grinder going again, by way of its state that sends it on.
+    /// </summary>
+    private const string GrinderGoEventName = "GO";
+
+    /// <summary>
+    /// The event that a grinder that caught the local player waits for, which the game sends everything as it puts the
+    /// player back at the last safe place.
+    /// </summary>
+    private const string GrinderPutBackEventName = "HAZARD RELOAD";
+
+    /// <summary>
+    /// How long grinders stopped for the partner wait for them to go on, in seconds: longer than a player lies waiting
+    /// to be stood up, so that only a word that was lost makes them go on by themselves.
+    /// </summary>
+    private const float PartnerGrinderStopLimit = 200f;
+
+    /// <summary>
+    /// The variables of a grinder that hold the grinders that go with it, which it stops as it catches the player.
+    /// </summary>
+    private static readonly string[] GrinderGroupVariableNames = ["Buddy", "Buddy 2", "Boss"];
+
+    /// <summary>
+    /// The states of a grinder catching the local player, which a stop for the partner leaves alone.
+    /// </summary>
+    private static readonly HashSet<string> GrinderCatchStateNames =
+        new(StringComparer.Ordinal) { GrinderCatchStateName, "Multihitting", GrinderHazardHitStateName };
 
     /// <summary>
     /// The machines that the scene host paces, each named by what its objects are called and by the states its rounds
@@ -107,6 +161,18 @@ internal partial class CoopSave {
     private Fsm? _startingMachineRound;
 
     /// <summary>
+    /// The grinders that caught the local player and haven't gone on yet, with whether the player went down while
+    /// caught, instead of being put back at the last safe place.
+    /// </summary>
+    private readonly Dictionary<Fsm, bool> _caughtGrinders = new();
+
+    /// <summary>
+    /// The grinders here that stopped because the same grinder caught the partner in their game, with when, in unscaled
+    /// time. Each goes on when the partner's does, sending the grinders that go with it on too.
+    /// </summary>
+    private readonly Dictionary<Fsm, float> _grindersStoppedForPartner = new();
+
+    /// <summary>
     /// The number of the last round that this game, as scene host, said.
     /// </summary>
     private ulong _machineRoundCount;
@@ -138,7 +204,17 @@ internal partial class CoopSave {
         /// <summary>
         /// A grinder goes back to its start, which it doesn't any more in a checked save.
         /// </summary>
-        StayPut
+        StayPut,
+
+        /// <summary>
+        /// A grinder that caught the local player goes on: it stays where it is, and the partner's goes on too.
+        /// </summary>
+        GoOnAfterCatch,
+
+        /// <summary>
+        /// A grinder catches the local player, which stops it in the partner's game as well.
+        /// </summary>
+        Catch
     }
 
     /// <summary>
@@ -160,8 +236,16 @@ internal partial class CoopSave {
             return MachineStep.None;
         }
 
+        // A grinder that caught the local player goes on once they are put back, or once a grinder that went with it
+        // and stopped it as well sends it on
         if (kind.IsGrinder && toState.Name == GrinderResetStateName) {
-            return MachineStep.StayPut;
+            return fsm.ActiveState?.Name == GrinderHazardHitStateName || _caughtGrinders.ContainsKey(fsm)
+                ? MachineStep.GoOnAfterCatch
+                : MachineStep.StayPut;
+        }
+
+        if (kind.IsGrinder && toState.Name == GrinderCatchStateName) {
+            return MachineStep.Catch;
         }
 
         if (Array.IndexOf(kind.RoundStateNames, toState.Name) < 0 ||
@@ -230,6 +314,16 @@ internal partial class CoopSave {
                 return;
             case MachineStep.StayPut:
                 StayPutOnReset(fsm, toState, orig);
+                return;
+            case MachineStep.GoOnAfterCatch:
+                StayPutOnReset(fsm, toState, orig);
+                _caughtGrinders.Remove(fsm);
+                TellPartnerAboutGrinder(CoopSaveUpdateKind.MachineGo, fsm);
+                return;
+            case MachineStep.Catch:
+                orig(fsm, toState);
+                _caughtGrinders[fsm] = false;
+                TellPartnerAboutGrinder(CoopSaveUpdateKind.MachineStop, fsm);
                 return;
             default:
                 orig(fsm, toState);
@@ -487,6 +581,7 @@ internal partial class CoopSave {
     /// themselves once this game runs the room or the host's word has been too long in coming.
     /// </summary>
     private void UpdateMachines() {
+        UpdateGrinderStops();
         if (_heldMachines.Count == 0 && _pendingMachineRounds.Count == 0) {
             return;
         }
@@ -581,13 +676,173 @@ internal partial class CoopSave {
         _pendingMachineRounds.Clear();
         _takenMachineRounds.Clear();
         _machinesSaid.Clear();
+        _caughtGrinders.Clear();
+        _grindersStoppedForPartner.Clear();
+    }
+
+    /// <summary>
+    /// Tells the partner, if they are in the room, that a grinder caught the local player and stopped, or that it goes
+    /// on again.
+    /// </summary>
+    private void TellPartnerAboutGrinder(CoopSaveUpdateKind kind, Fsm fsm) {
+        if (_checkedWith is not { } partnerId || GetCheckedPartner() is not { IsInLocalScene: true } ||
+            fsm.GameObject is not { } gameObject) {
+            return;
+        }
+
+        Send(new CoopSaveUpdate {
+            TargetId = partnerId,
+            Kind = kind,
+            Scene = gameObject.scene.name,
+            ObjectPath = ScenePath.Get(gameObject.transform),
+            FsmName = fsm.Name
+        });
+    }
+
+    /// <summary>
+    /// Takes the partner's word that a grinder caught them: the same grinder here stops where it is, with the grinders
+    /// that go with it, as the game stops them in the partner's game. One that is catching the local player is left
+    /// to it.
+    /// </summary>
+    private void OnMachineStop(ClientPlayerData player, CoopSaveUpdate update) {
+        if (FindPartnerGrinder(player, update) is not { } fsm) {
+            return;
+        }
+
+        var stopped = new List<Fsm> { fsm };
+        foreach (var name in GrinderGroupVariableNames) {
+            if (fsm.Variables.GetFsmGameObject(name)?.Value is { } other &&
+                FindMachineFsm(other, fsm.Name) is { } otherFsm && !stopped.Contains(otherFsm)) {
+                stopped.Add(otherFsm);
+            }
+        }
+
+        foreach (var grinder in stopped) {
+            if (grinder.ActiveState?.Name is { } state && GrinderCatchStateNames.Contains(state)) {
+                continue;
+            }
+
+            // A word for a round that came before the stop is old by the time it goes on
+            _pendingMachineRounds.Remove(grinder);
+            grinder.Event(GrinderStopEventName);
+        }
+
+        if (fsm.ActiveState?.Name == GrinderStoppedStateName) {
+            _grindersStoppedForPartner[fsm] = Time.unscaledTime;
+            Logger.Info($"The grinder '{update.ObjectPath}' stops here too, since it caught {player.Username}");
+        }
+    }
+
+    /// <summary>
+    /// Takes the partner's word that a grinder that caught them goes on: the same grinder here goes on, and sends the
+    /// grinders that go with it on as the game does.
+    /// </summary>
+    private void OnMachineGo(ClientPlayerData player, CoopSaveUpdate update) {
+        if (FindPartnerGrinder(player, update) is not { } fsm || !_grindersStoppedForPartner.Remove(fsm) ||
+            fsm.ActiveState?.Name != GrinderStoppedStateName) {
+            return;
+        }
+
+        Logger.Info($"The grinder '{update.ObjectPath}' goes on here too, since it let {player.Username} go");
+        fsm.Event(GrinderGoEventName);
+    }
+
+    /// <summary>
+    /// Finds the grinder here that a word of the partner names, if the word comes from the partner of the checked save
+    /// and the grinder is in the room.
+    /// </summary>
+    private Fsm? FindPartnerGrinder(ClientPlayerData player, CoopSaveUpdate update) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+            return null;
+        }
+
+        if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target ||
+            FindMachineKind(target.name, update.FsmName) is not { IsGrinder: true }) {
+            return null;
+        }
+
+        return FindMachineFsm(target, update.FsmName);
+    }
+
+    /// <summary>
+    /// The FSM of a name on an object, if it has one.
+    /// </summary>
+    private static Fsm? FindMachineFsm(GameObject gameObject, string fsmName) {
+        foreach (var playMakerFsm in gameObject.GetComponents<PlayMakerFSM>()) {
+            if (playMakerFsm != null && playMakerFsm.FsmName == fsmName && playMakerFsm.Fsm is { } fsm) {
+                return fsm;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Sends grinders on that wait for something that won't come: a grinder that caught the local player, who went down
+    /// instead of being put back at the last safe place, goes on once they are stood up again, as it would once they
+    /// were put back. Grinders stopped for the partner go on once the partner is no longer in the room, or when the
+    /// word that theirs went on was lost.
+    /// </summary>
+    private void UpdateGrinderStops() {
+        if (_caughtGrinders.Count > 0) {
+            var hero = HeroController.instance;
+            foreach (var fsm in _caughtGrinders.Keys.ToList()) {
+                // One that another grinder that went with it stopped still has to say that it goes on
+                if (fsm.GameObject == null || fsm.ActiveState?.Name is not { } state ||
+                    (!GrinderCatchStateNames.Contains(state) && state != GrinderStoppedStateName)) {
+                    _caughtGrinders.Remove(fsm);
+                    continue;
+                }
+
+                if (hero == null) {
+                    continue;
+                }
+
+                if (PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+                    _caughtGrinders[fsm] = true;
+                    continue;
+                }
+
+                if (_caughtGrinders[fsm] && state == GrinderHazardHitStateName && !hero.cState.dead) {
+                    Logger.Info(
+                        $"The grinder '{fsm.GameObject.name}' goes on, since the player it caught was stood up again"
+                    );
+                    fsm.Event(GrinderPutBackEventName);
+                }
+            }
+        }
+
+        if (_grindersStoppedForPartner.Count == 0) {
+            return;
+        }
+
+        var isPartnerHere = _checkedWith != null && GetCheckedPartner() is { IsInLocalScene: true };
+        foreach (var pair in _grindersStoppedForPartner.ToList()) {
+            var fsm = pair.Key;
+            if (fsm.GameObject == null || fsm.ActiveState?.Name != GrinderStoppedStateName) {
+                _grindersStoppedForPartner.Remove(fsm);
+                continue;
+            }
+
+            if (isPartnerHere && Time.unscaledTime - pair.Value <= PartnerGrinderStopLimit) {
+                continue;
+            }
+
+            _grindersStoppedForPartner.Remove(fsm);
+            Logger.Info(
+                isPartnerHere
+                    ? $"The grinder '{fsm.GameObject.name}' goes on by itself, since the partner's word didn't come"
+                    : $"The grinder '{fsm.GameObject.name}' goes on, since the partner left the room"
+            );
+            fsm.Event(GrinderGoEventName);
+        }
     }
 
     /// <summary>
     /// Collects the states of <see cref="MachineKinds"/> that a change of state is asked about.
     /// </summary>
     private static HashSet<string> BuildMachineStateNames() {
-        var names = new HashSet<string>(StringComparer.Ordinal) { GrinderResetStateName };
+        var names = new HashSet<string>(StringComparer.Ordinal) { GrinderResetStateName, GrinderCatchStateName };
         foreach (var kind in MachineKinds) {
             names.UnionWith(kind.RoundStateNames);
         }

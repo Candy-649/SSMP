@@ -941,6 +941,12 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.MachineRound:
                 OnMachineRound(player, update);
                 break;
+            case CoopSaveUpdateKind.MachineStop:
+                OnMachineStop(player, update);
+                break;
+            case CoopSaveUpdateKind.MachineGo:
+                OnMachineGo(player, update);
+                break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);
                 break;

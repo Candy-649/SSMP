@@ -642,5 +642,24 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    MachineRound
+    MachineRound,
+
+    /// <summary>
+    /// A grinder caught the sender, so it and the grinders that go with it stopped in the sender's game, and they stop
+    /// in the other game too. <see cref="CoopSaveUpdate.Scene"/>, <see cref="CoopSaveUpdate.ObjectPath"/> and
+    /// <see cref="CoopSaveUpdate.FsmName"/> name the grinder.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    MachineStop,
+
+    /// <summary>
+    /// A grinder that had caught the sender goes on, with the grinders that go with it, so they go on in the other
+    /// game too. Named like <see cref="MachineStop"/>.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    MachineGo
 }
