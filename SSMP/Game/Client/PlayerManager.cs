@@ -576,6 +576,7 @@ internal class PlayerManager : IPlayerManager {
             HeroRoomFigure.Reset(child.gameObject);
             HeroChildEffects.ResetCopies(child.gameObject);
             HeroChildParticles.ResetCopies(child.gameObject);
+            HeroDust.Reset(child.gameObject);
             ImbuedNail.Stop(child.gameObject);
             ThrownTool.RemoveCopies(child.gameObject);
 

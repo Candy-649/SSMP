@@ -733,7 +733,10 @@ internal class AnimationManager {
 
         // The game hiding the hero, and a figure of the hero that the room shows in its place
         { AnimationClip.HeroHidden, HeroHidden.Instance },
-        { AnimationClip.HeroRoomFigure, HeroRoomFigure.Instance }
+        { AnimationClip.HeroRoomFigure, HeroRoomFigure.Instance },
+
+        // The dust that the game raises anew under the hero
+        { AnimationClip.HeroDust, HeroDust.Instance }
     };
 
     #endregion
@@ -1200,6 +1203,7 @@ internal class AnimationManager {
         HeroChildParticles.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroChildParticle, effectInfo));
         HeroHidden.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHidden, effectInfo));
         HeroRoomFigure.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroRoomFigure, effectInfo));
+        HeroDust.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroDust, effectInfo));
         BeamShot.Watch(hc, OnToolMessage);
         if (hc.silkSpecialFSM != null) {
             TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));

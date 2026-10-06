@@ -813,5 +813,8 @@ internal enum AnimationClip {
     HeroHidden,
 
     // What a figure of the hero that the room shows in its place plays, like a bed that lays the hero down
-    HeroRoomFigure
+    HeroRoomFigure,
+
+    // The dust that the game raises anew under the hero as they land, jump, run or dash back
+    HeroDust
 }
