@@ -94,6 +94,11 @@ internal class HealthManagerComponent : EntityComponent {
     private uint _lastReceivedHealthEpoch;
 
     /// <summary>
+    /// Whether another game ran the creature at some point, so that this game only runs it by taking it over.
+    /// </summary>
+    private bool _wasRunElsewhere;
+
+    /// <summary>
     /// Whether a controlled client-side HP increase should be rolled back to the last authoritative value.
     /// </summary>
     private bool _hasPendingControlledHealCorrection;
@@ -351,15 +356,7 @@ internal class HealthManagerComponent : EntityComponent {
                 otherHealthManager.hp = newHp;
             }
 
-            // Obtain a pooled network data instance to avoid new allocations
-            var hpData = ObjectPool<EntityNetworkData>.Get();
-            hpData.Type = EntityComponentType.Health;
-
-            hpData.Packet.Write(previousHp);
-            hpData.Packet.Write(newHp);
-            hpData.Packet.Write(_currentHealthEpoch);
-
-            SendData(hpData);
+            SendHealth(previousHp, newHp);
         }
 
         var newInvincible = _healthManager.Host.IsInvincible;
@@ -384,15 +381,45 @@ internal class HealthManagerComponent : EntityComponent {
     /// <inheritdoc />
     public override void InitializeHost(uint sceneHostEpoch) {
         ResetHealthOrderingForEpoch(sceneHostEpoch);
+
+        // The health the copies were made with, which the copies in the other games were made with too
+        var copiedHp = _lastHp;
         var currentHp = GetCurrentHp();
         ApplyHp(currentHp, triggerHostDeath: false);
+
+        // A room can set the health of its creatures as it starts, before it is settled which game runs them: a fight
+        // gives its creatures the health of its first part. Nothing watched the room's own creature until now, so the
+        // other games, whose copies keep the health they were made with, are told. Not for a creature taken over from
+        // another game, whose own creature here was never the one the others followed.
+        if (!_wasRunElsewhere && currentHp != copiedHp) {
+            Logger.Info(
+                $"The room set the health of '{GameObject.Host?.name}' to {currentHp} before it ran, from {copiedHp}"
+            );
+            SendHealth(copiedHp, currentHp);
+        }
     }
 
     /// <inheritdoc />
     public override void InitializeClient(uint sceneHostEpoch) {
+        _wasRunElsewhere = true;
         ResetHealthOrderingForEpoch(sceneHostEpoch);
         var currentHp = GetCurrentHp();
         ApplyHp(currentHp, triggerHostDeath: false);
+    }
+
+    /// <summary>
+    /// Tells the other games that the health of the creature went from one value to another.
+    /// </summary>
+    private void SendHealth(int previousHp, int newHp) {
+        // Obtain a pooled network data instance to avoid new allocations
+        var hpData = ObjectPool<EntityNetworkData>.Get();
+        hpData.Type = EntityComponentType.Health;
+
+        hpData.Packet.Write(previousHp);
+        hpData.Packet.Write(newHp);
+        hpData.Packet.Write(_currentHealthEpoch);
+
+        SendData(hpData);
     }
 
     /// <summary>
