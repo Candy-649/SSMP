@@ -338,6 +338,8 @@
   "pilgrimGroupBonegrave",
   "pilgrimGroupShellgrave",
   "pilgrimGroupGreymoorField",
+  "bonetownPilgrimRoundCount",
+  "bonetownPilgrimHornedCount",
   "bonetownCrowd",
   "BonebottomBellwayPilgrimState",
   "enemyGroupAnt04",
