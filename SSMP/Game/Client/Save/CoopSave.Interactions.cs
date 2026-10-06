@@ -448,6 +448,20 @@ internal partial class CoopSave {
             return;
         }
 
+        // Machines of the room that the scene host paces before anything else: one held here goes nowhere at all
+        var machineStep = MachineStep.None;
+        MachineKind? machineKind = null;
+        try {
+            machineStep = DecideMachineSwitch(self, toState, out machineKind);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
+        if (machineStep != MachineStep.None && machineKind != null) {
+            TakeMachineStep(machineStep, machineKind, self, toState, orig);
+            return;
+        }
+
         // The cage that only goes off for both players first, since it can send its bait into another state, which is
         // then the state that everything below sees
         try {

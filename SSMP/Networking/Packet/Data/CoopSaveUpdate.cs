@@ -627,5 +627,20 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    RescueStoodUp
+    RescueStoodUp,
+
+    /// <summary>
+    /// A machine of the room that runs by itself, like a box that drops or a grinder, started a round in the game of
+    /// the sender, who is the scene host, so the other game starts the same round. <see cref="CoopSaveUpdate.Scene"/>,
+    /// <see cref="CoopSaveUpdate.ObjectPath"/>, <see cref="CoopSaveUpdate.FsmName"/> and
+    /// <see cref="CoopSaveUpdate.StateName"/> name it and the state the round starts with,
+    /// <see cref="CoopSaveUpdate.Amounts"/> holds the dice of the round and <see cref="CoopSaveUpdate.Sequence"/> grows
+    /// with every round the sender says. A grinder adds where it is in <see cref="CoopSaveUpdate.Values"/>, which of
+    /// its ways comes next in <see cref="CoopSaveUpdate.Part"/>, and 1 in <see cref="CoopSaveUpdate.PartCount"/> if
+    /// its ways start over.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    MachineRound
 }

@@ -487,6 +487,13 @@ internal partial class CoopSave {
         // Also once the partner is gone, so that a bench they kept up flips back
         UpdateTollBenches();
 
+        // Also once the partner is gone, so that machines waiting for their word go by themselves
+        try {
+            UpdateMachines();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         if (partner != null && _checkedWith == partner.Id) {
             UpdateCheckedPlayTime(marker);
             UpdateInteractions(partner);
@@ -654,7 +661,9 @@ internal partial class CoopSave {
             return;
         }
 
-        // First, so that none of the others throwing on the way can keep it from running
+        // First, so that none of the others throwing on the way can keep them from running. Forgetting the machines
+        // only empties lists, which can't throw.
+        ResetMachines();
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
         ResetInteractions();
@@ -928,6 +937,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.RescueStoodUp:
                 OnRescueStoodUp(player);
+                break;
+            case CoopSaveUpdateKind.MachineRound:
+                OnMachineRound(player, update);
                 break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);
