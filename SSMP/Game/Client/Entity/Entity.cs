@@ -2738,11 +2738,12 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Notes that a pull of the local player's own, like the storm of a silk skill, moved the copy on this step of
-    /// physics, which shows here at once. Until shortly after the last such step the copy is left where the pull puts
-    /// it rather than following the scene host's positions, which only show the pull a round trip later; then it goes
-    /// on from where it stands to the scene host's positions. The scene host's game moves the entity itself with the
-    /// copy of the same skill, so the two mostly differ by what the entity did by itself meanwhile.
+    /// Notes that a pull of the local player's own, like the storm of a silk skill or a snare they set, moved the copy
+    /// on this step of physics, which shows here at once. Until shortly after the last such step the copy is left where
+    /// the pull puts it rather than following the scene host's positions, which only show the pull a round trip later;
+    /// then it goes on from where it stands to the scene host's positions. The scene host's game moves the entity
+    /// itself with its copy of the same skill or thing, so the two mostly differ by what the entity did by itself
+    /// meanwhile.
     /// </summary>
     public void NotePulledHere() {
         _pulledHereUntil = Time.time + PulledHereHoldTime;

@@ -1112,13 +1112,14 @@ internal class CoopHits {
     /// <summary>
     /// Hook for the step of physics of <see cref="RecoilEnemiesToRadius"/>, which moves the enemies in its reach to a
     /// ring around it, pushing out those inside and drawing in those just outside, like the storm of a silk skill does
-    /// around the player. With a partner, a pull that is part of the local player's character (that storm, a crest's
-    /// bind) is local first, like knockback: it moves the copies of enemies on show here at once, and a copy it moved
-    /// leaves the scene host's positions alone until shortly after (<see cref="Entity.Entity.NotePulledHere"/>). A
-    /// copy that it can't move, because the enemy doesn't take knockback or something is in the way, goes on
-    /// following the scene host. The scene host's game moves the enemies themselves with the copy of the same skill
-    /// on the scene client's figure. Every other pull - the copy of the partner's skill, the machines of a room -
-    /// leaves the copies to the scene host's positions, which have it in already and in step with what pulls.
+    /// around the player. With a partner, a pull of the local player's own (<see cref="IsLocalPull"/>) is local first,
+    /// like knockback: it moves the copies of enemies on show here at once, and a copy it moved leaves the scene host's
+    /// positions alone until shortly after (<see cref="Entity.Entity.NotePulledHere"/>). A copy that it can't move,
+    /// because the enemy doesn't take knockback or something is in the way, goes on following the scene host. The
+    /// scene host's game moves the enemies themselves with its copy of the same skill or thing. Every other pull - the
+    /// copy of the partner's skill, the machines of a room - leaves the copies to the scene host's positions, which
+    /// have it in already and in step with what pulls; copies of the partner's tools pull only in the scene host's
+    /// game (<see cref="ToolCopies.PrepareCopy"/>).
     ///
     /// An enemy that is gone while it is held, destroyed without ever leaving the reach, is let go of first. The game's
     /// own step stops at the first one that is gone, so every enemy after it went unmoved for as long as the pull
@@ -1128,8 +1129,7 @@ internal class CoopHits {
         _pulledCopies.Clear();
         try {
             var enemies = self.enemies;
-            var hero = HeroController.SilentInstance;
-            var ownPull = _getPartnerId() != null && hero != null && self.transform.IsChildOf(hero.transform);
+            var ownPull = enemies.Count > 0 && _getPartnerId() != null && IsLocalPull(self);
             for (var i = enemies.Count - 1; i >= 0; i--) {
                 var enemy = enemies[i];
                 if (enemy.Obj == null || enemy.Transform == null || enemy.Collider == null || enemy.Recoil == null) {
@@ -1157,6 +1157,16 @@ internal class CoopHits {
         }
 
         _pulledCopies.Clear();
+    }
+
+    /// <summary>
+    /// Whether a pull on enemies is the local player's own: a part of their character, like the storm of a silk skill
+    /// or a crest's bind, or of a thing of their tools, like a shard they threw or a snare they set.
+    /// </summary>
+    private static bool IsLocalPull(RecoilEnemiesToRadius pull) {
+        var hero = HeroController.SilentInstance;
+        return hero != null && pull.transform.IsChildOf(hero.transform) ||
+               LocalToolComponent.IsLocalTool(pull.gameObject);
     }
 
     /// <summary>
