@@ -7,6 +7,7 @@ using SSMP.Networking.Packet.Data;
 using SSMP.Ui;
 using SSMP.Util;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client;
@@ -29,12 +30,23 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// door, or that a room leaves out as it loads, has no start that could wait, and plays for each player on their own
 /// arrival (CoopSave.Arrivals). So does a scene whose trigger the player only reaches while the scene that began at the
 /// door still steers them.
+///
+/// A scene that the game sets in several rooms, and plays in whichever its player reaches first, counts as reached by a
+/// player who waits at it in any of them. Each game tells the others, wherever they are, when its player waits at such a
+/// scene, when it starts for them and when they leave it without it starting. Two players who reach it in different
+/// rooms then watch it at the same time, each in their own room, where before each waited for the other to come to
+/// theirs.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
     /// The event with which the held story scenes start, sent by the trigger that the player walks into.
     /// </summary>
     private const string StoryStartEventName = "ENTER";
+
+    /// <summary>
+    /// The scene of the main menu, through which the local player closes their save.
+    /// </summary>
+    private const string MenuSceneName = "Menu_Title";
 
     /// <summary>
     /// How far, in units, the local player may have moved from where they set off a held story scene for it to start
@@ -49,11 +61,24 @@ internal partial class BossRoomCoop {
     private const float StoryNoticeDelay = 1.5f;
 
     /// <summary>
+    /// How often, in seconds, a player who waits at a story scene that the game sets in several rooms says so again.
+    /// </summary>
+    private const float StoryWaitReportInterval = 1f;
+
+    /// <summary>
+    /// How long, in seconds, a player counts as waiting at a story scene that the game sets in several rooms after they
+    /// last said so: a player whose game stopped saying it without the word that they left reaching the others counts
+    /// no longer than this.
+    /// </summary>
+    private const float StoryWaitReportLifetime = 3f;
+
+    /// <summary>
     /// The story scenes that start as the player walks into them and that the other game then skips, found in the
     /// game's data: each room shows its scene only while the scene's flag, quest or wish isn't set as the room loads.
     /// Left out: a way out of a room whose scene plays as the player comes into the next one, where holding the way
     /// out would only shut it while the scene in the next room is still decided as that room loads; and the talk
-    /// before a fight in a boss arena, which already waits for every player there (ArenaCoop.BossStarts).
+    /// before a fight in a boss arena, which already waits for every player there (ArenaCoop.BossStarts). A scene that
+    /// the game sets in several rooms has an entry in each, with the same path, FSM and state.
     /// </summary>
     private static readonly StoryScene[] StoryScenes = [
         new("song_05", "Black Thread States/Normal World/Lace Scene/Lace NPC Citadel Meet", "Control", "Dormant"),
@@ -75,6 +100,16 @@ internal partial class BossRoomCoop {
     /// </summary>
     private static readonly HashSet<(string FsmName, string StateName)> StoryStartStates =
         StoryScenes.Select(scene => (scene.FsmName, scene.StateName)).ToHashSet();
+
+    /// <summary>
+    /// The story scenes that the game sets in several rooms, and plays in whichever its player reaches first: those of
+    /// <see cref="StoryScenes"/> with an entry in more than one scene.
+    /// </summary>
+    private static readonly HashSet<StoryKey> SharedStories = StoryScenes
+        .GroupBy(scene => scene.Key)
+        .Where(group => group.Count() > 1)
+        .Select(group => group.Key)
+        .ToHashSet();
 
     /// <summary>
     /// The names of the fields of the actions that notice the player in which they keep their trigger.
@@ -113,27 +148,43 @@ internal partial class BossRoomCoop {
     private Fsm? _startingStory;
 
     /// <summary>
+    /// The other players who said that they wait at a story scene that the game sets in several rooms, with the scene
+    /// and when they last said so, in unscaled seconds.
+    /// </summary>
+    private readonly Dictionary<ushort, (StoryKey Story, float HeardAt)> _storyWaits = new();
+
+    /// <summary>
+    /// The names of the other players for whom a story scene that the game sets in several rooms started, with the
+    /// scene. They count as having reached it until the local player closes their save, since they can't set it off
+    /// again: also after either player lost the connection and came back, the other under another ID.
+    /// </summary>
+    private readonly HashSet<(string Username, StoryKey Story)> _storyStarts = [];
+
+    /// <summary>
     /// Holds back the start of a story scene until every player has reached it.
     /// </summary>
     /// <returns>Whether the event is held back.</returns>
     private bool TryHoldStoryStart(Fsm fsm, FsmState state, string eventName) {
-        if (eventName != StoryStartEventName || fsm == _startingStory || !IsStoryStart(fsm, state)) {
+        if (eventName != StoryStartEventName || fsm == _startingStory || FindStoryScene(fsm, state) is not { } scene) {
             return false;
         }
 
         if (!_heldStories.TryGetValue(fsm, out var held)) {
-            held = new HeldStory(state.Name, GetStoryTriggers(fsm, state.Name)) {
+            var shared = SharedStories.Contains(scene.Key) ? scene.Key : null;
+            held = new HeldStory(state.Name, GetStoryTriggers(fsm, state.Name), shared) {
                 NextNoticeTime = Time.unscaledTime + StoryNoticeDelay
             };
         }
 
         if (HaveAllReachedStory(held)) {
             _heldStories.Remove(fsm);
+            TellStoryStarted(held);
             return false;
         }
 
         if (_heldStories.TryAdd(fsm, held)) {
             Logger.Info($"Holding back the story scene '{GetPath(fsm)}' until the other players reach it");
+            TellWaitingAtStory(held);
         }
 
         var heroController = HeroController.instance;
@@ -145,11 +196,12 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether an FSM waits in a state for the player to walk into one of <see cref="StoryScenes"/>.
+    /// Finds the one of <see cref="StoryScenes"/> for which an FSM waits in a state for the player to walk into it.
     /// </summary>
-    private static bool IsStoryStart(Fsm fsm, FsmState state) {
+    /// <returns>The story scene, or null if the FSM doesn't wait for one in that state.</returns>
+    private static StoryScene? FindStoryScene(Fsm fsm, FsmState state) {
         if (!StoryStartStates.Contains((fsm.Name, state.Name)) || fsm.GameObject == null) {
-            return false;
+            return null;
         }
 
         var sceneName = fsm.GameObject.scene.name;
@@ -162,17 +214,19 @@ internal partial class BossRoomCoop {
 
             path ??= ScenePath.Get(fsm.GameObject.transform);
             if (path == scene.Path) {
-                return true;
+                return scene;
             }
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
     /// Whether every other player has reached a story scene: is in the local scene and has been in one of the scene's
-    /// triggers since it was held, or is now. Without triggers to look at, being in the scene is enough. The partner of
-    /// a two-player save counts as not there while they aren't on the server. True when nobody else plays.
+    /// triggers since it was held, or is now. Without triggers to look at, being in the scene is enough. For a scene
+    /// that the game sets in several rooms, a player who waits at it in any of them, or for whom it started, has reached
+    /// it too. The partner of a two-player save counts as not there while they aren't on the server. True when nobody
+    /// else plays.
     /// </summary>
     private bool HaveAllReachedStory(HeldStory held) {
         if (!IsHoldActive()) {
@@ -184,6 +238,10 @@ internal partial class BossRoomCoop {
         }
 
         foreach (var playerData in _playerData.Values) {
+            if (held.Shared is { } story && HasReachedSharedStory(playerData, story)) {
+                continue;
+            }
+
             if (!playerData.IsInLocalScene) {
                 return false;
             }
@@ -217,7 +275,13 @@ internal partial class BossRoomCoop {
             var held = pair.Value;
             if (fsm.GameObject == null || fsm.ActiveState?.Name != held.StateName) {
                 _heldStories.Remove(fsm);
+                TellLeftStory(held);
                 continue;
+            }
+
+            // Also while it waits only for the local player to be free to start it
+            if (Time.unscaledTime >= held.NextReportTime) {
+                TellWaitingAtStory(held);
             }
 
             if (!HaveAllReachedStory(held)) {
@@ -241,6 +305,7 @@ internal partial class BossRoomCoop {
     private void TryStartHeldStory(Fsm fsm, HeldStory held) {
         if (!IsLocalHeroInStoryTrigger(held)) {
             _heldStories.Remove(fsm);
+            TellLeftStory(held);
             Logger.Info(
                 $"The story scene '{GetPath(fsm)}' starts when the local player walks into it again, since every " +
                 "player reached it"
@@ -256,6 +321,7 @@ internal partial class BossRoomCoop {
 
         _heldStories.Remove(fsm);
         Logger.Info($"Starting the story scene '{GetPath(fsm)}', since every player reached it");
+        TellStoryStarted(held);
         _startingStory = fsm;
         try {
             fsm.Event(StoryStartEventName);
@@ -374,10 +440,109 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Forgets the story scenes of the previous scene.
+    /// Whether another player waits at a story scene that the game sets in several rooms, or it started for them.
+    /// </summary>
+    private bool HasReachedSharedStory(ClientPlayerData playerData, StoryKey story) {
+        if (_storyStarts.Contains((playerData.Username, story))) {
+            return true;
+        }
+
+        return _storyWaits.TryGetValue(playerData.Id, out var wait) && wait.Story == story &&
+               Time.unscaledTime - wait.HeardAt <= StoryWaitReportLifetime;
+    }
+
+    /// <summary>
+    /// Tells the other players, wherever they are, that the local player waits at a held story scene, if the game sets
+    /// it in several rooms.
+    /// </summary>
+    private void TellWaitingAtStory(HeldStory held) {
+        if (held.Shared is not { } story) {
+            return;
+        }
+
+        held.NextReportTime = Time.unscaledTime + StoryWaitReportInterval;
+        Send(BossRoomUpdateKind.WaitingAtStory, story.Path, story.FsmName, story.StateName, "", "");
+    }
+
+    /// <summary>
+    /// Tells the other players, wherever they are, that a story scene started for the local player, if the game sets
+    /// it in several rooms.
+    /// </summary>
+    private void TellStoryStarted(HeldStory held) {
+        if (held.Shared is { } story) {
+            Send(BossRoomUpdateKind.StartedStory, story.Path, story.FsmName, story.StateName, "", "");
+        }
+    }
+
+    /// <summary>
+    /// Tells the other players, wherever they are, that the local player no longer waits at a held story scene that
+    /// didn't start, if the game sets it in several rooms.
+    /// </summary>
+    private void TellLeftStory(HeldStory held) {
+        if (held.Shared is { } story) {
+            Send(BossRoomUpdateKind.LeftStory, story.Path, story.FsmName, story.StateName, "", "");
+        }
+    }
+
+    /// <summary>
+    /// Takes the word of another player, wherever the local player is, that they wait at a story scene that the game
+    /// sets in several rooms, that it started for them, or that they left it without it starting.
+    /// </summary>
+    private void OnStoryReport(BossRoomUpdate update) {
+        var story = new StoryKey(update.Path, update.FsmName, update.FromState);
+        if (!SharedStories.Contains(story)) {
+            return;
+        }
+
+        var playerId = update.PlayerId;
+        switch (update.Kind) {
+            case BossRoomUpdateKind.WaitingAtStory:
+                if (!_storyWaits.TryGetValue(playerId, out var wait) || wait.Story != story) {
+                    Logger.Info($"Player {playerId} waits at the story scene '{story.Path}' in '{update.SceneName}'");
+                }
+
+                _storyWaits[playerId] = (story, Time.unscaledTime);
+                break;
+            case BossRoomUpdateKind.StartedStory:
+                Logger.Info($"The story scene '{story.Path}' started for player {playerId} in '{update.SceneName}'");
+                _storyWaits.Remove(playerId);
+                if (_playerData.TryGetValue(playerId, out var playerData)) {
+                    _storyStarts.Add((playerData.Username, story));
+                }
+
+                break;
+            case BossRoomUpdateKind.LeftStory:
+                if (_storyWaits.TryGetValue(playerId, out var left) && left.Story == story) {
+                    Logger.Info($"Player {playerId} no longer waits at the story scene '{story.Path}'");
+                    _storyWaits.Remove(playerId);
+                }
+
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Forgets the story scenes of the previous scene. Those that waited for the other players no longer do.
     /// </summary>
     private void ClearStories() {
+        foreach (var held in _heldStories.Values) {
+            TellLeftStory(held);
+        }
+
         _heldStories.Clear();
+    }
+
+    /// <summary>
+    /// Forgets what the other players said about the story scenes that the game sets in several rooms once the local
+    /// player closes their save, whether connected or not.
+    /// </summary>
+    private void ClearStoryReportsOnMenu(Scene oldScene, Scene newScene) {
+        if (newScene.name != MenuSceneName) {
+            return;
+        }
+
+        _storyWaits.Clear();
+        _storyStarts.Clear();
     }
 
     /// <summary>
@@ -387,7 +552,20 @@ internal partial class BossRoomCoop {
     /// <param name="Path">The path in the scene of the object of its FSM.</param>
     /// <param name="FsmName">The name of its FSM.</param>
     /// <param name="StateName">The state in which its FSM waits for the player.</param>
-    private record StoryScene(string SceneName, string Path, string FsmName, string StateName);
+    private record StoryScene(string SceneName, string Path, string FsmName, string StateName) {
+        /// <summary>
+        /// What tells the scene apart in every room that the game sets it in.
+        /// </summary>
+        public StoryKey Key => new(Path, FsmName, StateName);
+    }
+
+    /// <summary>
+    /// What tells a story scene apart in every room that the game sets it in.
+    /// </summary>
+    /// <param name="Path">The path in the scene of the object of its FSM.</param>
+    /// <param name="FsmName">The name of its FSM.</param>
+    /// <param name="StateName">The state in which its FSM waits for the player.</param>
+    private record StoryKey(string Path, string FsmName, string StateName);
 
     /// <summary>
     /// The start of a story scene that waits.
@@ -409,6 +587,11 @@ internal partial class BossRoomCoop {
         public readonly HashSet<ushort> Arrived = [];
 
         /// <summary>
+        /// The scene, if the game sets it in several rooms, so that a player who waits at it in another counts too.
+        /// </summary>
+        public readonly StoryKey? Shared;
+
+        /// <summary>
         /// Where the local player was when they last set the scene off.
         /// </summary>
         public Vector2 Position;
@@ -418,9 +601,16 @@ internal partial class BossRoomCoop {
         /// </summary>
         public float NextNoticeTime;
 
-        public HeldStory(string stateName, List<Collider2D> triggers) {
+        /// <summary>
+        /// When the other games hear next that the local player waits at the scene, if the game sets it in several
+        /// rooms, in unscaled seconds.
+        /// </summary>
+        public float NextReportTime;
+
+        public HeldStory(string stateName, List<Collider2D> triggers, StoryKey? shared) {
             StateName = stateName;
             Triggers = triggers;
+            Shared = shared;
         }
     }
 }

@@ -1439,7 +1439,8 @@ internal abstract class ServerManager : IServerManager {
 
     /// <summary>
     /// Callback method for when a player sends something that happened in a room whose gates are closed by an FSM. It
-    /// goes to the other players in the scene of the room, or to all other players when the player waits for them.
+    /// goes to the other players in the scene of the room, or to all other players when the player waits for them or
+    /// for a story scene that the game sets in several rooms.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
     /// <param name="update">The BossRoomUpdate packet data.</param>
@@ -1451,7 +1452,8 @@ internal abstract class ServerManager : IServerManager {
 
         update.PlayerId = id;
 
-        if (update.Kind == BossRoomUpdateKind.Waiting) {
+        if (update.Kind is BossRoomUpdateKind.Waiting or BossRoomUpdateKind.WaitingAtStory or
+            BossRoomUpdateKind.StartedStory or BossRoomUpdateKind.LeftStory) {
             foreach (var otherId in _playerData.Keys) {
                 if (otherId != id) {
                     _netServer.GetUpdateManagerForClient(otherId)?.AddBossRoomUpdateData(update);

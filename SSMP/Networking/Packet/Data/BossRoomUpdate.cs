@@ -200,5 +200,23 @@ internal enum BossRoomUpdateKind : byte {
     /// What the boss of a room told the room in this visit, for a player who came into the scene after it said so. The
     /// room of that player catches up with the fight when they walk in.
     /// </summary>
-    BossEvents
+    BossEvents,
+
+    /// <summary>
+    /// A player waits at a story scene that the game sets in several rooms, said again every second while they do. The
+    /// other players hear about it in any scene, since they may wait at it in another of its rooms.
+    /// </summary>
+    WaitingAtStory,
+
+    /// <summary>
+    /// A story scene that the game sets in several rooms started for a player. The other players hear about it in any
+    /// scene.
+    /// </summary>
+    StartedStory,
+
+    /// <summary>
+    /// A player stopped waiting at a story scene that the game sets in several rooms without it starting, for example
+    /// because they left its room. The other players hear about it in any scene.
+    /// </summary>
+    LeftStory
 }

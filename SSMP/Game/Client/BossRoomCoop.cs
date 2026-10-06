@@ -271,6 +271,9 @@ internal partial class BossRoomCoop {
         _isPartnerMissing = isPartnerMissing;
         _isSharedTalk = isSharedTalk;
         _holdsSharedTalkEnd = holdsSharedTalkEnd;
+
+        // For as long as the game runs, since what other players said holds across connections
+        SceneManager.activeSceneChanged += ClearStoryReportsOnMenu;
     }
 
     /// <summary>
@@ -386,6 +389,13 @@ internal partial class BossRoomCoop {
         // Players hear that a teammate waits for them wherever they are
         if (update.Kind == BossRoomUpdateKind.Waiting) {
             OnTeammateWaiting();
+            return;
+        }
+
+        // Players hear wherever they are where a teammate waits at a story scene that the game sets in several rooms
+        if (update.Kind is BossRoomUpdateKind.WaitingAtStory or BossRoomUpdateKind.StartedStory or
+            BossRoomUpdateKind.LeftStory) {
+            OnStoryReport(update);
             return;
         }
 
