@@ -114,6 +114,22 @@ internal partial class CoopSave {
     private const string CrashHoleGate = "top1";
 
     /// <summary>
+    /// The scene that plays as a player first comes into the town of the bell, in any case. Each game plays it for its
+    /// own player, since its flag is set only by the scene itself, and it ends by beginning a quest.
+    /// </summary>
+    private const string TownArrivalSceneName = "Belltown_cutscene";
+
+    /// <summary>
+    /// The path of the object whose FSM plays that scene.
+    /// </summary>
+    private const string TownArrivalPath = "Cinematic Player";
+
+    /// <summary>
+    /// The FSM that plays that scene.
+    /// </summary>
+    private const string TownArrivalFsmName = "Cutscene Control";
+
+    /// <summary>
     /// The FSM that plays an arrival of the local player which the partner had first, leaving out what the partner's
     /// arrival already did for both players.
     /// </summary>
@@ -180,12 +196,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the FSM that runs now plays an arrival of the local player which the partner had first. Such an arrival
-    /// lets no time pass, which the partner's already did and which would move the characters of the world on again,
-    /// and doesn't begin a quest that the partner finished since, which would open it again in both games.
+    /// Whether the FSM that runs now plays an arrival of the local player which the partner may have had first: the
+    /// start above, or the scene of the first arrival in the town of the bell (<see cref="TownArrivalSceneName"/>).
+    /// Such an arrival lets no time pass, which the partner's already did and which would move the characters of the
+    /// world on again, and doesn't begin a quest that the partner finished since, which would open it again in both
+    /// games.
     /// </summary>
     private bool IsArrivalReplay() {
-        return _arrivalReplay != null && FsmExecutionStack.ExecutingFsm == _arrivalReplay;
+        return FsmExecutionStack.ExecutingFsm is { } fsm &&
+               (fsm == _arrivalReplay ||
+                fsm.Name == TownArrivalFsmName && IsFsmAt(fsm, TownArrivalSceneName, TownArrivalPath));
     }
 
     /// <summary>
