@@ -232,6 +232,13 @@ internal partial class CoopSave {
         public Vector2? StandAt { get; set; }
 
         /// <summary>
+        /// Whether a grinder held the player as they went down. They stand up at the last safe place, as the game puts
+        /// back a player that a grinder caught: where they fell is on the grinder's way, and it would catch them again
+        /// as soon as they stood up.
+        /// </summary>
+        public bool ByGrinder { get; set; }
+
+        /// <summary>
         /// The game's death shown over the player as they went down, while it is still playing.
         /// </summary>
         public GameObject? Effect { get; set; }
@@ -1801,6 +1808,12 @@ internal partial class CoopSave {
             if (rescue.StandAt is { } standAt) {
                 Logger.Info($"Standing back up beside the partner at {standAt}");
                 hero.transform.position = new Vector3(standAt.x, standAt.y, hero.transform.position.z);
+            } else if (rescue.ByGrinder) {
+                var safe = playerData.hazardRespawnLocation;
+                Logger.Info(
+                    $"Standing back up at {safe} instead of {hero.transform.position}, where a grinder caught them"
+                );
+                hero.transform.position = safe;
             } else if (IsInOrOverTheRoomsHarm(hero.transform.position)) {
                 var safe = playerData.hazardRespawnLocation;
                 Logger.Info(

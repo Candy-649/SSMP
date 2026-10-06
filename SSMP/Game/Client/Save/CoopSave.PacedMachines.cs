@@ -873,8 +873,17 @@ internal partial class CoopSave {
                     continue;
                 }
 
-                if (state == GrinderHazardHitStateName && hero != null &&
-                    PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+                if (hero == null || !PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+                    continue;
+                }
+
+                // Stood up again where it caught them, they would be caught again as soon as they were on their feet
+                if (_rescue is { ByGrinder: false } rescue) {
+                    rescue.ByGrinder = true;
+                    Logger.Info($"The grinder '{fsm.GameObject.name}' held the player as they went down");
+                }
+
+                if (state == GrinderHazardHitStateName) {
                     Logger.Info($"The grinder '{fsm.GameObject.name}' goes on, since the player it caught went down");
                     fsm.Event(GrinderPutBackEventName);
                 }
