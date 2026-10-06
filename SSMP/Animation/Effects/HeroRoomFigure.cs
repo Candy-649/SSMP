@@ -23,8 +23,9 @@ namespace SSMP.Animation.Effects;
 /// other players (see <see cref="HeroHidden"/>), and a copy of the room's own figure plays there what it plays for the
 /// player, in the same place: two players lying on one bed lie one over the other, where the bed lays down anyone,
 /// rather than on the sides of it that they sit on (see <see cref="Game.Client.BenchCoop"/>), which on a bed seen from
-/// its side would put one on top of the other. A figure that moves in the player's game stays where it started in the
-/// copy.
+/// its side would put one on top of the other. A room switches its figure on either by its sprite or by switching the
+/// whole figure on, like the shrines that give a crest, whose figure then leaps up to the shrine; the copy goes where
+/// the figure goes in the player's game.
 /// </summary>
 internal class HeroRoomFigure : AnimationEffect {
     /// <summary>
@@ -38,6 +39,17 @@ internal class HeroRoomFigure : AnimationEffect {
     /// <see cref="ShownFor"/>); and a player who comes into the room meanwhile sees the figure from then on.
     /// </summary>
     internal const float SayAgainAfter = 0.5f;
+
+    /// <summary>
+    /// How often a player whose figure moves says where it is while it does, in seconds, often enough for the copy to
+    /// follow it smoothly.
+    /// </summary>
+    internal const float SayMovesEvery = 0.1f;
+
+    /// <summary>
+    /// How far a figure has to move from where its player last said it was before they say it again, in units.
+    /// </summary>
+    internal const float MovedFar = 0.02f;
 
     /// <summary>
     /// How long the copy of a figure stays after its player last said that the room shows them, in seconds: a word that
@@ -77,6 +89,12 @@ internal class HeroRoomFigure : AnimationEffect {
     private const byte NotShown = 0;
 
     /// <summary>
+    /// What the name of an object that a room switches on whole has to have in it to be taken for a figure of the hero:
+    /// a room that hides the hero also switches on others while it does, like the figure of someone the hero meets.
+    /// </summary>
+    private static readonly string[] HeroFigureNames = ["Hornet", "Hero"];
+
+    /// <summary>
     /// What watches the local hero, which the hooks tell about a figure of it and what the figure plays.
     /// </summary>
     private static HeroRoomFigureWatcher? _watcher;
@@ -86,6 +104,12 @@ internal class HeroRoomFigure : AnimationEffect {
     /// figure, which stays for as long as the game runs.
     /// </summary>
     private static Hook? _showHook;
+
+    /// <summary>
+    /// The hook of the action that switches an object on or off, by which a room shows a figure of its own that it
+    /// switches on whole, which stays for as long as the game runs.
+    /// </summary>
+    private static Hook? _activateHook;
 
     /// <summary>
     /// The hook of the method that every way of playing a clip ends in, which stays for as long as the game runs.
@@ -141,6 +165,18 @@ internal class HeroRoomFigure : AnimationEffect {
                 _showHook = new Hook(
                     enter,
                     new Action<Action<SetMeshRenderer>, SetMeshRenderer>(OnSetMeshRendererEnter)
+                );
+            }
+        }
+
+        if (_activateHook == null) {
+            var enter = typeof(ActivateGameObject).GetMethod("OnEnter", BindingFlags.Instance | BindingFlags.Public);
+            if (enter == null) {
+                Logger.Error("Could not find ActivateGameObject#OnEnter; figures that rooms switch on will not show");
+            } else {
+                _activateHook = new Hook(
+                    enter,
+                    new Action<Action<ActivateGameObject>, ActivateGameObject>(OnActivateGameObjectEnter)
                 );
             }
         }
@@ -220,6 +256,46 @@ internal class HeroRoomFigure : AnimationEffect {
             !IsPartOfACreature(target)) {
             watcher.Show(target);
         }
+    }
+
+    /// <summary>
+    /// Switches an object on or off. When an FSM of the room switches on a figure of the hero whole, in a state that
+    /// hides the hero, the other players are told about the figure, as for one whose sprite it switches on (see
+    /// <see cref="OnSetMeshRendererEnter"/>). Only a figure named for the hero counts, since the room may switch on others
+    /// while the hero is hidden.
+    /// </summary>
+    private static void OnActivateGameObjectEnter(Action<ActivateGameObject> orig, ActivateGameObject self) {
+        orig(self);
+
+        var watcher = _watcher;
+        var fsm = self.Fsm;
+        if (watcher == null || fsm == null || self.activate == null || !self.activate.Value) {
+            return;
+        }
+
+        var hero = watcher.gameObject;
+        var target = fsm.GetOwnerDefaultTarget(self.gameObject);
+        if (target == null || target == hero || !target.activeInHierarchy ||
+            !target.TryGetComponent<tk2dSpriteAnimator>(out _) || !IsNamedForTheHero(target)) {
+            return;
+        }
+
+        if (!IsTheHerosOwn(fsm, hero) && HidesTheHero(self.State, fsm, hero) && !IsPartOfACreature(target)) {
+            watcher.Show(target);
+        }
+    }
+
+    /// <summary>
+    /// Whether the name of an object says that it is a figure of the hero.
+    /// </summary>
+    private static bool IsNamedForTheHero(GameObject target) {
+        foreach (var name in HeroFigureNames) {
+            if (target.name.IndexOf(name, StringComparison.OrdinalIgnoreCase) >= 0) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -352,14 +428,15 @@ internal class HeroRoomFigure : AnimationEffect {
 
     /// <summary>
     /// Writes what the room's figure of the local hero plays to effect info: how many clips it started so far, so that
-    /// a clip is started once however often it is said, where the figure is in the room, and the clip it plays, from
-    /// where it is in it now and how fast.
+    /// a clip is started once however often it is said, where the figure is in the room, the clip it plays, from where
+    /// it is in it now and how fast, and where the figure stands, within what it is part of.
     /// </summary>
     /// <param name="plays">How many clips the figure started so far, counted round.</param>
     /// <param name="path">The path of the figure in its room.</param>
     /// <param name="figure">The animator of the figure.</param>
     internal static byte[] Write(byte plays, string path, tk2dSpriteAnimator figure) {
         var clip = figure.CurrentClip;
+        var position = figure.transform.localPosition;
 
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
@@ -369,6 +446,9 @@ internal class HeroRoomFigure : AnimationEffect {
         writer.Write(clip != null ? clip.name : "");
         writer.Write(clip != null ? figure.ClipTimeSeconds : 0f);
         writer.Write(figure.ClipFps);
+        writer.Write(position.x);
+        writer.Write(position.y);
+        writer.Write(position.z);
         writer.Flush();
         return stream.ToArray();
     }
@@ -419,6 +499,7 @@ internal class HeroRoomFigure : AnimationEffect {
         string clipName;
         float clipTime;
         float fps;
+        Vector3 position;
         try {
             using var reader = new BinaryReader(new MemoryStream(effectInfo, 1, effectInfo.Length - 1));
             plays = reader.ReadByte();
@@ -426,11 +507,12 @@ internal class HeroRoomFigure : AnimationEffect {
             clipName = reader.ReadString();
             clipTime = reader.ReadSingle();
             fps = reader.ReadSingle();
+            position = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
         } catch (IOException) {
             return;
         }
 
-        copy.Show(plays, path, clipName, clipTime, fps, ShownFor);
+        copy.Show(plays, path, clipName, clipTime, fps, position + new Vector3(0f, 0f, CopyBehind), ShownFor);
     }
 
     /// <summary>
@@ -573,6 +655,18 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
     private float _sayOftenUntil;
 
     /// <summary>
+    /// Where the figure stood when the other players were last told, within what it is part of.
+    /// </summary>
+    [NonSerialized]
+    private Vector3 _saidPosition;
+
+    /// <summary>
+    /// When the other players are told soonest again where the figure is, as it moves, in unscaled time.
+    /// </summary>
+    [NonSerialized]
+    private float _sayMoveAt;
+
+    /// <summary>
     /// Starts watching again, telling the other players with the given callback, for a hero that may be shown by a
     /// figure already: a player who connects again while lying in a bed is said to lie there at once, and a figure
     /// that is gone meanwhile is found gone at the next look.
@@ -639,11 +733,18 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
             return;
         }
 
+        // A figure that moves, like one that leaps up to a shrine, is said again as it goes
+        var position = _figure!.transform.localPosition;
+        if (!_changed && Time.unscaledTime >= _sayMoveAt &&
+            (position - _saidPosition).sqrMagnitude > HeroRoomFigure.MovedFar * HeroRoomFigure.MovedFar) {
+            _changed = true;
+        }
+
         if (!_changed && Time.unscaledTime < _sayAgainAt) {
             return;
         }
 
-        var effectInfo = HeroRoomFigure.Write(_plays, _path, _figure!);
+        var effectInfo = HeroRoomFigure.Write(_plays, _path, _figure);
         if (effectInfo.Length > HeroRoomFigure.MostEffectInfo) {
             Logger.Warn($"The figure '{_path}' has too long a path to show to other players");
             _figure = null;
@@ -652,6 +753,8 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
 
         _shown = true;
         _changed = false;
+        _saidPosition = position;
+        _sayMoveAt = Time.unscaledTime + HeroRoomFigure.SayMovesEvery;
         _sayAgainAt = Time.unscaledTime + (Time.unscaledTime < _sayOftenUntil
             ? HeroHidden.SayOftenEvery
             : HeroRoomFigure.SayAgainAfter);
@@ -709,6 +812,19 @@ internal class RoomFigureCopy : MonoBehaviour {
     private float _endedUntil;
 
     /// <summary>
+    /// Where the player's figure stood when they last said, within what it is part of, which the copy goes to.
+    /// </summary>
+    [NonSerialized]
+    private Vector3 _position;
+
+    /// <summary>
+    /// How fast the copy closes the distance to where the player's figure stood, as a share of it per second: a
+    /// figure that moves is said every <see cref="HeroRoomFigure.SayMovesEvery"/> seconds, and the copy gets most of
+    /// the way in that time.
+    /// </summary>
+    private const float FollowRate = 20f;
+
+    /// <summary>
     /// Whether the copy shows now.
     /// </summary>
     public bool IsShown => _copy != null && _shownUntil > Time.unscaledTime;
@@ -722,8 +838,17 @@ internal class RoomFigureCopy : MonoBehaviour {
     /// <param name="clipName">The name of the clip that it plays.</param>
     /// <param name="clipTime">How far into the clip it is, in seconds.</param>
     /// <param name="fps">How fast it plays the clip.</param>
+    /// <param name="position">Where the copy goes, within what the figure is part of.</param>
     /// <param name="shownFor">How long the copy stays unless the player says again that the room shows them.</param>
-    public void Show(byte plays, string path, string clipName, float clipTime, float fps, float shownFor) {
+    public void Show(
+        byte plays,
+        string path,
+        string clipName,
+        float clipTime,
+        float fps,
+        Vector3 position,
+        float shownFor
+    ) {
         // Said before the player said that the room shows them no more, and only arriving now
         if (Time.unscaledTime < _endedUntil && (sbyte) (plays - _endedPlays) <= 0) {
             return;
@@ -742,7 +867,12 @@ internal class RoomFigureCopy : MonoBehaviour {
             _animator = _copy.GetComponent<tk2dSpriteAnimator>();
             _path = path;
             made = true;
+
+            // A new copy starts where the figure is, rather than going there from where the room keeps it
+            _copy.transform.localPosition = position;
         }
+
+        _position = position;
 
         // Said again while the same clip goes on, it is not started again; a clip started since that was lost on the
         // way starts from where the player's figure is in it now
@@ -805,6 +935,16 @@ internal class RoomFigureCopy : MonoBehaviour {
     private void Update() {
         if (_shownUntil > 0f && (_copy == null || Time.unscaledTime >= _shownUntil)) {
             Hide();
+            return;
+        }
+
+        if (_copy != null) {
+            var place = _copy.transform;
+            place.localPosition = Vector3.Lerp(
+                place.localPosition,
+                _position,
+                1f - Mathf.Exp(-FollowRate * Time.unscaledDeltaTime)
+            );
         }
     }
 
