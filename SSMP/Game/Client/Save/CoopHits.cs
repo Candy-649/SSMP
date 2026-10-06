@@ -216,6 +216,17 @@ internal class CoopHits {
     private bool _sendFailed;
 
     /// <summary>
+    /// Whether looking at what a pull holds threw, which is only logged once.
+    /// </summary>
+    private bool _pullFailed;
+
+    /// <summary>
+    /// The copies that a pull of the local player's own holds on this step of physics, with where each stood before
+    /// it, kept to tell which ones it moved (see <see cref="OnPullEnemies"/>).
+    /// </summary>
+    private readonly List<(Entity.Entity entity, Transform transform, Vector3 position)> _pulledCopies = [];
+
+    /// <summary>
     /// The state that each state machine was in before it first changed state during a hit or touch of the local
     /// player's attack, which tells whether the object answered it (see <see cref="AnswersAttack"/>).
     /// </summary>
@@ -311,6 +322,10 @@ internal class CoopHits {
                 nameof(Recoil.RecoilByDirection), InstanceFlags, null, [typeof(int), typeof(float)], null
             ),
             new Action<Action<Recoil, int, float>, Recoil, int, float>(OnRecoilByDirection)
+        );
+        AddHook(
+            typeof(RecoilEnemiesToRadius).GetMethod("FixedUpdate", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<RecoilEnemiesToRadius>, RecoilEnemiesToRadius>(OnPullEnemies)
         );
         AddHook(
             typeof(TrackTriggerObjects).GetMethod("get_InsideCount", InstanceFlags),
@@ -1092,6 +1107,56 @@ internal class CoopHits {
         if (!SendKnockback(partnerId, entity.Id, direction, magnitude, id) && id != 0) {
             entity.EndAnticipation();
         }
+    }
+
+    /// <summary>
+    /// Hook for the step of physics of <see cref="RecoilEnemiesToRadius"/>, which moves the enemies in its reach to a
+    /// ring around it, pushing out those inside and drawing in those just outside, like the storm of a silk skill does
+    /// around the player. With a partner, a pull that is part of the local player's character (that storm, a crest's
+    /// bind) is local first, like knockback: it moves the copies of enemies on show here at once, and a copy it moved
+    /// leaves the scene host's positions alone until shortly after (<see cref="Entity.Entity.NotePulledHere"/>). A
+    /// copy that it can't move, because the enemy doesn't take knockback or something is in the way, goes on
+    /// following the scene host. The scene host's game moves the enemies themselves with the copy of the same skill
+    /// on the scene client's figure. Every other pull - the copy of the partner's skill, the machines of a room -
+    /// leaves the copies to the scene host's positions, which have it in already and in step with what pulls.
+    ///
+    /// An enemy that is gone while it is held, destroyed without ever leaving the reach, is let go of first. The game's
+    /// own step stops at the first one that is gone, so every enemy after it went unmoved for as long as the pull
+    /// lasted, every step throwing.
+    /// </summary>
+    private void OnPullEnemies(Action<RecoilEnemiesToRadius> orig, RecoilEnemiesToRadius self) {
+        _pulledCopies.Clear();
+        try {
+            var enemies = self.enemies;
+            var hero = HeroController.SilentInstance;
+            var ownPull = _getPartnerId() != null && hero != null && self.transform.IsChildOf(hero.transform);
+            for (var i = enemies.Count - 1; i >= 0; i--) {
+                var enemy = enemies[i];
+                if (enemy.Obj == null || enemy.Transform == null || enemy.Collider == null || enemy.Recoil == null) {
+                    enemies.RemoveAt(i);
+                    continue;
+                }
+
+                if (ownPull && TryGetEntity(enemy.Obj, out var entity, out var isClientCopy) && isClientCopy) {
+                    _pulledCopies.Add((entity, enemy.Transform, enemy.Transform.position));
+                }
+            }
+        } catch (Exception e) {
+            if (!_pullFailed) {
+                _pullFailed = true;
+                Logger.Error($"Could not look at what a pull holds:\n{e}");
+            }
+        }
+
+        orig(self);
+
+        foreach (var (entity, transform, position) in _pulledCopies) {
+            if (transform != null && transform.position != position) {
+                entity.NotePulledHere();
+            }
+        }
+
+        _pulledCopies.Clear();
     }
 
     /// <summary>

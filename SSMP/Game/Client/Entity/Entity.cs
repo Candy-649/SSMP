@@ -117,11 +117,16 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether something other than the interpolation was moving the copy on the last frame - something the local
-    /// player did to this entity still waiting to come back from the scene host, or the copy moving by itself
-    /// (<see cref="OwnMotionComponent"/>) - which says when that has just stopped and the interpolation is about to
-    /// take the entity over again.
+    /// player did to this entity still waiting to come back from the scene host, the copy moving by itself
+    /// (<see cref="OwnMotionComponent"/>) or a pull of the local player's own moving it - which says when that has
+    /// just stopped and the interpolation is about to take the entity over again.
     /// </summary>
     private bool _wasMovedHere;
+
+    /// <summary>
+    /// Until when a pull of the local player's own moves the copy, in game time (see <see cref="NotePulledHere"/>).
+    /// </summary>
+    private float _pulledHereUntil;
 
     /// <summary>
     /// The number the next thing the local player does to this entity before telling the scene host goes under.
@@ -191,6 +196,13 @@ internal partial class Entity {
     /// <see cref="AnticipationSettleCap"/>, which is the longest anything answered can take.
     /// </summary>
     private const float AnticipationHoldTime = 1.5f;
+
+    /// <summary>
+    /// How long, in seconds of game time, a copy goes on being moved by a pull of this game after the last step of
+    /// physics that pulled it: a few steps, so that the pull holds it from one step to the next and lets it go soon
+    /// after it ends.
+    /// </summary>
+    private const float PulledHereHoldTime = 0.1f;
 
     /// <summary>
     /// The longest the scene host waits for something a scene client did to finish happening before saying it has
@@ -1365,9 +1377,11 @@ internal partial class Entity {
 
                 // While something the local player did to this entity is still on its way to the scene host and
                 // back, what the local game did is what moves it, and the interpolation stays out of the way. So it
-                // does while the copy moves by itself from how the entity set off (OwnMotionComponent), or while its
-                // own FSM runs here for something the local player did (PlayHere).
-                var movedHere = IsAnticipating() || MovesByItself() || _runHere != null;
+                // does while the copy moves by itself from how the entity set off (OwnMotionComponent), while its
+                // own FSM runs here for something the local player did (PlayHere), or while a pull of the local
+                // player's own moves it (NotePulledHere).
+                var movedHere = IsAnticipating() || MovesByItself() || _runHere != null ||
+                                Time.time < _pulledHereUntil;
                 if (_wasMovedHere && !movedHere) {
                     // Nothing wrote this object while that was going on, so the interpolation carried on predicting
                     // from where the entity stood before any of it. Picking that up again would put it back there in
@@ -2721,6 +2735,17 @@ internal partial class Entity {
     /// </summary>
     public void EndAnticipation() {
         _outstandingAnticipation = 0;
+    }
+
+    /// <summary>
+    /// Notes that a pull of the local player's own, like the storm of a silk skill, moved the copy on this step of
+    /// physics, which shows here at once. Until shortly after the last such step the copy is left where the pull puts
+    /// it rather than following the scene host's positions, which only show the pull a round trip later; then it goes
+    /// on from where it stands to the scene host's positions. The scene host's game moves the entity itself with the
+    /// copy of the same skill, so the two mostly differ by what the entity did by itself meanwhile.
+    /// </summary>
+    public void NotePulledHere() {
+        _pulledHereUntil = Time.time + PulledHereHoldTime;
     }
 
     /// <summary>
