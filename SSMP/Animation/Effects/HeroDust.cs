@@ -260,7 +260,7 @@ internal class HeroDust : AnimationEffect {
     /// Sends an event to an FSM, except to the one that shakes the screen while dust is raised for another player.
     /// </summary>
     private static void OnSendEvent(Action<PlayMakerFSM, string> orig, PlayMakerFSM self, string eventName) {
-        if (_raisingForOther > 0 && self != null && self.FsmName == CameraShakeFsmName) {
+        if (_raisingForOther > 0 && self.FsmName == CameraShakeFsmName) {
             return;
         }
 

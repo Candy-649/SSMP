@@ -37,30 +37,6 @@ internal partial class BossRoomCoop {
     private const string DisablePauseName = "disablePause";
 
     /// <summary>
-    /// The message that tells a player in a waiting room how to leave it.
-    /// </summary>
-    private static string GiveUpHintMessage => Lang.Pick(
-        "Type /giveup to open the doors if you don't want to wait.",
-        "不想等的话，输入 /giveup 就能把门打开。"
-    );
-
-    /// <summary>
-    /// The message for a player who opened the doors of the room they waited in.
-    /// </summary>
-    private static string GaveUpMessage => Lang.Pick(
-        "The doors are open. The boss still waits until your teammate is in the room.",
-        "门开了。不过在队友进屋之前，这里仍然不会开打。"
-    );
-
-    /// <summary>
-    /// The message for a player who gives up waiting while they don't wait in a room.
-    /// </summary>
-    private static string NothingToGiveUpMessage => Lang.Pick(
-        "You aren't waiting in a boss room.",
-        "你现在并没有在等待什么。"
-    );
-
-    /// <summary>
     /// The events that close a gate, in the order they are tried. Gates only react to them while they are open.
     /// </summary>
     private static readonly string[] GateCloseEvents = ["BG CLOSE", "BG QUICK CLOSE"];
@@ -308,15 +284,7 @@ internal partial class BossRoomCoop {
                 continue;
             }
 
-            if (!wait.HintShown) {
-                wait.HintShown = true;
-                UiManager.InternalChatBox.AddMessage(GiveUpHintMessage);
-            }
-
-            if (!wait.GaveUp) {
-                LockGates(room, wait);
-            }
-
+            LockGates(room, wait);
             KeepHeroFree(heroController, wait);
         }
     }
@@ -393,50 +361,6 @@ internal partial class BossRoomCoop {
         }
     }
 
-    /// <summary>
-    /// Opens the gates of the boss room that the local player waits in, so that they can leave. The boss keeps waiting
-    /// until every player is in the room.
-    /// </summary>
-    public void GiveUpWaiting() {
-        var heroController = HeroController.instance;
-        var gaveUp = false;
-        foreach (var room in _bossRooms.Values) {
-            if (room.Wait is not { } wait || heroController == null ||
-                !wait.Shape.Contains(heroController.transform.position)) {
-                continue;
-            }
-
-            gaveUp = true;
-            wait.GaveUp = true;
-            wait.RestrictedSince = null;
-            FreeHero(wait);
-
-            foreach (var gate in room.Gates) {
-                if (gate.GameObject == null || GetGateEventName(gate, GateOpenEvents) is not { } openEvent) {
-                    continue;
-                }
-
-                _closedGates.Remove(gate);
-                RemovePendingClose(gate);
-                Logger.Info($"Opening gate '{GetPath(gate)}', since the local player gave up waiting");
-                SendGateEvent(gate, openEvent);
-            }
-        }
-
-        // A story scene that waits starts for the local player alone
-        var gaveUpStory = GiveUpStories();
-        if (gaveUp) {
-            UiManager.InternalChatBox.AddMessage(GaveUpMessage);
-        }
-
-        if (gaveUpStory) {
-            UiManager.InternalChatBox.AddMessage(StoryGaveUpMessage);
-        }
-
-        if (!gaveUp && !gaveUpStory) {
-            UiManager.InternalChatBox.AddMessage(NothingToGiveUpMessage);
-        }
-    }
 
     /// <summary>
     /// Stops waiting in the boss rooms of the current scene, like after disconnecting, and opens the gates that kept
@@ -548,16 +472,6 @@ internal partial class BossRoomCoop {
         /// The bosses that can't be hurt while the room waits, with whether each of them was invincible before.
         /// </summary>
         public readonly Dictionary<HealthManager, bool> Invincible = new();
-
-        /// <summary>
-        /// Whether the local player gave up waiting, after which the gates stay open for them.
-        /// </summary>
-        public bool GaveUp;
-
-        /// <summary>
-        /// Whether the local player was told how to give up waiting.
-        /// </summary>
-        public bool HintShown;
 
         /// <summary>
         /// Since when, in unscaled seconds, the local player has been without control, or null while they have it.

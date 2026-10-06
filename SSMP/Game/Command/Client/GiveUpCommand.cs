@@ -1,26 +1,31 @@
 using SSMP.Api.Command;
 using SSMP.Api.Command.Client;
 using SSMP.Game.Client;
+using SSMP.Ui;
+using SSMP.Util;
 
 namespace SSMP.Game.Command.Client;
 
 /// <summary>
-/// Command for a player who is shut in and doesn't want to be anymore: a boss room whose boss waits for their
-/// teammate, or an arena whose battle stopped going anywhere. It opens the doors for them alone.
+/// Command for a player who is shut into an arena whose battle stopped going anywhere: it opens the doors for them
+/// alone. A boss room or a story scene that waits for the teammate can't be given up on: it waits until every player is
+/// there.
 /// </summary>
 internal class GiveUpCommand : IClientCommand, ICommandWithDescription {
-    /// <summary>
-    /// The boss room rules that know which room the local player waits in.
-    /// </summary>
-    private readonly BossRoomCoop _bossRoomCoop;
-
     /// <summary>
     /// The arena rules that know which battle the local player is shut into.
     /// </summary>
     private readonly ArenaCoop _arenaCoop;
 
-    public GiveUpCommand(BossRoomCoop bossRoomCoop, ArenaCoop arenaCoop) {
-        _bossRoomCoop = bossRoomCoop;
+    /// <summary>
+    /// The message for a player who isn't shut into an arena.
+    /// </summary>
+    private static string NothingToGiveUpMessage => Lang.Pick(
+        "You aren't shut into an arena.",
+        "你现在没有被关在遭遇战里。"
+    );
+
+    public GiveUpCommand(ArenaCoop arenaCoop) {
         _arenaCoop = arenaCoop;
     }
 
@@ -31,15 +36,12 @@ internal class GiveUpCommand : IClientCommand, ICommandWithDescription {
     public string[] Aliases => [];
 
     /// <inheritdoc />
-    public string Description => "Open the doors of the boss room or arena you are shut into.";
+    public string Description => "Open the doors of the arena you are shut into.";
 
     /// <inheritdoc />
     public void Execute(string[] arguments) {
-        // The arena first, and only one message: a player shut into a battle is not also waiting on a boss
-        if (_arenaCoop.GiveUpBattle()) {
-            return;
+        if (!_arenaCoop.GiveUpBattle()) {
+            UiManager.InternalChatBox.AddMessage(NothingToGiveUpMessage);
         }
-
-        _bossRoomCoop.GiveUpWaiting();
     }
 }

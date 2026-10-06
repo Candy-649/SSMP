@@ -24,10 +24,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// trigger, which lies in the same place in every game. By then the other game, whose room decided as it loaded to show
 /// the scene, has set off its own, so nothing that this game's scene marks can take it away. Waiting only for the
 /// other player to come into the room let them leave by another way before they got to the scene, and lose it. The
-/// player who waits can go where they like, and /giveup plays the scene for them alone. Only scenes that start as their
-/// player walks into them are held: one that plays as a player comes through a door, or that a room leaves out as it
-/// loads, has no start that could wait, and plays for each player on their own arrival (CoopSave.Arrivals). So does a
-/// scene whose trigger the player only reaches while the scene that began at the door still steers them.
+/// player who waits can go where they like, but can't watch the scene alone, since it would then be gone for the other
+/// player. Only scenes that start as their player walks into them are held: one that plays as a player comes through a
+/// door, or that a room leaves out as it loads, has no start that could wait, and plays for each player on their own
+/// arrival (CoopSave.Arrivals). So does a scene whose trigger the player only reaches while the scene that began at the
+/// door still steers them.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
@@ -89,8 +90,8 @@ internal partial class BossRoomCoop {
     /// The message for a player whose story scene waits for the other players.
     /// </summary>
     private static string StoryWaitingMessage => Lang.Pick(
-        "This scene waits until your teammate gets here too. Type /giveup to watch it alone.",
-        "这段剧情要等队友也走到这里才开始。不想等的话，输入 /giveup 自己先看。"
+        "This scene waits until your teammate gets here too.",
+        "这段剧情要等队友也走到这里才开始。"
     );
 
     /// <summary>
@@ -102,22 +103,9 @@ internal partial class BossRoomCoop {
     );
 
     /// <summary>
-    /// The message for a player who gave up waiting for a story scene.
-    /// </summary>
-    private static string StoryGaveUpMessage => Lang.Pick(
-        "The scene no longer waits for your teammate.",
-        "这段剧情不再等队友了。"
-    );
-
-    /// <summary>
     /// The story scenes of the current scene that wait, by their FSM.
     /// </summary>
     private readonly Dictionary<Fsm, HeldStory> _heldStories = new();
-
-    /// <summary>
-    /// The story scenes of the current scene that the local player chose to watch alone.
-    /// </summary>
-    private readonly HashSet<Fsm> _storiesWatchedAlone = [];
 
     /// <summary>
     /// The story scene whose start is being sent again now that it may start, which is let through.
@@ -129,8 +117,7 @@ internal partial class BossRoomCoop {
     /// </summary>
     /// <returns>Whether the event is held back.</returns>
     private bool TryHoldStoryStart(Fsm fsm, FsmState state, string eventName) {
-        if (eventName != StoryStartEventName || fsm == _startingStory || !IsStoryStart(fsm, state) ||
-            _storiesWatchedAlone.Contains(fsm)) {
+        if (eventName != StoryStartEventName || fsm == _startingStory || !IsStoryStart(fsm, state)) {
             return false;
         }
 
@@ -233,7 +220,7 @@ internal partial class BossRoomCoop {
                 continue;
             }
 
-            if (!held.GaveUp && !HaveAllReachedStory(held)) {
+            if (!HaveAllReachedStory(held)) {
                 if (Time.unscaledTime >= held.NextNoticeTime) {
                     held.NextNoticeTime = Time.unscaledTime + NoticeInterval;
                     UiManager.InternalChatBox.AddMessage(StoryWaitingMessage);
@@ -252,10 +239,12 @@ internal partial class BossRoomCoop {
     /// where they set it off. Otherwise it starts the next time they walk into it, as it does in the game.
     /// </summary>
     private void TryStartHeldStory(Fsm fsm, HeldStory held) {
-        var reason = held.GaveUp ? "the local player gave up waiting" : "every player reached it";
         if (!IsLocalHeroInStoryTrigger(held)) {
             _heldStories.Remove(fsm);
-            Logger.Info($"The story scene '{GetPath(fsm)}' starts when the local player walks into it again, since {reason}");
+            Logger.Info(
+                $"The story scene '{GetPath(fsm)}' starts when the local player walks into it again, since every " +
+                "player reached it"
+            );
             UiManager.InternalChatBox.AddMessage(StoryReadyMessage);
             return;
         }
@@ -266,30 +255,13 @@ internal partial class BossRoomCoop {
         }
 
         _heldStories.Remove(fsm);
-        Logger.Info($"Starting the story scene '{GetPath(fsm)}', since {reason}");
+        Logger.Info($"Starting the story scene '{GetPath(fsm)}', since every player reached it");
         _startingStory = fsm;
         try {
             fsm.Event(StoryStartEventName);
         } finally {
             _startingStory = null;
         }
-    }
-
-    /// <summary>
-    /// Plays the story scenes that wait for the other players for the local player alone.
-    /// </summary>
-    /// <returns>Whether a story scene waited.</returns>
-    private bool GiveUpStories() {
-        if (_heldStories.Count == 0) {
-            return false;
-        }
-
-        foreach (var pair in _heldStories) {
-            pair.Value.GaveUp = true;
-            _storiesWatchedAlone.Add(pair.Key);
-        }
-
-        return true;
     }
 
     /// <summary>
@@ -406,7 +378,6 @@ internal partial class BossRoomCoop {
     /// </summary>
     private void ClearStories() {
         _heldStories.Clear();
-        _storiesWatchedAlone.Clear();
     }
 
     /// <summary>
@@ -446,11 +417,6 @@ internal partial class BossRoomCoop {
         /// When the players hear next that the local player waits, in unscaled seconds.
         /// </summary>
         public float NextNoticeTime;
-
-        /// <summary>
-        /// Whether the local player chose to watch the scene alone, so that it only waits until they are free.
-        /// </summary>
-        public bool GaveUp;
 
         public HeldStory(string stateName, List<Collider2D> triggers) {
             StateName = stateName;
