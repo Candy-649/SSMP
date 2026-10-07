@@ -35,12 +35,15 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// the caught player's go on. A player who went down instead of being put back is never put back, so their grinders go
 /// on as they go down, the way enemies go on while a player lies waiting to be stood up (USER 10-06): they can't hurt a
 /// player who lies there.
+///
+/// The controller of a fight is paced the same way, but in every state rather than at the starts of rounds (see
+/// CoopSave.DirectedFights).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
     /// How long a machine waits here for the scene host's word before it starts its round by itself, in seconds. Longer
     /// than any round, so that it only happens when the host's machine has stopped going: its own clock is then the best
-    /// there is.
+    /// there is. The controller of a fight waits for as long as it takes (see CoopSave.DirectedFights).
     /// </summary>
     private const float MachineHoldLimit = 10f;
 
@@ -140,7 +143,17 @@ internal partial class CoopSave {
         new(["junk_chute_"], "Control", ["Flow"]),
 
         // Grinders, in groups that go together, which go through their list of ways without rolling anything
-        new(["Understore_Grinder"], "Control", [GrinderNextWayStateName], isGrinder: true)
+        new(["Understore_Grinder"], "Control", [GrinderNextWayStateName], isGrinder: true),
+
+        // The controller of the fight with the two dancers, which the other game follows in every state from the first
+        // beat on (see CoopSave.DirectedFights). The start of the fight before that, with the gates, the lights and the
+        // beat setting off, each game has by itself.
+        new(
+            ["Dancer Control"], "Control", [], sceneName: "Cog_Dancers_boss", ownStateNames: [
+                "Init", "Deactivate Positions", "Encountered?", "Dormant", "Gate Close", "Light Open",
+                "Beat Start Pause", "Pendulum Prepare", "Beat Start"
+            ]
+        )
     ];
 
     /// <summary>
@@ -148,6 +161,14 @@ internal partial class CoopSave {
     /// the hook this serves is called for every change of state of every state machine in the game.
     /// </summary>
     private static readonly HashSet<string> MachineStateNames = BuildMachineStateNames();
+
+    /// <summary>
+    /// The FSMs of the controllers of fights among <see cref="MachineKinds"/>, which a change of state is asked about
+    /// in every state.
+    /// </summary>
+    private static readonly HashSet<string> DirectorFsmNames = new(
+        MachineKinds.Where(kind => kind.IsDirector).Select(kind => kind.FsmName), StringComparer.Ordinal
+    );
 
     /// <summary>
     /// The machines here that wait for the scene host's word: the state each waits in, the state it was about to start
@@ -176,6 +197,13 @@ internal partial class CoopSave {
     /// The machine whose round of the scene host's is being started here, which is let through.
     /// </summary>
     private Fsm? _startingMachineRound;
+
+    /// <summary>
+    /// The state of the scene host's word that the controller of a fight in <see cref="_startingMachineRound"/> goes
+    /// into here, which alone is let through: anything it would go on to by itself in the same breath is held as ever.
+    /// Null for the other machines, which are let through in any state while their round starts.
+    /// </summary>
+    private FsmState? _startingMachineState;
 
     /// <summary>
     /// The grinders that caught the local player and haven't gone on yet.
@@ -238,7 +266,13 @@ internal partial class CoopSave {
         /// The part of a grinder that catches the local player would catch them while they lie waiting to be stood up,
         /// where nothing can hurt them: it doesn't, and the grinder goes on over them.
         /// </summary>
-        SpareLyingPlayer
+        SpareLyingPlayer,
+
+        /// <summary>
+        /// The controller of a fight here, still in the start of the fight, would be sent into the fight by something
+        /// else than the end of its start: it stays where it is (see CoopSave.DirectedFights).
+        /// </summary>
+        StayInStart
     }
 
     /// <summary>
@@ -250,8 +284,18 @@ internal partial class CoopSave {
     /// <param name="kind">The kind of machine, if it is one.</param>
     private MachineStep DecideMachineSwitch(Fsm fsm, FsmState toState, out MachineKind? kind) {
         kind = null;
-        if (_checkedWith == null || !MachineStateNames.Contains(toState.Name) || fsm == _startingMachineRound ||
-            fsm.GameObject is not { } gameObject || MachineSwitchToStateField == null) {
+        if (_checkedWith == null || MachineSwitchToStateField == null) {
+            return MachineStep.None;
+        }
+
+        // The controller of a fight, which is paced in every state rather than at the starts of rounds
+        if (FindDirector(fsm) is { } director) {
+            kind = director;
+            return DecideDirectorSwitch(fsm, toState, director);
+        }
+
+        if (!MachineStateNames.Contains(toState.Name) || fsm == _startingMachineRound ||
+            fsm.GameObject is not { } gameObject) {
             return MachineStep.None;
         }
 
@@ -263,11 +307,11 @@ internal partial class CoopSave {
                 return MachineStep.None;
             }
 
-            kind = FindMachineKind(grinder.name, GrinderFsmName);
+            kind = FindMachineKind(grinder.gameObject, GrinderFsmName);
             return kind is { IsGrinder: true } ? MachineStep.SpareLyingPlayer : MachineStep.None;
         }
 
-        kind = FindMachineKind(gameObject.name, fsm.Name);
+        kind = FindMachineKind(gameObject, fsm.Name);
         if (kind == null) {
             return MachineStep.None;
         }
@@ -361,6 +405,10 @@ internal partial class CoopSave {
             case MachineStep.SpareLyingPlayer:
                 MachineSwitchToStateField?.SetValue(fsm, null);
                 return;
+            case MachineStep.StayInStart:
+                MachineSwitchToStateField?.SetValue(fsm, null);
+                CountDirectedState(fsm, DirectedStep.StayedInStart);
+                return;
             case MachineStep.Catch:
                 orig(fsm, toState);
                 _caughtGrinders.Add(fsm);
@@ -412,6 +460,9 @@ internal partial class CoopSave {
             word.Amounts = [.. SharedDice.Record(() => orig(fsm, toState))];
         } finally {
             Send(word);
+            if (kind.IsDirector) {
+                CountDirectedState(fsm, DirectedStep.Told);
+            }
         }
     }
 
@@ -440,7 +491,7 @@ internal partial class CoopSave {
         }
 
         if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target ||
-            FindMachineKind(target.name, update.FsmName) is not { } kind) {
+            FindMachineKind(target, update.FsmName) is not { } kind) {
             return;
         }
 
@@ -464,14 +515,20 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Starts the round of a word of the scene host on a machine here, if the machine is where that round can start:
-    /// held at the end of its last round, or in a state that goes into the round by itself.
+    /// held at the end of its last round, or in a state that goes into the round by itself. The controller of a fight
+    /// goes into the host's state from anywhere in the fight.
     /// </summary>
     /// <returns>Whether the round started.</returns>
     private bool TryStartMachineRoundNow(MachineKind kind, Fsm fsm, CoopSaveUpdate update) {
         var isHeld = _heldMachines.TryGetValue(fsm, out var held) && fsm.ActiveState != null &&
                      held.From == fsm.ActiveState;
-        if (!isHeld && !GoesStraightTo(fsm.ActiveState, update.StateName)) {
+        if (!isHeld && !GoesStraightTo(fsm.ActiveState, update.StateName) && !IsInDirectedPart(kind, fsm)) {
             return false;
+        }
+
+        // A state that the controller of a fight doesn't have is nothing to go into, and leaves it waiting as it was
+        if (kind.IsDirector && fsm.GetState(update.StateName) == null) {
+            return true;
         }
 
         _heldMachines.Remove(fsm);
@@ -511,7 +568,20 @@ internal partial class CoopSave {
         }
 
         if (_machinesSaid.Add(fsm)) {
-            Logger.Info($"The machine '{update.ObjectPath}' follows the rounds of the scene host's");
+            Logger.Info(
+                kind.IsDirector
+                    ? $"The fight controller '{update.ObjectPath}' follows the scene host's in every state"
+                    : $"The machine '{update.ObjectPath}' follows the rounds of the scene host's"
+            );
+        }
+
+        if (kind.IsDirector) {
+            if (fsm.GetState(update.StateName) is { } state) {
+                EnterDirectedState(fsm, state, update.Amounts, start);
+                CountDirectedState(fsm, DirectedStep.Followed);
+            }
+
+            return;
         }
 
         var lastStarting = _startingMachineRound;
@@ -648,8 +718,8 @@ internal partial class CoopSave {
                 continue;
             }
 
-            if (FindMachineKind(fsm.GameObject.name, fsm.Name) is { } kind &&
-                GoesStraightTo(fsm.ActiveState, update.StateName)) {
+            if (FindMachineKind(fsm.GameObject, fsm.Name) is { } kind &&
+                (GoesStraightTo(fsm.ActiveState, update.StateName) || IsInDirectedPart(kind, fsm))) {
                 _pendingMachineRounds.Remove(fsm);
                 StartMachineRound(kind, fsm, update, () => fsm.SetState(update.StateName));
             }
@@ -659,12 +729,15 @@ internal partial class CoopSave {
             return;
         }
 
+        // The controller of a fight waits for the host's word for as long as it takes: the host's tells every state it
+        // goes into, so a word that doesn't come means it is still where it was, and a step of its own here would only
+        // go another way
         List<Fsm>? released = null;
         foreach (var pair in _heldMachines) {
             var fsm = pair.Key;
             var held = pair.Value;
             if (fsm.GameObject == null || held.From != fsm.ActiveState || runsTheRoom ||
-                Time.unscaledTime - held.Since > MachineHoldLimit) {
+                (Time.unscaledTime - held.Since > MachineHoldLimit && FindDirector(fsm) == null)) {
                 (released ??= []).Add(fsm);
             }
         }
@@ -694,6 +767,16 @@ internal partial class CoopSave {
 
             // A machine of a game that now runs the room goes through the hook as any other, so that the round is said
             // to a partner in the room; one that only gave up on the word is let through
+            if (FindDirector(fsm) != null) {
+                try {
+                    EnterDirectedState(fsm, null, null, () => fsm.SetState(state.Name));
+                } catch (Exception e) {
+                    LogInteractionError(e);
+                }
+
+                continue;
+            }
+
             var lastStarting = _startingMachineRound;
             if (!runsTheRoom) {
                 _startingMachineRound = fsm;
@@ -719,6 +802,8 @@ internal partial class CoopSave {
         _machinesSaid.Clear();
         _caughtGrinders.Clear();
         _grindersStoppedForPartner.Clear();
+        _directors.Clear();
+        LogDirectedStates();
     }
 
     /// <summary>
@@ -836,7 +921,7 @@ internal partial class CoopSave {
         }
 
         if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target ||
-            FindMachineKind(target.name, update.FsmName) is not { IsGrinder: true }) {
+            FindMachineKind(target, update.FsmName) is not { IsGrinder: true }) {
             return null;
         }
 
@@ -931,16 +1016,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The kind of machine that objects of a name are, going by the FSM.
+    /// The kind of machine that an object is, going by its name, the FSM and, for a kind of one room, its scene.
     /// </summary>
-    private static MachineKind? FindMachineKind(string name, string fsmName) {
+    private static MachineKind? FindMachineKind(GameObject gameObject, string fsmName) {
+        string? name = null;
         foreach (var kind in MachineKinds) {
             if (kind.FsmName != fsmName) {
                 continue;
             }
 
+            name ??= gameObject.name;
             foreach (var prefix in kind.NamePrefixes) {
-                if (name.StartsWith(prefix, StringComparison.Ordinal)) {
+                if (name.StartsWith(prefix, StringComparison.Ordinal) && (kind.SceneName == null ||
+                        string.Equals(gameObject.scene.name, kind.SceneName, StringComparison.OrdinalIgnoreCase))) {
                     return kind;
                 }
             }
@@ -960,11 +1048,20 @@ internal partial class CoopSave {
     /// One kind of machine that the scene host paces.
     /// </summary>
     private sealed class MachineKind {
-        public MachineKind(string[] namePrefixes, string fsmName, string[] roundStateNames, bool isGrinder = false) {
+        public MachineKind(
+            string[] namePrefixes,
+            string fsmName,
+            string[] roundStateNames,
+            bool isGrinder = false,
+            string? sceneName = null,
+            string[]? ownStateNames = null
+        ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
             RoundStateNames = roundStateNames;
             IsGrinder = isGrinder;
+            SceneName = sceneName;
+            OwnStateNames = ownStateNames == null ? null : new HashSet<string>(ownStateNames, StringComparer.Ordinal);
         }
 
         /// <summary>
@@ -986,5 +1083,21 @@ internal partial class CoopSave {
         /// Whether it is a grinder, which also goes by where it is and by its list of ways.
         /// </summary>
         public bool IsGrinder { get; }
+
+        /// <summary>
+        /// The scene that the objects of this kind are in, for a kind of one room, or null for any scene.
+        /// </summary>
+        public string? SceneName { get; }
+
+        /// <summary>
+        /// For the controller of a fight, the states that each game goes into by itself: the start of the fight. Every
+        /// other state is paced. Null for a machine that is paced at the starts of its rounds.
+        /// </summary>
+        public HashSet<string>? OwnStateNames { get; }
+
+        /// <summary>
+        /// Whether it is the controller of a fight, which is paced in every state but <see cref="OwnStateNames"/>.
+        /// </summary>
+        public bool IsDirector => OwnStateNames != null;
     }
 }

@@ -637,7 +637,8 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.Amounts"/> holds the dice of the round and <see cref="CoopSaveUpdate.Sequence"/> grows
     /// with every round the sender says. A grinder adds where it is in <see cref="CoopSaveUpdate.Values"/>, which of
     /// its ways comes next in <see cref="CoopSaveUpdate.Part"/>, and 1 in <see cref="CoopSaveUpdate.PartCount"/> if
-    /// its ways start over.
+    /// its ways start over. The controller of a fight says every state it goes into after the start of the fight, each
+    /// as a round of its own.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
