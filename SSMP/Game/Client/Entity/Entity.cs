@@ -1401,6 +1401,7 @@ internal partial class Entity {
 
         UpdateLeads();
         LetThePlayerBackIn(false);
+        SayIfTheCopyIsOnHere();
 
         foreach (var entityComponent in _updatableComponents) {
             entityComponent.OnUpdate();
@@ -1691,8 +1692,10 @@ internal partial class Entity {
                 // Logger.Info($"Entity '{_object.Client.name}' client animator was allowed to play animation");
 
                 orig(self, clip, clipStartTime, overrideFps);
+                NotePose(clip, _copyPosePacket);
 
                 _allowClientAnimation = false;
+                _copyPosePacket = 0;
             }
 
             return;
@@ -1707,6 +1710,8 @@ internal partial class Entity {
         if (_isControlled) {
             return;
         }
+
+        NotePose(clip, 0);
 
         if (!_animationClipNameIds.TryGetValue(clip.name, out var animationId)) {
             //Logger.Warn($"Entity '{Object.Client.name}' played unknown animation: {clip.name}");
@@ -1831,6 +1836,7 @@ internal partial class Entity {
     /// </summary>
     public void InitializeClient(uint sceneHostEpoch = 0) {
         ResetAnticipation();
+        ForgetPosePackets();
 
         // This game expected to run the room and left the room's own object running, but the other game runs it
         // after all: it is put to sleep now, as it would have been from the start
@@ -2036,6 +2042,7 @@ internal partial class Entity {
         }
 
         ResetAnticipation();
+        ForgetPosePackets();
 
         //Logger.Info($"Making entity ({Id}, {Type}) a host entity");
 
@@ -2972,13 +2979,25 @@ internal partial class Entity {
     /// <param name="animationId">The ID of the animation.</param>
     /// <param name="wrapMode">The wrap mode of the animation clip.</param>
     /// <param name="alreadyInSceneUpdate">Whether this update is when entering a new scene.</param>
+    /// <param name="packet">The packet that brought it, or 0 for one that came in none.</param>
     public void UpdateAnimation(
         byte animationId,
         tk2dSpriteAnimationClip.WrapMode wrapMode,
-        bool alreadyInSceneUpdate
+        bool alreadyInSceneUpdate,
+        ushort packet = 0
     ) {
         if (_animator.Client == null) {
             //Logger.Warn($"Entity '{Object.Client.name}' received animation while client animator does not exist");
+            return;
+        }
+
+        if (!_animationClipNameIds.TryGetValue(animationId, out var clipName)) {
+            //Logger.Warn($"Entity '{Object.Client.name}' received unknown animation ID: {animationId}");
+            return;
+        }
+
+        // From before the clip shown, which came in a newer packet (Entity.Poses)
+        if (IsLatePose(packet, clipName)) {
             return;
         }
 
@@ -2989,16 +3008,12 @@ internal partial class Entity {
             return;
         }
 
-        if (!_animationClipNameIds.TryGetValue(animationId, out var clipName)) {
-            //Logger.Warn($"Entity '{Object.Client.name}' received unknown animation ID: {animationId}");
-            return;
-        }
-
         //Logger.Info($"Entity '{Object.Client.name}' received animation: {animationId}, {clipName}, {wrapMode}");
 
         // All paths lead to calling the Play method of the sprite animator that is hooked, so we allow the call
         // through the hook
         _allowClientAnimation = true;
+        _copyPosePacket = packet;
 
         if (alreadyInSceneUpdate) {
             // Since this is an animation update from an entity that was already present in a scene,

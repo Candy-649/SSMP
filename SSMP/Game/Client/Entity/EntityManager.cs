@@ -339,7 +339,8 @@ internal class EntityManager {
             entity.UpdateAnimation(
                 update.AnimationId,
                 (tk2dSpriteAnimationClip.WrapMode) update.AnimationWrapMode,
-                alreadyInSceneUpdate
+                alreadyInSceneUpdate,
+                update.ReceivedSequence
             );
 
         return true;
