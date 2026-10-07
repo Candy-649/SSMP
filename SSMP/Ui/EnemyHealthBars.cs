@@ -18,6 +18,9 @@ namespace SSMP.Ui;
 /// A bar shows from the first hit until the creature dies, at the part of its health that is left. The part that a hit
 /// just took lingers for a moment before it drains away, so that a hit can be seen even when both players land them.
 /// The health of a creature is where its own game keeps it, which in co-op is the scene host's health of it.
+///
+/// A boss is full at the health its room gives it as the room starts, and a fight that puts its boss out of reach
+/// between its parts and then gives it health for the next part starts that part full.
 /// </summary>
 internal class EnemyHealthBars {
     /// <summary>
@@ -93,14 +96,21 @@ internal class EnemyHealthBars {
 
     /// <summary>
     /// The health from which a part of a creature is scenery that can't be beaten, like the coils of a boss that only
-    /// block the way. Their bars would never move.
+    /// block the way, or from which a creature can't be beaten for the moment, like a boss between the parts of its
+    /// fight. Their bars would never move.
     /// </summary>
     private const int UnbeatableHealth = 9999;
 
     /// <summary>
-    /// The name of the action that shows the title of a boss, which almost every boss has in an FSM of its own.
+    /// How long, in seconds, the full health of a boss is whatever the boss has after its bar starts following it,
+    /// unless this game's own player hits it sooner.
+    ///
+    /// A room can give its boss the health of the first part of its fight as the room starts, below what the boss was
+    /// made with, and that is where the boss starts rather than a hit. Taken for a hit, the bars of two bosses that are
+    /// given 190 of the 300 they are made with showed, part empty, as soon as their room was entered. The moment
+    /// covers the health of the scene host's room reaching the other game, and a room that sets it a frame late.
     /// </summary>
-    private const string BossTitleActionName = "DisplayBossTitle";
+    private const float BossStartSettleTime = 1f;
 
     /// <summary>
     /// The bosses whose title the room shows instead of the boss itself, by the name of their object.
@@ -242,8 +252,9 @@ internal class EnemyHealthBars {
             }
 
             if (!_bars.TryGetValue(healthManager, out var bar)) {
-                // Known from the start, so that the full health is known before the first hit
-                bar = new Bar(healthManager, GetInitialHealth(healthManager));
+                // Known from the start, so that the full health is known before the first hit, and whether it is a
+                // boss, whose full health is known differently
+                bar = new Bar(healthManager, GetInitialHealth(healthManager), IsBoss(healthManager));
                 _bars[healthManager] = bar;
             }
 
@@ -271,7 +282,6 @@ internal class EnemyHealthBars {
             }
 
             if (!bar.HasView) {
-                bar.IsBoss = IsBoss(healthManager);
                 bar.CreateView(_canvasTransform);
             }
 
@@ -388,7 +398,8 @@ internal class EnemyHealthBars {
     }
 
     /// <summary>
-    /// Whether a creature is a boss: one of its FSMs shows the title of a boss, or the room shows its title.
+    /// Whether a creature is a boss: one of its FSMs shows the title of a boss, as an FSM of almost every boss's own
+    /// does, or the room shows its title.
     /// </summary>
     private static bool IsBoss(HealthManager healthManager) {
         var gameObject = healthManager.gameObject;
@@ -400,7 +411,7 @@ internal class EnemyHealthBars {
             foreach (var playMakerFsm in gameObject.GetComponents<PlayMakerFSM>()) {
                 foreach (var state in playMakerFsm.FsmStates ?? []) {
                     foreach (var action in state.Actions ?? []) {
-                        if (action?.GetType().Name == BossTitleActionName) {
+                        if (action is HutongGames.PlayMaker.Actions.DisplayBossTitle) {
                             return true;
                         }
                     }
@@ -416,7 +427,7 @@ internal class EnemyHealthBars {
     /// <summary>
     /// The bar of the health of a creature, and what is known about the creature for it.
     /// </summary>
-    private class Bar(HealthManager healthManager, int initialHealth) {
+    private class Bar(HealthManager healthManager, int initialHealth, bool isBoss) {
         /// <summary>
         /// The health of the creature.
         /// </summary>
@@ -434,9 +445,37 @@ internal class EnemyHealthBars {
 
         /// <summary>
         /// The full health of the creature: what it started with, or more if it was given more since, like by the
-        /// start of a fight.
+        /// start of a fight. A boss can also start lower and start each part of its fight over (see
+        /// <see cref="FollowHealth"/>).
         /// </summary>
         private int _fullHealth = initialHealth;
+
+        /// <summary>
+        /// Until when, in unscaled seconds, the full health of a boss is whatever the boss has (see
+        /// <see cref="BossStartSettleTime"/>).
+        /// </summary>
+        private readonly float _startSettledAt = Time.unscaledTime + BossStartSettleTime;
+
+        /// <summary>
+        /// Whether where a boss starts is settled, after which its full health no longer follows what it has.
+        /// </summary>
+        private bool _isStartSettled;
+
+        /// <summary>
+        /// The last health of its own that the creature was seen with while alive, or -1 before any.
+        /// </summary>
+        private int _lastHealth = -1;
+
+        /// <summary>
+        /// Whether the creature was given a health that it can't be beaten from (see <see cref="UnbeatableHealth"/>)
+        /// and was not given health of its own since.
+        /// </summary>
+        private bool _isUnbeatable;
+
+        /// <summary>
+        /// The health of its own that the creature had just before it was made unbeatable, or -1 when none was seen.
+        /// </summary>
+        private int _healthBeforeUnbeatable = -1;
 
         /// <summary>
         /// The share of the full health that is shown as left.
@@ -506,7 +545,7 @@ internal class EnemyHealthBars {
         /// <summary>
         /// Whether the creature is a boss, whose bar is along the bottom of the screen.
         /// </summary>
-        public bool IsBoss;
+        public bool IsBoss { get; } = isBoss;
 
         /// <summary>
         /// Whether the bar is to be shown: the creature is active, alive, can be beaten, and was hurt.
@@ -532,15 +571,78 @@ internal class EnemyHealthBars {
             }
 
             _wasActive = isActive;
-            if (isAlive && health > _fullHealth) {
+            if (isAlive) {
+                FollowHealth(health);
+            }
+
+            IsShown = isAlive && _isHurt && !_isUnbeatable && _fullHealth > 1 && _fullHealth < UnbeatableHealth;
+        }
+
+        /// <summary>
+        /// Follows the health of a creature that is alive.
+        /// </summary>
+        /// <param name="health">The health that the creature has.</param>
+        private void FollowHealth(int health) {
+            // Given a health that it can't be beaten from for a while: a fight puts its boss out of reach between its
+            // parts, and a creature that swallowed something it has to spit out can't be hurt until it does. That is
+            // no health of the creature's own, so it is never taken for its full health, and the bar is away
+            // meanwhile. Taken for it, the full health of two bosses was 99999 from the second part of their fight
+            // on, which this can't show, and their bars never came back.
+            if (health >= UnbeatableHealth) {
+                if (!_isUnbeatable) {
+                    _isUnbeatable = true;
+                    _healthBeforeUnbeatable = _lastHealth;
+                }
+
+                return;
+            }
+
+            if (_isUnbeatable) {
+                // A hit takes a little off what it was given, so it is over only once what it has is health again
+                if (health >= UnbeatableHealth / 2) {
+                    return;
+                }
+
+                _isUnbeatable = false;
+
+                // A boss that is given health of its own afterwards starts the next part of its fight with it, full.
+                // One given back what it had goes on from there, as does any other creature: one that spat out what it
+                // swallowed is left with what it had or less
+                if (IsBoss && health != _healthBeforeUnbeatable) {
+                    _fullHealth = health;
+
+                    // Shown for the new part whether or not it was hit in the last one, once it was seen fighting:
+                    // of two bosses that start the part together, only the one hit before showed a bar
+                    if (_healthBeforeUnbeatable >= 0) {
+                        _isHurt = true;
+                    }
+
+                    Logger.Info(
+                        $"[Bars] The boss '{_healthManager.name}' was out of reach and starts again with {health} " +
+                        $"health, from {_healthBeforeUnbeatable}"
+                    );
+                }
+            }
+
+            // Where a boss starts, which its room can set lower than what the boss was made with as the room starts.
+            // Settled at the first hit of this game's own player, so that the hit is not taken for the start; a hit of
+            // the partner's in that moment arrives as health alone and still is
+            if (IsBoss && !_isStartSettled) {
+                if (Time.unscaledTime < _startSettledAt && !_healthManager.HasTakenDamage()) {
+                    _fullHealth = health;
+                } else {
+                    _isStartSettled = true;
+                }
+            }
+
+            _lastHealth = health;
+            if (health > _fullHealth) {
                 _fullHealth = health;
             }
 
-            if (isAlive && health < _fullHealth) {
+            if (health < _fullHealth) {
                 _isHurt = true;
             }
-
-            IsShown = isAlive && _isHurt && _fullHealth > 1 && _fullHealth < UnbeatableHealth;
         }
 
         /// <summary>
