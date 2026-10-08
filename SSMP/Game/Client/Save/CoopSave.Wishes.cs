@@ -324,6 +324,7 @@ internal partial class CoopSave {
             next.HasBeenSeen = false;
             if (!next.IsCompleted) {
                 accepted++;
+                NoteWishAcceptedByPartner(name);
             }
         }
 
@@ -424,6 +425,7 @@ internal partial class CoopSave {
                 wish.HasBeenSeen = false;
                 playerData.QuestCompletionData.SetData(name, wish);
                 _mergedWishKeys.Add(name);
+                NoteWishAcceptedByPartner(name);
                 added++;
             }
         }

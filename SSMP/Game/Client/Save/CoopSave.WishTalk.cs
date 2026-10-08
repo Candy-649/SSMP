@@ -661,6 +661,15 @@ internal partial class CoopSave {
             new Func<Func<FullQuestBase, bool>, FullQuestBase, bool>(OnConsumeWishTarget)
         );
 
+        // Dialogue whose end begins a wish, which only the partner's game accepted yet (CoopSave.PartnerAccepts)
+        AddWishTalkHook(
+            typeof(QuestPlaymakerActions.CheckQuestState).GetMethod(
+                "DoQuestAction", InstanceFlags | BindingFlags.DeclaredOnly, null, [typeof(FullQuestBase)], null
+            ),
+            new Action<Action<QuestPlaymakerActions.CheckQuestState, FullQuestBase>,
+                QuestPlaymakerActions.CheckQuestState, FullQuestBase>(OnCheckWishState)
+        );
+
         // What a character gives in its dialogue. Money that it gives goes through the hook for changes of currency
         AddWishTalkHook(
             typeof(HutongGames.PlayMaker.Actions.SavedItemGet).GetMethod(
@@ -1495,6 +1504,10 @@ internal partial class CoopSave {
 
         var wasActive = self.IsAccepted && !self.IsCompleted;
         orig(self, afterPrompt, showPrompt);
+        if (!_applyingPartnerTalk) {
+            NoteWishBegunHere(self.name);
+        }
+
         if (!_applyingPartnerTalk && !wasActive && self.IsAccepted && !self.IsCompleted) {
             AddTalkWish(self);
         }

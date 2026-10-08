@@ -632,6 +632,7 @@ internal partial class CoopSave {
         ResetWorldChanges();
         ResetInteractionSession();
         ResetWishes();
+        ResetPartnerAccepts();
         ResetStoryFlags();
         ResetWishTalk();
         ResetLifts();
