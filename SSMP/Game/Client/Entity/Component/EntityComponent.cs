@@ -135,5 +135,11 @@ internal enum EntityComponentType : ushort {
     /// The colour of the sprite, for a player who walks in after the creature changed it (see
     /// <see cref="TintComponent"/>).
     /// </summary>
-    Tint
+    Tint,
+
+    /// <summary>
+    /// Which of some named parts of the creature are switched on, for a player who walks in after the creature
+    /// switched them and for the game that takes it over (see <see cref="PartsComponent"/>).
+    /// </summary>
+    Parts
 }

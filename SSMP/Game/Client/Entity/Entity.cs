@@ -989,6 +989,10 @@ internal partial class Entity {
             //addedComponentsString += $" {type}";
         }
 
+        if (EntityRegistry.TryGetSharedParts(Type, out var partPaths)) {
+            _components[EntityComponentType.Parts] = new PartsComponent(_netClient, Id, Object, partPaths);
+        }
+
         //Logger.Debug(addedComponentsString);
     }
 

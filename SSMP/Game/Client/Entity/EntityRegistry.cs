@@ -52,6 +52,12 @@ internal static class EntityRegistry {
     /// </summary>
     private static readonly Dictionary<EntityType, Dictionary<string, string>> EachGameFrom = new();
 
+    /// <summary>
+    /// For each type of entity whose entry names any, the parts whose being switched on or off goes to the other game
+    /// (see <see cref="EntityRegistryEntry.SharedParts"/>).
+    /// </summary>
+    private static readonly Dictionary<EntityType, string[]> SharedParts = new();
+
     static EntityRegistry() {
         var loadedEntries = FileUtil.LoadObjectFromEmbeddedJson<List<EntityRegistryEntry>>(EntityRegistryFilePath)
                             ?? throw new InvalidDataException("Could not deserialize entries from embedded JSON.");
@@ -99,6 +105,14 @@ internal static class EntityRegistry {
     }
 
     /// <summary>
+    /// Gets the parts of an entity of the given type whose being switched on or off goes to the other game, if its
+    /// entry names any (see <see cref="EntityRegistryEntry.SharedParts"/>).
+    /// </summary>
+    public static bool TryGetSharedParts(EntityType type, [NotNullWhen(true)] out string[]? paths) {
+        return SharedParts.TryGetValue(type, out paths);
+    }
+
+    /// <summary>
     /// Filters out entries whose <see cref="EntityRegistryEntry.TypeName"/> has no mapping in
     /// <see cref="EntityType"/>, and recursively validates children.
     /// </summary>
@@ -141,6 +155,10 @@ internal static class EntityRegistry {
 
             if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {
                 EachGameFrom[entry.Type] = new Dictionary<string, string>(eachGameFrom, StringComparer.Ordinal);
+            }
+
+            if (entry.SharedParts is { Count: > 0 } sharedParts) {
+                SharedParts[entry.Type] = sharedParts.ToArray();
             }
 
             validEntries.Add(entry);
@@ -353,6 +371,15 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("each_game_from")]
     public Dictionary<string, string>? EachGameFrom { get; set; }
+
+    /// <summary>
+    /// Parts of the entity, by their path under it, whose being switched on or off goes from the game that runs the
+    /// creature to the other one, also to a player who walks in later and to the room's own creature that the other
+    /// game will take over (see <see cref="PartsComponent"/>): parts that the creature's first steps switch on and
+    /// that only its first wake switches off, like the cobweb a reed rests in.
+    /// </summary>
+    [JsonProperty("shared_parts")]
+    public List<string>? SharedParts { get; set; }
 
     /// <summary>
     /// Child entries nested under this entry. Populated from the registry file and validated
