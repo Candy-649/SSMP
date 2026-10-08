@@ -429,6 +429,7 @@ internal partial class CoopSave {
         RememberWishes();
         RememberStoryFlags();
         SendPendingWishTurnIns(partner);
+        AskAboutWishesRead(partner);
 
         marker.PartnerName = partner.Username;
         if (partner.SaveKey.Length > 0) {

@@ -623,6 +623,10 @@ internal partial class CoopSave {
         _tookControl = false;
         _everChecked = false;
 
+        // A step of dialogue that waits for the partner doesn't go on: its scene is going, and going on would run what
+        // comes after the wish, like saving the game, on the way out (CoopSave.WishRead)
+        EndHeldBegin(null, false);
+
         // Before the pairing is forgotten, so that a question of the partner still on screen is answered back to them
         // and a button that waited on them is told it is over. ResetWishTalk below runs it again, which does nothing.
         ResetWishConfirm();
@@ -632,7 +636,6 @@ internal partial class CoopSave {
         ResetWorldChanges();
         ResetInteractionSession();
         ResetWishes();
-        ResetPartnerAccepts();
         ResetStoryFlags();
         ResetWishTalk();
         ResetLifts();
@@ -738,6 +741,11 @@ internal partial class CoopSave {
         }
 
         var wasChecked = _checkedWith == id;
+
+        // A step of dialogue that waits for them goes on without the wish, which waits for them to read to it too
+        if (_heldBegin is { } heldBegin && heldBegin.PartnerId == id) {
+            EndHeldBegin(GetPartnerGoneMessage(), true);
+        }
 
         // Before the partner is forgotten: a question of theirs still on screen is answered back to them, and a
         // button that waited on them tells them it is over. Afterwards there is nobody left to address either to.
@@ -1590,6 +1598,9 @@ internal partial class CoopSave {
     private void RemoveLocalPairing(int slot) {
         RemoveMarker(slot);
         if (slot == _sessionSlot) {
+            // The save is its player's alone now, and so is a wish that a step of dialogue waits to begin with the
+            // partner: the step goes on and takes it (CoopSave.WishRead)
+            EndHeldBegin(null, true);
             ReleaseHold(HeroController.instance);
             ResetSession(false);
         }

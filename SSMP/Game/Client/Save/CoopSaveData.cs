@@ -84,6 +84,15 @@ internal class CoopSaveMarker {
     /// </summary>
     [JsonProperty("arrivalsToSee")]
     public List<string> ArrivalsToSee { get; set; } = [];
+
+    /// <summary>
+    /// Wishes that dialogue begins without asking, whose step the local player read to while the partner hadn't, and
+    /// which the dialogue went on from without the wish (see CoopSave.WishRead). The wish is taken in both saves the
+    /// moment the partner reads to the same step. It is kept here so that a game that closes in between doesn't forget
+    /// that its player read it, which a dialogue that is heard only once could never tell it again.
+    /// </summary>
+    [JsonProperty("wishesRead")]
+    public List<string> WishesRead { get; set; } = [];
 }
 
 /// <summary>

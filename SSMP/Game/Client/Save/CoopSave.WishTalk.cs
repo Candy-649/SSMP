@@ -661,15 +661,6 @@ internal partial class CoopSave {
             new Func<Func<FullQuestBase, bool>, FullQuestBase, bool>(OnConsumeWishTarget)
         );
 
-        // Dialogue whose end begins a wish, which only the partner's game accepted yet (CoopSave.PartnerAccepts)
-        AddWishTalkHook(
-            typeof(QuestPlaymakerActions.CheckQuestState).GetMethod(
-                "DoQuestAction", InstanceFlags | BindingFlags.DeclaredOnly, null, [typeof(FullQuestBase)], null
-            ),
-            new Action<Action<QuestPlaymakerActions.CheckQuestState, FullQuestBase>,
-                QuestPlaymakerActions.CheckQuestState, FullQuestBase>(OnCheckWishState)
-        );
-
         // What a character gives in its dialogue. Money that it gives goes through the hook for changes of currency
         AddWishTalkHook(
             typeof(HutongGames.PlayMaker.Actions.SavedItemGet).GetMethod(
@@ -795,6 +786,7 @@ internal partial class CoopSave {
         );
 
         RegisterWishConfirmHook();
+        RegisterWishReadHook();
     }
 
     /// <summary>
@@ -877,6 +869,15 @@ internal partial class CoopSave {
             LogWishTalkError(e);
         }
 
+        // A step of dialogue that waits for the partner must not wait for good because something above throws on
+        // every frame (CoopSave.WishRead)
+        try {
+            UpdateHeldBegin();
+            UpdateLastKeyTalk();
+        } catch (Exception e) {
+            LogWishTalkError(e);
+        }
+
         // Each in its own try: something above that throws on every frame must neither leave a question on the screen,
         // nor leave the hero standing at a board that waits for the partner's answer, nor keep the partner from hearing
         // the progress that counts from either player
@@ -936,9 +937,21 @@ internal partial class CoopSave {
         }
 
         _partnerTalk = null;
+        _lastKeyTalk = null;
         _donationPrompt = null;
         _wishActions.Clear();
         _talkStates.Clear();
+
+        // The dialogue went with its scene before the partner read to the step that begins its wish. The save
+        // remembers that its player read to it, and nothing that came after the step ran, so nothing goes on.
+        if (_heldBegin != null) {
+            EndHeldBegin(Lang.Pick(
+                $"You left before {GetPartnerName()} read to that point, so the wish isn't taken yet. Once they read " +
+                "that dialogue to the same point too, you both take it.",
+                $"{GetPartnerName()} 还没读到那一步你就离开了，这个愿望先不接。等 {GetPartnerName()} 也把那段对话读到同一步，你们会一起接下。"
+            ), false);
+        }
+
         ResetWishConfirm();
         ResetWishCopyChecks();
     }
@@ -954,6 +967,7 @@ internal partial class CoopSave {
         _talkStates.Clear();
         _pendingWishTurnIns.Clear();
         ResetWishConfirm();
+        ResetWishRead();
         ResetWishProgress();
 
         // A donation asked about is asked again by the next yes. A board that waits for the partner's answer is kept:
@@ -985,7 +999,15 @@ internal partial class CoopSave {
             // is asked by their own game, in their own conversation, and a wish is only taken when both have said yes
             // at their own prompt. Both may look at a board at once too; what one of them turns in or donates there
             // meanwhile waits for the other (StartBoardTalk, CanDonateTogether)
-            if (_everChecked && GetCurrentMarker() is { } marker && self is PlayMakerNPC npc) {
+            if (_heldBegin is { } held && held.Npc == self) {
+                // Its dialogue stands at a step that waits for the partner, and talking to it again could move it on
+                // without them (CoopSave.WishRead)
+                Chat(Lang.Pick(
+                    $"Waiting for {GetPartnerName()} to read to the same point.",
+                    $"正在等 {GetPartnerName()} 也读到同一步。"
+                ));
+                allowed = false;
+            } else if (_everChecked && GetCurrentMarker() is { } marker && self is PlayMakerNPC npc) {
                 allowed = TryStartWishTalk(npc, marker);
             }
         } catch (Exception e) {
@@ -1032,6 +1054,7 @@ internal partial class CoopSave {
         EndWishTalk();
         var talk = new WishTalk(npc, fsms, true);
         _wishTalk = talk;
+        _lastKeyTalk = talk;
         Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
         Logger.Info($"Key dialogue with '{npc.name}' starts with {partner.Username} close by");
         return true;
@@ -1504,10 +1527,6 @@ internal partial class CoopSave {
 
         var wasActive = self.IsAccepted && !self.IsCompleted;
         orig(self, afterPrompt, showPrompt);
-        if (!_applyingPartnerTalk) {
-            NoteWishBegunHere(self.name);
-        }
-
         if (!_applyingPartnerTalk && !wasActive && self.IsAccepted && !self.IsCompleted) {
             AddTalkWish(self);
         }

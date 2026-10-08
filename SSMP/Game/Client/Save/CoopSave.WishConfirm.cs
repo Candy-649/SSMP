@@ -313,6 +313,7 @@ internal partial class CoopSave {
             partnerAt.Kind == meeting.Kind && partnerAt.Wish == meeting.Wish) {
             _partnerWishWait = null;
             SendConfirmAnswer(partnerAt.PartnerId, partnerAt.Key, true);
+            NoteWishAgreedAtPrompt(GetWishKey(meeting));
             Chat(meeting.Kind switch {
                 WishConfirmRace => Lang.Pick("You both said yes, so you race together.", "你们都选了「是」，一起跑。"),
                 WishConfirmAid => Lang.Pick(
@@ -382,8 +383,10 @@ internal partial class CoopSave {
             }
 
             // Said no at this player's own box, which is the answer the partner is standing at theirs waiting for.
-            // Without this they would wait out their whole time for a no that was already given.
-            if (_partnerWishWait is { } waiting && IsPromptAboutWish(self, waiting)) {
+            // Without this they would wait out their whole time for a no that was already given. A partner who read
+            // to a step of dialogue that begins the wish has nothing to take back, and gets it with this player
+            // whenever they say yes to it after all (CoopSave.WishRead).
+            if (_partnerWishWait is { IsRead: false } waiting && IsPromptAboutWish(self, waiting)) {
                 _partnerWishWait = null;
                 SendConfirmAnswer(waiting.PartnerId, waiting.Key, false);
                 Chat(Lang.Pick(
@@ -709,6 +712,13 @@ internal partial class CoopSave {
                     // raced by one of them after the other had said no
                     if (_partnerWishWait is { } partnerAt && partnerAt.Key == update.Key) {
                         _partnerWishWait = null;
+
+                        // A partner whose dialogue went on from the step that begins the wish still gets it with this
+                        // player once they read to the same step, which is what they were told already
+                        if (partnerAt.IsRead) {
+                            break;
+                        }
+
                         Chat(Lang.Pick(
                             $"The yes of {partnerAt.PartnerName} no longer stands.",
                             $"{partnerAt.PartnerName} 的「是」已经不算数了。"
@@ -726,6 +736,26 @@ internal partial class CoopSave {
     /// Runs the answer that waited for the partner, once they agreed or refused.
     /// </summary>
     private void AnswerHeldConfirm(ulong key, bool agreed, string message) {
+        // A step of dialogue that begins a wish has no no to answer. It waits until the partner reads to the same
+        // step, or its own time runs out (CoopSave.WishRead).
+        if (_heldBegin is { } begin && begin.Key == key) {
+            if (agreed) {
+                ReleaseHeldBegin(Lang.Pick(
+                    $"{GetPartnerName()} got to it too, so you both take the wish.",
+                    $"{GetPartnerName()} 也到了这一步，你们一起接下这个愿望。"
+                ));
+            } else {
+                Logger.Info($"The partner's game turned down the wait at '{begin.Wish}', which waits on all the same");
+            }
+
+            return;
+        }
+
+        // The answer to a wait at a step of dialogue that ended already, or to an ask as a check ended
+        if (AnswerEndedRead(key, agreed)) {
+            return;
+        }
+
         if (_wishConfirm is not { } held || held.Key != key) {
             return;
         }
@@ -754,6 +784,7 @@ internal partial class CoopSave {
             }
 
             Chat(message);
+            NoteWishAgreedAtPrompt(held.WishKey);
             held.Proceed();
             return;
         }
@@ -868,6 +899,10 @@ internal partial class CoopSave {
         // partner standing at the character is told no and cannot take a wish this save already holds. Which is
         // exactly what happened to the player who went away and came back to find their partner had taken it.
         if (IsWishThisSaveAlreadyHas(update)) {
+            if (GetAskWish(update) is { Kind: WishConfirmAccept } had) {
+                ForgetWishRead(had.Wish);
+            }
+
             SendConfirmAnswer(player.Id, update.Key, true);
             Logger.Info(
                 $"Agreed to the wish of {player.Username} without asking, because this save already has it"
@@ -879,6 +914,12 @@ internal partial class CoopSave {
         // short, the partner hears it at once, with what this save has, rather than standing at their prompt until
         // their time runs out for a yes that could never come
         if (RefuseTurnInThisSaveCannotPay(player, update)) {
+            return;
+        }
+
+        // An ask as a check ends whether this save remembers reading to a wish too, which puts nothing in front of
+        // this player (CoopSave.WishRead)
+        if (AnswerReadCheck(player, update)) {
             return;
         }
 
@@ -952,14 +993,43 @@ internal partial class CoopSave {
             return;
         }
 
+        // This player stands at the step of dialogue that begins the same wish, waiting for exactly this
+        if (_heldBegin is { } begin && begin.WishKey == wishKey) {
+            SendConfirmAnswer(player.Id, update.Key, true);
+            ReleaseHeldBegin(Lang.Pick(
+                $"{player.Username} got to it too, so you both take the wish.",
+                $"{player.Username} 也到了这一步，你们一起接下这个愿望。"
+            ));
+            return;
+        }
+
+        // This player read to that step before and the dialogue went on without the wish, which waited for the
+        // partner to get to it too. Now they have.
+        if (asked.Kind == WishConfirmAccept && HasReadWish(asked.Wish)) {
+            SendConfirmAnswer(player.Id, update.Key, true);
+            TakeReadWish(asked.Wish);
+            Chat(Lang.Pick(
+                $"{player.Username} got to the wish that you read to before, so you both took it.",
+                $"{player.Username} 也到了你之前读到的那个愿望，你们一起接下了它。"
+            ));
+            return;
+        }
+
         // One at a time. The one already waiting is answered rather than forgotten, or it would stand at its box
         // until its own time ran out over a question nobody was listening for any more.
         if (_partnerWishWait is { } older) {
             SendConfirmAnswer(older.PartnerId, older.Key, false);
         }
 
-        _partnerWishWait = new PartnerWishWait(player.Id, player.Username, update.Key, asked.Kind, asked.Wish);
-        Chat(asked.Kind switch {
+        var isRead = update.Records.Count > 1 && update.Records[1] == WishConfirmRead;
+        _partnerWishWait = new PartnerWishWait(player.Id, player.Username, update.Key, asked.Kind, asked.Wish, isRead);
+        Chat(isRead
+            ? Lang.Pick(
+                $"{player.Username} read to where a wish is taken. Read the dialogue of the same character to that " +
+                "point too, and you both take it.",
+                $"{player.Username} 读到了接下一个愿望的那一步。你也和同一个角色把对话读到那里，你们就一起接下。"
+            )
+            : asked.Kind switch {
             WishConfirmRace => Lang.Pick(
                 $"{player.Username} wants to start a race. Talk to the racer and say yes too, and you both run.",
                 $"{player.Username} 想开始比赛。你也去跟对手说话、选「是」，就一起跑。"
@@ -983,7 +1053,10 @@ internal partial class CoopSave {
                 $"{player.Username} 在他们那边同意交付这个愿望了。你也在自己的选项上选「是」。"
             )
         });
-        Logger.Info($"{player.Username} is waiting at their own box about the wish '{asked.Wish}' ({asked.Kind})");
+        Logger.Info(
+            $"{player.Username} is waiting at their own {(isRead ? "step of dialogue" : "box")} about the wish " +
+            $"'{asked.Wish}' ({asked.Kind})"
+        );
     }
 
     /// <summary>
@@ -1316,9 +1389,17 @@ internal partial class CoopSave {
             SendConfirmAnswer(shown.PartnerId, shown.Key, false);
         }
 
+        // A partner who read to a step of dialogue waits for as long as they stay the partner of the check, and one who
+        // left took their wait with them
+        if (_partnerWishWait is { IsRead: true } readWait && readWait.PartnerId != _checkedWith) {
+            _partnerWishWait = null;
+        }
+
         // A partner standing at their own box is not waited on forever. They are told no, and this player is told
         // why, since from their side nothing visible ever happened at all.
-        if (_partnerWishWait is { } wishWait && now - wishWait.Started > WishConfirmTimeout) {
+        // A partner who read to a step of dialogue is not, though: they have nothing to be told no about, and get the
+        // wish with this player whenever this player reads to the same step (CoopSave.WishRead)
+        if (_partnerWishWait is { IsRead: false } wishWait && now - wishWait.Started > WishConfirmTimeout) {
             _partnerWishWait = null;
             SendConfirmAnswer(wishWait.PartnerId, wishWait.Key, false);
             Chat(wishWait.Kind == WishConfirmRace
@@ -1485,13 +1566,20 @@ internal partial class CoopSave {
     /// A wish the partner has said yes to at their own box, waiting for the local player to say yes at theirs.
     /// </summary>
     private sealed class PartnerWishWait {
-        public PartnerWishWait(ushort partnerId, string partnerName, ulong key, string kind, string wish) {
+        public PartnerWishWait(ushort partnerId, string partnerName, ulong key, string kind, string wish, bool isRead) {
             PartnerId = partnerId;
             PartnerName = partnerName;
             Key = key;
             Kind = kind;
             Wish = wish;
+            IsRead = isRead;
         }
+
+        /// <summary>
+        /// Whether they read to a step of dialogue that begins the wish, rather than said yes at a prompt. Such a step
+        /// can't be answered no, so it is never told no either: it waits for this player to read to the same step.
+        /// </summary>
+        public bool IsRead { get; }
 
         /// <summary>
         /// The player waiting, who is answered.
