@@ -1629,10 +1629,6 @@
     "fsm_names": [
       "Control",
       "call_handmaiden"
-    ],
-    "shared_parts": [
-      "Cobweb1",
-      "Cobweb2"
     ]
   },
   {

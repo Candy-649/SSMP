@@ -989,8 +989,15 @@ internal partial class Entity {
             //addedComponentsString += $" {type}";
         }
 
-        if (EntityRegistry.TryGetSharedParts(Type, out var partPaths)) {
+        // The parts that the creature's own FSMs dress it in, which a player walking in later and a game taking the
+        // creature over would otherwise not know about. An FSM that each game runs by itself dresses each game's
+        // creature by itself.
+        var partPaths = PartsComponent.FindParts(Object.Host, _fsms.Host.Where(fsm => !IsRunByEachGame(fsm)));
+        if (partPaths.Count > 0) {
             _components[EntityComponentType.Parts] = new PartsComponent(_netClient, Id, Object, partPaths);
+            SSMP.Logging.Logger.Info(
+                $"'{Object.Host.name}' ({Id}, {Type}) has parts that its FSMs switch: {string.Join(", ", partPaths)}"
+            );
         }
 
         //Logger.Debug(addedComponentsString);

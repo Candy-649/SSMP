@@ -138,8 +138,8 @@ internal enum EntityComponentType : ushort {
     Tint,
 
     /// <summary>
-    /// Which of some named parts of the creature are switched on, for a player who walks in after the creature
-    /// switched them and for the game that takes it over (see <see cref="PartsComponent"/>).
+    /// Which of the parts that the creature's FSMs dress it in are switched on, for a player who walks in after the
+    /// creature switched them and for the game that takes it over (see <see cref="PartsComponent"/>).
     /// </summary>
     Parts
 }
