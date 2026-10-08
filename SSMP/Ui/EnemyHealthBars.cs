@@ -146,9 +146,18 @@ internal class EnemyHealthBars {
     private readonly Dictionary<HealthManager, Bar> _bars = new();
 
     /// <summary>
-    /// The bars of bosses that are shown, from the bottom of the screen up, in the order that they were hit first.
+    /// The bars of bosses that are shown, by their numbers.
     /// </summary>
     private readonly List<Bar> _bossBars = [];
+
+    /// <summary>
+    /// The bosses of the scene that have had a bar along the bottom of the screen and are still there, in the order of
+    /// their numbers: by the name of the room's own boss, which its copy in the other game has too, and bosses of one
+    /// name in the order they first had a bar. Numbered in the order they were hit first, as they were, each game numbered them as it saw the
+    /// first hits, and the time that the partner's hits take to arrive can turn those round: the boss that was 1 for
+    /// one player could be 2 for the other.
+    /// </summary>
+    private readonly List<Bar> _numberedBosses = [];
 
     /// <summary>
     /// The creatures whose health the game counts as active, gathered anew every frame.
@@ -224,6 +233,7 @@ internal class EnemyHealthBars {
 
         _bars.Clear();
         _bossBars.Clear();
+        _numberedBosses.Clear();
     }
 
     /// <summary>
@@ -316,14 +326,31 @@ internal class EnemyHealthBars {
     }
 
     /// <summary>
-    /// Adds the bar of a boss to the bars along the bottom of the screen, with a number that no other boss there has.
-    /// A boss that comes back keeps its number if it is still free.
+    /// Adds the bar of a boss to the bars along the bottom of the screen, with the number that its name gives it among
+    /// the bosses of the scene (see <see cref="_numberedBosses"/>). A boss that comes back keeps its number.
     /// </summary>
     private void AddBossBar(Bar bar) {
-        if (bar.Number <= 0 || _bossBars.Exists(other => other.Number == bar.Number)) {
-            bar.Number = 1;
-            while (_bossBars.Exists(other => other.Number == bar.Number)) {
-                bar.Number++;
+        if (!_numberedBosses.Contains(bar)) {
+            // A boss that died or is gone counts no more, so that a game that never had its bar, like one whose player
+            // walked in after it died, numbers the bosses that are left the same way
+            _numberedBosses.RemoveAll(other => other.IsGone);
+
+            // A boss of the same name whose bar is gone hands its number on: the copy of a boss that this game has just
+            // taken over, whose bar is now the one of the room's own boss, or a boss that came back as another object.
+            // One that the game no longer counts as active is gone even before its bar is taken down in this frame
+            var gone = _numberedBosses.FindIndex(other =>
+                other.BossName == bar.BossName &&
+                (other.SeenFrame != Time.frameCount || !_bossBars.Contains(other))
+            );
+            if (gone >= 0) {
+                _numberedBosses[gone] = bar;
+            } else {
+                var at = _numberedBosses.FindIndex(other => string.CompareOrdinal(other.BossName, bar.BossName) > 0);
+                _numberedBosses.Insert(at < 0 ? _numberedBosses.Count : at, bar);
+            }
+
+            for (var i = 0; i < _numberedBosses.Count; i++) {
+                _numberedBosses[i].Number = i + 1;
             }
         }
 
@@ -382,11 +409,14 @@ internal class EnemyHealthBars {
     }
 
     /// <summary>
-    /// Stacks the bars of the bosses that are shown from the bottom of the screen up.
+    /// Stacks the bars of the bosses that are shown from the bottom of the screen up, the lowest number on top, so that
+    /// they read 1, 2 from the top down. With 1 at the bottom and 2 above it, they were read the wrong way round (USER
+    /// 10-08, "上2下1"). A single bar stays at the bottom.
     /// </summary>
     private void PlaceBossBars() {
         for (var i = 0; i < _bossBars.Count; i++) {
-            _bossBars[i].PlaceAtBottom(BossBarBottom + i * (BossBarHeight + 2f * Edge + BossBarSpacing));
+            var fromTheBottom = _bossBars.Count - 1 - i;
+            _bossBars[i].PlaceAtBottom(BossBarBottom + fromTheBottom * (BossBarHeight + 2f * Edge + BossBarSpacing));
         }
     }
 
@@ -541,6 +571,16 @@ internal class EnemyHealthBars {
         /// The number of a boss among the bosses that fight together, or 0 before it had one.
         /// </summary>
         public int Number;
+
+        /// <summary>
+        /// The name of the room's own creature, which its copy in the other game has with "(Clone)" after it.
+        /// </summary>
+        public string BossName { get; } = healthManager.name.Replace("(Clone)", "").Trim();
+
+        /// <summary>
+        /// Whether the creature is dead or gone altogether.
+        /// </summary>
+        public bool IsGone => _healthManager == null || _healthManager.isDead;
 
         /// <summary>
         /// Whether the creature is a boss, whose bar is along the bottom of the screen.
