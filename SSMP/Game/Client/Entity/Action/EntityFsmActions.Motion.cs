@@ -696,6 +696,21 @@ internal static partial class EntityFsmActions {
             return true;
         }
 
+        foreach (var letGo in PartsLetGoBy(creature)) {
+            if (transform.IsChildOf(letGo.transform)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// What a creature's own FSMs let go of into the room by giving it no parent, as their variables hold it now:
+    /// neither the creature itself nor a player.
+    /// </summary>
+    private static List<GameObject> PartsLetGoBy(GameObject creature) {
+        var parts = new List<GameObject>();
         foreach (var fsm in creature.GetComponents<PlayMakerFSM>()) {
             foreach (var state in fsm.FsmStates) {
                 var actions = state.Actions;
@@ -713,14 +728,38 @@ internal static partial class EntityFsmActions {
                         _ => null
                     };
 
-                    if (letGo != null && letGo != creature && transform.IsChildOf(letGo.transform)) {
-                        return true;
+                    if (letGo != null && letGo != creature && !IsAPlayer(letGo) && !parts.Contains(letGo)) {
+                        parts.Add(letGo);
                     }
                 }
             }
         }
 
-        return false;
+        return parts;
+    }
+
+    /// <summary>
+    /// Switches off what a creature's copy let go of into the room, when this game takes the creature over and the copy
+    /// itself is switched off: it is the copy's, like the parts under it, which go off with it, and the room's own
+    /// creature goes on with its own. Left on, the censer of a boss that was thrown when the other player left stayed
+    /// for good where the copy's throw stopped - in the air, with the hurting part of it on - and its chain beside it.
+    /// Only what was made with the copy is switched off: not the room's own, nor another creature, nor what the
+    /// copy's variables may have been pointed at in the room.
+    /// </summary>
+    /// <param name="copy">The copy of the creature.</param>
+    /// <param name="room">The room's own creature, which takes over.</param>
+    /// <param name="madeWithCopy">Everything that was under the copy when it was made.</param>
+    internal static void SwitchOffWhatTheCopyLetGo(GameObject copy, GameObject? room, Transform[] madeWithCopy) {
+        var roomOwn = room == null ? [] : PartsLetGoBy(room);
+        foreach (var part in PartsLetGoBy(copy)) {
+            var transform = part.transform;
+            if (Array.IndexOf(madeWithCopy, transform) < 0 || transform.IsChildOf(copy.transform) ||
+                roomOwn.Contains(part) || IsObjectInRegistry(part)) {
+                continue;
+            }
+
+            part.SetActive(false);
+        }
     }
 
     /// <summary>

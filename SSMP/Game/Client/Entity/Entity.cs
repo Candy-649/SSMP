@@ -408,6 +408,8 @@ internal partial class Entity {
             _hasParent = true;
         }
 
+        _madeWithCopy = Object.Client.GetComponentsInChildren<Transform>(true);
+
         Object.Client.transform.localScale = _lastScale = _hasParent
             ? Object.Host.transform.localScale
             : Object.Host.transform.lossyScale;
@@ -2041,6 +2043,12 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Everything that was under the copy when it was made, by which what its FSMs let go of into the room is told from
+    /// anything else (see <see cref="EntityFsmActions.SwitchOffWhatTheCopyLetGo"/>).
+    /// </summary>
+    private readonly Transform[] _madeWithCopy;
+
+    /// <summary>
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
@@ -2239,6 +2247,12 @@ internal partial class Entity {
         // A player that the copy holds stays held by the room's own creature, which goes on from there
         StopRunningHere(letGoOfThePlayer: false);
         EntityFsmActions.LeaveStatesOf(_fsms.Client);
+
+        // Not from a copy that is off already, like one that died: what it dropped as it went stays, as it does in the
+        // room's own creature's game, which never let go of anything of its own in its place
+        if (Object.Client.activeSelf) {
+            EntityFsmActions.SwitchOffWhatTheCopyLetGo(Object.Client, Object.Host, _madeWithCopy);
+        }
 
         // What the copy kept in the save goes to the room's own creature, which saves it from now on
         HandSaveToTheRoom();
