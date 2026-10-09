@@ -45,7 +45,7 @@ internal class PlayerManager : IPlayerManager {
     /// <summary>
     /// The name (and prefix) of the game object for player containers.
     /// </summary>
-    private const string PlayerContainerName = "Player Container";
+    internal const string PlayerContainerName = "Player Container";
 
     /// <summary>
     /// The name of the game object for the username of players.

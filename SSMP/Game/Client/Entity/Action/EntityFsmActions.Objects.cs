@@ -425,13 +425,16 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// Gives an object let out of an entity its own physics back, so that what the world does to it happens.
+    /// Gives an object let out of an entity its own physics back, so that what the world does to it happens. Each body
+    /// gets back the kind the game made it as, which the copy's build took from it, or the kind the other game set it
+    /// to since (EntityInitializer.GiveBackBodyType): all of them were made to move by themselves, so the two ends of
+    /// the chain that a boss throws a censer on, which the game holds wherever it puts them, were left to fall here.
     /// </summary>
     /// <param name="gameObject">The object that was let go of.</param>
     private static void RestoreOwnPhysics(GameObject gameObject) {
         foreach (var rigidbody in gameObject.GetComponentsInChildren<Rigidbody2D>(true)) {
-            if (rigidbody != null && rigidbody.bodyType == RigidbodyType2D.Kinematic) {
-                rigidbody.bodyType = RigidbodyType2D.Dynamic;
+            if (rigidbody != null) {
+                EntityInitializer.GiveBackBodyType(rigidbody);
             }
         }
     }

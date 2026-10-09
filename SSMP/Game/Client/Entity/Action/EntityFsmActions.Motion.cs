@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Entity.Component;
@@ -169,10 +170,25 @@ internal static partial class EntityFsmActions {
     #region SetPosition
 
     /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// One that puts its object in place every frame from then on has not put it anywhere yet. A part of the creature
+    /// is then put in place by the copy itself every frame, from the values that the scene host keeps sending (see
+    /// <see cref="WriteMovingPart"/>). A boss that throws a censer on a chain flies it by putting it every frame on a
+    /// curve that it eases along: sent once as each half of the throw started, the copy's censer stood where that half
+    /// started it and showed up on the ground when it landed (USER 10-09).
+    /// </remarks>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetPosition action) {
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
             return false;
+        }
+
+        if (action.everyFrame && !action.lateUpdate) {
+            var movesHere = IsMovingPart(action, gameObject);
+            data.Packet.Write(movesHere);
+            if (movesHere) {
+                return WritePartPlace(data, action, gameObject);
+            }
         }
 
         Vector3 vector3;
@@ -231,6 +247,9 @@ internal static partial class EntityFsmActions {
             if (!action.z.IsNone) {
                 vector3.z = action.z.Value;
             }
+        } else if (action.everyFrame && !action.lateUpdate && data.Packet.ReadBool()) {
+            PutPartHere(data, action, gameObject);
+            return;
         } else {
             vector3 = new Vector3(
                 data.Packet.ReadFloat(),
@@ -266,6 +285,10 @@ internal static partial class EntityFsmActions {
     ///
     /// Only an object under the creature itself, or under nothing, is sent this way: the copy's object sits under the
     /// same parent there. One under something else, like the hero that a part was put on, may not on the copy.
+    ///
+    /// One that turns a part of the creature every frame from then on, by angles, is turned by the copy itself every
+    /// frame, from the values that the scene host keeps sending (see <see cref="WriteTurningPart"/>), like a chain that
+    /// a boss pulls back, turned each frame to the angle the boss works out for it.
     /// </remarks>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetRotation action) {
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
@@ -290,10 +313,19 @@ internal static partial class EntityFsmActions {
             return true;
         }
 
+        data.Packet.Write(false);
+        if (action.everyFrame && !action.lateUpdate) {
+            // Not a turn held in a quaternion, whose variables the scene host does not send
+            var turnsHere = action.quaternion.IsNone && IsMovingPart(action, gameObject);
+            data.Packet.Write(turnsHere);
+            if (turnsHere) {
+                WriteTurningPart(data, action, gameObject);
+                return true;
+            }
+        }
+
         // Turned from the next frame on, the object isn't turned yet, and what it is about to be turned to is sent, as
         // is the turn of an object under something other than the creature
-        data.Packet.Write(false);
-
         Vector3 vector3;
         if (action.quaternion.IsNone) {
             if (action.vector.IsNone) {
@@ -359,6 +391,9 @@ internal static partial class EntityFsmActions {
                 gameObject.transform.localRotation = turn;
             }
 
+            return;
+        } else if (action.everyFrame && !action.lateUpdate && data.Packet.ReadBool()) {
+            TurnPartHere(data, action, gameObject);
             return;
         } else {
             // Client path: always consume packet bytes to keep the stream in sync,
@@ -536,16 +571,22 @@ internal static partial class EntityFsmActions {
     /// set in the FSM or held by its variables, for the copy to move its own part the same way (see
     /// <see cref="MovePartHere"/>). Only the decision goes: the moving is each game's own, and goes on through a
     /// stall in between. The creature itself is left out, which is kept in step by its own position, and so is
-    /// anything not its own.
+    /// anything not its own (see <see cref="IsOwnPart"/>).
     /// </summary>
     /// <param name="data">The network data.</param>
     /// <param name="action">The action.</param>
     /// <param name="gameObject">The object that the action moves.</param>
     /// <returns>Whether it moves a part of its creature, and so anything was written.</returns>
     private static bool WriteMovingPart(EntityNetworkData data, FsmStateAction action, GameObject? gameObject) {
-        var creature = action.Fsm.GameObject;
-        if (gameObject == null || creature == null || !gameObject.transform.IsChildOf(creature.transform) ||
-            !WritePlace(data, action, gameObject)) {
+        return IsOwnPart(action, gameObject) && WritePartPlace(data, action, gameObject);
+    }
+
+    /// <summary>
+    /// Writes where a part of the creature starts and all that the action is given as it starts (see
+    /// <see cref="WriteMovingPart"/>), for an object already known to be such a part.
+    /// </summary>
+    private static bool WritePartPlace(EntityNetworkData data, FsmStateAction action, GameObject? gameObject) {
+        if (!WritePlace(data, action, gameObject)) {
             return false;
         }
 
@@ -574,6 +615,199 @@ internal static partial class EntityFsmActions {
         var ownValues = ReadValues(data, action);
         RunInState(action, everyStep);
         PutBack(ownValues);
+    }
+
+    /// <summary>
+    /// Writes how a part of the creature that an action turns every frame from now on starts out turned under its
+    /// parent, and all that the action is given as it starts in this game (see <see cref="WriteValues"/>), for the
+    /// copy to go on turning its own part the same way (see <see cref="TurnPartHere"/>).
+    /// </summary>
+    private static void WriteTurningPart(EntityNetworkData data, FsmStateAction action, GameObject gameObject) {
+        var turn = gameObject.transform.localRotation;
+        data.Packet.Write(turn.x);
+        data.Packet.Write(turn.y);
+        data.Packet.Write(turn.z);
+        data.Packet.Write(turn.w);
+        WriteValues(data, action);
+    }
+
+    /// <summary>
+    /// Turns a part of the copy every frame the way the game that runs the creature turns its own (see
+    /// <see cref="WriteTurningPart"/>) until the scene host's FSM leaves the state, as <see cref="MovePartHere"/>
+    /// moves one.
+    /// </summary>
+    private static void TurnPartHere(EntityNetworkData data, FsmStateAction action, GameObject? gameObject) {
+        var turn = new Quaternion(
+            data.Packet.ReadFloat(),
+            data.Packet.ReadFloat(),
+            data.Packet.ReadFloat(),
+            data.Packet.ReadFloat()
+        );
+        if (gameObject != null) {
+            gameObject.transform.localRotation = turn;
+        }
+
+        var ownValues = ReadValues(data, action);
+        RunInState(action);
+        PutBackNewer(ownValues);
+    }
+
+    /// <summary>
+    /// Puts a part of the copy in place every frame the way the game that runs the creature puts its own (see
+    /// <see cref="WriteMovingPart"/>) until the scene host's FSM leaves the state. Unlike a part that an action moves on
+    /// from where it starts (<see cref="MovePartHere"/>), what this one is put at is read again every frame, from the
+    /// copy's variables, which keep what the action was given unless newer came with it (see
+    /// <see cref="PutBackNewer"/>).
+    /// </summary>
+    private static void PutPartHere(EntityNetworkData? data, FsmStateAction action, GameObject? gameObject) {
+        if (data == null) {
+            return;
+        }
+
+        ReadPlace(data, gameObject);
+        var ownValues = ReadValues(data, action);
+        RunInState(action);
+        PutBackNewer(ownValues);
+    }
+
+    /// <summary>
+    /// Whether an object is a part of its creature that the copy moves, turns or puts in place itself when an action
+    /// does so to it over a while: one of its own parts (see <see cref="IsOwnPart"/>) that nothing but replays keeps
+    /// in step.
+    /// </summary>
+    private static bool IsMovingPart(FsmStateAction action, GameObject? gameObject) {
+        return IsOwnPart(action, gameObject) && IsKeptInStepByReplays(gameObject, action);
+    }
+
+    /// <summary>
+    /// Whether an object is a part of the creature whose FSM an action is in: something under the creature, or
+    /// something that one of the creature's own FSMs lets go of into the room by giving it no parent, with what is
+    /// under it. A boss that throws a censer on a chain lets go of both as it starts, and they are its own all the
+    /// same: the copy has its own of each, let go of the same way. Neither the creature itself nor a player is.
+    /// </summary>
+    private static bool IsOwnPart(FsmStateAction action, GameObject? gameObject) {
+        var creature = action.Fsm.GameObject;
+        if (gameObject == null || creature == null || gameObject == creature || IsAPlayer(gameObject)) {
+            return false;
+        }
+
+        var transform = gameObject.transform;
+        if (transform.IsChildOf(creature.transform)) {
+            return true;
+        }
+
+        foreach (var fsm in creature.GetComponents<PlayMakerFSM>()) {
+            foreach (var state in fsm.FsmStates) {
+                var actions = state.Actions;
+                if (actions == null) {
+                    continue;
+                }
+
+                foreach (var stateAction in actions) {
+                    var letGo = stateAction switch {
+                        SetParent { gameObject: not null } setParent when IsNoParent(setParent.parent) =>
+                            fsm.Fsm.GetOwnerDefaultTarget(setParent.gameObject),
+                        SetTransformParent { gameObject: not null } setTransformParent
+                            when IsNoParent(setTransformParent.parent) =>
+                            fsm.Fsm.GetOwnerDefaultTarget(setTransformParent.gameObject),
+                        _ => null
+                    };
+
+                    if (letGo != null && letGo != creature && transform.IsChildOf(letGo.transform)) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the parent that an action puts something under is none at all, as set in the FSM, rather than a
+    /// variable that happens to hold none just now.
+    /// </summary>
+    private static bool IsNoParent(FsmGameObject? parent) {
+        return parent == null || string.IsNullOrEmpty(parent.Name) && parent.Value == null;
+    }
+
+    /// <summary>
+    /// Whether an object is a player's character, or something on one: this game's own, or the figure of a partner.
+    /// </summary>
+    private static bool IsAPlayer(GameObject gameObject) {
+        var hero = HeroController.instance;
+        if (hero != null && gameObject.transform.IsChildOf(hero.transform)) {
+            return true;
+        }
+
+        return gameObject.transform.root.name.StartsWith(PlayerManager.PlayerContainerName, StringComparison.Ordinal);
+    }
+
+    /// <summary>
+    /// Whether what an action puts its object at is the creature itself or one of its own parts (see
+    /// <see cref="IsOwnPart"/>), which the copy has too. What else the copy's variables hold may not be what the scene
+    /// host's held: the player that a creature is after is the scene host's there and this game's own here.
+    /// </summary>
+    private static bool FollowsItsOwn(FsmStateAction action, GameObject? followed) {
+        return followed != null && (followed == action.Fsm.GameObject || IsOwnPart(action, followed));
+    }
+
+    /// <summary>
+    /// Writes what an action that puts its object at a place every frame from then on did as its state started: for
+    /// a part of the creature, all that the copy needs to go on putting its own part in place every frame (see
+    /// <see cref="WriteMovingPart"/>), and for anything else where the object was put, as for an action done once.
+    /// </summary>
+    /// <param name="data">The network data.</param>
+    /// <param name="action">The action.</param>
+    /// <param name="gameObject">The object that the action puts in place.</param>
+    /// <param name="followsItsOwn">
+    /// Whether what the action puts the object at is something the copy has too (see <see cref="FollowsItsOwn"/>).
+    /// </param>
+    private static bool WriteEveryFramePlace(
+        EntityNetworkData data,
+        FsmStateAction action,
+        GameObject? gameObject,
+        bool followsItsOwn = true
+    ) {
+        var movesHere = followsItsOwn && IsMovingPart(action, gameObject);
+        if (!movesHere && !IsKeptInStepByReplays(gameObject, action)) {
+            return false;
+        }
+
+        data.Packet.Write(movesHere);
+        return movesHere ? WritePartPlace(data, action, gameObject) : WritePlace(data, action, gameObject);
+    }
+
+    /// <summary>
+    /// Reads what <see cref="WriteEveryFramePlace"/> wrote: a part goes on being put in place by the copy itself, and
+    /// anything else is put where the game that runs the creature put it.
+    /// </summary>
+    /// <param name="data">The network data, or null when it sets up the creature's first states.</param>
+    /// <param name="action">The action.</param>
+    /// <param name="gameObject">The object that the action puts in place.</param>
+    /// <param name="followsItsOwn">
+    /// Whether what the copy's action puts the object at is the copy or its own part (see
+    /// <see cref="FollowsItsOwn"/>): the copy's variable for it is its own, which the scene host does not send, and
+    /// one holding anything else is put where the scene host's part was put, once, as before.
+    /// </param>
+    private static void ReadEveryFramePlace(
+        EntityNetworkData? data,
+        FsmStateAction action,
+        GameObject? gameObject,
+        bool followsItsOwn = true
+    ) {
+        if (data != null && data.Packet.ReadBool()) {
+            if (followsItsOwn) {
+                PutPartHere(data, action, gameObject);
+            } else {
+                ReadPlace(data, gameObject);
+                PutBack(ReadValues(data, action));
+            }
+
+            return;
+        }
+
+        ReadPlace(data, gameObject);
     }
 
     /// <summary>
@@ -659,6 +893,46 @@ internal static partial class EntityFsmActions {
                 variable.RawValue = own;
             }
         }
+    }
+
+    /// <summary>
+    /// Like <see cref="PutBack"/>, for an action that reads its variables again every frame: a variable gets back what
+    /// it held only if the scene host's value of it came in this frame, with the action's data or just before it,
+    /// and is then at least as new as what the action was given. One that came earlier is older than the start of the
+    /// action. The scene host sends a variable when it sees it change, which can be a frame after the state it changed
+    /// in was entered, so the copy can get the action first: a censer that a boss puts on a curve every frame was put
+    /// back on the end of the last throw's curve, where it showed until the new curve came in.
+    /// </summary>
+    private static void PutBackNewer(List<(NamedVariable Variable, object Own, object Given)>? ownValues) {
+        if (ownValues == null) {
+            return;
+        }
+
+        foreach (var (variable, own, given) in ownValues) {
+            if (Equals(variable.RawValue, given) && HostWroteThisFrame(variable)) {
+                variable.RawValue = own;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The frame in which the scene host's value of each variable of a copy's FSM last reached it (see
+    /// <see cref="NoteHostWrote"/>).
+    /// </summary>
+    private static readonly ConditionalWeakTable<NamedVariable, StrongBox<int>> HostWriteFrames = new();
+
+    /// <summary>
+    /// Notes that the scene host's value of a variable has just been written into the copy's FSM.
+    /// </summary>
+    internal static void NoteHostWrote(NamedVariable variable) {
+        HostWriteFrames.GetValue(variable, _ => new StrongBox<int>()).Value = Time.frameCount;
+    }
+
+    /// <summary>
+    /// Whether the scene host's value of a variable of a copy's FSM was written into it in this frame.
+    /// </summary>
+    private static bool HostWroteThisFrame(NamedVariable variable) {
+        return HostWriteFrames.TryGetValue(variable, out var frame) && frame.Value == Time.frameCount;
     }
 
     /// <summary>
@@ -1157,12 +1431,25 @@ internal static partial class EntityFsmActions {
         // the copy's own FSM here set moving (PlayHere). The room's own body, taken over, keeps the kind the other
         // game last left it as (BodyTypeComponent), not one its FSM starts with.
         var go = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
-        if (go == null || !action.isKinematic.Value && go.transform.IsChildOf(action.Fsm.GameObject.transform)) {
+        if (go == null) {
             return;
         }
 
         var rigidbody = go.GetComponent<Rigidbody2D>();
         if (rigidbody == null) {
+            return;
+        }
+
+        // What the other game made one of the creature's bodies is noted all the same, for when the creature lets go of
+        // it (RestoreOwnPhysics): one set moving while it was carried, and kept still here, moves by itself from then on
+        if (go != action.Fsm.GameObject) {
+            EntityInitializer.NoteBodyType(
+                rigidbody,
+                action.isKinematic.Value ? RigidbodyType2D.Kinematic : RigidbodyType2D.Dynamic
+            );
+        }
+
+        if (!action.isKinematic.Value && go.transform.IsChildOf(action.Fsm.GameObject.transform)) {
             return;
         }
 

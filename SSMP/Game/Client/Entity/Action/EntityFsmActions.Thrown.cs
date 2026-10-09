@@ -256,17 +256,26 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetPosition2d action) {
-        // Put in place every frame from then on, it was not put anywhere yet
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+
+        // Put in place every frame from then on, it was not put anywhere yet. A part of the creature is then put in
+        // place by the copy itself every frame (see WriteMovingPart), and anything else is left alone.
         if (action.everyFrame || action.lateUpdate) {
-            return false;
+            return !action.lateUpdate && WriteMovingPart(data, action, gameObject);
         }
 
-        return WritePlace(data, action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        return WritePlace(data, action, gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetPosition2d action) {
-        ReadPlace(data, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (action.everyFrame && !action.lateUpdate) {
+            PutPartHere(data, action, gameObject);
+            return;
+        }
+
+        ReadPlace(data, gameObject);
     }
 
     #endregion
@@ -275,12 +284,20 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetPosition2D action) {
-        return WritePlace(data, action, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.GameObject);
+        return action.EveryFrame
+            ? WriteEveryFramePlace(data, action, gameObject)
+            : WritePlace(data, action, gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetPosition2D action) {
-        ReadPlace(data, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.GameObject);
+        if (action.EveryFrame) {
+            ReadEveryFramePlace(data, action, gameObject);
+        } else {
+            ReadPlace(data, gameObject);
+        }
     }
 
     #endregion
@@ -288,13 +305,26 @@ internal static partial class EntityFsmActions {
     #region SetPositionToObject
 
     /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// One that keeps its object at another every frame from then on goes on doing so on the copy, if both are the
+    /// creature's own (see <see cref="WriteEveryFramePlace"/>): the end of a chain follows the censer that a boss pulls
+    /// back on it, and the chain the point it is pulled from.
+    /// </remarks>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetPositionToObject action) {
-        return WritePlace(data, action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        return action.everyFrame
+            ? WriteEveryFramePlace(data, action, gameObject, FollowsItsOwn(action, action.targetObject.Value))
+            : WritePlace(data, action, gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetPositionToObject action) {
-        ReadPlace(data, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (action.everyFrame) {
+            ReadEveryFramePlace(data, action, gameObject, FollowsItsOwn(action, action.targetObject.Value));
+        } else {
+            ReadPlace(data, gameObject);
+        }
     }
 
     #endregion
@@ -303,12 +333,20 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetPositionToObject2D action) {
-        return WritePlace(data, action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        return action.everyFrame
+            ? WriteEveryFramePlace(data, action, gameObject, FollowsItsOwn(action, action.targetObject.Value))
+            : WritePlace(data, action, gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetPositionToObject2D action) {
-        ReadPlace(data, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (action.everyFrame) {
+            ReadEveryFramePlace(data, action, gameObject, FollowsItsOwn(action, action.targetObject.Value));
+        } else {
+            ReadPlace(data, gameObject);
+        }
     }
 
     #endregion

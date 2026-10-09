@@ -3275,6 +3275,7 @@ internal partial class Entity {
 
                     if (writesCopy && index < clientFsm.FsmVariables.FloatVariables.Length) {
                         clientFsm.FsmVariables.FloatVariables[index].Value = val;
+                        EntityFsmActions.NoteHostWrote(clientFsm.FsmVariables.FloatVariables[index]);
                     }
                 }
             }
@@ -3288,6 +3289,7 @@ internal partial class Entity {
 
                     if (writesCopy && index < clientFsm.FsmVariables.IntVariables.Length) {
                         clientFsm.FsmVariables.IntVariables[index].Value = val;
+                        EntityFsmActions.NoteHostWrote(clientFsm.FsmVariables.IntVariables[index]);
                     }
                 }
             }
@@ -3301,6 +3303,7 @@ internal partial class Entity {
 
                     if (writesCopy && index < clientFsm.FsmVariables.BoolVariables.Length) {
                         clientFsm.FsmVariables.BoolVariables[index].Value = val;
+                        EntityFsmActions.NoteHostWrote(clientFsm.FsmVariables.BoolVariables[index]);
                     }
                 }
             }
@@ -3314,6 +3317,7 @@ internal partial class Entity {
 
                     if (writesCopy && index < clientFsm.FsmVariables.StringVariables.Length) {
                         clientFsm.FsmVariables.StringVariables[index].Value = val;
+                        EntityFsmActions.NoteHostWrote(clientFsm.FsmVariables.StringVariables[index]);
                     }
                 }
             }
@@ -3327,6 +3331,7 @@ internal partial class Entity {
 
                     if (writesCopy && index < clientFsm.FsmVariables.Vector2Variables.Length) {
                         clientFsm.FsmVariables.Vector2Variables[index].Value = (Vector2) val;
+                        EntityFsmActions.NoteHostWrote(clientFsm.FsmVariables.Vector2Variables[index]);
                     }
                 }
             }
@@ -3340,6 +3345,7 @@ internal partial class Entity {
 
                     if (writesCopy && index < clientFsm.FsmVariables.Vector3Variables.Length) {
                         clientFsm.FsmVariables.Vector3Variables[index].Value = (Vector3) val;
+                        EntityFsmActions.NoteHostWrote(clientFsm.FsmVariables.Vector3Variables[index]);
                     }
                 }
             }

@@ -285,6 +285,28 @@ internal static class EntityInitializer {
     }
 
     /// <summary>
+    /// Gives a rigidbody the body type noted for it (see <see cref="RestoreBodyType"/>) and keeps the note, for a part
+    /// that its creature may take back and let go of again, and leaves one with no note as it is.
+    /// </summary>
+    /// <param name="rigidbody">The rigidbody to give its body type back.</param>
+    internal static void GiveBackBodyType(Rigidbody2D rigidbody) {
+        if (OriginalBodyTypes.TryGetValue(rigidbody, out var bodyType)) {
+            rigidbody.bodyType = bodyType;
+        }
+    }
+
+    /// <summary>
+    /// Notes the body type that the game running a creature gave one of its bodies after the copy was built, for the
+    /// copy's body to get when it is let go of or let out (see <see cref="GiveBackBodyType"/>). Until then the copy may
+    /// keep the body as it is: a body set moving while its creature carries it is kept still here.
+    /// </summary>
+    /// <param name="rigidbody">The copy's rigidbody.</param>
+    /// <param name="bodyType">The body type the other game gave it.</param>
+    internal static void NoteBodyType(Rigidbody2D rigidbody, RigidbodyType2D bodyType) {
+        OriginalBodyTypes[rigidbody] = bodyType;
+    }
+
+    /// <summary>
     /// Checks whether a rigidbody belongs to a corpse hierarchy whose native lifecycle requires the original body.
     /// </summary>
     /// <param name="rigidbody">The rigidbody to classify.</param>
