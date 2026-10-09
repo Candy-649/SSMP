@@ -244,7 +244,9 @@ internal static partial class EntityFsmActions {
             );
         }
 
-        if (ActsOnTheLocalPlayer(action)) {
+        // Unless a talk of the local player handed them over to this very creature, which now does to them what it
+        // does to the player it talks to (Entity.HandOver)
+        if (ActsOnTheLocalPlayer(action) && !Entity.IsHandedOverTo(action)) {
             SayItWasKeptOffThePlayer(action);
             return;
         }

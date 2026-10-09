@@ -524,6 +524,14 @@ internal class HealthManagerComponent : EntityComponent {
         var newHp = data.Packet.ReadInt();
         var healthEpoch = data.Packet.ReadUInt();
 
+        // The state of a room this game is in already brings only the deaths that it missed: health set outright
+        // could undo a hit of the local player that is still on its way to the scene host, and the changes that come
+        // after it are only ever added to it. Health of a newer count of who runs the room is taken all the same: the
+        // game that runs it now set it outright, and what comes after is added to that
+        if (alreadyInSceneUpdate && Entity.FromRoomState && newHp > 0 && healthEpoch <= _lastReceivedHealthEpoch) {
+            return;
+        }
+
         if (alreadyInSceneUpdate) {
             ResetHealthOrderingForEpoch(healthEpoch);
             ApplyHp(newHp, triggerHostDeath: false);

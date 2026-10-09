@@ -117,5 +117,13 @@ public enum ServerUpdatePacketId {
     /// A comparison of the state of the room between the games of the two players of a two-player save, for the other
     /// player.
     /// </summary>
-    CoopCheckUpdate = 21
+    CoopCheckUpdate = 21,
+
+    /// <summary>
+    /// A request for the state of the room this player has been in all along, after a stretch in which nothing reached
+    /// them: what was sent in it may never come. Unlike <see cref="SceneResyncRequest"/>, which asks for the answer to
+    /// entering the room, it is answered with <see cref="ClientUpdatePacketId.RoomState"/>, which the player's game
+    /// takes as a correction of a room it is already in.
+    /// </summary>
+    RoomStateRequest = 22
 }

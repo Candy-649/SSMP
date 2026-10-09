@@ -153,7 +153,7 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
         try {
             ReadHeaders(packet);
         } catch (Exception e) {
-            Logger.Debug($"Exception while reading headers of packet:\n{e}");
+            WarnUnreadable("its headers", e);
             return false;
         }
 
@@ -192,7 +192,7 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
                 _resendAddonPacketData[seq] = addonDataDict;
             }
         } catch (Exception e) {
-            Logger.Debug($"Exception while reading update packet resend data:\n{e}");
+            WarnUnreadable("its resent data", e);
             return false;
         }
 

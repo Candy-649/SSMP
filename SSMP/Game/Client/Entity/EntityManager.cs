@@ -111,6 +111,12 @@ internal class EntityManager {
     /// </summary>
     public Dictionary<ushort, Entity>.ValueCollection ActiveEntities => _entities.Values;
 
+    /// <summary>
+    /// The count of changes of who runs this room that this game was last told of with its role in it (see
+    /// ServerManager.GetNextSceneHostEpoch), or 0 before it was told any.
+    /// </summary>
+    public uint SceneHostEpoch { get; private set; }
+
     public EntityManager(NetClient netClient) {
         _netClient = netClient;
         _entities = new Dictionary<ushort, Entity>();
@@ -200,6 +206,7 @@ internal class EntityManager {
     /// Initializes the entity manager if we are the scene host.
     /// </summary>
     public void InitializeSceneHost(uint sceneHostEpoch = 0) {
+        SceneHostEpoch = sceneHostEpoch;
         Logger.Info($"We are scene host, releasing control of all registered entities (epoch {sceneHostEpoch})");
         IsSceneHost = true;
         ForEachEntity("release", entity => {
@@ -223,6 +230,7 @@ internal class EntityManager {
     /// Initializes the entity manager if we are a scene client.
     /// </summary>
     public void InitializeSceneClient(uint sceneHostEpoch = 0) {
+        SceneHostEpoch = sceneHostEpoch;
         Logger.Info($"We are scene client, taking control of all registered entities (epoch {sceneHostEpoch})");
         if (_expectsToRunRoom) {
             Logger.Info("This game expected to run the room, but the other game does: what ran here is put to sleep");
@@ -256,6 +264,7 @@ internal class EntityManager {
     /// Updates the entity manager if we become the scene host.
     /// </summary>
     public void BecomeSceneHost(uint sceneHostEpoch = 0) {
+        SceneHostEpoch = sceneHostEpoch;
         Logger.Info($"Becoming scene host (epoch {sceneHostEpoch})");
         IsSceneHost = true;
         ForEachEntity("take over", entity => entity.MakeHost(sceneHostEpoch));
@@ -321,6 +330,12 @@ internal class EntityManager {
         if (IsSceneHost) return true;
 
         if (!_entities.TryGetValue(update.Id, out var entity) || !_sceneRoleDetermined) {
+            // The state of a room this game is in corrects what is here now; kept for later, it would be taken in as
+            // if it had just happened
+            if (Entity.FromRoomState) {
+                return true;
+            }
+
             _pendingUpdates.Enqueue(update);
             return false;
         }
@@ -355,6 +370,12 @@ internal class EntityManager {
     /// </summary>
     public bool HandleReliableEntityUpdate(ReliableEntityUpdate update, bool alreadyInSceneUpdate = false) {
         if (!_entities.TryGetValue(update.Id, out var entity) || !_sceneRoleDetermined) {
+            // Not kept for later either, like the unreliable kind (HandleEntityUpdate): a stored health would be
+            // taken in again as a blow, and what plays out once would play again
+            if (Entity.FromRoomState) {
+                return true;
+            }
+
             _pendingUpdates.Enqueue(update);
             return false;
         }
@@ -404,6 +425,7 @@ internal class EntityManager {
         if (!_netClient.IsConnected) return;
 
         _sceneRoleDetermined = false;
+        SceneHostEpoch = 0;
 
         // The creatures of a room that this game will run are left running from the start. Switched off until the
         // server says so and then back on, they would start over what they had already begun (Entity.InitializeHost).

@@ -279,6 +279,8 @@ internal class CoopHits {
     /// </summary>
     public void RegisterHooks() {
         Entity.Entity.CopyTouchedLocalPlayer += OnCopyTouchedLocalPlayer;
+        Entity.Entity.CopyToldByLocalTalk += OnCopyToldByLocalTalk;
+        Entity.Entity.TalkLedTo += OnTalkLedTo;
         Entity.Entity.CatchWentOn += OnCatchWentOn;
 
         AddILHook(
@@ -386,6 +388,8 @@ internal class CoopHits {
     /// </summary>
     public void DeregisterHooks() {
         Entity.Entity.CopyTouchedLocalPlayer -= OnCopyTouchedLocalPlayer;
+        Entity.Entity.CopyToldByLocalTalk -= OnCopyToldByLocalTalk;
+        Entity.Entity.TalkLedTo -= OnTalkLedTo;
         Entity.Entity.CatchWentOn -= OnCatchWentOn;
 
         foreach (var hook in _hooks) {
@@ -451,6 +455,11 @@ internal class CoopHits {
 
         if (update.Kind == CoopHitKind.EntityInput) {
             ApplyEntityInput(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.EntityTalkEnd) {
+            ApplyEntityTalkEnd(update);
             return;
         }
 
@@ -1566,6 +1575,18 @@ internal class CoopHits {
     }
 
     /// <summary>
+    /// Says that a talk of the local player with the copy of an entity told the creature to go on from it, as the knight
+    /// asked to spar is told to start (see Entity.HandOver). The creature runs in the scene host's game, so that is where
+    /// it goes.
+    /// </summary>
+    /// <param name="copied">The entity.</param>
+    /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
+    /// <param name="eventName">The event.</param>
+    private void OnCopyToldByLocalTalk(Entity.Entity copied, byte fsmIndex, string eventName) {
+        PlayOrSend(copied, fsmIndex, eventName, "ended a talk that hands them over to");
+    }
+
+    /// <summary>
     /// Plays at once what the local player's strike or touch told an FSM of the copy of an entity, where the entity
     /// says so (see <see cref="Entity.Entity.PlayHere"/>), and sends the scene host all that it needs to play the same;
     /// otherwise sends it only the event, and the copy shows what the scene host's game then does. Only while the scene
@@ -1782,6 +1803,42 @@ internal class CoopHits {
             Responder = stateName,
             Hit = [catchNumber, step]
         });
+    }
+
+    /// <summary>
+    /// Sends the scene host where a talk of the local player with the copy of an entity took its FSM (see
+    /// <see cref="Entity.Entity.TalkLedTo"/>).
+    /// </summary>
+    /// <param name="copied">The entity.</param>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="fromState">The state the talk started in.</param>
+    /// <param name="toState">The state the talk led to.</param>
+    private void OnTalkLedTo(Entity.Entity copied, byte fsmIndex, string fromState, string toState) {
+        if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
+            return;
+        }
+
+        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
+            TargetId = partnerId,
+            Kind = CoopHitKind.EntityTalkEnd,
+            EntityId = copied.Id,
+            Index = fsmIndex,
+            Path = fromState,
+            Responder = toState
+        });
+    }
+
+    /// <summary>
+    /// Takes where a talk of the partner with their copy of an entity took its FSM, if this game is the scene host and
+    /// so runs it (see <see cref="Entity.Entity.TakeTalkEnd"/>).
+    /// </summary>
+    /// <param name="update">The update.</param>
+    private void ApplyEntityTalkEnd(CoopHitUpdate update) {
+        if (!_entityManager.IsSceneHost || FindEntity(update.EntityId) is not { } entity) {
+            return;
+        }
+
+        entity.TakeTalkEnd(update.Index, update.Path, update.Responder);
     }
 
     /// <summary>

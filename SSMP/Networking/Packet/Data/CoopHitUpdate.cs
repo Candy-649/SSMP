@@ -156,5 +156,14 @@ internal enum CoopHitKind : byte {
     /// <see cref="CoopHitUpdate.Hit"/> holds the number that the catch went under and the number of this step of it;
     /// the game of the scene host takes its own FSM there too.
     /// </summary>
-    EntityCatchState
+    EntityCatchState,
+
+    /// <summary>
+    /// An entity, found by the ID of its entity, that the sender's player talked to through its copy, whose FSM at
+    /// <see cref="CoopHitUpdate.Index"/> ran the talk in the sender's game: it started in the state named by
+    /// <see cref="CoopHitUpdate.Path"/>, and once over would go to the state named by
+    /// <see cref="CoopHitUpdate.Responder"/>. The game of the scene host takes its own FSM there, if it is still where
+    /// the talk started.
+    /// </summary>
+    EntityTalkEnd
 }

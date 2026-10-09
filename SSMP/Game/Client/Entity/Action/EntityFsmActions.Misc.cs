@@ -306,6 +306,38 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region SetDeathRespawnNonLethal
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData _, SetDeathRespawnNonLethal __) => true;
+
+    /// <summary>
+    /// Applies network data to the FSM action. A character that a player spars with tells the game where a player it
+    /// beats comes back - beside it, rather than at a bench - and only the game that runs the character heard it, so
+    /// the other player, beaten in the same spar, woke up on their bench. It only says where a death that is not lethal
+    /// brings the player back, which the game forgets again at the next room (GameManager.OnNextLevelReady).
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData _, SetDeathRespawnNonLethal action) =>
+        action.OnEnter();
+
+    #endregion
+
+    #region ActivateInteractible
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData _, ActivateInteractible __) => true;
+
+    /// <summary>
+    /// Applies network data to the FSM action. Whether a creature that talks can be talked to now: a guardian at rest
+    /// can, one that is fighting cannot. Only the game that runs the creature switched it, so the copy offered a talk
+    /// whenever its room had loaded with one, and none when it had not. A talk with the copy is run in the local
+    /// player's own game (Entity.TalkHere), and it is offered as the creature offers it.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData _, ActivateInteractible action) =>
+        action.OnEnter();
+
+    #endregion
+
     #region SendMessage
 
     /// <summary>Builds network data from the FSM action.</summary>

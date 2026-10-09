@@ -426,7 +426,7 @@ internal partial class Entity {
         if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && caught == null ||
             SwitchToStateField == null ||
             fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null ||
-            Object.Client == null || _runHere != null && _runHere != copyFsm) {
+            Object.Client == null || _runHere != null && _runHere != copyFsm || _runHereTalk) {
             return null;
         }
 
@@ -951,8 +951,15 @@ internal partial class Entity {
             if (_runHereLed) {
                 Logger.Info($"The copy of entity {Id} was switched off while it played the catch this game led");
                 FollowSceneHost();
+            } else if (_runHereTalk) {
+                Logger.Info($"The copy of entity {Id} was switched off while the local player talked to it");
+                EndTalkHere(null);
             }
 
+            return;
+        }
+
+        if (_runHereTalk && UpdateTalkHere()) {
             return;
         }
 
@@ -1036,7 +1043,7 @@ internal partial class Entity {
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="state">The state of the action.</param>
     private void HearFromSceneHost(PlayMakerFSM fsm, FsmState state) {
-        if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && _aftermath == null &&
+        if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
             _runHereCombo?.Contains(state) != true && !FollowIntoTheAftermath(state.Name)) {
             CatchUpWithSceneHost();
         }
@@ -1091,7 +1098,7 @@ internal partial class Entity {
             }
         }
 
-        if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && _aftermath == null &&
+        if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
             stateName != fsm.ActiveStateName && !IsInCombo(stateName) && !FollowIntoTheAftermath(stateName)) {
             CatchUpWithSceneHost();
         }
@@ -1369,7 +1376,7 @@ internal partial class Entity {
         foreach (var state in fsm.States) {
             foreach (var action in state.Actions) {
                 if (action is { Enabled: true } && IsLeftToSceneHost(action) &&
-                    !(_runHereForGood && EachGamePartActionNames.Contains(action.GetType().Name))) {
+                    !((_runHereForGood || _runHereTalk) && EachGamePartActionNames.Contains(action.GetType().Name))) {
                     action.Enabled = false;
                     _mutedHere.Add(action);
                 }
@@ -1391,7 +1398,13 @@ internal partial class Entity {
         _runHere = copyFsm;
         _runHereFsm = fsm;
         HookSwitchState();
-        HeldFsms[fsm] = this;
+
+        // A talk goes from state to state as the local player talks, until it is over (TalkHere)
+        if (_runHereTalk) {
+            TalkFsms[fsm] = this;
+        } else {
+            HeldFsms[fsm] = this;
+        }
     }
 
     /// <summary>
@@ -1553,6 +1566,7 @@ internal partial class Entity {
         }
 
         HeldFsms.Remove(fsm);
+        ForgetTalkHere(fsm);
         TakeTheCopysBodyBack();
 
         if (!led || !letGoOfThePlayer) {
@@ -1583,6 +1597,7 @@ internal partial class Entity {
 
         var led = _runHereLed;
         HeldFsms.Remove(fsm);
+        ForgetTalkHere(fsm);
         _runHere = null;
         _runHereFsm = null;
         _runHereLed = false;
@@ -1736,6 +1751,17 @@ internal partial class Entity {
     ) {
         if (self == _recordedFsm) {
             _recordedPath?.Add(toState);
+            orig(self, toState);
+            return;
+        }
+
+        // A talk of the local player goes on as they talk, and no further once it is over (TalkHere)
+        if (TalkFsms.Count > 0 && TalkFsms.TryGetValue(self, out var talker)) {
+            if (talker.HoldsTalkAt(self, toState)) {
+                SwitchToStateField!.SetValue(self, null);
+                return;
+            }
+
             orig(self, toState);
             return;
         }

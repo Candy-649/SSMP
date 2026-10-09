@@ -133,4 +133,11 @@ internal enum ClientUpdatePacketId {
     /// The room another player is in now, or none while they are between rooms.
     /// </summary>
     PlayerRoom = 25,
+
+    /// <summary>
+    /// The state of the room this player is in, asked for again after a stretch in which nothing reached them
+    /// (<see cref="ServerUpdatePacketId.RoomStateRequest"/>). It holds what <see cref="PlayerAlreadyInScene"/> holds,
+    /// and is taken as a correction of a room the player is already in rather than as walking into it.
+    /// </summary>
+    RoomState = 26,
 }

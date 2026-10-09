@@ -346,6 +346,10 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.SceneResyncRequest,
             OnSceneResyncRequest
         );
+        _packetManager.RegisterServerUpdatePacketHandler(
+            ServerUpdatePacketId.RoomStateRequest,
+            OnRoomStateRequest
+        );
         _packetManager.RegisterServerUpdatePacketHandler<BattleSceneUpdate>(
             ServerUpdatePacketId.BattleSceneUpdate,
             OnBattleSceneUpdate
@@ -413,6 +417,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDeath);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SceneResyncRequest);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.RoomStateRequest);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopSaveUpdate);
@@ -556,7 +561,14 @@ internal abstract class ServerManager : IServerManager {
     /// than a fresh one. Nothing is decided over: the room keeps the host it has and the other player, who was told
     /// the first time, is not told twice.
     /// </param>
-    private void OnClientEnterScene(ServerPlayerData playerData, bool resync = false) {
+    /// <param name="roomState">
+    /// Whether this answers a player who has been in the room all along and asks for its state after a gap in what
+    /// reached them (<see cref="OnRoomStateRequest"/>), which is sent as <see cref="ClientUpdatePacketId.RoomState"/>.
+    /// It is answered like <paramref name="resync"/>, and without a line in the log for every entity.
+    /// </param>
+    private void OnClientEnterScene(ServerPlayerData playerData, bool resync = false, bool roomState = false) {
+        resync |= roomState;
+
         var enterSceneList = new List<ClientPlayerEnterScene>();
         var alreadyPlayersInScene = false;
 
@@ -613,9 +625,11 @@ internal abstract class ServerManager : IServerManager {
                 }
 
                 if (entityData.Spawned) {
-                    Logger.Info(
-                        $"Sending that entity '{entityKey.EntityId}' has spawned in the scene to '{playerData.Id}'"
-                    );
+                    if (!roomState) {
+                        Logger.Info(
+                            $"Sending that entity '{entityKey.EntityId}' has spawned in the scene to '{playerData.Id}'"
+                        );
+                    }
 
                     var entitySpawn = new EntitySpawn {
                         Id = entityKey.EntityId,
@@ -626,7 +640,11 @@ internal abstract class ServerManager : IServerManager {
                     entitySpawnList.Add(entitySpawn);
                 }
 
-                Logger.Info($"Sending that entity '{entityKey.EntityId}' is already in scene to '{playerData.Id}'");
+                if (!roomState) {
+                    Logger.Info(
+                        $"Sending that entity '{entityKey.EntityId}' is already in scene to '{playerData.Id}'"
+                    );
+                }
 
                 var entityUpdate = new EntityUpdate {
                     Id = entityKey.EntityId
@@ -730,8 +748,16 @@ internal abstract class ServerManager : IServerManager {
             reliableEntityUpdateList,
             _fullSynchronisation && makeEnteringPlayerHost,
             sceneHostEpoch,
-            playerData.CurrentScene
+            playerData.CurrentScene,
+            roomState ? ClientUpdatePacketId.RoomState : ClientUpdatePacketId.PlayerAlreadyInScene
         );
+
+        if (roomState) {
+            Logger.Info(
+                $"Told ({playerData.Id}, {playerData.Username}) the state of '{playerData.CurrentScene}' again: " +
+                $"{enterSceneList.Count} other players, {entityUpdateList.Count} entities"
+            );
+        }
     }
 
     /// <summary>
@@ -1372,6 +1398,36 @@ internal abstract class ServerManager : IServerManager {
             playerData.CurrentScene,
             otherId => { _netServer.GetUpdateManagerForClient(otherId)?.AddPlayerDeathData(id); }
         );
+    }
+
+    /// <summary>
+    /// When each player was last told the state of their room again (see <see cref="OnRoomStateRequest"/>).
+    /// </summary>
+    private readonly ConcurrentDictionary<ushort, DateTime> _roomStateToldAt = new();
+
+    /// <summary>
+    /// The least time between two answers to the same player's requests for the state of their room, in seconds.
+    /// </summary>
+    private const double RoomStateMinInterval = 3.0;
+
+    /// <summary>
+    /// Callback for when a player who has been in their room all along asks for its state, after a stretch in which
+    /// nothing reached them. What was sent in it may never come: the death of an enemy, a creature switched off, the
+    /// other player leaving. The answer holds what the answer to entering the room holds, and decides nothing over.
+    /// </summary>
+    /// <param name="id">The ID of the player asking.</param>
+    private void OnRoomStateRequest(ushort id) {
+        if (!_playerData.TryGetValue(id, out var playerData) || string.IsNullOrEmpty(playerData.CurrentScene)) {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (_roomStateToldAt.TryGetValue(id, out var toldAt) && (now - toldAt).TotalSeconds < RoomStateMinInterval) {
+            return;
+        }
+
+        _roomStateToldAt[id] = now;
+        OnClientEnterScene(playerData, roomState: true);
     }
 
     /// <summary>

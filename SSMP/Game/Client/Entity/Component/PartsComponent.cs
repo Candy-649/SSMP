@@ -33,6 +33,13 @@ namespace SSMP.Game.Client.Entity.Component;
 /// Each word carries how many parts there are and a hash of their paths, in the order of their bits. A game that found
 /// other parts on the same creature, like one whose creature was changed by something else first, would put the word on
 /// the wrong parts, so it takes none.
+///
+/// A part through which a player talks to the creature is one too (see <see cref="IsTalkPart"/>). A knight that rides a
+/// bug is talked to through such parts, which its FSM switches on as the room starts, so the player of a game that
+/// came in after that could not talk to it at all while the partner could (USER 10-09). Each player talks in their own
+/// game, as to any character. Unlike a part that is only seen, every word goes on the copy's talk parts, because one
+/// switches itself off in its own FSM, which the copy never hears of - but never one that would cut off the local
+/// player while they are talking: that waits until they are done.
 internal class PartsComponent : EntityComponent {
     /// <summary>
     /// How long the parts have to stay the same before they are sent, in seconds.
@@ -83,6 +90,17 @@ internal class PartsComponent : EntityComponent {
     /// </summary>
     private bool _mismatchLogged;
 
+    /// <summary>
+    /// Which parts are ones through which a player talks to the creature, a bit for each.
+    /// </summary>
+    private readonly int _talkParts;
+
+    /// <summary>
+    /// Which talk parts of the copy the last word switched off while the local player was talking, a bit for each.
+    /// They are switched off once the player is done.
+    /// </summary>
+    private int _talkPartsToSwitchOff;
+
     public PartsComponent(
         NetClient netClient,
         ushort entityId,
@@ -94,6 +112,9 @@ internal class PartsComponent : EntityComponent {
         for (var i = 0; i < paths.Count; i++) {
             _hostParts[i] = FindPart(gameObject.Host, paths[i]);
             _clientParts[i] = FindPart(gameObject.Client, paths[i]);
+            if ((_hostParts[i] ?? _clientParts[i]) is { } part && IsTalkPart(part)) {
+                _talkParts |= 1 << i;
+            }
         }
 
         _pathsHash = HashPaths(paths);
@@ -101,9 +122,9 @@ internal class PartsComponent : EntityComponent {
 
     /// <summary>
     /// Finds the parts of a creature, by their paths under it: the children that its FSMs switch on or off for good,
-    /// whose whole tree is only something to see. A child that collides, makes a sound, sends particles, runs an FSM or
-    /// does anything else is left to the switches that the copy plays as they happen, where a word that came a moment
-    /// late could hurt, sound or burst again on its own.
+    /// whose whole tree is only something to see, or through which a player talks to it. A child that collides, makes a
+    /// sound, sends particles, runs an FSM or does anything else is left to the switches that the copy plays as they
+    /// happen, where a word that came a moment late could hurt, sound or burst again on its own.
     /// </summary>
     /// <param name="root">The room's own creature.</param>
     /// <param name="fsms">Its FSMs that the scene host runs for both games.</param>
@@ -123,9 +144,9 @@ internal class PartsComponent : EntityComponent {
                         continue;
                     }
 
-                    var target = fsm.GetOwnerDefaultTarget(activate.gameObject);
+                    var target = fsm.GetOwnerDefaultTarget(activate.gameObject) ?? FindNamedTarget(fsm, activate.gameObject);
                     if (target == null || target == root || !target.transform.IsChildOf(root.transform) ||
-                        !found.Add(target) || !IsOnlyShown(target)) {
+                        !found.Add(target) || !IsOnlyShown(target) && !IsTalkPart(target)) {
                         continue;
                     }
 
@@ -164,6 +185,74 @@ internal class PartsComponent : EntityComponent {
 
             return (int) hash;
         }
+    }
+
+    /// <summary>
+    /// The child that a variable of an FSM is to hold once the FSM has found it by name, for a variable that is still
+    /// empty: the creature fills it in its first steps, which have not run yet when it is looked at here. The knight's
+    /// talk parts are switched through such variables.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="target">What an action of the FSM is given to work on.</param>
+    private static GameObject? FindNamedTarget(HutongGames.PlayMaker.Fsm fsm, HutongGames.PlayMaker.FsmOwnerDefault target) {
+        if (target.OwnerOption != HutongGames.PlayMaker.OwnerDefaultOption.SpecifyGameObject ||
+            target.GameObject is not { UseVariable: true, Name: { Length: > 0 } name }) {
+            return null;
+        }
+
+        foreach (var state in fsm.States) {
+            foreach (var action in state.Actions) {
+                // FindNamedChild finds the child that has the name of the variable it fills (its IL: Transform.Find of
+                // storeResult.Name)
+                if (action is not FindNamedChild { storeResult: { } store } find || store.Name != name ||
+                    fsm.GetOwnerDefaultTarget(find.gameObject) is not { } parent) {
+                    continue;
+                }
+
+                var child = parent.transform.Find(name);
+                if (child != null) {
+                    return child.gameObject;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a child is one through which a player talks to the creature: it is a character to talk to itself, and
+    /// nothing under it hurts, can be hurt, or is picked up or used. What is picked up is each player's own, so a pickup
+    /// must stay where each game left it.
+    /// </summary>
+    private static bool IsTalkPart(GameObject part) {
+        if (part.GetComponent<NPCControlBase>() == null) {
+            return false;
+        }
+
+        foreach (var component in part.GetComponentsInChildren<UnityEngine.Component>(true)) {
+            switch (component) {
+                case DamageHero:
+                case HealthManager:
+                case InteractableBase and not NPCControlBase:
+                    return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the local player may be talking through a talk part right now: its dialogue is running, or the player is
+    /// not their own master, as they are not from the moment they start talking until the talk lets them go.
+    /// </summary>
+    private static bool MayBeTalking(GameObject part) {
+        foreach (var npc in part.GetComponentsInChildren<PlayMakerNPC>(true)) {
+            if (npc.IsRunningDialogue) {
+                return true;
+            }
+        }
+
+        return HeroController.instance is { controlReqlinquished: true };
     }
 
     /// <summary>
@@ -220,6 +309,7 @@ internal class PartsComponent : EntityComponent {
     /// <inheritdoc />
     public override void OnUpdate() {
         if (IsControlled) {
+            SwitchOffTalkPartsLeftOver();
             return;
         }
 
@@ -263,6 +353,27 @@ internal class PartsComponent : EntityComponent {
 
         // The copy was hidden while this game ran the creature, so it is dressed again by the next word
         _copyDressed = false;
+        _talkPartsToSwitchOff = 0;
+    }
+
+    /// <summary>
+    /// Switches off the talk parts of the copy that a word switched off while the local player was talking, once they
+    /// are done.
+    /// </summary>
+    private void SwitchOffTalkPartsLeftOver() {
+        if (_talkPartsToSwitchOff == 0) {
+            return;
+        }
+
+        for (var i = 0; i < _clientParts.Length; i++) {
+            if ((_talkPartsToSwitchOff & (1 << i)) == 0 || _clientParts[i] is { } part && part != null &&
+                part.activeSelf && MayBeTalking(part)) {
+                continue;
+            }
+
+            _talkPartsToSwitchOff &= ~(1 << i);
+            SetOn(_clientParts[i], false);
+        }
     }
 
     /// <inheritdoc />
@@ -293,12 +404,39 @@ internal class PartsComponent : EntityComponent {
         var dressCopy = !_copyDressed;
         _copyDressed = true;
         for (var i = 0; i < count; i++) {
-            if (dressCopy) {
+            var bit = 1 << i;
+            if ((_talkParts & bit) != 0) {
+                SetTalkPartOfCopy(i, parts[i]);
+            } else if (dressCopy) {
                 SetOn(_clientParts[i], parts[i]);
             }
 
             SetOn(_hostParts[i], parts[i]);
         }
+    }
+
+    /// <summary>
+    /// Switches a talk part of the copy as a word says, but leaves one on while the local player may be talking
+    /// through it: switched off under them, the conversation and its box would be left without the FSM that ends
+    /// them, and the player without control for good (NPCControlBase.OnDisable closes neither).
+    /// </summary>
+    /// <param name="index">The index of the part.</param>
+    /// <param name="isOn">Whether the word says it is on.</param>
+    private void SetTalkPartOfCopy(int index, bool isOn) {
+        var bit = 1 << index;
+        if (isOn) {
+            _talkPartsToSwitchOff &= ~bit;
+            SetOn(_clientParts[index], true);
+            return;
+        }
+
+        if (_clientParts[index] is { } part && part != null && part.activeSelf && MayBeTalking(part)) {
+            _talkPartsToSwitchOff |= bit;
+            return;
+        }
+
+        _talkPartsToSwitchOff &= ~bit;
+        SetOn(_clientParts[index], false);
     }
 
     /// <inheritdoc />

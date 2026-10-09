@@ -66,6 +66,46 @@ internal static class SteamRelayMessaging {
         Steamworks.Constants.k_nSteamNetworkingSend_AutoRestartBrokenSession;
 
     /// <summary>
+    /// How long, in milliseconds, Steam waits on a session that hears nothing before it gives up on it: longer than
+    /// the mod's own wait (UpdateManager.ConnectionTimeoutCeiling, 30 s).
+    ///
+    /// Steam's own default is 10 s. A session it gives up on is rebuilt by itself at the next send
+    /// (AutoRestartBrokenSession) - and Steam's own header says that whatever reliable messages had not been delivered
+    /// are dropped when it does, without a word. A gap in the relay of a little over 10 s therefore lost, silently and
+    /// for good, everything important sent in it, while the mod, which waits 30 s, never knew anything was wrong. With
+    /// Steam waiting longer than the mod, a session ends only once the mod has given up on it too.
+    /// </summary>
+    private const int SessionTimeout = 45000;
+
+    /// <summary>
+    /// Makes Steam wait longer than the mod on a session that hears nothing (see <see cref="SessionTimeout"/>), for
+    /// every session from here on. Set once, before any session starts.
+    /// </summary>
+    public static void WaitLongerThanTheMod() {
+        SetGlobalInt(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_TimeoutInitial, SessionTimeout);
+        SetGlobalInt(ESteamNetworkingConfigValue.k_ESteamNetworkingConfig_TimeoutConnected, SessionTimeout);
+    }
+
+    /// <summary>
+    /// Sets one of Steam's networking settings for every session.
+    /// </summary>
+    private static void SetGlobalInt(ESteamNetworkingConfigValue setting, int value) {
+        var handle = GCHandle.Alloc(value, GCHandleType.Pinned);
+        try {
+            if (!SteamNetworkingUtils.SetConfigValue(
+                    setting, ESteamNetworkingConfigScope.k_ESteamNetworkingConfig_Global, IntPtr.Zero,
+                    ESteamNetworkingConfigDataType.k_ESteamNetworkingConfig_Int32, handle.AddrOfPinnedObject()
+                )) {
+                Logger.Warn($"Steam relay: could not set {setting} to {value}");
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Steam relay: could not set {setting} to {value}: {e.Message}");
+        } finally {
+            handle.Free();
+        }
+    }
+
+    /// <summary>
     /// Builds an identity for a player from their Steam ID.
     /// </summary>
     public static SteamNetworkingIdentity IdentityOf(ulong steamId) {

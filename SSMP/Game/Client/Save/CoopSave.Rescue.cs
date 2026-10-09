@@ -568,7 +568,9 @@ internal partial class CoopSave {
             return;
         }
 
+        var healthBefore = PlayerData.instance == null ? 0 : PlayerData.instance.health;
         orig(self, go, damageSide, damageAmount, hazardType, damagePropertyFlags);
+        NoteHurt(self, go, damageAmount, hazardType, damagePropertyFlags, healthBefore);
     }
 
     /// <summary>
@@ -734,14 +736,14 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Keeps a death of the local player from being played out while the partner can still pull them back up, and lays
-    /// them down instead. Anything that leaves no cocoon to open, or leaves nobody to open it, plays out untouched.
+    /// them down instead. A death that leaves nobody to pull the player up plays out untouched.
     /// </summary>
     /// <param name="death">The coroutine of the game that plays out the death.</param>
     /// <param name="nonLethal">Whether the death was non-lethal.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
     private IEnumerator WrapDeath(IEnumerator death, bool nonLethal, bool frostDeath) {
         // The game makes every death in a memory non-lethal itself, inside the death and so after this is asked
-        // (HeroController.Die). It leaves no cocoon there, so none of them is held either.
+        // (HeroController.Die)
         nonLethal |= global::GameManager.instance != null && global::GameManager.instance.IsMemoryScene();
 
         // Before anything is decided about this death, including the deaths this mod then keeps its hands off. One
@@ -769,13 +771,12 @@ internal partial class CoopSave {
 
         _deathPassesNoTime = false;
 
-        // A non-lethal death leaves no cocoon: the game skips that whole part of its own sequence, so there would be
-        // nothing for the partner to open and the player would wait for something that cannot come. It also takes
-        // nobody to a bench, so a player who is waiting is not told anything: whoever this is can still reach them.
-        if (nonLethal) {
-            return death;
-        }
-
+        // A death that is not lethal - losing a spar with a character, any death in a memory - is laid down like any
+        // other. A fight is lost only once both players are down (USER 10-10: "比试就按照所有boss战的标准来"), and
+        // until then the room must not hear of it: the character won the spar at the first knock-out and stood there
+        // in its victory pose while the partner was still fighting it. The cocoon a player lies in is this mod's own,
+        // so the cocoon that the game leaves out of such a death is no reason to wait for nothing. Once both are
+        // down, each game plays its own death, which brings its player back where the game says, with nothing lost.
         if (!CanWaitForRescue()) {
             TellPartnerNobodyIsComing();
 
@@ -792,7 +793,7 @@ internal partial class CoopSave {
     /// <summary>
     /// Writes down what the player was when this death reached them.
     /// </summary>
-    /// <param name="nonLethal">Whether the death was non-lethal, which this mod leaves entirely alone.</param>
+    /// <param name="nonLethal">Whether the death was non-lethal.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
     private void SayWhatTheDeathFound(bool nonLethal, bool frostDeath) {
         try {

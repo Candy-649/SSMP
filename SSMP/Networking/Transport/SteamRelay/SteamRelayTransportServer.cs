@@ -61,6 +61,7 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
 
         // Warms the relay network before anyone tries to join
         SteamNetworkingUtils.InitRelayNetworkAccess();
+        SteamRelayMessaging.WaitLongerThanTheMod();
 
         _sessionRequestCallback = Callback<SteamNetworkingMessagesSessionRequest_t>.Create(OnSessionRequest);
         _sessionFailedCallback = Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);

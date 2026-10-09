@@ -105,6 +105,20 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private bool _timeoutGraceTold;
 
     /// <summary>
+    /// The shortest stretch without anything arriving, in seconds, that is said to be over once something arrives
+    /// again (see <see cref="ReceiveResumed"/>). The other side sends every tick, empty or not, so anything this long is
+    /// a gap in the link rather than a quiet moment.
+    /// </summary>
+    private const double ReceiveGapTold = 2.0;
+
+    /// <summary>
+    /// Raised on the thread that receives when something arrives after a stretch of at least
+    /// <see cref="ReceiveGapTold"/> seconds in which nothing did, with its length in seconds. What was sent in the
+    /// stretch may still be on its way, or lost for good.
+    /// </summary>
+    public event Action<double>? ReceiveResumed;
+
+    /// <summary>
     /// Cached capability: whether the transport requires application-level sequencing.
     /// </summary>
     private bool _requiresSequencing = true;
@@ -311,9 +325,20 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     public void OnReceivePacket<TIncoming, TOtherPacketId>(TIncoming packet)
         where TIncoming : UpdatePacket<TOtherPacketId>
         where TOtherPacketId : Enum {
-        // Reset the connection timeout timer
-        _lastReceiveTime = DateTime.UtcNow;
+        // Reset the connection timeout timer, saying how long the stretch was if anything was missed in it. The log
+        // said when a quiet stretch began and never when it ended, so how long one had lasted could only be guessed.
+        var now = DateTime.UtcNow;
+        var gap = (now - _lastReceiveTime).TotalSeconds;
+        _lastReceiveTime = now;
         _timeoutGraceTold = false;
+        if (gap >= ReceiveGapTold) {
+            Logger.Info($"Packets arrive again after {gap:F1}s in which none did");
+            try {
+                ReceiveResumed?.Invoke(gap);
+            } catch (Exception e) {
+                Logger.Warn($"Could not take in the end of a gap in what arrives: {e.Message}");
+            }
+        }
 
         // A transport without sequence numbers has nothing here to acknowledge: the packet that just arrived answers
         // nothing that was sent. Closing the round trip of the last sent sequence anyway, as this used to, timed the
@@ -378,8 +403,25 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             try {
                 CurrentUpdatePacket.CreatePacket(rawPacket);
             } catch (Exception e) {
-                Logger.Error($"Failed to create packet: {e}");
-                return;
+                // What cannot be written is let go of, and said. Kept, it stayed in the packet that every later tick
+                // adds to, which then failed the same way for good: nothing was ever sent again, while the connection
+                // looked alive. The rest of what was to go - much of it reliable, which nothing would send again -
+                // still goes.
+                var dropped = CurrentUpdatePacket.DropUnwritableData();
+                Logger.Error(
+                    $"Failed to create packet, so what could not be written is dropped " +
+                    $"({(dropped.Count > 0 ? string.Join(", ", dropped) : "none found")}):\n{e}"
+                );
+
+                rawPacket = new Packet.Packet();
+                try {
+                    CurrentUpdatePacket.CreatePacket(rawPacket);
+                } catch (Exception again) {
+                    Logger.Error($"Failed to create packet again, so all that was in it is dropped:\n{again}");
+                    CurrentUpdatePacket = new TOutgoing();
+                    Monitor.PulseAll(Lock);
+                    return;
+                }
             }
 
             // Reset the packet by creating a new instance,

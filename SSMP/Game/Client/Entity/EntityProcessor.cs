@@ -185,6 +185,15 @@ internal class EntityProcessor {
             }
         }
 
+        // A character of the room that only talks is not the creature its name is taken from (see IsTalkOnly). One
+        // that a creature leaves behind, a body that still speaks, is what that creature became, and stays one.
+        if (!(SpawnedId.HasValue && gameObject == GameObject) && IsTalkOnly(gameObject, foundEntry)) {
+            Logger.Info(
+                $"Left '{gameObject.name}' to each game: it only talks, though its name reads as ({foundEntry.Type})"
+            );
+            return;
+        }
+
         ushort id;
 
         // If a spawned ID is defined we check whether an entity with the given ID already exists
@@ -296,6 +305,43 @@ internal class EntityProcessor {
                 entity.UpdateIsActive(true);
             }
         }
+    }
+
+    /// <summary>
+    /// Whether an object of the room is a character that only talks, which matched the entry of a creature by its name
+    /// alone: it cannot be hurt, and a talk with it goes to an FSM of its own that the entry would have only the scene
+    /// host's game run. The entries match every object whose name contains the creature's, so a knight resting
+    /// between fights (one talk FSM, nothing to hit) became the knight who fights. Taken for the creature, its talk ran
+    /// in the scene host's game alone and the other player could not talk to it at all. Left alone, each game runs it,
+    /// as it runs every other character that only talks.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    /// <param name="entry">The entry it matched.</param>
+    private static bool IsTalkOnly(GameObject gameObject, EntityRegistryEntry entry) {
+        if (gameObject.GetComponent<HealthManager>() != null) {
+            return false;
+        }
+
+        foreach (var npc in gameObject.GetComponentsInChildren<PlayMakerNPC>(true)) {
+            var target = npc.CustomEventTarget != null ? npc.CustomEventTarget : GetDialogueFsm(npc);
+            if (target != null && target.gameObject == gameObject && entry.ContainsFsmName(target.FsmName) &&
+                !EntityRegistry.IsRunByEachGame(entry.Type, target.FsmName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The FSM that a talking character tells about its talk when nothing else is set to hear it.
+    /// </summary>
+    private static PlayMakerFSM? GetDialogueFsm(PlayMakerNPC npc) {
+        return typeof(PlayMakerNPC).GetField(
+            "dialogueFsm",
+            System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public |
+            System.Reflection.BindingFlags.NonPublic
+        )?.GetValue(npc) as PlayMakerFSM;
     }
 
     /// <summary>

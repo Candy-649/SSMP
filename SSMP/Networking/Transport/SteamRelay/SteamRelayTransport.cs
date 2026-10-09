@@ -89,6 +89,7 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
 
         // Warms the relay network if it was not warmed already, so the first message does not pay for it
         SteamNetworkingUtils.InitRelayNetworkAccess();
+        SteamRelayMessaging.WaitLongerThanTheMod();
 
         if (_isLoopback) {
             Logger.Info("Steam relay: the host is this player, using the loopback channel");

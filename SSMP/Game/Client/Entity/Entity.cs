@@ -492,6 +492,7 @@ internal partial class Entity {
         };
 
         EntitiesByCopy[Object.Client] = this;
+        EntitiesByRoomObject[Object.Host] = this;
         _broadcastHook ??= new Hook(
             typeof(HutongGames.PlayMaker.Fsm).GetMethod(
                 nameof(HutongGames.PlayMaker.Fsm.BroadcastEventToGameObject),
@@ -518,6 +519,7 @@ internal partial class Entity {
                 )!,
                 OnFsmTriggerEnter2D
             );
+            HookTalks();
         }
 
         _hookedActions = new Dictionary<FsmStateAction, HookedEntityAction>();
@@ -2079,6 +2081,10 @@ internal partial class Entity {
             return;
         }
 
+        // A talk of the local player with the copy ends here: the room's own creature goes on from where the scene
+        // host's was, and the copy that the talk ran on is put away
+        EndTalkHere(null);
+
         ResetAnticipation();
         ForgetPosePackets();
 
@@ -2328,6 +2334,93 @@ internal partial class Entity {
     private static readonly Dictionary<GameObject, Entity> EntitiesByCopy = new();
 
     /// <summary>
+    /// Whether what is being taken in is the state of a room this game is already in, asked for again after a gap in
+    /// what reached it (ClientManager.OnRoomState), rather than the state of a room being walked into. What that
+    /// already is is not done again, and what plays out once is not played again.
+    /// </summary>
+    internal static bool FromRoomState;
+
+    /// <summary>
+    /// When this game last took in each kind of thing the scene host said of this entity as it happened, in unscaled
+    /// seconds: whether it is on, the clip it shows, each kind of data, the variables of each FSM.
+    /// </summary>
+    private readonly Dictionary<int, float> _heardAt = new();
+
+    /// <summary>
+    /// How recently a kind of thing must have been heard as it happened for the state of the room to leave it be, in
+    /// seconds (see <see cref="YieldsToNewer"/>).
+    /// </summary>
+    private const float RoomStateYieldTime = 1f;
+
+    /// <summary>
+    /// The kinds of things heard of an entity besides its data, which go by their component type (see
+    /// <see cref="_heardAt"/>): whether it is on, its clip, and the variables of each FSM from this one on.
+    /// </summary>
+    private const int HeardActive = -1, HeardClip = -2, HeardFsmVariables = 1000;
+
+    /// <summary>
+    /// Notes that a kind of thing was heard as it happened, or says whether the state of the room is to leave it be.
+    /// The server puts the state of the room together when asked, and what reaches it after that goes out in the same
+    /// packet - and is taken in first, since a packet's contents are taken in in the order of their kind
+    /// (BasePacket.ReadPacketData), the state of the room last. So what was heard as it happened just before is the
+    /// newer of the two: a creature that had just been switched on was switched off again.
+    /// </summary>
+    /// <param name="kind">The kind of thing.</param>
+    /// <returns>Whether the state of the room leaves it be.</returns>
+    private bool YieldsToNewer(int kind) {
+        if (!FromRoomState) {
+            _heardAt[kind] = Time.unscaledTime;
+            return false;
+        }
+
+        return _heardAt.TryGetValue(kind, out var at) && Time.unscaledTime - at < RoomStateYieldTime;
+    }
+
+    /// <summary>
+    /// The entities, by the room's own object of each.
+    /// </summary>
+    private static readonly Dictionary<GameObject, Entity> EntitiesByRoomObject = new();
+
+    /// <summary>
+    /// The entity whose copy an object is, or is a part of, or null for anything else.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    internal static Entity? FindByCopyPart(GameObject? gameObject) {
+        for (var current = gameObject == null ? null : gameObject.transform; current != null; current = current.parent) {
+            if (EntitiesByCopy.TryGetValue(current.gameObject, out var entity)) {
+                return entity;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The entity that an object is, or is a part of - the room's own object or the copy - or null for anything else.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    internal static Entity? FindByPart(GameObject? gameObject) {
+        for (var current = gameObject == null ? null : gameObject.transform; current != null; current = current.parent) {
+            if (EntitiesByCopy.TryGetValue(current.gameObject, out var entity) ||
+                EntitiesByRoomObject.TryGetValue(current.gameObject, out entity)) {
+                return entity;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether an FSM is one of those of this entity that only the game of the scene host runs: an FSM of the creature
+    /// itself, on the room's own object or on the copy, that is not run by each game (see
+    /// <see cref="IsRunByEachGame"/>). What such an FSM opens - a line, a prompt - opens in that game alone.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    internal bool IsRunBySceneHostAlone(PlayMakerFSM? fsm) {
+        return fsm != null && (_fsms.Host.Contains(fsm) || _fsms.Client.Contains(fsm)) && !IsRunByEachGame(fsm);
+    }
+
+    /// <summary>
     /// The hook that hears events sent to the objects of copies, put in place with the first entity.
     /// </summary>
     private static Hook? _broadcastHook;
@@ -2503,6 +2596,13 @@ internal partial class Entity {
         // Anything else counts only from a part of the copy itself, which caught it here: whatever else tells the
         // creature something about the player or their things does so in the scene host's game as well
         if (sender.GameObject is not { } part || !part.transform.IsChildOf(target.transform)) {
+            return;
+        }
+
+        // Or from a part through which the local player talks to the creature, whose talk ends by telling the creature
+        // to go on from it, like the knight asked to spar (see Entity.HandOver)
+        if (part != target && IsInTalkPart(part, target)) {
+            entity.OnCopyToldByTalk(fsmName, eventName);
             return;
         }
 
@@ -2963,8 +3063,9 @@ internal partial class Entity {
     /// </summary>
     /// <param name="scale">The new scale data.</param>
     public void UpdateScale(EntityUpdate.ScaleData scale) {
-        // The part of an FSM that each game runs by itself turns the copy to the local player (RunEachGamePart)
-        if (Object.Client == null || _runHereForGood) {
+        // The part of an FSM that each game runs by itself turns the copy to the local player (RunEachGamePart), and so
+        // does a talk with them (TalkHere)
+        if (Object.Client == null || _runHereForGood || _runHereTalk) {
             //Logger.Warn($"Cannot update scale for entity ({Id}, {Type}), client object is null");
             return;
         }
@@ -3045,9 +3146,16 @@ internal partial class Entity {
             return;
         }
 
-        // Played by the copy's own FSM until the scene host has answered its input, and through the combo of a catch,
-        // and held till then (PlayHere)
-        if (WaitsForEcho || _runHereCombo != null) {
+        // The state of a room this game is in already plays only a clip the copy is not playing: played again, the
+        // clip it is in the middle of would start over or jump to its end
+        if (FromRoomState && _animator.Client != null && _animator.Client.CurrentClip?.name == clipName ||
+            YieldsToNewer(HeardClip)) {
+            return;
+        }
+
+        // Played by the copy's own FSM until the scene host has answered its input, through the combo of a catch, and
+        // through a talk of the local player, and held till then (PlayHere, TalkHere)
+        if (WaitsForEcho || _runHereCombo != null || _runHereTalk) {
             _heldAnimation = (animationId, wrapMode);
             return;
         }
@@ -3114,6 +3222,10 @@ internal partial class Entity {
     /// </summary>
     /// <param name="active">The new value for active.</param>
     public void UpdateIsActive(bool active) {
+        if (YieldsToNewer(HeardActive)) {
+            return;
+        }
+
         _sceneHostHasItOn = active;
         _timesToldIfOn++;
         _lastToldIfOn = Time.unscaledTime;
@@ -3146,6 +3258,18 @@ internal partial class Entity {
         foreach (var data in entityNetworkData) {
             if (data.Type == EntityComponentType.Echo) {
                 HearEcho(data);
+                continue;
+            }
+
+            // What plays something out once - a prompt to a challenge, a spawner moving into place, a jar breaking, a
+            // dream platform showing - is played on walking into the room, and not again for a room this game is in
+            if (FromRoomState && data.Type is EntityComponentType.ChallengePrompt or EntityComponentType.EnemySpawner
+                    or EntityComponentType.SpawnJar or EntityComponentType.DreamPlatform) {
+                continue;
+            }
+
+            // Newer when heard just before the state of the room (see YieldsToNewer); a death is a death either way
+            if (data.Type != EntityComponentType.Health && YieldsToNewer((int) data.Type)) {
                 continue;
             }
 
@@ -3208,7 +3332,8 @@ internal partial class Entity {
                 // (HoldsForTheAftermath).
                 HearFromSceneHost(fsm, state);
                 if (fsm == _runHere && !_mutedHere.Contains(action)) {
-                    if (WaitsForEcho || HoldsForTheAftermath(state)) {
+                    // And while it runs here for a talk of the local player, until the talk is over (TalkHere)
+                    if (WaitsForEcho || HoldsForTheAftermath(state) || _runHereTalk) {
                         HoldForEcho(data);
                         continue;
                     }
@@ -3254,6 +3379,11 @@ internal partial class Entity {
     /// <param name="hostFsmData">Dictionary mapping FSM index to data.</param>
     public void UpdateHostFsmData(Dictionary<byte, EntityHostFsmData> hostFsmData) {
         foreach (var (fsmIndex, data) in hostFsmData) {
+            // Newer when heard just before the state of the room (see YieldsToNewer)
+            if (YieldsToNewer(HeardFsmVariables + fsmIndex)) {
+                continue;
+            }
+
             if (_fsms.Host.Count <= fsmIndex) {
                 //Logger.Warn($"Tried to update host FSM data for unknown FSM index: {fsmIndex}");
                 continue;
@@ -3297,7 +3427,8 @@ internal partial class Entity {
             // itself, whose count of binds left is the local player's (RunEachGamePart), nor into a catch that this
             // game leads, whose count of struggles is (_runHereLed).
             var clientFsm = _fsms.Client[fsmIndex];
-            var writesCopy = clientFsm != _runHere || !WaitsForEcho && !_runHereForGood && !_runHereLed;
+            var writesCopy = clientFsm != _runHere ||
+                             !WaitsForEcho && !_runHereForGood && !_runHereLed && !_runHereTalk;
 
             if (data.Types.Contains(EntityHostFsmData.Type.Floats)) {
                 foreach (var (index, val) in data.Floats) {
@@ -3400,6 +3531,7 @@ internal partial class Entity {
             LetThePlayerBackIn(true);
         } finally {
             EntitiesByCopy.Remove(Object.Client);
+            EntitiesByRoomObject.Remove(Object.Host);
 
             // An FSM that was still to be made is no longer this entity's to hook
             foreach (var fsm in _fsms.Host) {

@@ -389,6 +389,29 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
     }
 
     /// <summary>
+    /// Takes the data that cannot be written into a packet out of this one, and says what it was. Only that is lost:
+    /// the rest of what was to be sent still goes.
+    /// </summary>
+    /// <returns>The IDs of the data taken out.</returns>
+    internal List<TPacketId> DropUnwritableData() {
+        var dropped = new List<TPacketId>();
+        foreach (var pair in new List<KeyValuePair<TPacketId, IPacketData>>(NormalPacketData)) {
+            try {
+                pair.Value.WriteData(new Packet());
+            } catch (Exception) {
+                NormalPacketData.Remove(pair.Key);
+                dropped.Add(pair.Key);
+            }
+        }
+
+        if (dropped.Count > 0) {
+            CachedAllPacketData = null;
+        }
+
+        return dropped;
+    }
+
+    /// <summary>
     /// Create a raw packet out of the data contained in this class by writing to the given packet.
     /// </summary>
     /// <param name="packet">The packet instance to write the data to.</param>
@@ -414,11 +437,41 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
             // Read the addon packet data
             ReadAddonDataDict(packet, AddonPacketData);
         } catch (Exception e) {
-            Logger.Debug($"Exception while reading base packet:\n{e}");
+            WarnUnreadable("its data", e);
             return false;
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// When an unreadable packet was last reported, and how many have gone unreported since.
+    /// </summary>
+    private static DateTime _unreadableToldAt = DateTime.MinValue;
+
+    /// <summary>
+    /// How many unreadable packets have gone unreported since the last report.
+    /// </summary>
+    private static int _unreadableUntold;
+
+    /// <summary>
+    /// Says that a packet that arrived could not be read and was dropped whole, reliable data and all - at most once
+    /// every few seconds, with how many more there were. Said only to the debug log, a link that dropped every packet
+    /// this way looked in the log exactly like one that carried nothing at all.
+    /// </summary>
+    /// <param name="what">What of the packet could not be read.</param>
+    /// <param name="e">Why.</param>
+    internal static void WarnUnreadable(string what, Exception e) {
+        var now = DateTime.UtcNow;
+        if ((now - _unreadableToldAt).TotalSeconds < 5) {
+            _unreadableUntold++;
+            return;
+        }
+
+        var more = _unreadableUntold > 0 ? $" ({_unreadableUntold} more since the last one said)" : "";
+        _unreadableToldAt = now;
+        _unreadableUntold = 0;
+        Logger.Warn($"A packet that arrived was dropped, because {what} could not be read{more}:\n{e}");
     }
 
     /// <summary>
