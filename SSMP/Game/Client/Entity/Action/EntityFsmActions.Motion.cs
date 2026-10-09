@@ -255,6 +255,18 @@ internal static partial class EntityFsmActions {
     #region SetRotation
 
     /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// An action that turns its object as its state starts has done so by now, and the object is sent turned the way it
+    /// sits under its parent, like the places and sizes of parts (WritePlace, WriteScale). A turn in the world was put
+    /// on the copy's part as it was, with the copy's body facing whichever way it faced when the word came. The engine
+    /// turns a part under a body that is flipped the mirror way round, and the body's own turn travels separately,
+    /// with its position. A creature that turns to face something and points a part at it in the same step - the
+    /// dancers turning to the middle and pointing their eye beams at it as the ring appears - had the beam set for the
+    /// way the copy faced before it turned, and once it had turned the beam pointed away from the middle (USER 10-09).
+    ///
+    /// Only an object under the creature itself, or under nothing, is sent this way: the copy's object sits under the
+    /// same parent there. One under something else, like the hero that a part was put on, may not on the copy.
+    /// </remarks>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetRotation action) {
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
@@ -265,6 +277,22 @@ internal static partial class EntityFsmActions {
             //Logger.Debug("Tried getting SetPosition network data, but entity is in registry");
             return false;
         }
+
+        var parent = gameObject.transform.parent;
+        if (!action.everyFrame && !action.lateUpdate &&
+            (parent == null || PathFromOwner(action.Fsm.GameObject, parent.gameObject) != null)) {
+            var turn = gameObject.transform.localRotation;
+            data.Packet.Write(true);
+            data.Packet.Write(turn.x);
+            data.Packet.Write(turn.y);
+            data.Packet.Write(turn.z);
+            data.Packet.Write(turn.w);
+            return true;
+        }
+
+        // Turned from the next frame on, the object isn't turned yet, and what it is about to be turned to is sent, as
+        // is the turn of an object under something other than the creature
+        data.Packet.Write(false);
 
         Vector3 vector3;
         if (action.quaternion.IsNone) {
@@ -320,6 +348,18 @@ internal static partial class EntityFsmActions {
             if (!action.xAngle.IsNone) euler.x = action.xAngle.Value;
             if (!action.yAngle.IsNone) euler.y = action.yAngle.Value;
             if (!action.zAngle.IsNone) euler.z = action.zAngle.Value;
+        } else if (data.Packet.ReadBool()) {
+            var turn = new Quaternion(
+                data.Packet.ReadFloat(),
+                data.Packet.ReadFloat(),
+                data.Packet.ReadFloat(),
+                data.Packet.ReadFloat()
+            );
+            if (gameObject != null) {
+                gameObject.transform.localRotation = turn;
+            }
+
+            return;
         } else {
             // Client path: always consume packet bytes to keep the stream in sync,
             // even if the target object is gone.
