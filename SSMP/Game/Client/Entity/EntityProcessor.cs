@@ -351,6 +351,13 @@ internal class EntityProcessor {
 
     /// <summary>
     /// Creates the same ID for a static scene object even when another client has a different set or discovery order.
+    /// The depth of the object and of everything it sits under is left out. A room may give an object a depth at random
+    /// as it is switched on (SetZRandom), which for one that is on as the room loads happens before it is numbered here,
+    /// so it got another ID in each game and nothing the scene host said about it ever reached the other game's copy: a
+    /// flyer that was to come with a wave of an arena never came for the other player, and others like it never
+    /// showed (USER 10-09). The depth only orders what is drawn in front; the names and the rest of the position tell
+    /// the objects apart. Of the room objects that the registry takes, none come to the same ID without the depth,
+    /// while with it two pairs in one room did, the second of each never registered (FsmScan --stableids).
     /// </summary>
     private static ushort GetStableSceneId(GameObject gameObject) {
         const uint offset = 2166136261;
@@ -369,7 +376,6 @@ internal class EntityProcessor {
             var position = current.localPosition;
             AddInt(BitConverter.SingleToInt32Bits(position.x));
             AddInt(BitConverter.SingleToInt32Bits(position.y));
-            AddInt(BitConverter.SingleToInt32Bits(position.z));
         }
 
         return (ushort) (hash ^ hash >> 16);

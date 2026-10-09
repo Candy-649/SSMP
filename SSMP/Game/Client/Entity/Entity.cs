@@ -1844,6 +1844,25 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Sends the clip that the room's own creature shows now, for the other game's copy and for whoever walks in later.
+    /// A clip played before this game was settled to run the room was never sent: the sprite animator only says what it
+    /// plays at the moment it plays it, and nothing goes out before then. One that lies in wait plays its waiting clip
+    /// once as the room loads and holds it until it is woken, so the other game's copy showed the picture the room was
+    /// saved with instead: a creature that should have been hidden in the ground stood out in the open in the middle
+    /// of an attack (USER 10-09). It is sent once when the room is settled to be run here, like whether the creature is
+    /// on - not for one that is taken in later, whose clips all come after, and which may be an old one from a pool
+    /// still showing the clip it ended its last life with.
+    /// </summary>
+    internal void SendShownClip() {
+        if (_animator.Host == null || _animator.Host.CurrentClip is not { } clip ||
+            !_animationClipNameIds.TryGetValue(clip.name, out var animationId)) {
+            return;
+        }
+
+        _netClient.UpdateManager.UpdateEntityAnimation(Id, animationId, (byte) clip.wrapMode);
+    }
+
+    /// <summary>
     /// Initializes the entity when the client user is a scene client. Only sets a variable to indicate the scene
     /// host has been determined.
     /// </summary>

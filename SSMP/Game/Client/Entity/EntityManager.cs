@@ -202,7 +202,10 @@ internal class EntityManager {
     public void InitializeSceneHost(uint sceneHostEpoch = 0) {
         Logger.Info($"We are scene host, releasing control of all registered entities (epoch {sceneHostEpoch})");
         IsSceneHost = true;
-        ForEachEntity("release", entity => entity.InitializeHost(sceneHostEpoch));
+        ForEachEntity("release", entity => {
+            entity.InitializeHost(sceneHostEpoch);
+            entity.SendShownClip();
+        });
         _sceneRoleDetermined = true;
         _expectsToRunRoom = false;
 
