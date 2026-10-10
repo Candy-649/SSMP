@@ -236,6 +236,18 @@ internal partial class Entity {
     private const float AnticipationStampTime = 2.5f;
 
     /// <summary>
+    /// When, in seconds after it last changed, the scene host sends again which way an entity faces, the clip it shows
+    /// and the place it came to stand in.
+    ///
+    /// Each of these goes once, when it changes, by the way that drops what it cannot deliver, and nothing comes after
+    /// it until the next change. A creature that turned to charge and then flew straight sent its turn once, and a copy
+    /// that missed it flew the whole charge rear first (USER 10-10, "飞天怪用屁股撞"). The player's own facing had been
+    /// lost the same way and was walked backwards (ClientManager). Sent again a few times at growing gaps, a short break
+    /// in the line is covered for a few bytes each; a copy that already has it changes nothing.
+    /// </summary>
+    private static readonly float[] SentAgainAfter = [0.1f, 0.3f, 0.7f];
+
+    /// <summary>
     /// The ID of the entity.
     /// </summary>
     public ushort Id { get; }
@@ -340,6 +352,43 @@ internal partial class Entity {
     private Vector3 _lastScale;
 
     /// <summary>
+    /// When the place, the scale and the clip of this game's creature were last changed and sent, in unscaled seconds,
+    /// and how many times each has been sent again since (see <see cref="SentAgainAfter"/>). Counted as all sent until
+    /// the first change.
+    /// </summary>
+    private float _positionChangedAt, _scaleChangedAt, _clipChangedAt;
+
+    /// <inheritdoc cref="_positionChangedAt"/>
+    private int _positionSentAgain = SentAgainAfter.Length,
+        _scaleSentAgain = SentAgainAfter.Length,
+        _clipSentAgain = SentAgainAfter.Length;
+
+    /// <summary>
+    /// The axes of the scale that changed since it was last sent other than again, which are what is sent again.
+    /// </summary>
+    private bool _scaleAgainX, _scaleAgainY, _scaleAgainZ;
+
+    /// <summary>
+    /// The clip last sent other than again, by its ID, wrap mode and name, which is what is sent again.
+    /// </summary>
+    private byte _clipAgainId, _clipAgainWrapMode;
+
+    /// <inheritdoc cref="_clipAgainId"/>
+    private string? _clipAgainName;
+
+    /// <summary>
+    /// The packet order of the scales the copy took, so that an older one arriving after a newer one is thrown away, as
+    /// for positions (see <see cref="UpdatePosition"/>).
+    /// </summary>
+    private readonly PositionSequence _scaleSequence;
+
+    /// <summary>
+    /// Which way the game that runs this creature last said its copy faces (the sign of its x scale), and when, for the
+    /// log of what hurt the player (CoopSave.Hurts); 0 until it has said.
+    /// </summary>
+    private float _toldFacing, _toldFacingAt;
+
+    /// <summary>
     /// Whether the game object for the entity was last active.
     /// </summary>
     private bool _lastIsActive;
@@ -382,6 +431,7 @@ internal partial class Entity {
         Type = type;
 
         _positionSequence = new PositionSequence($"entity {id} ({type})");
+        _scaleSequence = new PositionSequence($"the facing of entity {id} ({type})");
 
         _isControlled = true;
         _keepsRunning = keepsRunning;
@@ -493,6 +543,27 @@ internal partial class Entity {
 
         EntitiesByCopy[Object.Client] = this;
         EntitiesByRoomObject[Object.Host] = this;
+
+        // Bounds that hold the creature in the space of what it sits under in the room hold the copy, which sits under
+        // nothing, through that same object (OnConstrainLateUpdate)
+        // (The game's own LateUpdate is private, which the referenced library does not show.)
+        if (!_hasParent && !_constrainHookTried && Object.Host.transform.parent != null &&
+            Object.Client.GetComponents<ConstrainPosition>().Any(constrain => constrain.localSpace)) {
+            _constrainHookTried = true;
+            var lateUpdate = typeof(ConstrainPosition).GetMethod(
+                "LateUpdate", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                System.Type.EmptyTypes, null
+            );
+            if (lateUpdate != null) {
+                _constrainHook = new Hook(lateUpdate, OnConstrainLateUpdate);
+            } else {
+                SSMP.Logging.Logger.Warn(
+                    "Could not find how the game holds a creature within its bounds, so copies held in the space of " +
+                    "what they sit under are held in the world instead"
+                );
+            }
+        }
+
         _broadcastHook ??= new Hook(
             typeof(HutongGames.PlayMaker.Fsm).GetMethod(
                 nameof(HutongGames.PlayMaker.Fsm.BroadcastEventToGameObject),
@@ -1386,6 +1457,7 @@ internal partial class Entity {
             HideTheRoomsOwnCopy();
             SayWhyTheCopyIsOff();
             UpdateRunHere();
+            CheckWokenByLocalPlayer();
 
             if (Object.Client != null &&
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
@@ -1455,10 +1527,17 @@ internal partial class Entity {
         var stoppedMovingByItself = _hostMovedByItself && !movesByItself;
         _hostMovedByItself = movesByItself;
 
+        // What changed a moment ago goes again in case it was lost (SentAgainAfter); the place not while the entity
+        // moves by itself, when none is sent at all
+        var positionAgain = !_hasParent && !movesByItself && IsDueAgain(_positionChangedAt, ref _positionSentAgain);
+        var scaleAgain = !_hasParent && IsDueAgain(_scaleChangedAt, ref _scaleSentAgain);
+
         // Unity already tracks transform mutations; avoid re-reading and comparing position/scale on quiet frames. A
         // part of another entity sends neither: the copy of its parent carries it and moves it the way it moves here.
-        if (!_hasParent && (transform.hasChanged || anticipationTaken || stoppedMovingByItself)) {
+        if (!_hasParent && (transform.hasChanged || anticipationTaken || stoppedMovingByItself || positionAgain ||
+                            scaleAgain)) {
             var newPosition = transform.position;
+            var newScale = transform.lossyScale;
 
             // A position is sent even when the entity has not moved, for as long as there are forced ones left,
             // because the player waiting on it has nothing else to wait for. It is also the whole of the answer
@@ -1467,9 +1546,14 @@ internal partial class Entity {
             //
             // None is sent while the entity moves by itself from how it set off: the other game moves the copy the
             // same way, and was told where it set off from (OwnMotionComponent).
-            if ((newPosition != _lastPosition || anticipationTaken) && !movesByItself) {
+            if ((newPosition != _lastPosition || anticipationTaken || positionAgain) && !movesByItself) {
                 if (_anticipationSendsLeft > 0) {
                     _anticipationSendsLeft--;
+                }
+
+                if (newPosition != _lastPosition) {
+                    _positionChangedAt = Time.unscaledTime;
+                    _positionSentAgain = 0;
                 }
 
                 _lastPosition = newPosition;
@@ -1477,6 +1561,23 @@ internal partial class Entity {
                 _netClient.UpdateManager.UpdateEntityPosition(
                     Id,
                     new Math_Vector3(newPosition.x, newPosition.y, newPosition.z)
+                );
+
+                // Which way the entity faces rides along with every position, as the player's own does
+                // (ClientManager). Sent on its own only on the frame it changed, a lost turn left the copy facing the
+                // old way for as long as the entity kept going. Only the sign of each axis, a byte, and added to a
+                // change of size the packet may already carry rather than put in its place (ScaleData.TakeNewer).
+                _netClient.UpdateManager.UpdateEntityScale(
+                    Id,
+                    new EntityUpdate.ScaleData {
+                        origin = true,
+                        x = true,
+                        y = true,
+                        xFlipped = true,
+                        yFlipped = true,
+                        xScale = newScale.x,
+                        yScale = newScale.y
+                    }
                 );
 
                 // Beside every position for a while rather than only the once, for the same reason as above, and
@@ -1488,7 +1589,6 @@ internal partial class Entity {
 
             const float epsilon = 0.0001f;
 
-            var newScale = transform.lossyScale;
             if (newScale != _lastScale) {
                 var scaleData = new EntityUpdate.ScaleData {
                     origin = true
@@ -1519,14 +1619,51 @@ internal partial class Entity {
                     if (System.Math.Abs(newScale.z - _lastScale.z * -1) < epsilon) {
                         scaleData.zFlipped = true;
                     }
+
+                    // The way a scale is written has no way to say z without x and y (ScaleData.WriteData)
+                    if (!scaleData.x) {
+                        scaleData.x = true;
+                        scaleData.xScale = newScale.x;
+                    }
+
+                    if (!scaleData.y) {
+                        scaleData.y = true;
+                        scaleData.yScale = newScale.y;
+                    }
                 }
 
                 _netClient.UpdateManager.UpdateEntityScale(Id, scaleData);
 
+                // Sent again a few times in case it was lost (SentAgainAfter), with every axis that changed since it
+                // was last sent other than again: a turn and a change of size a moment apart are both in it
+                if (_scaleSentAgain >= SentAgainAfter.Length) {
+                    _scaleAgainX = _scaleAgainY = _scaleAgainZ = false;
+                }
+
+                _scaleAgainX |= scaleData.x;
+                _scaleAgainY |= scaleData.y;
+                _scaleAgainZ |= scaleData.z;
+                _scaleChangedAt = Time.unscaledTime;
+                _scaleSentAgain = 0;
+
                 _lastScale = newScale;
+            } else if (scaleAgain) {
+                SendScaleAgain(newScale);
             }
 
             transform.hasChanged = false;
+        }
+
+        // The clip goes again too (SentAgainAfter), while this game's creature still plays it: one that has played to
+        // its end would only start over, late, on a copy that missed it
+        if (_animator.Host != null && IsDueAgain(_clipChangedAt, ref _clipSentAgain) &&
+            _animator.Host.CurrentClip is { } shownClip && shownClip.name == _clipAgainName &&
+            _animator.Host.IsPlaying(shownClip)) {
+            _netClient.UpdateManager.UpdateEntityAnimation(
+                Id,
+                _clipAgainId,
+                (byte) (_clipAgainWrapMode | EntityUpdate.WrapModeSentAgain)
+            );
         }
 
         var newActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
@@ -1740,6 +1877,63 @@ internal partial class Entity {
             animationId,
             (byte) clip.wrapMode
         );
+        NoteClipSent(animationId, (byte) clip.wrapMode, clip.name);
+    }
+
+    /// <summary>
+    /// Whether something that was sent once when it changed is due to be sent again (see <see cref="SentAgainAfter"/>),
+    /// counting it if so. Past more than one of the times at once, after a long frame, it goes only the once.
+    /// </summary>
+    /// <param name="changedAt">When it changed and was sent, in unscaled seconds.</param>
+    /// <param name="sentAgain">How many times it was sent again since.</param>
+    private static bool IsDueAgain(float changedAt, ref int sentAgain) {
+        if (sentAgain >= SentAgainAfter.Length || Time.unscaledTime - changedAt < SentAgainAfter[sentAgain]) {
+            return false;
+        }
+
+        while (sentAgain < SentAgainAfter.Length && Time.unscaledTime - changedAt >= SentAgainAfter[sentAgain]) {
+            sentAgain++;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Sends again the axes of this game's creature's scale that changed a moment ago (see
+    /// <see cref="SentAgainAfter"/>), whole, so a copy that missed a turn or a change of size has it.
+    /// </summary>
+    /// <param name="scale">The scale of this game's creature now.</param>
+    private void SendScaleAgain(Vector3 scale) {
+        // The way a scale is written has no way to say z without x and y (ScaleData.WriteData)
+        var all = _scaleAgainZ;
+        if (!_scaleAgainX && !_scaleAgainY && !all) {
+            return;
+        }
+
+        _netClient.UpdateManager.UpdateEntityScale(
+            Id,
+            new EntityUpdate.ScaleData {
+                origin = true,
+                x = _scaleAgainX || all,
+                y = _scaleAgainY || all,
+                z = all,
+                xScale = scale.x,
+                yScale = scale.y,
+                zScale = scale.z
+            }
+        );
+    }
+
+    /// <summary>
+    /// Notes the clip this game's creature was just sent playing, for it to go again in case it was lost (see
+    /// <see cref="SentAgainAfter"/>).
+    /// </summary>
+    private void NoteClipSent(byte animationId, byte wrapMode, string clipName) {
+        _clipAgainId = animationId;
+        _clipAgainWrapMode = wrapMode;
+        _clipAgainName = clipName;
+        _clipChangedAt = Time.unscaledTime;
+        _clipSentAgain = 0;
     }
 
     /// <summary>
@@ -2018,6 +2212,7 @@ internal partial class Entity {
         }
 
         _netClient.UpdateManager.UpdateEntityAnimation(Id, animationId, (byte) clip.wrapMode);
+        NoteClipSent(animationId, (byte) clip.wrapMode, clip.name);
     }
 
     /// <summary>
@@ -2563,6 +2758,23 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// What the game that runs this creature last said of which way it faces (the sign of its x scale), and how long ago,
+    /// for the log of what hurt the player (CoopSave.Hurts).
+    /// </summary>
+    internal string DescribeToldFacing() => _toldFacingAt <= 0f
+        ? "never told which way it faces"
+        : $"told x scale {(_toldFacing > 0f ? "+" : "-")} {Time.unscaledTime - _toldFacingAt:0.0} s ago";
+
+    /// <summary>
+    /// How fast this game moves the copy between the positions it is told, for the same log, or null for a copy that
+    /// is not moved that way.
+    /// </summary>
+    internal Vector3? CopyVelocity => Object.Client != null &&
+                                      Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)
+        ? interpolation.Velocity
+        : null;
+
+    /// <summary>
     /// The entity that an object is, or is a part of - the room's own object or the copy - or null for anything else.
     /// </summary>
     /// <param name="gameObject">The object.</param>
@@ -2585,6 +2797,68 @@ internal partial class Entity {
     /// <param name="fsm">The FSM.</param>
     internal bool IsRunBySceneHostAlone(PlayMakerFSM? fsm) {
         return fsm != null && (_fsms.Host.Contains(fsm) || _fsms.Client.Contains(fsm)) && !IsRunByEachGame(fsm);
+    }
+
+    /// <summary>
+    /// The hook that holds copies within their bounds in the space the bounds are kept in (see
+    /// <see cref="OnConstrainLateUpdate"/>), put in place with the first copy that needs it.
+    /// </summary>
+    private static Hook? _constrainHook;
+
+    /// <summary>
+    /// Whether <see cref="_constrainHook"/> was looked for, so that a game without the method says so only once.
+    /// </summary>
+    private static bool _constrainHookTried;
+
+    /// <summary>
+    /// Holds the copy of a creature within the bounds its game holds the room's own creature in, in the space they are
+    /// kept in. Some creatures are held between bounds kept in the space of what they sit under in the room - the
+    /// fight they belong to - and a copy sits under nothing, so the same bounds held it in the world instead: a
+    /// creature whose fight is far from the corner of the room was put back at the corner every frame, out of sight,
+    /// while what it threw still came from where it really was (USER 10-10, "刚刚有小怪我这里看不到，但是投的针能投到我",
+    /// "竞技场的怪我能看到一部分"). Done as the game does it (ConstrainPosition.LateUpdate), only through what the room's
+    /// own creature sits under; everything else is held by the game itself.
+    /// </summary>
+    private static void OnConstrainLateUpdate(Action<ConstrainPosition> orig, ConstrainPosition self) {
+        if (!self.localSpace || !EntitiesByCopy.TryGetValue(self.gameObject, out var entity) || entity._hasParent ||
+            entity.Object.Host == null || entity.Object.Host.transform.parent is not { } space) {
+            orig(self);
+            return;
+        }
+
+        var transform = self.transform;
+        var position = space.InverseTransformPoint(transform.position);
+        var constrained = false;
+        if (self.constrainX) {
+            if (position.x < self.xMin) {
+                position.x = self.xMin;
+                constrained = true;
+            } else if (position.x > self.xMax) {
+                position.x = self.xMax;
+                constrained = true;
+            }
+        }
+
+        if (self.constrainY) {
+            if (position.y < self.yMin) {
+                position.y = self.yMin;
+                constrained = true;
+            } else if (position.y > self.yMax) {
+                position.y = self.yMax;
+                constrained = true;
+            }
+        }
+
+        if (!constrained || Time.timeScale <= Mathf.Epsilon) {
+            return;
+        }
+
+        transform.position = space.TransformPoint(position);
+        if (self.cutVelocityOnConstrain && self.rb != null) {
+            self.rb.linearVelocity = Vector2.zero;
+        }
+
+        self.OnConstrained?.Invoke();
     }
 
     /// <summary>
@@ -3234,16 +3508,42 @@ internal partial class Entity {
     /// Updates the scale of the client entity.
     /// </summary>
     /// <param name="scale">The new scale data.</param>
-    public void UpdateScale(EntityUpdate.ScaleData scale) {
-        // Newer when heard just before the state of the room (see YieldsToNewer)
-        if (YieldsToNewer(HeardScale)) {
+    /// <param name="sequence">The number of the packet it came in, or 0 for none.</param>
+    public void UpdateScale(EntityUpdate.ScaleData scale, ushort sequence = 0) {
+        // Newer when heard just before the state of the room (see YieldsToNewer). A turn alone, which rides along with
+        // every position, says nothing of the size and does not count as one heard: while the creature moved, the state
+        // of the room would never again put right a change of size that was lost
+        if ((scale.HasSize || FromRoomState) && YieldsToNewer(HeardScale)) {
             return;
+        }
+
+        // An older scale arriving after a newer one is thrown away, as an older position is (UpdatePosition): with the
+        // facing riding along with every position, one held back on the way would turn the copy back for a moment, and
+        // a turn held back past the last of them would for good. What the state of a room says is not numbered by the
+        // packet that carries it, and YieldsToNewer sees to it.
+        if (!FromRoomState && !_scaleSequence.Accepts(sequence, out _)) {
+            return;
+        }
+
+        if (scale.x) {
+            _toldFacing = scale.xFlipped ? (scale.xPos ? 1f : -1f) : Mathf.Sign(scale.xScale);
+            _toldFacingAt = Time.unscaledTime;
         }
 
         // The part of an FSM that each game runs by itself turns the copy to the local player (RunEachGamePart), and so
         // does a talk with them (TalkHere)
         if (Object.Client == null || _runHereForGood || _runHereTalk) {
             //Logger.Warn($"Cannot update scale for entity ({Id}, {Type}), client object is null");
+            return;
+        }
+
+        // Held for as long as the copy's FSM runs here (PlayHere), as its positions are not taken meanwhile either: what
+        // the scene host sends is from before the input, or of its own creature, which may face elsewhere, and now that
+        // the facing rides along with every position it would turn the copy back from what its own FSM turned it to,
+        // frame after frame. It is taken once the copy follows the scene host again.
+        if (_runHere != null) {
+            _heldScale ??= new EntityUpdate.ScaleData();
+            _heldScale.TakeNewer(scale);
             return;
         }
 
@@ -3292,7 +3592,10 @@ internal partial class Entity {
             }
         }
 
-        transform.localScale = localScale;
+        // Only when it changes: the facing that rides along with every position mostly says what the copy has already
+        if (transform.localScale != localScale) {
+            transform.localScale = localScale;
+        }
     }
 
     /// <summary>
@@ -3302,11 +3605,16 @@ internal partial class Entity {
     /// <param name="wrapMode">The wrap mode of the animation clip.</param>
     /// <param name="alreadyInSceneUpdate">Whether this update is when entering a new scene.</param>
     /// <param name="packet">The packet that brought it, or 0 for one that came in none.</param>
+    /// <param name="sentAgain">
+    /// Whether it is a clip sent again in case it was lost (EntityUpdate.WrapModeSentAgain), which a copy that shows it
+    /// already leaves be.
+    /// </param>
     public void UpdateAnimation(
         byte animationId,
         tk2dSpriteAnimationClip.WrapMode wrapMode,
         bool alreadyInSceneUpdate,
-        ushort packet = 0
+        ushort packet = 0,
+        bool sentAgain = false
     ) {
         if (_animator.Client == null) {
             //Logger.Warn($"Entity '{Object.Client.name}' received animation while client animator does not exist");
@@ -3334,6 +3642,15 @@ internal partial class Entity {
         // through a talk of the local player, and held till then (PlayHere, TalkHere)
         if (WaitsForEcho || _runHereCombo != null || _runHereTalk) {
             _heldAnimation = (animationId, wrapMode);
+            return;
+        }
+
+        // Sent again in case it was lost (SentAgainAfter): a copy that is still playing it leaves it be, and one whose
+        // own FSM runs here plays its own clips. A copy whose clip of that name has played to its end missed it being
+        // played again - the same attack twice - which the scene host sends again only while it still plays it.
+        if (sentAgain && (_runHere != null ||
+                          _animator.Client.CurrentClip is { } current && current.name == clipName &&
+                          _animator.Client.IsPlaying(current))) {
             return;
         }
 

@@ -94,6 +94,14 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public byte AnimationWrapMode { get; set; }
 
     /// <summary>
+    /// The bit of <see cref="AnimationWrapMode"/> that marks a clip the scene host sends again, a little after it was
+    /// first sent, in case that was lost (Entity.SentAgainAfter). A wrap mode is a number below eight, so the top bit
+    /// is free. A copy that already shows a clip sent again leaves it be: played once more, a clip that has played to
+    /// its end starts over.
+    /// </summary>
+    public const byte WrapModeSentAgain = 0x80;
+
+    /// <summary>
     /// Construct the entity update data.
     /// </summary>
     public EntityUpdate() {
@@ -120,6 +128,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public override void WriteData(IPacket packet) {
         packet.Write(Id);
 
+        // A scale with neither x nor y cannot be written (ScaleData.WriteData), so it is left out whole rather than
+        // written as one the reader takes for all three axes, which would read the rest of the packet out of step
+        var writesScale = UpdateTypes.Contains(EntityUpdateType.Scale) && (Scale.x || Scale.y);
+
         // Construct the byte flag representing update types
         byte updateTypeFlag = 0;
         // Keep track of value of current bit
@@ -128,7 +140,8 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         for (var i = 0; i < EntityUpdateTypeCount; i++) {
             // Cast the current index of the loop to a PlayerUpdateType and check if it is
             // contained in the update type list, if so, we add the current bit to the flag
-            if (UpdateTypes.Contains((EntityUpdateType) i)) {
+            if (UpdateTypes.Contains((EntityUpdateType) i) &&
+                ((EntityUpdateType) i != EntityUpdateType.Scale || writesScale)) {
                 updateTypeFlag |= currentTypeValue;
             }
 
@@ -143,7 +156,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
             packet.Write(Position);
         }
 
-        if (UpdateTypes.Contains(EntityUpdateType.Scale)) {
+        if (writesScale) {
             Scale.WriteData(packet);
         }
 
@@ -269,23 +282,36 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         /// </summary>
         public bool IsEmpty => !x && !y && !z;
 
+        /// <summary>
+        /// Whether it says the size of any axis, rather than only which way an axis is turned, as the facing that rides
+        /// along with every position does (Entity).
+        /// </summary>
+        public bool HasSize => x && !xFlipped || y && !yFlipped || z && !zFlipped;
+
         /// <inheritdoc cref="IPacketData.WriteData" />
         public void WriteData(IPacket packet) {
             // Logger.Debug($"ScaleData.WriteData x: {x}, y: {y}, z: {z}, xFlipped: {xFlipped}, yFlipped: {yFlipped},
             // zFlipped: {zFlipped}, xScale: {xScale}, yScale: {yScale}, zScale: {zScale}");
 
+            // The two lowest bits say "x", "y", "x and y", or with neither of them all three: there is no way to say z
+            // without both x and y. A z with only one of them was read back as all three, so the reader took floats
+            // that had never been written and read the rest of the packet out of step. It is left out then: how deep a
+            // flat sprite is scaled does not change how it looks. A scale with neither x nor y is not written at all
+            // (EntityUpdate.WriteData), and a change of z is sent with x and y (Entity).
+            var withZ = z && x && y;
+
             // 0 0 0 0 0 0 0 0
             byte flagByte = 0;
 
-            if (x && !y && !z) {
+            if (x && !y && !withZ) {
                 // Only x defined
                 // ( 1 0 ) 0 0 0 0 0 0
                 flagByte |= 1;
-            } else if (!x && y && !z) {
+            } else if (!x && y && !withZ) {
                 // Only y defined
                 // ( 0 1 ) 0 0 0 0 0 0
                 flagByte |= 2;
-            } else if (x && y && !z) {
+            } else if (x && y && !withZ) {
                 // Only x and y defined
                 // ( 1 1 ) 0 0 0 0 0 0
                 flagByte |= 3;
@@ -311,7 +337,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
                 }
             }
 
-            if (zFlipped) {
+            if (withZ && zFlipped) {
                 // 1 x x x x x ( 1 ) 0
                 flagByte |= 64;
 
@@ -334,7 +360,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
                 packet.Write(yScale);
             }
 
-            if (z && !zFlipped) {
+            if (withZ && !zFlipped) {
                 // Logger.Debug($"  zScale: {zScale}");
                 packet.Write(zScale);
             }
@@ -440,6 +466,64 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
                 } else {
                     zScale = data.zScale;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Takes in a scale that was sent after this one, for the axes it says anything about, into a packet that already
+        /// has this one waiting in it. Put in its place instead, as it used to be, the second of two changes made a frame
+        /// apart dropped the first when they were of different axes; and the facing that rides along with a position
+        /// (Entity) dropped a change of size made the frame before it. A turn of an axis whose size waits here turns that
+        /// size, so neither is lost.
+        /// </summary>
+        /// <param name="newer">The scale sent after this one.</param>
+        public void TakeNewer(ScaleData newer) {
+            if (newer.x) {
+                var positive = newer.origin ? newer.xScale > 0 : newer.xPos;
+                if (newer.xFlipped && x && !xFlipped) {
+                    xScale = System.Math.Abs(xScale) * (positive ? 1f : -1f);
+                } else if (newer.xFlipped) {
+                    xFlipped = true;
+                    xPos = positive;
+                    xScale = positive ? 1f : -1f;
+                } else {
+                    xFlipped = false;
+                    xScale = newer.xScale;
+                }
+
+                x = true;
+            }
+
+            if (newer.y) {
+                var positive = newer.origin ? newer.yScale > 0 : newer.yPos;
+                if (newer.yFlipped && y && !yFlipped) {
+                    yScale = System.Math.Abs(yScale) * (positive ? 1f : -1f);
+                } else if (newer.yFlipped) {
+                    yFlipped = true;
+                    yPos = positive;
+                    yScale = positive ? 1f : -1f;
+                } else {
+                    yFlipped = false;
+                    yScale = newer.yScale;
+                }
+
+                y = true;
+            }
+
+            if (newer.z) {
+                var positive = newer.origin ? newer.zScale > 0 : newer.zPos;
+                if (newer.zFlipped && z && !zFlipped) {
+                    zScale = System.Math.Abs(zScale) * (positive ? 1f : -1f);
+                } else if (newer.zFlipped) {
+                    zFlipped = true;
+                    zPos = positive;
+                    zScale = positive ? 1f : -1f;
+                } else {
+                    zFlipped = false;
+                    zScale = newer.zScale;
+                }
+
+                z = true;
             }
         }
 

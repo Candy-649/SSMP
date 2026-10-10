@@ -85,13 +85,20 @@ internal partial class CoopSave {
                     line.Append($", part of '{creature.name}' ({DescribeDrawn(creature.gameObject)})");
                 }
 
-                line.Append(Entity.Entity.FindByCopyPart(source) is { } copied
+                var copied = Entity.Entity.FindByCopyPart(source);
+                line.Append(copied != null
                     ? $", which is this game's copy of entity {copied.Id} ({copied.Type})"
                     : ", which is this game's own");
                 line.Append(
                     $", {Vector2.Distance(sourcePosition, heroPosition):0.0} away at " +
                     $"({sourcePosition.x:0.00}, {sourcePosition.y:0.00})"
                 );
+
+                // Which way it faces and goes, and which side of it the player is on: a creature that charged a
+                // player back first (USER 10-10, "飞天怪用屁股撞") shows here as one going towards the player while its
+                // x scale says it faces the other way
+                var body = creature != null ? creature.gameObject : source;
+                line.Append($", {DescribeFacing(body, copied, heroPosition)}");
             }
 
             line.Append($"; the player at ({heroPosition.x:0.00}, {heroPosition.y:0.00})");
@@ -99,6 +106,35 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Warn($"Could not write down a hurt of the player: {e.Message}");
         }
+    }
+
+    /// <summary>
+    /// Which way a creature faces (the sign of its x scale) and goes, which side of it the player is on, and for a copy
+    /// what the game that runs it last said of which way it faces.
+    /// </summary>
+    /// <param name="body">The creature.</param>
+    /// <param name="copied">The entity whose copy it is, or null for this game's own.</param>
+    /// <param name="heroPosition">Where the player is.</param>
+    private static string DescribeFacing(GameObject body, Entity.Entity? copied, Vector3 heroPosition) {
+        var transform = body.transform;
+        var text = new StringBuilder($"x scale {(transform.lossyScale.x >= 0f ? "+" : "-")}");
+        Vector3? velocity = null;
+        if (copied != null) {
+            velocity = copied.CopyVelocity;
+        } else if (body.TryGetComponent<Rigidbody2D>(out var rigidbody)) {
+            velocity = rigidbody.linearVelocity;
+        }
+
+        if (velocity is { } going) {
+            text.Append($" going ({going.x:0.0}, {going.y:0.0})");
+        }
+
+        text.Append($", the player on its {(heroPosition.x >= transform.position.x ? "right" : "left")}");
+        if (copied != null) {
+            text.Append($", {copied.DescribeToldFacing()}");
+        }
+
+        return text.ToString();
     }
 
     /// <summary>

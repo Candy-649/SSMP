@@ -386,6 +386,12 @@ internal partial class Entity {
     private (byte Id, tk2dSpriteAnimationClip.WrapMode WrapMode)? _heldAnimation;
 
     /// <summary>
+    /// The scale that the scene host sent while the copy waited for its echo or went through the combo of a catch, all
+    /// of it taken together, or null for none (see <see cref="UpdateScale"/>).
+    /// </summary>
+    private EntityUpdate.ScaleData? _heldScale;
+
+    /// <summary>
     /// The actions of <see cref="_runHere"/> that are left to the scene host, switched off while the copy runs here.
     /// </summary>
     private readonly HashSet<FsmStateAction> _mutedHere = [];
@@ -417,13 +423,15 @@ internal partial class Entity {
     /// scene host sets on its FSM too; null for a strike or a touch. A catch other than one of the
     /// <see cref="CatchEvents"/> is one that a part felt for itself, which this game leads (see
     /// <see cref="_runHereLed"/>).</param>
+    /// <param name="woken">Whether the local player woke the creature by coming near (CheckWokenByLocalPlayer), which
+    /// is played here whatever the creature's registry entry says.</param>
     /// <returns>What the scene host is sent to play the same, or null if it was not played here.</returns>
-    public InputStart? PlayHere(byte fsmIndex, string eventName, ToldValues? caught = null) {
+    public InputStart? PlayHere(byte fsmIndex, string eventName, ToldValues? caught = null, bool woken = false) {
         if (CatchEvents.Contains(eventName)) {
             caught ??= ToldValues.None;
         }
 
-        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && caught == null ||
+        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && caught == null && !woken ||
             SwitchToStateField == null ||
             fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null ||
             Object.Client == null || _runHere != null && _runHere != copyFsm || _runHereTalk) {
@@ -914,9 +922,11 @@ internal partial class Entity {
 
         Logger.Info($"The scene host took the input on entity {Id} to '{_runHereReached}' too");
         var heldAnimation = _heldAnimation;
+        var heldScale = _heldScale;
         _runHereAwaited = 0;
         _heldData.Clear();
         _heldAnimation = null;
+        _heldScale = null;
 
         // The scene host's FSM may have gone on already, which it said before this came, and the copy then plays what
         // the scene host last played - unless it has only gone on through the combo of a catch
@@ -925,6 +935,10 @@ internal partial class Entity {
             StopRunningHere();
             if (heldAnimation is { } animation) {
                 UpdateAnimation(animation.Id, animation.WrapMode, false);
+            }
+
+            if (heldScale != null) {
+                UpdateScale(heldScale);
             }
         }
     }
@@ -974,6 +988,7 @@ internal partial class Entity {
     private void FollowSceneHost() {
         var heldData = new List<EntityNetworkData>(_heldData);
         var heldAnimation = _heldAnimation;
+        var heldScale = _heldScale;
         var fsmIndex = _runHereIndex;
         StopRunningHere();
 
@@ -981,6 +996,10 @@ internal partial class Entity {
         UpdateData(heldData, false);
         if (heldAnimation is { } animation) {
             UpdateAnimation(animation.Id, animation.WrapMode, false);
+        }
+
+        if (heldScale != null) {
+            UpdateScale(heldScale);
         }
     }
 
@@ -1148,11 +1167,16 @@ internal partial class Entity {
     /// </summary>
     private void CatchUpWithSceneHost() {
         var heldAnimation = _heldAnimation;
+        var heldScale = _heldScale;
         StopRunningHere();
         if (heldAnimation is { } animation && !(_animationClipNameIds.TryGetValue(animation.Id, out var clipName) &&
                                                 _animator.Client != null &&
                                                 _animator.Client.CurrentClip?.name == clipName)) {
             UpdateAnimation(animation.Id, animation.WrapMode, false);
+        }
+
+        if (heldScale != null) {
+            UpdateScale(heldScale);
         }
     }
 
@@ -1552,6 +1576,7 @@ internal partial class Entity {
         _runHereAwaited = 0;
         _heldData.Clear();
         _heldAnimation = null;
+        _heldScale = null;
         foreach (var action in _mutedHere) {
             action.Enabled = true;
         }
@@ -2195,6 +2220,9 @@ internal partial class Entity {
             // A creature, which lives where the scene host's game runs it
             CreateObject create => IsEntity(create.gameObject.Value),
             SpawnObjectFromGlobalPool spawn => IsEntity(spawn.gameObject.Value),
+            // The fight of a closed arena, which the scene host's game starts and runs for the room (ArenaCoop): a
+            // creature that starts its arena as it wakes (Entity.Wake)
+            CallMethodProper call => call.behaviour?.Value == nameof(BattleScene),
             _ => false
         };
         return leftToSceneHost && !EntityFsmActions.IsThePlayersOwn(action);

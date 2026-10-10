@@ -451,14 +451,15 @@ internal class EntityManager {
             entity.UpdatePosition(update.Position, update.ReceivedSequence, anticipation);
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Scale))
-            entity.UpdateScale(update.Scale);
+            entity.UpdateScale(update.Scale, update.ReceivedSequence);
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Animation))
             entity.UpdateAnimation(
                 update.AnimationId,
-                (tk2dSpriteAnimationClip.WrapMode) update.AnimationWrapMode,
+                (tk2dSpriteAnimationClip.WrapMode) (update.AnimationWrapMode & ~EntityUpdate.WrapModeSentAgain),
                 alreadyInSceneUpdate,
-                update.ReceivedSequence
+                update.ReceivedSequence,
+                (update.AnimationWrapMode & EntityUpdate.WrapModeSentAgain) != 0
             );
 
         return true;

@@ -1010,7 +1010,14 @@ internal abstract class ServerManager : IServerManager {
         }
 
         var now = DateTime.UtcNow;
-        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Position)) {
+
+        // Each kind only when it is newer than the one of that kind last taken from this player
+        // (ServerEntityData.TakesNewer). What is passed on is numbered again on the way out, so the game it goes to
+        // cannot tell a stale one from a new one any more.
+        var sequence = entityUpdate.ReceivedSequence;
+        var positionTaken = entityUpdate.UpdateTypes.Contains(EntityUpdateType.Position) &&
+                            entityData.TakesNewer(id, HeardPosition, sequence);
+        if (positionTaken) {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
@@ -1029,7 +1036,10 @@ internal abstract class ServerManager : IServerManager {
         // Not kept for players who walk in later, unlike the position: this says how far the scene host has got
         // through what somebody else asked of the entity, which is nothing to a player who asked for none of it.
         // With two players there is only ever the one of them to send it to.
-        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Anticipation)) {
+        //
+        // It rides with a position, from the same moment, so it goes when that position goes.
+        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Anticipation) &&
+            (positionTaken || !entityUpdate.UpdateTypes.Contains(EntityUpdateType.Position))) {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
@@ -1042,7 +1052,8 @@ internal abstract class ServerManager : IServerManager {
             );
         }
 
-        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Scale)) {
+        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Scale) &&
+            entityData.TakesNewer(id, HeardScale, sequence)) {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
@@ -1054,11 +1065,18 @@ internal abstract class ServerManager : IServerManager {
                 }
             );
 
-            entityData.Scale.Merge(entityUpdate.Scale);
-            entityData.HeardAt[HeardScale] = now;
+            // Taken in rather than put in place of what is kept, which a facing alone, riding with every position,
+            // would otherwise strip of the size it was kept with (ScaleData.TakeNewer). A facing alone is not a size
+            // heard either: the state of the room would otherwise never put a lost change of size right while the
+            // creature moves (OnRoomSnapshot)
+            entityData.Scale.TakeNewer(entityUpdate.Scale);
+            if (entityUpdate.Scale.HasSize) {
+                entityData.HeardAt[HeardScale] = now;
+            }
         }
 
-        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Animation)) {
+        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Animation) &&
+            entityData.TakesNewer(id, HeardClip, sequence)) {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
@@ -1071,8 +1089,10 @@ internal abstract class ServerManager : IServerManager {
                 }
             );
 
+            // Kept without the mark of a clip sent again (EntityUpdate.WrapModeSentAgain): to a player walking in
+            // later it is the clip the creature shows, which their copy has never been shown
             entityData.AnimationId = entityUpdate.AnimationId;
-            entityData.AnimationWrapMode = entityUpdate.AnimationWrapMode;
+            entityData.AnimationWrapMode = (byte) (entityUpdate.AnimationWrapMode & ~EntityUpdate.WrapModeSentAgain);
             entityData.HeardAt[HeardClip] = now;
         }
     }

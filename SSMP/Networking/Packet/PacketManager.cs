@@ -208,8 +208,17 @@ internal class PacketManager {
 
     public void HandleServerUpdatePacket(ushort id, ServerUpdatePacket packet) {
         UnpackPacketDataDict(
-            packet.GetPacketData(), (packetId, data) =>
-                _serverUpdateRegistry.Execute(packetId, handler => handler(id, data))
+            packet.GetPacketData(), (packetId, data) => {
+                // Which packet of the sender's it came in, for the server to keep only what is newer than what it
+                // already took of an entity (ServerEntityData.TakesNewer). The way between the game that runs a room and
+                // the server orders what it carries no better than the way on from the server, and what the server sends
+                // on is numbered again by the server, so a stale one let through here is new to whoever gets it next.
+                if (data is EntityUpdate entityUpdate) {
+                    entityUpdate.ReceivedSequence = packet.Sequence;
+                }
+
+                _serverUpdateRegistry.Execute(packetId, handler => handler(id, data));
+            }
         );
 
         foreach (var pair in packet.GetAddonPacketData()) {

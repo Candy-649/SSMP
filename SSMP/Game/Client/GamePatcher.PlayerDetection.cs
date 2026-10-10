@@ -264,6 +264,26 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Whether the local player stands inside an alert range and can be seen from it, as the range would answer for this
+    /// game's player alone, and the range may set its creature on a player. For the copy of a creature that the other
+    /// game runs, which sees this game's player only by the figure it is told of (Entity.CheckWokenByLocalPlayer).
+    /// </summary>
+    /// <param name="alertRange">The alert range.</param>
+    internal static bool SeesLocalPlayer(AlertRange alertRange) {
+        var hero = HeroController.instance;
+        if (hero == null || alertRange == null || !alertRange.isActiveAndEnabled) {
+            return false;
+        }
+
+        // Nobody while the local player is between two rooms or down (PlayerTargetRegistry)
+        var heroObject = hero.gameObject;
+        return PlayerTargetRegistry.GetTrackedPlayers().Contains(heroObject) &&
+               CanAcquireMultiplayerTarget(alertRange) &&
+               IsPlayerInsideAlertRange(alertRange, heroObject) &&
+               HasLineOfSightToAlertRangeTarget(alertRange, heroObject);
+    }
+
+    /// <summary>
     /// Whether an alert range hangs off something that can be fought, rather than off a piece of the world.
     ///
     /// Written down the first time, because this is asked of every alert range every frame and walking up the

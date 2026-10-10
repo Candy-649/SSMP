@@ -260,6 +260,29 @@ internal class CoopHits {
     /// </summary>
     private readonly List<(string EventName, int[] Dice)> _toldRoom = [];
 
+    /// <summary>
+    /// What listens for the direction a tink or a hit response was struck in (see <see cref="OnSendHitInDirection"/>).
+    /// </summary>
+    private static readonly FieldInfo? HitInDirectionField =
+        typeof(HitResponseBase).GetField("HitInDirection", InstanceFlags);
+
+    /// <summary>
+    /// Whether the hit being made is one of the local player's on an object of the room that is there for the player
+    /// who strikes it, such as a tink (see <see cref="HitAsLocal"/>).
+    /// </summary>
+    private bool _localPersonalHit;
+
+    /// <summary>
+    /// Whether a hit of the partner in a direction is being played here (see <see cref="ReplayHitInDirection"/>).
+    /// </summary>
+    private bool _replayingDirection;
+
+    /// <summary>
+    /// The stand-in for what the partner struck a tink with, and the object it sits under (see
+    /// <see cref="ReplayHitInDirection"/>).
+    /// </summary>
+    private GameObject? _directionSource, _directionSourceRoot;
+
     public CoopHits(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
@@ -280,6 +303,7 @@ internal class CoopHits {
     public void RegisterHooks() {
         Entity.Entity.CopyTouchedLocalPlayer += OnCopyTouchedLocalPlayer;
         Entity.Entity.CopyToldByLocalTalk += OnCopyToldByLocalTalk;
+        Entity.Entity.CopyWokenByLocalPlayer += OnCopyWokenByLocalPlayer;
         Entity.Entity.TalkLedTo += OnTalkLedTo;
         Entity.Entity.CatchWentOn += OnCatchWentOn;
 
@@ -381,6 +405,9 @@ internal class CoopHits {
                 OnNailHitEnemy
             )
         );
+
+        // Hooked by the game patcher, before the tink's own rewritten method that calls it (GamePatcher)
+        GamePatcher.HitInDirectionDetour = OnSendHitInDirection;
     }
 
     /// <summary>
@@ -389,6 +416,8 @@ internal class CoopHits {
     public void DeregisterHooks() {
         Entity.Entity.CopyTouchedLocalPlayer -= OnCopyTouchedLocalPlayer;
         Entity.Entity.CopyToldByLocalTalk -= OnCopyToldByLocalTalk;
+        Entity.Entity.CopyWokenByLocalPlayer -= OnCopyWokenByLocalPlayer;
+        GamePatcher.HitInDirectionDetour = null;
         Entity.Entity.TalkLedTo -= OnTalkLedTo;
         Entity.Entity.CatchWentOn -= OnCatchWentOn;
 
@@ -413,9 +442,15 @@ internal class CoopHits {
             Object.Destroy(_touchSource.gameObject);
         }
 
+        if (_directionSourceRoot != null) {
+            Object.Destroy(_directionSourceRoot);
+        }
+
         _hitSource = null;
         _movingHitSource = null;
         _touchSource = null;
+        _directionSource = null;
+        _directionSourceRoot = null;
     }
 
     /// <summary>
@@ -470,6 +505,11 @@ internal class CoopHits {
 
         if (update.Kind == CoopHitKind.ObjectEvents) {
             ReplayObjectEvents(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.ObjectDirection) {
+            ReplayHitInDirection(update);
             return;
         }
 
@@ -778,7 +818,7 @@ internal class CoopHits {
             }
 
             if (IsPersonal(component.GetType())) {
-                return responder.Hit(hit);
+                return hit.IsHeroDamage ? HitAsLocal(responder, hit) : responder.Hit(hit);
             }
 
             // The update is made before the hit, since a hit can break the object and move its parts. An object that
@@ -1413,7 +1453,7 @@ internal class CoopHits {
 
         IHitResponder.HitResponse response;
         try {
-            response = tink.Hit(hit);
+            response = HitAsLocal(tink, hit);
         } finally {
             _toldByTink = null;
         }
@@ -1449,6 +1489,199 @@ internal class CoopHits {
 
         _netClient.UpdateManager.SetCoopHitUpdate(update);
         NoteTraffic(update.Scene, update.Path, $"sent '{eventName}' to {update.Responder}");
+    }
+
+    /// <summary>
+    /// Makes a hit of the local player on an object of the room that is there for the player who strikes it, marked as
+    /// theirs for what the object tells the world of the direction it was struck in (see
+    /// <see cref="OnSendHitInDirection"/>).
+    /// </summary>
+    /// <param name="responder">The object.</param>
+    /// <param name="hit">The hit.</param>
+    /// <returns>How the object responded to the hit.</returns>
+    private IHitResponder.HitResponse HitAsLocal(IHitResponder responder, HitInstance hit) {
+        var last = _localPersonalHit;
+        _localPersonalHit = true;
+        try {
+            return responder.Hit(hit);
+        } finally {
+            _localPersonalHit = last;
+        }
+    }
+
+    /// <summary>
+    /// Sends the partner the direction in which the local player struck a tink of the room, for what moves by it to
+    /// move the same way in their game (see <see cref="ReplayHitInDirection"/>). A tink is the striker's alone - its
+    /// spark and the fling of the player off it - but some things in the world listen for the direction it was struck
+    /// in and move by it: a platform struck along its rails slid off in one game and stood still in the other (USER
+    /// 10-10, "有个打一下会随着轨道滑动过去的方块没有同步"). Only what listens is played there, with the dice this game had,
+    /// not the spark or the fling. A hit response is left be: the partner's game replays the whole hit on it, which
+    /// tells what listens there by itself.
+    /// </summary>
+    private void OnSendHitInDirection(
+        Action<HitResponseBase, GameObject, HitInstance.HitDirection> orig,
+        HitResponseBase self,
+        GameObject source,
+        HitInstance.HitDirection direction
+    ) {
+        CoopHitUpdate? update = null;
+        try {
+            if (!_replayingDirection && HitInDirectionField?.GetValue(self) != null &&
+                (_localPersonalHit || IsLocalHeroPart(source)) && _getPartnerId() is { } partnerId) {
+                update = CreateDirectionUpdate(partnerId, self, source, direction);
+            }
+        } catch (Exception e) {
+            if (!_sendFailed) {
+                _sendFailed = true;
+                Logger.Error($"Could not send a hit of the local player in a direction:\n{e}");
+            }
+        }
+
+        if (update == null) {
+            orig(self, source, direction);
+            return;
+        }
+
+        var dice = SharedDice.Record(() => orig(self, source, direction));
+        if (_netClient.IsConnected) {
+            update.Hit = SharedDice.Append(update.Hit, dice);
+            _netClient.UpdateManager.SetCoopHitUpdate(update);
+            NoteTraffic(update.Scene, update.Path, $"sent a hit {direction} on {update.Responder}");
+        }
+    }
+
+    /// <summary>
+    /// Whether an object is a part of the local player, such as the slash of their needle. Not by the topmost object
+    /// above both: a player riding a lift sits under the lift, and so does what is in the room on it.
+    /// </summary>
+    private static bool IsLocalHeroPart(GameObject? gameObject) {
+        var hero = HeroController.instance;
+        return gameObject != null && hero != null && gameObject.transform.IsChildOf(hero.transform);
+    }
+
+    /// <summary>
+    /// Creates the update that sends the partner a hit of the local player in a direction on a tink of the room.
+    /// </summary>
+    /// <returns>The update, or null if the partner isn't in the scene or the tink is not one to send.</returns>
+    private CoopHitUpdate? CreateDirectionUpdate(
+        ushort partnerId,
+        HitResponseBase tink,
+        GameObject? source,
+        HitInstance.HitDirection direction
+    ) {
+        if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+            return null;
+        }
+
+        var target = tink.gameObject;
+        var type = tink.GetType();
+        if (!target.scene.IsValid() || target.scene.name == "DontDestroyOnLoad" || !IsPersonal(type) ||
+            !IsRoomObject(tink) || PersonalPlaces.Contains(target)) {
+            return null;
+        }
+
+        var index = Array.IndexOf(target.GetComponents(type), tink);
+        if (index is < 0 or > byte.MaxValue) {
+            return null;
+        }
+
+        // Where it was struck from, and where what struck it sat under: a platform goes by the one, and by the other
+        // when the one gives no way it can go
+        var sourcePosition = source != null ? source.transform.position : target.transform.position;
+        var rootPosition = source != null ? source.transform.root.position : sourcePosition;
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write((byte) direction);
+        writer.Write(sourcePosition.x);
+        writer.Write(sourcePosition.y);
+        writer.Write(sourcePosition.z);
+        writer.Write(rootPosition.x);
+        writer.Write(rootPosition.y);
+        writer.Write(rootPosition.z);
+        writer.Flush();
+
+        return new CoopHitUpdate {
+            TargetId = partnerId,
+            Kind = CoopHitKind.ObjectDirection,
+            Scene = target.scene.name,
+            Path = ScenePath.Get(target.transform),
+            Responder = type.FullName ?? type.Name,
+            Index = (byte) index,
+            Hit = stream.ToArray()
+        };
+    }
+
+    /// <summary>
+    /// Tells what listens for the direction a tink of the room was struck in that the partner struck it so in their
+    /// game, from where they struck it, with the dice their game had (see <see cref="OnSendHitInDirection"/>).
+    /// </summary>
+    private void ReplayHitInDirection(CoopHitUpdate update) {
+        var type = typeof(HitResponseBase).Assembly.GetType(update.Responder);
+        if (type == null || !typeof(HitResponseBase).IsAssignableFrom(type)) {
+            NotReplayed(update, "direction", "that kind of object is unknown here");
+            return;
+        }
+
+        var target = ScenePath.Find(update.Path, update.Scene);
+        if (target == null) {
+            NotReplayed(update, "direction", "the object is not here");
+            return;
+        }
+
+        var components = target.GetComponents(type);
+        if (update.Index >= components.Length || components[update.Index] is not HitResponseBase tink) {
+            NotReplayed(update, "direction", $"the object has only {components.Length} parts of that kind here");
+            return;
+        }
+
+        if (!tink.isActiveAndEnabled || !IsRoomObject(tink)) {
+            NotReplayed(update, "direction", "the object is switched off or not a part of the room here");
+            return;
+        }
+
+        HitInstance.HitDirection direction;
+        Vector3 sourcePosition, rootPosition;
+        int[]? dice;
+        try {
+            using var reader = new BinaryReader(new MemoryStream(update.Hit));
+            direction = (HitInstance.HitDirection) reader.ReadByte();
+            sourcePosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            rootPosition = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            dice = SharedDice.Read(reader);
+        } catch (Exception e) {
+            Logger.Warn($"Could not read a hit of the partner in a direction on {update.Path}: {e.Message}");
+            return;
+        }
+
+        // A stand-in where what struck it was, under one where that sat
+        if (_directionSourceRoot == null || _directionSource == null) {
+            if (_directionSourceRoot != null) {
+                Object.Destroy(_directionSourceRoot);
+            }
+
+            _directionSourceRoot = new GameObject("Coop Direction Hit Source Root");
+            Object.DontDestroyOnLoad(_directionSourceRoot);
+            _directionSource = CreateHitSource("Coop Direction Hit Source");
+            _directionSource.transform.SetParent(_directionSourceRoot.transform, false);
+        }
+
+        _directionSourceRoot.transform.position = rootPosition;
+        _directionSource.transform.position = sourcePosition;
+
+        _replayingDirection = true;
+        try {
+            var source = _directionSource;
+            SharedDice.Throw(dice, () => tink.SendHitInDirection(source, direction));
+        } catch (Exception e) {
+            Logger.Warn($"Could not replay a hit of the partner in a direction on {update.Path}:\n{e}");
+            NoteTraffic(update.Scene, update.Path, $"got a hit {direction} on {update.Responder}, whose replay failed");
+            return;
+        } finally {
+            _replayingDirection = false;
+        }
+
+        NoteReplayed(update, "direction", true);
     }
 
     /// <summary>
@@ -1587,6 +1820,18 @@ internal class CoopHits {
     }
 
     /// <summary>
+    /// Says that the local player came into a range of the copy of an entity that wakes the creature (see
+    /// Entity.CheckWokenByLocalPlayer): the copy wakes here at once, and the creature in the scene host's game wakes the
+    /// same way, going after the local player.
+    /// </summary>
+    /// <param name="copied">The entity.</param>
+    /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
+    /// <param name="eventName">The event that the range sends.</param>
+    private void OnCopyWokenByLocalPlayer(Entity.Entity copied, byte fsmIndex, string eventName) {
+        PlayOrSend(copied, fsmIndex, eventName, "came near", woken: true);
+    }
+
+    /// <summary>
     /// Plays at once what the local player's strike or touch told an FSM of the copy of an entity, where the entity
     /// says so (see <see cref="Entity.Entity.PlayHere"/>), and sends the scene host all that it needs to play the same;
     /// otherwise sends it only the event, and the copy shows what the scene host's game then does. Only while the scene
@@ -1600,13 +1845,16 @@ internal class CoopHits {
     /// <param name="caught">For a catch, what the part that caught set on the FSM along with the event; null for a
     /// strike or a touch.</param>
     /// <param name="grabbedThePlayer">Whether the part that told it grabbed the player themselves.</param>
+    /// <param name="woken">Whether the local player woke the creature by coming near, which plays here whatever the
+    /// creature, and has the creature go after them in the scene host's game.</param>
     private void PlayOrSend(
         Entity.Entity copied,
         byte fsmIndex,
         string eventName,
         string what,
         Entity.ToldValues? caught = null,
-        bool grabbedThePlayer = false
+        bool grabbedThePlayer = false,
+        bool woken = false
     ) {
         if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
             // Alone in the room nothing goes on with the catch, which the part may have started on the player already
@@ -1619,12 +1867,12 @@ internal class CoopHits {
             return;
         }
 
-        if (copied.PlayHere(fsmIndex, eventName, caught) is { } input) {
+        if (copied.PlayHere(fsmIndex, eventName, caught, woken) is { } input) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                 $"went to '{input.State}', and the scene host is sent it with where the copy was"
             );
-            SendEntityInput(partnerId, copied.Id, fsmIndex, eventName, input);
+            SendEntityInput(partnerId, copied.Id, fsmIndex, eventName, input, woken);
             return;
         }
 
@@ -1677,12 +1925,14 @@ internal class CoopHits {
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
     /// <param name="eventName">The event.</param>
     /// <param name="input">What the copy's FSM played.</param>
+    /// <param name="woken">Whether the local player woke the creature by coming near, so that it goes after them.</param>
     private void SendEntityInput(
         ushort partnerId,
         ushort entityId,
         byte fsmIndex,
         string eventName,
-        Entity.InputStart input
+        Entity.InputStart input,
+        bool woken = false
     ) {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
@@ -1713,6 +1963,9 @@ internal class CoopHits {
             }
         }
 
+        // Whether the local player woke the creature by coming near
+        writer.Write(woken);
+
         writer.Flush();
 
         _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
@@ -1737,6 +1990,7 @@ internal class CoopHits {
 
         Entity.InputStart input;
         int partnerRtt;
+        bool woken;
         try {
             using var reader = new BinaryReader(new MemoryStream(update.Hit));
             var state = reader.ReadString();
@@ -1764,10 +2018,21 @@ internal class CoopHits {
                 }
             }
 
+            woken = reader.BaseStream.Position < reader.BaseStream.Length && reader.ReadBoolean();
             input = new Entity.InputStart(state, position, motion, dice, anticipation, caught, path);
         } catch (IOException e) {
             Logger.Warn($"Could not read what the partner did to the copy of entity {update.EntityId}: {e.Message}");
             return;
+        }
+
+        // A creature that the partner woke by coming near goes after the partner, as it would have gone after the one
+        // player there is who woke it. Only when it takes the wake: one that is up already keeps whom it chose.
+        if (woken && update.Index < entity.HostFsms.Count && entity.HostFsms[update.Index] is { } wokenFsm &&
+            wokenFsm != null && wokenFsm.Fsm?.ActiveState is { } wokenState &&
+            Entity.Action.EntityFsmActions.FindTransition(wokenFsm.Fsm, wokenState, update.Responder) != null &&
+            _playerData.TryGetValue(update.PlayerId, out var waker) && waker.PlayerObject != null &&
+            entity.Object.Host != null) {
+            GamePatcher.SetTargetOf(entity.Object.Host, waker.PlayerObject);
         }
 
         var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);

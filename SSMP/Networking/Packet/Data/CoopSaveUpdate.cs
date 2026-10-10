@@ -672,5 +672,16 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    CreatureDeath
+    CreatureDeath,
+
+    /// <summary>
+    /// A platform that slides along its rails when struck came to rest in the sender's game.
+    /// <see cref="CoopSaveUpdate.ItemScenes"/> and <see cref="CoopSaveUpdate.ItemIds"/> name it the way its item saves
+    /// it, and <see cref="CoopSaveUpdate.Amounts"/> holds the place it came to rest at and 1 if its item keeps it only
+    /// until a rest.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    SlidePlatform
 }

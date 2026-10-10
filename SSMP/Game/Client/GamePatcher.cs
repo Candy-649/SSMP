@@ -51,6 +51,21 @@ internal partial class GamePatcher {
     private ILHook? _tinkEffectOnTriggerEnter2DHook;
 
     /// <summary>
+    /// Hook for a tink or hit response telling what listens in which direction it was struck, which hands it to
+    /// <see cref="HitInDirectionDetour"/>. Put in place before <see cref="_tinkEffectOnTriggerEnter2DHook"/>, whose
+    /// rewritten method calls it: the method is short enough to be copied into a method compiled while nothing hooks
+    /// it, and a hook put in place after that would never hear the calls from there.
+    /// </summary>
+    private Hook? _sendHitInDirectionHook;
+
+    /// <summary>
+    /// What a tink or hit response telling what listens in which direction it was struck goes through, or null for
+    /// nothing (CoopHits.OnSendHitInDirection).
+    /// </summary>
+    internal static Action<Action<HitResponseBase, GameObject, HitInstance.HitDirection>, HitResponseBase, GameObject,
+        HitInstance.HitDirection>? HitInDirectionDetour { get; set; }
+
+    /// <summary>
     /// IL hook for suppressing local-only invincibility feedback caused by remote player hits.
     /// </summary>
     private ILHook? _healthManagerInvincibleHook;
@@ -120,6 +135,14 @@ internal partial class GamePatcher {
     /// Registers all gameplay hooks owned by this patcher.
     /// </summary>
     public void RegisterHooks() {
+        _sendHitInDirectionHook = TryCreateHook(
+            typeof(HitResponseBase),
+            "SendHitInDirection",
+            new Action<Action<HitResponseBase, GameObject, HitInstance.HitDirection>, HitResponseBase, GameObject,
+                HitInstance.HitDirection>(OnSendHitInDirection),
+            parameterTypes: [typeof(GameObject), typeof(HitInstance.HitDirection)]
+        );
+
         _tinkEffectOnTriggerEnter2DHook = TryCreateILHook(
             typeof(TinkEffect),
             "TryDoTinkReactionNoDamager",
@@ -296,6 +319,23 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Hands a tink or hit response telling what listens in which direction it was struck to
+    /// <see cref="HitInDirectionDetour"/>.
+    /// </summary>
+    private static void OnSendHitInDirection(
+        Action<HitResponseBase, GameObject, HitInstance.HitDirection> orig,
+        HitResponseBase self,
+        GameObject source,
+        HitInstance.HitDirection direction
+    ) {
+        if (HitInDirectionDetour is { } detour) {
+            detour(orig, self, source, direction);
+        } else {
+            orig(self, source, direction);
+        }
+    }
+
+    /// <summary>
     /// Runs the given action as a hit of a remote player, so that what it hits doesn't knock back the local player.
     /// </summary>
     /// <param name="action">The action that hits something for a remote player.</param>
@@ -316,6 +356,9 @@ internal partial class GamePatcher {
     public void DeregisterHooks() {
         _tinkEffectOnTriggerEnter2DHook?.Dispose();
         _tinkEffectOnTriggerEnter2DHook = null;
+
+        _sendHitInDirectionHook?.Dispose();
+        _sendHitInDirectionHook = null;
 
         _healthManagerInvincibleHook?.Dispose();
         _healthManagerInvincibleHook = null;

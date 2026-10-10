@@ -245,8 +245,14 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     public void UpdateEntityScale(ushort entityId, EntityUpdate.ScaleData scale) {
         lock (Lock) {
             var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ServerUpdatePacketId.EntityUpdate);
-            entityUpdate.UpdateTypes.Add(EntityUpdateType.Scale);
-            entityUpdate.Scale = scale;
+
+            // Added to a scale already waiting in this packet, not put in its place (ScaleData.TakeNewer), and into one
+            // of the packet's own rather than the caller's
+            if (entityUpdate.UpdateTypes.Add(EntityUpdateType.Scale)) {
+                entityUpdate.Scale = new EntityUpdate.ScaleData();
+            }
+
+            entityUpdate.Scale.TakeNewer(scale);
         }
     }
 

@@ -165,5 +165,17 @@ internal enum CoopHitKind : byte {
     /// <see cref="CoopHitUpdate.Responder"/>. The game of the scene host takes its own FSM there, if it is still where
     /// the talk started.
     /// </summary>
-    EntityTalkEnd
+    EntityTalkEnd,
+
+    /// <summary>
+    /// A tink of the room, found by its path, its type in <see cref="CoopHitUpdate.Responder"/> and its place among
+    /// those of that type in <see cref="CoopHitUpdate.Index"/>, that the sender struck in a direction, which moves what
+    /// listens for it, like a platform that slides along its rails. <see cref="CoopHitUpdate.Hit"/> holds the direction,
+    /// where what struck it was and where the object it sat under was, and the dice of the sender's game; the other game
+    /// tells what listens the same.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently change
+    /// what every later kind means to a game running an older build.
+    /// </summary>
+    ObjectDirection
 }
