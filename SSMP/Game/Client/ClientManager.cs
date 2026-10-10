@@ -358,7 +358,9 @@ internal class ClientManager : IClientManager {
 
         _pauseManager = new PauseManager(netClient);
         _gamePatcher = new GamePatcher(netClient, _entityManager);
-        _benchCoop = new BenchCoop(netClient, _playerData, _saveManager);
+        _benchCoop = new BenchCoop(
+            netClient, _playerData, _saveManager, () => AuthUtil.GetSaveKey(_modSettings.AuthKey)
+        );
         _enemyHealthCoop = new EnemyHealthCoop(_playerData);
         _bindCoop = new BindCoop();
         _arenaCoop = new ArenaCoop(
@@ -367,7 +369,7 @@ internal class ClientManager : IClientManager {
             _entityManager,
             () => _fullSynchronisation,
             // Made here and called later, by which time the two-player save and the boss rooms below exist
-            () => _coopSave!.CheckedPartnerId != null,
+            () => _coopSave!.CheckedMemberIds.Count > 0,
             () => _coopSave!.IsPartnerMissing(),
             () => _bossRoomCoop!.TellTeammatesWaiting()
         );
@@ -397,10 +399,10 @@ internal class ClientManager : IClientManager {
             netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedMemberIds
         );
         _fleaGameCoop = new FleaGameCoop(
-            netClient, _playerData, _entityManager, () => _coopSave.CheckedPartnerId, _coopHits.SendObjectEvent
+            netClient, _playerData, _entityManager, () => _coopSave.CheckedMemberIds, _coopHits.SendObjectEvent
         );
         _coopStateCheck = new CoopStateCheck(
-            netClient, _playerData, _entityManager, _coopSave, () => _coopSave.CheckedPartnerId
+            netClient, _playerData, _entityManager, _coopSave, () => _coopSave.CheckedMemberIds
         );
         _coopSave.OnFleaGameScore = _fleaGameCoop.OnPartnerScore;
         _coopSave.OnPartnerFlagSet = _arenaCoop.OnPartnerFlagSet;

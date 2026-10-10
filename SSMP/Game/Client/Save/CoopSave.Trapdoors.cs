@@ -220,7 +220,7 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names their hatch by its scene and path.</param>
     private void OnTrapdoor(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
             !_checkedMembers.Contains(player.Id)) {
             return;
         }

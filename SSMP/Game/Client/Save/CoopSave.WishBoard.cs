@@ -602,13 +602,6 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The partner that the save was checked with, or null.
-    /// </summary>
-    private ClientPlayerData? GetCheckedPartner() {
-        return _checkedWith is { } partnerId && _playerData.TryGetValue(partnerId, out var partner) ? partner : null;
-    }
-
-    /// <summary>
     /// The member whose key dialogue or use of a board is with a character or board, or null.
     /// </summary>
     private ClientPlayerData? GetMemberTalkingAt(NPCControlBase npc) {

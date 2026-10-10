@@ -500,9 +500,10 @@ internal enum CoopSaveUpdateKind : byte {
     RescueEnd,
 
     /// <summary>
-    /// Which game of the festival the sender is playing and their score in it, sent whenever either changes.
-    /// <see cref="CoopSaveUpdate.Part"/> is 1 while they play one and 0 otherwise, and
-    /// <see cref="CoopSaveUpdate.ObjectPath"/> is then the name of the game's object. <see cref="CoopSaveUpdate.Key"/>
+    /// Which game of the festival the sender is playing, their score in it and whether their game runs the room, sent
+    /// whenever any of that changes. <see cref="CoopSaveUpdate.Part"/> has the bit 1 while they play one, and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> is then the name of the game's object, and the bit 2 while their game is
+    /// the scene host, which is the game that sends the fleas out. <see cref="CoopSaveUpdate.Key"/>
     /// is the score of the round as a running total rather than a single point, so a lost or repeated update cannot
     /// make the other game count wrong: it only ever takes the larger of the two.
     ///

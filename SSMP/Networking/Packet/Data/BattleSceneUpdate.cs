@@ -11,6 +11,11 @@ internal class BattleSceneUpdate : IPacketData {
     public bool DropReliableDataIfNewerExists => false;
 
     /// <summary>
+    /// The ID of the player who sent it, which the server fills in for the players who receive it.
+    /// </summary>
+    public ushort PlayerId { get; set; }
+
+    /// <summary>
     /// The name of the scene that the arena is in.
     /// </summary>
     public string SceneName { get; set; } = "";
@@ -37,6 +42,7 @@ internal class BattleSceneUpdate : IPacketData {
 
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
+        packet.Write(PlayerId);
         packet.Write(SceneName);
         packet.Write(Path);
         packet.Write((byte) Status);
@@ -46,6 +52,7 @@ internal class BattleSceneUpdate : IPacketData {
 
     /// <inheritdoc />
     public void ReadData(IPacket packet) {
+        PlayerId = packet.ReadUShort();
         SceneName = packet.ReadString();
         Path = packet.ReadString();
         Status = (BattleSceneStatus) packet.ReadByte();

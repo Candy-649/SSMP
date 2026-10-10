@@ -198,13 +198,6 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the save of the partner has the larger key, which decides between things that both games chose at once.
-    /// </summary>
-    private bool PartnerKeyWins() {
-        return string.CompareOrdinal(GetCurrentMarker()?.PartnerKey ?? "", LocalKey) > 0;
-    }
-
-    /// <summary>
     /// Whether the save of a member has a larger key than the local save, which decides between things that their
     /// games chose at once.
     /// </summary>
@@ -383,7 +376,7 @@ internal partial class CoopSave {
     /// because the game of the partner may have finished its check already and doesn't send them again.
     /// </summary>
     private void OnWorldChange(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
             PlayerData.instance == null || SceneData.instance == null) {
             return;
         }

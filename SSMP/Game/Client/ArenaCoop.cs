@@ -386,7 +386,7 @@ internal partial class ArenaCoop {
                 OnBossWaiting();
                 return;
             case BattleSceneStatus.TalkDone:
-                OnBossTalkDone(update.Path);
+                OnBossTalkDone(update.Path, update.PlayerId);
                 return;
         }
 
@@ -1572,9 +1572,9 @@ internal partial class ArenaCoop {
         public bool LocalTalkDone;
 
         /// <summary>
-        /// Whether another player in the scene finished the talk before the fight of a boss arena.
+        /// The other players in the scene who finished the talk before the fight of a boss arena, by their IDs.
         /// </summary>
-        public bool OthersTalkDone;
+        public readonly HashSet<ushort> TalkDoneBy = [];
 
         /// <summary>
         /// Whether the end of the fight of an arena without a saved win is still to be played for the local player,

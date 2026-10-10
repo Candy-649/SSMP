@@ -287,7 +287,7 @@ internal partial class CoopSave {
     internal void OnPlayerEnterScene(ClientPlayerData player) {
         try {
             if (!_checkedMembers.Contains(player.Id) || GetCurrentMarker() is not { } marker ||
-                !IsPartner(player, marker)) {
+                !IsMember(player, marker)) {
                 return;
             }
 
@@ -351,7 +351,7 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names the trap by its path in its scene.</param>
     private void OnWorldTrigger(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
             !_checkedMembers.Contains(player.Id)) {
             return;
         }

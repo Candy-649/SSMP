@@ -484,7 +484,7 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names the machine by its path in its scene.</param>
     private void OnMachineRound(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
             !_checkedMembers.Contains(player.Id) || IsSceneHost?.Invoke() == true) {
             return;
         }
@@ -911,7 +911,7 @@ internal partial class CoopSave {
     /// and the grinder is in the room.
     /// </summary>
     private Fsm? FindPartnerGrinder(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
             !_checkedMembers.Contains(player.Id)) {
             return null;
         }

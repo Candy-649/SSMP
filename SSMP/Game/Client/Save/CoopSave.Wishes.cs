@@ -216,7 +216,7 @@ internal partial class CoopSave {
     /// </summary>
     private void OnWishChange(ClientPlayerData player, CoopSaveUpdate update) {
         var playerData = PlayerData.instance;
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
             playerData == null) {
             return;
         }

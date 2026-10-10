@@ -77,7 +77,7 @@ internal partial class CoopSave {
     /// over it (Entity.KeepBoolSavesOfTheCopy).
     /// </summary>
     private void OnCreatureDeath(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
             SceneData.instance is not { } sceneData) {
             return;
         }

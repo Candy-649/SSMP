@@ -1729,6 +1729,7 @@ internal abstract class ServerManager : IServerManager {
             return;
         }
 
+        update.PlayerId = id;
         SendDataInSameScene(
             id,
             update.SceneName,

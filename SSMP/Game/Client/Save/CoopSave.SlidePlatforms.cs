@@ -87,7 +87,7 @@ internal partial class CoopSave {
     /// on the platform here - unless this game runs the room with the partner in it, whose platform follows this one.
     /// </summary>
     private void OnSlidePlatform(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
             SceneData.instance is not { } sceneData || update.ItemScenes.Count < 1 || update.ItemIds.Count < 1 ||
             update.Amounts.Count < 2) {
             return;

@@ -2104,12 +2104,19 @@ internal class ConnectInterface {
         if (hostVersion.Length > 0 && hostVersion != SteamManager.LocalModVersion) {
             Logger.Warn($"Lobby runs '{hostVersion}', this game runs '{SteamManager.LocalModVersion}'");
 
+            // Counted before leaving, with the local player among them
+            var twoPlayers = SteamMatchmaking.GetNumLobbyMembers(lobbyId) <= 2;
             SteamManager.LeaveLobby();
             ResetConnectionButtons();
-            ShowFeedback(Color.red, Lang.Pick(
-                "You are on different versions of the mod. Both players need the same one.",
-                "你们两个装的模组版本不一样。两个人必须用同一个版本。"
-            ), stays: true);
+            ShowFeedback(Color.red, twoPlayers
+                ? Lang.Pick(
+                    "You are on different versions of the mod. Both players need the same one.",
+                    "你们两个装的模组版本不一样。两个人必须用同一个版本。"
+                )
+                : Lang.Pick(
+                    "You and the host are on different versions of the mod. Everyone needs the same one.",
+                    "你和房主装的模组版本不一样。所有人必须用同一个版本。"
+                ), stays: true);
 
             return;
         }

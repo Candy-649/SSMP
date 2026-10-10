@@ -208,7 +208,7 @@ internal partial class CoopSave {
     /// Gives or takes an item of the story that the partner was given or used up.
     /// </summary>
     private void OnStoryItem(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
             !IsFromCurrentCheck(player, update) || !_appliedStoryItems.Add(update.Key)) {
             return;
         }

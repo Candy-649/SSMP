@@ -7,6 +7,11 @@ The models in this folder were built from this survey. Suspects fixed since it w
 All paths are relative to `D:\programming\silksong_mod\SSMP\SSMP\`. `C/` = `Game/Client/`, `S/` = `Game/Client/Save/`.
 Line numbers are for the working tree at 743df53 (read-only survey, nothing built or run).
 
+Written for two players. Since 0.4.90 a save holds any number of members: "the partner" below is each other member,
+and `_checkedWith`/`CheckedPartnerId`, `GetCheckedPartner` and `FindPartner` are gone in favour of `_checkedMembers`,
+`CheckedMemberIds` and `FindMembers`. The flea game score's `Part` carries bit 1 for playing and bit 2 for running
+the room.
+
 ---------------------------------------------------------------------------------------------------------------------
 ## 0. Cross-cutting facts every model needs
 

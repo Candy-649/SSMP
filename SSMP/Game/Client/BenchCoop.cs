@@ -18,9 +18,10 @@ namespace SSMP.Game.Client;
 /// Co-op rules for resting at benches.
 /// When a player rests at a bench or dies, semi-persistent objects such as enemies respawn for every player. A room
 /// that a player is in at that moment keeps its state until it is loaded again, so enemies that are fighting a player
-/// don't respawn around them. Players who sit on the same bench take opposite sides of it: while other players are
-/// connected, the host sits right of the seat and other players left of it, whether they sit down, sit down without
-/// the tween to the seat, or wake up on the bench.
+/// don't respawn around them. Players who sit on the same bench take places of their own on it: with two players
+/// connected, the host sits right of the seat and the other player left of it, and with more, every player has a
+/// place of their own across the seat in the order of their save keys, whether they sit down, sit down without the
+/// tween to the seat, or wake up on the bench.
 /// </summary>
 internal class BenchCoop {
     /// <summary>
@@ -52,7 +53,8 @@ internal class BenchCoop {
 
     /// <summary>
     /// How far, in units, each player sits from the middle of the seat while other players are connected. One player
-    /// is moved this far one way and the other the same distance the other way, so the gap between them is twice this.
+    /// is moved this far one way and the other the same distance the other way, so the gap between them is twice this,
+    /// which is also the gap between the places of more players.
     ///
     /// It was 1, which the sprite widths said would have them "barely touching" - and in game on 2026-09-17 that read
     /// as two people sitting pointedly apart rather than resting together. The sprites are drawn on a canvas about
@@ -133,10 +135,21 @@ internal class BenchCoop {
     /// </summary>
     private Hook? _setPositionEnterHook;
 
-    public BenchCoop(NetClient netClient, Dictionary<ushort, ClientPlayerData> playerData, SaveManager saveManager) {
+    /// <summary>
+    /// Gets the save key of the local player, which orders the places of more than two players on a bench.
+    /// </summary>
+    private readonly Func<string> _getLocalKey;
+
+    public BenchCoop(
+        NetClient netClient,
+        Dictionary<ushort, ClientPlayerData> playerData,
+        SaveManager saveManager,
+        Func<string> getLocalKey
+    ) {
         _netClient = netClient;
         _playerData = playerData;
         _saveManager = saveManager;
+        _getLocalKey = getLocalKey;
     }
 
     /// <summary>
@@ -402,11 +415,25 @@ internal class BenchCoop {
     }
 
     /// <summary>
-    /// Gets how far the local player sits from the middle of the seat: to the right for the host and to the left for
-    /// other players.
+    /// Gets how far the local player sits from the middle of the seat. With two players, to the right for the host and
+    /// to the left for the other player. With more, the players are spread across the seat a gap apart in the order of
+    /// their save keys, which every game puts the same way: by who hosts, every player but the host would sit in the
+    /// one place left of the seat.
     /// </summary>
     private float GetSeatOffset() {
-        return _saveManager.IsHostingServer ? SeatOffset : -SeatOffset;
+        if (_playerData.Count <= 1) {
+            return _saveManager.IsHostingServer ? SeatOffset : -SeatOffset;
+        }
+
+        var localKey = _getLocalKey();
+        var place = 0;
+        foreach (var player in _playerData.Values) {
+            if (string.CompareOrdinal(player.SaveKey, localKey) < 0) {
+                place++;
+            }
+        }
+
+        return (place - _playerData.Count / 2f) * SeatOffset * 2f;
     }
 
     /// <summary>

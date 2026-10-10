@@ -792,7 +792,7 @@ internal partial class CoopSave {
     /// Plays the partner's use of a mechanism or item receptacle on the local copy.
     /// </summary>
     private void OnInteraction(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker)) {
             return;
         }
 

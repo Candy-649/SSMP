@@ -77,7 +77,7 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     private void OnPrisonCapture(ClientPlayerData player) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
             !_checkedMembers.Contains(player.Id) || IsInPrisonClothes()) {
             return;
         }

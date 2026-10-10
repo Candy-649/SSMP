@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -24,7 +25,8 @@ namespace SSMP.Game.Client.Save;
 ///
 /// Each game reads the state of the room every second: the state that each state machine of the objects of the room
 /// is in, what the objects that take hits keep of them, the saved objects of the world, the creatures and the story
-/// flags. Every few seconds it sends the partner a digest of the values that stayed the same for a while, in groups,
+/// flags. Every few seconds it sends the members in the room a digest of the values that stayed the same for a while,
+/// in groups,
 /// and where the digests of a group differ the two games compare the values of that group one by one. A value that
 /// differs while it stayed the same in both games for a while is not a hit or a change that is still on its way. It is
 /// written to the log with the value of each game, how long each game has had it, and the hits and touches that went
@@ -175,9 +177,17 @@ internal class CoopStateCheck {
     private readonly CoopSave _coopSave;
 
     /// <summary>
-    /// Gets the ID of the partner that the two-player save was checked with, or null outside a checked save.
+    /// Gets the IDs of the members that the two-player save was checked with, none outside a checked save.
     /// </summary>
-    private readonly Func<ushort?> _getPartnerId;
+    private readonly Func<IReadOnlyCollection<ushort>> _getMembers;
+
+    /// <summary>
+    /// The member whose game this one compares the room with, during a visit and after it: the one with the lowest ID
+    /// among the members in the room. Every game sends its digests to everyone in the room and compares only those of
+    /// the member it picked, which still compares every game with another one: two games that differ differ from the
+    /// third as well, or one of them is the third's pick.
+    /// </summary>
+    private ushort? _comparedWith;
 
     /// <summary>
     /// A number that tells the digests of this run of the game from those of an earlier run, whose count restarted.
@@ -404,13 +414,28 @@ internal class CoopStateCheck {
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
         CoopSave coopSave,
-        Func<ushort?> getPartnerId
+        Func<IReadOnlyCollection<ushort>> getMembers
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _entityManager = entityManager;
         _coopSave = coopSave;
-        _getPartnerId = getPartnerId;
+        _getMembers = getMembers;
+    }
+
+    /// <summary>
+    /// The member in the room whose game this one compares the room with (see <see cref="_comparedWith"/>), or null if
+    /// no member is in the room.
+    /// </summary>
+    private ushort? GetComparedMember() {
+        ushort? lowest = null;
+        foreach (var id in _getMembers()) {
+            if (_playerData.TryGetValue(id, out var member) && member.IsInLocalScene && (lowest == null || id < lowest)) {
+                lowest = id;
+            }
+        }
+
+        return lowest;
     }
 
     /// <summary>
@@ -434,10 +459,12 @@ internal class CoopStateCheck {
     }
 
     /// <summary>
-    /// Handles a comparison from the partner.
+    /// Handles a comparison from a member: a digest or an answer from the member this game compares with, or a request
+    /// from any member who compares with this game.
     /// </summary>
     public void OnCoopCheckUpdate(CoopCheckUpdate update) {
-        if (_visitScene == null || _getPartnerId() != update.PlayerId) {
+        if (_visitScene == null || !_getMembers().Contains(update.PlayerId) ||
+            update.Kind != CoopCheckKind.DetailRequest && update.PlayerId != _comparedWith) {
             return;
         }
 
@@ -518,11 +545,15 @@ internal class CoopStateCheck {
     private void Update() {
         var now = Time.unscaledTime;
         var hero = HeroController.SilentInstance;
-        if (_getPartnerId() is not { } partnerId || !_netClient.IsConnected ||
-            !_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene || hero == null ||
+        if (GetComparedMember() is not { } comparedId || !_netClient.IsConnected || hero == null ||
             hero.cState.transitioning || now < _sceneEnteredAt + SettleTime) {
             EndVisit();
             return;
+        }
+
+        // A visit is a comparison with one member, so another one taking their place starts it over
+        if (_visitScene != null && _comparedWith != comparedId) {
+            EndVisit(true);
         }
 
         if (!_found) {
@@ -531,7 +562,7 @@ internal class CoopStateCheck {
         }
 
         if (_visitScene == null) {
-            StartVisit(now);
+            StartVisit(now, comparedId);
         }
 
         if (!_sampling && now >= _nextSample) {
@@ -547,7 +578,7 @@ internal class CoopStateCheck {
 
         if (now >= _nextDigest && HasSettledValues(now)) {
             _nextDigest = now + DigestInterval;
-            SendDigest(partnerId, now);
+            SendDigest(now);
         }
     }
 
@@ -1100,9 +1131,16 @@ internal class CoopStateCheck {
     #region Comparing with the partner
 
     /// <summary>
-    /// Starts comparing the room with the game of the partner.
+    /// Starts comparing the room with the game of a member.
     /// </summary>
-    private void StartVisit(float now) {
+    private void StartVisit(float now, ushort comparedId) {
+        // The digests of another member are counted from wherever theirs are
+        if (_comparedWith != comparedId) {
+            _comparedWith = comparedId;
+            _partnerRunId = 0;
+            _partnerDigestSeq = 0;
+        }
+
         _visitScene = SceneManager.GetActiveScene().name;
         _visitStart = now;
         _visitDigestsSent = 0;
@@ -1126,7 +1164,9 @@ internal class CoopStateCheck {
     /// <summary>
     /// Stops comparing the room, and writes down what the comparison found while the players were in it together.
     /// </summary>
-    private void EndVisit() {
+    /// <param name="memberChanged">Whether it stops because another member is compared with from here on, rather
+    /// than because the room was left.</param>
+    private void EndVisit(bool memberChanged = false) {
         if (_visitScene == null) {
             return;
         }
@@ -1154,7 +1194,8 @@ internal class CoopStateCheck {
         }
 
         _builder.Clear();
-        _builder.Append("[State check] Left ").Append(scene).Append(" after ").Append(Seconds(now - _visitStart))
+        _builder.Append(memberChanged ? "[State check] Compared with another member from here on in " : "[State check] Left ")
+            .Append(scene).Append(" after ").Append(Seconds(now - _visitStart))
             .Append(" together: ").Append(_entries.Count).Append(" values, ").Append(_visitDigestsCompared)
             .Append(" digests compared, ").Append(_visitBucketsAsked).Append(" groups looked into, ")
             .Append(_visitDifferences).Append(" differences written down");
@@ -1235,9 +1276,9 @@ internal class CoopStateCheck {
     }
 
     /// <summary>
-    /// Sends the partner the digest of each group of the local values.
+    /// Sends the members in the room the digest of each group of the local values.
     /// </summary>
-    private void SendDigest(ushort partnerId, float now) {
+    private void SendDigest(float now) {
         ComputeBuckets(now);
 
         using var stream = new MemoryStream();
@@ -1250,7 +1291,13 @@ internal class CoopStateCheck {
         }
 
         writer.Flush();
-        Send(partnerId, CoopCheckKind.Digest, stream.ToArray());
+        var data = stream.ToArray();
+        foreach (var id in _getMembers()) {
+            if (_playerData.TryGetValue(id, out var member) && member.IsInLocalScene) {
+                Send(id, CoopCheckKind.Digest, data);
+            }
+        }
+
         _visitDigestsSent++;
     }
 
@@ -1316,7 +1363,7 @@ internal class CoopStateCheck {
             _askedAt[bucket] = now;
         }
 
-        if (asked == null || _getPartnerId() is not { } partnerId) {
+        if (asked == null || _comparedWith is not { } comparedId) {
             return;
         }
 
@@ -1343,7 +1390,7 @@ internal class CoopStateCheck {
         writer.Flush();
         _requests[requestId] = request;
         _visitBucketsAsked += asked.Count;
-        Send(partnerId, CoopCheckKind.DetailRequest, stream.ToArray());
+        Send(comparedId, CoopCheckKind.DetailRequest, stream.ToArray());
     }
 
     /// <summary>
@@ -1381,7 +1428,7 @@ internal class CoopStateCheck {
     /// Answers a request of the partner with the local values of the groups that it asks about which differ from its
     /// own, with their names, and the names that the partner has and the local game does not.
     /// </summary>
-    private void OnDetailRequest(BinaryReader reader, ushort partnerId) {
+    private void OnDetailRequest(BinaryReader reader, ushort requesterId) {
         var requestId = reader.ReadUInt32();
         var scene = reader.ReadString();
         if (scene != _visitScene) {
@@ -1436,7 +1483,7 @@ internal class CoopStateCheck {
         }
 
         writer.Flush();
-        Send(partnerId, CoopCheckKind.Detail, stream.ToArray());
+        Send(requesterId, CoopCheckKind.Detail, stream.ToArray());
     }
 
     /// <summary>
@@ -1566,9 +1613,10 @@ internal class CoopStateCheck {
             _builder.Append("; this player at ").Append(Where(hero.transform.position));
         }
 
-        if (_getPartnerId() is { } partnerId && _playerData.TryGetValue(partnerId, out var partner) &&
-            partner.PlayerObject != null) {
-            _builder.Append(", partner shown at ").Append(Where(partner.PlayerObject.transform.position));
+        if (_comparedWith is { } comparedId && _playerData.TryGetValue(comparedId, out var compared) &&
+            compared.PlayerObject != null) {
+            _builder.Append(", ").Append(compared.Username).Append(" shown at ")
+                .Append(Where(compared.PlayerObject.transform.position));
         }
 
         // A creature that only this scene client has off: whether the scene host's word that it is on never came or
@@ -1656,16 +1704,16 @@ internal class CoopStateCheck {
     }
 
     /// <summary>
-    /// Sends a comparison to the partner.
+    /// Sends a comparison to a member.
     /// </summary>
-    private void Send(ushort partnerId, CoopCheckKind kind, byte[] data) {
+    private void Send(ushort memberId, CoopCheckKind kind, byte[] data) {
         if (data.Length > ushort.MaxValue) {
             Fail($"A comparison of the room was too long to send ({data.Length} bytes)");
             return;
         }
 
         _netClient.UpdateManager.SetCoopCheckUpdate(new CoopCheckUpdate {
-            TargetId = partnerId,
+            TargetId = memberId,
             Kind = kind,
             Data = data
         });

@@ -61,10 +61,9 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// The message for a player whose boss waits for other players to read its dialogue.
     /// </summary>
-    private static string ReadingMessage => Lang.Pick(
-        "Waiting for your teammate to finish the dialogue...",
-        "正在等队友把对话看完……"
-    );
+    private string ReadingMessage => _playerData.Count <= 1
+        ? Lang.Pick("Waiting for your teammate to finish the dialogue...", "正在等队友把对话看完……")
+        : Lang.Pick("Waiting for your teammates to finish the dialogue...", "正在等队友们把对话看完……");
 
     /// <summary>
     /// The field with the dialogue box of the game.

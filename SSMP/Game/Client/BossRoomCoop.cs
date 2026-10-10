@@ -85,18 +85,16 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// The message for a player who waits in a room for the other players.
     /// </summary>
-    private static string WaitingMessage => Lang.Pick(
-        "Waiting for your teammate to catch up...",
-        "正在等队友跟上来……"
-    );
+    private string WaitingMessage => _playerData.Count <= 1
+        ? Lang.Pick("Waiting for your teammate to catch up...", "正在等队友跟上来……")
+        : Lang.Pick("Waiting for your teammates to catch up...", "正在等队友们跟上来……");
 
     /// <summary>
     /// The message for a player whose teammate waits in a room.
     /// </summary>
-    private static string TeammateWaitingMessage => Lang.Pick(
-        "Your teammate is waiting for you.",
-        "你的队友正在等你。"
-    );
+    private string TeammateWaitingMessage => _playerData.Count <= 1
+        ? Lang.Pick("Your teammate is waiting for you.", "你的队友正在等你。")
+        : Lang.Pick("A teammate is waiting for you.", "有队友正在等你。");
 
     /// <summary>
     /// Events that close gates.

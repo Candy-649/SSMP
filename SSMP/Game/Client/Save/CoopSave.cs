@@ -211,12 +211,6 @@ internal partial class CoopSave {
     private readonly HashSet<ushort> _checkedMembers = [];
 
     /// <summary>
-    /// One member that the saves were checked with, or null: what the parts go by that keep in step with one partner at
-    /// a time.
-    /// </summary>
-    private ushort? _checkedWith => _checkedMembers.Count > 0 ? _checkedMembers.Min() : null;
-
-    /// <summary>
     /// Whether updating the session threw, which is only logged once.
     /// </summary>
     private bool _updateFailed;
@@ -327,12 +321,6 @@ internal partial class CoopSave {
     /// The save key of the local player.
     /// </summary>
     private string LocalKey => AuthUtil.GetSaveKey(_modSettings.AuthKey);
-
-    /// <summary>
-    /// The ID of one member that the saves were checked with while they are in the save, or null: what the parts go by
-    /// that keep in step with one partner at a time.
-    /// </summary>
-    public ushort? CheckedPartnerId => _checkedWith;
 
     /// <summary>
     /// The IDs of the members that the saves were checked with while they are in the save.
@@ -1452,7 +1440,7 @@ internal partial class CoopSave {
     /// </summary>
     private void AcceptPairRequest(int slot, ClientPlayerData player, PairingRequest request) {
         var localDefeats = GetDefeatRecords();
-        if (!HaveSameDefeats(player, request.Defeats, localDefeats)) {
+        if (!HaveSameDefeats(player, request.Defeats, localDefeats, request.Group.Count > 1)) {
             Send(new CoopSaveUpdate {
                 TargetId = player.Id,
                 Kind = CoopSaveUpdateKind.PairRefused,
@@ -1514,7 +1502,7 @@ internal partial class CoopSave {
         }
 
         // A boss may have been beaten since the request
-        if (!HaveSameDefeats(player, update.Records, GetDefeatRecords())) {
+        if (!HaveSameDefeats(player, update.Records, GetDefeatRecords(), sent.PlayerIds.Count > 1)) {
             _sentPairRequest = null;
             SendPairCancel(player, update.Key);
             CancelPairRequest(sent, player.Id);
@@ -1665,7 +1653,7 @@ internal partial class CoopSave {
 
         _sentPairRequest = null;
         CancelPairRequest(sent, player.Id);
-        if (HaveSameDefeats(player, update.Records, GetDefeatRecords())) {
+        if (HaveSameDefeats(player, update.Records, GetDefeatRecords(), sent.PlayerIds.Count > 1)) {
             Chat(Lang.Pick(
                 $"{player.Username} couldn't agree, because their save had beaten different bosses. Type /coopsave to ask again.",
                 $"{player.Username} 没能同意，因为对方存档打过的 Boss 和你的对不上。打 /coopsave 再问一次。"
@@ -1697,7 +1685,16 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether two saves have beaten the same bosses. If not, the local player hears how many differ.
     /// </summary>
-    private static bool HaveSameDefeats(ClientPlayerData player, List<string> partnerDefeats, List<string> localDefeats) {
+    /// <param name="player">The other player.</param>
+    /// <param name="partnerDefeats">The bosses that their save has beaten.</param>
+    /// <param name="localDefeats">The bosses that the local save has beaten.</param>
+    /// <param name="shared">Whether the saves are to be paired with more than one other player.</param>
+    private static bool HaveSameDefeats(
+        ClientPlayerData player,
+        List<string> partnerDefeats,
+        List<string> localDefeats,
+        bool shared
+    ) {
         var onlyPartner = partnerDefeats.Except(localDefeats).ToList();
         var onlyLocal = localDefeats.Except(partnerDefeats).ToList();
         if (onlyPartner.Count == 0 && onlyLocal.Count == 0) {
@@ -1709,13 +1706,22 @@ internal partial class CoopSave {
             $"only local: {string.Join(", ", onlyLocal)}"
         );
         Chat(
-            Lang.Pick(
-                $"These saves can't become a two-player save, because they have beaten different bosses: {player.Username} " +
-                $"beat {onlyPartner.Count} that you haven't, and you beat {onlyLocal.Count} that they haven't. A two-player " +
-                "save needs the same bosses beaten in both saves, like two new games.",
-                $"这两个存档没法组成双人存档，因为打过的 Boss 对不上：{player.Username} 打过 {onlyPartner.Count} 个你没打过的，" +
-                $"你打过 {onlyLocal.Count} 个他们没打过的。双人存档需要两边打过的 Boss 完全一样，比如两个都是新游戏。"
-            )
+            shared
+                ? Lang.Pick(
+                    $"Your save and {player.Username}'s can't be in one shared save, because they have beaten different " +
+                    $"bosses: {player.Username} beat {onlyPartner.Count} that you haven't, and you beat {onlyLocal.Count} " +
+                    "that they haven't. A shared save needs the same bosses beaten in every save, like new games.",
+                    $"你和 {player.Username} 的存档没法放进同一个多人存档，因为打过的 Boss 对不上：{player.Username} 打过 " +
+                    $"{onlyPartner.Count} 个你没打过的，你打过 {onlyLocal.Count} 个他们没打过的。多人存档需要每个人打过的 Boss " +
+                    "完全一样，比如都是新游戏。"
+                )
+                : Lang.Pick(
+                    $"These saves can't become a two-player save, because they have beaten different bosses: " +
+                    $"{player.Username} beat {onlyPartner.Count} that you haven't, and you beat {onlyLocal.Count} that " +
+                    "they haven't. A two-player save needs the same bosses beaten in both saves, like two new games.",
+                    $"这两个存档没法组成双人存档，因为打过的 Boss 对不上：{player.Username} 打过 {onlyPartner.Count} 个你没打过的，" +
+                    $"你打过 {onlyLocal.Count} 个他们没打过的。双人存档需要两边打过的 Boss 完全一样，比如两个都是新游戏。"
+                )
         );
         return false;
     }
@@ -2407,11 +2413,6 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a player is a member of a paired save, as the parts say that keep in step with one partner at a time.
-    /// </summary>
-    private static bool IsPartner(ClientPlayerData player, CoopSaveMarker marker) => IsMember(player, marker);
-
-    /// <summary>
     /// Each member of a paired save with the player on the server who is them, or null: the player with their save key,
     /// or else one with their name. No player stands for two members.
     /// </summary>
@@ -2467,11 +2468,6 @@ internal partial class CoopSave {
 
         return members;
     }
-
-    /// <summary>
-    /// One member of a paired save on the server, or null, for the parts that keep in step with one partner at a time.
-    /// </summary>
-    private ClientPlayerData? FindPartner(CoopSaveMarker marker) => FindMembers(marker).FirstOrDefault();
 
     /// <summary>
     /// Whether every member of a paired save is on the server.

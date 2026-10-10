@@ -465,7 +465,9 @@ internal class WaitingRoomPanel : IComponent {
             : waitingOn == 0
                 ? Lang.Pick("Everyone is ready. Choose your saves.", "都准备好了，挑存档吧。")
                 : localReady
-                    ? Lang.Pick("Waiting for your teammate to be ready.", "正在等队友准备。")
+                    ? members.Count <= 2
+                        ? Lang.Pick("Waiting for your teammate to be ready.", "正在等队友准备。")
+                        : Lang.Pick("Waiting for your teammates to be ready.", "正在等队友们准备。")
                     : Lang.Pick(
                         "Say you are ready when you want to choose your saves.",
                         "想开始挑存档的话，点一下「我准备好了」。"

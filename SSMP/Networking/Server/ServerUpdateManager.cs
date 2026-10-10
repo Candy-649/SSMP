@@ -531,6 +531,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                 GetOrCreateCollection<BattleSceneUpdate>(ClientUpdatePacketId.BattleSceneUpdate);
             battleSceneUpdateCollection.DataInstances.Add(
                 new BattleSceneUpdate {
+                    PlayerId = update.PlayerId,
                     SceneName = update.SceneName,
                     Path = update.Path,
                     Status = update.Status,

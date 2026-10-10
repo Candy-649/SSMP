@@ -82,26 +82,23 @@ internal partial class ArenaCoop {
     /// <summary>
     /// The message for a player who waits in a boss arena for the other players.
     /// </summary>
-    private static string BossWaitingMessage => Lang.Pick(
-        "Waiting for your teammate to catch up...",
-        "正在等队友跟上来……"
-    );
+    private string BossWaitingMessage => _playerData.Count <= 1
+        ? Lang.Pick("Waiting for your teammate to catch up...", "正在等队友跟上来……")
+        : Lang.Pick("Waiting for your teammates to catch up...", "正在等队友们跟上来……");
 
     /// <summary>
     /// The message for a player whose teammate waits in a boss arena.
     /// </summary>
-    private static string BossTeammateWaitingMessage => Lang.Pick(
-        "Your teammate is waiting for you.",
-        "你的队友正在等你。"
-    );
+    private string BossTeammateWaitingMessage => _playerData.Count <= 1
+        ? Lang.Pick("Your teammate is waiting for you.", "你的队友正在等你。")
+        : Lang.Pick("A teammate is waiting for you.", "有队友正在等你。");
 
     /// <summary>
     /// The message for a player who finished the talk before the fight of a boss arena while a teammate still reads.
     /// </summary>
-    private static string BossTalkWaitingMessage => Lang.Pick(
-        "Waiting for your teammate to finish the dialogue...",
-        "正在等队友看完对话……"
-    );
+    private string BossTalkWaitingMessage => _playerData.Count <= 1
+        ? Lang.Pick("Waiting for your teammate to finish the dialogue...", "正在等队友看完对话……")
+        : Lang.Pick("Waiting for your teammates to finish the dialogue...", "正在等队友们看完对话……");
 
     /// <summary>
     /// The events of boss arenas that wait for the other players, by the FSM that waits for them.
@@ -300,9 +297,7 @@ internal partial class ArenaCoop {
     /// </summary>
     private void ReleaseHeldBossEvents(BattleScene battleScene, ArenaState state) {
         // A player who left the scene finishes the talk again when they come back
-        if (state.OthersTalkDone && !IsOtherPlayerInScene()) {
-            state.OthersTalkDone = false;
-        }
+        state.TalkDoneBy.RemoveWhere(id => !_playerData.TryGetValue(id, out var other) || !other.IsInLocalScene);
 
         if (_heldBossEvents.Count == 0) {
             return;
@@ -491,11 +486,17 @@ internal partial class ArenaCoop {
     }
 
     /// <summary>
-    /// Whether the other players in the scene finished the talk before the fight of a boss arena. A player who left the
-    /// scene isn't waited for.
+    /// Whether the other players in the scene finished the talk before the fight of a boss arena, every one of them. A
+    /// player who left the scene isn't waited for.
     /// </summary>
     private bool HaveAllFinishedTheTalk(ArenaState state) {
-        return !IsOtherPlayerInScene() || state.OthersTalkDone;
+        foreach (var playerData in _playerData.Values) {
+            if (playerData.IsInLocalScene && !state.TalkDoneBy.Contains(playerData.Id)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -660,16 +661,15 @@ internal partial class ArenaCoop {
     /// <summary>
     /// Remembers that another player finished the talk before the fight of a boss arena.
     /// </summary>
-    private void OnBossTalkDone(string path) {
+    private void OnBossTalkDone(string path, ushort playerId) {
         var battleScene = FindBattleScene(path);
         if (battleScene == null) {
             return;
         }
 
         var state = GetState(battleScene);
-        if (!state.OthersTalkDone) {
-            state.OthersTalkDone = true;
-            Logger.Info($"Another player finished the talk of boss arena '{state.Path}'");
+        if (state.TalkDoneBy.Add(playerId)) {
+            Logger.Info($"Player {playerId} finished the talk of boss arena '{state.Path}'");
         }
     }
 

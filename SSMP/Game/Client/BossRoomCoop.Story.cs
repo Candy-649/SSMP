@@ -125,10 +125,9 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// The message for a player whose story scene waits for the other players.
     /// </summary>
-    private static string StoryWaitingMessage => Lang.Pick(
-        "This scene waits until your teammate gets here too.",
-        "这段剧情要等队友也走到这里才开始。"
-    );
+    private string StoryWaitingMessage => _playerData.Count <= 1
+        ? Lang.Pick("This scene waits until your teammate gets here too.", "这段剧情要等队友也走到这里才开始。")
+        : Lang.Pick("This scene waits until your teammates get here too.", "这段剧情要等队友们也走到这里才开始。");
 
     /// <summary>
     /// The message for a player whose story scene may start, but who walked away from where they set it off.
