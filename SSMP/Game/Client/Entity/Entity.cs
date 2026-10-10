@@ -2020,6 +2020,17 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Tells a copy that came after the room's other creatures the count of who runs the room, which it was not set up
+    /// with (EntityProcessor): its health is told in it (HealthManagerComponent).
+    /// </summary>
+    internal void SetSceneHostEpoch(uint sceneHostEpoch) {
+        if (_components.TryGetValue(EntityComponentType.Health, out var component) &&
+            component is HealthManagerComponent health) {
+            health.SetSceneHostEpoch(sceneHostEpoch);
+        }
+    }
+
+    /// <summary>
     /// Initializes the entity when the client user is a scene client. Only sets a variable to indicate the scene
     /// host has been determined.
     /// </summary>

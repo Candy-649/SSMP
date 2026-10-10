@@ -411,6 +411,7 @@ internal class EntityManager {
             GameObject = spawnedObject,
             IsSceneHost = IsSceneHost,
             IsSceneHostDetermined = _sceneRoleDetermined,
+            SceneHostEpoch = SceneHostEpoch,
             LateLoad = true,
             SpawnedId = id
         }.Process();
@@ -582,6 +583,7 @@ internal class EntityManager {
                 GameObject = obj,
                 IsSceneHost = IsSceneHost,
                 IsSceneHostDetermined = _sceneRoleDetermined,
+                SceneHostEpoch = SceneHostEpoch,
                 KeepsRunning = RunsTheRoom,
                 LateLoad = lateLoad,
                 UseStableSceneId = true
@@ -692,6 +694,7 @@ internal class EntityManager {
             GameObject = details.GameObject,
             IsSceneHost = IsSceneHost,
             IsSceneHostDetermined = _sceneRoleDetermined,
+            SceneHostEpoch = SceneHostEpoch,
             KeepsRunning = RunsTheRoom,
             LateLoad = true
         }.Process();

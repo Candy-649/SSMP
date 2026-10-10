@@ -1128,11 +1128,13 @@ internal abstract class ServerManager : IServerManager {
             foreach (var updateData in entityUpdate.GenericData) {
                 updateData.SenderId = id;
 
-                if (updateData.Type == EntityComponentType.Health &&
-                    !playerData.IsSceneHost &&
-                    IsHealingHealthUpdate(updateData)) {
+                // The health of a creature is told by the game that runs it alone; the other games send the damage
+                // that their copies took, which goes on to it (HealthManagerComponent)
+                if (updateData.Type == EntityComponentType.Health && !playerData.IsSceneHost &&
+                    HealthMessage.IsState(updateData)) {
                     Logger.Info(
-                        $"Ignoring non-host health increase for entity {entityUpdate.Id} from player {id} in scene '{playerData.CurrentScene}'"
+                        $"Ignoring the health of entity {entityUpdate.Id} told by player {id}, whose game does not " +
+                        $"run '{playerData.CurrentScene}'"
                     );
                     continue;
                 }
@@ -1155,20 +1157,13 @@ internal abstract class ServerManager : IServerManager {
 
             if (filteredGenericData.Count > 0) {
                 foreach (var updateData in filteredGenericData) {
-                    if (updateData.Type > EntityComponentType.Death) {
+                    if (updateData.Type == EntityComponentType.Health) {
+                        KeepNewerHealthState(entityData, updateData);
+                    } else if (updateData.Type > EntityComponentType.Death) {
                         KeepGenericData(entityData, updateData);
                         entityData.HeardAt[(int) updateData.Type] = now;
                     }
                 }
-            }
-
-            // Helper to inspect an entity health packet and check if it represents a health increase.
-            // Returns: True if the update heals the entity; otherwise false.
-            static bool IsHealingHealthUpdate(EntityNetworkData updateData) {
-                var packet = new Packet(updateData.Packet.ToArray());
-                var previousHp = packet.ReadInt();
-                var newHp = packet.ReadInt();
-                return newHp > previousHp;
             }
         }
 
@@ -1417,6 +1412,40 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="entityData">What the server keeps of the entity.</param>
     /// <param name="updateData">The data.</param>
     private static void KeepGenericData(ServerEntityData entityData, EntityNetworkData updateData) {
+        if (updateData.Type == EntityComponentType.Health) {
+            KeepNewerHealthState(entityData, updateData);
+            return;
+        }
+
+        KeepAs(entityData, updateData);
+    }
+
+    /// <summary>
+    /// Keeps the health of an entity told by the game that runs it, for players who walk in, if it was told later than
+    /// what is kept: in a later count of who runs the room, or later in the same. The damage that a copy took is not
+    /// kept: the game that runs the creature takes it in, and its health says so.
+    /// </summary>
+    private static void KeepNewerHealthState(ServerEntityData entityData, EntityNetworkData health) {
+        if (!HealthMessage.IsState(health)) {
+            return;
+        }
+
+        var kept = entityData.GenericData.Find(data => data.Type == EntityComponentType.Health);
+        if (kept != null && HealthMessage.IsState(kept)) {
+            var (epoch, number) = HealthMessage.StateOrder(health);
+            var (keptEpoch, keptNumber) = HealthMessage.StateOrder(kept);
+            if (epoch < keptEpoch || epoch == keptEpoch && number <= keptNumber) {
+                return;
+            }
+        }
+
+        KeepAs(entityData, health);
+    }
+
+    /// <summary>
+    /// Keeps the data of an entity in place of what was kept of its kind.
+    /// </summary>
+    private static void KeepAs(ServerEntityData entityData, EntityNetworkData updateData) {
         var existingData = entityData.GenericData.Find(d => d.Type == updateData.Type);
         if (existingData == null) {
             entityData.GenericData.Add(updateData.Clone());
@@ -1512,24 +1541,6 @@ internal abstract class ServerManager : IServerManager {
         bool HeardJustNow(ServerEntityData data, int kind) =>
             data.HeardAt.TryGetValue(kind, out var at) && (now - at).TotalSeconds < RoomSnapshotYieldTime;
 
-        // Health is the exception: what the other players' games send of it is what their copies took from their own
-        // hits, which go on while the creature they show is already dead in the game that runs it; and nothing heard
-        // is newer than a death
-        bool YieldsTo(ServerEntityData data, EntityNetworkData genericData) {
-            if (!HeardJustNow(data, (int) genericData.Type)) {
-                return false;
-            }
-
-            if (genericData.Type != EntityComponentType.Health) {
-                return true;
-            }
-
-            var packet = new Packet(genericData.Packet.ToArray());
-            packet.ReadInt();
-            return packet.ReadInt() > 0 &&
-                   data.GenericData.Find(kept => kept.Type == EntityComponentType.Health)?.SenderId == id;
-        }
-
         ServerEntityData DataOf(ushort entityId) {
             var key = new ServerEntityKey(sceneName, entityId);
             if (!_entityData.TryGetValue(key, out var data)) {
@@ -1571,7 +1582,10 @@ internal abstract class ServerManager : IServerManager {
 
             if (update.UpdateTypes.Contains(EntityUpdateType.Data)) {
                 foreach (var genericData in update.GenericData) {
-                    if (genericData.Type > EntityComponentType.Death && !YieldsTo(data, genericData)) {
+                    // Health goes by the order it was told in, whenever it was heard (KeepNewerHealthState)
+                    if (genericData.Type > EntityComponentType.Death &&
+                        (genericData.Type == EntityComponentType.Health ||
+                         !HeardJustNow(data, (int) genericData.Type))) {
                         genericData.SenderId = id;
                         KeepGenericData(data, genericData);
                     }

@@ -768,6 +768,44 @@ internal class EntityNetworkData : IPoolable {
 }
 
 /// <summary>
+/// The kinds of health data of an entity, by their first byte, and what the server reads of them: the health of the
+/// creature as the game that runs it tells it, or all the damage that a copy of it in another game took from the
+/// player of that game (see HealthManagerComponent).
+/// </summary>
+internal static class HealthMessage {
+    /// <summary>
+    /// The health of the creature, told by the game that runs it: the scene-host epoch, the number of the telling in
+    /// it, the health, whether the creature is dead, and for each copy in another game how much of its damage is in
+    /// the health.
+    /// </summary>
+    public const byte State = 0;
+
+    /// <summary>
+    /// All the damage that a copy took from the player of its game in the epoch: the epoch, the number of the copy,
+    /// the damage.
+    /// </summary>
+    public const byte OwnDamage = 1;
+
+    /// <summary>
+    /// Whether health data tell the health of a creature, rather than the damage of a copy. The server keeps the
+    /// newest of them for players who walk in.
+    /// </summary>
+    public static bool IsState(EntityNetworkData data) {
+        var bytes = data.Packet.ToArray();
+        return bytes.Length > 0 && bytes[0] == State;
+    }
+
+    /// <summary>
+    /// The order of a telling of the health of a creature: the scene-host epoch it was told in, then its number in it.
+    /// </summary>
+    public static (uint epoch, uint number) StateOrder(EntityNetworkData data) {
+        var packet = new Packet(data.Packet.ToArray());
+        packet.ReadByte();
+        return (packet.ReadUInt(), packet.ReadUInt());
+    }
+}
+
+/// <summary>
 /// Class containing data for host FSMs including state and FSM variables.
 /// Used to make host transfer easier since all clients receive updates on host FSM details.
 /// Implements IPoolable for object pooling to reduce allocations.

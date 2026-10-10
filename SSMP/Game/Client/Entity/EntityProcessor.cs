@@ -51,6 +51,11 @@ internal class EntityProcessor {
     public bool IsSceneHostDetermined { get; init; }
 
     /// <summary>
+    /// The count of who runs the scene, once that is determined (EntityManager.SceneHostEpoch).
+    /// </summary>
+    public uint SceneHostEpoch { get; init; }
+
+    /// <summary>
     /// Whether the local client runs the scene, or expects to while the scene host is not determined yet, so that the
     /// host object is left running instead of being deactivated until it is.
     /// </summary>
@@ -299,10 +304,14 @@ internal class EntityProcessor {
         if (LateLoad && IsSceneHostDetermined) {
             if (IsSceneHost) {
                 // Since this is a late load it needs to be initialized as host if we are the scene host
-                entity.InitializeHost();
+                entity.InitializeHost(SceneHostEpoch);
             } else {
                 // Since this is a late load we need to update the 'active' state of the entity
                 entity.UpdateIsActive(true);
+
+                // The rest of a copy's setup it has from being made, but not the count of who runs the room, which its
+                // health is told in: made later than the room's other creatures, it had none
+                entity.SetSceneHostEpoch(SceneHostEpoch);
             }
         }
     }

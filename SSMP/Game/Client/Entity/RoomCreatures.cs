@@ -300,6 +300,7 @@ internal class RoomCreatures {
             GameObject = creature,
             IsSceneHost = true,
             IsSceneHostDetermined = true,
+            SceneHostEpoch = _entityManager.SceneHostEpoch,
             KeepsRunning = true,
             LateLoad = true
         }.Process();

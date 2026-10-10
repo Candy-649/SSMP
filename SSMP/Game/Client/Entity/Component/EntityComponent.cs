@@ -92,7 +92,7 @@ internal abstract class EntityComponent {
 
     /// <summary>
     /// Puts what the component keeps of this game's creature into the state of the room that this game runs, for what
-    /// is not said again as it is (see <see cref="SendAgain"/>) - its health, which goes as a change (see
+    /// is not said again as it is (see <see cref="SendAgain"/>) - its health, which is told only when it changes (see
     /// Entity.AddToRoomSnapshot).
     /// </summary>
     /// <param name="data">The data of the creature in the state of the room.</param>

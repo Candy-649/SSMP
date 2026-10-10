@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Reflection;
 using MonoMod.RuntimeDetour;
 using SSMP.Networking.Client;
@@ -16,6 +17,25 @@ namespace SSMP.Game.Client.Entity.Component;
 internal class HealthManagerComponent : EntityComponent {
     private const BindingFlags HookBindingFlags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
     private const float ControlledHealCorrectionDelaySeconds = 0.4f;
+
+    /// <summary>
+    /// How long a copy waits for the game that runs the creature to take its damage in before sending it again, in
+    /// seconds: at first, and after <see cref="OwnDamageQuickResends"/> times.
+    /// </summary>
+    private const float OwnDamageResendTime = 1f, OwnDamageSlowResendTime = 5f;
+
+    /// <summary>
+    /// How many times a copy sends its damage again a second apart, before it waits longer between them. It goes on
+    /// until the damage is taken in: a stretch in which nothing arrives can outlast all of the quick ones, and damage
+    /// that is not sent again after it is lost.
+    /// </summary>
+    private const int OwnDamageQuickResends = 10;
+
+    /// <summary>
+    /// The number of the next copy made in this game. Each copy has its own, by which the game that runs the creature
+    /// tells the damage of one visit of a player to the room from the next, which counts from nothing again.
+    /// </summary>
+    private static uint _nextCopyKey = (uint) new System.Random().Next();
 
     /// <summary>
     /// Host-client pair of health manager components of the entity.
@@ -89,11 +109,6 @@ internal class HealthManagerComponent : EntityComponent {
     private uint _currentHealthEpoch;
 
     /// <summary>
-    /// The highest received scene host epoch.
-    /// </summary>
-    private uint _lastReceivedHealthEpoch;
-
-    /// <summary>
     /// Whether another game ran the creature at some point, so that this game only runs it by taking it over.
     /// </summary>
     private bool _wasRunElsewhere;
@@ -107,6 +122,62 @@ internal class HealthManagerComponent : EntityComponent {
     /// Unscaled time at which the next controlled heal correction should be applied.
     /// </summary>
     private float _pendingControlledHealCorrectionAt;
+
+    /// <summary>
+    /// The number of this copy (see <see cref="_nextCopyKey"/>).
+    /// </summary>
+    private readonly uint _copyKey = _nextCopyKey++;
+
+    /// <summary>
+    /// The health that the game that runs the creature last told, and the number of that telling in the current
+    /// epoch, 0 before any (see <see cref="SendHealthState"/>).
+    /// </summary>
+    private int _toldHp;
+
+    /// <inheritdoc cref="_toldHp" />
+    private uint _toldNumber;
+
+    /// <summary>
+    /// Whether the creature was dead when its health was last told.
+    /// </summary>
+    private bool _toldDead;
+
+    /// <summary>
+    /// All the damage that the copy took from this game's player in the current epoch.
+    /// </summary>
+    private int _ownDamage;
+
+    /// <summary>
+    /// How much of <see cref="_ownDamage"/> was in the health last told.
+    /// </summary>
+    private int _ownDamageTaken;
+
+    /// <summary>
+    /// When the copy's damage was last sent.
+    /// </summary>
+    private float _ownDamageSentAt;
+
+    /// <summary>
+    /// How many times the copy's damage was sent again since this game's player last hit it.
+    /// </summary>
+    private int _ownDamageResends;
+
+    /// <summary>
+    /// In the game that runs the creature: the damage of each other player's copy that is in its health, by player -
+    /// the number of the copy, and all of its damage taken in.
+    /// </summary>
+    private readonly Dictionary<ushort, (uint copyKey, int damage)> _damageTaken = new();
+
+    /// <summary>
+    /// In the game that runs the creature: the number of its last telling of its health in the current epoch.
+    /// </summary>
+    private uint _tellNumber;
+
+    /// <summary>
+    /// Whether the creature has had any health. Some are set up with none of their own and are alive at none, and a
+    /// copy that is told it has none dies.
+    /// </summary>
+    private bool _hadHealth;
 
     public HealthManagerComponent(
         NetClient netClient,
@@ -130,6 +201,8 @@ internal class HealthManagerComponent : EntityComponent {
 
         _lastInvincible = healthManager.Host.IsInvincible;
         _lastHp = healthManager.Host.hp;
+        _toldHp = _lastHp;
+        _hadHealth = _lastHp > 0;
         _lastInvincibleFromDirection = healthManager.Host.InvincibleFromDirection;
 
         // Get the largest overload of Die from HealthManager, because that is the method that is getting called by
@@ -326,24 +399,15 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void AddToRoomSnapshot(System.Collections.Generic.List<EntityNetworkData> data) {
-        if (IsControlled) {
+        if (IsControlled || !HasHealthToTell()) {
             return;
         }
 
-        // The health as it is, as a change from itself to itself: a copy that hears it as it happens adds nothing to
-        // its own, and the state of a room takes from it only a death that was missed (UpdateHealth). None for a
-        // creature that is alive with no health - some are set up with none of their own - since a copy told it has
-        // none dies
-        var hp = GetCurrentHp();
-        if (hp <= 0 && _healthManager.Host != null && !_healthManager.Host.GetIsDead()) {
-            return;
-        }
+        // The health as it is, told anew: the copies take it as they take any (UpdateHealth)
         var hpData = new EntityNetworkData {
             Type = EntityComponentType.Health
         };
-        hpData.Packet.Write(hp);
-        hpData.Packet.Write(hp);
-        hpData.Packet.Write(_currentHealthEpoch);
+        WriteHealthState(hpData);
         data.Add(hpData);
     }
 
@@ -358,6 +422,10 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         var newHp = observedHealthManager.hp;
+        if (newHp > 0) {
+            _hadHealth = true;
+        }
+
         if (newHp != _lastHp) {
             if (IsControlled && newHp > _lastHp) {
                 if (_hasPendingControlledHealCorrection) {
@@ -386,7 +454,21 @@ internal class HealthManagerComponent : EntityComponent {
                 otherHealthManager.hp = newHp;
             }
 
-            SendHealth(previousHp, newHp);
+            if (IsControlled) {
+                // A blow of this game's player on the copy. All of the damage so far is what is sent, so that what
+                // went missing on the way comes with the next
+                _ownDamage += previousHp - newHp;
+                _ownDamageResends = 0;
+                SendOwnDamage();
+            } else {
+                SendHealthState();
+            }
+        } else if (IsControlled && _ownDamage > _ownDamageTaken &&
+                   Time.unscaledTime - _ownDamageSentAt >=
+                   (_ownDamageResends < OwnDamageQuickResends ? OwnDamageResendTime : OwnDamageSlowResendTime)) {
+            // The game that runs the creature has not told health with all of it in: sent again, as it is all of it
+            _ownDamageResends++;
+            SendOwnDamage();
         }
 
         var newInvincible = _healthManager.Host.IsInvincible;
@@ -419,13 +501,16 @@ internal class HealthManagerComponent : EntityComponent {
 
         // A room can set the health of its creatures as it starts, before it is settled which game runs them: a fight
         // gives its creatures the health of its first part. Nothing watched the room's own creature until now, so the
-        // other games, whose copies keep the health they were made with, are told. Not for a creature taken over from
-        // another game, whose own creature here was never the one the others followed.
-        if (!_wasRunElsewhere && currentHp != copiedHp) {
+        // other games, whose copies keep the health they were made with, are told. A creature taken over from another
+        // game goes on at the health that its copy had here, which the copies in the other games are told as the start
+        // of the new count of who runs the room.
+        if (_wasRunElsewhere) {
+            SendHealthState();
+        } else if (currentHp != copiedHp) {
             Logger.Info(
                 $"The room set the health of '{GameObject.Host?.name}' to {currentHp} before it ran, from {copiedHp}"
             );
-            SendHealth(copiedHp, currentHp);
+            SendHealthState();
         }
     }
 
@@ -438,33 +523,100 @@ internal class HealthManagerComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Tells the other games that the health of the creature went from one value to another.
+    /// Tells the other games the health of the creature as it is here, in the game that runs it, and how much of the
+    /// damage of each of their copies is in it already. A copy takes it as it is, less the damage of its own player
+    /// that is not in it yet (UpdateHealth). Changes used to be sent as such, from one value to another, and each one
+    /// lost on the way left the copies off by that much for as long as the creature lived, more with every stretch in
+    /// which nothing arrived; health told as it is is made right by whichever telling comes next.
     /// </summary>
-    private void SendHealth(int previousHp, int newHp) {
-        // Obtain a pooled network data instance to avoid new allocations
+    private void SendHealthState() {
+        if (!HasHealthToTell()) {
+            return;
+        }
+
         var hpData = ObjectPool<EntityNetworkData>.Get();
         hpData.Type = EntityComponentType.Health;
-
-        hpData.Packet.Write(previousHp);
-        hpData.Packet.Write(newHp);
-        hpData.Packet.Write(_currentHealthEpoch);
-
+        WriteHealthState(hpData);
         SendData(hpData);
     }
 
     /// <summary>
-    /// Resets health epoch tracking for a new scene-host epoch.
+    /// Writes the health of the creature as a new telling (see <see cref="SendHealthState"/>).
+    /// </summary>
+    private void WriteHealthState(EntityNetworkData data) {
+        data.Packet.Write(HealthMessage.State);
+        data.Packet.Write(_currentHealthEpoch);
+        data.Packet.Write(++_tellNumber);
+        data.Packet.Write(GetCurrentHp());
+        data.Packet.Write(_healthManager.Host != null ? _healthManager.Host.GetIsDead() : _lastHp <= 0);
+
+        var count = System.Math.Min(_damageTaken.Count, byte.MaxValue);
+        data.Packet.Write((byte) count);
+        foreach (var (copyKey, damage) in _damageTaken.Values) {
+            if (count-- == 0) {
+                break;
+            }
+
+            data.Packet.Write(copyKey);
+            data.Packet.Write(damage);
+        }
+    }
+
+    /// <summary>
+    /// Whether the health of the creature means anything to the copies: not for one that is alive at no health because
+    /// it never had any (see <see cref="_hadHealth"/>).
+    /// </summary>
+    private bool HasHealthToTell() {
+        return _hadHealth || GetCurrentHp() > 0;
+    }
+
+    /// <summary>
+    /// Tells the game that runs the creature all the damage that the copy took from this game's player so far in the
+    /// current epoch (see <see cref="TakeInOwnDamage"/>).
+    /// </summary>
+    private void SendOwnDamage() {
+        var hpData = ObjectPool<EntityNetworkData>.Get();
+        hpData.Type = EntityComponentType.Health;
+        hpData.Packet.Write(HealthMessage.OwnDamage);
+        hpData.Packet.Write(_currentHealthEpoch);
+        hpData.Packet.Write(_copyKey);
+        hpData.Packet.Write(_ownDamage);
+        SendData(hpData);
+
+        _ownDamageSentAt = Time.unscaledTime;
+    }
+
+    /// <summary>
+    /// Sets the count of who runs the room for a creature that came after the room's other ones and was set up for no
+    /// role (see Entity.SetSceneHostEpoch). Left at the 0 it was made with, its health and damage were told in another
+    /// count than the other game's, and each game passed over what the other said.
+    /// </summary>
+    internal void SetSceneHostEpoch(uint sceneHostEpoch) {
+        ResetHealthOrderingForEpoch(sceneHostEpoch);
+    }
+
+    /// <summary>
+    /// Starts the count of damage and of tellings over for a new scene-host epoch: the game that runs the creature from
+    /// then on tells its health from its own, and the damage of the copies is counted against that.
     /// </summary>
     /// <param name="sceneHostEpoch">The new scene-host epoch assigned by the server.</param>
     private void ResetHealthOrderingForEpoch(uint sceneHostEpoch) {
+        if (sceneHostEpoch != _currentHealthEpoch) {
+            _toldHp = GetCurrentHp();
+            _toldNumber = 0;
+            _toldDead = false;
+            _ownDamage = 0;
+            _ownDamageTaken = 0;
+            _ownDamageResends = 0;
+            _damageTaken.Clear();
+            _tellNumber = 0;
+        }
+
         _currentHealthEpoch = sceneHostEpoch;
-        _lastReceivedHealthEpoch = sceneHostEpoch;
     }
 
     /// <inheritdoc />
     public override void Update(EntityNetworkData data, bool alreadyInSceneUpdate) {
-        Logger.Info("Received health manager update");
-
         if (!IsControlled && data.Type != EntityComponentType.Health) {
             Logger.Info("  Entity was not controlled");
             return;
@@ -542,71 +694,131 @@ internal class HealthManagerComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Applies a health update from the network.
-    /// Scene snapshots are applied as absolute HP,
-    /// while live updates are merged as HP deltas
-    /// so delayed packets do not overwrite local damage or healing.
+    /// Takes in a health message: the health of the creature told by the game that runs it, or the damage of a copy in
+    /// another game (see <see cref="SendHealthState"/> and <see cref="SendOwnDamage"/>).
     /// </summary>
     private void UpdateHealth(EntityNetworkData data, bool alreadyInSceneUpdate) {
         _hasPendingControlledHealCorrection = false;
 
-        var previousHp = data.Packet.ReadInt();
-        var newHp = data.Packet.ReadInt();
-        var healthEpoch = data.Packet.ReadUInt();
-
-        // The state of a room this game is in already brings only the deaths that it missed: health set outright
-        // could undo a hit of the local player that is still on its way to the scene host, and the changes that come
-        // after it are only ever added to it. Health of a newer count of who runs the room is taken all the same: the
-        // game that runs it now set it outright, and what comes after is added to that
-        if (alreadyInSceneUpdate && Entity.FromRoomState && newHp > 0 && healthEpoch <= _lastReceivedHealthEpoch) {
+        if (data.Packet.ReadByte() == HealthMessage.OwnDamage) {
+            TakeInOwnDamage(data);
             return;
         }
 
-        if (alreadyInSceneUpdate) {
-            ResetHealthOrderingForEpoch(healthEpoch);
-            ApplyHp(newHp, triggerHostDeath: false);
-
-            // Walking into a room that the other player already cleared sends the health of everything in it, but
-            // never the deaths themselves - the server keeps health and whether an object is active, and drops death
-            // data. Health alone leaves a copy that is alive with nothing left, which then asks to die every frame
-            // and is turned down every frame, for as long as the room lasts. Its death is played out once here
-            // instead, the same way one that arrives over the network is. A player who is scene host needs none of
-            // this: their own object dies by itself and tells the others.
-            if (newHp <= 0 && IsControlled && _healthManager.Client != null) {
-                _allowDeath = true;
-                _clientCorpse = null;
-                _healthManager.Client.Die(null, AttackTypes.Generic, true);
+        var epoch = data.Packet.ReadUInt();
+        var number = data.Packet.ReadUInt();
+        var hp = data.Packet.ReadInt();
+        var dead = data.Packet.ReadBool();
+        var ownDamageTaken = 0;
+        var count = data.Packet.ReadByte();
+        for (var i = 0; i < count; i++) {
+            var copyKey = data.Packet.ReadUInt();
+            var damage = data.Packet.ReadInt();
+            if (copyKey == _copyKey) {
+                ownDamageTaken = damage;
             }
-        } else {
-            // Cache once; avoids re-evaluating the IsControlled check twice below on every packet
-            var isControlled = IsControlled;
-
-            if (healthEpoch < _lastReceivedHealthEpoch) {
-                return;
-            }
-
-            if (healthEpoch > _lastReceivedHealthEpoch) {
-                _lastReceivedHealthEpoch = healthEpoch;
-                if (isControlled) {
-                    _currentHealthEpoch = healthEpoch;
-                }
-            }
-
-            var currentHp = isControlled ? _lastHp : GetCurrentHp();
-            var damage = System.Math.Max(previousHp - newHp, 0);
-            var healing = System.Math.Max(newHp - previousHp, 0);
-
-            var targetHp = currentHp;
-            if (damage > 0) {
-                targetHp -= damage;
-            }
-
-            if (healing > 0) {
-                targetHp += healing;
-            }
-
-            ApplyHp(targetHp, triggerHostDeath: true);
         }
+
+        if (!IsControlled) {
+            // The game that runs the creature takes its health from another only as it walks into the room after the
+            // other ran it - told in an earlier count of who runs the room, before this game told any of its own - and
+            // tells it on as its own. What the server keeps of a room this game ran all along came from it, and an
+            // answer to walking in that came twice would set the creature back to it, undoing the hits since.
+            if (alreadyInSceneUpdate && !Entity.FromRoomState && epoch < _currentHealthEpoch && _tellNumber == 0) {
+                ApplyHp(hp, triggerHostDeath: false);
+                SendHealthState();
+            }
+
+            return;
+        }
+
+        // A blow of this game's player that the copy took before this, and that was not counted yet, is counted first:
+        // set over, it would be lost
+        var client = _healthManager.Client;
+        if (client != null && client.hp < _lastHp) {
+            _ownDamage += _lastHp - client.hp;
+            _lastHp = client.hp;
+            _ownDamageResends = 0;
+            SendOwnDamage();
+        }
+
+        if (epoch > _currentHealthEpoch) {
+            ResetHealthOrderingForEpoch(epoch);
+        }
+
+        if (epoch == _currentHealthEpoch && number > _toldNumber) {
+            _toldHp = hp;
+            _toldNumber = number;
+            _toldDead = dead;
+            _ownDamageTaken = ownDamageTaken;
+
+            // The game that runs the creature is heard from: what of this game's damage is not in it yet goes again
+            // soon, however long it went unheard before
+            _ownDamageResends = 0;
+        } else if (epoch < _currentHealthEpoch && alreadyInSceneUpdate && _toldNumber == 0) {
+            // Told before the room last changed hands, and nothing since, as the copy walks in: nearer the health of
+            // the creature than the health the copy was made with. The damage in it was counted against another.
+            _toldHp = hp;
+            _toldDead = dead;
+        } else if (!alreadyInSceneUpdate) {
+            return;
+        }
+
+        // As told, less the damage of this game's player that is not in it yet: on its way, or lost and sent again
+        ApplyHp(_toldHp - System.Math.Max(0, _ownDamage - _ownDamageTaken), triggerHostDeath: false);
+
+        // Walking into a room that the other player already cleared sends the health of everything in it, but never
+        // the deaths themselves - the server keeps health and whether an object is active, and drops death data. The
+        // same for the state of the room told again after a stretch in which nothing arrived, which can be all there
+        // is of a death that went missing. Health alone leaves a copy that is alive with nothing left, which then asks
+        // to die every frame and is turned down every frame, for as long as the room lasts. Its death is played out
+        // once here instead, the same way one that arrives over the network is - for a creature told dead, not one
+        // told it has no health, which some are alive at. A player who is scene host needs none of this: their own
+        // object dies by itself and tells the others.
+        if (alreadyInSceneUpdate && _toldDead && client != null && !client.GetIsDead()) {
+            _allowDeath = true;
+            _clientCorpse = null;
+            client.Die(null, AttackTypes.Generic, true);
+        }
+    }
+
+    /// <summary>
+    /// Takes in the damage of a copy in another game on the creature that this game runs: what of it is not in the
+    /// creature's health yet. All of the copy's damage so far comes each time, so none is taken in twice and none is
+    /// lost with a message that went missing. Answered by telling the health as it is then, which is how the copy
+    /// knows its damage was taken in.
+    /// </summary>
+    private void TakeInOwnDamage(EntityNetworkData data) {
+        var epoch = data.Packet.ReadUInt();
+        var copyKey = data.Packet.ReadUInt();
+        var damage = data.Packet.ReadInt();
+
+        if (IsControlled) {
+            return;
+        }
+
+        // Damage counted against health that another game told, which this game does not go on from. A copy that
+        // missed the change of who runs the room is told the health as it is, and counts from there.
+        if (epoch != _currentHealthEpoch) {
+            if (epoch < _currentHealthEpoch) {
+                SendHealthState();
+            }
+
+            return;
+        }
+
+        // A copy of a later visit of the player to the room counts from nothing again
+        if (!_damageTaken.TryGetValue(data.SenderId, out var taken) || taken.copyKey != copyKey) {
+            taken = (copyKey, 0);
+        }
+
+        if (damage > taken.damage) {
+            ApplyHp(GetCurrentHp() - (damage - taken.damage), triggerHostDeath: true);
+            taken.damage = damage;
+        }
+
+        _damageTaken[data.SenderId] = taken;
+        SendHealthState();
     }
 
     /// <summary>
