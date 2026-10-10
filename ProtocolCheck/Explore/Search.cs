@@ -282,6 +282,131 @@ public static class Search {
     }
 
     /// <summary>
+    /// Runs a model by random walks rather than through every order, for models too large for that, like three players
+    /// with something going wrong: each walk starts at the first state and takes events picked at random, any of them
+    /// at each step, for a number of steps, checking the invariant at every state. From where a walk ends, ordinary
+    /// events picked at random go on until the goal is reached, tried a few times over; a walk from whose end the goal
+    /// was never reached that way is reported as a likely dead end, and one that ends where nothing can happen as a
+    /// stop. It proves nothing, but it reaches orders far deeper than the full search gets to.
+    /// </summary>
+    /// <param name="model">The model.</param>
+    /// <param name="walks">How many walks.</param>
+    /// <param name="steps">How many events each walk takes, and how many each try to reach the goal may take.</param>
+    /// <param name="seed">The seed of the first walk; each walk after it takes the next one, so a finding comes back
+    /// with the same seed.</param>
+    /// <param name="progress">Where to say how far it has got.</param>
+    public static Result Walk<T>(Model<T> model, int walks, int steps, int seed, Action<string>? progress = null)
+        where T : Rec {
+        const int tries = 3;
+        var clock = Stopwatch.StartNew();
+        var result = new Result { Model = $"{model.Name}, {walks} random walks", Scope = model.Scope };
+        var shortest = new Dictionary<(string Kind, string Text), List<string>>();
+        var moves = new Moves<T>();
+        var nextReport = clock.Elapsed + TimeSpan.FromSeconds(10);
+
+        void Note(string kind, string text, List<string> trace) {
+            if (!shortest.TryGetValue((kind, text), out var known) || trace.Count < known.Count) {
+                shortest[(kind, text)] = new List<string>(trace);
+            }
+        }
+
+        // Takes one event picked at random, ordinary ones only if asked; false when there is none to take or the
+        // state it led to is broken
+        bool Step(Random random, ref T state, List<string> trace, bool ordinaryOnly) {
+            moves.Items.Clear();
+            model.Moves(state, moves);
+            var count = 0;
+            foreach (var item in moves.Items) {
+                if (!ordinaryOnly || item.Ordinary) {
+                    count++;
+                }
+            }
+
+            if (count == 0) {
+                return false;
+            }
+
+            var pick = random.Next(count);
+            foreach (var (label, change, ordinary) in moves.Items) {
+                if (ordinaryOnly && !ordinary || pick-- > 0) {
+                    continue;
+                }
+
+                var next = state.Clone<T>();
+                change(next);
+                model.Normalize(next);
+                state = next;
+                trace.Add(label);
+                result.Events++;
+                break;
+            }
+
+            if (model.Invariant(state) is { } problem) {
+                Note("invariant", problem, trace);
+                return false;
+            }
+
+            return true;
+        }
+
+        for (var walk = 0; walk < walks; walk++) {
+            var random = new Random(seed + walk);
+            var state = model.Initial();
+            var trace = new List<string>();
+            var broken = false;
+            for (var step = 0; step < steps; step++) {
+                if (!Step(random, ref state, trace, false)) {
+                    broken = model.Invariant(state) != null;
+                    break;
+                }
+
+                if (model.Goal(state)) {
+                    result.Goals++;
+                }
+            }
+
+            result.States++;
+            if (broken) {
+                continue;
+            }
+
+            // From where it ended, the goal again by ordinary events alone
+            var reached = model.Goal(state);
+            for (var attempt = 0; attempt < tries && !reached; attempt++) {
+                var tryState = state;
+                var tryTrace = new List<string>(trace);
+                for (var step = 0; step < steps && !reached; step++) {
+                    if (!Step(random, ref tryState, tryTrace, true)) {
+                        break;
+                    }
+
+                    reached = model.Goal(tryState);
+                }
+            }
+
+            if (!reached) {
+                result.DeadEnds++;
+                moves.Items.Clear();
+                model.Moves(state, moves);
+                Note(moves.Items.Count == 0 ? "stop" : "likely dead end", model.Describe(state), trace);
+            }
+
+            if (progress != null && clock.Elapsed >= nextReport) {
+                nextReport = clock.Elapsed + TimeSpan.FromSeconds(10);
+                progress($"{model.Name}: {walk + 1} of {walks} walks");
+            }
+        }
+
+        foreach (var ((kind, text), trace) in shortest.OrderBy(pair => pair.Value.Count)) {
+            result.Findings.Add(new Finding(kind, text, trace));
+        }
+
+        result.Complete = false;
+        result.Time = clock.Elapsed;
+        return result;
+    }
+
+    /// <summary>
     /// The states along a sequence of events, starting with the first state.
     /// </summary>
     public static List<T> Replay<T>(Model<T> model, IReadOnlyList<string> steps) where T : Rec {
@@ -330,11 +455,14 @@ public static class Search {
         return builder.ToString();
     }
 
-    public static void Report<T>(Model<T> model, Result result, TextWriter output, bool traces) where T : Rec {
+    public static void Report<T>(Model<T> model, Result result, TextWriter output, bool traces, bool walked = false)
+        where T : Rec {
         var status = result.Complete ? "" : " (cut short at the state limit)";
-        output.WriteLine(
-            $"{result.Model}: {result.States} states, {result.Events} events, {result.Goals} at the goal, " +
-            $"{result.DeadEnds} in dead ends, {result.Time.TotalSeconds:F1}s{status}"
+        output.WriteLine(walked
+            ? $"{result.Model}: {result.Events} events, {result.Goals} states at the goal on the way, " +
+              $"{result.DeadEnds} walks that ended out of reach of it, {result.Time.TotalSeconds:F1}s"
+            : $"{result.Model}: {result.States} states, {result.Events} events, {result.Goals} at the goal, " +
+              $"{result.DeadEnds} in dead ends, {result.Time.TotalSeconds:F1}s{status}"
         );
         if (result.Scope.Length > 0) {
             output.WriteLine($"  scope: {result.Scope}");

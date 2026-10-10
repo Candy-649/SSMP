@@ -12,6 +12,8 @@ namespace ProtocolCheck;
 /// dotnet run -c Release --project ProtocolCheck -- --limit 500000  at most this many states per model
 /// dotnet run -c Release --project ProtocolCheck -- --deep          also the models too large to finish
 /// dotnet run -c Release --project ProtocolCheck -- --before-fixes  also the code before its fixes, to see the finds
+/// dotnet run -c Release --project ProtocolCheck -- --walk 20000    random walks instead, also of the models too
+///                                                                 large to finish (--steps 400, --seed 1 by default)
 /// </code>
 /// </summary>
 internal static class Program {
@@ -20,22 +22,31 @@ internal static class Program {
         var deep = args.Contains("--deep");
         var beforeFixes = args.Contains("--before-fixes");
         var limit = 5_000_000;
+        var walks = 0;
+        var steps = 400;
+        var seed = 1;
         var names = new List<string>();
         for (var i = 0; i < args.Length; i++) {
             if (args[i] == "--limit" && i + 1 < args.Length) {
                 limit = int.Parse(args[++i]);
+            } else if (args[i] == "--walk" && i + 1 < args.Length) {
+                walks = int.Parse(args[++i]);
+            } else if (args[i] == "--steps" && i + 1 < args.Length) {
+                steps = int.Parse(args[++i]);
+            } else if (args[i] == "--seed" && i + 1 < args.Length) {
+                seed = int.Parse(args[++i]);
             } else if (!args[i].StartsWith("--")) {
                 names.Add(args[i]);
             }
         }
 
         var found = 0;
-        foreach (var run in Runs(deep, beforeFixes)) {
+        foreach (var run in Runs(deep || walks > 0, beforeFixes)) {
             if (names.Count > 0 && !names.Any(name => run.Name.Contains(name, StringComparison.OrdinalIgnoreCase))) {
                 continue;
             }
 
-            found += run.Execute(limit, traces);
+            found += walks > 0 ? run.Walk(walks, steps, seed, traces) : run.Execute(limit, traces);
             Console.WriteLine();
         }
 
@@ -67,6 +78,8 @@ internal static class Program {
         string Name { get; }
 
         int Execute(int limit, bool traces);
+
+        int Walk(int walks, int steps, int seed, bool traces);
     }
 
     private sealed class Run<T>(Model<T> model) : IRun where T : Rec {
@@ -75,6 +88,12 @@ internal static class Program {
         public int Execute(int limit, bool traces) {
             var result = Search.Run(model, limit, line => Console.Error.WriteLine("  " + line));
             Search.Report(model, result, Console.Out, traces);
+            return result.Findings.Count;
+        }
+
+        public int Walk(int walks, int steps, int seed, bool traces) {
+            var result = Search.Walk(model, walks, steps, seed, line => Console.Error.WriteLine("  " + line));
+            Search.Report(model, result, Console.Out, traces, walked: true);
             return result.Findings.Count;
         }
     }
