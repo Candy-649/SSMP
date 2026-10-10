@@ -185,9 +185,9 @@ internal partial class CoopSave {
         public override void OnCallHeld() => RestoreStandingHeight();
 
         /// <inheritdoc />
-        public override void BeforeLocalRide(bool partnerInside) {
-            // A call plate that moved the lift closer can't move it away from under the partner
-            if (partnerInside) {
+        public override void BeforeLocalRide(bool memberInside) {
+            // A call plate that moved the lift closer can't move it away from under a member
+            if (memberInside) {
                 RestoreStandingHeight();
             }
         }
@@ -237,8 +237,8 @@ internal partial class CoopSave {
     /// Hook for <see cref="LiftControl.MoveToStop"/>, which every ride and call of a cage lift goes through.
     /// </summary>
     private void OnLiftMoveToStop(Action<LiftControl, int, bool> orig, LiftControl self, int stopIndex, bool camera) {
-        ClientPlayerData? partner;
-        if (_liftReplaying || (partner = GetLiftPartner()) == null) {
+        List<ClientPlayerData> members;
+        if (_liftReplaying || (members = GetLiftMembers()).Count == 0) {
             orig(self, stopIndex, camera);
             return;
         }
@@ -258,7 +258,7 @@ internal partial class CoopSave {
 
         try {
             var hero = HeroController.instance;
-            RequestLiftRide(lift, stopIndex, hero != null && lift.ContainsHero(hero), camera, partner);
+            RequestLiftRide(lift, stopIndex, hero != null && lift.ContainsHero(hero), camera, members);
         } catch (Exception e) {
             LogLiftError(e);
         }

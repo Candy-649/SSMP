@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -9,31 +11,33 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// What the game of the partner sends about the lifts of a room that both players are in (see CoopSave.Lifts): rides
-/// that it started, calls for the game that decides, and the state of the lifts for a player who entered the room. Also
-/// moves the avatar of the partner with a lift that it rides.
+/// What the games of the members send about the lifts of a room that they are in (see CoopSave.Lifts): rides that they
+/// started, calls for the game that decides, and the state of the lifts for a player who entered the room. Also moves
+/// the avatar of each member with a lift that it rides.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
-    /// How long a lift has to stand still, in seconds, before the positions that the partner sends give the height of
+    /// How long a lift has to stand still, in seconds, before the positions that a member sends give the height of
     /// their avatar on it again.
     /// </summary>
     private const float LiftAvatarSettleTime = 0.3f;
 
     /// <summary>
-    /// Plays a ride that the game of the partner started on the same lift.
+    /// Plays a ride that the game of a member started on the same lift.
     /// </summary>
     private void OnLiftMove(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || !IsLiftRoom(update.Scene)) {
+        if (!_checkedMembers.Contains(player.Id) || !IsLiftRoom(update.Scene)) {
             return;
         }
 
         try {
-            if (FindLift(update) is not { } lift || update.Key <= lift.PartnerRide) {
+            // Each game counts its own rides, so the newest is told apart for each member on their own
+            if (FindLift(update) is not { } lift ||
+                lift.MemberRides.TryGetValue(player.Id, out var newest) && update.Key <= newest) {
                 return;
             }
 
-            lift.PartnerRide = update.Key;
+            lift.MemberRides[player.Id] = update.Key;
             int stop = update.Part;
             if (!lift.HasStop(stop)) {
                 return;
@@ -54,22 +58,23 @@ internal partial class CoopSave {
                     lift.SetHeight(update.Values[0]);
                 }
 
-                // The ride of the partner started a moment ago, which the wait before the lift moves makes up for
+                // The ride of the member started a moment ago, which the wait before the lift moves makes up for
                 moved = lift.Move(stop, inside, (float) _netClient.UpdateManager.AverageRtt / 2000f);
                 lift.WasMoving = lift.IsMoving;
                 if (moved) {
-                    // Their ride, so they are not told about it again. Only once it was really taken: a ride that
-                    // was refused would otherwise silence a later ride of ours that happens to go the same way.
-                    lift.ToldPartnerStop = stop;
+                    // Their ride, which their game sent to every member in the room, so nobody is told about it
+                    // again. Only once it was really taken: a ride that was refused would otherwise silence a later
+                    // ride of ours that happens to go the same way.
+                    lift.ToldStop = stop;
                 }
             } finally {
                 _liftReplaying = false;
             }
 
-            // A ride that could not be played is the two lifts parting company, and nothing here ever asked again:
-            // the partner sends a ride once, and from then on their lift is at one end and this one at the other,
-            // with no way back but leaving the room. A lift refuses only while it is locked, starting up or already
-            // part way through something, so it is worth asking again for a moment.
+            // A ride that could not be played is the lifts parting company, and nothing here ever asked again: the
+            // member sends a ride once, and from then on their lift is at one end and this one at the other, with no
+            // way back but leaving the room. A lift refuses only while it is locked, starting up or already part way
+            // through something, so it is worth asking again for a moment.
             if (!moved) {
                 Logger.Info($"The lift '{update.ObjectPath}' could not take the ride of {player.Username} yet");
                 MonoBehaviourUtil.Instance.StartCoroutine(RetryLiftMove(lift, stop, player.Username));
@@ -80,10 +85,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Serves a call of a lift that the game of the partner sent because the local game decides about the lift.
+    /// Serves a call of a lift that the game of a member sent because the local game decides about the lift.
     /// </summary>
     private void OnLiftCall(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || !IsLiftRoom(update.Scene)) {
+        if (!_checkedMembers.Contains(player.Id) || !IsLiftRoom(update.Scene)) {
             return;
         }
 
@@ -93,20 +98,20 @@ internal partial class CoopSave {
                 return;
             }
 
-            var partner = player.IsInLocalScene ? player : null;
+            var members = GetLiftMembers();
             var inside = update.PartCount == 1;
-            if (!DecidesLifts(partner)) {
-                // Only the game that decides serves calls and corrects the other game. While both games wait for the
+            if (!DecidesLifts(members)) {
+                // Only the game that decides serves calls and corrects the other games. While the games wait for the
                 // state of the room, the call waits for whichever of them decides
                 if (IsWaitingForLiftState()) {
-                    QueueLiftCall(lift, stop, true, inside);
+                    QueueLiftCall(lift, stop, player.Id, inside);
                 }
 
                 return;
             }
 
             if (lift.Stop == stop) {
-                // The lift goes to that stop or stands there already, which the game of the partner may not show
+                // The lift goes to that stop or stands there already, which the game of the member may not show
                 if (!lift.IsMoving) {
                     SendLiftState(lift, player.Id, true);
                 }
@@ -115,9 +120,9 @@ internal partial class CoopSave {
             }
 
             var hero = HeroController.instance;
-            if (lift.IsMoving || IsLiftHeldForOther(lift, true, partner) ||
+            if (lift.IsMoving || IsLiftHeldForOther(lift, player.Id, members) ||
                 !StartLiftRide(lift, stop, hero != null && lift.ContainsHero(hero), player)) {
-                QueueLiftCall(lift, stop, true, inside);
+                QueueLiftCall(lift, stop, player.Id, inside);
             }
         } catch (Exception e) {
             LogLiftError(e);
@@ -125,11 +130,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Unlocks a lift that the game of the partner unlocked, mostly with a plate that their player stood on. The plate
+    /// Unlocks a lift that the game of a member unlocked, mostly with a plate that their player stood on. The plate
     /// here goes down for them as well, but tells the lift nothing (see <see cref="OnLiftPlateActivate"/>).
     /// </summary>
     private void OnLiftUnlock(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || !IsLiftRoom(update.Scene)) {
+        if (!_checkedMembers.Contains(player.Id) || !IsLiftRoom(update.Scene)) {
             return;
         }
 
@@ -152,14 +157,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends the state of the lifts of the current room to a partner who entered it.
-    /// </summary>
-    /// <summary>
-    /// Asks a lift again to take a ride of the partner that it could not take at once, for a moment.
+    /// Asks a lift again to take a ride of a member that it could not take at once, for a moment.
     /// </summary>
     /// <param name="lift">The lift.</param>
-    /// <param name="stop">The stop the partner rode to.</param>
-    /// <param name="username">The name of the partner, for the log.</param>
+    /// <param name="stop">The stop the member rode to.</param>
+    /// <param name="username">The name of the member, for the log.</param>
     private IEnumerator RetryLiftMove(SyncedLift lift, int stop, string username) {
         var until = Time.unscaledTime + LiftMoveRetryTime;
 
@@ -179,7 +181,7 @@ internal partial class CoopSave {
                 moved = lift.Move(stop, inside, 0f);
                 lift.WasMoving = lift.IsMoving;
                 if (moved) {
-                    lift.ToldPartnerStop = stop;
+                    lift.ToldStop = stop;
                 }
             } catch (Exception e) {
                 LogLiftError(e);
@@ -197,25 +199,24 @@ internal partial class CoopSave {
         }
 
         Logger.Warn(
-            $"A lift never took the ride of {username}, so the two games have it at different stops until the room " +
-            "is left"
+            $"A lift never took the ride of {username}, so the games have it at different stops until the room is left"
         );
     }
 
+    /// <summary>
+    /// Sends the state of the lifts of the current room to a member who entered it.
+    /// </summary>
     private void OnLiftStateRequest(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || update.Scene != SceneManager.GetActiveScene().name) {
+        if (!_checkedMembers.Contains(player.Id) || update.Scene != SceneManager.GetActiveScene().name) {
             return;
         }
 
         try {
-            // The partner entered the room, maybe after their game started again, so their counts start over
+            // The member entered the room, maybe after their game started again, so their counts start over
             foreach (var known in _lifts.Values) {
-                known.PartnerRide = 0;
+                known.MemberRides.Remove(player.Id);
                 if (known is Carriage carriage) {
-                    carriage.PartnerDriveKey = 0;
-                    carriage.PartnerDriving = false;
-                    carriage.PartnerTime = float.NegativeInfinity;
-                    carriage.SeenClaim = carriage.LocalDriving ? carriage.LocalClaim : 0;
+                    ForgetCarriageDriveOf(carriage, player.Id);
                 }
             }
 
@@ -231,9 +232,9 @@ internal partial class CoopSave {
     /// Sends where a lift is and whether it moves.
     /// </summary>
     /// <param name="lift">The lift.</param>
-    /// <param name="targetId">The ID of the partner.</param>
-    /// <param name="correction">Whether the state corrects the lift of the partner, which it takes even when the
-    /// partner has been in the room longer.</param>
+    /// <param name="targetId">The ID of the member.</param>
+    /// <param name="correction">Whether the state corrects the lift of the member, which they take even when they have
+    /// been in the room longer.</param>
     private void SendLiftState(SyncedLift lift, ushort targetId, bool correction) {
         Send(new CoopSaveUpdate {
             TargetId = targetId,
@@ -250,11 +251,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes the state of a lift from a partner who has been in the room longer, unless the local hero is on the lift,
-    /// in which case the lift of the partner comes to the hero instead.
+    /// Takes the state of a lift from a member who has been in the room longer, unless the local hero is on the lift,
+    /// in which case the lift of the member comes to the hero instead.
     /// </summary>
     private void OnLiftState(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || !IsLiftRoom(update.Scene)) {
+        if (!_checkedMembers.Contains(player.Id) || !IsLiftRoom(update.Scene)) {
             return;
         }
 
@@ -262,7 +263,7 @@ internal partial class CoopSave {
             _liftStateReceived = true;
             var localTime = Time.unscaledTime - _liftRoomStart;
             if (update.PlayTime < localTime - LiftRoomTimeTie ||
-                (update.PlayTime <= localTime + LiftRoomTimeTie && !PartnerKeyWins())) {
+                (update.PlayTime <= localTime + LiftRoomTimeTie && !MemberKeyWins(player))) {
                 return;
             }
 
@@ -271,7 +272,9 @@ internal partial class CoopSave {
                 return;
             }
 
-            lift.PartnerRide = System.Math.Max(lift.PartnerRide, update.Key);
+            lift.MemberRides[player.Id] = System.Math.Max(
+                lift.MemberRides.TryGetValue(player.Id, out var newest) ? newest : 0, update.Key
+            );
             lift.Calls.Clear();
             var moving = update.PartCount == 1;
             var hero = HeroController.instance;
@@ -295,7 +298,7 @@ internal partial class CoopSave {
             try {
                 var value = update.Values.Count > 0 ? update.Values[0] : lift.StateValue;
                 if (moving) {
-                    // A lift that stands where the ride of the partner ends already, like at the end of the ride,
+                    // A lift that stands where the ride of the member ends already, like at the end of the ride,
                     // doesn't ride there again
                     if (lift.IsMoving
                             ? lift.Stop != stop
@@ -304,7 +307,7 @@ internal partial class CoopSave {
                     }
 
                     // Their lift is on its way there, so that much they know
-                    lift.ToldPartnerStop = stop;
+                    lift.ToldStop = stop;
                 } else {
                     if (lift.IsMoving || lift.Stop != stop ||
                         Mathf.Abs(lift.StateValue - value) > lift.StateTolerance) {
@@ -314,7 +317,7 @@ internal partial class CoopSave {
                     // Their lift stands still, so they know of no ride at all - and putting this one where theirs
                     // stands can set it off, because that runs the lift's own state machine as far as it will go.
                     // A ride that begins that way is this game's, and they have to be told.
-                    lift.ToldPartnerStop = -1;
+                    lift.ToldStop = -1;
                 }
 
                 lift.WasMoving = lift.IsMoving;
@@ -327,8 +330,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Moves the avatar of the partner with the lifts it rides right before the frame is drawn, after the positions that
-    /// the partner sent, which lag behind a moving lift, moved it.
+    /// Moves the avatars of the members with the lifts they ride right before the frame is drawn, after the positions
+    /// that the members sent, which lag behind a moving lift, moved them.
     /// </summary>
     private void OnLiftBeforeRender() {
         if (_lifts.Count == 0) {
@@ -336,10 +339,10 @@ internal partial class CoopSave {
         }
 
         try {
-            var partner = GetLiftPartner();
+            var members = GetLiftMembers();
             foreach (var lift in _lifts.Values) {
                 if (lift.Owner != null) {
-                    UpdateAvatarRide(lift, partner);
+                    UpdateAvatarRides(lift, members);
                 }
             }
         } catch (Exception e) {
@@ -348,91 +351,114 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts, keeps or ends the ride of the avatar of the partner on a lift.
+    /// Starts, keeps or ends the rides of the avatars of the members on a lift.
     /// </summary>
-    private static void UpdateAvatarRide(SyncedLift lift, ClientPlayerData? partner) {
+    private static void UpdateAvatarRides(SyncedLift lift, List<ClientPlayerData> members) {
         var liftPosition = lift.Transform.position;
         if ((liftPosition - lift.LastPosition).sqrMagnitude > 0.000001f) {
             lift.LastPosition = liftPosition;
             lift.MovedAt = Time.unscaledTime;
         }
 
-        var container = partner?.PlayerContainer;
-        var stopped = !lift.IsMoving &&
-                      (!lift.AvatarRiding || Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime);
-        if (container == null || !container.activeInHierarchy || stopped ||
-            lift.AvatarRiding && lift.AvatarContainer != container) {
-            EndAvatarRide(lift);
+        // A member who left the room or the save no longer rides it
+        if (lift.Avatars.Count > 0) {
+            foreach (var id in lift.Avatars.Keys.ToList()) {
+                if (!members.Exists(member => member.Id == id)) {
+                    EndAvatarRide(lift, id);
+                }
+            }
+        }
+
+        foreach (var member in members) {
+            UpdateAvatarRide(lift, member, liftPosition);
+        }
+    }
+
+    /// <summary>
+    /// Starts, keeps or ends the ride of the avatar of a member on a lift.
+    /// </summary>
+    private static void UpdateAvatarRide(SyncedLift lift, ClientPlayerData member, Vector3 liftPosition) {
+        lift.Avatars.TryGetValue(member.Id, out var ride);
+        var container = member.PlayerContainer;
+        var stopped = !lift.IsMoving && (ride == null || Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime);
+        if (container == null || !container.activeInHierarchy || stopped || ride != null && ride.Container != container) {
+            EndAvatarRide(lift, member.Id);
             return;
         }
 
         var position = container.transform.position;
-        if (!lift.AvatarRiding) {
+        if (ride == null) {
             if (!lift.Contains(position)) {
                 return;
             }
 
-            lift.AvatarRiding = true;
-            lift.AvatarContainer = container;
-            lift.AvatarOffset = position - liftPosition;
+            ride = new AvatarRide { Container = container, Offset = position - liftPosition };
+            lift.Avatars[member.Id] = ride;
             if (container.TryGetComponent<SSMP.Fsm.PredictiveInterpolation>(out var interpolation)) {
                 interpolation.SetPredictionEnabled(false);
             }
-        } else if ((position - lift.AvatarPlaced).sqrMagnitude > 0.0001f) {
-            // A position from the partner moved the avatar, which lags behind a moving lift along its way.
+        } else if ((position - ride.Placed).sqrMagnitude > 0.0001f) {
+            // A position from the member moved the avatar, which lags behind a moving lift along its way.
             //
             // Stepping off is looked for across the lift and not along it, for that same reason: along the way it
             // travels, a position that has merely fallen behind looks exactly like one that has left, and reading
             // the first as the second would throw a passenger off every time the lift got going. Across it there is
-            // no lag to confuse, so a partner whose position has moved off the side of the lift really has.
+            // no lag to confuse, so a member whose position has moved off the side of the lift really has.
             //
-            // Nothing looked at all before this, and once the avatar was holding on it never let go: a partner who
+            // Nothing looked at all before this, and once the avatar was holding on it never let go: a member who
             // stepped off a rising lift went on rising beside it, because the one axis their own position was still
             // believed on was the one they had walked along.
             var across = lift.MovesSideways
-                ? new Vector3(lift.AvatarPlaced.x, position.y, position.z)
-                : new Vector3(position.x, lift.AvatarPlaced.y, position.z);
+                ? new Vector3(ride.Placed.x, position.y, position.z)
+                : new Vector3(position.x, ride.Placed.y, position.z);
             if (!lift.Contains(across)) {
-                EndAvatarRide(lift);
+                EndAvatarRide(lift, member.Id);
 
                 return;
             }
 
             var offset = position - liftPosition;
-            lift.AvatarOffset = Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime ? offset :
-                lift.MovesSideways ? new Vector3(lift.AvatarOffset.x, offset.y, offset.z) :
-                new Vector3(offset.x, lift.AvatarOffset.y, offset.z);
+            ride.Offset = Time.unscaledTime - lift.MovedAt > LiftAvatarSettleTime ? offset :
+                lift.MovesSideways ? new Vector3(ride.Offset.x, offset.y, offset.z) :
+                new Vector3(offset.x, ride.Offset.y, offset.z);
         }
 
-        var placed = liftPosition + lift.AvatarOffset;
+        var placed = liftPosition + ride.Offset;
         container.transform.position = placed;
-        lift.AvatarPlaced = placed;
+        ride.Placed = placed;
     }
 
     /// <summary>
-    /// Ends the ride of the avatar of the partner on a lift, which gives the avatar back to the positions that the
-    /// partner sends.
+    /// Ends the ride of the avatar of a member on a lift, which gives the avatar back to the positions that the member
+    /// sends.
     /// </summary>
-    private static void EndAvatarRide(SyncedLift lift) {
-        if (!lift.AvatarRiding) {
+    private static void EndAvatarRide(SyncedLift lift, ushort playerId) {
+        if (!lift.Avatars.TryGetValue(playerId, out var ride)) {
             return;
         }
 
-        lift.AvatarRiding = false;
-        if (lift.AvatarContainer != null &&
-            lift.AvatarContainer.TryGetComponent<SSMP.Fsm.PredictiveInterpolation>(out var interpolation)) {
+        lift.Avatars.Remove(playerId);
+        if (ride.Container != null &&
+            ride.Container.TryGetComponent<SSMP.Fsm.PredictiveInterpolation>(out var interpolation)) {
             interpolation.SetPredictionEnabled(true);
         }
-
-        lift.AvatarContainer = null;
     }
 
     /// <summary>
-    /// Ends the rides of the avatar of the partner on all lifts.
+    /// Ends the rides of the avatars of every member on a lift.
+    /// </summary>
+    private static void EndAvatarRides(SyncedLift lift) {
+        foreach (var playerId in lift.Avatars.Keys.ToList()) {
+            EndAvatarRide(lift, playerId);
+        }
+    }
+
+    /// <summary>
+    /// Ends the rides of the avatars of the members on all lifts.
     /// </summary>
     private void EndAvatarRides() {
         foreach (var lift in _lifts.Values) {
-            EndAvatarRide(lift);
+            EndAvatarRides(lift);
         }
     }
 }

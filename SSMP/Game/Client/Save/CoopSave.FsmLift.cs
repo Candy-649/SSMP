@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using HutongGames.PlayMaker;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -303,7 +304,7 @@ internal partial class CoopSave {
         FsmEvent fsmEvent,
         FsmEventData eventData
     ) {
-        if (_liftReplaying || fsmEvent == null || _checkedWith == null ||
+        if (_liftReplaying || fsmEvent == null || _checkedMembers.Count == 0 ||
             self.Name != LiftFsmName && self.Name != StoryLiftFsmName) {
             orig(self, fsmEvent!, eventData);
             return;
@@ -325,7 +326,7 @@ internal partial class CoopSave {
             LogLiftError(e);
         }
 
-        // A ride that the event starts reaches the partner once the FSM switched to it, which an event that the FSM
+        // A ride that the event starts reaches the members once the FSM switched to it, which an event that the FSM
         // sends itself only does after its actions ran (see UpdateFsmLiftRide)
         orig(self, fsmEvent, eventData);
     }
@@ -353,7 +354,8 @@ internal partial class CoopSave {
     /// </summary>
     private bool HoldFsmLiftRide(FsmLift lift, string eventName, int stop) {
         // Only the hero touching the lift or waiting at the other end is a player's call; other events are scripted
-        if (GetLiftPartner() is not { } partner || eventName is not ("TOUCHED" or "CANCEL") ||
+        var members = GetLiftMembers();
+        if (members.Count == 0 || eventName is not ("TOUCHED" or "CANCEL") ||
             lift.Fsm.Variables.FindFsmBool("Force Up") is { Value: true } ||
             lift.Fsm.Variables.FindFsmBool("Funeral Happening") is { Value: true }) {
             return false;
@@ -362,18 +364,18 @@ internal partial class CoopSave {
         var hero = HeroController.instance;
         var inside = hero != null && lift.ContainsHero(hero);
 
-        // Alone, the lift comes for a hero anywhere at the other end. With two players that only counts close to its
-        // shaft, or a partner far away would send it away from the other player again and again. A hero who stood at
-        // that stop while the lift left without them calls it again once they left the stop and came back
+        // Alone, the lift comes for a hero anywhere at the other end. With more players that only counts close to its
+        // shaft, or a player far away would send it away from the others again and again. A hero who stood at that
+        // stop while the lift left without them calls it again once they left the stop and came back
         if (!inside && (hero == null || !lift.IsAtStop(stop, hero.transform.position) || lift.DeclinedStop == stop)) {
             return true;
         }
 
-        if (DecidesLifts(partner) && !IsLiftHeldForOther(lift, false, partner)) {
+        if (DecidesLifts(members) && !IsLiftHeldForOther(lift, null, members)) {
             return false;
         }
 
-        RequestLiftRide(lift, stop, inside, true, partner);
+        RequestLiftRide(lift, stop, inside, true, members);
         return true;
     }
 
@@ -381,7 +383,7 @@ internal partial class CoopSave {
     /// Follows the state of a platform lift every frame: sends a ride that its FSM started or turned around by itself,
     /// and remembers a stop that the lift left while the local hero stood there without riding it.
     /// </summary>
-    private void UpdateFsmLiftRide(FsmLift lift, ClientPlayerData? partner) {
+    private void UpdateFsmLiftRide(FsmLift lift, List<ClientPlayerData> members) {
         var hero = HeroController.instance;
         if (lift.IsStanding) {
             lift.StoodAt = lift.Stop;
@@ -397,19 +399,19 @@ internal partial class CoopSave {
             lift.DeclinedStop = -1;
         }
 
-        // Any ride under way that the partner has not been told where it is going. This used to compare the state
+        // Any ride under way that the members have not been told where it is going. This used to compare the state
         // the lift was in a frame ago against a list of the states a ride begins from, which recognised a ride only
         // when it began one particular way. It missed a lift being unlocked, a lift turning around through the state
-        // that picks a direction, and - the one that cost a room - a lift being put where the partner says theirs
+        // that picks a direction, and - the one that cost a room - a lift being put where a member says theirs
         // stands: doing that runs the lift's own state machine, inside that one call, far enough to set it off back
         // towards whoever is standing below, so by the time anything looked it was several states past the list.
-        if (partner == null || !lift.IsMoving || lift.Stop == lift.ToldPartnerStop) {
+        if (members.Count == 0 || !lift.IsMoving || lift.Stop == lift.ToldStop) {
             return;
         }
 
         lift.WasMoving = true;
         lift.Calls.RemoveAll(call => call.Stop == lift.Stop);
-        SendLiftMove(lift, lift.Stop, lift.Transform.position.y, partner.Id);
+        SendLiftMove(lift, lift.Stop, lift.Transform.position.y);
     }
 
     /// <summary>
@@ -475,29 +477,34 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Holds the start of the story lift until the hero and the avatar of the partner are both in it.
+    /// Holds the start of the story lift until the hero and the avatars of every member are in it.
     /// </summary>
     /// <returns>Whether the start is held.</returns>
     private bool HoldStoryLift(Fsm fsm) {
-        if (GetFsmLift(fsm) is not StoryLift lift || IsBothInStoryLift(lift)) {
+        if (GetFsmLift(fsm) is not StoryLift lift || IsEveryoneInStoryLift(lift)) {
             return false;
         }
 
         if (!lift.WaitShown) {
             lift.WaitShown = true;
-            var name = _checkedWith is { } id && _playerData.TryGetValue(id, out var partner)
-                ? partner.Username
-                : "your partner";
-            Chat(Lang.Pick($"Waiting for {name} to ride this lift together", $"正在等 {name} 一起坐这台升降台"));
+            var missing = GetMembersOutsideStoryLift(lift);
+            if (missing.Count == 0) {
+                missing = GetCheckedMembers();
+            }
+
+            var names = missing.Count == 0
+                ? Lang.Pick("your partner", "队友")
+                : JoinNames(missing.Select(member => member.Username));
+            Chat(Lang.Pick($"Waiting for {names} to ride this lift together", $"正在等 {names} 一起坐这台升降台"));
         }
 
         return true;
     }
 
     /// <summary>
-    /// Starts the story lifts that were held once both players are in them.
+    /// Starts the story lifts that were held once every player is in them.
     /// </summary>
-    private void UpdateStoryLifts(ClientPlayerData partner) {
+    private void UpdateStoryLifts() {
         foreach (var lift in _lifts.Values) {
             if (lift is not StoryLift story || story.Owner == null ||
                 story.Fsm.ActiveStateName != StoryLiftIdleState) {
@@ -510,7 +517,7 @@ internal partial class CoopSave {
                 continue;
             }
 
-            if (!partner.IsInLocalScene || !IsBothInStoryLift(story)) {
+            if (!IsEveryoneInStoryLift(story)) {
                 continue;
             }
 
@@ -524,11 +531,22 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the hero and the avatar of the partner are both in the story lift.
+    /// Whether the hero and the avatars of every member are in the story lift. A member in another room keeps it
+    /// waiting, as the partner always did: it takes everyone on to where the story goes.
     /// </summary>
-    private bool IsBothInStoryLift(StoryLift lift) {
+    private bool IsEveryoneInStoryLift(StoryLift lift) {
         var hero = HeroController.instance;
-        return hero != null && lift.ContainsHero(hero) && GetLiftPartner()?.PlayerContainer is { } container &&
-               lift.Contains(container.transform.position);
+        return hero != null && lift.ContainsHero(hero) && _checkedMembers.Count > 0 &&
+               GetMembersOutsideStoryLift(lift).Count == 0;
+    }
+
+    /// <summary>
+    /// The members whose avatars are not in the story lift: in another room, or in this one but outside it.
+    /// </summary>
+    private List<ClientPlayerData> GetMembersOutsideStoryLift(StoryLift lift) {
+        return GetCheckedMembers().FindAll(member =>
+            !member.IsInLocalScene || member.PlayerContainer is not { } container ||
+            !lift.Contains(container.transform.position)
+        );
     }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using MonoMod.RuntimeDetour;
 using SSMP.Networking.Packet.Data;
@@ -10,18 +11,18 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Lifts in a checked two-player save, which are in the same place in both games. While both players are in a room, the
-/// game of the player with the larger save key decides about its lifts: it plays the rides that its player starts and
-/// serves the calls that the other game sends instead of starting a ride itself, and the other game plays the same
-/// rides. A started ride goes at once, and a call from the other stop waits until the lift arrived. A lift waits at a
-/// stop for a short time while the other player is on it or at that stop, then serves a call if the caller still waits.
-/// A player who enters a room takes the lifts from the game of a partner who has been in it longer. Nobody is moved: the
-/// avatar of a partner who rides a lift moves with the lift. The kinds of lifts are in CoopSave.CageLift and
+/// Lifts in a checked two-player save, which are in the same place in every game. While members are in a room together,
+/// the game of the one of them with the largest save key decides about its lifts: it plays the rides that its player
+/// starts and serves the calls that the other games send instead of starting a ride themselves, and the other games play
+/// the same rides. A started ride goes at once, and a call from the other stop waits until the lift arrived. A lift waits
+/// at a stop for a short time while another player is on it or at that stop, then serves a call if the caller still
+/// waits. A player who enters a room takes the lifts from the game of a member who has been in it longer. Nobody is
+/// moved: the avatar of a member who rides a lift moves with the lift. The kinds of lifts are in CoopSave.CageLift and
 /// CoopSave.FsmLift.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
-    /// How long a lift waits at a stop after it arrived, in seconds, while the other player is on it or at that stop.
+    /// How long a lift waits at a stop after it arrived, in seconds, while another player is on it or at that stop.
     /// </summary>
     private const float LiftWaitTime = 2.5f;
 
@@ -46,7 +47,7 @@ internal partial class CoopSave {
     private const float LiftErrorLogTime = 10f;
 
     /// <summary>
-    /// How long a lift is asked again to take a ride of the partner that it could not take at once, in seconds.
+    /// How long a lift is asked again to take a ride of a member that it could not take at once, in seconds.
     /// </summary>
     private const float LiftMoveRetryTime = 2f;
 
@@ -62,7 +63,7 @@ internal partial class CoopSave {
     private const float LiftSameHeight = 0.5f;
 
     /// <summary>
-    /// The difference in the time that both players have been in a room, in seconds, below which the save key decides
+    /// The difference in the time that two players have been in a room, in seconds, below which the save key decides
     /// whose lifts both games take.
     /// </summary>
     private const float LiftRoomTimeTie = 0.25f;
@@ -103,7 +104,7 @@ internal partial class CoopSave {
     private bool _liftStateRequested;
 
     /// <summary>
-    /// Whether a partner sent the state of the lifts of the current room.
+    /// Whether a member sent the state of the lifts of the current room.
     /// </summary>
     private bool _liftStateReceived;
 
@@ -118,7 +119,7 @@ internal partial class CoopSave {
     private float _liftFailedAt;
 
     /// <summary>
-    /// A lift that the sync keeps in the same place in both games. Its stops count from 0.
+    /// A lift that the sync keeps in the same place in every game. Its stops count from 0.
     /// </summary>
     private abstract class SyncedLift {
         /// <summary>
@@ -220,7 +221,7 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// Unlocks the lift because the game of the partner unlocked it, when it did or before a ride of theirs.
+        /// Unlocks the lift because the game of a member unlocked it, when it did or before a ride of theirs.
         /// </summary>
         public virtual void Unlock() {
         }
@@ -245,8 +246,8 @@ internal partial class CoopSave {
         /// <summary>
         /// Called before a ride of the local player starts at once.
         /// </summary>
-        /// <param name="partnerInside">Whether the avatar of the partner is in or on the lift.</param>
-        public virtual void BeforeLocalRide(bool partnerInside) {
+        /// <param name="memberInside">Whether the avatar of a member is in or on the lift.</param>
+        public virtual void BeforeLocalRide(bool memberInside) {
         }
 
         /// <summary>
@@ -266,8 +267,8 @@ internal partial class CoopSave {
         public bool WasMoving { get; set; }
 
         /// <summary>
-        /// The stop the partner has been told this lift is on its way to, or -1 when they have not been told of a
-        /// ride at all.
+        /// The stop the members in the room have been told this lift is on its way to, or -1 when they have not been
+        /// told of a ride at all.
         ///
         /// This is what decides whether a ride is news. It replaced asking which state the lift was in a frame ago,
         /// which only recognised a ride that began from one of a handful of named states and so missed every other
@@ -275,7 +276,7 @@ internal partial class CoopSave {
         /// being put where the partner says the lift stands, which runs the lift's own state machine far enough
         /// inside that one call to set it off again before anything looks.
         /// </summary>
-        public int ToldPartnerStop { get; set; } = -1;
+        public int ToldStop { get; set; } = -1;
 
         /// <summary>
         /// When the lift last arrived at a stop.
@@ -283,9 +284,9 @@ internal partial class CoopSave {
         public float ArrivedAt { get; set; } = float.NegativeInfinity;
 
         /// <summary>
-        /// The count of the newest ride of the partner that the lift played.
+        /// The count of the newest ride of each member that the lift played, by member: each game counts its own.
         /// </summary>
-        public ulong PartnerRide { get; set; }
+        public Dictionary<ushort, ulong> MemberRides { get; } = new();
 
         /// <summary>
         /// The calls that wait for the lift, oldest first.
@@ -303,24 +304,9 @@ internal partial class CoopSave {
         public float SentCallTime { get; set; } = float.NegativeInfinity;
 
         /// <summary>
-        /// Whether the avatar of the partner rides the lift.
+        /// The avatars of members that ride the lift, by member.
         /// </summary>
-        public bool AvatarRiding { get; set; }
-
-        /// <summary>
-        /// Where the avatar of the partner is relative to the lift while it rides.
-        /// </summary>
-        public Vector3 AvatarOffset { get; set; }
-
-        /// <summary>
-        /// Where the sync last put the avatar of the partner.
-        /// </summary>
-        public Vector3 AvatarPlaced { get; set; }
-
-        /// <summary>
-        /// The container of the avatar that rides the lift, whose prediction the ride turned off.
-        /// </summary>
-        public GameObject? AvatarContainer { get; set; }
+        public Dictionary<ushort, AvatarRide> Avatars { get; } = new();
 
         /// <summary>
         /// Where the lift was when the sync last looked at it for the avatar.
@@ -334,6 +320,26 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The avatar of a member riding a lift.
+    /// </summary>
+    private sealed class AvatarRide {
+        /// <summary>
+        /// The container of the avatar, whose prediction the ride turned off.
+        /// </summary>
+        public required GameObject Container { get; init; }
+
+        /// <summary>
+        /// Where the avatar is relative to the lift while it rides.
+        /// </summary>
+        public Vector3 Offset { get; set; }
+
+        /// <summary>
+        /// Where the sync last put the avatar.
+        /// </summary>
+        public Vector3 Placed { get; set; }
+    }
+
+    /// <summary>
     /// A call of a lift that waits for its turn.
     /// </summary>
     private class LiftCall {
@@ -343,9 +349,9 @@ internal partial class CoopSave {
         public required int Stop { get; init; }
 
         /// <summary>
-        /// Whether the partner called, rather than the local player.
+        /// The member who called, or null for the local player.
         /// </summary>
-        public required bool ByPartner { get; init; }
+        public required ushort? By { get; init; }
 
         /// <summary>
         /// Whether the caller is in or on the lift and rides it, rather than waiting at the stop.
@@ -374,13 +380,13 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="TempPressurePlate.Activate"/>, which tells what a plate opens or calls that it went down. A
-    /// plate that stands in for the partner (see OnWorldTrigger) goes down here like theirs, with the plates beside it,
+    /// plate that stands in for a member (see OnWorldTrigger) goes down here like theirs, with the plates beside it,
     /// but a lift that it calls or unlocks is not told: the lift takes its ride and its unlock from the updates that
-    /// the game of the partner sends about the lift, where their plate told it. Told here as well, the lift took the
+    /// the game of that member sends about the lift, where their plate told it. Told here as well, the lift took the
     /// call for one of the local player's and made it a second time, and jumped closer to the stop first.
     /// </summary>
     private void OnLiftPlateActivate(Action<TempPressurePlate> orig, TempPressurePlate self) {
-        if (self.player != self.gameObject || GetLiftPartner() == null ||
+        if (self.player != self.gameObject || GetLiftMembers().Count == 0 ||
             !FindRoomLifts().Exists(lift => lift.HasPlate(self))) {
             orig(self);
             return;
@@ -391,26 +397,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Lets a lift unlock in the local game and, if it was locked, sends that to the partner in the room, whose game
-    /// unlocks the same lift (see <see cref="OnLiftUnlock"/>). Called from the hooks of the ways that lifts unlock.
+    /// Lets a lift unlock in the local game and, if it was locked, sends that to the members in the room, whose games
+    /// unlock the same lift (see <see cref="OnLiftUnlock"/>). Called from the hooks of the ways that lifts unlock.
     /// </summary>
     /// <param name="lift">The lift.</param>
     /// <param name="unlock">Unlocks it.</param>
     private void UnlockLift(SyncedLift lift, Action unlock) {
         var locked = !lift.IsUnlocked;
         unlock();
-        if (!locked || _liftReplaying || GetLiftPartner() is not { } partner) {
+        if (!locked || _liftReplaying || GetLiftMembers().Count == 0) {
             return;
         }
 
-        Send(new CoopSaveUpdate {
-            TargetId = partner.Id,
+        SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.LiftUnlock,
             Scene = lift.Owner.gameObject.scene.name,
             ObjectPath = lift.Path,
             FsmName = lift.FsmName
         });
-        Logger.Info($"Sent unlocking the lift '{lift.Path}' to the partner");
+        Logger.Info($"Sent unlocking the lift '{lift.Path}' to the members in the room");
     }
 
     /// <summary>
@@ -440,23 +445,36 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Gets the partner with whom the lifts of the current room are synced, who is checked and in the room.
+    /// The members with whom the lifts of the current room are synced: checked, and in the room.
     /// </summary>
-    private ClientPlayerData? GetLiftPartner() {
-        return _checkedWith is { } id && _playerData.TryGetValue(id, out var partner) && partner.IsInLocalScene
-            ? partner
-            : null;
+    private List<ClientPlayerData> GetLiftMembers() {
+        return GetCheckedMembers().FindAll(member => member.IsInLocalScene);
+    }
+
+    /// <summary>
+    /// The member whose game decides about the lifts of the current room, the one of the members in it with the largest
+    /// save key, or null when that is the local game.
+    /// </summary>
+    private ClientPlayerData? GetLiftDecider(List<ClientPlayerData> members) {
+        ClientPlayerData? decider = null;
+        foreach (var member in members) {
+            if (decider == null ? MemberKeyWins(member) : MemberKeyWins(member, decider)) {
+                decider = member;
+            }
+        }
+
+        return decider;
     }
 
     /// <summary>
     /// Whether the local game decides about the lifts of the current room.
     /// </summary>
-    private bool DecidesLifts(ClientPlayerData? partner) {
-        if (partner == null) {
+    private bool DecidesLifts(List<ClientPlayerData> members) {
+        if (members.Count == 0) {
             return true;
         }
 
-        return !IsWaitingForLiftState() && !PartnerKeyWins();
+        return !IsWaitingForLiftState() && GetLiftDecider(members) == null;
     }
 
     /// <summary>
@@ -528,16 +546,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Asks the partner for the state of the lifts after entering a room, notices when lifts arrive, and serves the calls
-    /// that wait.
+    /// Asks the members for the state of the lifts after entering a room, notices when lifts arrive, and serves the
+    /// calls that wait.
     /// </summary>
-    private void UpdateLifts(ClientPlayerData partner) {
+    private void UpdateLifts() {
         try {
             if (!_liftStateRequested && Time.unscaledTime - _liftRoomStart >= LiftStateRequestDelay) {
                 _liftStateRequested = true;
                 if (FindRoomLifts().Count > 0) {
-                    Send(new CoopSaveUpdate {
-                        TargetId = partner.Id,
+                    // To every member, of whom those in the room answer
+                    SendToMembers(new CoopSaveUpdate {
                         Kind = CoopSaveUpdateKind.LiftStateRequest,
                         Scene = SceneManager.GetActiveScene().name
                     });
@@ -546,8 +564,8 @@ internal partial class CoopSave {
                 }
             }
 
-            var liftPartner = partner.IsInLocalScene ? partner : null;
-            var decides = DecidesLifts(liftPartner);
+            var members = GetLiftMembers();
+            var decides = DecidesLifts(members);
             List<object>? gone = null;
             foreach (var entry in _lifts) {
                 if (entry.Value.Owner == null) {
@@ -555,18 +573,18 @@ internal partial class CoopSave {
                     continue;
                 }
 
-                UpdateLift(entry.Value, liftPartner, decides);
+                UpdateLift(entry.Value, members, decides);
             }
 
             if (gone != null) {
                 foreach (var key in gone) {
-                    // A lift that is gone can't end the ride of the avatar on it anymore
-                    EndAvatarRide(_lifts[key]);
+                    // A lift that is gone can't end the rides of the avatars on it anymore
+                    EndAvatarRides(_lifts[key]);
                     _lifts.Remove(key);
                 }
             }
 
-            UpdateStoryLifts(partner);
+            UpdateStoryLifts();
         } catch (Exception e) {
             LogLiftError(e);
         }
@@ -575,24 +593,24 @@ internal partial class CoopSave {
     /// <summary>
     /// Notices when a lift arrives and serves its calls that wait when the local game decides about it.
     /// </summary>
-    private void UpdateLift(SyncedLift lift, ClientPlayerData? partner, bool decides) {
+    private void UpdateLift(SyncedLift lift, List<ClientPlayerData> members, bool decides) {
         lift.Update();
         if (lift is FsmLift fsmLift) {
-            UpdateFsmLiftRide(fsmLift, partner);
+            UpdateFsmLiftRide(fsmLift, members);
         }
 
         var moving = lift.IsMoving;
         if (lift.WasMoving && !moving) {
             lift.ArrivedAt = Time.unscaledTime;
 
-            // Nothing is on its way any more, so whatever the partner was told about is over and the next ride is
+            // Nothing is on its way any more, so whatever the members were told about is over and the next ride is
             // news again whichever stop it goes to
-            lift.ToldPartnerStop = -1;
+            lift.ToldStop = -1;
         }
 
         lift.WasMoving = moving;
         if (!decides) {
-            // Calls that came while both games waited for the state of the room wait for the game that decides
+            // Calls that came while the games waited for the state of the room wait for the game that decides
             if (!IsWaitingForLiftState()) {
                 lift.Calls.Clear();
             }
@@ -607,33 +625,38 @@ internal partial class CoopSave {
         var currentStop = lift.Stop;
         lift.Calls.RemoveAll(call =>
             call.Stop == currentStop || Time.unscaledTime - call.Time > LiftCallLifetime ||
-            !IsCallerWaiting(lift, call, partner)
+            !IsCallerWaiting(lift, call, members)
         );
-        if (lift.Calls.Count == 0 || IsLiftHeldForOther(lift, lift.Calls[0].ByPartner, partner)) {
+        if (lift.Calls.Count == 0 || IsLiftHeldForOther(lift, lift.Calls[0].By, members)) {
             return;
         }
 
         var hero = HeroController.instance;
-        StartLiftRide(lift, lift.Calls[0].Stop, hero != null && lift.ContainsHero(hero), partner);
+        StartLiftRide(lift, lift.Calls[0].Stop, hero != null && lift.ContainsHero(hero));
     }
 
     /// <summary>
     /// Handles a ride or a call that the local player started: the game that decides starts it at once or lets it wait
-    /// for its turn, and the other game sends it to the game that decides.
+    /// for its turn, and the other games send it to the game that decides.
     /// </summary>
     /// <param name="lift">The lift.</param>
     /// <param name="stop">The stop that the player wants the lift to go to.</param>
     /// <param name="inside">Whether the local hero is in or on the lift.</param>
     /// <param name="camera">Whether the ride may move the camera.</param>
-    /// <param name="partner">The partner in the room.</param>
-    private void RequestLiftRide(SyncedLift lift, int stop, bool inside, bool camera, ClientPlayerData partner) {
-        if (!DecidesLifts(partner)) {
+    /// <param name="members">The members in the room.</param>
+    private void RequestLiftRide(SyncedLift lift, int stop, bool inside, bool camera, List<ClientPlayerData> members) {
+        if (!DecidesLifts(members)) {
             lift.OnCallHeld();
-            if (lift.SentCallStop != stop || Time.unscaledTime - lift.SentCallTime >= LiftCallResendTime) {
+
+            // To the game that decides, which is the one with the largest save key in the room. While the games wait
+            // for the state of the room, that is the one that decides once it has arrived, and with only one other
+            // member in the room the call goes to them either way.
+            if ((GetLiftDecider(members) ?? (members.Count == 1 ? members[0] : null)) is { } decider &&
+                (lift.SentCallStop != stop || Time.unscaledTime - lift.SentCallTime >= LiftCallResendTime)) {
                 lift.SentCallStop = stop;
                 lift.SentCallTime = Time.unscaledTime;
                 Send(new CoopSaveUpdate {
-                    TargetId = partner.Id,
+                    TargetId = decider.Id,
                     Kind = CoopSaveUpdateKind.LiftCall,
                     Scene = lift.Owner.gameObject.scene.name,
                     ObjectPath = lift.Path,
@@ -645,31 +668,35 @@ internal partial class CoopSave {
 
             // If this game turns out to decide once the state of the room arrived, it serves the call itself
             if (IsWaitingForLiftState()) {
-                QueueLiftCall(lift, stop, false, inside);
+                QueueLiftCall(lift, stop, null, inside);
             }
 
             return;
         }
 
-        if (lift.IsMoving || IsLiftHeldForOther(lift, false, partner)) {
+        if (lift.IsMoving || IsLiftHeldForOther(lift, null, members)) {
             lift.OnCallHeld();
-            QueueLiftCall(lift, stop, false, inside);
+            QueueLiftCall(lift, stop, null, inside);
             return;
         }
 
-        lift.BeforeLocalRide(IsAvatarOn(lift, partner));
-        if (!StartLiftRide(lift, stop, camera, partner)) {
-            QueueLiftCall(lift, stop, false, inside);
+        lift.BeforeLocalRide(members.Exists(member => IsAvatarOn(lift, member)));
+        if (!StartLiftRide(lift, stop, camera)) {
+            QueueLiftCall(lift, stop, null, inside);
         }
     }
 
     /// <summary>
     /// Lets a call wait for the lift, replacing an earlier call of the same player to the same stop.
     /// </summary>
-    private static void QueueLiftCall(SyncedLift lift, int stop, bool byPartner, bool inside) {
-        var call = lift.Calls.Find(other => other.Stop == stop && other.ByPartner == byPartner);
+    /// <param name="lift">The lift.</param>
+    /// <param name="stop">The stop.</param>
+    /// <param name="by">The member who called, or null for the local player.</param>
+    /// <param name="inside">Whether the caller is in or on the lift.</param>
+    private static void QueueLiftCall(SyncedLift lift, int stop, ushort? by, bool inside) {
+        var call = lift.Calls.Find(other => other.Stop == stop && other.By == by);
         if (call == null) {
-            call = new LiftCall { Stop = stop, ByPartner = byPartner };
+            call = new LiftCall { Stop = stop, By = by };
             lift.Calls.Add(call);
         }
 
@@ -678,10 +705,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts a ride of a lift in the local game and sends it to the partner.
+    /// Starts a ride of a lift in the local game and sends it to the members in the room.
     /// </summary>
+    /// <param name="lift">The lift.</param>
+    /// <param name="stop">The stop.</param>
+    /// <param name="camera">Whether the ride may move the camera.</param>
+    /// <param name="caller">A member whose call the ride serves, who is sent it even when this game doesn't see them
+    /// in the room yet, or null.</param>
     /// <returns>Whether the ride started.</returns>
-    private bool StartLiftRide(SyncedLift lift, int stop, bool camera, ClientPlayerData? partner) {
+    private bool StartLiftRide(SyncedLift lift, int stop, bool camera, ClientPlayerData? caller = null) {
         var fromY = lift.Transform.position.y;
         bool started;
         _liftReplaying = true;
@@ -697,20 +729,31 @@ internal partial class CoopSave {
 
         lift.WasMoving = true;
         lift.Calls.RemoveAll(call => call.Stop == stop);
-        if (partner != null) {
-            SendLiftMove(lift, stop, fromY, partner.Id);
-        }
-
+        SendLiftMove(lift, stop, fromY, caller);
         return true;
     }
 
     /// <summary>
-    /// Sends a ride that started in the local game, or turned around, to the partner.
+    /// Sends a ride that started in the local game, or turned around, to the members in the room.
     /// </summary>
-    private void SendLiftMove(SyncedLift lift, int stop, float fromY, ushort partnerId) {
-        lift.ToldPartnerStop = stop;
-        Send(new CoopSaveUpdate {
-            TargetId = partnerId,
+    /// <param name="lift">The lift.</param>
+    /// <param name="stop">The stop it goes to.</param>
+    /// <param name="fromY">Where it started from.</param>
+    /// <param name="caller">A member whose call the ride serves, who is sent it even when this game doesn't see them
+    /// in the room yet, or null.</param>
+    private void SendLiftMove(SyncedLift lift, int stop, float fromY, ClientPlayerData? caller = null) {
+        var members = GetLiftMembers();
+        if (caller != null && !members.Exists(member => member.Id == caller.Id)) {
+            members.Add(caller);
+        }
+
+        if (members.Count == 0) {
+            return;
+        }
+
+        lift.ToldStop = stop;
+        var update = new CoopSaveUpdate {
+            TargetId = members[0].Id,
             Kind = CoopSaveUpdateKind.LiftMove,
             Scene = lift.Owner.gameObject.scene.name,
             ObjectPath = lift.Path,
@@ -718,40 +761,53 @@ internal partial class CoopSave {
             Part = (ushort) stop,
             Key = ++_liftRideCount,
             Values = [fromY]
-        });
+        };
+        Send(update);
+        for (var i = 1; i < members.Count; i++) {
+            SendCopy(update, members[i].Id);
+        }
     }
 
     /// <summary>
-    /// Whether a lift that arrived a moment ago still waits for the player other than the one who wants it, who is on it
-    /// or at its stop.
+    /// Whether a lift that arrived a moment ago still waits for the players other than the one who wants it, who are
+    /// on it or at its stop.
     /// </summary>
-    private static bool IsLiftHeldForOther(SyncedLift lift, bool byPartner, ClientPlayerData? partner) {
+    /// <param name="lift">The lift.</param>
+    /// <param name="by">The member who wants it, or null for the local player.</param>
+    /// <param name="members">The members in the room.</param>
+    private static bool IsLiftHeldForOther(SyncedLift lift, ushort? by, List<ClientPlayerData> members) {
         if (Time.unscaledTime - lift.ArrivedAt >= LiftWaitTime) {
             return false;
         }
 
-        if (byPartner) {
+        if (by != null) {
             var hero = HeroController.instance;
-            return hero != null && (lift.ContainsHero(hero) || lift.IsAtStop(lift.Stop, hero.transform.position));
+            if (hero != null && (lift.ContainsHero(hero) || lift.IsAtStop(lift.Stop, hero.transform.position))) {
+                return true;
+            }
         }
 
-        return partner?.PlayerContainer is { } container &&
-               (IsAvatarOn(lift, partner) || lift.IsAtStop(lift.Stop, container.transform.position));
+        return members.Exists(member =>
+            member.Id != by && member.PlayerContainer is { } container &&
+            (IsAvatarOn(lift, member) || lift.IsAtStop(lift.Stop, container.transform.position))
+        );
     }
 
     /// <summary>
     /// Whether the player of a call still waits for the lift: on it for a ride, or at the stop for a call.
     /// </summary>
-    private static bool IsCallerWaiting(SyncedLift lift, LiftCall call, ClientPlayerData? partner) {
+    private static bool IsCallerWaiting(SyncedLift lift, LiftCall call, List<ClientPlayerData> members) {
         Vector3 position;
         bool inside;
-        if (call.ByPartner) {
-            if (partner?.PlayerContainer is not { } container) {
+        ClientPlayerData? caller = null;
+        if (call.By is { } by) {
+            caller = members.Find(member => member.Id == by);
+            if (caller?.PlayerContainer is not { } container) {
                 return false;
             }
 
             position = container.transform.position;
-            inside = IsAvatarOn(lift, partner);
+            inside = IsAvatarOn(lift, caller);
         } else {
             if (HeroController.instance is not { } hero) {
                 return false;
@@ -761,25 +817,25 @@ internal partial class CoopSave {
             inside = lift.ContainsHero(hero);
         }
 
-        // A partner standing on their own lift is taken at their word. Their game looked at their own hero and their
+        // A member standing on their own lift is taken at their word. Their game looked at their own hero and their
         // own lift and said so; asking whether their body is inside the lift over here asks about a different lift,
         // and the one moment that matters is the moment the two lifts are not in the same place. That is exactly
         // when this was answering no: they rode up, this lift stayed down, and from then on every call they sent
         // was thrown away on the grounds that they were not standing on a lift they were nowhere near - forever,
         // because nothing ever asks twice. Stepping onto a lift is one event, sent once, and never sent again.
         if (call.Inside) {
-            return !call.ByPartner || inside || partner is { IsInLocalScene: true };
+            return call.By == null || inside || caller is { IsInLocalScene: true };
         }
 
         return !inside && lift.IsAtStop(call.Stop, position);
     }
 
     /// <summary>
-    /// Whether the avatar of the partner is in or on a lift, or rides it.
+    /// Whether the avatar of a member is in or on a lift, or rides it.
     /// </summary>
-    private static bool IsAvatarOn(SyncedLift lift, ClientPlayerData? partner) {
-        return lift.AvatarRiding ||
-               partner?.PlayerContainer is { } container && lift.Contains(container.transform.position);
+    private static bool IsAvatarOn(SyncedLift lift, ClientPlayerData member) {
+        return lift.Avatars.ContainsKey(member.Id) ||
+               member.PlayerContainer is { } container && lift.Contains(container.transform.position);
     }
 
     /// <summary>

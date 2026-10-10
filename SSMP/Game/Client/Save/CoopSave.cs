@@ -503,11 +503,10 @@ internal partial class CoopSave {
         // The parts that keep in step with one partner at a time go by a checked member, and by any member on the
         // server where they went by an unchecked partner
         var checkedPartner = members.FirstOrDefault(member => _checkedMembers.Contains(member.Id));
-        var partner = checkedPartner ?? members.FirstOrDefault();
 
         // A boss checkpoint that throws must not keep the hold below from working either
         try {
-            UpdateCheckpoint(hero, marker, partner);
+            UpdateCheckpoint(hero, marker, members);
         } catch (Exception e) {
             if (!_checkpointFailed) {
                 _checkpointFailed = true;
@@ -517,10 +516,10 @@ internal partial class CoopSave {
 
         UpdateWishTalk();
         UpdateDeliverySummon(hero);
-        UpdateRescue(hero, checkedPartner);
-        UpdateLavaChase(hero, checkedPartner);
-        UpdateChaseStandUp(hero, checkedPartner);
-        UpdateRaces(checkedPartner);
+        UpdateRescue(hero);
+        UpdateLavaChase(hero);
+        UpdateChaseStandUp(hero);
+        UpdateRaces();
         UpdatePrisonCapture(hero);
         UpdateClothesGrab(hero);
 
@@ -540,7 +539,7 @@ internal partial class CoopSave {
             UpdateWorldChanges();
             UpdateWishes();
             UpdateStoryFlags();
-            UpdateLifts(checkedPartner);
+            UpdateLifts();
             UpdateTrapdoors();
         }
 
@@ -798,11 +797,11 @@ internal partial class CoopSave {
     /// <summary>
     /// Called when a player disconnects, after which the loaded save waits for them again if they are a member of it.
     /// </summary>
-    public void OnPlayerDisconnect(ushort id) {
+    public void OnPlayerDisconnect(ushort id, string username) {
         ForgetRequestsOf(id);
 
         if (_memberChecks.ContainsKey(id) || _checkedMembers.Contains(id)) {
-            PartnerLeft(id, Lang.Pick("left", "离开了"));
+            PartnerLeft(id, Lang.Pick("left", "离开了"), username);
 
             // Members who are still checked with each other keep the keys of their round
             if (_checkedMembers.Count == 0) {
@@ -817,13 +816,14 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="id">The ID of the member.</param>
     /// <param name="how">How they left, for the message, or null for no message.</param>
-    private void PartnerLeft(ushort id, string? how) {
+    /// <param name="username">Their name, for a member who is already gone from the players.</param>
+    private void PartnerLeft(ushort id, string? how, string? username = null) {
         if (!_memberChecks.TryGetValue(id, out var check) && !_checkedMembers.Contains(id)) {
             return;
         }
 
         var wasChecked = _checkedMembers.Contains(id);
-        var name = check?.Name;
+        var name = check?.Name ?? username ?? (_playerData.TryGetValue(id, out var gone) ? gone.Username : null);
 
         // A step of dialogue that waits for them goes on without the wish, which waits for them to read to it too
         if (_heldBegin is { } heldBegin && heldBegin.HasMember(id)) {
@@ -851,9 +851,15 @@ internal partial class CoopSave {
 
         // This path does not go through ResetSession, so a cocoon of theirs left standing in the room would stay for
         // good, and this player would be remembered as waiting to be pulled up by someone who is gone - which would
-        // quietly stop the next death of the local player from waiting for anyone
-        ResetRescue();
-        OnClothesGrabPartnerLeft();
+        // quietly stop the next death of the local player from waiting for anyone. With other members still checked,
+        // only what is known of this one goes.
+        if (_checkedMembers.Count == 0) {
+            ResetRescue();
+        } else {
+            ForgetRescueOf(id);
+        }
+
+        OnClothesGrabMemberLeft(id);
 
         if (wasChecked) {
             // The play time that the players played together is kept for the next check
@@ -863,6 +869,7 @@ internal partial class CoopSave {
         // A boss fight that the member was in ends for the local player too
         if (wasChecked && IsInBossFight()) {
             _interruptPending = true;
+            _interruptName = name;
         }
 
         if (wasChecked && how != null && GetCurrentMarker() is { } marker) {
@@ -894,7 +901,7 @@ internal partial class CoopSave {
         // This path does not go through ResetSession either, so the same cocoon and the same memory of a partner
         // waiting would be left behind, this time by leaving the server rather than by them leaving it
         ResetRescue();
-        OnClothesGrabPartnerLeft();
+        ForgetClothesGrabMembers();
 
         _highestCheckKey = 0;
 
@@ -2689,6 +2696,28 @@ internal partial class CoopSave {
     private void SendToMembers(CoopSaveUpdate update) {
         update.TargetId = CoopTargets.Everyone;
         Send(update);
+    }
+
+    /// <summary>
+    /// Sends an update to each member that the saves were checked with who is in the room of the local player, and to
+    /// nobody else: what only matters in a room doesn't go to the members elsewhere.
+    /// </summary>
+    private void SendToRoomMembers(CoopSaveUpdate update) {
+        var sent = false;
+        foreach (var member in GetCheckedMembers()) {
+            if (!member.IsInLocalScene) {
+                continue;
+            }
+
+            if (sent) {
+                SendCopy(update, member.Id);
+                continue;
+            }
+
+            update.TargetId = member.Id;
+            Send(update);
+            sent = true;
+        }
     }
 
     /// <summary>

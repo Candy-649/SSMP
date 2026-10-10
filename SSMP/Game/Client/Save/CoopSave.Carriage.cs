@@ -10,9 +10,9 @@ namespace SSMP.Game.Client.Save;
 /// <summary>
 /// Carriages (<see cref="ManualLift"/>) in a checked two-player save (see CoopSave.Lifts), which move sideways while a
 /// player holds one of their buttons, or come to a call plate. The player who holds a button or steps on a plate first
-/// drives the carriage: their game sends where it is several times a second, and the other game plays the same
-/// movement and ignores the buttons of its player until a short time after the driver let go. A driver who holds the
-/// carriage too long can be taken over by the other player.
+/// drives the carriage: their game sends where it is several times a second to the members in the room, and the other
+/// games play the same movement and ignore the buttons of their players until a short time after the driver let go.
+/// A driver who holds the carriage too long can be taken over by another player.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -21,12 +21,12 @@ internal partial class CoopSave {
     private const string CarriageKind = "ManualLift";
 
     /// <summary>
-    /// How long the buttons of a carriage stay ignored after the partner let go of it, in seconds.
+    /// How long the buttons of a carriage stay ignored after the member who drove it let go of it, in seconds.
     /// </summary>
     private const float CarriageReleaseTime = 0.5f;
 
     /// <summary>
-    /// How long the partner can drive a carriage, in seconds, before the local player can take it over.
+    /// How long a member can drive a carriage, in seconds, before the local player can take it over.
     /// </summary>
     private const float CarriageMaxHold = 10f;
 
@@ -36,28 +36,28 @@ internal partial class CoopSave {
     private const float CarriageSendInterval = 1f / 15f;
 
     /// <summary>
-    /// How long the game follows the last position that the partner sent, in seconds.
+    /// How long the game follows the last position that the driving member sent, in seconds.
     /// </summary>
     private const float CarriageFollowTime = 1f;
 
     /// <summary>
-    /// How far ahead the game guesses where the carriage of the partner is from its speed, in seconds at most.
+    /// How far ahead the game guesses where the carriage of the driving member is from its speed, in seconds at most.
     /// </summary>
     private const float CarriagePredictTime = 0.2f;
 
     /// <summary>
-    /// The difference of the part of the way above which the carriage jumps to where the partner has it.
+    /// The difference of the part of the way above which the carriage jumps to where the driving member has it.
     /// </summary>
     private const float CarriageSnapPart = 0.1f;
 
     /// <summary>
-    /// How fast the carriage catches up with where the partner has it, per second.
+    /// How fast the carriage catches up with where the driving member has it, per second.
     /// </summary>
     private const float CarriageCatchUp = 5f;
 
     /// <summary>
     /// The count of the updates of the drives of carriages that the local game sent, which tells newer ones from older
-    /// ones in the game of the partner, also across rooms.
+    /// ones in the games of the members, also across rooms.
     /// </summary>
     private ulong _carriageDriveCount;
 
@@ -118,17 +118,27 @@ internal partial class CoopSave {
         public int SeenClaim { get; set; }
 
         /// <summary>
-        /// Whether the partner drives the carriage.
+        /// The member whose drive the carriage follows, while it follows one or did a moment ago, or null.
+        /// </summary>
+        public ushort? DriverId { get; set; }
+
+        /// <summary>
+        /// The number of the drive of that member.
+        /// </summary>
+        public int DriverClaim { get; set; }
+
+        /// <summary>
+        /// Whether that member drives the carriage.
         /// </summary>
         public bool PartnerDriving { get; set; }
 
         /// <summary>
-        /// When the partner started to drive the carriage.
+        /// When that member started to drive the carriage.
         /// </summary>
         public float PartnerDriveStart { get; set; }
 
         /// <summary>
-        /// When the partner let go of the carriage.
+        /// When that member let go of the carriage.
         /// </summary>
         public float PartnerReleasedAt { get; set; } = float.NegativeInfinity;
 
@@ -138,15 +148,15 @@ internal partial class CoopSave {
         public bool WasFollowing { get; set; }
 
         /// <summary>
-        /// The direction of the drive of the partner in which the carriage already reached its end in the local game, or
+        /// The direction of the drive of the member in which the carriage already reached its end in the local game, or
         /// 0. The carriage waits there instead of stopping at the end again every frame.
         /// </summary>
         public float ArrivedDirection { get; set; }
 
         /// <summary>
-        /// The count of the newest update of a drive of the partner.
+        /// The count of the newest update of a drive of each member, by member: each game counts its own.
         /// </summary>
-        public ulong PartnerDriveKey { get; set; }
+        public Dictionary<ushort, ulong> DriveKeys { get; } = new();
 
         /// <summary>
         /// When the game last sent where the carriage is.
@@ -159,12 +169,12 @@ internal partial class CoopSave {
         public bool SentStopped { get; set; } = true;
 
         /// <summary>
-        /// When the last position from the partner came, or negative infinity before the first.
+        /// When the last position from the driving member came, or negative infinity before the first.
         /// </summary>
         public float PartnerTime { get; set; } = float.NegativeInfinity;
 
         /// <summary>
-        /// The part of the way, the speed and the direction of the carriage in the last update of the partner.
+        /// The part of the way, the speed and the direction of the carriage in the last update of the driving member.
         /// </summary>
         public float PartnerPart { get; set; }
 
@@ -211,7 +221,7 @@ internal partial class CoopSave {
                                  CarriageCalledField?.GetValue(Lift) is int and not 0;
 
         /// <summary>
-        /// Whether the buttons of the local player are ignored because the partner drives, or let go a moment ago.
+        /// Whether the buttons of the local player are ignored because a member drives, or let go a moment ago.
         /// </summary>
         public bool IsFollowing => PartnerDriving || Time.unscaledTime - PartnerReleasedAt < CarriageReleaseTime;
 
@@ -311,11 +321,10 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for the method of <see cref="ManualLift"/> that the buttons and call plates of a carriage call, which ignores
-    /// them while the partner drives, and otherwise makes the local player the driver.
+    /// them while a member drives, and otherwise makes the local player the driver.
     /// </summary>
     private void OnCarriageUpdateDirection(Action<ManualLift, bool> orig, ManualLift self, bool overrideCall) {
-        ClientPlayerData? partner;
-        if (_liftReplaying || (partner = GetLiftPartner()) == null) {
+        if (_liftReplaying || GetLiftMembers().Count == 0) {
             orig(self, overrideCall);
             return;
         }
@@ -342,33 +351,39 @@ internal partial class CoopSave {
                 carriage.LocalDriving = false;
             }
 
-            SendCarriageDrive(carriage, partner, true);
+            SendCarriageDrive(carriage, true);
         } catch (Exception e) {
             LogLiftError(e);
         }
     }
 
     /// <summary>
-    /// Hook for the update of <see cref="ManualLift"/>, which plays the drive of the partner, lets the local player take
-    /// over a carriage that the partner held too long, and sends the drive of the local player.
+    /// Hook for the update of <see cref="ManualLift"/>, which plays the drive of a member, lets the local player take
+    /// over a carriage that a member held too long, and sends the drive of the local player.
     /// </summary>
     private void OnCarriageUpdate(Action<ManualLift> orig, ManualLift self) {
-        ClientPlayerData? partner;
         if (!_lifts.TryGetValue(self, out var found) || found is not Carriage carriage) {
             orig(self);
             return;
         }
 
-        if ((partner = GetLiftPartner()) == null) {
-            // A partner who left in the middle of a drive doesn't drive the carriage on to its end
+        // A member who left in the middle of a drive doesn't drive the carriage on to its end
+        var members = GetLiftMembers();
+        if (carriage.DriverId is { } driver && !members.Exists(member => member.Id == driver) ||
+            members.Count == 0) {
+            // Also when their drive had stopped coming without them letting go, which left the drive held for a
+            // member who is no longer there to let go of it
+            carriage.DriverId = null;
+            carriage.PartnerDriving = false;
             if (carriage.PartnerTime > float.NegativeInfinity) {
                 carriage.PartnerTime = float.NegativeInfinity;
-                carriage.PartnerDriving = false;
                 if (!carriage.IsPressed) {
                     carriage.Direction = 0f;
                 }
             }
+        }
 
+        if (members.Count == 0) {
             orig(self);
             return;
         }
@@ -378,7 +393,7 @@ internal partial class CoopSave {
             var following = carriage.IsFollowing;
             if (following && carriage.PartnerDriving && carriage.IsPressed &&
                 Time.unscaledTime - carriage.PartnerDriveStart >= CarriageMaxHold) {
-                // The partner held the carriage too long, so the held button of the local player takes it over
+                // The member held the carriage too long, so the held button of the local player takes it over
                 carriage.PartnerDriving = false;
                 carriage.PartnerReleasedAt = float.NegativeInfinity;
                 following = false;
@@ -399,7 +414,7 @@ internal partial class CoopSave {
                 CarriageDelayField?.SetValue(self, 0f);
                 CarriageCalledField?.SetValue(self, 0);
                 if (carriage.ArrivedDirection != 0f || IsAtCarriageEnd(carriage, carriage.PartnerDirection)) {
-                    // The carriage reached the end that the partner drives to before the partner did
+                    // The carriage reached the end that the member drives to before the member did
                     carriage.ArrivedDirection = carriage.PartnerDirection;
                     carriage.Direction = 0f;
                     carriage.Velocity = 0f;
@@ -410,7 +425,7 @@ internal partial class CoopSave {
                     );
                 }
             } else if (carriage.PartnerTime > float.NegativeInfinity && !carriage.LocalDriving) {
-                // The drive of the partner stopped coming without them letting go
+                // The drive of the member stopped coming without them letting go
                 carriage.PartnerTime = float.NegativeInfinity;
                 if (!carriage.IsPressed) {
                     carriage.Direction = 0f;
@@ -442,9 +457,9 @@ internal partial class CoopSave {
                 if (carriage.LocalDriving && !carriage.IsPressed) {
                     // A call plate drives the carriage without a button, and its end clears the call without telling
                     carriage.LocalDriving = false;
-                    SendCarriageDrive(carriage, partner, true);
+                    SendCarriageDrive(carriage, true);
                 } else if (carriage.LocalDriving || !carriage.SentStopped) {
-                    SendCarriageDrive(carriage, partner, false);
+                    SendCarriageDrive(carriage, false);
                 }
             }
         } catch (Exception e) {
@@ -453,20 +468,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends where the carriage is while the local player drives it, until it stopped after they let go.
+    /// Sends where the carriage is while the local player drives it, until it stopped after they let go, to the
+    /// members in the room.
     /// </summary>
     /// <param name="carriage">The carriage.</param>
-    /// <param name="partner">The partner in the room.</param>
     /// <param name="force">Whether to send at once, for a change of the buttons.</param>
-    private void SendCarriageDrive(Carriage carriage, ClientPlayerData partner, bool force) {
+    private void SendCarriageDrive(Carriage carriage, bool force) {
         if (!force && Time.unscaledTime - carriage.SentAt < CarriageSendInterval) {
             return;
         }
 
         carriage.SentAt = Time.unscaledTime;
         carriage.SentStopped = !carriage.LocalDriving && !carriage.IsMoving;
-        Send(new CoopSaveUpdate {
-            TargetId = partner.Id,
+        SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.LiftDrive,
             Scene = carriage.Lift.gameObject.scene.name,
             ObjectPath = carriage.Path,
@@ -479,25 +493,33 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes a drive of a carriage from the partner. A drive with a higher number wins over the drive of the local
-    /// player, and the save key decides between drives with the same number, which both players started at once.
+    /// Takes a drive of a carriage from a member. A drive with a higher number wins over the drive of the local player
+    /// and over the drive of another member, and the save key decides between drives with the same number, which
+    /// players started at once.
     /// </summary>
     private void OnLiftDrive(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkedWith != player.Id || !IsLiftRoom(update.Scene) || update.Values.Count < 3) {
+        if (!_checkedMembers.Contains(player.Id) || !IsLiftRoom(update.Scene) || update.Values.Count < 3) {
             return;
         }
 
         try {
-            if (FindLift(update) is not Carriage carriage || update.Key <= carriage.PartnerDriveKey) {
+            if (FindLift(update) is not Carriage carriage ||
+                carriage.DriveKeys.TryGetValue(player.Id, out var newest) && update.Key <= newest) {
                 return;
             }
 
-            carriage.PartnerDriveKey = update.Key;
+            carriage.DriveKeys[player.Id] = update.Key;
             var claim = update.Amounts.Count > 0 ? update.Amounts[0] : 0;
             carriage.SeenClaim = System.Math.Max(carriage.SeenClaim, claim);
+
+            // Another member whose drive the carriage follows
+            var other = carriage.DriverId is { } driverId && driverId != player.Id &&
+                        _playerData.TryGetValue(driverId, out var driver)
+                ? driver
+                : null;
             if (update.PartCount == 1) {
                 if (carriage.LocalDriving) {
-                    if (claim < carriage.LocalClaim || claim == carriage.LocalClaim && !PartnerKeyWins()) {
+                    if (claim < carriage.LocalClaim || claim == carriage.LocalClaim && !MemberKeyWins(player)) {
                         return;
                     }
 
@@ -505,13 +527,25 @@ internal partial class CoopSave {
                     carriage.SentStopped = true;
                 }
 
-                if (!carriage.PartnerDriving) {
+                if (other != null && carriage.PartnerDriving &&
+                    (claim < carriage.DriverClaim || claim == carriage.DriverClaim && !MemberKeyWins(player, other))) {
+                    return;
+                }
+
+                if (!carriage.PartnerDriving || other != null) {
                     carriage.PartnerDriveStart = Time.unscaledTime;
                 }
 
                 carriage.PartnerDriving = true;
+                carriage.DriverClaim = claim;
             } else {
                 if (carriage.LocalDriving) {
+                    return;
+                }
+
+                // Another member drives it, or did a moment ago, and what this one does after letting go isn't followed
+                if (other != null &&
+                    (carriage.PartnerDriving || Time.unscaledTime - carriage.PartnerTime < CarriageFollowTime)) {
                     return;
                 }
 
@@ -521,6 +555,7 @@ internal partial class CoopSave {
                 }
             }
 
+            carriage.DriverId = player.Id;
             carriage.PartnerTime = Time.unscaledTime;
             carriage.PartnerPart = update.Values[0];
             carriage.PartnerVelocity = update.Values[1];
@@ -528,6 +563,22 @@ internal partial class CoopSave {
         } catch (Exception e) {
             LogLiftError(e);
         }
+    }
+
+    /// <summary>
+    /// Forgets the drives of a member who entered the room again, maybe after their game started again, so that their
+    /// counts start over. A drive that nobody is known to hold any more goes too.
+    /// </summary>
+    private static void ForgetCarriageDriveOf(Carriage carriage, ushort playerId) {
+        carriage.DriveKeys.Remove(playerId);
+        if (carriage.DriverId == playerId || carriage.DriverId == null) {
+            carriage.DriverId = null;
+            carriage.PartnerDriving = false;
+            carriage.PartnerTime = float.NegativeInfinity;
+        }
+
+        carriage.SeenClaim = carriage.LocalDriving ? carriage.LocalClaim :
+            carriage.PartnerDriving ? carriage.DriverClaim : 0;
     }
 
     /// <summary>

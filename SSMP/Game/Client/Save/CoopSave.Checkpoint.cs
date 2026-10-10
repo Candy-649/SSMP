@@ -9,9 +9,9 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Boss checkpoints of two-player saves. When a boss fight starts with both players there, each game saves and
+/// Boss checkpoints of two-player saves. When a boss fight starts with every member there, each game saves and
 /// remembers the door that its player came into the scene through. If a player drops out while the fight lasts, it ends
-/// for both: the player who stays leaves through that door and the boss waits for both players again, and the player
+/// for everyone: the players who stay leave through that door and the boss waits for every player again, and the player
 /// who dropped out goes back to that door once they are back in the save. Dying in the fight stays like it is in the
 /// game. The checkpoint ends when the boss is beaten or the player leaves its scene another way.
 /// </summary>
@@ -37,7 +37,7 @@ internal partial class CoopSave {
     private const float MoveRetryInterval = 0.5f;
 
     /// <summary>
-    /// The scene in which a boss fight started with both players since the local player came into it, or null.
+    /// The scene in which a boss fight started with every player since the local player came into it, or null.
     /// </summary>
     private string? _fightStartedScene;
 
@@ -48,12 +48,18 @@ internal partial class CoopSave {
     private string? _fightSaveScene;
 
     /// <summary>
-    /// Whether the partner dropped out of the boss fight of the loaded save, so the local player leaves it.
+    /// Whether a member dropped out of the boss fight of the loaded save, so the local player leaves it.
     /// </summary>
     private bool _interruptPending;
 
     /// <summary>
-    /// Whether the save loaded while its boss fight lasted, so the player goes back to its door once the partner is in.
+    /// The name of the member who dropped out of the boss fight, or null when it isn't known.
+    /// </summary>
+    private string? _interruptName;
+
+    /// <summary>
+    /// Whether the save loaded while its boss fight lasted, so the player goes back to its door once every member is
+    /// in.
     /// </summary>
     private bool _loadedWithCheckpoint;
 
@@ -78,9 +84,9 @@ internal partial class CoopSave {
     private float _nextDefeatCheckTime;
 
     /// <summary>
-    /// Whether the partner was in the local scene in the previous frame, to notice them coming into a boss fight.
+    /// The members who were in the local scene in the previous frame, to notice them coming into a boss fight.
     /// </summary>
-    private bool _partnerWasInScene;
+    private readonly HashSet<ushort> _membersWereInScene = [];
 
     /// <summary>
     /// Whether updating the boss checkpoint threw, which is only logged once.
@@ -112,29 +118,31 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Called when a boss fight starts with every player there. In a two-player save that both players are in, the
-    /// fight gets a checkpoint, and the partner's game hears about it, because a boss only starts for one of them.
-    /// Reports that come too early, like before the partner is in the scene, are ignored, so a later one still counts.
+    /// Called when a boss fight starts with every player there. In a two-player save that every member is in, the
+    /// fight gets a checkpoint, and the games of the members hear about it, because a boss only starts for one of
+    /// them. Reports that come too early, like before every member is in the scene, are ignored, so a later one still
+    /// counts.
     /// </summary>
     public void OnBossFightStarted() {
         var scene = SceneUtil.GetCurrentSceneName();
-        if (GetFightPartner(scene, out var marker) is not { } partner || marker == null) {
+        if (GetFightMembers(scene, out var marker) is null || marker == null) {
             return;
         }
 
         _fightStartedScene = scene;
         StartCheckpoint(marker, scene);
-        Send(new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.BossFight, Records = [scene] });
+        SendToMembers(new CoopSaveUpdate { Kind = CoopSaveUpdateKind.BossFight, Records = [scene] });
     }
 
     /// <summary>
-    /// The partner's game saw a boss fight start with both players, or the local player came into a fight that goes
+    /// The game of a member saw a boss fight start with every player, or the local player came into a fight that goes
     /// on, so it gets a checkpoint here too if the local player is in its scene.
     /// </summary>
     private void OnBossFight(ClientPlayerData player, CoopSaveUpdate update) {
         var scene = SceneUtil.GetCurrentSceneName();
         if (update.Records.Count == 0 || update.Records[0] != scene ||
-            GetFightPartner(scene, out var marker) is not { } partner || marker == null || partner.Id != player.Id) {
+            GetFightMembers(scene, out var marker) is not { } members || marker == null ||
+            !members.Exists(member => member.Id == player.Id)) {
             return;
         }
 
@@ -143,27 +151,31 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The partner of the loaded two-player save if a boss fight in a scene can get a checkpoint: the fight didn't get
-    /// one since the local player came in, both saves were checked, the partner is in the scene and the local player
-    /// is on their feet.
+    /// The members of the loaded two-player save if a boss fight in a scene can get a checkpoint, or null: the fight
+    /// didn't get one since the local player came in, the saves were checked with every member, all of them are in the
+    /// scene and the local player is on their feet.
     /// </summary>
-    private ClientPlayerData? GetFightPartner(string scene, out CoopSaveMarker? marker) {
+    private List<ClientPlayerData>? GetFightMembers(string scene, out CoopSaveMarker? marker) {
         marker = null;
         var hero = HeroController.instance;
         if (_fightStartedScene == scene || !IsInGame() || hero == null || hero.cState.dead ||
-            PlayerTargetRegistry.IsPlayerDown(hero.gameObject) ||
-            GetCurrentMarker() is not { } current || FindPartner(current) is not { } partner ||
-            _checkedWith != partner.Id || !partner.IsInLocalScene) {
+            PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || GetCurrentMarker() is not { } current) {
+            return null;
+        }
+
+        var members = FindMembers(current);
+        if (members.Count == 0 || !IsGroupComplete(current, members) ||
+            !members.TrueForAll(member => member.IsInLocalScene)) {
             return null;
         }
 
         marker = current;
-        return partner;
+        return members;
     }
 
     /// <summary>
-    /// Whether the local player is in a boss fight that started with both players since they came into its scene, and
-    /// that has a checkpoint. Only such a fight ends when the partner drops out, not a room whose boss waits after an
+    /// Whether the local player is in a boss fight that started with every player since they came into its scene, and
+    /// that has a checkpoint. Only such a fight ends when a member drops out, not a room whose boss waits after an
     /// earlier fight ended.
     /// </summary>
     private bool IsInBossFight() {
@@ -195,16 +207,19 @@ internal partial class CoopSave {
         _interruptPending = false;
         _loadedWithCheckpoint = false;
         _nextDefeatCheckTime = Time.unscaledTime + DefeatCheckInterval;
-        Logger.Info($"The boss fight in '{scene}' started with both players, checkpoint at door '{gate}'");
+        Logger.Info($"The boss fight in '{scene}' started with every player, checkpoint at door '{gate}'");
     }
 
     /// <summary>
     /// Keeps the boss checkpoint of the loaded save up to date every frame: ends it when its boss was beaten, gives a
-    /// partner who comes into the fight a checkpoint too, takes the local player out of a fight that their partner
-    /// dropped out of, saves the game for a fight that started, and takes the local player back to the door after
-    /// loading a save whose fight lasted.
+    /// member who comes into the fight a checkpoint too, takes the local player out of a fight that a member dropped
+    /// out of, saves the game for a fight that started, and takes the local player back to the door after loading a
+    /// save whose fight lasted.
     /// </summary>
-    private void UpdateCheckpoint(HeroController hero, CoopSaveMarker marker, ClientPlayerData? partner) {
+    /// <param name="hero">The hero controller.</param>
+    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="members">The members of the save who are on the server.</param>
+    private void UpdateCheckpoint(HeroController hero, CoopSaveMarker marker, List<ClientPlayerData> members) {
         var scene = SceneUtil.GetCurrentSceneName();
         var bossScene = marker.BossScene;
         if (bossScene != null && scene == bossScene && Time.unscaledTime >= _nextDefeatCheckTime) {
@@ -223,19 +238,26 @@ internal partial class CoopSave {
         // Without a connection the game goes back to the main menu, and the checkpoint stays for when the player is back
         if (!_netClient.IsConnected) {
             _interruptPending = false;
-            _partnerWasInScene = false;
+            _membersWereInScene.Clear();
             return;
         }
 
-        // A partner who comes into a fight that goes on, like after dying, gets a checkpoint for it too
-        var partnerIn = partner != null && _checkedWith == partner.Id;
-        var partnerInScene = partner != null && partnerIn && partner.IsInLocalScene;
-        if (partner != null && partnerInScene && !_partnerWasInScene && _fightStartedScene == scene &&
-            bossScene == scene) {
-            Send(new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.BossFight, Records = [scene] });
+        // A member who comes into a fight that goes on, like after dying, gets a checkpoint for it too
+        var allIn = IsGroupComplete(marker, members);
+        foreach (var member in members) {
+            var inScene = _checkedMembers.Contains(member.Id) && member.IsInLocalScene;
+            if (inScene && !_membersWereInScene.Contains(member.Id) && _fightStartedScene == scene &&
+                bossScene == scene) {
+                Send(new CoopSaveUpdate { TargetId = member.Id, Kind = CoopSaveUpdateKind.BossFight, Records = [scene] });
+            }
         }
 
-        _partnerWasInScene = partnerInScene;
+        _membersWereInScene.Clear();
+        foreach (var member in members) {
+            if (_checkedMembers.Contains(member.Id) && member.IsInLocalScene) {
+                _membersWereInScene.Add(member.Id);
+            }
+        }
 
         var gameManager = global::GameManager.instance;
         if (gameManager.GameState != GameState.PLAYING || gameManager.IsInSceneTransition || hero.cState.dead ||
@@ -244,12 +266,12 @@ internal partial class CoopSave {
             return;
         }
 
-        if (_interruptPending && (scene != bossScene || partnerIn)) {
+        if (_interruptPending && (scene != bossScene || allIn)) {
             _interruptPending = false;
         }
 
         if (_interruptPending) {
-            // A boss that fell right before the partner dropped out doesn't need its door anymore
+            // A boss that fell right before the member dropped out doesn't need its door anymore
             if (Time.unscaledTime >= _nextMoveTryTime && !EndCheckpointIfBeaten(marker)) {
                 _fightSaveScene = null;
                 if (LeaveBossFight(hero, marker, scene)) {
@@ -270,7 +292,7 @@ internal partial class CoopSave {
             Chat(Lang.Pick("Saved your game at the start of the boss fight.", "已经在这场 Boss 战开始的地方存了档。"));
         }
 
-        if (bossScene == null || !_loadedWithCheckpoint || !partnerIn) {
+        if (bossScene == null || !_loadedWithCheckpoint || !allIn) {
             return;
         }
 
@@ -301,8 +323,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Ends the boss fight for the local player because their partner dropped out of it: they leave through the door
-    /// they came in through, and the boss waits for both players again when they come back in.
+    /// Ends the boss fight for the local player because a member dropped out of it: they leave through the door they
+    /// came in through, and the boss waits for every player again when they come back in.
     /// </summary>
     /// <returns>Whether the player started leaving.</returns>
     private bool LeaveBossFight(HeroController hero, CoopSaveMarker marker, string scene) {
@@ -343,15 +365,22 @@ internal partial class CoopSave {
 
         Logger.Info(
             leadsOut
-                ? $"The partner dropped out of the boss fight, leaving through door '{gate}'"
-                : $"The partner dropped out of the boss fight, coming back in through door '{gate}', which doesn't lead out"
+                ? $"A member dropped out of the boss fight, leaving through door '{gate}'"
+                : $"A member dropped out of the boss fight, coming back in through door '{gate}', which doesn't lead out"
         );
+        var name = marker.Members.Count <= 1 ? marker.PartnerName : _interruptName ?? marker.PartnerName;
         Chat(
-            Lang.Pick(
-                $"{marker.PartnerName} dropped out of the boss fight, so it ends for you too. The boss waits until you are " +
-                "both back in the room.",
-                $"{marker.PartnerName} 掉出了这场 Boss 战，所以你这边也跟着结束了。等你们两个都回到房间，Boss 才会继续。"
-            )
+            marker.Members.Count <= 1
+                ? Lang.Pick(
+                    $"{name} dropped out of the boss fight, so it ends for you too. The boss waits until you are both " +
+                    "back in the room.",
+                    $"{name} 掉出了这场 Boss 战，所以你这边也跟着结束了。等你们两个都回到房间，Boss 才会继续。"
+                )
+                : Lang.Pick(
+                    $"{name} dropped out of the boss fight, so it ends for you too. The boss waits until you are all " +
+                    "back in the room.",
+                    $"{name} 掉出了这场 Boss 战，所以你这边也跟着结束了。等你们都回到房间，Boss 才会继续。"
+                )
         );
         return true;
     }
@@ -476,7 +505,7 @@ internal partial class CoopSave {
         _checkpointMoveNoticed = false;
         _checkpointMoveTime = -1f;
         _nextMoveTryTime = 0f;
-        _partnerWasInScene = false;
+        _membersWereInScene.Clear();
     }
 
     /// <summary>
@@ -486,7 +515,7 @@ internal partial class CoopSave {
     private void OnCheckpointSceneChanged(string sceneName) {
         _fightStartedScene = null;
         _fightSaveScene = null;
-        _partnerWasInScene = false;
+        _membersWereInScene.Clear();
 
         // Loading a save doesn't leave its boss fight, and neither do scenes like the one on the way to the menu
         var gameManager = global::GameManager.instance;

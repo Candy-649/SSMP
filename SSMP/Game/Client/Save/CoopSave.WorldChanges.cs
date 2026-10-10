@@ -205,6 +205,22 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether the save of a member has a larger key than the local save, which decides between things that their
+    /// games chose at once.
+    /// </summary>
+    private bool MemberKeyWins(ClientPlayerData member) {
+        return string.CompareOrdinal(GetMemberKey(GetCurrentMarker(), member), LocalKey) > 0;
+    }
+
+    /// <summary>
+    /// Whether the save of one member has a larger key than the save of another, for what their games chose at once.
+    /// </summary>
+    private bool MemberKeyWins(ClientPlayerData member, ClientPlayerData over) {
+        var marker = GetCurrentMarker();
+        return string.CompareOrdinal(GetMemberKey(marker, member), GetMemberKey(marker, over)) > 0;
+    }
+
+    /// <summary>
     /// Remembers the saved objects of the world that both saves have after a check: those that the local save sent and
     /// those that the save of the partner sent. Everything else that is set gets sent as a change.
     /// </summary>

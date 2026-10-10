@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
@@ -13,19 +14,19 @@ namespace SSMP.Game.Client.Save;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Races against the racer of a room in a checked two-player save, which both players run together and win together.
+/// Races against the racer of a room in a checked two-player save, which the members run together and win together.
 ///
 /// Each game has its own racer, its own track and its own count of laps, and only its own hero can cross a line, so a
-/// race is still two races: each player runs theirs in their own game. What is shared is how they start and how they
-/// end. A race starts only once both players said yes at their own prompt, which the prompts that need both players
-/// see to. Both then wait at the start line, in the dark the game puts them in there, until the other one is there
-/// too, so that the countdowns of both games start together. And both win as soon as either of them beats the racer:
-/// a player who lost is held where the game would tell them so, until the partner either wins - and this game is then
-/// told that its player won too - or is out as well.
+/// race is still one race for each player: each runs theirs in their own game. What is shared is how they start and
+/// how they end. A race starts only once every member said yes at their own prompt, which the prompts that need every
+/// member see to. They then wait at the start line, in the dark the game puts them in there, until every member in the
+/// room is there too, so that the countdowns of their games start together. And all of them win as soon as any of them
+/// beats the racer: a player who lost is held where the game would tell them so, until another member either wins -
+/// and this game is then told that its player won too - or every one of them is out as well.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
-    /// How long a player waits at the start line for the partner before running alone. The partner may still be
+    /// How long a player waits at the start line for the other members before running without them. They may still be
     /// reading what the racer says after the yes, so it is long; the one who waits sees why in the chat.
     /// </summary>
     private const float RaceStartTimeout = 60f;
@@ -36,7 +37,7 @@ internal partial class CoopSave {
     private const ushort RaceReady = 0;
 
     /// <summary>
-    /// The sender beat the racer, which wins the race for both players.
+    /// The sender beat the racer, which wins the race for every member.
     /// </summary>
     private const ushort RaceWon = 1;
 
@@ -46,7 +47,7 @@ internal partial class CoopSave {
     private const ushort RaceOut = 2;
 
     /// <summary>
-    /// The sender is already running and answers the partner's word that they are at the start line. Kept apart from
+    /// The sender is already running and answers a member's word that they are at the start line. Kept apart from
     /// <see cref="RaceReady"/> so that it is never answered in turn: two players who were both already running used to
     /// answer each other's answers for the rest of the race.
     /// </summary>
@@ -119,8 +120,8 @@ internal partial class CoopSave {
     private Fsm? _raceFsm;
 
     /// <summary>
-    /// The wishes of that racer. Their changes don't go to the partner until the race is over, because the game of the
-    /// partner decides what a win gives by whether the wish is complete, and a completion of this game that arrived
+    /// The wishes of that racer. Their changes don't go to the members until the race is over, because the game of a
+    /// member decides what a win gives by whether the wish is complete, and a completion of this game that arrived
     /// before that would take the rewards of the last track away from them.
     /// </summary>
     private readonly HashSet<string> _raceWishes = new(StringComparer.Ordinal);
@@ -131,7 +132,7 @@ internal partial class CoopSave {
     private bool _raceStarted;
 
     /// <summary>
-    /// The event of the racer that waits for the partner, or null.
+    /// The event of the racer that waits for the members, or null.
     /// </summary>
     private RaceHold? _raceHold;
 
@@ -141,35 +142,35 @@ internal partial class CoopSave {
     private bool _releasingRaceEvent;
 
     /// <summary>
-    /// Whether the local player won this race, by beating the racer or with the partner.
+    /// Whether the local player won this race, by beating the racer or with a member.
     /// </summary>
     private bool _raceWonHere;
 
     /// <summary>
-    /// Whether the partner was told how the race ended for the local player.
+    /// Whether the members were told how the race ended for the local player.
     /// </summary>
     private bool _raceResultSent;
 
     /// <summary>
-    /// Whether the partner runs this race too.
+    /// The members who run this race too.
     /// </summary>
-    private bool _partnerRacing;
+    private readonly HashSet<ushort> _racingMembers = [];
 
     /// <summary>
-    /// Whether the partner beat the racer in this race.
+    /// The members who beat the racer in this race, any one of whom wins it for everyone.
     /// </summary>
-    private bool _partnerRaceWon;
+    private readonly HashSet<ushort> _raceWonBy = [];
 
     /// <summary>
-    /// Whether the partner is out of this race.
+    /// The members who are out of this race.
     /// </summary>
-    private bool _partnerRaceOut;
+    private readonly HashSet<ushort> _raceOutMembers = [];
 
     /// <summary>
-    /// When the partner said they are at the start line before the local player got there. It counts for as long as
-    /// the partner waits there.
+    /// When each member said they are at the start line, kept from before the local player got there. It counts for as
+    /// long as they wait there.
     /// </summary>
-    private float _partnerRaceReadyAt = float.NegativeInfinity;
+    private readonly Dictionary<ushort, float> _raceReadyAt = new();
 
     /// <summary>
     /// Whether syncing a race threw, which is only logged once.
@@ -211,9 +212,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// What to ask the partner about starting a race. It names the racer rather than the prompt, because the first race
-    /// asks in the box that accepts the wish and every later one in a plain box, and the two players need not be at
-    /// the same one.
+    /// What to ask the members about starting a race. It names the racer rather than the prompt, because the first race
+    /// asks in the box that accepts the wish and every later one in a plain box, and the players need not be at the same
+    /// one.
     /// </summary>
     private static CoopSaveUpdate? CreateRaceConfirm(YesNoAction action, ref string what) {
         var racer = action.Fsm?.GameObject;
@@ -237,7 +238,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a wish of the local wish log belongs to the race that runs, and waits for it to end before it goes to
-    /// the partner.
+    /// the members.
     /// </summary>
     private bool IsHeldByRace(string name) {
         return _raceFsm != null && _raceWishes.Contains(name);
@@ -276,7 +277,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts following a try of a race. What the partner said about the start line is kept, since they may have got
+    /// Starts following a try of a race. What the members said about the start line is kept, since they may have got
     /// there first.
     /// </summary>
     private void StartRaceRound(Fsm fsm) {
@@ -285,9 +286,9 @@ internal partial class CoopSave {
         _raceHold = null;
         _raceWonHere = false;
         _raceResultSent = false;
-        _partnerRacing = false;
-        _partnerRaceWon = false;
-        _partnerRaceOut = false;
+        _racingMembers.Clear();
+        _raceWonBy.Clear();
+        _raceOutMembers.Clear();
 
         _raceWishes.Clear();
         foreach (var action in GetWishActions(fsm)) {
@@ -323,14 +324,14 @@ internal partial class CoopSave {
         _raceStarted = false;
         _raceWonHere = false;
         _raceResultSent = false;
-        _partnerRacing = false;
-        _partnerRaceWon = false;
-        _partnerRaceOut = false;
-        _partnerRaceReadyAt = float.NegativeInfinity;
+        _racingMembers.Clear();
+        _raceWonBy.Clear();
+        _raceOutMembers.Clear();
+        _raceReadyAt.Clear();
     }
 
     /// <summary>
-    /// Whether an event of the racer waits for the partner rather than going on: leaving the start line, and hearing
+    /// Whether an event of the racer waits for the members rather than going on: leaving the start line, and hearing
     /// that the race was lost.
     /// </summary>
     private bool HoldsRaceEvent(Fsm fsm, FsmEvent fsmEvent) {
@@ -361,66 +362,107 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Keeps the local player at the start line until the partner is there too.
+    /// Keeps the local player at the start line until every member in the room is there too.
     /// </summary>
     /// <returns>Whether the start waits.</returns>
     private bool HoldRaceStart() {
-        if (GetRacePartner() is not { } partner) {
+        var members = GetCheckedMembers();
+        if (members.Count == 0) {
             _raceStarted = true;
             return false;
         }
 
-        if (!partner.IsInLocalScene) {
+        var room = members.FindAll(member => member.IsInLocalScene);
+        if (room.Count == 0) {
             _raceStarted = true;
+            var away = JoinNames(members.Select(member => member.Username));
             Chat(Lang.Pick(
-                $"{partner.Username} isn't in this room, so you race alone.",
-                $"{partner.Username} 不在这个房间，你自己跑。"
+                members.Count == 1
+                    ? $"{away} isn't in this room, so you race alone."
+                    : $"{away} aren't in this room, so you race alone.",
+                $"{away} 不在这个房间，你自己跑。"
             ));
             return false;
         }
 
-        if (Time.unscaledTime - _partnerRaceReadyAt <= RaceStartTimeout) {
-            _partnerRaceReadyAt = float.NegativeInfinity;
-            _partnerRacing = true;
+        var waiting = room.FindAll(member => !IsAtRaceStartLine(member.Id));
+        if (waiting.Count == 0) {
+            RaceTogetherWith(room);
             _raceStarted = true;
-            SendRace(partner.Id, RaceReady);
+            SendRace(null, RaceReady);
+            var names = JoinNames(room.Select(member => member.Username));
             Chat(Lang.Pick(
-                $"{partner.Username} is at the start line too. Race together!",
-                $"{partner.Username} 也在起跑线上了，一起跑！"
+                room.Count == 1
+                    ? $"{names} is at the start line too. Race together!"
+                    : $"{names} are at the start line too. Race together!",
+                $"{names} 也在起跑线上了，一起跑！"
             ));
-            Logger.Info($"{partner.Username} was at the start line first, so the race starts at once");
+            Logger.Info($"{names} were at the start line first, so the race starts at once");
             return false;
         }
 
         _raceHold = new RaceHold(RaceStartLineState, RaceFinishedEvent, true);
-        SendRace(partner.Id, RaceReady);
+        SendRace(null, RaceReady);
+        var missing = JoinNames(waiting.Select(member => member.Username));
         Chat(Lang.Pick(
-            $"Waiting for {partner.Username} to reach the start line too (at most a minute)...",
-            $"等 {partner.Username} 也到起跑线再一起开跑（最多等一分钟）……"
+            $"Waiting for {missing} to reach the start line too (at most a minute)...",
+            $"等 {missing} 也到起跑线再一起开跑（最多等一分钟）……"
         ));
-        Logger.Info($"Waiting at the start line for {partner.Username}");
+        Logger.Info($"Waiting at the start line for {missing}");
         return true;
     }
 
     /// <summary>
-    /// Keeps the racer from telling the local player that they lost while the partner may still win for both.
+    /// Whether a member said they are at the start line, and still waits there.
+    /// </summary>
+    private bool IsAtRaceStartLine(ushort playerId) {
+        return _raceReadyAt.TryGetValue(playerId, out var at) && Time.unscaledTime - at <= RaceStartTimeout;
+    }
+
+    /// <summary>
+    /// Counts the given members as running this race with the local player, which their word at the start line was.
+    /// </summary>
+    private void RaceTogetherWith(List<ClientPlayerData> members) {
+        foreach (var member in members) {
+            _racingMembers.Add(member.Id);
+            _raceReadyAt.Remove(member.Id);
+        }
+    }
+
+    /// <summary>
+    /// The members who run this race with the local player and are still in it: in the room, and not out.
+    /// </summary>
+    private List<ClientPlayerData> GetMembersStillRacing() {
+        return GetCheckedMembers().FindAll(member =>
+            _racingMembers.Contains(member.Id) && member.IsInLocalScene && !_raceOutMembers.Contains(member.Id)
+        );
+    }
+
+    /// <summary>
+    /// Keeps the racer from telling the local player that they lost while another member may still win for everyone.
     /// </summary>
     /// <returns>Whether the loss waits.</returns>
     private bool HoldRaceLoss(string state, string eventName) {
-        // Taken as a win by the next update, which is where the partner's win is turned into one here
-        if (_partnerRaceWon) {
+        // Taken as a win by the next update, which is where the win of a member is turned into one here
+        if (_raceWonBy.Count > 0) {
             _raceHold = new RaceHold(state, eventName, false);
             return true;
         }
 
         SendRaceResult(RaceOut);
-        if (_partnerRacing && !_partnerRaceOut && GetRacePartner() is { IsInLocalScene: true } partner) {
+        var racing = GetMembersStillRacing();
+        if (racing.Count > 0) {
             _raceHold = new RaceHold(state, eventName, false);
+            var names = JoinNames(racing.Select(member => member.Username));
             Chat(Lang.Pick(
-                $"You didn't beat the racer. If {partner.Username} does, you both win.",
-                $"你没赢过对手。只要 {partner.Username} 赢了，就算你们都赢。"
+                _checkedMembers.Count <= 1
+                    ? $"You didn't beat the racer. If {names} does, you both win."
+                    : $"You didn't beat the racer. If {names} does, you all win.",
+                _checkedMembers.Count <= 1
+                    ? $"你没赢过对手。只要 {names} 赢了，就算你们都赢。"
+                    : $"你没赢过对手。只要 {names} 有人赢了，就算大家都赢。"
             ));
-            Logger.Info($"Holding '{eventName}' of the race until {partner.Username} is done");
+            Logger.Info($"Holding '{eventName}' of the race until {names} are done");
             return true;
         }
 
@@ -428,10 +470,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Lets a race go on once the partner decided it: at the start line, when they got there or stopped coming, and
-    /// after a loss, when they won for both or are out too.
+    /// Lets a race go on once the members decided it: at the start line, when they got there or stopped coming, and
+    /// after a loss, when one of them won for everyone or all of them are out too.
     /// </summary>
-    private void UpdateRaces(ClientPlayerData? partner) {
+    private void UpdateRaces() {
         if (_raceFsm is not { } fsm) {
             return;
         }
@@ -443,9 +485,6 @@ internal partial class CoopSave {
             }
 
             var state = fsm.ActiveStateName;
-            var partnerHere = partner != null && partner.IsInLocalScene;
-            var partnerName = partner?.Username ??
-                              GetCurrentMarker()?.PartnerName ?? Lang.Pick("Your partner", "队友");
             if (_raceHold is { } held) {
                 // Something else moved the racer on, which leaves nothing waiting
                 if (held.State != state) {
@@ -453,40 +492,74 @@ internal partial class CoopSave {
                     return;
                 }
 
+                var members = GetCheckedMembers();
                 if (held.IsStart) {
-                    if (!partnerHere) {
+                    var room = members.FindAll(member => member.IsInLocalScene);
+                    var waiting = room.FindAll(member => !IsAtRaceStartLine(member.Id));
+                    if (room.Count == 0) {
+                        var gone = members.Count == 0
+                            ? GetCurrentMarker()?.PartnerName ?? Lang.Pick("Your partner", "队友")
+                            : JoinNames(members.Select(member => member.Username));
                         ReleaseRaceHold(fsm, Lang.Pick(
-                            $"{partnerName} isn't in this room any more, so you race alone.",
-                            $"{partnerName} 不在这个房间了，你先自己跑。"
+                            members.Count <= 1
+                                ? $"{gone} isn't in this room any more, so you race alone."
+                                : $"{gone} aren't in this room any more, so you race alone.",
+                            $"{gone} 不在这个房间了，你先自己跑。"
+                        ));
+                    } else if (waiting.Count == 0) {
+                        // Those who were waited for and left the room aren't waited for any more
+                        RaceTogetherWith(room);
+                        ReleaseRaceHold(fsm, Lang.Pick(
+                            "Everyone in this room is at the start line. Race together!",
+                            "这个房间里的人都到起跑线了，一起跑！"
                         ));
                     } else if (Time.unscaledTime - held.Since > RaceStartTimeout) {
-                        ReleaseRaceHold(fsm, Lang.Pick(
-                            $"{partnerName} didn't reach the start line, so you race alone.",
-                            $"{partnerName} 一直没到起跑线，你先自己跑。"
-                        ));
+                        var ready = room.FindAll(member => IsAtRaceStartLine(member.Id));
+                        RaceTogetherWith(ready);
+                        var missing = JoinNames(waiting.Select(member => member.Username));
+                        ReleaseRaceHold(fsm, ready.Count == 0
+                            ? Lang.Pick(
+                                $"{missing} didn't reach the start line, so you race alone.",
+                                $"{missing} 一直没到起跑线，你先自己跑。"
+                            )
+                            : Lang.Pick(
+                                $"{missing} didn't reach the start line, so you race without them.",
+                                $"{missing} 一直没到起跑线，你们先跑。"
+                            ));
                     }
 
                     return;
                 }
 
-                if (_partnerRaceWon) {
+                if (_raceWonBy.Count > 0) {
                     WinRaceWithPartner(fsm);
-                } else if (!partnerHere) {
-                    ReleaseRaceHold(fsm, Lang.Pick(
-                        $"{partnerName} isn't in this room any more, so this race is lost.",
-                        $"{partnerName} 不在这个房间了，这一轮算输。"
-                    ));
-                } else if (_partnerRaceOut) {
-                    ReleaseRaceHold(fsm, Lang.Pick(
-                        $"{partnerName} didn't beat the racer either, so this race is lost.",
-                        $"{partnerName} 也没赢过对手，这一轮算输。"
-                    ));
+                } else if (GetMembersStillRacing().Count == 0) {
+                    // Every member who ran it is out, or gone from the room: those who left are named if any did
+                    var racers = members.FindAll(member => _racingMembers.Contains(member.Id));
+                    var left = racers.FindAll(member => !member.IsInLocalScene);
+                    if (left.Count > 0 || racers.Count == 0) {
+                        var gone = racers.Count == 0
+                            ? GetCurrentMarker()?.PartnerName ?? Lang.Pick("Your partner", "队友")
+                            : JoinNames(left.Select(member => member.Username));
+                        ReleaseRaceHold(fsm, Lang.Pick(
+                            left.Count <= 1
+                                ? $"{gone} isn't in this room any more, so this race is lost."
+                                : $"{gone} aren't in this room any more, so this race is lost.",
+                            $"{gone} 不在这个房间了，这一轮算输。"
+                        ));
+                    } else {
+                        var names = JoinNames(racers.Select(member => member.Username));
+                        ReleaseRaceHold(fsm, Lang.Pick(
+                            $"{names} didn't beat the racer either, so this race is lost.",
+                            $"{names} 也没赢过对手，这一轮算输。"
+                        ));
+                    }
                 }
 
                 return;
             }
 
-            if (_partnerRaceWon && !_raceWonHere && state is RaceRunningState or RaceRunnerEndState) {
+            if (_raceWonBy.Count > 0 && !_raceWonHere && state is RaceRunningState or RaceRunnerEndState) {
                 WinRaceWithPartner(fsm);
             }
         } catch (Exception e) {
@@ -508,7 +581,7 @@ internal partial class CoopSave {
         }
 
         Chat(message);
-        Logger.Info($"Sending on '{held.EventName}' of the race, which waited for the partner");
+        Logger.Info($"Sending on '{held.EventName}' of the race, which waited for the members");
         _releasingRaceEvent = true;
         try {
             fsm.Event(held.EventName);
@@ -518,7 +591,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Makes the race of the local player won, because the partner beat the racer.
+    /// Makes the race of the local player won, because a member beat the racer.
     /// </summary>
     private void WinRaceWithPartner(Fsm fsm) {
         _raceWonHere = true;
@@ -528,7 +601,7 @@ internal partial class CoopSave {
         // In the middle of a race the game is told that the hero finished their laps, which is exactly what it hears
         // when the local player wins, so everything that listens for the end of a race hears it as well
         if (held == null && fsm.ActiveStateName == RaceRunningState && FinishHeroLaps(fsm)) {
-            Logger.Info("The partner won the race, so the laps of the local player were finished for them");
+            Logger.Info("A member won the race, so the laps of the local player were finished for them");
             return;
         }
 
@@ -542,7 +615,7 @@ internal partial class CoopSave {
             FsmExecutionStack.PopFsm();
         }
 
-        Logger.Info($"The partner won the race, so it is won here too from '{held?.State ?? RaceRunnerEndState}'");
+        Logger.Info($"A member won the race, so it is won here too from '{held?.State ?? RaceRunnerEndState}'");
     }
 
     /// <summary>
@@ -567,34 +640,38 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The local player beat the racer, which wins the race for the partner too.
+    /// The local player beat the racer, which wins the race for the members too.
     /// </summary>
     private void OnLocalRaceWon() {
-        // Won with the partner, who knows
+        // Won with a member, who knows
         if (_raceWonHere) {
             return;
         }
 
         _raceWonHere = true;
-        if (_partnerRaceWon) {
+        if (_raceWonBy.Count > 0) {
             return;
         }
 
         SendRaceResult(RaceWon);
-        if (_partnerRacing && GetRacePartner() is { IsInLocalScene: true } partner) {
+        var racing = GetCheckedMembers().FindAll(member =>
+            _racingMembers.Contains(member.Id) && member.IsInLocalScene
+        );
+        if (racing.Count > 0) {
+            var names = JoinNames(racing.Select(member => member.Username));
             Chat(Lang.Pick(
-                $"You beat the racer, so {partner.Username} wins too!",
-                $"你赢了对手，{partner.Username} 也算赢！"
+                racing.Count == 1 ? $"You beat the racer, so {names} wins too!" : $"You beat the racer, so {names} win too!",
+                $"你赢了对手，{names} 也算赢！"
             ));
         }
     }
 
     /// <summary>
-    /// The partner is at the start line, won or is out.
+    /// A member is at the start line, won or is out.
     /// </summary>
     private void OnRace(ClientPlayerData player, CoopSaveUpdate update) {
         try {
-            if (_checkedWith != player.Id || update.Scene != SceneUtil.GetCurrentSceneName()) {
+            if (!_checkedMembers.Contains(player.Id) || update.Scene != SceneUtil.GetCurrentSceneName()) {
                 return;
             }
 
@@ -610,11 +687,19 @@ internal partial class CoopSave {
                         return;
                     }
 
-                    _partnerRaceWon = true;
-                    Chat(Lang.Pick(
-                        $"{player.Username} beat the racer, so you both win!",
-                        $"{player.Username} 赢了对手，算你们都赢！"
-                    ));
+                    var first = _raceWonBy.Count == 0;
+                    _raceWonBy.Add(player.Id);
+                    if (first) {
+                        Chat(Lang.Pick(
+                            _checkedMembers.Count <= 1
+                                ? $"{player.Username} beat the racer, so you both win!"
+                                : $"{player.Username} beat the racer, so you all win!",
+                            _checkedMembers.Count <= 1
+                                ? $"{player.Username} 赢了对手，算你们都赢！"
+                                : $"{player.Username} 赢了对手，算大家都赢！"
+                        ));
+                    }
+
                     Logger.Info($"{player.Username} won the race");
                     break;
                 case RaceOut:
@@ -622,12 +707,18 @@ internal partial class CoopSave {
                         return;
                     }
 
-                    _partnerRaceOut = true;
-                    if (_raceHold == null && _raceStarted && !_raceWonHere && _partnerRacing) {
-                        Chat(Lang.Pick(
-                            $"{player.Username} didn't beat the racer. It's up to you now!",
-                            $"{player.Username} 没赢过对手，就看你的了！"
-                        ));
+                    _raceOutMembers.Add(player.Id);
+                    if (_raceHold == null && _raceStarted && !_raceWonHere && _racingMembers.Contains(player.Id)) {
+                        var others = GetMembersStillRacing();
+                        Chat(others.Count == 0
+                            ? Lang.Pick(
+                                $"{player.Username} didn't beat the racer. It's up to you now!",
+                                $"{player.Username} 没赢过对手，就看你的了！"
+                            )
+                            : Lang.Pick(
+                                $"{player.Username} didn't beat the racer. It's up to the rest of you now!",
+                                $"{player.Username} 没赢过对手，就看你们的了！"
+                            ));
                     }
 
                     Logger.Info($"{player.Username} is out of the race");
@@ -639,14 +730,27 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The partner got to the start line: the local player who waits there starts with them, one who is not there yet
-    /// starts at once when they get there, and one who already started tells them to start too.
+    /// A member got to the start line: the local player who waits there starts with them once every member in the room
+    /// is there, one who is not there yet starts at once when they get there, and one who already started tells them to
+    /// start too.
     /// </summary>
-    /// <param name="player">The partner.</param>
+    /// <param name="player">The member.</param>
     /// <param name="answer">Whether this answers a word of the local player, which is never answered again.</param>
     private void OnPartnerRaceReady(ClientPlayerData player, bool answer) {
         if (_raceFsm is { } fsm && _raceHold is { IsStart: true }) {
-            _partnerRacing = true;
+            _raceReadyAt[player.Id] = Time.unscaledTime;
+            var room = GetCheckedMembers().FindAll(member => member.IsInLocalScene);
+            var waiting = room.FindAll(member => !IsAtRaceStartLine(member.Id));
+            if (waiting.Count > 0) {
+                var missing = JoinNames(waiting.Select(member => member.Username));
+                Chat(Lang.Pick(
+                    $"{player.Username} is at the start line too. Still waiting for {missing}.",
+                    $"{player.Username} 也到起跑线了。还在等 {missing}。"
+                ));
+                return;
+            }
+
+            RaceTogetherWith(room);
             ReleaseRaceHold(fsm, Lang.Pick(
                 $"{player.Username} is at the start line too. Race together!",
                 $"{player.Username} 也到起跑线了，一起跑！"
@@ -654,10 +758,10 @@ internal partial class CoopSave {
             return;
         }
 
-        // They got there after the local player stopped waiting. How their race ends still counts for both, and they
-        // are only waiting for this word.
+        // They got there after the local player stopped waiting. How their race ends still counts for everyone, and
+        // they are only waiting for this word.
         if (_raceFsm != null && _raceStarted) {
-            _partnerRacing = true;
+            _racingMembers.Add(player.Id);
             if (!answer) {
                 SendRace(player.Id, RaceReadyAnswer);
                 Logger.Info($"{player.Username} reached the start line after the race started here");
@@ -666,12 +770,12 @@ internal partial class CoopSave {
             return;
         }
 
-        _partnerRaceReadyAt = Time.unscaledTime;
+        _raceReadyAt[player.Id] = Time.unscaledTime;
         Logger.Info($"{player.Username} is at the start line");
     }
 
     /// <summary>
-    /// Tells the partner how the race ended for the local player, once.
+    /// Tells the members how the race ended for the local player, once.
     /// </summary>
     private void SendRaceResult(ushort result) {
         if (_raceResultSent) {
@@ -679,25 +783,28 @@ internal partial class CoopSave {
         }
 
         _raceResultSent = true;
-        if (GetRacePartner() is { } partner) {
-            SendRace(partner.Id, result);
+        if (_checkedMembers.Count > 0) {
+            SendRace(null, result);
         }
     }
 
-    private void SendRace(ushort partnerId, ushort what) {
-        Send(new CoopSaveUpdate {
-            TargetId = partnerId,
+    /// <summary>
+    /// Sends a word about the race to one member, or to every member when no member is given; a game takes it only in
+    /// the room of the race.
+    /// </summary>
+    private void SendRace(ushort? targetId, ushort what) {
+        var update = new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.Race,
             PartCount = what,
             Scene = SceneUtil.GetCurrentSceneName()
-        });
-    }
+        };
 
-    /// <summary>
-    /// The checked partner, or null.
-    /// </summary>
-    private ClientPlayerData? GetRacePartner() {
-        return _checkedWith is { } id && _playerData.TryGetValue(id, out var partner) ? partner : null;
+        if (targetId is { } id) {
+            update.TargetId = id;
+            Send(update);
+        } else {
+            SendToMembers(update);
+        }
     }
 
     private void LogRaceError(Exception e) {

@@ -472,10 +472,11 @@ internal enum CoopSaveUpdateKind : byte {
     WaitingRoomReady,
 
     /// <summary>
-    /// The sender died and is waiting to be pulled back up instead of going to their bench, so the other player may
-    /// break the cocoon they left behind. <see cref="CoopSaveUpdate.Scene"/> is the room they died in and
-    /// <see cref="CoopSaveUpdate.Values"/> holds the x and y of the cocoon, so that the other game can show one where
-    /// there is none of its own.
+    /// The sender died and is waiting to be pulled back up instead of going to their bench, so the other members may
+    /// break the cocoon they left behind. <see cref="CoopSaveUpdate.Scene"/> is the room they died in,
+    /// <see cref="CoopSaveUpdate.Values"/> holds the x and y of the cocoon, so that the other games can show one where
+    /// there is none of their own, and a third value of 1 for a death in the chase of a lava, which leaves no cocoon.
+    /// <see cref="CoopSaveUpdate.Key"/> names the death, which every hit on the cocoon names in turn.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
@@ -483,15 +484,18 @@ internal enum CoopSaveUpdateKind : byte {
     RescueOffer,
 
     /// <summary>
-    /// The sender hit the cocoon that the other player left behind. <see cref="CoopSaveUpdate.Part"/> counts the hits
-    /// so far and <see cref="CoopSaveUpdate.PartCount"/> how many it takes, so that the player waiting sees how far it
-    /// got and is pulled back up on the last one.
+    /// The sender hit the cocoon that another member left behind, which <see cref="CoopSaveUpdate.Key"/> names by its
+    /// death, and every member is told. <see cref="CoopSaveUpdate.Part"/> counts the hits of the sender on it so far
+    /// and <see cref="CoopSaveUpdate.PartCount"/> how many it takes, so that the player waiting sees how far it got and
+    /// is pulled back up once the hits of everyone together reach it, and every game knows they are being pulled up.
+    /// A member who died in the chase of a lava is stood up the same way, with all the hits at once and
+    /// <see cref="CoopSaveUpdate.Values"/> holding where to stand up.
     /// </summary>
     RescueHit,
 
     /// <summary>
     /// The sender is no longer waiting to be pulled back up, because they went to their bench, they were pulled up, or
-    /// nobody could reach them any more. The cocoon that the other game showed for them goes away again.
+    /// nobody could reach them any more. The cocoon that the other games showed for them goes away again.
     /// </summary>
     RescueEnd,
 
@@ -517,8 +521,8 @@ internal enum CoopSaveUpdateKind : byte {
     FleaGamesOutroReady,
 
     /// <summary>
-    /// The sender has died while the other player was waiting to be pulled back up, so there is nobody left to open
-    /// that cocoon and the wait ends. Both players go to their bench, which is the rule for two deaths.
+    /// The sender has died while the other members were all waiting to be pulled back up, so there is nobody left to
+    /// open their cocoons and their waits end. Everyone goes to their bench, which is the rule for everyone down.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
@@ -561,10 +565,11 @@ internal enum CoopSaveUpdateKind : byte {
 
     /// <summary>
     /// Where the lava that chases the players in the room of the sender is in their game, and where they last stood
-    /// safely, sent a few times a second while it chases. <see cref="CoopSaveUpdate.Scene"/> names the room,
-    /// <see cref="CoopSaveUpdate.Sequence"/> tells the newest apart, and <see cref="CoopSaveUpdate.Values"/> holds how
-    /// high the lava is, how fast it rises, whether it is after anyone (1 or 0), whether there is a safe place (1 or
-    /// 0), that place, and how many seconds ago the sender stood there.
+    /// safely, sent to the members in that room a few times a second while it chases. <see cref="CoopSaveUpdate.Scene"/>
+    /// names the room, <see cref="CoopSaveUpdate.Sequence"/> tells the newest apart, <see cref="CoopSaveUpdate.Part"/>
+    /// is 1 when the game of the sender runs the room, whose lava the others follow, and
+    /// <see cref="CoopSaveUpdate.Values"/> holds how high the lava is, how fast it rises, whether it is after anyone (1
+    /// or 0), whether there is a safe place (1 or 0), that place, and how many seconds ago the sender stood there.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
@@ -654,9 +659,9 @@ internal enum CoopSaveUpdateKind : byte {
     TollBench,
 
     /// <summary>
-    /// The sender was waiting to be pulled back up and is now on their feet again. The other player, whose hits pulled
-    /// them up, is told only then, since a hit that pulls them up doesn't stand them up when something comes first in
-    /// their game.
+    /// The sender was waiting to be pulled back up and is now on their feet again. The member whose hit pulled them up
+    /// is told only then, since a hit that pulls them up doesn't stand them up when something comes first in their
+    /// game.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.

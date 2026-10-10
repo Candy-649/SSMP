@@ -1119,7 +1119,7 @@ internal class ClientManager : IClientManager {
                 : Lang.Pick($"Player '{username}' disconnected from the server", $"{username} 断开了连接")
         );
         _uiManager.OnPlayerLeft(username);
-        _coopSave.OnPlayerDisconnect(id);
+        _coopSave.OnPlayerDisconnect(id, username);
 
         try {
             PlayerDisconnectEvent?.Invoke(playerData!);

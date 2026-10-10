@@ -2,6 +2,7 @@ using System;
 using System.Reflection;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Hooks;
@@ -14,12 +15,13 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Being pulled back up by the other player after dying, instead of waking at a bench. While the other player is
-/// still standing, a death of the local player is not played out at all: the player goes down where they are, the
-/// game's own death is shown over them with what it tells the room taken out, and they lie in a cocoon that the other
-/// player can break open to put them back on their feet with half their health. The game's own death runs, from its
-/// very first step, only once nobody is left to do that: both players are down, the wait ran out, or the player gave
-/// up. Waiting is a choice, and the cocoon stops being shown to the other player the moment waiting ends.
+/// Being pulled back up by another member after dying, instead of waking at a bench. While another member is still
+/// standing, a death of the local player is not played out at all: the player goes down where they are, the game's own
+/// death is shown over them with what it tells the room taken out, and they lie in a cocoon that the other members can
+/// break open to put them back on their feet with half their health. Each member who is down lies in a cocoon of their
+/// own, and the hits of everyone who hits one count together. The game's own death runs, from its very first step,
+/// only once nobody is left to do that: every member is down, the wait ran out, or the player gave up. Waiting is a
+/// choice, and the cocoon stops being shown to the others the moment waiting ends.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -43,10 +45,10 @@ internal partial class CoopSave {
     private const float LeaveKeyDeadTime = 0.5f;
 
     /// <summary>
-    /// The name of the partner whose hits could still pull the local player back up, remembered so that the line
+    /// The names of the members whose hits could still pull the local player back up, remembered so that the line
     /// shown during a wait can name them even on a frame when the rest of the two-player save update does not run.
     /// </summary>
-    private string? _rescuePartnerName;
+    private List<string> _rescuerNames = [];
 
     /// <summary>
     /// The source of the short invulnerability of a player who was just pulled back up, so that the hit that killed
@@ -182,9 +184,15 @@ internal partial class CoopSave {
         public float StartTime { get; } = Time.unscaledTime;
 
         /// <summary>
-        /// How far the other player got in opening the cocoon.
+        /// How far the other members got in opening the cocoon, all of their hits together.
         /// </summary>
         public int Hits { get; set; }
+
+        /// <summary>
+        /// How many hits each member who hit the cocoon landed on it. Each of them says how many of theirs it has
+        /// taken so far rather than that it took one more, so a word of theirs that comes twice or late counts once.
+        /// </summary>
+        public Dictionary<ushort, int> HitsBy { get; } = new();
 
         /// <summary>
         /// How the wait ended, or <see cref="RescueOutcome.Waiting"/> while it has not.
@@ -204,8 +212,8 @@ internal partial class CoopSave {
         public MusicCue? Music { get; set; }
 
         /// <summary>
-        /// What names this death apart from every other one, so that what the partner says about opening a cocoon
-        /// can be told to be about this cocoon and not the last one.
+        /// What names this death apart from every other one, so that what the members say about opening a cocoon
+        /// can be told to be about this cocoon and not the last one, or the cocoon of another member.
         ///
         /// These messages are resent until they arrive and are never dropped in favour of a newer one, which is
         /// right for them - none of them may be lost - but it means one written about a death that is already over
@@ -215,19 +223,21 @@ internal partial class CoopSave {
         public ulong Key { get; set; }
 
         /// <summary>
-        /// Whether the wait ended because the partner went down as well, which makes this one of two deaths rather than
-        /// a death of one player that the other lived through.
+        /// Whether the wait ended because every other member went down as well, which makes this one of everyone's
+        /// deaths rather than a death of one player that the others lived through.
         /// </summary>
-        public bool PartnerDown { get; set; }
+        public bool EveryoneDown { get; set; }
 
         /// <summary>
-        /// Whether the player died while a lava was chasing the two of them, which leaves no cocoon: they stand up
-        /// beside the partner a few seconds later instead (see <see cref="UpdateChaseStandUp"/>).
+        /// Whether the player died while a lava was chasing them and a member on their feet in its room, which leaves
+        /// no cocoon: they stand up beside a member there a few seconds later instead (see
+        /// <see cref="UpdateChaseStandUp"/>).
         /// </summary>
         public bool Chase { get; set; }
 
         /// <summary>
-        /// Where the partner said to stand up, for a death in the chase, or null to stand up where they fell.
+        /// Where the member who stood them up said to stand up, for a death in the chase, or null to stand up where
+        /// they fell.
         /// </summary>
         public Vector2? StandAt { get; set; }
 
@@ -251,7 +261,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The cocoon of the partner, shown in this game only while they are waiting to be pulled back up.
+    /// The cocoon of another member, shown in this game only while they are waiting to be pulled back up.
     /// </summary>
     private sealed class RescueTarget {
         public RescueTarget(ushort playerId, string scene, GameObject cocoon) {
@@ -274,21 +284,52 @@ internal partial class CoopSave {
         /// The object that stands in for their cocoon.
         /// </summary>
         public GameObject Cocoon { get; }
-
-        /// <summary>
-        /// How many hits it has taken.
-        /// </summary>
-        public int Hits { get; set; }
-
-        /// <summary>
-        /// What the player who is waiting called this death of theirs, sent back with every hit so that a hit cannot
-        /// be taken as being about a later death of the same player.
-        /// </summary>
-        public ulong Key { get; set; }
     }
 
     /// <summary>
-    /// Counts the hits of the local player on the cocoon of the partner. The cocoon of the game's own player is never
+    /// Another member who is lying down waiting to be pulled back up, as far as this game has heard.
+    /// </summary>
+    private sealed class WaitingMember {
+        public WaitingMember(string scene, Vector2 position, ulong key) {
+            Scene = scene;
+            Position = position;
+            Key = key;
+        }
+
+        /// <summary>
+        /// The room their cocoon is in, or empty for a death in the chase of a lava, which leaves none.
+        /// </summary>
+        public string Scene { get; }
+
+        /// <summary>
+        /// Where in that room their cocoon is.
+        /// </summary>
+        public Vector2 Position { get; }
+
+        /// <summary>
+        /// What they called the death their cocoon belongs to, which every hit on it names, so that a hit cannot be
+        /// taken as being about a later death of the same player, or about the cocoon of another.
+        /// </summary>
+        public ulong Key { get; }
+
+        /// <summary>
+        /// How many hits the local player landed on their cocoon.
+        /// </summary>
+        public int OwnHits { get; set; }
+
+        /// <summary>
+        /// How many hits each of the other members landed on it, as each of them said.
+        /// </summary>
+        public Dictionary<ushort, int> HitsBy { get; } = new();
+
+        /// <summary>
+        /// All of the hits on their cocoon together.
+        /// </summary>
+        public int Hits => OwnHits + HitsBy.Values.Sum();
+    }
+
+    /// <summary>
+    /// Counts the hits of the local player on the cocoon of another member. The cocoon of the game's own player is never
     /// this: that one keeps its own components and belongs to the player it was left by.
     /// </summary>
     private sealed class RescueCocoonHits : MonoBehaviour, IHitResponder {
@@ -306,7 +347,7 @@ internal partial class CoopSave {
         /// <inheritdoc/>
         public IHitResponder.HitResponse Hit(HitInstance damageInstance) {
             // Only the local player's own attacks open it. Creatures swing through where it lies as well, and the
-            // attacks of some of them hit whatever they touch, which counted towards pulling the partner up and paid
+            // attacks of some of them hit whatever they touch, which counted towards pulling the member up and paid
             // this player silk for it. For them there is nothing there.
             if (!damageInstance.IsHeroDamage) {
                 return IHitResponder.Response.None;
@@ -422,14 +463,17 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The name given to the last death of the local player that waited to be pulled back up. Every death takes the
-    /// next one, so that what the partner says about one cocoon is never taken as being about another.
+    /// next one, so that what the members say about one cocoon is never taken as being about another. Each game starts
+    /// from a number of its own, so that the deaths of different players don't share a name either: a hit on a cocoon
+    /// goes to every member, and the name is how each game tells whose cocoon was hit.
     /// </summary>
-    private ulong _lastRescueKey;
+    private ulong _lastRescueKey = (ulong) BitConverter.ToUInt32(Guid.NewGuid().ToByteArray(), 0) << 32;
 
     /// <summary>
-    /// The cocoon of the partner that the local player can open, or null while they are not waiting.
+    /// The cocoons of other members that the local player can open, by the member lying in each. One is here only while
+    /// its member is waiting and the local player stands in its room.
     /// </summary>
-    private RescueTarget? _rescueTarget;
+    private readonly Dictionary<ushort, RescueTarget> _rescueTargets = new();
 
     /// <summary>
     /// The cocoon shown to the player who is lying in it, or null while none is.
@@ -442,34 +486,19 @@ internal partial class CoopSave {
     private GameObject? _rescueOwnCocoon;
 
     /// <summary>
-    /// The partner who is lying dead waiting to be pulled back up, or null while they are not. This is kept apart from
-    /// <see cref="_rescueTarget"/> on purpose: that one only exists while their cocoon is in the room the local player
-    /// is standing in, and a partner who died somewhere else is still in no position to pull anyone up.
+    /// The other members who are lying dead waiting to be pulled back up. This is kept apart from
+    /// <see cref="_rescueTargets"/> on purpose: those only exist while a cocoon is in the room the local player is
+    /// standing in, and a member who died somewhere else is still in no position to pull anyone up. Kept even while the
+    /// local player is somewhere else, so that walking into the room of a cocoon later still shows it: an offer that
+    /// was thrown away because it arrived while the player was elsewhere could never be shown at all.
     /// </summary>
-    private ushort? _partnerWaitingRescue;
+    private readonly Dictionary<ushort, WaitingMember> _waitingMembers = new();
 
     /// <summary>
-    /// The partner whom the local player's last hit on their cocoon pulled up, and when, until their game says that
-    /// they are on their feet; null otherwise.
+    /// The members whom the local player's last hit on their cocoon pulled up, and when, until their game says that
+    /// they are on their feet.
     /// </summary>
-    private (ushort PlayerId, float Time)? _partnerBeingPulledUp;
-
-    /// <summary>
-    /// The room the waiting partner died in, or empty while none is waiting. Remembered even while the local player is
-    /// somewhere else, so that walking into that room later still shows their cocoon: an offer that was thrown away
-    /// because it arrived while the player was elsewhere could never be shown at all.
-    /// </summary>
-    private string _partnerCocoonScene = "";
-
-    /// <summary>
-    /// Where in that room their cocoon is.
-    /// </summary>
-    private Vector2 _partnerCocoonPosition;
-
-    /// <summary>
-    /// What the partner called the death their cocoon belongs to, sent back with every hit on it.
-    /// </summary>
-    private ulong _partnerRescueKey;
+    private readonly Dictionary<ushort, float> _membersBeingPulledUp = new();
 
     /// <summary>
     /// Whether a failure of this has been logged already.
@@ -630,14 +659,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Keeps the world where it is for a death that the partner lived through.
+    /// Keeps the world where it is for a death that another member lived through.
     ///
     /// A death is the game's main way of letting time pass: once the save is written and just before the player is
     /// taken to their bench, <c>GameManager.PlayerDead</c> calls this, and it moves characters on, rolls whether
-    /// some of them are out, and ends what only lasts a few rooms. In a two-player save only both players going down
-    /// counts as time passing - one of them waking at a bench while the other is still out there has not made any time
-    /// pass for the world the two of them share. Being pulled back up never gets here at all. Leaving the game and the
-    /// other callers are untouched.
+    /// some of them are out, and ends what only lasts a few rooms. In a two-player save only every member going down
+    /// counts as time passing - one of them waking at a bench while another is still out there has not made any time
+    /// pass for the world they share. Being pulled back up never gets here at all. Leaving the game and the other
+    /// callers are untouched.
     /// </summary>
     /// <param name="orig">The original method.</param>
     /// <param name="self">The game manager.</param>
@@ -653,7 +682,7 @@ internal partial class CoopSave {
             _deathPassesNoTime = false;
 
             if (HeroController.instance is { } hero && hero.cState.dead) {
-                Logger.Info("Not letting time pass for this death: the teammate is still standing");
+                Logger.Info("Not letting time pass for this death: a teammate is still standing");
 
                 return;
             }
@@ -673,8 +702,8 @@ internal partial class CoopSave {
     private Hook? _timePassesHook;
 
     /// <summary>
-    /// Whether the death that is on its way to the bench is one the partner lived through, so the world does not move
-    /// on for it. Set when a player lying down is let go to the bench, and used up by the one call that moves the
+    /// Whether the death that is on its way to the bench is one another member lived through, so the world does not
+    /// move on for it. Set when a player lying down is let go to the bench, and used up by the one call that moves the
     /// world on.
     /// </summary>
     private bool _deathPassesNoTime;
@@ -735,8 +764,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Keeps a death of the local player from being played out while the partner can still pull them back up, and lays
-    /// them down instead. A death that leaves nobody to pull the player up plays out untouched.
+    /// Keeps a death of the local player from being played out while another member can still pull them back up, and
+    /// lays them down instead. A death that leaves nobody to pull the player up plays out untouched.
     /// </summary>
     /// <param name="death">The coroutine of the game that plays out the death.</param>
     /// <param name="nonLethal">Whether the death was non-lethal.</param>
@@ -772,13 +801,13 @@ internal partial class CoopSave {
         _deathPassesNoTime = false;
 
         // A death that is not lethal - losing a spar with a character, any death in a memory - is laid down like any
-        // other. A fight is lost only once both players are down (USER 10-10: "比试就按照所有boss战的标准来"), and
+        // other. A fight is lost only once every player is down (USER 10-10: "比试就按照所有boss战的标准来"), and
         // until then the room must not hear of it: the character won the spar at the first knock-out and stood there
         // in its victory pose while the partner was still fighting it. The cocoon a player lies in is this mod's own,
-        // so the cocoon that the game leaves out of such a death is no reason to wait for nothing. Once both are
+        // so the cocoon that the game leaves out of such a death is no reason to wait for nothing. Once everyone is
         // down, each game plays its own death, which brings its player back where the game says, with nothing lost.
         if (!CanWaitForRescue()) {
-            TellPartnerNobodyIsComing();
+            TellNobodyIsComing();
 
             return death;
         }
@@ -819,69 +848,89 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells a partner who is lying in their cocoon that nobody is coming, because the player who was to open it has
-    /// just died themselves.
+    /// Tells the members who are lying in their cocoons that nobody is coming, because the player who was the last one
+    /// left to open them has just died themselves.
     ///
-    /// Two deaths means two benches - that is the rule - and this is the half of it that was missing. The death of
-    /// the second player already goes straight to their bench, because a player whose partner is waiting cannot wait
-    /// themselves, but the first player was never told and lay there until their wait ran out of time: watching an
-    /// empty room, with the enemies that killed them both still swinging at the spot they fell on.
+    /// Everyone down means everyone to their bench - that is the rule - and this is the half of it that was missing.
+    /// The death of the last player already goes straight to their bench, because a player whom nobody standing is
+    /// left to pull up cannot wait themselves, but the others were never told and lay there until their wait ran out of
+    /// time: watching an empty room, with the enemies that killed them all still swinging at the spot they fell on.
+    /// While another member is still on their feet nobody is told anything, since they can still pull everyone up.
     /// </summary>
-    private void TellPartnerNobodyIsComing() {
+    private void TellNobodyIsComing() {
         try {
-            if (_partnerWaitingRescue is not { } playerId || GetCheckedPartner() is not { } partner ||
-                partner.Id != playerId) {
-                // Two players who both die and are both left lying there is exactly what this exists to stop, so
-                // which of these three it was is worth a line
+            if (!IsEveryoneElseDown()) {
+                // Players who all die and are all left lying there is exactly what this exists to stop, so which of
+                // these it was is worth a line
                 Logger.Info(
                     "Not telling anybody that nobody is coming: " +
-                    $"waiting partner: {_partnerWaitingRescue?.ToString() ?? "none"}, " +
-                    $"checked partner: {GetCheckedPartner()?.Id.ToString() ?? "none"}"
+                    $"waiting members: {(_waitingMembers.Count == 0 ? "none" : string.Join(", ", _waitingMembers.Keys))}, " +
+                    $"checked members: {(_checkedMembers.Count == 0 ? "none" : GetCheckedNames())}"
                 );
 
                 return;
             }
 
-            Logger.Info($"Telling {partner.Username} that nobody is coming, because this player has died as well");
+            Logger.Info($"Telling {GetCheckedNames()} that nobody is coming, because this player has died as well");
 
-            Send(new CoopSaveUpdate {
-                TargetId = partner.Id,
+            SendToMembers(new CoopSaveUpdate {
                 Kind = CoopSaveUpdateKind.RescueLost
             });
 
-            // Their cocoon goes now rather than when they answer: this player is on their way to a bench either way.
-            // So are they, so their body is not stood up where they lay.
-            RemoveRescueTarget(false);
-            _partnerWaitingRescue = null;
+            // Their cocoons go now rather than when they answer: this player is on their way to a bench either way.
+            // So are they, so their bodies are not stood up where they lay.
+            RemoveRescueTargets(false);
+            _waitingMembers.Clear();
         } catch (Exception e) {
             LogRescueError(e);
         }
     }
 
     /// <summary>
-    /// The partner died while this player was waiting to be pulled back up, so the wait ends and this player goes to
-    /// their bench as well.
+    /// The last member who could have pulled this player up died while this player was waiting, so the wait ends and
+    /// this player goes to their bench as well.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     private void OnRescueLost(ClientPlayerData player) {
-        if (_rescue is not { Outcome: RescueOutcome.Waiting } rescue || GetCheckedPartner()?.Id != player.Id) {
+        if (_rescue is not { Outcome: RescueOutcome.Waiting } rescue || !_checkedMembers.Contains(player.Id)) {
             return;
         }
 
+        // Their game saw nobody else on their feet, but this one may know of a member that theirs did not, like one
+        // whose save it had not checked yet. With two players there is never anyone else.
+        if (GetStandingMembers().Find(member => member.Id != player.Id) is { } standing) {
+            Logger.Info($"{player.Username} died as well, but {standing.Username} is still standing, so the wait goes on");
+            return;
+        }
+
+        EndWaitEveryoneDown(rescue, player.Username);
+    }
+
+    /// <summary>
+    /// Ends the wait of the local player because the last member who could have pulled them up went down as well.
+    /// </summary>
+    /// <param name="rescue">The wait.</param>
+    /// <param name="name">The name of the member who went down last.</param>
+    private void EndWaitEveryoneDown(PendingRescue rescue, string name) {
         rescue.Outcome = RescueOutcome.Ended;
-        rescue.PartnerDown = true;
-        Logger.Info($"{player.Username} died as well, so this wait is over and both go to their benches");
+        rescue.EveryoneDown = true;
+        Logger.Info($"{name} died as well, so this wait is over and everyone goes to their bench");
         Chat(
-            Lang.Pick(
-                $"{player.Username} died as well, so you are both going back to your bench.",
-                $"{player.Username} 也死了，两个人一起回长椅。"
-            )
+            _checkedMembers.Count <= 1
+                ? Lang.Pick(
+                    $"{name} died as well, so you are both going back to your bench.",
+                    $"{name} 也死了，两个人一起回长椅。"
+                )
+                : Lang.Pick(
+                    $"{name} died as well, so you are all going back to your benches.",
+                    $"{name} 也死了，大家一起回长椅。"
+                )
         );
     }
 
     /// <summary>
-    /// Whether the local player can be pulled back up at all: the saves are checked with a partner who is here, and
-    /// that partner is not lying dead themselves, since two players waiting for each other would wait forever.
+    /// Whether the local player can be pulled back up at all: the saves are checked with members who are here, and one
+    /// of them is not lying dead themselves, since players who are all waiting for each other would wait forever.
     /// </summary>
     private bool CanWaitForRescue() {
         if (!_netClient.IsConnected || !IsInGame() || GetCurrentMarker() == null) {
@@ -893,16 +942,25 @@ internal partial class CoopSave {
             return false;
         }
 
-        if (GetCheckedPartner() is not { } partner) {
-            return false;
-        }
+        // Every member dead means nobody is left to open a cocoon, so this one goes to the bench the way it always did
+        return GetStandingMembers().Count > 0;
+    }
 
-        // Both players dead means nobody is left to open a cocoon, so this one goes to the bench the way it always did
-        if (_partnerWaitingRescue == partner.Id) {
-            return false;
-        }
+    /// <summary>
+    /// The members the saves were checked with who are on their feet as far as this game knows, wherever they are: not
+    /// lying in a cocoon waiting to be pulled up.
+    /// </summary>
+    private List<ClientPlayerData> GetStandingMembers() {
+        return GetCheckedMembers().FindAll(member => !_waitingMembers.ContainsKey(member.Id));
+    }
 
-        return true;
+    /// <summary>
+    /// Whether every member the saves were checked with is lying in a cocoon waiting to be pulled up, which with the
+    /// local player down as well is everyone down.
+    /// </summary>
+    private bool IsEveryoneElseDown() {
+        var members = GetCheckedMembers();
+        return members.Count > 0 && members.TrueForAll(member => _waitingMembers.ContainsKey(member.Id));
     }
 
     /// <summary>
@@ -911,9 +969,9 @@ internal partial class CoopSave {
     private float _lastStoodBackUpTime;
 
     /// <summary>
-    /// Lays the player down where they are instead of playing the death out, holds them there while the partner has a
-    /// chance to open their cocoon, and then either puts them back on their feet or plays the game's own death after
-    /// all, from its first step.
+    /// Lays the player down where they are instead of playing the death out, holds them there while the other members
+    /// have a chance to open their cocoon, and then either puts them back on their feet or plays the game's own death
+    /// after all, from its first step.
     /// </summary>
     /// <param name="death">The coroutine of the game that plays out the death, not started yet.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
@@ -1012,20 +1070,20 @@ internal partial class CoopSave {
                 yield break;
             }
 
-            // A partner who went down while this player was being stood up waits for them, and this player is going
-            // to their bench after all: two deaths, two benches
-            if (_partnerWaitingRescue != null) {
-                lying.PartnerDown = true;
-                TellPartnerNobodyIsComing();
+            // Members who all went down while this player was being stood up wait for them, and this player is going
+            // to their bench after all: everyone down, everyone to their bench
+            if (IsEveryoneElseDown()) {
+                lying.EveryoneDown = true;
+                TellNobodyIsComing();
             }
         }
 
-        // Time only passes when both players are down. A partner who is still connected and did not go down as well
+        // Time only passes when every member is down. A member who is still connected and did not go down as well
         // lived through this death, whether this player gave up, ran out of time or could not be stood back up
-        _deathPassesNoTime = !lying.PartnerDown && GetCheckedPartner() != null;
+        _deathPassesNoTime = !lying.EveryoneDown && GetCheckedMembers().Count > 0;
         Logger.Info(
             "Letting the game's own death take the player to their bench, " +
-            (_deathPassesNoTime ? "without time passing: the teammate is still standing" : "with time passing")
+            (_deathPassesNoTime ? "without time passing: a teammate is still standing" : "with time passing")
         );
 
         // The player has already watched their death once, so the game's own is played behind a dark screen rather
@@ -1038,7 +1096,7 @@ internal partial class CoopSave {
         ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), Color.black, RescueFadeTime);
 
         // Still down while the screen goes dark, and marked as held all the way, so that nothing in between takes the
-        // player for someone on their feet: a second death would be laid down on top of this one, a partner going
+        // player for someone on their feet: a second death would be laid down on top of this one, a member going
         // down now would be told this player is coming for them, and what only moves a player who is standing - back
         // to the door of a fight, over to a delivery - would move one on their way to a death
         for (var faded = 0f; faded < RescueFadeTime; faded += Time.deltaTime) {
@@ -1055,7 +1113,7 @@ internal partial class CoopSave {
 
         // Either the player gave up, or putting them back on their feet did not work, and a player left lying there
         // would be far worse than the bench they expected in the first place. From its first step, which is where the
-        // player was headed before the partner could do anything about it: it finds them lying where they went down,
+        // player was headed before the others could do anything about it: it finds them lying where they went down,
         // so what it writes down of the cocoon and the money in it is written about that place, and it tells the room
         // of the death itself. Its sounds were heard once already, while the player went down (OnDeathSound).
         _deathHeardFrame = Time.frameCount;
@@ -1079,7 +1137,7 @@ internal partial class CoopSave {
     /// Takes the player down where they are, as the first step of the game's own death does (HeroController.Die),
     /// without the part that makes it a death: they are not marked dead, nothing is told of it, and their money and
     /// silk stay with them. Nothing in the room acts on a death that never happened - a boss can still fall to the
-    /// partner, the money on the floor can still be picked up, the dark over hidden places still follows the player -
+    /// others, the money on the floor can still be picked up, the dark over hidden places still follows the player -
     /// and nothing has to be put back when they stand up. The game's own death does all of it if it comes to that.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
@@ -1188,24 +1246,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts waiting to be pulled back up, and tells the partner where the cocoon is so their game can show it.
+    /// Starts waiting to be pulled back up, and tells the members where the cocoon is so their games can show it.
     /// </summary>
     /// <returns>Whether a wait was started.</returns>
     /// <param name="hero">The hero controller.</param>
     private bool StartRescueWait(HeroController hero) {
-        if (GetCheckedPartner() is not { } partner) {
+        if (GetCheckedMembers().Count == 0) {
             return false;
         }
 
-        // Where the game itself would leave the cocoon, so both games point at the same spot
+        // Where the game itself would leave the cocoon, so every game points at the same spot
         var (scene, position) = WhereTheGameLeavesTheCocoon(hero);
         if (string.IsNullOrEmpty(scene)) {
             return false;
         }
 
         // In the chase of a lava nobody can come back for a cocoon: the lava is already over where the player fell.
-        // They stand up beside the partner instead, the way a game made for two brings a player back.
-        var chase = IsChaseWithPartner(partner);
+        // They stand up beside a member on their feet in the chase instead, the way a game made for more than one
+        // brings a player back.
+        var chase = IsChaseWithMembers();
 
         var gameManager = global::GameManager.instance;
         _rescue = new PendingRescue(scene, position) {
@@ -1215,8 +1274,7 @@ internal partial class CoopSave {
             Key = ++_lastRescueKey,
             Chase = chase
         };
-        Send(new CoopSaveUpdate {
-            TargetId = partner.Id,
+        SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.RescueOffer,
             Scene = scene,
             Values = chase ? [position.x, position.y, 1f] : [position.x, position.y],
@@ -1224,17 +1282,18 @@ internal partial class CoopSave {
         });
         SayTheLocalPlayerIsDown(true);
 
+        var standing = JoinNames(GetStandingMembers().Select(member => member.Username));
         if (chase) {
-            Logger.Info($"Died in the chase of the lava in '{scene}', so standing up beside {partner.Username} soon");
+            Logger.Info($"Died in the chase of the lava in '{scene}', so standing up beside one of {standing} soon");
 
             return true;
         }
 
-        // Shown to the player themselves as well, not only to the one who can open it. Watching the room you died in
+        // Shown to the player themselves as well, not only to the ones who can open it. Watching the room you died in
         // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting.
-        _rescueOwnCocoon = SpawnRescueCocoon(position, false);
+        _rescueOwnCocoon = SpawnRescueCocoon(position, null);
 
-        Logger.Info($"Waiting for {partner.Username} to open the cocoon in '{scene}'");
+        Logger.Info($"Waiting for {standing} to open the cocoon in '{scene}'");
 
         return true;
     }
@@ -1275,10 +1334,10 @@ internal partial class CoopSave {
     /// <summary>
     /// Ends the fight of a boss that fell, asked when the boss goes into the end that each game plays for its own
     /// player (Entity.EachGamePartBegan), and for any boss once its save has it beaten. Its checkpoint ends: the boss
-    /// counts as beaten only once the local player has bound it, and the partner dropping out in the middle of that
+    /// counts as beaten only once the local player has bound it, and a member dropping out in the middle of that
     /// took them back to the door with the boss still holding them. And the local player is stood up the way a rescue
-    /// does if they lie in their cocoon. What comes after a boss is for both players, and a game whose player still
-    /// lay there had them miss it: they neither bound the boss nor followed the other into the memory it sends them
+    /// does if they lie in their cocoon. What comes after a boss is for every player, and a game whose player still
+    /// lay there had them miss it: they neither bound the boss nor followed the others into the memory it sends them
     /// to, and found its room shut when they came back.
     /// </summary>
     private void EndFightOfFallenBoss() {
@@ -1294,7 +1353,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Stops waiting to be pulled back up, so the player is no longer down, and tells the partner so that the cocoon
+    /// Stops waiting to be pulled back up, so the player is no longer down, and tells the members so that the cocoon
     /// stops being shown to them.
     /// </summary>
     private void EndRescueWait() {
@@ -1311,9 +1370,8 @@ internal partial class CoopSave {
         SayTheLocalPlayerIsDown(false);
         _uiManager.CoopPrompt.Hide();
 
-        if (GetCheckedPartner() is { } partner) {
-            Send(new CoopSaveUpdate {
-                TargetId = partner.Id,
+        if (GetCheckedMembers().Count > 0) {
+            SendToMembers(new CoopSaveUpdate {
                 Kind = CoopSaveUpdateKind.RescueEnd
             });
         }
@@ -1342,7 +1400,7 @@ internal partial class CoopSave {
     /// does that in is a dead end - it has no transition of its own at all, and the only ways out of it are events
     /// the game sends while respawning. A player lying down never respawns, so the plates stayed closed for the whole
     /// wait, over a screen this mod had just deliberately given back: a dark cloud around a player who could otherwise
-    /// see the room, their cocoon and their teammate coming.
+    /// see the room, their cocoon and their teammates coming.
     ///
     /// The event sent is the one whose state grows the plates back to the size the room itself asked for, so a dark
     /// room stays as dark as it was rather than being thrown open by a death.
@@ -1591,14 +1649,24 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="rescue">The death being waited on.</param>
     private void ShowTheWayOutOfTheWait(PendingRescue rescue) {
-        var partnerName = string.IsNullOrEmpty(_rescuePartnerName)
-            ? Lang.Pick("your teammate", "队友")
-            : _rescuePartnerName;
+        // Whoever is hitting the cocoon, or else whoever could
+        var hitters = new List<string>();
+        foreach (var hitter in rescue.HitsBy.Keys) {
+            if (_playerData.TryGetValue(hitter, out var member)) {
+                hitters.Add(member.Username);
+            }
+        }
+
+        var names = rescue.Hits > 0 && hitters.Count > 0 ? hitters : _rescuerNames;
+        var one = names.Count <= 1;
+        var name = names.Count == 0 ? Lang.Pick("your teammate", "队友") : JoinNames(names);
 
         if (rescue.Chase) {
+            // Beside whichever of them stands this player up first
+            var beside = one ? name : Lang.Pick("a teammate", "队友");
             _uiManager.CoopPrompt.Show(Lang.Pick(
-                $"You will stand up beside {partnerName} in a moment. Press {LeaveKeyName} to go to your bench instead",
-                $"马上会在 {partnerName} 身边站起来。按 {LeaveKeyName} 直接回长椅"
+                $"You will stand up beside {beside} in a moment. Press {LeaveKeyName} to go to your bench instead",
+                $"马上会在 {beside} 身边站起来。按 {LeaveKeyName} 直接回长椅"
             ));
 
             return;
@@ -1607,15 +1675,15 @@ internal partial class CoopSave {
         _uiManager.CoopPrompt.Show(
             rescue.Hits > 0
                 ? Lang.Pick(
-                    $"{partnerName} is breaking you out ({rescue.Hits}/{RescueHits}). " +
+                    $"{name} {(one ? "is" : "are")} breaking you out ({rescue.Hits}/{RescueHits}). " +
                     $"Press {LeaveKeyName} to go to your bench instead",
-                    $"{partnerName} 正在打你的茧（{rescue.Hits}/{RescueHits}）。" +
+                    $"{name} 正在打你的茧（{rescue.Hits}/{RescueHits}）。" +
                     $"按 {LeaveKeyName} 直接回长椅"
                 )
                 : Lang.Pick(
-                    $"Waiting for {partnerName} to break you out. " +
+                    $"Waiting for {name} to break you out. " +
                     $"Press {LeaveKeyName} to go to your bench instead",
-                    $"等 {partnerName} 来打破你的茧。" +
+                    $"等 {name} 来打破你的茧。" +
                     $"按 {LeaveKeyName} 直接回长椅"
                 )
         );
@@ -1804,10 +1872,10 @@ internal partial class CoopSave {
             // What the death left behind cannot tell this. The game marks a death by the room (cState.hazardDeath)
             // only on the way back to that place after a hit the player lives through; the hit that takes the last
             // of the health goes straight to the death without it (HeroController.TakeDamage).
-            // Beside the partner, for a death in the chase: a place their game picked as clear of the lava, while the
+            // Beside a member, for a death in the chase: a place their game picked as clear of the lava, while the
             // game's own mark is usually under it by now
             if (rescue.StandAt is { } standAt) {
-                Logger.Info($"Standing back up beside the partner at {standAt}");
+                Logger.Info($"Standing back up beside a member at {standAt}");
                 hero.transform.position = new Vector3(standAt.x, standAt.y, hero.transform.position.z);
             } else if (rescue.ByGrinder) {
                 var safe = playerData.hazardRespawnLocation;
@@ -1854,8 +1922,8 @@ internal partial class CoopSave {
                 playerData.health = health;
             }
 
-            // A silk for every hit it took to open the cocoon. The one who opened it got one for each hit as well
-            // (OnRescueCocoonHit): a whole spool, which is what the game gives for breaking one's own cocoon, made a
+            // A silk for every hit it took to open the cocoon. Those who opened it got one for each of their hits as
+            // well (OnRescueCocoonHit): a whole spool, which is what the game gives for breaking one's own cocoon, made a
             // bind the moment they stood up, and with a bind that nothing interrupts that was all of their health.
             hero.AddSilk(RescueHits, true);
 
@@ -1919,13 +1987,16 @@ internal partial class CoopSave {
 
             _lastStoodBackUpTime = Time.unscaledTime;
 
-            Chat(Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。"));
+            Chat(
+                rescue.HitsBy.Count > 1
+                    ? Lang.Pick("Your teammates pulled you back up.", "队友们把你拉起来了。")
+                    : Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。")
+            );
             Logger.Info("Pulled back up after a death instead of going to the bench");
 
-            // The partner who pulled this player up hears it only now that they stand
-            if (GetCheckedPartner() is { } partner) {
-                Send(new CoopSaveUpdate {
-                    TargetId = partner.Id,
+            // The member whose hit pulled this player up hears it only now that they stand
+            if (GetCheckedMembers().Count > 0) {
+                SendToMembers(new CoopSaveUpdate {
                     Kind = CoopSaveUpdateKind.RescueStoodUp
                 });
             }
@@ -2033,19 +2104,18 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Keeps a wait for a rescue and a cocoon of the partner in step with the game each frame: the line that tells the
-    /// waiting player what is happening, the key that gives up on it, and the cocoon that stops being shown once the
-    /// partner is no longer waiting.
+    /// Keeps a wait for a rescue and the cocoons of other members in step with the game each frame: the line that tells
+    /// the waiting player what is happening, the key that gives up on it, and the cocoons that stop being shown once
+    /// their members are no longer waiting.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
-    /// <param name="partner">The partner whose save is checked with this one, or null.</param>
-    private void UpdateRescue(HeroController hero, ClientPlayerData? partner) {
+    private void UpdateRescue(HeroController hero) {
         try {
             // The wait marks every frame it runs on, and so does the way to the bench after it, so one that has
             // stopped marking them is gone: the room was loaded again underneath it, or the save was left, and
             // whatever was holding it went away with it. After a room is loaded this is a different hero entirely.
             // Nothing else can end the wait once that has happened, so it ends here, which also takes the cocoon of
-            // someone who is walking around again off the screen of the other player.
+            // someone who is walking around again off the screens of the others.
             if (_rescue is { } held && Time.frameCount - held.HeldFrame > 2) {
                 EndRescueWait();
 
@@ -2053,22 +2123,31 @@ internal partial class CoopSave {
             }
 
             if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
-                if (partner == null) {
-                    // Nobody is left to open it
+                var standing = GetStandingMembers();
+                if (standing.Count == 0) {
+                    // Nobody is left to open it: the members who could have are gone, or down as well. Members still
+                    // lying in their cocoons make that everyone down, and they are told so.
                     rescue.Outcome = RescueOutcome.Ended;
+                    if (IsEveryoneElseDown()) {
+                        rescue.EveryoneDown = true;
+                        TellNobodyIsComing();
+                    }
+
                     return;
                 }
 
                 // Only remembered here. Showing the line and reading the key that gives up on the wait both happen in
                 // the wait itself, which is the one thing that keeps running while the player lies there
-                _rescuePartnerName = partner.Username;
+                _rescuerNames = standing.ConvertAll(member => member.Username);
 
                 return;
             }
 
-            if (_rescueTarget is { } target && (partner == null || partner.Id != target.PlayerId ||
-                                                SceneUtil.GetCurrentSceneName() != target.Scene)) {
-                RemoveRescueTarget();
+            foreach (var target in _rescueTargets.Values.ToList()) {
+                if (!_checkedMembers.Contains(target.PlayerId) || !_playerData.ContainsKey(target.PlayerId) ||
+                    !_waitingMembers.ContainsKey(target.PlayerId) || SceneUtil.GetCurrentSceneName() != target.Scene) {
+                    RemoveRescueTarget(target.PlayerId);
+                }
             }
         } catch (Exception e) {
             LogRescueError(e);
@@ -2076,20 +2155,20 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The partner died and is waiting to be pulled back up, so their cocoon is shown here for the local player to
+    /// Another member died and is waiting to be pulled back up, so their cocoon is shown here for the local player to
     /// break open. Their own game never sent one before, which is why a room where both players died only ever held
     /// one cocoon.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update.</param>
     private void OnRescueOffer(ClientPlayerData player, CoopSaveUpdate update) {
-        // Said either way, because this news is not sent again, and without a line here a partner who went down
+        // Said either way, because this news is not sent again, and without a line here a member who went down
         // unseen could not be told from one whose news never arrived
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !_checkedMembers.Contains(player.Id)) {
             Logger.Info(
                 $"Not taking the news that {player.Username} went down in '{update.Scene}': " +
                 $"two-player save loaded: {GetCurrentMarker() != null}, " +
-                $"saves checked with: {_checkedWith?.ToString() ?? "nobody"}"
+                $"saves checked with: {(_checkedMembers.Count == 0 ? "nobody" : GetCheckedNames())}"
             );
 
             return;
@@ -2097,120 +2176,165 @@ internal partial class CoopSave {
 
         Logger.Info($"{player.Username} went down in '{update.Scene}' ({update.Key})");
 
-        RemoveRescueTarget();
+        RemoveRescueTarget(player.Id);
 
         if (update.Values.Count < 2) {
             return;
         }
 
         // Noted whichever room they died in: it decides whether a death of this player can wait for them at all, and
-        // it is what lets their cocoon appear when this player walks into that room later
-        _partnerWaitingRescue = player.Id;
-        _partnerCocoonScene = update.Scene;
-        _partnerCocoonPosition = new Vector2(update.Values[0], update.Values[1]);
-        _partnerRescueKey = update.Key;
+        // it is what lets their cocoon appear when this player walks into that room later. A death in the chase of a
+        // lava leaves no cocoon to show, now or on walking into that room later.
+        var chase = update.Values.Count >= 3 && update.Values[2] > 0f;
+        _waitingMembers[player.Id] = new WaitingMember(
+            chase ? "" : update.Scene, new Vector2(update.Values[0], update.Values[1]), update.Key
+        );
 
-        // Both went down before either heard about the other, so each is lying there waiting for someone who cannot
-        // come. Two deaths are two benches in whichever order the news arrives, and this wait ends here.
-        if (_rescue is { Outcome: RescueOutcome.Waiting }) {
-            OnRescueLost(player);
+        // Everyone went down before hearing that the others had, so each is lying there waiting for someone who cannot
+        // come. Everyone down is everyone to their bench in whichever order the news arrives, and this wait ends here.
+        var everyoneDown = IsEveryoneElseDown();
+        if (_rescue is { Outcome: RescueOutcome.Waiting } waiting && everyoneDown) {
+            EndWaitEveryoneDown(waiting, player.Username);
         }
 
         // This player is down themselves - lying there, on their way to a bench, or dead as far as the game knows - so
-        // nobody is coming for the partner either: two deaths, two benches. Told to them even when this player's own
-        // cocoon should have told them already, because it may not have reached them: a partner whose news was lost
-        // in a stretch of the connection carrying nothing lay there waiting for someone who had long gone to their
-        // bench, and let no time pass for a death that both of them died. A player whose cocoon the partner has just
-        // broken is standing up rather than down: the partner died right after pulling them up, and the news of both
-        // can arrive together, before this player is back on their feet.
-        if (HeroController.instance is { } hero && _rescue is not { Outcome: RescueOutcome.Rescued } &&
-            (PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.dead)) {
-            TellPartnerNobodyIsComing();
+        // with nobody else standing, nobody is coming for the members either: everyone down, everyone to their bench.
+        // Told to them even when this player's own cocoon should have told them already, because it may not have
+        // reached them: a member whose news was lost in a stretch of the connection carrying nothing lay there waiting
+        // for someone who had long gone to their bench, and let no time pass for a death that everyone died. A player
+        // whose cocoon was just broken is standing up rather than down: a member died right after pulling them up, and
+        // the news of both can arrive together, before this player is back on their feet.
+        var localDown = HeroController.instance is { } hero && _rescue is not { Outcome: RescueOutcome.Rescued } &&
+                        (PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.dead);
+        if (localDown) {
+            if (everyoneDown) {
+                TellNobodyIsComing();
+
+                return;
+            }
+
+            // Another member is still on their feet, who can pull both of them up
+            var standing = JoinNames(GetStandingMembers().Select(member => member.Username));
+            Chat(Lang.Pick(
+                $"{player.Username} went down as well. {standing} can still break you both out.",
+                $"{player.Username} 也倒下了。{standing} 还能把你们两个都救起来。"
+            ));
+        }
+
+        if (chase) {
+            OnChaseDeath(player, update, !localDown);
 
             return;
         }
 
-        // A death in the chase of a lava leaves no cocoon to show, now or on walking into that room later
-        if (update.Values.Count >= 3 && update.Values[2] > 0f) {
-            _partnerCocoonScene = "";
-            OnChaseDeath(player, update);
-
-            return;
+        if (!localDown) {
+            Chat(
+                SceneUtil.GetCurrentSceneName() == update.Scene
+                    ? Lang.Pick(
+                        $"{player.Username} died. Hit their cocoon {RescueHits} times to break them out.",
+                        $"{player.Username} 死了。攻击他们的茧 {RescueHits} 次就能把人救出来。"
+                    )
+                    : Lang.Pick(
+                        $"{player.Username} died. Their cocoon is where they fell, and {RescueHits} hits break them out.",
+                        $"{player.Username} 死了。茧就在他们倒下的地方，打 {RescueHits} 次能把人救出来。"
+                    )
+            );
         }
 
-        Chat(
-            SceneUtil.GetCurrentSceneName() == update.Scene
-                ? Lang.Pick(
-                    $"{player.Username} died. Hit their cocoon {RescueHits} times to break them out.",
-                    $"{player.Username} 死了。攻击他们的茧 {RescueHits} 次就能把人救出来。"
-                )
-                : Lang.Pick(
-                    $"{player.Username} died. Their cocoon is where they fell, and {RescueHits} hits break them out.",
-                    $"{player.Username} 死了。茧就在他们倒下的地方，打 {RescueHits} 次能把人救出来。"
-                )
-        );
-
-        ShowPartnerCocoon();
+        ShowMemberCocoon(player.Id);
     }
 
     /// <summary>
-    /// The partner hit the cocoon of the local player, so the player who is waiting sees how far it got, and is put
-    /// back on their feet on the last hit.
+    /// A member hit a cocoon. On the cocoon of the local player, the player who is waiting sees how far it got, and is
+    /// put back on their feet once the hits of everyone together reach the count. On the cocoon of another member the
+    /// hits are counted here as well, so that this game knows when that member is being pulled up: from then on they
+    /// count as standing, as they do in the game whose hit pulled them up.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update.</param>
     private void OnRescueHit(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_rescue is not { Outcome: RescueOutcome.Waiting } rescue || GetCheckedPartner()?.Id != player.Id) {
+        if (!_checkedMembers.Contains(player.Id)) {
+            return;
+        }
+
+        var needed = update.PartCount == 0 ? RescueHits : update.PartCount;
+        if (_rescue is { Outcome: RescueOutcome.Waiting } rescue && update.Key == rescue.Key) {
+            // A running count of theirs, so the larger of what they said is what counts
+            rescue.HitsBy[player.Id] = System.Math.Max(
+                rescue.HitsBy.TryGetValue(player.Id, out var before) ? before : 0, update.Part
+            );
+            rescue.Hits = rescue.HitsBy.Values.Sum();
+
+            // The hit the member landed, shown on this side of it too. The silk it drew went to them.
+            if (_rescueOwnCocoon != null) {
+                PlaySilkHitEffect(_rescueOwnCocoon, false);
+            }
+
+            if (rescue.Hits >= needed) {
+                // A death in the chase is stood up beside the member who stood them up, at the place their game picked
+                if (update.Values.Count >= 2) {
+                    rescue.StandAt = new Vector2(update.Values[0], update.Values[1]);
+                }
+
+                rescue.Outcome = RescueOutcome.Rescued;
+            }
+
+            return;
+        }
+
+        foreach (var pair in _waitingMembers) {
+            if (pair.Value.Key != update.Key) {
+                continue;
+            }
+
+            var waitingMember = pair.Value;
+            waitingMember.HitsBy[player.Id] = System.Math.Max(
+                waitingMember.HitsBy.TryGetValue(player.Id, out var earlier) ? earlier : 0, update.Part
+            );
+
+            if (waitingMember.Hits >= needed) {
+                Logger.Info($"The cocoon of player {pair.Key} opened with the hit of {player.Username}");
+                MarkPulledUp(pair.Key);
+            }
+
             return;
         }
 
         // A hit about some earlier death of this player is not a hit on the cocoon lying here now. These messages
         // are resent until they arrive and are never dropped for a newer one, so one written about a death that is
         // already over can still turn up - and taken at face value it opened this cocoon the instant it appeared.
-        if (update.Key != rescue.Key) {
+        if (_rescue is { Outcome: RescueOutcome.Waiting } lying) {
             Logger.Info(
-                $"Ignoring a hit on a cocoon of an earlier death ({update.Key}), this one being {rescue.Key}"
+                $"Ignoring a hit on a cocoon of an earlier death ({update.Key}), this one being {lying.Key}"
             );
-
-            return;
-        }
-
-        rescue.Hits = update.Part;
-
-        // The hit the partner landed, shown on this side of it too. The silk it drew went to them.
-        if (_rescueOwnCocoon != null) {
-            PlaySilkHitEffect(_rescueOwnCocoon, false);
-        }
-
-        if (update.Part >= (update.PartCount == 0 ? RescueHits : update.PartCount)) {
-            // A death in the chase is stood up beside the partner, at the place their game picked
-            if (update.Values.Count >= 2) {
-                rescue.StandAt = new Vector2(update.Values[0], update.Values[1]);
-            }
-
-            rescue.Outcome = RescueOutcome.Rescued;
         }
     }
 
     /// <summary>
-    /// The partner is no longer waiting to be pulled back up, so their cocoon goes away again.
+    /// Counts a member whose cocoon has just opened as standing from here on. Their game only says so once the hits
+    /// have reached it and they are back on their feet, and a player who died in between - in a fight, right after the
+    /// cocoon opened - was taken for the last of everyone going down and sent to their bench, leaving the member who
+    /// had just been saved standing alone.
+    /// </summary>
+    /// <param name="playerId">The member.</param>
+    private void MarkPulledUp(ushort playerId) {
+        _waitingMembers.Remove(playerId);
+        RemoveRescueTarget(playerId);
+    }
+
+    /// <summary>
+    /// A member is no longer waiting to be pulled back up, so their cocoon goes away again.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update.</param>
     private void OnRescueEnd(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_partnerWaitingRescue == player.Id) {
-            _partnerWaitingRescue = null;
-        }
-
+        _waitingMembers.Remove(player.Id);
         ForgetChaseDeath(player.Id);
-
-        if (_rescueTarget is { } target && target.PlayerId == player.Id) {
-            RemoveRescueTarget();
-        }
+        RemoveRescueTarget(player.Id);
     }
 
     /// <summary>
-    /// Puts something that stands in for the cocoon of the partner in the room, keeping the part of it that decides
+    /// Puts something that stands in for the cocoon of a member in the room, keeping the part of it that decides
     /// how it looks and dropping the parts that pay out, clear the save, or make it fade away again.
     ///
     /// Destroying every FSM was too blunt. The cocoon's own "Break" FSM starts in "Next Frame" and walks straight
@@ -2219,14 +2343,14 @@ internal partial class CoopSave {
     /// showed the form it has after it has already burst.
     /// </summary>
     /// <param name="position">Where the player died.</param>
-    /// <param name="openable">Whether hits on it count towards pulling the player in it back up.</param>
+    /// <param name="openableFor">The member whom hits on it pull back up, or null for one that takes no hits.</param>
     /// <returns>The object, or null if it could not be made.</returns>
-    private GameObject? SpawnRescueCocoon(Vector2 position, bool openable) {
+    private GameObject? SpawnRescueCocoon(Vector2 position, ushort? openableFor) {
         var gameManager = global::GameManager.instance;
         var sceneManager = gameManager == null ? null : gameManager.GetSceneManager();
         var prefab = sceneManager == null ? null : sceneManager.GetComponent<CustomSceneManager>()?.heroCorpsePrefab;
         if (prefab == null) {
-            Logger.Warn("Could not find the cocoon to show for the partner");
+            Logger.Warn("Could not find the cocoon to show for a member");
 
             return null;
         }
@@ -2263,10 +2387,10 @@ internal partial class CoopSave {
         cocoon.SetActive(true);
 
         // The one a player is shown of their own takes no hits. They are lying in it, they cannot swing at anything
-        // while they are, and the way out of it is the other player - not themselves.
-        if (openable) {
+        // while they are, and the way out of it is the other players - not themselves.
+        if (openableFor is { } playerId) {
             var hits = cocoon.AddComponent<RescueCocoonHits>();
-            hits.Hits = OnRescueCocoonHit;
+            hits.Hits = hit => OnRescueCocoonHit(playerId, hit);
         }
 
         return cocoon;
@@ -2288,83 +2412,82 @@ internal partial class CoopSave {
             try {
                 fsm.RemoveFirstAction<CallMethodProper>(ReturnCurrencyStateName);
             } catch (Exception e) {
-                Logger.Warn($"Could not take the payout out of the cocoon of the partner: {e.Message}");
+                Logger.Warn($"Could not take the payout out of the cocoon of a member: {e.Message}");
             }
         }
     }
 
     /// <summary>
-    /// Counts a hit of the local player on the cocoon of the partner, and tells them how far it got. Each one pays
-    /// silk the way a hit on a creature does (HealthManager.TakeDamage), by the game's own rule for the attack: what
-    /// gives no silk on a creature gives none here, and an attack that hits many times pays for its first.
+    /// Counts a hit of the local player on the cocoon of a member, and tells every member how far the local player got
+    /// with it. Each one pays silk the way a hit on a creature does (HealthManager.TakeDamage), by the game's own rule
+    /// for the attack: what gives no silk on a creature gives none here, and an attack that hits many times pays for
+    /// its first.
     /// </summary>
+    /// <param name="playerId">The member lying in the cocoon.</param>
     /// <param name="hit">The hit.</param>
-    private void OnRescueCocoonHit(HitInstance hit) {
-        if (_rescueTarget is not { } target || GetCheckedPartner() is not { } partner ||
-            partner.Id != target.PlayerId) {
+    private void OnRescueCocoonHit(ushort playerId, HitInstance hit) {
+        if (!_rescueTargets.ContainsKey(playerId) || !_waitingMembers.TryGetValue(playerId, out var waiting) ||
+            !_checkedMembers.Contains(playerId)) {
             return;
         }
 
-        target.Hits++;
+        waiting.OwnHits++;
 
         if (HeroController.instance is { } hero) {
             hero.SilkGain(hit);
         }
 
-        Send(new CoopSaveUpdate {
-            TargetId = partner.Id,
+        // To every member, not only the one lying in it: the hits of everyone count together, and every game has to
+        // know when the cocoon opens, or it takes the member in it for someone still down
+        SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.RescueHit,
-            Part = (ushort) target.Hits,
+            Part = (ushort) waiting.OwnHits,
             PartCount = RescueHits,
-            Key = target.Key
+            Key = waiting.Key
         });
 
-        if (target.Hits >= RescueHits) {
-            // Counted as standing from here on, as a partner stood up in the chase of a lava is. Their game only says
-            // so once this hit has reached it and they are back on their feet, and a player who died in between - in
-            // a fight, right after pulling them up - was taken for the second of two deaths and sent to their bench,
-            // leaving the partner they had just saved standing alone
-            _partnerWaitingRescue = null;
-            RemoveRescueTarget();
+        if (waiting.Hits >= RescueHits) {
+            MarkPulledUp(playerId);
 
             // Said once their game says that they stand: a hit that pulls them up doesn't stand them up when
             // something comes first in their game, like this player going down right after it
-            _partnerBeingPulledUp = (partner.Id, Time.unscaledTime);
+            _membersBeingPulledUp[playerId] = Time.unscaledTime;
         }
     }
 
     /// <summary>
-    /// The partner's game put them back on their feet. When the local player's hits pulled them up, the local player is
+    /// A member's game put them back on their feet. When the local player's hit pulled them up, the local player is
     /// told now.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     private void OnRescueStoodUp(ClientPlayerData player) {
-        if (_partnerBeingPulledUp is not { } pulled || pulled.PlayerId != player.Id) {
+        if (!_membersBeingPulledUp.TryGetValue(player.Id, out var time)) {
             return;
         }
 
-        _partnerBeingPulledUp = null;
-        if (Time.unscaledTime - pulled.Time <= StoodUpWordTime) {
+        _membersBeingPulledUp.Remove(player.Id);
+        if (Time.unscaledTime - time <= StoodUpWordTime) {
             Chat(Lang.Pick($"You broke {player.Username} out.", $"你把 {player.Username} 拉起来了。"));
         }
     }
 
     /// <summary>
-    /// Puts the cocoon of a waiting partner in the room once the local player is standing in the room it is in. It is
-    /// shown on arriving as well as on hearing about it, since a player who was elsewhere when their partner died can
+    /// Puts the cocoon of a waiting member in the room once the local player is standing in the room it is in. It is
+    /// shown on arriving as well as on hearing about it, since a player who was elsewhere when the member died can
     /// still be the one who walks in and opens it.
     /// </summary>
-    private void ShowPartnerCocoon() {
-        if (_partnerWaitingRescue is not { } playerId || _rescueTarget != null ||
-            _partnerCocoonScene.Length == 0 || SceneUtil.GetCurrentSceneName() != _partnerCocoonScene) {
+    /// <param name="playerId">The member.</param>
+    private void ShowMemberCocoon(ushort playerId) {
+        if (!_waitingMembers.TryGetValue(playerId, out var waiting) || _rescueTargets.ContainsKey(playerId) ||
+            waiting.Scene.Length == 0 || SceneUtil.GetCurrentSceneName() != waiting.Scene) {
             return;
         }
 
-        if (SpawnRescueCocoon(_partnerCocoonPosition, true) is not { } cocoon) {
+        if (SpawnRescueCocoon(waiting.Position, playerId) is not { } cocoon) {
             return;
         }
 
-        _rescueTarget = new RescueTarget(playerId, _partnerCocoonScene, cocoon) { Key = _partnerRescueKey };
+        _rescueTargets[playerId] = new RescueTarget(playerId, waiting.Scene, cocoon);
 
         // Their body is in the cocoon now, so it stops standing beside it. Nothing ever took it away before: the
         // death that crosses over is an animation like any other, and the animation of a death simply stops on its
@@ -2372,6 +2495,15 @@ internal partial class CoopSave {
         // were gone from the room a few seconds later anyway, so a body frozen mid-death was never on screen long
         // enough to be noticed. A wait lasts up to three quarters of a minute.
         SetPartnerBodyHidden(playerId, true);
+    }
+
+    /// <summary>
+    /// Puts the cocoons of every waiting member in the room that the local player is standing in.
+    /// </summary>
+    private void ShowMemberCocoons() {
+        foreach (var playerId in _waitingMembers.Keys.ToList()) {
+            ShowMemberCocoon(playerId);
+        }
     }
 
     /// <summary>
@@ -2383,7 +2515,7 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="player">The player whose character was just put in the room.</param>
     internal void HideCharacterOfPartnerInCocoon(ClientPlayerData player) {
-        if (_rescueTarget is not { } target || target.PlayerId != player.Id) {
+        if (!_rescueTargets.ContainsKey(player.Id)) {
             return;
         }
 
@@ -2392,7 +2524,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes the body of the partner off the screen while they are lying in their cocoon, and brings it back when
+    /// Takes the body of a member off the screen while they are lying in their cocoon, and brings it back when
     /// they are not.
     ///
     /// Hidden the way the mod hides a player everywhere else: the animation is stopped and the sprite is replaced by
@@ -2437,7 +2569,7 @@ internal partial class CoopSave {
                 // Nothing should come looking for someone who is lying in a cocoon. Off the list, nothing chooses
                 // them from here on; an enemy that had already chosen them is let go of them as well, as one is
                 // when this game's own player goes down. Left holding them, it kept them for as long as they lay in
-                // its sight, which is all of the wait: a boss went on striking the cocoon of the partner it had
+                // its sight, which is all of the wait: a boss went on striking the cocoon of the member it had
                 // been fighting while the player still standing was right there.
                 PlayerTargetRegistry.UnregisterRemotePlayer(body);
                 GamePatcher.ForgetPlayerAsTarget(body);
@@ -2480,23 +2612,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Shows or takes away the cocoon of a waiting partner when the local player changes rooms.
+    /// Shows or takes away the cocoons of waiting members when the local player changes rooms.
     /// </summary>
     private void OnRescueSceneChanged() {
         try {
-            if (_rescueTarget is { } target && SceneUtil.GetCurrentSceneName() != target.Scene) {
-                RemoveRescueTarget();
+            foreach (var target in _rescueTargets.Values.ToList()) {
+                if (SceneUtil.GetCurrentSceneName() != target.Scene) {
+                    RemoveRescueTarget(target.PlayerId);
+                }
             }
 
-            ShowPartnerCocoon();
+            ShowMemberCocoons();
         } catch (Exception e) {
             LogRescueError(e);
         }
     }
 
     /// <summary>
-    /// Forgets everything about a rescue when the loaded save is left, so that a cocoon of a partner does not stay
-    /// behind in the world and a partner who is remembered as waiting cannot keep the next death of this player from
+    /// Forgets everything about a rescue when the loaded save is left, so that a cocoon of a member does not stay
+    /// behind in the world and a member who is remembered as waiting cannot keep the next death of this player from
     /// waiting for a rescue of its own.
     /// </summary>
     private void ResetRescue() {
@@ -2504,44 +2638,70 @@ internal partial class CoopSave {
             rescue.Outcome = RescueOutcome.Ended;
         }
 
-        RemoveRescueTarget();
+        RemoveRescueTargets(true);
         RemoveOwnCocoon();
-        if (_chaseHiddenPartner is { } hidden) {
+        foreach (var hidden in _chaseHiddenMembers.ToList()) {
             ForgetChaseDeath(hidden);
         }
 
-        _chaseStandUp = null;
-        _partnerWaitingRescue = null;
-        _partnerBeingPulledUp = null;
-        _partnerCocoonScene = "";
+        _chaseStandUps.Clear();
+        _waitingMembers.Clear();
+        _membersBeingPulledUp.Clear();
         _uiManager.CoopPrompt.Hide();
         BodiesKeptHidden.Clear();
     }
 
     /// <summary>
-    /// Takes the cocoon of the partner out of the room again.
+    /// Forgets what is known of the rescue of one member who is no longer in the save while others still are: their
+    /// cocoon goes, and they no longer count as lying down for anyone. Whether the local player can still wait with
+    /// the members who are left is asked again on the next frame (<see cref="UpdateRescue"/>).
     /// </summary>
-    /// <param name="standUp">Whether the partner stands up here, so that their body is put back on the screen. Not for
-    /// a partner on their way to their bench: in their own game they lie there until it takes them away, and their
+    /// <param name="playerId">The member.</param>
+    private void ForgetRescueOf(ushort playerId) {
+        RemoveRescueTarget(playerId);
+        ForgetChaseDeath(playerId);
+        _waitingMembers.Remove(playerId);
+        _membersBeingPulledUp.Remove(playerId);
+        BodiesKeptHidden.Remove(playerId);
+    }
+
+    /// <summary>
+    /// Takes the cocoon of a member out of the room again.
+    /// </summary>
+    /// <param name="playerId">The member lying in it.</param>
+    /// <param name="standUp">Whether the member stands up here, so that their body is put back on the screen. Not for
+    /// a member on their way to their bench: in their own game they lie there until it takes them away, and their
     /// body stood up beside the place their cocoon had been.</param>
-    private void RemoveRescueTarget(bool standUp = true) {
-        if (_rescueTarget is { } target) {
-            if (target.Cocoon != null) {
-                UnityEngine.Object.Destroy(target.Cocoon);
-            }
+    private void RemoveRescueTarget(ushort playerId, bool standUp = true) {
+        if (!_rescueTargets.TryGetValue(playerId, out var target)) {
+            return;
+        }
 
-            if (standUp) {
-                // Whatever else took the cocoon away - they were pulled up, the fall of a boss stood them up, they gave
-                // up, or this player walked out of the room - their body belongs back on the screen
-                SetPartnerBodyHidden(target.PlayerId, false);
-            } else {
-                // Still off the screen, but no longer held there: their game shows nothing more of them on the way to
-                // their bench (HeroController.Die plays nothing on the hero), and what it shows once they are back
-                // is shown again
-                BodiesKeptHidden.Remove(target.PlayerId);
-            }
+        if (target.Cocoon != null) {
+            UnityEngine.Object.Destroy(target.Cocoon);
+        }
 
-            _rescueTarget = null;
+        if (standUp) {
+            // Whatever else took the cocoon away - they were pulled up, the fall of a boss stood them up, they gave
+            // up, or this player walked out of the room - their body belongs back on the screen
+            SetPartnerBodyHidden(target.PlayerId, false);
+        } else {
+            // Still off the screen, but no longer held there: their game shows nothing more of them on the way to
+            // their bench (HeroController.Die plays nothing on the hero), and what it shows once they are back
+            // is shown again
+            BodiesKeptHidden.Remove(target.PlayerId);
+        }
+
+        _rescueTargets.Remove(playerId);
+    }
+
+    /// <summary>
+    /// Takes the cocoons of every member out of the room again.
+    /// </summary>
+    /// <param name="standUp">Whether the members stand up here (see <see cref="RemoveRescueTarget"/>).</param>
+    private void RemoveRescueTargets(bool standUp) {
+        foreach (var playerId in _rescueTargets.Keys.ToList()) {
+            RemoveRescueTarget(playerId, standUp);
         }
     }
 

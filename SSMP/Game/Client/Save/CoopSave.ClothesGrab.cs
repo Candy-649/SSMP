@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using HutongGames.PlayMaker;
 using SSMP.Internals;
 using SSMP.Networking.Packet.Data;
@@ -14,16 +16,16 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
 /// Taking back the clothes that the prison took, in a checked two-player save. Each player takes back their own, from
-/// the creature that holds them in their own game, but while both of them are without theirs, it only happens once both
-/// of them reached for it: whoever reaches first crouches there and waits for the other, and then both go at once. The
+/// the creature that holds them in their own game, but while more of them are without theirs, it only happens once all
+/// of those reached for it: whoever reaches first crouches there and waits for the others, and then all go at once. The
 /// jump button gets the one who waits out of it again. The user chose this on 2026-09-24 - both players decide to take
-/// them back, and only then does it happen. A partner who has theirs already doesn't make anyone wait.
+/// them back, and only then does it happen. A member who has theirs already doesn't make anyone wait.
 ///
-/// How it looks to the other player is carried over as well. The game plays the grab with a stand-in: it hides the
+/// How it looks to the other players is carried over as well. The game plays the grab with a stand-in: it hides the
 /// player, has a second figure leap at the creature and fling itself up, and the player only reappears in the air
-/// afterwards. The other game only ever saw the player crouch and then hang in the air where they were hidden, so it
-/// now hides them the same way and plays a copy of the same stand-in on them, from the moment the grab starts over
-/// there until they reappear.
+/// afterwards. The other games only ever saw the player crouch and then hang in the air where they were hidden, so they
+/// now hide them the same way and play a copy of the same stand-in on them, from the moment the grab starts over there
+/// until they reappear.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -48,7 +50,7 @@ internal partial class CoopSave {
     private const string ClothesGrabIdleState = "Idle";
 
     /// <summary>
-    /// The state of the grab in which the player crouches first, which is where they wait for the partner.
+    /// The state of the grab in which the player crouches first, which is where they wait for the members.
     /// </summary>
     private const string ClothesGrabCrouchState = "Crouch";
 
@@ -98,66 +100,66 @@ internal partial class CoopSave {
     private static readonly Vector3 StandInFlingOffset = new(-0.3f, -1f, 0f);
 
     /// <summary>
-    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for a partner who no longer waits to take theirs back.
+    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for a member who no longer waits to take theirs back.
     /// </summary>
     private const ushort ClothesGrabNotReady = 0;
 
     /// <summary>
-    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for a partner who reached for theirs.
+    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for a member who reached for theirs.
     /// </summary>
     private const ushort ClothesGrabReady = 1;
 
     /// <summary>
-    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for the grab of a partner starting.
+    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for the grab of a member starting.
     /// </summary>
     private const ushort ClothesGrabStarted = 2;
 
     /// <summary>
-    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for the grab of a partner showing them again.
+    /// The number in <see cref="CoopSaveUpdate.PartCount"/> for the grab of a member showing them again.
     /// </summary>
     private const ushort ClothesGrabEnded = 3;
 
     /// <summary>
-    /// The grab of the local player while it waits for the partner, or null.
+    /// The grab of the local player while it waits for the members, or null.
     /// </summary>
     private Fsm? _clothesGrabHeld;
 
     /// <summary>
-    /// Whether the waiting grab already tried to end the crouching, which it does again once the partner is ready.
+    /// Whether the waiting grab already tried to end the crouching, which it does again once the members are ready.
     /// </summary>
     private bool _clothesGrabGoHeld;
 
     /// <summary>
-    /// Whether the partner reached for their clothes and waits for the local player.
+    /// The members who reached for their clothes and wait for the others.
     /// </summary>
-    private bool _partnerReadyToGrab;
+    private readonly HashSet<ushort> _membersReadyToGrab = [];
 
     /// <summary>
-    /// The stand-in that plays the grab of the partner here, or null.
+    /// The stand-ins that play the grabs of members here, by member.
     /// </summary>
-    private PartnerStandIn? _partnerStandIn;
+    private readonly Dictionary<ushort, PartnerStandIn> _memberStandIns = new();
 
     /// <summary>
-    /// Follows the grab of the local player: whether it has to wait for the partner, and when it starts and ends.
+    /// Follows the grab of the local player: whether it has to wait for the members, and when it starts and ends.
     /// Called from the hook on changes of FSM state that <see cref="RegisterInteractionHooks"/> puts in place.
     /// </summary>
     /// <param name="fsm">The FSM that is changing state.</param>
     /// <param name="toState">The state it is changing into.</param>
     private void OnClothesGrabSwitch(Fsm fsm, FsmState toState) {
-        if (_checkedWith is not { } partnerId || fsm.Name != ClothesGrabFsmName || !IsClothesGrab(fsm)) {
+        if (_checkedMembers.Count == 0 || fsm.Name != ClothesGrabFsmName || !IsClothesGrab(fsm)) {
             return;
         }
 
         switch (toState.Name) {
             case ClothesGrabCrouchState when fsm.ActiveStateName == ClothesGrabIdleState:
-                OnLocalClothesGrab(fsm, partnerId);
+                OnLocalClothesGrab(fsm);
                 break;
             case ClothesGrabStartState:
-                _partnerReadyToGrab = false;
-                SendClothesGrab(fsm, partnerId, ClothesGrabStarted);
+                _membersReadyToGrab.Clear();
+                SendClothesGrab(fsm, ClothesGrabStarted);
                 break;
             case ClothesGrabEndState:
-                SendClothesGrab(fsm, partnerId, ClothesGrabEnded);
+                SendClothesGrab(fsm, ClothesGrabEnded);
                 break;
         }
     }
@@ -171,33 +173,50 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The local player reached for their clothes. If the partner is without theirs as well, the partner is told, and
-    /// the local player waits crouching until the partner reached for theirs too.
+    /// The local player reached for their clothes. If other members are without theirs as well, they are told, and
+    /// the local player waits crouching until every one of them reached for theirs too.
     /// </summary>
-    private void OnLocalClothesGrab(Fsm fsm, ushort partnerId) {
-        if (GetCheckedPartner() is not { CrestType: CrestType.Cloakless } partner) {
+    private void OnLocalClothesGrab(Fsm fsm) {
+        var cloakless = GetCheckedMembers().FindAll(member => member.CrestType == CrestType.Cloakless);
+        if (cloakless.Count == 0) {
             return;
         }
 
-        SendClothesGrab(fsm, partnerId, ClothesGrabReady);
-        if (_partnerReadyToGrab) {
-            Logger.Info($"Reached for the clothes after {partner.Username} did, so both take them back now");
+        SendClothesGrab(fsm, ClothesGrabReady);
+        var waiting = cloakless.FindAll(member => !_membersReadyToGrab.Contains(member.Id));
+        if (waiting.Count == 0) {
+            Logger.Info(
+                $"Reached for the clothes after {JoinNames(cloakless.Select(member => member.Username))} did, so " +
+                "everyone takes them back now"
+            );
             return;
         }
 
         _clothesGrabHeld = fsm;
         _clothesGrabGoHeld = false;
-        Logger.Info($"Reached for the clothes, waiting for {partner.Username} to reach for theirs");
+        var names = JoinNames(waiting.Select(member => member.Username));
+        Logger.Info($"Reached for the clothes, waiting for {names} to reach for theirs");
 
         var jump = InputHandler.Instance is { } inputHandler ? PromptKeyName(inputHandler.inputActions.Jump) : "Jump";
         Chat(Lang.Pick(
-            $"Waiting for {partner.Username} to reach for theirs, to take them back together. {jump} to stop waiting.",
-            $"等 {partner.Username} 也伸手，两个人一起抢回来。按 {jump} 不等了。"
+            $"Waiting for {names} to reach for theirs, to take them back together. {jump} to stop waiting.",
+            _checkedMembers.Count <= 1
+                ? $"等 {names} 也伸手，两个人一起抢回来。按 {jump} 不等了。"
+                : $"等 {names} 也伸手，大家一起抢回来。按 {jump} 不等了。"
         ));
     }
 
     /// <summary>
-    /// Keeps the waiting grab crouching: the event that would end the crouching is held back until the partner is
+    /// Whether every other member without their clothes reached for them, which lets a grab that waits go.
+    /// </summary>
+    private bool AreClothesGrabbersReady() {
+        return GetCheckedMembers().TrueForAll(member =>
+            member.CrestType != CrestType.Cloakless || _membersReadyToGrab.Contains(member.Id)
+        );
+    }
+
+    /// <summary>
+    /// Keeps the waiting grab crouching: the event that would end the crouching is held back until the members are
     /// ready. Called from the hook on the events of FSMs.
     /// </summary>
     /// <returns>Whether the event is held back.</returns>
@@ -212,7 +231,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Lets the waiting grab go on, now that the partner reached for theirs.
+    /// Lets the waiting grab go on, now that the members reached for theirs.
     /// </summary>
     private void ReleaseClothesGrab() {
         if (_clothesGrabHeld is not { } fsm) {
@@ -228,15 +247,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the partner about the grab of the local player.
+    /// Tells the members about the grab of the local player.
     /// </summary>
-    private void SendClothesGrab(Fsm fsm, ushort partnerId, ushort part) {
+    private void SendClothesGrab(Fsm fsm, ushort part) {
         if (fsm.GameObject is not { } gameObject) {
             return;
         }
 
-        Send(new CoopSaveUpdate {
-            TargetId = partnerId,
+        SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.ClothesGrab,
             Scene = gameObject.scene.name,
             ObjectPath = ScenePath.Get(gameObject.transform),
@@ -245,38 +263,44 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The partner reached for their clothes, stopped waiting, or their grab started or ended.
+    /// A member reached for their clothes, stopped waiting, or their grab started or ended.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, with what happened in <see cref="CoopSaveUpdate.PartCount"/>.</param>
     private void OnClothesGrab(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !_checkedMembers.Contains(player.Id)) {
             return;
         }
 
         switch (update.PartCount) {
             case ClothesGrabReady:
-                _partnerReadyToGrab = true;
-                if (_clothesGrabHeld != null) {
-                    Logger.Info($"{player.Username} reached for their clothes too, so both take them back now");
-                    ReleaseClothesGrab();
-                } else {
+                _membersReadyToGrab.Add(player.Id);
+                if (_clothesGrabHeld == null) {
                     Chat(Lang.Pick(
                         $"{player.Username} waits for you to take your clothes back together.",
                         $"{player.Username} 在等你一起去抢衣服。"
+                    ));
+                } else if (AreClothesGrabbersReady()) {
+                    Logger.Info($"{player.Username} reached for their clothes too, so everyone takes them back now");
+                    ReleaseClothesGrab();
+                } else {
+                    Chat(Lang.Pick(
+                        $"{player.Username} reached for theirs too. Still waiting for the others.",
+                        $"{player.Username} 也伸手了，还在等其他人。"
                     ));
                 }
 
                 break;
             case ClothesGrabNotReady:
-                _partnerReadyToGrab = false;
+                _membersReadyToGrab.Remove(player.Id);
                 Chat(Lang.Pick($"{player.Username} stopped waiting.", $"{player.Username} 不等了。"));
                 break;
             case ClothesGrabStarted:
-                // The partner doesn't wait anymore once their grab started, and a local player who still waits for them
-                // goes along: the partner only goes after hearing that the local player reached for theirs too. What
-                // they said about waiting may have got lost on the way, like when they lost the connection meanwhile.
-                _partnerReadyToGrab = false;
+                // The member doesn't wait anymore once their grab started, and a local player who still waits goes
+                // along: the member only goes after hearing that everyone reached for theirs, the local player too.
+                // What the others said about waiting may have got lost on the way, like when they lost the connection
+                // meanwhile.
+                _membersReadyToGrab.Remove(player.Id);
                 if (_clothesGrabHeld != null) {
                     Logger.Info($"The grab of {player.Username} started, so the local player goes along");
                     ReleaseClothesGrab();
@@ -285,18 +309,18 @@ internal partial class CoopSave {
                 StartPartnerStandIn(player, update);
                 break;
             case ClothesGrabEnded:
-                EndPartnerStandIn();
+                EndPartnerStandIn(player.Id);
                 break;
         }
     }
 
     /// <summary>
-    /// Lets the local player stop waiting for the partner with the jump button, and keeps the stand-in of the partner
+    /// Lets the local player stop waiting for the members with the jump button, and keeps the stand-ins of members
     /// going.
     /// </summary>
     private void UpdateClothesGrab(HeroController hero) {
         try {
-            UpdatePartnerStandIn();
+            UpdatePartnerStandIns();
 
             if (_clothesGrabHeld is not { } fsm || InputHandler.Instance is not { } inputHandler ||
                 global::GameManager.instance is not { isPaused: false } || !inputHandler.inputActions.Jump.WasPressed) {
@@ -315,11 +339,11 @@ internal partial class CoopSave {
 
             hero.StartAnimationControlToIdle();
             fsm.SetState(ClothesGrabIdleState);
-            if (_checkedWith is { } partnerId) {
-                SendClothesGrab(fsm, partnerId, ClothesGrabNotReady);
+            if (_checkedMembers.Count > 0) {
+                SendClothesGrab(fsm, ClothesGrabNotReady);
             }
 
-            Logger.Info("Stopped waiting for the partner to take the clothes back together");
+            Logger.Info("Stopped waiting for the members to take the clothes back together");
             Chat(Lang.Pick("You stopped waiting.", "不等了。"));
         } catch (Exception e) {
             Logger.Error($"Could not follow taking the clothes back:\n{e}");
@@ -327,10 +351,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Hides the body of the partner and plays a copy of the stand-in on it, the way the grab plays it in their game.
+    /// Hides the body of a member and plays a copy of the stand-in on it, the way the grab plays it in their game.
     /// </summary>
     private void StartPartnerStandIn(ClientPlayerData player, CoopSaveUpdate update) {
-        EndPartnerStandIn();
+        EndPartnerStandIn(player.Id);
 
         if (SceneUtil.GetCurrentSceneName() != update.Scene || player.PlayerObject is not { } body ||
             body.GetComponent<MeshRenderer>() is not { } bodyRenderer) {
@@ -339,7 +363,7 @@ internal partial class CoopSave {
 
         // The stand-in of this room, which is there whether the local player is without their clothes or not. The
         // grab of the local player takes it along onto the local player when it starts, and leaves it there, which is
-        // where it is when both players grab at once.
+        // where it is when players grab at once.
         var grab = ScenePath.Find(update.ObjectPath, update.Scene);
         var template = grab != null ? grab.transform.parent?.Find(StandInName) : null;
         if (template == null && HeroController.instance is { } hero) {
@@ -380,32 +404,30 @@ internal partial class CoopSave {
         animator.Pause();
 
         bodyRenderer.enabled = false;
-        _partnerStandIn = standIn;
+        _memberStandIns[player.Id] = standIn;
         Logger.Info($"Playing the grab of {player.Username} with a copy of the stand-in");
     }
 
     /// <summary>
-    /// Starts the leap of the stand-in once the grab carried the partner to the creature.
+    /// Starts the leap of each stand-in once the grab carried its member to the creature.
     /// </summary>
-    private void UpdatePartnerStandIn() {
-        if (_partnerStandIn is not { } standIn) {
-            return;
-        }
-
-        if (standIn.Animator.Paused && Time.time - standIn.StartTime >= StandInLeapDelay) {
-            standIn.Animator.Resume();
+    private void UpdatePartnerStandIns() {
+        foreach (var standIn in _memberStandIns.Values) {
+            if (standIn.Animator.Paused && Time.time - standIn.StartTime >= StandInLeapDelay) {
+                standIn.Animator.Resume();
+            }
         }
     }
 
     /// <summary>
-    /// Puts the stand-in of the partner away and shows their body again.
+    /// Puts the stand-in of a member away and shows their body again.
     /// </summary>
-    private void EndPartnerStandIn() {
-        if (_partnerStandIn is not { } standIn) {
+    private void EndPartnerStandIn(ushort playerId) {
+        if (!_memberStandIns.TryGetValue(playerId, out var standIn)) {
             return;
         }
 
-        _partnerStandIn = null;
+        _memberStandIns.Remove(playerId);
         if (standIn.Figure != null) {
             Object.Destroy(standIn.Figure);
         }
@@ -416,17 +438,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the grabs of the room that was left. Whether the partner waits is kept: whoever gets there first waits
-    /// there, so the other one only comes into the room after they said so.
+    /// Puts the stand-ins of every member away.
+    /// </summary>
+    private void EndPartnerStandIns() {
+        foreach (var playerId in _memberStandIns.Keys.ToList()) {
+            EndPartnerStandIn(playerId);
+        }
+    }
+
+    /// <summary>
+    /// Forgets the grabs of the room that was left. Whether the members wait is kept: whoever gets there first waits
+    /// there, so the others only come into the room after they said so.
     /// </summary>
     private void OnClothesGrabSceneChanged() {
-        // A player who leaves the room while waiting, like by dying, no longer waits there, so the partner is told.
-        // Only jumping used to say it, and a partner who still counted them as waiting took their clothes back alone
+        // A player who leaves the room while waiting, like by dying, no longer waits there, so the members are told.
+        // Only jumping used to say it, and a member who still counted them as waiting took their clothes back alone
         // the moment they reached for them. The object may be gone with the room, so this says it without its path,
-        // which the partner doesn't need for this.
-        if (_clothesGrabHeld != null && _checkedWith is { } partnerId) {
-            Send(new CoopSaveUpdate {
-                TargetId = partnerId,
+        // which the members don't need for this.
+        if (_clothesGrabHeld != null && _checkedMembers.Count > 0) {
+            SendToMembers(new CoopSaveUpdate {
                 Kind = CoopSaveUpdateKind.ClothesGrab,
                 PartCount = ClothesGrabNotReady
             });
@@ -434,7 +464,7 @@ internal partial class CoopSave {
 
         _clothesGrabHeld = null;
         _clothesGrabGoHeld = false;
-        EndPartnerStandIn();
+        EndPartnerStandIns();
     }
 
     /// <summary>
@@ -442,22 +472,36 @@ internal partial class CoopSave {
     /// </summary>
     private void ResetClothesGrab() {
         OnClothesGrabSceneChanged();
-        _partnerReadyToGrab = false;
+        _membersReadyToGrab.Clear();
     }
 
     /// <summary>
-    /// The partner left the session. That they waited is forgotten: they may come back with their game loaded anew,
-    /// and then they don't wait anymore. If they do still wait when they come back, reaching for the clothes here
-    /// frees them, and their grab starting frees the local player in turn. The stand-in of a grab of theirs is put
-    /// away, since their character goes back to be used for whoever comes next, the stand-in and all.
+    /// A member left the session. That they waited is forgotten: they may come back with their game loaded anew, and
+    /// then they don't wait anymore. If they do still wait when they come back, reaching for the clothes here frees
+    /// them, and their grab starting frees the local player in turn. The stand-in of a grab of theirs is put away,
+    /// since their character goes back to be used for whoever comes next, the stand-in and all. A grab of the local
+    /// player that waited for them alone goes on with the members who are still here, once those reached for theirs.
     /// </summary>
-    private void OnClothesGrabPartnerLeft() {
-        _partnerReadyToGrab = false;
-        EndPartnerStandIn();
+    /// <param name="playerId">The member.</param>
+    private void OnClothesGrabMemberLeft(ushort playerId) {
+        _membersReadyToGrab.Remove(playerId);
+        EndPartnerStandIn(playerId);
+        if (_clothesGrabHeld != null && _checkedMembers.Count > 0 && AreClothesGrabbersReady()) {
+            Logger.Info("The member who was waited for left, and everyone else reached for theirs, so they go now");
+            ReleaseClothesGrab();
+        }
     }
 
     /// <summary>
-    /// A copy of the stand-in that plays the grab of the partner on their body.
+    /// Forgets the members that waited, and the stand-ins of their grabs, when the local player leaves the server.
+    /// </summary>
+    private void ForgetClothesGrabMembers() {
+        _membersReadyToGrab.Clear();
+        EndPartnerStandIns();
+    }
+
+    /// <summary>
+    /// A copy of the stand-in that plays the grab of a member on their body.
     /// </summary>
     private sealed class PartnerStandIn {
         public PartnerStandIn(GameObject figure, tk2dSpriteAnimator animator, MeshRenderer body, float startTime) {
@@ -478,12 +522,12 @@ internal partial class CoopSave {
         public tk2dSpriteAnimator Animator { get; }
 
         /// <summary>
-        /// What draws the body of the partner, which is hidden while the stand-in plays.
+        /// What draws the body of the member, which is hidden while the stand-in plays.
         /// </summary>
         public MeshRenderer Body { get; }
 
         /// <summary>
-        /// When the grab of the partner started, in seconds of game time.
+        /// When the grab of the member started, in seconds of game time.
         /// </summary>
         public float StartTime { get; }
 
