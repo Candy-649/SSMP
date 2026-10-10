@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -92,9 +93,10 @@ internal partial class CoopSave {
     private int _differentStoryFlags;
 
     /// <summary>
-    /// Whether the current check took the story flags that differ from the save of the partner.
+    /// The username of the member whose save the current check took the story flags that differ from, or null if they
+    /// came from the local save.
     /// </summary>
-    private bool _storyFlagsFromPartner;
+    private string? _storyFlagsFrom;
 
     /// <summary>
     /// Whether syncing the story flags threw, which is only logged once.
@@ -179,9 +181,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends the story flags that changed in the local save to the partner.
+    /// Sends the story flags that changed in the local save to the other members.
     /// </summary>
-    private void UpdateStoryFlags(ClientPlayerData partner) {
+    private void UpdateStoryFlags() {
         var playerData = PlayerData.instance;
         if (playerData == null || _knownStoryValues == null || Time.unscaledTime < _nextStoryFlagTime) {
             return;
@@ -199,7 +201,7 @@ internal partial class CoopSave {
                 }
 
                 _knownStoryValues[i] = value;
-                update ??= new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange };
+                update ??= new CoopSaveUpdate { Kind = CoopSaveUpdateKind.WorldChange };
                 update.FlagNames.Add(fields[i].Name);
                 update.FlagValues.Add(value);
             }
@@ -212,17 +214,18 @@ internal partial class CoopSave {
                 foreach (var scene in unlocked) {
                     if (!_knownBossScenes.Contains(scene)) {
                         _knownBossScenes.Add(scene);
-                        update ??= new CoopSaveUpdate {
-                            TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange
-                        };
+                        update ??= new CoopSaveUpdate { Kind = CoopSaveUpdateKind.WorldChange };
                         update.Names.Add(scene);
                     }
                 }
             }
 
             if (update != null) {
-                Send(update);
-                Logger.Info($"Sent {update.FlagNames.Count} story flags and {update.Names.Count} boss scenes to {partner.Username}");
+                SendToMembers(update);
+                Logger.Info(
+                    $"Sent {update.FlagNames.Count} story flags and {update.Names.Count} boss scenes to " +
+                    GetCheckedNames()
+                );
             }
         } catch (Exception e) {
             if (!_storyFlagsFailed) {
@@ -294,56 +297,87 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Compares the story flags that the partner's save sent with the ones that the local save sent, for a check, so that
-    /// both games compare the same values. The flags that differ are taken from the save that was played longer since
-    /// both players last played together, or from the save with the larger key if both were played equally long, so
-    /// both games choose the same save. A boolean that a saved object of the world sets stays set if either save has
-    /// that object, since the check gives it to both saves, and so does a record of something done for good, like an
-    /// arena that either player won. Flags that changed live during the check are newer than both saves and stay as
-    /// they are.
+    /// Compares the story flags that the saves of the members sent with the ones that the local save sent, for a check,
+    /// so that every game compares the same values. The flags that differ are taken from the save that was played
+    /// longest since the players last played together, or from the save with the largest key of those that were played
+    /// equally long, so every game chooses the same save. A boolean that a saved object of the world sets stays set if
+    /// any save has that object, since the check gives it to every save, and so does a record of something done for
+    /// good, like an arena that any player won. Flags that changed live during the check are newer than all the saves
+    /// and stay as they are.
     /// </summary>
+    /// <param name="states">The parts of the world progress of each member of the round.</param>
     /// <returns>How many story flags changed in the local save.</returns>
-    private int AddStoryFlags(ClientPlayerData partner, List<CoopSaveUpdate> parts) {
+    private int AddStoryFlags(List<(ClientPlayerData Member, List<CoopSaveUpdate> Parts)> states) {
         var playerData = PlayerData.instance;
         var fields = GetStoryFields();
-        var partnerTime = parts.Count > 0 ? parts[0].PlayTime : 0f;
-        var localTime = GetCheckPlayTime();
-        _storyFlagsFromPartner = partnerTime > localTime || (partnerTime.Equals(localTime) && PartnerKeyWins());
-        var worldItemFlags = GetWorldItemFlags(parts);
+        var marker = GetCurrentMarker();
+
+        // The local save goes first, and a member's save takes over by being played longer, or as long with a larger key
+        var winner = -1;
+        var winnerTime = GetCheckPlayTime();
+        var winnerKey = LocalKey;
+        for (var i = 0; i < states.Count; i++) {
+            var time = states[i].Parts.Count > 0 ? states[i].Parts[0].PlayTime : 0f;
+            var key = GetMemberKey(marker, states[i].Member);
+            if (time > winnerTime || (time.Equals(winnerTime) && string.CompareOrdinal(key, winnerKey) > 0)) {
+                winner = i;
+                winnerTime = time;
+                winnerKey = key;
+            }
+        }
+
+        _storyFlagsFrom = winner >= 0 ? states[winner].Member.Username : null;
+        var worldItemFlags = GetWorldItemFlags(states.SelectMany(state => state.Parts).ToList());
+
+        // What each member's save sent, by the name of the flag, and the names in the order they came in
+        var memberValues = new List<Dictionary<string, int>>(states.Count);
+        var names = new List<string>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var (_, parts) in states) {
+            var values = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var part in parts) {
+                for (var i = 0; i < part.FlagNames.Count && i < part.FlagValues.Count; i++) {
+                    values[part.FlagNames[i]] = part.FlagValues[i];
+                    if (seen.Add(part.FlagNames[i])) {
+                        names.Add(part.FlagNames[i]);
+                    }
+                }
+            }
+
+            memberValues.Add(values);
+        }
 
         _differentStoryFlags = 0;
         var changes = new CoopSaveUpdate();
-        foreach (var part in parts) {
-            for (var i = 0; i < part.FlagNames.Count && i < part.FlagValues.Count; i++) {
-                var name = part.FlagNames[i];
-                if (!StoryFieldIndices.TryGetValue(name, out var index) || _flagSequences.ContainsKey(name)) {
-                    continue;
-                }
+        foreach (var name in names) {
+            if (!StoryFieldIndices.TryGetValue(name, out var index) || _flagSequences.ContainsKey(name)) {
+                continue;
+            }
 
-                var partnerValue = part.FlagValues[i];
-                var hasSent = _agreedStoryValues != null && index < _agreedStoryValues.Length;
-                var localValue = hasSent ? _agreedStoryValues![index] : ReadStoryValue(fields[index], playerData);
-                if (localValue == partnerValue) {
-                    continue;
-                }
+            var hasSent = _agreedStoryValues != null && index < _agreedStoryValues.Length;
+            var localValue = hasSent ? _agreedStoryValues![index] : ReadStoryValue(fields[index], playerData);
+            if (memberValues.All(values => !values.TryGetValue(name, out var memberValue) || memberValue == localValue)) {
+                continue;
+            }
 
-                _differentStoryFlags++;
-                var value = _storyFlagsFromPartner ? partnerValue : localValue;
-                if (fields[index].FieldType == typeof(bool) &&
-                    (worldItemFlags.Contains(name) || StoryRecordNames.Contains(name))) {
-                    value = 1;
-                }
+            _differentStoryFlags++;
+            var value = winner >= 0 && memberValues[winner].TryGetValue(name, out var winnerValue)
+                ? winnerValue
+                : localValue;
+            if (fields[index].FieldType == typeof(bool) &&
+                (worldItemFlags.Contains(name) || StoryRecordNames.Contains(name))) {
+                value = 1;
+            }
 
-                if (hasSent) {
-                    _agreedStoryValues![index] = value;
-                }
+            if (hasSent) {
+                _agreedStoryValues![index] = value;
+            }
 
-                // A flag that keeps the value of the local save keeps what the local player changed since, which goes to
-                // the partner after the check
-                if (value != localValue && ReadStoryValue(fields[index], playerData) != value) {
-                    changes.FlagNames.Add(name);
-                    changes.FlagValues.Add(value);
-                }
+            // A flag that keeps the value of the local save keeps what the local player changed since, which goes to
+            // the others after the check
+            if (value != localValue && ReadStoryValue(fields[index], playerData) != value) {
+                changes.FlagNames.Add(name);
+                changes.FlagValues.Add(value);
             }
         }
 

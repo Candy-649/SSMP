@@ -1998,8 +1998,10 @@ internal partial class CoopSave {
     /// finishes it.
     /// </summary>
     private bool IsFromCurrentCheck(ClientPlayerData player, CoopSaveUpdate update) {
-        return _checkedWith == player.Id ||
-               (_checkPartnerId == player.Id && _checkKey != 0 && update.Sequence >> 32 == _checkKey >> 16);
+        // A player whose pairing names the local save without the local save naming them said no hello that counts,
+        // so their game's round key, which can be the same small number, doesn't make their changes count here
+        return _checkedMembers.Contains(player.Id) ||
+               (IsFromMemberInSave(player) && _checkKey != 0 && update.Sequence >> 32 == _checkKey >> 16);
     }
 
     /// <summary>

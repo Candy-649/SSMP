@@ -3,27 +3,27 @@ using ProtocolCheck.Explore;
 namespace ProtocolCheck.Models;
 
 /// <summary>
-/// The check that both games of a two-player save run every time the two players meet: a hello with a key, the world
-/// progress of each game in parts, and a leave. Transcribed from <c>CoopSave.cs</c> and <c>CoopSave.Check.cs</c>, with
-/// the names of their fields and methods.
+/// The check that the games of a shared save run every time its players meet: a round with a key, a hello from each
+/// game to each other game, the world progress of each game in parts to each other game, and a leave. Transcribed from
+/// <c>CoopSave.cs</c> and <c>CoopSave.Check.cs</c>, with the names of their fields and methods.
 /// <para>
-/// Player A hosts: the server runs in their game, which waits in the menu until B is on the server and then loads the
-/// save. B joins over the relay and loads the save once A is on the server, which is what the save menu enforces.
-/// Going to the menu disconnects: <c>UiManager.OnReturnToMainMenu</c> disconnects the client and stops the server, after
-/// <c>CoopSave.OnReturnToMainMenu</c> already ran, because CoopSave subscribes first (in the ClientManager
-/// constructor, before <c>UiManager.Initialize</c>).
+/// Player A hosts: the server runs in their game, which waits in the menu until every other player is on the server and
+/// then loads the save. The others join over the relay and load the save once every other player is on the server,
+/// which is what the save menu enforces. Going to the menu disconnects: <c>UiManager.OnReturnToMainMenu</c>
+/// disconnects the client and stops the server, after <c>CoopSave.OnReturnToMainMenu</c> already ran, because CoopSave
+/// subscribes first (in the ClientManager constructor, before <c>UiManager.Initialize</c>).
 /// </para>
 /// </summary>
-internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<SaveCheck.World> {
-    private const int PartCount = 2;
+internal sealed class SaveCheck(int players = 2, int disruptions = 2, int inFlight = 3, int partCount = 2)
+    : Model<SaveCheck.World> {
     private const ushort HelloStart = 0;
     private const ushort HelloAnswer = 1;
 
-    public override string Name => $"save check ({disruptions} disruptions)";
+    public override string Name => $"save check ({players} players, {disruptions} disruptions)";
 
     public override string Scope =>
-        "no pairing, no save key mismatch, no benches, world progress in 2 parts; time passes for a hello only " +
-        $"while at most {inFlight} messages are on their way";
+        "every player on the server is a member; no pairing, no save key mismatch, no benches, world progress in " +
+        $"{partCount} parts; time passes for a hello only while at most {inFlight} messages are on their way";
 
     public sealed record Hello(ushort PlayerId, ulong Key, ushort PartCount) : Msg {
         public override int Packet => Packets.CoopSaveUpdate;
@@ -45,6 +45,19 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
         public override int Packet => Packets.PlayerDisconnect;
     }
 
+    /// <summary>
+    /// <c>MemberCheck</c>: the check with one member in a round. <c>HelloRecent</c> stands for <c>LastHelloUtc</c>
+    /// being less than <c>HelloRetryDelay</c> ago, and <c>Parts</c> for the parts in <c>Parts</c>, one bit each.
+    /// </summary>
+    public readonly record struct MemberCheck(
+        ushort Id,
+        bool Hello,
+        bool StateSent,
+        bool StateReceived,
+        int Parts,
+        bool HelloRecent
+    );
+
     public sealed class Game : Rec {
         public string Name = "";
         public bool Connected;
@@ -52,44 +65,48 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
         public bool InGame;
 
         /// <summary>
-        /// The other players this game knows, ClientManager's <c>_playerData</c>.
+        /// The other players this game knows, ClientManager's <c>_playerData</c>, which are all members.
         /// </summary>
         public Seq<ushort> Players = Seq<ushort>.Empty;
 
         public int _sessionSlot = -1;
         public bool _held;
         public bool _everChecked;
-        public ushort? _checkedWith;
+
+        /// <summary>
+        /// <c>_checkedMembers</c>, in the order of the IDs.
+        /// </summary>
+        public Seq<ushort> _checkedMembers = Seq<ushort>.Empty;
+
+        /// <summary>
+        /// <c>_memberChecks</c>, in the order of the IDs.
+        /// </summary>
+        public Seq<MemberCheck> _memberChecks = Seq<MemberCheck>.Empty;
+
         public ulong _highestCheckKey;
-        public ushort? _checkPartnerId;
         public ulong _checkKey;
-        public bool _partnerHello;
-        public bool _stateSent;
-        public bool _stateReceived;
         public bool _stateAdded;
-
-        /// <summary>
-        /// The parts in <c>_stateParts</c>, one bit each.
-        /// </summary>
-        public int _stateParts;
-
-        /// <summary>
-        /// Whether the last hello went out less than <c>HelloRetryDelay</c> ago.
-        /// </summary>
-        public bool HelloRecent;
+        public bool _roundFinished;
     }
 
     public sealed class World : Rec {
         public Game A = new() { Name = "A" };
         public Game B = new() { Name = "B" };
+        public Game C = new() { Name = "C" };
         public bool ServerUp;
         public ushort NextId;
         public Channel ToA = new();
         public Channel ToB = new();
+        public Channel ToC = new();
         public int Disruptions;
     }
 
     public override World Initial() => new() { Disruptions = disruptions };
+
+    /// <summary>
+    /// The games of the players of the model: A and B, and C with three players.
+    /// </summary>
+    private Game[] Games(World w) => players >= 3 ? [w.A, w.B, w.C] : [w.A, w.B];
 
     /// <summary>
     /// Renumbers the counts in the upper bits of the check keys from 1 up. The games only ever compare keys and make one
@@ -97,12 +114,15 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
     /// exactly one apart, and both stay the same when every larger gap becomes 2.
     /// </summary>
     public override void Normalize(World w) {
+        var games = Games(w);
+
         // Sharing a packet only changes the order when a player connecting or disconnecting joins it, because every
         // other message here has the same packet ID. Once that can't happen any more, the server may as well send
         // everything right away, and the search doesn't have to try every moment it could.
-        if (w.Disruptions == 0 && w.B.Connected) {
-            w.ToA.Flush();
-            w.ToB.Flush();
+        if (w.Disruptions == 0 && games.All(g => g.Connected)) {
+            foreach (var g in games) {
+                ChannelOf(w, g).Flush();
+            }
         }
 
         var counts = new SortedSet<ulong>();
@@ -113,13 +133,12 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
             }
         }
 
-        foreach (var g in new[] { w.A, w.B }) {
+        foreach (var g in games) {
             Note(g._highestCheckKey);
             Note(g._checkKey);
-        }
-
-        foreach (var message in w.ToA.Sent.Concat(w.ToA.Open).Concat(w.ToB.Sent).Concat(w.ToB.Open)) {
-            Note(KeyOf(message));
+            foreach (var message in ChannelOf(w, g).Sent.Concat(ChannelOf(w, g).Open)) {
+                Note(KeyOf(message));
+            }
         }
 
         var renumbered = new Dictionary<ulong, ulong>();
@@ -143,12 +162,10 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
             _ => message
         };
 
-        foreach (var g in new[] { w.A, w.B }) {
+        foreach (var g in games) {
             g._highestCheckKey = Map(g._highestCheckKey);
             g._checkKey = Map(g._checkKey);
-        }
-
-        foreach (var channel in new[] { w.ToA, w.ToB }) {
+            var channel = ChannelOf(w, g);
             channel.Sent = Seq<Msg>.Of(channel.Sent.Select(MapMessage).ToArray());
             channel.Open = Seq<Msg>.Of(channel.Open.Select(MapMessage).ToArray());
         }
@@ -161,29 +178,38 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
         _ => 0
     };
 
-    public override bool Goal(World w) =>
-        w.A is { InGame: true, Connected: true } && w.B is { InGame: true, Connected: true } &&
-        w.A._checkedWith == w.B.Id && w.B._checkedWith == w.A.Id;
+    public override bool Goal(World w) {
+        var games = Games(w);
+        return games.All(g =>
+            g is { InGame: true, Connected: true } &&
+            games.Where(other => other != g).All(other => other.Id is { } id && g._checkedMembers.Contains(id))
+        );
+    }
 
-    public override string Describe(World w) => $"{Describe(w.A)}; {Describe(w.B)}";
+    public override string Describe(World w) => string.Join("; ", Games(w).Select(Describe));
 
     private static string Describe(Game g) =>
         !g.Connected ? $"{g.Name} not connected" :
         !g.InGame ? $"{g.Name} in the menu" :
-        g._checkedWith != null ? $"{g.Name} checked" :
-        $"{g.Name} waiting (hello from the partner: {g._partnerHello}, progress sent: {g._stateSent}, " +
-        $"received: {g._stateReceived})";
+        g._roundFinished ? $"{g.Name} checked with {g._checkedMembers.Count}" :
+        $"{g.Name} waiting ({string.Join(", ", g._memberChecks.Select(check =>
+            $"{check.Id}: hello {check.Hello}, sent {check.StateSent}, received {check.StateReceived}"))})";
 
     public override void Moves(World w, Moves<World> moves) {
+        var games = Games(w);
         if (!w.ServerUp && !w.A.Connected) {
             moves.Add("A hosts", Host);
         }
 
-        if (w.ServerUp && !w.B.Connected) {
-            moves.Add("B joins", Join);
+        foreach (var g in games.Skip(1)) {
+            var name = g.Name;
+            if (w.ServerUp && !g.Connected) {
+                moves.Add($"{name} joins", s => Join(s, GameOf(s, name)));
+            }
         }
 
-        foreach (var g in new[] { w.A, w.B }) {
+        var pending = games.Sum(g => ChannelOf(w, g).Pending);
+        foreach (var g in games) {
             var name = g.Name;
             var channel = ChannelOf(w, g);
             if (channel.Sent.Count > 0) {
@@ -194,7 +220,8 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
                 moves.Add($"server sends to {name}", s => ChannelOf(s, name).Flush());
             }
 
-            if (g.Connected && !g.InGame && FindPartner(g) != null) {
+            // The save menu only opens the save with every other member on the server
+            if (g.Connected && !g.InGame && g.Players.Count == players - 1) {
                 moves.Add($"{name} loads the save", s => GameOf(s, name).InGame = true);
             }
 
@@ -212,18 +239,26 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
 
             // Time passing is what sends a hello again, and a hello can bring the world progress back with it, so the
             // search lets time pass only while few enough messages are on their way
-            if (g.HelloRecent && w.ToA.Pending + w.ToB.Pending <= inFlight) {
-                moves.Add($"{name}: 2s pass", s => GameOf(s, name).HelloRecent = false);
+            if (g._memberChecks.Any(check => check.HelloRecent) && pending <= inFlight) {
+                moves.Add($"{name}: 2s pass", s => {
+                    var game = GameOf(s, name);
+                    game._memberChecks = Seq<MemberCheck>.Of(
+                        game._memberChecks.Select(check => check with { HelloRecent = false }).ToArray()
+                    );
+                });
             }
         }
 
         if (w.Disruptions > 0) {
-            if (w.B.InGame) {
-                moves.Disrupt("B quits to the menu", s => { BQuits(s); s.Disruptions--; });
-            }
+            foreach (var g in games.Skip(1)) {
+                var name = g.Name;
+                if (g.InGame) {
+                    moves.Disrupt($"{name} quits to the menu", s => { Quits(s, GameOf(s, name)); s.Disruptions--; });
+                }
 
-            if (w.B.Connected) {
-                moves.Disrupt("B's connection drops", s => { BDrops(s); s.Disruptions--; });
+                if (g.Connected) {
+                    moves.Disrupt($"{name}'s connection drops", s => { Drops(s, GameOf(s, name)); s.Disruptions--; });
+                }
             }
 
             if (w.A.InGame) {
@@ -236,8 +271,8 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
     /// Whether the next frame of a game makes a new check key, which has random lower bits.
     /// </summary>
     private static bool MakesKey(Game g) {
-        var partner = FindPartner(g);
-        if (partner == null) {
+        var members = g.Players;
+        if (members.Count == 0) {
             return false;
         }
 
@@ -245,72 +280,113 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
             return true;
         }
 
-        return g._checkedWith != partner && (g._checkPartnerId != partner || g._checkKey == 0);
+        return members.Any(member => !g._checkedMembers.Contains(member)) && !g._roundFinished && g._checkKey == 0;
     }
 
-    private static Game GameOf(World w, string name) => name == "A" ? w.A : w.B;
+    private static Game GameOf(World w, string name) => name switch { "A" => w.A, "B" => w.B, _ => w.C };
 
-    private static Channel ChannelOf(World w, Game g) => g.Name == "A" ? w.ToA : w.ToB;
+    private static Channel ChannelOf(World w, Game g) => ChannelOf(w, g.Name);
 
-    private static Channel ChannelOf(World w, string name) => name == "A" ? w.ToA : w.ToB;
+    private static Channel ChannelOf(World w, string name) => name switch { "A" => w.ToA, "B" => w.ToB, _ => w.ToC };
 
     /// <summary>
     /// CoopSave.Send: goes out only while connected, and the server drops it for a player who isn't there.
     /// </summary>
-    private static void Send(World w, Game g, ushort target, Msg message) {
+    private void Send(World w, Game g, ushort target, Msg message) {
         if (!g.Connected) {
             return;
         }
 
-        var receiver = w.A.Connected && w.A.Id == target ? w.A : w.B.Connected && w.B.Id == target ? w.B : null;
+        var receiver = Games(w).FirstOrDefault(other => other.Connected && other.Id == target);
         if (receiver != null) {
             ChannelOf(w, receiver).Put(message);
         }
     }
 
+    private static int FindCheck(Game g, ushort id) {
+        for (var i = 0; i < g._memberChecks.Count; i++) {
+            if (g._memberChecks[i].Id == id) {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
+    private static MemberCheck? GetCheck(Game g, ushort id) {
+        var index = FindCheck(g, id);
+        return index < 0 ? null : g._memberChecks[index];
+    }
+
     /// <summary>
-    /// FindPartner: the other player, if this game knows them.
+    /// Puts the check with a member in, in the place of an older one or in the order of the IDs.
     /// </summary>
-    private static ushort? FindPartner(Game g) => g.Players.Count > 0 ? g.Players[0] : null;
+    private static void SetCheck(Game g, MemberCheck check) {
+        var index = FindCheck(g, check.Id);
+        if (index >= 0) {
+            g._memberChecks = g._memberChecks.RemoveAt(index).Insert(index, check);
+            return;
+        }
+
+        var at = 0;
+        while (at < g._memberChecks.Count && g._memberChecks[at].Id < check.Id) {
+            at++;
+        }
+
+        g._memberChecks = g._memberChecks.Insert(at, check);
+    }
+
+    private static void RemoveCheck(Game g, ushort id) {
+        var index = FindCheck(g, id);
+        if (index >= 0) {
+            g._memberChecks = g._memberChecks.RemoveAt(index);
+        }
+    }
+
+    private static Seq<ushort> Sorted(IEnumerable<ushort> ids) => Seq<ushort>.Of(ids.Distinct().OrderBy(id => id).ToArray());
 
     #region CoopSave.Check.cs
 
     private static void ResetCheck(Game g) {
-        g.HelloRecent = false;
-        g._checkPartnerId = null;
+        g._checkedMembers = Seq<ushort>.Empty;
+        g._memberChecks = Seq<MemberCheck>.Empty;
         g._checkKey = 0;
-        g._partnerHello = false;
-        g._stateSent = false;
-        g._stateReceived = false;
         g._stateAdded = false;
-        g._stateParts = 0;
+        g._roundFinished = false;
     }
 
-    private static void UpdateCheck(World w, Game g, ushort partner, ulong low) {
-        if (g._checkPartnerId != partner) {
-            ResetCheck(g);
-            g._checkPartnerId = partner;
+    private void UpdateCheck(World w, Game g, Seq<ushort> members, ulong low) {
+        if (g._roundFinished) {
+            return;
         }
 
         if (g._checkKey == 0) {
             g._checkKey = NewCheckKey(g, low);
-            SendHello(w, g, partner, HelloStart);
-        } else if ((!g._partnerHello || !g._stateReceived) && !g.HelloRecent) {
-            SendHello(w, g, partner, HelloStart);
         }
 
-        if (g._partnerHello && !g._stateSent) {
-            g._stateSent = true;
-            SendWorldState(w, g, partner);
-        }
-
-        if (g._stateSent && g._stateReceived) {
-            if (!g._stateAdded) {
-                g._stateAdded = true;
+        foreach (var member in members) {
+            if (GetCheck(g, member) is not { } check) {
+                SetCheck(g, new MemberCheck(member, false, false, false, 0, false));
+                SendHello(w, g, member, HelloStart);
+            } else if ((!check.Hello || !check.StateReceived) && !check.HelloRecent) {
+                SendHello(w, g, member, HelloStart);
             }
 
-            FinishCheck(g, partner);
+            if (GetCheck(g, member) is { Hello: true, StateSent: false } ready) {
+                SetCheck(g, ready with { StateSent = true });
+                SendWorldState(w, g, member);
+            }
         }
+
+        if (members.Count == 0 || !members.All(member => GetCheck(g, member) is { StateSent: true, StateReceived: true })) {
+            return;
+        }
+
+        if (!g._stateAdded) {
+            g._stateAdded = true;
+        }
+
+        FinishCheck(g, members);
     }
 
     private static ulong NewCheckKey(Game g, ulong low) {
@@ -319,113 +395,126 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
         return key;
     }
 
-    private static void SendHello(World w, Game g, ushort partner, ushort kind) {
-        g.HelloRecent = true;
-        Send(w, g, partner, new Hello(g.Id!.Value, g._checkKey, kind));
+    private void SendHello(World w, Game g, ushort member, ushort kind) {
+        if (GetCheck(g, member) is { } check) {
+            SetCheck(g, check with { HelloRecent = true });
+        }
+
+        Send(w, g, member, new Hello(g.Id!.Value, g._checkKey, kind));
     }
 
-    private static void OnHello(World w, Game g, ushort player, Hello update) {
+    private void OnHello(World w, Game g, ushort player, Hello update) {
         if (!g.InGame) {
             return;
         }
 
         g._highestCheckKey = Math.Max(g._highestCheckKey, update.Key);
+        var check = GetCheck(g, player);
 
         if (update.PartCount == HelloAnswer) {
-            if (update.Key == g._checkKey && g._checkPartnerId == player) {
-                g._partnerHello = true;
+            if (update.Key == g._checkKey && check != null) {
+                SetCheck(g, check.Value with { Hello = true });
                 ResendWorldState(w, g, player);
             }
 
             return;
         }
 
-        if (update.Key == g._checkKey && g._checkPartnerId == player) {
-            g._partnerHello = true;
+        if (update.Key > g._checkKey) {
+            ResetCheck(g);
+            g._checkKey = update.Key;
+            SetCheck(g, new MemberCheck(player, true, false, false, 0, false));
+            SendHello(w, g, player, HelloAnswer);
+            return;
+        }
+
+        if (g._roundFinished && !g._checkedMembers.Contains(player)) {
+            ResetCheck(g);
+            return;
+        }
+
+        if (update.Key == g._checkKey) {
+            SetCheck(g, (check ?? new MemberCheck(player, false, false, false, 0, false)) with { Hello = true });
             SendHello(w, g, player, HelloAnswer);
             ResendWorldState(w, g, player);
             return;
         }
 
-        if (update.Key < g._checkKey && g._checkPartnerId == player) {
-            if (g._checkedWith != player) {
-                SendHello(w, g, player, HelloStart);
+        if (!g._checkedMembers.Contains(player)) {
+            if (check == null) {
+                SetCheck(g, new MemberCheck(player, false, false, false, 0, false));
             }
 
-            return;
+            SendHello(w, g, player, HelloStart);
         }
-
-        if (g._checkedWith == player) {
-            g._checkedWith = null;
-        }
-
-        ResetCheck(g);
-        g._checkPartnerId = player;
-        g._checkKey = update.Key;
-        g._partnerHello = true;
-        SendHello(w, g, player, HelloAnswer);
     }
 
     private static void OnWorldState(Game g, ushort player, WorldState update) {
-        if (g._stateReceived) {
+        var check = GetCheck(g, player);
+        if (check is { StateReceived: true }) {
             return;
         }
 
-        if (!g.InGame || g._checkKey == 0 || update.Key != g._checkKey || g._checkPartnerId != player) {
+        if (!g.InGame || g._checkKey == 0 || update.Key != g._checkKey || check == null) {
             return;
         }
 
-        g._stateParts |= 1 << update.Part;
-        if (int.PopCount(g._stateParts) < update.PartCount) {
-            return;
-        }
-
-        g._stateReceived = true;
+        var parts = check.Value.Parts | (1 << update.Part);
+        SetCheck(g, check.Value with { Parts = parts, StateReceived = int.PopCount(parts) >= update.PartCount });
     }
 
     private static void OnLeft(Game g, ushort player, Left update) {
-        if (g._checkPartnerId == player && g._checkKey > update.Key) {
+        if (GetCheck(g, player) != null && g._checkKey > update.Key) {
             return;
         }
 
         PartnerLeft(g, player);
     }
 
-    private static void FinishCheck(Game g, ushort partner) {
-        g._checkedWith = partner;
-        g._everChecked = true;
-    }
-
-    private static void SendWorldState(World w, Game g, ushort partner) {
-        for (ushort part = 0; part < PartCount; part++) {
-            Send(w, g, partner, new WorldState(g.Id!.Value, g._checkKey, part, PartCount));
+    private void FinishCheck(Game g, Seq<ushort> members) {
+        g._roundFinished = true;
+        g._checkedMembers = Sorted(members);
+        if (IsGroupComplete(g, members)) {
+            g._everChecked = true;
         }
     }
 
-    private static void ResendWorldState(World w, Game g, ushort partner) {
-        if (!g._stateSent || g._checkKey == 0) {
+    private void SendWorldState(World w, Game g, ushort member) {
+        for (ushort part = 0; part < partCount; part++) {
+            Send(w, g, member, new WorldState(g.Id!.Value, g._checkKey, part, (ushort) partCount));
+        }
+    }
+
+    private void ResendWorldState(World w, Game g, ushort member) {
+        if (GetCheck(g, member) is not { StateSent: true } || g._checkKey == 0) {
             return;
         }
 
-        SendWorldState(w, g, partner);
+        SendWorldState(w, g, member);
     }
 
     #endregion
 
     #region CoopSave.cs
 
-    private static void UpdateSession(World w, Game g, ulong low) {
+    /// <summary>
+    /// IsGroupComplete: every member on the server and checked with.
+    /// </summary>
+    private bool IsGroupComplete(Game g, Seq<ushort> members) =>
+        members.Count == players - 1 && members.All(member => g._checkedMembers.Contains(member));
+
+    private void UpdateSession(World w, Game g, ulong low) {
         if (g._sessionSlot != 1) {
             ResetSession(w, g, true);
             g._sessionSlot = 1;
         }
 
-        var partner = FindPartner(g);
-        if (partner != null && g._checkedWith != partner) {
-            UpdateCheck(w, g, partner.Value, low);
+        var members = g.Players;
+        if (members.Any(member => !g._checkedMembers.Contains(member))) {
+            UpdateCheck(w, g, members, low);
         }
 
-        if (partner != null && g._checkedWith == partner) {
+        if (IsGroupComplete(g, members)) {
             g._held = false;
             return;
         }
@@ -435,19 +524,21 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
         }
     }
 
-    private static void ResetSession(World w, Game g, bool notifyPartner) {
-        var partnerId = g._checkedWith ?? g._checkPartnerId;
-        if (notifyPartner && partnerId is { } id && g.Players.Contains(id)) {
-            Send(w, g, id, new Left(g.Id!.Value, g._highestCheckKey));
+    private void ResetSession(World w, Game g, bool notifyPartner) {
+        if (notifyPartner) {
+            foreach (var id in Sorted(g._memberChecks.Select(check => check.Id).Concat(g._checkedMembers))) {
+                if (g.Players.Contains(id)) {
+                    Send(w, g, id, new Left(g.Id!.Value, g._highestCheckKey));
+                }
+            }
         }
 
         g._held = false;
         g._everChecked = false;
-        g._checkedWith = null;
         ResetCheck(g);
     }
 
-    private static void OnReturnToMainMenu(World w, Game g) {
+    private void OnReturnToMainMenu(World w, Game g) {
         ResetSession(w, g, true);
         g._sessionSlot = -1;
     }
@@ -456,35 +547,41 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
     /// OnPlayerConnect, after ClientManager added the player.
     /// </summary>
     private static void OnPlayerConnect(Game g, ushort player) {
-        g.Players = g.Players.Add(player);
+        g.Players = Sorted(g.Players.Append(player));
         if (!g.InGame) {
             return;
         }
 
-        g._checkedWith = null;
-        ResetCheck(g);
-        g._highestCheckKey = 0;
+        RemoveCheck(g, player);
+        if (g._checkedMembers.Count == 0) {
+            ResetCheck(g);
+            g._highestCheckKey = 0;
+        }
     }
 
     /// <summary>
-    /// OnPlayerDisconnect, after which ClientManager forgets the player.
+    /// OnPlayerDisconnect, after ClientManager forgot the player.
     /// </summary>
     private static void OnPlayerDisconnect(Game g, ushort id) {
-        if (g._checkPartnerId == id || g._checkedWith == id) {
-            PartnerLeft(g, id);
-            g._highestCheckKey = 0;
-        }
-
         g.Players = g.Players.Remove(id);
+        if (GetCheck(g, id) != null || g._checkedMembers.Contains(id)) {
+            PartnerLeft(g, id);
+            if (g._checkedMembers.Count == 0) {
+                g._highestCheckKey = 0;
+            }
+        }
     }
 
     private static void PartnerLeft(Game g, ushort id) {
-        if (g._checkPartnerId != id && g._checkedWith != id) {
+        if (GetCheck(g, id) == null && !g._checkedMembers.Contains(id)) {
             return;
         }
 
-        g._checkedWith = null;
-        ResetCheck(g);
+        g._checkedMembers = g._checkedMembers.Remove(id);
+        RemoveCheck(g, id);
+        if (g._checkedMembers.Count == 0) {
+            ResetCheck(g);
+        }
     }
 
     private static void OnLocalConnect(Game g) {
@@ -493,7 +590,6 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
 
     private static void OnLocalDisconnect(Game g) {
         g._held = false;
-        g._checkedWith = null;
         ResetCheck(g);
         g._highestCheckKey = 0;
     }
@@ -502,7 +598,7 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
     /// ClientManager's handlers for the messages of this model. OnCoopSaveUpdate drops an update from a player that the
     /// game doesn't know.
     /// </summary>
-    private static void Handle(World w, Game g, Msg message) {
+    private void Handle(World w, Game g, Msg message) {
         switch (message) {
             case PlayerConnect connect:
                 OnPlayerConnect(g, connect.Id);
@@ -535,19 +631,21 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
         OnLocalConnect(w.A);
     }
 
-    private static void Join(World w) {
-        var b = w.B;
-        b.Connected = true;
-        b.Id = w.NextId++;
-        b.Players = Seq<ushort>.Of(w.A.Id!.Value);
-        OnLocalConnect(b);
-        w.ToA.Put(new PlayerConnect(b.Id.Value));
+    private void Join(World w, Game g) {
+        var others = Games(w).Where(other => other != g && other.Connected).ToList();
+        g.Connected = true;
+        g.Id = w.NextId++;
+        g.Players = Sorted(others.Select(other => other.Id!.Value));
+        OnLocalConnect(g);
+        foreach (var other in others) {
+            ChannelOf(w, other).Put(new PlayerConnect(g.Id.Value));
+        }
     }
 
     /// <summary>
     /// A game disconnects, from the menu or because the connection is lost, and goes to the menu.
     /// </summary>
-    private static void Leave(World w, Game g) {
+    private void Leave(World w, Game g) {
         ChannelOf(w, g).Clear();
         OnLocalDisconnect(g);
         g.Connected = false;
@@ -560,28 +658,40 @@ internal sealed class SaveCheck(int disruptions = 2, int inFlight = 3) : Model<S
         g.Id = null;
     }
 
-    private static void BQuits(World w) {
-        var b = w.B;
-        var id = b.Id!.Value;
-        OnReturnToMainMenu(w, b);
-        b.InGame = false;
-        Leave(w, b);
-        w.ToA.Put(new PlayerDisconnect(id));
+    /// <summary>
+    /// The server tells every other game that a player left.
+    /// </summary>
+    private void TellLeft(World w, Game g, ushort id) {
+        foreach (var other in Games(w)) {
+            if (other != g && other.Connected) {
+                ChannelOf(w, other).Put(new PlayerDisconnect(id));
+            }
+        }
     }
 
-    private static void BDrops(World w) {
-        var id = w.B.Id!.Value;
-        Leave(w, w.B);
-        w.ToA.Put(new PlayerDisconnect(id));
+    private void Quits(World w, Game g) {
+        var id = g.Id!.Value;
+        OnReturnToMainMenu(w, g);
+        g.InGame = false;
+        Leave(w, g);
+        TellLeft(w, g, id);
     }
 
-    private static void AQuits(World w) {
+    private void Drops(World w, Game g) {
+        var id = g.Id!.Value;
+        Leave(w, g);
+        TellLeft(w, g, id);
+    }
+
+    private void AQuits(World w) {
         var a = w.A;
         OnReturnToMainMenu(w, a);
         a.InGame = false;
         Leave(w, a);
-        if (w.B.Connected) {
-            Leave(w, w.B);
+        foreach (var g in Games(w).Skip(1)) {
+            if (g.Connected) {
+                Leave(w, g);
+            }
         }
 
         w.ServerUp = false;

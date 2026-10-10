@@ -183,10 +183,10 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, CoopSaveUpdate> _pendingMachineRounds = new();
 
     /// <summary>
-    /// The number of the newest word of the scene host taken for each machine, so that a word that comes late, after a
-    /// newer one, is dropped.
+    /// The number of the newest word taken for each machine from each member, whose words count up by themselves, so
+    /// that a word that comes late, after a newer one, is dropped.
     /// </summary>
-    private readonly Dictionary<Fsm, ulong> _takenMachineRounds = new();
+    private readonly Dictionary<(Fsm, ushort), ulong> _takenMachineRounds = new();
 
     /// <summary>
     /// The machines that were said in the log to follow the scene host, so that it is said once for each.
@@ -284,7 +284,7 @@ internal partial class CoopSave {
     /// <param name="kind">The kind of machine, if it is one.</param>
     private MachineStep DecideMachineSwitch(Fsm fsm, FsmState toState, out MachineKind? kind) {
         kind = null;
-        if (_checkedWith == null || MachineSwitchToStateField == null) {
+        if (_checkedMembers.Count == 0 || MachineSwitchToStateField == null) {
             return MachineStep.None;
         }
 
@@ -328,8 +328,7 @@ internal partial class CoopSave {
             return MachineStep.Catch;
         }
 
-        if (Array.IndexOf(kind.RoundStateNames, toState.Name) < 0 ||
-            GetCheckedPartner() is not { IsInLocalScene: true }) {
+        if (Array.IndexOf(kind.RoundStateNames, toState.Name) < 0 || !IsMemberInRoom()) {
             return MachineStep.None;
         }
 
@@ -429,7 +428,7 @@ internal partial class CoopSave {
         try {
             var gameObject = fsm.GameObject;
             word = new CoopSaveUpdate {
-                TargetId = _checkedWith!.Value,
+                TargetId = CoopTargets.Everyone,
                 Kind = CoopSaveUpdateKind.MachineRound,
                 Scene = gameObject.scene.name,
                 ObjectPath = ScenePath.Get(gameObject.transform),
@@ -485,8 +484,8 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names the machine by its path in its scene.</param>
     private void OnMachineRound(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id ||
-            IsSceneHost?.Invoke() == true) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+            !_checkedMembers.Contains(player.Id) || IsSceneHost?.Invoke() == true) {
             return;
         }
 
@@ -500,11 +499,11 @@ internal partial class CoopSave {
                 continue;
             }
 
-            if (_takenMachineRounds.TryGetValue(fsm, out var taken) && update.Sequence <= taken) {
+            if (_takenMachineRounds.TryGetValue((fsm, player.Id), out var taken) && update.Sequence <= taken) {
                 return;
             }
 
-            _takenMachineRounds[fsm] = update.Sequence;
+            _takenMachineRounds[(fsm, player.Id)] = update.Sequence;
             if (!TryStartMachineRoundNow(kind, fsm, update)) {
                 _pendingMachineRounds[fsm] = update;
             }
@@ -698,8 +697,7 @@ internal partial class CoopSave {
         }
 
         // Words of a scene host that this game took over from, or of a partner who left, are no longer the room's
-        var runsTheRoom = _checkedWith == null || IsSceneHost?.Invoke() == true ||
-                          GetCheckedPartner() is not { IsInLocalScene: true };
+        var runsTheRoom = _checkedMembers.Count == 0 || IsSceneHost?.Invoke() == true || !IsMemberInRoom();
         if (runsTheRoom) {
             _pendingMachineRounds.Clear();
             _takenMachineRounds.Clear();
@@ -807,19 +805,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the partner, if they are in the room, that a grinder caught the local player and stopped, or that it goes
-    /// on again.
+    /// Tells the members in the room that a grinder caught the local player and stopped, or that it goes on again.
     /// </summary>
     private void TellPartnerAboutGrinder(CoopSaveUpdateKind kind, Fsm fsm) {
-        if (_checkedWith is not { } partnerId || GetCheckedPartner() is not { IsInLocalScene: true } ||
-            fsm.GameObject is not { } gameObject) {
+        if (!IsMemberInRoom() || fsm.GameObject is not { } gameObject) {
             return;
         }
 
         // The change of state already went on, so what throws here must not reach the game
         try {
-            Send(new CoopSaveUpdate {
-                TargetId = partnerId,
+            SendToMembers(new CoopSaveUpdate {
                 Kind = kind,
                 Scene = gameObject.scene.name,
                 ObjectPath = ScenePath.Get(gameObject.transform),
@@ -879,11 +874,11 @@ internal partial class CoopSave {
     /// word's number otherwise.
     /// </summary>
     private bool IsOldMachineWord(Fsm fsm, CoopSaveUpdate update) {
-        if (_takenMachineRounds.TryGetValue(fsm, out var taken) && update.Sequence <= taken) {
+        if (_takenMachineRounds.TryGetValue((fsm, update.PlayerId), out var taken) && update.Sequence <= taken) {
             return true;
         }
 
-        _takenMachineRounds[fsm] = update.Sequence;
+        _takenMachineRounds[(fsm, update.PlayerId)] = update.Sequence;
         return false;
     }
 
@@ -916,7 +911,8 @@ internal partial class CoopSave {
     /// and the grinder is in the room.
     /// </summary>
     private Fsm? FindPartnerGrinder(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+            !_checkedMembers.Contains(player.Id)) {
             return null;
         }
 
@@ -979,7 +975,7 @@ internal partial class CoopSave {
             return;
         }
 
-        var isPartnerHere = _checkedWith != null && GetCheckedPartner() is { IsInLocalScene: true };
+        var isPartnerHere = IsMemberInRoom();
         foreach (var pair in _grindersStoppedForPartner.ToList()) {
             var fsm = pair.Key;
             if (fsm.GameObject == null || fsm.ActiveState?.Name != GrinderStoppedStateName) {

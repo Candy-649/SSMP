@@ -61,13 +61,14 @@ internal partial class CoopSave {
                 return;
             }
 
-            if (_checkedWith is not { } partnerId || !_playerData.TryGetValue(partnerId, out var partner) ||
-                self.persistent == null || partner.IsInLocalScene && IsSceneHost?.Invoke() != true) {
+            // With a member in the room, the game that runs the room says where its platform came to rest
+            if (_checkedMembers.Count == 0 || self.persistent == null ||
+                IsMemberInRoom() && IsSceneHost?.Invoke() != true) {
                 return;
             }
 
             GetItemSceneAndId(self.persistent, out var scene, out var id);
-            var update = new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.SlidePlatform };
+            var update = new CoopSaveUpdate { TargetId = CoopTargets.Everyone, Kind = CoopSaveUpdateKind.SlidePlatform };
             update.ItemScenes.Add(scene);
             update.ItemIds.Add(id);
             update.Amounts.Add(self.currentNodeIndex);
@@ -86,7 +87,7 @@ internal partial class CoopSave {
     /// on the platform here - unless this game runs the room with the partner in it, whose platform follows this one.
     /// </summary>
     private void OnSlidePlatform(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
             SceneData.instance is not { } sceneData || update.ItemScenes.Count < 1 || update.ItemIds.Count < 1 ||
             update.Amounts.Count < 2) {
             return;

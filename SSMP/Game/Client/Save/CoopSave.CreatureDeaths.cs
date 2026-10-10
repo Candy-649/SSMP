@@ -49,7 +49,7 @@ internal partial class CoopSave {
     ) {
         var died = false;
         try {
-            died = data is { Value: true, IsSemiPersistent: true } && _checkedWith != null &&
+            died = data is { Value: true, IsSemiPersistent: true } && _checkedMembers.Count > 0 &&
                    SceneData.instance is { } sceneData &&
                    !(sceneData.PersistentBools.TryGetValue(data.SceneName, data.ID, out var saved) && saved.Value) &&
                    self.TryGetComponent<HealthManager>(out _) &&
@@ -63,11 +63,11 @@ internal partial class CoopSave {
 
         orig(self, data);
 
-        if (died && _checkedWith is { } partnerId && _playerData.TryGetValue(partnerId, out var partner)) {
-            var update = new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.CreatureDeath };
+        if (died && _checkedMembers.Count > 0) {
+            var update = new CoopSaveUpdate { Kind = CoopSaveUpdateKind.CreatureDeath };
             update.ItemScenes.Add(data.SceneName);
             update.ItemIds.Add(data.ID);
-            Send(update);
+            SendToMembers(update);
         }
     }
 
@@ -77,7 +77,7 @@ internal partial class CoopSave {
     /// over it (Entity.KeepBoolSavesOfTheCopy).
     /// </summary>
     private void OnCreatureDeath(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
             SceneData.instance is not { } sceneData) {
             return;
         }

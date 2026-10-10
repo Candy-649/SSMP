@@ -134,7 +134,8 @@ internal class NetServerClient : IDisposable {
     }
 
     /// <summary>
-    /// Get a new ID that is not in use by another client.
+    /// Get a new ID that is not in use by another client. The largest ID is never given out, because it is the target of
+    /// a co-op update that goes to every player (<see cref="SSMP.Networking.Packet.Data.CoopTargets.Everyone"/>).
     /// </summary>
     /// <returns>An unused ID.</returns>
     private static ushort GetId() {
@@ -142,7 +143,7 @@ internal class NetServerClient : IDisposable {
             ushort newId;
             do {
                 newId = _lastId++;
-            } while (UsedIds.ContainsKey(newId));
+            } while (UsedIds.ContainsKey(newId) || newId == SSMP.Networking.Packet.Data.CoopTargets.Everyone);
 
             UsedIds[newId] = 0;
             return newId;

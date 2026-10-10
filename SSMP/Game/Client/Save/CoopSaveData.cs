@@ -17,20 +17,46 @@ internal class CoopSaveMarkers {
 }
 
 /// <summary>
-/// A save of the local player that is paired with a save of another player.
+/// A save of the local player that is paired with the saves of other players: one other player for a two-player save,
+/// more for a save that more players share.
 /// </summary>
 internal class CoopSaveMarker {
     /// <summary>
-    /// The save key of the other player.
+    /// The save key of the first other player. Pairings from before saves could have more than two players name their
+    /// only other player here, and <see cref="Members"/> takes them over as it loads; it is still written for the first
+    /// member, so that an older build reads a two-player save the way it always did.
     /// </summary>
     [JsonProperty("partnerKey")]
     public string PartnerKey { get; set; } = "";
 
     /// <summary>
-    /// The username of the other player when the saves were last checked, for messages.
+    /// The username of the first other player, kept like <see cref="PartnerKey"/>.
     /// </summary>
     [JsonProperty("partnerName")]
     public string PartnerName { get; set; } = "";
+
+    /// <summary>
+    /// The other players that share the save, each with their save key and their username when the saves were last
+    /// checked, for messages. Empty in a pairing from before saves could have more than two players, which
+    /// <see cref="TakeOverPartner"/> fills from <see cref="PartnerKey"/>.
+    /// </summary>
+    [JsonProperty("members")]
+    public List<CoopSaveMember> Members { get; set; } = [];
+
+    /// <summary>
+    /// Fills <see cref="Members"/> of a pairing from before saves could have more than two players from its only other
+    /// player, and writes the first member back to <see cref="PartnerKey"/> and <see cref="PartnerName"/>.
+    /// </summary>
+    public void TakeOverPartner() {
+        if (Members.Count == 0 && PartnerKey.Length > 0) {
+            Members.Add(new CoopSaveMember { Key = PartnerKey, Name = PartnerName });
+        }
+
+        if (Members.Count > 0) {
+            PartnerKey = Members[0].Key;
+            PartnerName = Members[0].Name;
+        }
+    }
 
     /// <summary>
     /// When the saves were paired.
@@ -93,6 +119,24 @@ internal class CoopSaveMarker {
     /// </summary>
     [JsonProperty("wishesRead")]
     public List<string> WishesRead { get; set; } = [];
+}
+
+/// <summary>
+/// Another player that shares a save of the local player.
+/// </summary>
+internal class CoopSaveMember {
+    /// <summary>
+    /// The save key of the player, which their game gets from their authentication key.
+    /// </summary>
+    [JsonProperty("key")]
+    public string Key { get; set; } = "";
+
+    /// <summary>
+    /// The username of the player when the saves were last checked, for messages, and for finding them when they play
+    /// on another computer, which gives them another save key.
+    /// </summary>
+    [JsonProperty("name")]
+    public string Name { get; set; } = "";
 }
 
 /// <summary>

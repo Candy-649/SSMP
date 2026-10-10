@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using MonoMod.RuntimeDetour;
 using SSMP.Networking.Packet.Data;
@@ -85,7 +86,7 @@ internal partial class CoopSave {
     /// The hatches that the partner keeps open in their game, by the scene and path of theirs, whether or not a hatch
     /// here goes with them.
     /// </summary>
-    private readonly Dictionary<string, PartnerTrapdoor> _partnerTrapdoors = new();
+    private readonly Dictionary<(ushort, string), PartnerTrapdoor> _partnerTrapdoors = new();
 
     /// <summary>
     /// Whether a hatch is being opened because the partner keeps theirs open, which is not the local player keeping it
@@ -132,7 +133,7 @@ internal partial class CoopSave {
     /// Starts following a hatch that opens, and tells the partner if the local player opened it.
     /// </summary>
     private void NoticeTrapdoorOpen(Trapdoor door, float sign) {
-        if (_checkedWith == null || !ClosesByItself(door)) {
+        if (_checkedMembers.Count == 0 || !ClosesByItself(door)) {
             return;
         }
 
@@ -180,16 +181,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the partner that the local player keeps a hatch open, or no longer does.
+    /// Tells the other members that the local player keeps a hatch open, or no longer does.
     /// </summary>
     private void SendTrapdoor(OpenTrapdoor open, bool keptOpen) {
-        if (_checkedWith is not { } partnerId) {
+        if (_checkedMembers.Count == 0) {
             open.Sent = false;
             return;
         }
 
         var update = new CoopSaveUpdate {
-            TargetId = partnerId,
+            TargetId = CoopTargets.Everyone,
             Kind = CoopSaveUpdateKind.Trapdoor,
             Scene = open.Scene,
             ObjectPath = open.Path,
@@ -219,11 +220,13 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names their hatch by its scene and path.</param>
     private void OnTrapdoor(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+            !_checkedMembers.Contains(player.Id)) {
             return;
         }
 
-        var key = update.Scene + "/" + update.ObjectPath;
+        // Each member holds their hatch by themselves: one letting go leaves the hold of another
+        var key = (player.Id, update.Scene + "/" + update.ObjectPath);
         if (update.PartCount == 0) {
             // Nothing more to do: the hatch here counts down to closing from the moment it is no longer held open
             if (_partnerTrapdoors.Remove(key)) {
@@ -377,6 +380,16 @@ internal partial class CoopSave {
     /// Forgets the hatches that the partner keeps open, and that the partner was told about, as the check with them
     /// ends. The hatches here close by themselves afterwards.
     /// </summary>
+    /// <summary>
+    /// Forgets the hatches that a member who left the save kept open, which count down to closing from now on unless
+    /// another member keeps them open.
+    /// </summary>
+    private void ForgetTrapdoorsOf(ushort id) {
+        foreach (var key in _partnerTrapdoors.Keys.Where(key => key.Item1 == id).ToList()) {
+            _partnerTrapdoors.Remove(key);
+        }
+    }
+
     private void ResetTrapdoors() {
         _partnerTrapdoors.Clear();
         foreach (var open in _openTrapdoors) {

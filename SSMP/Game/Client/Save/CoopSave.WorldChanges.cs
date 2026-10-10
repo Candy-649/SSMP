@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -107,17 +108,18 @@ internal partial class CoopSave {
     private readonly Dictionary<string, ChangeStamp> _wishSequences = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// When a flag or wish last changed: the count in the sequence of its update, and whether the partner sent it.
+    /// When a flag or wish last changed: the count in the sequence of its update, and the save key of the game that
+    /// made the change, which decides between changes with the same count.
     /// </summary>
     private readonly struct ChangeStamp {
-        public ChangeStamp(uint count, bool fromPartner) {
+        public ChangeStamp(uint count, string key) {
             Count = count;
-            FromPartner = fromPartner;
+            Key = key;
         }
 
         public uint Count { get; }
 
-        public bool FromPartner { get; }
+        public string Key { get; }
     }
 
     /// <summary>
@@ -142,7 +144,7 @@ internal partial class CoopSave {
     /// changes of the partner that arrive afterwards don't undo them.
     /// </summary>
     private void StampLocalChanges(CoopSaveUpdate update) {
-        var stamp = new ChangeStamp((uint) update.Sequence, false);
+        var stamp = new ChangeStamp((uint) update.Sequence, LocalKey);
         foreach (var name in update.FlagNames) {
             _flagSequences[name] = stamp;
         }
@@ -160,11 +162,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the change of a flag or wish in an update of the partner is newer than its last change in either game,
-    /// and if so remembers it as the last one. A change from another check, one that the network delivered after a newer
-    /// one, and one that the local player overwrote after it arrived are old. When both players changed the same thing
-    /// at the same count, the change from the save with the larger key wins in both games. Updates that weren't sent,
-    /// like the changes that a check applies, have no sequence and count as new.
+    /// Whether the change of a flag or wish in an update of a member is newer than its last change in any game, and if
+    /// so remembers it as the last one. A change from another check, one that the network delivered after a newer one,
+    /// and one that the local player overwrote after it arrived are old. When two players changed the same thing at the
+    /// same count, the change from the save with the larger key wins in every game. Updates that weren't sent, like the
+    /// changes that a check applies, have no sequence and count as new.
     /// </summary>
     private bool IsNewerChange(Dictionary<string, ChangeStamp> sequences, CoopSaveUpdate update, string name) {
         if (update.Sequence == 0) {
@@ -177,13 +179,22 @@ internal partial class CoopSave {
 
         var count = (uint) update.Sequence;
         _changeCounter = System.Math.Max(_changeCounter, count);
+        var key = GetSenderKey(update.PlayerId);
         if (sequences.TryGetValue(name, out var last) &&
-            (last.Count > count || (last.Count == count && (last.FromPartner || !PartnerKeyWins())))) {
+            (last.Count > count || (last.Count == count && string.CompareOrdinal(key, last.Key) <= 0))) {
             return false;
         }
 
-        sequences[name] = new ChangeStamp(count, true);
+        sequences[name] = new ChangeStamp(count, key);
         return true;
+    }
+
+    /// <summary>
+    /// The save key of the member who sent an update, as the pairing has it, which decides between things that games
+    /// chose at once.
+    /// </summary>
+    private string GetSenderKey(ushort playerId) {
+        return _playerData.TryGetValue(playerId, out var player) ? GetMemberKey(GetCurrentMarker(), player) : "";
     }
 
     /// <summary>
@@ -202,7 +213,7 @@ internal partial class CoopSave {
             _knownWorldItems.Add(GetItemKey(scene, id));
         }
 
-        foreach (var part in _stateParts.Values) {
+        foreach (var part in _memberChecks.Values.SelectMany(check => check.Parts.Values)) {
             for (var i = 0; i < part.ItemIds.Count && i < part.ItemScenes.Count; i++) {
                 _knownWorldItems.Add(GetItemKey(part.ItemScenes[i], part.ItemIds[i]));
             }
@@ -246,20 +257,20 @@ internal partial class CoopSave {
     /// Sends the changes of the world before the game saves the objects of the level.
     /// </summary>
     private void OnSavePersistentObjects() {
-        if (_checkedWith is not { } partnerId || !_playerData.TryGetValue(partnerId, out var partner)) {
+        if (_checkedMembers.Count == 0) {
             return;
         }
 
         _savedWorldItemsDirty = true;
         _nextWorldChangeTime = 0f;
-        UpdateWorldChanges(partner);
+        UpdateWorldChanges();
     }
 
     /// <summary>
-    /// Sends the saved objects of the world that got set to the partner: those that the loaded objects show, and those
-    /// that only the save shows.
+    /// Sends the saved objects of the world that got set to the other members: those that the loaded objects show, and
+    /// those that only the save shows.
     /// </summary>
-    private void UpdateWorldChanges(ClientPlayerData partner) {
+    private void UpdateWorldChanges() {
         if (Time.unscaledTime < _nextWorldChangeTime) {
             return;
         }
@@ -282,7 +293,7 @@ internal partial class CoopSave {
                 }
 
                 if (!_knownWorldItems.Contains(key) && item.GetCurrentValue()) {
-                    AddWorldChange(ref update, partner, scene, id, key);
+                    AddWorldChange(ref update, scene, id, key);
                 }
             }
 
@@ -291,14 +302,14 @@ internal partial class CoopSave {
                 foreach (var (scene, id) in GetWorldItems()) {
                     var key = GetItemKey(scene, id);
                     if (!_knownWorldItems.Contains(key)) {
-                        AddWorldChange(ref update, partner, scene, id, key);
+                        AddWorldChange(ref update, scene, id, key);
                     }
                 }
             }
 
             if (update != null) {
-                Send(update);
-                Logger.Info($"Sent {update.ItemIds.Count} changes of the world to {partner.Username}");
+                SendToMembers(update);
+                Logger.Info($"Sent {update.ItemIds.Count} changes of the world to {GetCheckedNames()}");
             }
         } catch (Exception e) {
             if (!_worldChangeFailed) {
@@ -309,11 +320,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Adds a saved object of the world to the update with the changes for the partner and remembers it as known.
+    /// Adds a saved object of the world to the update with the changes for the other members and remembers it as known.
     /// </summary>
-    private void AddWorldChange(ref CoopSaveUpdate? update, ClientPlayerData partner, string scene, string id, string key) {
+    private void AddWorldChange(ref CoopSaveUpdate? update, string scene, string id, string key) {
         _knownWorldItems.Add(key);
-        update ??= new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange };
+        update ??= new CoopSaveUpdate { Kind = CoopSaveUpdateKind.WorldChange };
         update.ItemScenes.Add(scene);
         update.ItemIds.Add(id);
     }
@@ -356,8 +367,8 @@ internal partial class CoopSave {
     /// because the game of the partner may have finished its check already and doesn't send them again.
     /// </summary>
     private void OnWorldChange(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || PlayerData.instance == null ||
-            SceneData.instance == null) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
+            PlayerData.instance == null || SceneData.instance == null) {
             return;
         }
 

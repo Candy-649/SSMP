@@ -20,7 +20,7 @@ internal class CoopSaveUpdate : IPacketData {
     public ushort PlayerId { get; set; }
 
     /// <summary>
-    /// The ID of the player that the update goes to.
+    /// The ID of the player that the update goes to, or <see cref="CoopTargets.Everyone"/> for every other player.
     /// </summary>
     public ushort TargetId { get; set; }
 
@@ -75,7 +75,9 @@ internal class CoopSaveUpdate : IPacketData {
     /// <summary>
     /// For world progress, the IDs of the saved objects of the world that are set, in the order of
     /// <see cref="ItemScenes"/>. For dialogue that accepted or completed wishes, what it took and gave, each after the
-    /// index of its wish in <see cref="WishNames"/> or -1 for all of them, in the order of <see cref="Amounts"/>.
+    /// index of its wish in <see cref="WishNames"/> or -1 for all of them, in the order of <see cref="Amounts"/>. For a
+    /// request to pair saves and its confirmation, the save keys of the players it went to, in the order of
+    /// <see cref="Names"/>.
     /// </summary>
     public List<string> ItemIds { get; set; } = [];
 
@@ -159,7 +161,8 @@ internal class CoopSaveUpdate : IPacketData {
     /// <summary>
     /// Names that a kind of update carries as a set, like the boss scenes that the save of the sender has
     /// unlocked. They only ever get added, so both games take the union of them. For a hatch over a way out of the
-    /// room, the scene that the way leads to and the door of that scene that it comes in at, in that order.
+    /// room, the scene that the way leads to and the door of that scene that it comes in at, in that order. For a
+    /// request to pair saves and its confirmation, the usernames of the players it went to.
     /// </summary>
     public List<string> Names { get; set; } = [];
 
@@ -683,5 +686,11 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    SlidePlatform
+    SlidePlatform,
+
+    /// <summary>
+    /// A member agrees to make a shared save of more than two players a normal save again, which goes to every member.
+    /// The member who asked unpairs all of them once each agreed.
+    /// </summary>
+    UnpairAccept
 }

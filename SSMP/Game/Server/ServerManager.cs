@@ -1770,7 +1770,8 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
-    /// Callback method for when a player sends an update of a two-player save, which goes to the player it names.
+    /// Callback method for when a player sends an update of a two-player save, which goes to the player it names, or to
+    /// every other player.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
     /// <param name="update">The CoopSaveUpdate packet data.</param>
@@ -1780,16 +1781,15 @@ internal abstract class ServerManager : IServerManager {
             return;
         }
 
-        if (update.TargetId == id || !_playerData.ContainsKey(update.TargetId)) {
-            return;
-        }
-
         update.PlayerId = id;
-        _netServer.GetUpdateManagerForClient(update.TargetId)?.AddCoopSaveUpdateData(update);
+        foreach (var target in GetCoopTargets(id, update.TargetId)) {
+            _netServer.GetUpdateManagerForClient(target)?.AddCoopSaveUpdateData(update);
+        }
     }
 
     /// <summary>
-    /// Callback method for when a player sends a hit in a two-player save, which goes to the player it names.
+    /// Callback method for when a player sends a hit in a two-player save, which goes to the player it names, or to
+    /// every other player.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
     /// <param name="update">The CoopHitUpdate packet data.</param>
@@ -1799,17 +1799,15 @@ internal abstract class ServerManager : IServerManager {
             return;
         }
 
-        if (update.TargetId == id || !_playerData.ContainsKey(update.TargetId)) {
-            return;
-        }
-
         update.PlayerId = id;
-        _netServer.GetUpdateManagerForClient(update.TargetId)?.AddCoopHitUpdateData(update);
+        foreach (var target in GetCoopTargets(id, update.TargetId)) {
+            _netServer.GetUpdateManagerForClient(target)?.AddCoopHitUpdateData(update);
+        }
     }
 
     /// <summary>
     /// Callback method for when a player sends a comparison of the state of the room in a two-player save, which goes
-    /// to the player it names.
+    /// to the player it names, or to every other player.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
     /// <param name="update">The CoopCheckUpdate packet data.</param>
@@ -1819,12 +1817,26 @@ internal abstract class ServerManager : IServerManager {
             return;
         }
 
-        if (update.TargetId == id || !_playerData.ContainsKey(update.TargetId)) {
-            return;
+        update.PlayerId = id;
+        foreach (var target in GetCoopTargets(id, update.TargetId)) {
+            _netServer.GetUpdateManagerForClient(target)?.AddCoopCheckUpdateData(update);
+        }
+    }
+
+    /// <summary>
+    /// The players that an update of a co-op save goes to: the player it names, unless that is the sender or nobody on
+    /// the server, or every player but the sender for <see cref="CoopTargets.Everyone"/>. Each of them gets a copy of
+    /// its own, which the update managers make as they add it.
+    /// </summary>
+    /// <param name="id">The ID of the player who sent the update.</param>
+    /// <param name="targetId">The target that the update names.</param>
+    /// <returns>The IDs of the players to send it to.</returns>
+    private List<ushort> GetCoopTargets(ushort id, ushort targetId) {
+        if (targetId == CoopTargets.Everyone) {
+            return _playerData.Keys.Where(other => other != id).ToList();
         }
 
-        update.PlayerId = id;
-        _netServer.GetUpdateManagerForClient(update.TargetId)?.AddCoopCheckUpdateData(update);
+        return targetId == id || !_playerData.ContainsKey(targetId) ? [] : [targetId];
     }
 
     /// <summary>

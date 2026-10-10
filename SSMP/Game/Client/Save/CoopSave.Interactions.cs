@@ -105,11 +105,11 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, MechanismReplay> _replays = new();
 
     /// <summary>
-    /// Mechanisms that the partner used while the local copy couldn't replay it, like while the local hero was using
-    /// them, with the state that their change of the world starts in. They replay once the local copy can, unless the
-    /// local player uses them too.
+    /// Mechanisms that another member used while the local copy couldn't replay it, like while the local hero was using
+    /// them, with the state that their change of the world starts in and the name of who used them, for messages. They
+    /// replay once the local copy can, unless the local player uses them too.
     /// </summary>
-    private readonly Dictionary<Fsm, string> _pendingReplays = new();
+    private readonly Dictionary<Fsm, (string StateName, string Name)> _pendingReplays = new();
 
     /// <summary>
     /// Mechanisms that the local player used whose change of the world still runs, with its states, whose flags of the
@@ -123,9 +123,10 @@ internal partial class CoopSave {
     private readonly Dictionary<object, LocalInteraction> _localInteractions = new();
 
     /// <summary>
-    /// The uses of mechanisms and item receptacles by the partner since the scene loaded, with their keys.
+    /// The uses of mechanisms and item receptacles by other members since the scene loaded, with the key of the first
+    /// of them and the name of who used it, for messages.
     /// </summary>
-    private readonly Dictionary<object, ulong> _remoteInteractions = new();
+    private readonly Dictionary<object, (ulong Key, string Name)> _remoteInteractions = new();
 
     /// <summary>
     /// Item receptacles that the partner used while the local hero was using them, which play the unlock once the local
@@ -371,10 +372,10 @@ internal partial class CoopSave {
     /// Sends the flags that mechanisms of the local player set, starts the replays that waited for the local copy, and
     /// ends replays that never got back to their idle state.
     /// </summary>
-    private void UpdateInteractions(ClientPlayerData partner) {
+    private void UpdateInteractions() {
         try {
             if (_interactionFlags.Count > 0) {
-                var update = new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WorldChange };
+                var update = new CoopSaveUpdate { Kind = CoopSaveUpdateKind.WorldChange };
                 foreach (var name in _interactionFlags.Keys) {
                     // The value that the save has now, since a check may have changed the flag after it was set
                     if (ReadPlayerDataFlag(name) is { } value) {
@@ -385,8 +386,8 @@ internal partial class CoopSave {
 
                 _interactionFlags.Clear();
                 if (update.FlagNames.Count > 0) {
-                    Send(update);
-                    Logger.Info($"Sent {update.FlagNames.Count} flags of used mechanisms to {partner.Username}");
+                    SendToMembers(update);
+                    Logger.Info($"Sent {update.FlagNames.Count} flags of used mechanisms to {GetCheckedNames()}");
                 }
             }
 
@@ -426,6 +427,7 @@ internal partial class CoopSave {
         _localInteractions.Clear();
         _remoteInteractions.Clear();
         _pendingReceptacles.Clear();
+        _platesStoodOn.Clear();
         DropPromptInteraction();
     }
 
@@ -634,10 +636,9 @@ internal partial class CoopSave {
             _capturedMechanisms[fsm] = worldStates;
         }
 
-        var afterPartner = _remoteInteractions.ContainsKey(fsm);
-        if (_checkedWith is { } partnerId && fsm.GameObject is { } gameObject) {
+        var afterPartner = _remoteInteractions.TryGetValue(fsm, out var first);
+        if (_checkedMembers.Count > 0 && fsm.GameObject is { } gameObject) {
             var update = new CoopSaveUpdate {
-                TargetId = partnerId,
                 Kind = CoopSaveUpdateKind.Interaction,
                 Key = interaction.Key,
                 PartCount = afterPartner ? InteractionAfterPartner : InteractionFirst,
@@ -653,8 +654,8 @@ internal partial class CoopSave {
                 update.FlagValues.Add(pair.Value);
             }
 
-            Send(update);
-            Logger.Info($"Sent the use of mechanism '{fsm.Name}' on {gameObject.name} to the partner");
+            SendToMembers(update);
+            Logger.Info($"Sent the use of mechanism '{fsm.Name}' on {gameObject.name} to {GetCheckedNames()}");
         } else {
             foreach (var pair in interaction.Flags) {
                 _interactionFlags[pair.Key] = pair.Value;
@@ -662,7 +663,7 @@ internal partial class CoopSave {
         }
 
         if (afterPartner) {
-            Refund(interaction, Lang.Pick("had already paid for it", "已经付过了"));
+            Refund(interaction, Lang.Pick("had already paid for it", "已经付过了"), first.Name);
         }
     }
 
@@ -795,7 +796,7 @@ internal partial class CoopSave {
             return;
         }
 
-        if (_checkedWith != player.Id) {
+        if (!_checkedMembers.Contains(player.Id)) {
             AddInteractionDuringCheck(player, update);
             return;
         }
@@ -820,7 +821,7 @@ internal partial class CoopSave {
     /// enters its room again.
     /// </summary>
     private void AddInteractionDuringCheck(ClientPlayerData player, CoopSaveUpdate update) {
-        if (_checkPartnerId != player.Id || _checkKey == 0 || update.Sequence >> 32 != _checkKey >> 16) {
+        if (!IsFromMemberInSave(player) || _checkKey == 0 || update.Sequence >> 32 != _checkKey >> 16) {
             return;
         }
 
@@ -860,12 +861,12 @@ internal partial class CoopSave {
         // Whether the local save had the mechanism done already only shows before the flags of the partner are in
         var done = IsMechanismDone(fsm, mechanism);
         ApplyInteractionFlags(update);
-        _remoteInteractions[fsm] = update.Key;
+        _remoteInteractions.TryAdd(fsm, (update.Key, player.Username));
         if (_localInteractions.TryGetValue(fsm, out var local)) {
             // Both players used it. A player who used it after the use of the other had arrived gets the payment back
             // in their own game, so only uses that crossed on the way are settled here
             if (update.PartCount != InteractionAfterPartner) {
-                RefundIfBothPaid(local, update.Key);
+                RefundIfBothPaid(local, update.Key, player.Username);
             }
 
             return;
@@ -888,8 +889,8 @@ internal partial class CoopSave {
 
         // The replay waits for the local copy. It is queued before the prompt closes, because closing it can take the
         // mechanism back to its idle state at once
-        _pendingReplays[fsm] = update.StateName;
-        if (!TryClosePrompt(fsm)) {
+        _pendingReplays[fsm] = (update.StateName, player.Username);
+        if (!TryClosePrompt(fsm, player.Username)) {
             Logger.Info($"The use of mechanism '{fsm.Name}' by {player.Username} waits for the local copy");
         }
     }
@@ -902,15 +903,15 @@ internal partial class CoopSave {
             foreach (var pair in _pendingReplays.ToList()) {
                 var fsm = pair.Key;
                 if (fsm.Owner == null || GetMechanism(fsm) is not { } mechanism ||
-                    !mechanism.WorldStarts.TryGetValue(pair.Value, out var states)) {
+                    !mechanism.WorldStarts.TryGetValue(pair.Value.StateName, out var states)) {
                     _pendingReplays.Remove(fsm);
                 } else if (CanReplay(fsm, mechanism)) {
                     _pendingReplays.Remove(fsm);
-                    Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by the partner, which waited");
-                    StartReplay(fsm, pair.Value, states);
+                    Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by {pair.Value.Name}, which waited");
+                    StartReplay(fsm, pair.Value.StateName, states);
                 } else {
                     // A prompt whose text was still showing closes once it waits for an answer
-                    TryClosePrompt(fsm);
+                    TryClosePrompt(fsm, pair.Value.Name);
                 }
             }
         }
@@ -990,14 +991,15 @@ internal partial class CoopSave {
     /// Closes the prompt of a mechanism that the partner used, if the local hero has it open, hasn't paid in it yet,
     /// and it waits for an answer.
     /// </summary>
+    /// <param name="fsm">The mechanism.</param>
+    /// <param name="partnerName">The name of the member who used it.</param>
     /// <returns>Whether the prompt was closed.</returns>
-    private bool TryClosePrompt(Fsm fsm) {
+    private bool TryClosePrompt(Fsm fsm, string partnerName) {
         if (_promptInteraction is not { } interaction || interaction.Target != fsm ||
             interaction.Currency.Count > 0 || interaction.Items.Count > 0 || !CancelPrompt(fsm)) {
             return false;
         }
 
-        var partnerName = GetPartnerName();
         Chat(Lang.Pick(
             $"{partnerName} already paid for this, so it opens for you too.",
             $"{partnerName} 已经付过了，所以这边对你也打开了。"
@@ -1239,21 +1241,24 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Settles two uses of the same mechanism that crossed on the way, so each player paid before the use of the other
-    /// arrived. Both games give the payment back to the player whose use has the larger key, so only one player gets it.
+    /// Settles uses of the same mechanism that crossed on the way, so each player paid before the use of another
+    /// arrived. Every game gives the payment back to each player whose use has a larger key than another that crossed
+    /// it, so only the player with the smallest key pays. Each use that crossed comes here once, and a use is given back
+    /// at most once.
     /// </summary>
-    private void RefundIfBothPaid(LocalInteraction interaction, ulong partnerKey) {
+    private void RefundIfBothPaid(LocalInteraction interaction, ulong partnerKey, string partnerName) {
         if (interaction.Key > partnerKey) {
-            Refund(interaction, Lang.Pick("paid for it at the same moment", "和你同时付了"));
+            Refund(interaction, Lang.Pick("paid for it at the same moment", "和你同时付了"), partnerName);
         }
     }
 
     /// <summary>
-    /// Gives the local player back what they paid for a mechanism that the partner paid for too.
+    /// Gives the local player back what they paid for a mechanism that another member paid for too.
     /// </summary>
     /// <param name="interaction">The use of the local player.</param>
-    /// <param name="how">What the partner did, for the message.</param>
-    private void Refund(LocalInteraction interaction, string how) {
+    /// <param name="how">What the other member did, for the message.</param>
+    /// <param name="partnerName">The name of that member.</param>
+    private void Refund(LocalInteraction interaction, string how, string partnerName) {
         if (interaction.Refunded || (interaction.Currency.Count == 0 && interaction.Items.Count == 0)) {
             return;
         }
@@ -1286,27 +1291,35 @@ internal partial class CoopSave {
         if (returned == 0) {
             // What the story takes for good is gone for both players, so there is nothing to give back
             if (shared > 0) {
-                Chat(Lang.Pick(
-                    $"{GetPartnerName()} {how}, and what you gave is used up for both of you.",
-                    $"{GetPartnerName()}{how}，你交的东西两个人一起用掉了。"
-                ));
+                Chat(
+                    _checkedMembers.Count <= 1
+                        ? Lang.Pick(
+                            $"{partnerName} {how}, and what you gave is used up for both of you.",
+                            $"{partnerName}{how}，你交的东西两个人一起用掉了。"
+                        )
+                        : Lang.Pick(
+                            $"{partnerName} {how}, and what you gave is used up for all of you.",
+                            $"{partnerName}{how}，你交的东西大家一起用掉了。"
+                        )
+                );
             }
 
             return;
         }
 
         Chat(Lang.Pick(
-            $"{GetPartnerName()} {how}, so you got your payment back.",
-            $"{GetPartnerName()}{how}，所以你付的东西退回来了。"
+            $"{partnerName} {how}, so you got your payment back.",
+            $"{partnerName}{how}，所以你付的东西退回来了。"
         ));
         Logger.Info($"Gave back the payment for a mechanism that the partner {how}");
     }
 
     /// <summary>
-    /// The name of the checked partner, for messages.
+    /// The names of the checked members, for messages: in a two-player save the name of the partner.
     /// </summary>
     private string GetPartnerName() {
-        return _checkedWith is { } id && _playerData.TryGetValue(id, out var partner) ? partner.Username : "Your partner";
+        var members = GetCheckedMembers();
+        return members.Count > 0 ? JoinNames(members.Select(member => member.Username)) : "Your partner";
     }
 
     /// <summary>
@@ -1398,14 +1411,13 @@ internal partial class CoopSave {
 
             _localInteractions[self] = interaction;
             var flag = ReceptacleFlagField?.GetValue(self) as string ?? "";
-            var afterPartner = _remoteInteractions.ContainsKey(self);
-            if (_checkedWith is not { } partnerId) {
+            var afterPartner = _remoteInteractions.TryGetValue(self, out var first);
+            if (_checkedMembers.Count == 0) {
                 if (flag.Length > 0) {
                     _interactionFlags[flag] = 1;
                 }
             } else {
                 var update = new CoopSaveUpdate {
-                    TargetId = partnerId,
                     Kind = CoopSaveUpdateKind.Interaction,
                     Key = interaction.Key,
                     PartCount = afterPartner ? InteractionAfterPartner : InteractionFirst,
@@ -1427,12 +1439,12 @@ internal partial class CoopSave {
                     update.ItemIds.Add(id);
                 }
 
-                Send(update);
-                Logger.Info($"Sent the use of item receptacle {self.name} to the partner");
+                SendToMembers(update);
+                Logger.Info($"Sent the use of item receptacle {self.name} to {GetCheckedNames()}");
             }
 
             if (afterPartner) {
-                Refund(interaction, Lang.Pick("had already paid for it", "已经付过了"));
+                Refund(interaction, Lang.Pick("had already paid for it", "已经付过了"), first.Name);
             }
         } catch (Exception e) {
             LogInteractionError(e);
@@ -1468,10 +1480,10 @@ internal partial class CoopSave {
             return;
         }
 
-        _remoteInteractions[receptacle] = update.Key;
+        _remoteInteractions.TryAdd(receptacle, (update.Key, player.Username));
         if (_localInteractions.TryGetValue(receptacle, out var local)) {
             if (update.PartCount != InteractionAfterPartner) {
-                RefundIfBothPaid(local, update.Key);
+                RefundIfBothPaid(local, update.Key, player.Username);
             }
 
             return;

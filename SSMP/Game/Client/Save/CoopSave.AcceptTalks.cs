@@ -136,24 +136,24 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the kept dialogues whose wishes both saves had as the current check started, which the game keeps in
-    /// both saves from then on.
+    /// Forgets the kept dialogues whose wishes every save had as the current check started, which the game keeps in
+    /// every save from then on.
     /// </summary>
-    /// <param name="partnerEntries">The wish log that the partner's save sent for the check.</param>
-    private void ForgetSharedAcceptTalks(IEnumerable<(string Name, int Value)> partnerEntries) {
+    /// <param name="memberEntries">The wish log that the save of each member sent for the check.</param>
+    private void ForgetSharedAcceptTalks(List<List<(string Name, int Value)>> memberEntries) {
         if (GetCurrentMarker() is not { } marker || marker.AcceptTalks.Count == 0) {
             return;
         }
 
         var local = GetHeldWishKeys(_sentWishEntries);
-        var partner = GetHeldWishKeys(partnerEntries);
+        var members = memberEntries.Select(GetHeldWishKeys).ToList();
         var forgotten = marker.AcceptTalks.RemoveAll(talk => {
             var keys = GetAcceptTalkKeys(talk);
-            return keys.All(key => local.Contains(key) && partner.Contains(key));
+            return keys.All(key => local.Contains(key) && members.All(member => member.Contains(key)));
         });
 
         if (forgotten > 0) {
-            Logger.Info($"Forgot {forgotten} dialogues that accepted wishes, which both saves have now");
+            Logger.Info($"Forgot {forgotten} dialogues that accepted wishes, which every save has now");
         }
     }
 

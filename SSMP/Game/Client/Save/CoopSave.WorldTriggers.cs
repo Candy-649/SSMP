@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
@@ -157,6 +158,32 @@ internal partial class CoopSave {
     private const string PlateLeftName = "Left";
 
     /// <summary>
+    /// The members who stand on each plate here in their own games, for whom the plate stands on itself once, until the
+    /// last of them got off (<see cref="OnWorldTrigger"/>). Two members on one plate, of whom the first stepped off,
+    /// would otherwise let it up under the other.
+    /// </summary>
+    private readonly Dictionary<PressurePlateBase, HashSet<ushort>> _platesStoodOn = new();
+
+    /// <summary>
+    /// Takes a member who left the save off every plate they stood on, letting a plate up that nobody else stands on.
+    /// </summary>
+    private void ForgetPlatesOf(ushort id) {
+        foreach (var pair in _platesStoodOn.ToList()) {
+            if (!pair.Value.Remove(id) || pair.Value.Count > 0) {
+                continue;
+            }
+
+            try {
+                if (pair.Key != null && pair.Key.player == pair.Key.gameObject) {
+                    pair.Key.OnTouchEnd(pair.Key.gameObject);
+                }
+            } catch (Exception e) {
+                Logger.Warn($"Could not let the plate up that a member who left stood on: {e.Message}");
+            }
+        }
+    }
+
+    /// <summary>
     /// Collects the states of <see cref="WorldTriggerKinds"/> that say a trap has gone off.
     /// </summary>
     private static HashSet<string> BuildWorldTriggerGoneOffStateNames() {
@@ -180,7 +207,7 @@ internal partial class CoopSave {
     private CoopSaveUpdate? OnWorldTriggerSwitch(Fsm fsm, FsmState toState) {
         if (_replayingWorldTrigger ||
             !WorldTriggerGoneOffStateNames.Contains(toState.Name) ||
-            _checkedWith is not { } partnerId ||
+            _checkedMembers.Count == 0 ||
             fsm.GameObject is not { } gameObject ||
             FindWorldTriggerKind(gameObject, fsm.Name, toState.Name) is not { } kind ||
             Array.IndexOf(kind.FromStateNames, fsm.ActiveStateName) < 0) {
@@ -188,7 +215,6 @@ internal partial class CoopSave {
         }
 
         return new CoopSaveUpdate {
-            TargetId = partnerId,
             Kind = CoopSaveUpdateKind.WorldTrigger,
             Scene = gameObject.scene.name,
             ObjectPath = ScenePath.Get(gameObject.transform),
@@ -210,8 +236,8 @@ internal partial class CoopSave {
         try {
             trap.Amounts = [.. SharedDice.Record(goOff)];
         } finally {
-            Send(trap);
-            Logger.Info($"Sent the trap '{trap.ObjectPath}' going off to the partner");
+            SendToMembers(trap);
+            Logger.Info($"Sent the trap '{trap.ObjectPath}' going off to {GetCheckedNames()}");
         }
     }
 
@@ -235,13 +261,12 @@ internal partial class CoopSave {
         var send = toucher != self.gameObject && (!leaving || self.player == toucher && self.col.enabled);
         orig(self, toucher);
 
-        if (!send || _checkedWith is not { } partnerId) {
+        if (!send || _checkedMembers.Count == 0) {
             return;
         }
 
         var path = ScenePath.Get(self.transform);
-        Send(new CoopSaveUpdate {
-            TargetId = partnerId,
+        SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.WorldTrigger,
             Scene = self.gameObject.scene.name,
             ObjectPath = path,
@@ -261,7 +286,8 @@ internal partial class CoopSave {
     /// <param name="player">The player who walked in.</param>
     internal void OnPlayerEnterScene(ClientPlayerData player) {
         try {
-            if (_checkedWith != player.Id || GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+            if (!_checkedMembers.Contains(player.Id) || GetCurrentMarker() is not { } marker ||
+                !IsPartner(player, marker)) {
                 return;
             }
 
@@ -325,7 +351,8 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names the trap by its path in its scene.</param>
     private void OnWorldTrigger(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+            !_checkedMembers.Contains(player.Id)) {
             return;
         }
 
@@ -339,9 +366,19 @@ internal partial class CoopSave {
                 return;
             }
 
+            // The plate stands on itself for each member who stepped on it while it could feel them, and gets off
+            // only once the last of them did. A member whose step it couldn't feel, like while the local player was
+            // the one on it, is not counted: their game sends no getting off for a plate that never took them
+            if (!_platesStoodOn.TryGetValue(plate, out var standers)) {
+                standers = _platesStoodOn[plate] = [];
+            }
+
             if (update.StateName == PlateLeftName) {
-                plate.OnTouchEnd(target);
+                if (standers.Remove(player.Id) && standers.Count == 0) {
+                    plate.OnTouchEnd(target);
+                }
             } else if (plate.CanDepress && plate.col.enabled && (plate.player == null || plate.player == target)) {
+                standers.Add(player.Id);
                 plate.OnTouchStart(target);
                 Logger.Info($"{player.Username} is on the plate '{target.name}'");
             }

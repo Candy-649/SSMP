@@ -64,12 +64,12 @@ internal partial class CoopSave {
     private void OnApplyCaptured(Action orig) {
         orig();
 
-        if (_capturingForPartner || _checkedWith is not { } partnerId) {
+        if (_capturingForPartner || _checkedMembers.Count == 0) {
             return;
         }
 
-        Send(new CoopSaveUpdate { TargetId = partnerId, Kind = CoopSaveUpdateKind.PrisonCapture });
-        Logger.Info("Was caught and taken to the prison, so the partner is taken there too");
+        SendToMembers(new CoopSaveUpdate { Kind = CoopSaveUpdateKind.PrisonCapture });
+        Logger.Info($"Was caught and taken to the prison, so {GetCheckedNames()} are taken there too");
     }
 
     /// <summary>
@@ -77,8 +77,8 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     private void OnPrisonCapture(ClientPlayerData player) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id ||
-            IsInPrisonClothes()) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+            !_checkedMembers.Contains(player.Id) || IsInPrisonClothes()) {
             return;
         }
 

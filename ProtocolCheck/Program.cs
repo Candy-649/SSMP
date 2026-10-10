@@ -43,11 +43,18 @@ internal static class Program {
     }
 
     private static IEnumerable<IRun> Runs(bool deep, bool beforeFixes) {
-        yield return new Run<SaveCheck.World>(new SaveCheck(0));
-        yield return new Run<SaveCheck.World>(new SaveCheck(1));
+        yield return new Run<SaveCheck.World>(new SaveCheck(2, 0));
+        yield return new Run<SaveCheck.World>(new SaveCheck(2, 1));
+        // Three players reach far more orders, so their world progress goes in one part and time passes only once
+        // every message arrived
+        yield return new Run<SaveCheck.World>(new SaveCheck(3, 0, 0, 1));
+        yield return new Run<SaveCheck.World>(new SaveCheck(3, 1, 0, 1));
         if (deep) {
-            // Over 12 million states and not done; a run cut short only reports what it could finish
-            yield return new Run<SaveCheck.World>(new SaveCheck(2));
+            // Over 12 million states and not done; a run cut short only reports what it could finish. Three players
+            // with time passing while two messages are on their way passed 20 million states without an end.
+            yield return new Run<SaveCheck.World>(new SaveCheck(2, 2));
+            yield return new Run<SaveCheck.World>(new SaveCheck(3, 0, 2, 1));
+            yield return new Run<SaveCheck.World>(new SaveCheck(3, 2));
         }
 
         yield return new Run<SceneHost.World>(new SceneHost(1));

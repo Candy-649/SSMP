@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -148,9 +149,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends the wishes and rumours whose state changed in the local wish log to the partner.
+    /// Sends the wishes and rumours whose state changed in the local wish log to the other members.
     /// </summary>
-    private void UpdateWishes(ClientPlayerData partner) {
+    private void UpdateWishes() {
         var playerData = PlayerData.instance;
         if (playerData == null) {
             return;
@@ -170,17 +171,17 @@ internal partial class CoopSave {
                 // A wish that dialogue changes goes to the partner with what the dialogue took and gave, and one of
                 // a race that runs goes once it is over
                 if (!IsHeldByWishTalk(pair.Key) && !IsHeldByRace(pair.Key)) {
-                    AddWishChange(ref update, partner, _knownWishes, pair.Key, PackCompletion(pair.Value));
+                    AddWishChange(ref update, _knownWishes, pair.Key, PackCompletion(pair.Value));
                 }
             }
 
             foreach (var pair in playerData.QuestRumourData.Enumerate()) {
-                AddWishChange(ref update, partner, _knownRumours, pair.Key, PackRumour(pair.Value));
+                AddWishChange(ref update, _knownRumours, pair.Key, PackRumour(pair.Value));
             }
 
             if (update != null) {
-                Send(update);
-                Logger.Info($"Sent {update.WishNames.Count} changes of the wish log to {partner.Username}");
+                SendToMembers(update);
+                Logger.Info($"Sent {update.WishNames.Count} changes of the wish log to {GetCheckedNames()}");
             }
         } catch (Exception e) {
             LogWishError(e);
@@ -188,12 +189,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Adds a wish or rumour to the update with the changes of the wish log for the partner if its state isn't the known
-    /// one, and remembers the new state as known.
+    /// Adds a wish or rumour to the update with the changes of the wish log for the other members if its state isn't
+    /// the known one, and remembers the new state as known.
     /// </summary>
     private static void AddWishChange(
         ref CoopSaveUpdate? update,
-        ClientPlayerData partner,
         Dictionary<string, int> known,
         string name,
         int value
@@ -205,7 +205,7 @@ internal partial class CoopSave {
         }
 
         known[name] = value;
-        update ??= new CoopSaveUpdate { TargetId = partner.Id, Kind = CoopSaveUpdateKind.WishChange };
+        update ??= new CoopSaveUpdate { Kind = CoopSaveUpdateKind.WishChange };
         update.WishNames.Add(name);
         update.WishValues.Add(value);
     }
@@ -216,7 +216,8 @@ internal partial class CoopSave {
     /// </summary>
     private void OnWishChange(ClientPlayerData player, CoopSaveUpdate update) {
         var playerData = PlayerData.instance;
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || playerData == null) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || !IsFromMemberInSave(player) ||
+            playerData == null) {
             return;
         }
 
@@ -363,31 +364,37 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Adds the wishes and rumours that the save of the partner accepted and the local save didn't to the local wish
-    /// log, for a check, and finds the wishes that only one of the saves completed, which stay as they are. Both games
-    /// compare what both saves sent, so they find the same wishes, and both wish logs agree afterwards apart from those.
-    /// Wishes and rumours that changed live during the check are newer than both saves and stay as they are.
+    /// Adds the wishes and rumours that the save of a member accepted and the local save didn't to the local wish log,
+    /// for a check, and finds the wishes that only some of the saves completed, which stay as they are. Every game
+    /// compares what every save sent, so they find the same wishes, and the wish logs agree afterwards apart from those.
+    /// Wishes and rumours that changed live during the check are newer than all the saves and stay as they are.
     /// </summary>
+    /// <param name="memberEntries">The wish log that the save of each member sent.</param>
     /// <returns>How many wishes and rumours were added.</returns>
-    private int AddWishes(IEnumerable<(string Name, int Value)> partnerEntries) {
+    private int AddWishes(List<List<(string Name, int Value)>> memberEntries) {
         var playerData = PlayerData.instance;
-        var partnerWishes = new Dictionary<string, int>(StringComparer.Ordinal);
+        var memberWishes = new List<Dictionary<string, int>>(memberEntries.Count);
         var added = 0;
-        foreach (var (name, value) in partnerEntries) {
-            if ((value & RumourEntry) == 0) {
-                partnerWishes[name] = value;
-                continue;
+        foreach (var entries in memberEntries) {
+            var wishes = new Dictionary<string, int>(StringComparer.Ordinal);
+            foreach (var (name, value) in entries) {
+                if ((value & RumourEntry) == 0) {
+                    wishes[name] = value;
+                    continue;
+                }
+
+                var key = GetWishChangeKey(name, value);
+                var rumour = playerData.QuestRumourData.GetData(name);
+                if ((value & WishAccepted) != 0 && !rumour.IsAccepted && !_wishSequences.ContainsKey(key)) {
+                    rumour.IsAccepted = true;
+                    rumour.HasBeenSeen = false;
+                    playerData.QuestRumourData.SetData(name, rumour);
+                    _mergedWishKeys.Add(key);
+                    added++;
+                }
             }
 
-            var key = GetWishChangeKey(name, value);
-            var rumour = playerData.QuestRumourData.GetData(name);
-            if ((value & WishAccepted) != 0 && !rumour.IsAccepted && !_wishSequences.ContainsKey(key)) {
-                rumour.IsAccepted = true;
-                rumour.HasBeenSeen = false;
-                playerData.QuestRumourData.SetData(name, rumour);
-                _mergedWishKeys.Add(key);
-                added++;
-            }
+            memberWishes.Add(wishes);
         }
 
         var localWishes = new Dictionary<string, int>(StringComparer.Ordinal);
@@ -397,8 +404,10 @@ internal partial class CoopSave {
             }
         }
 
-        var names = new HashSet<string>(partnerWishes.Keys, StringComparer.Ordinal);
-        names.UnionWith(localWishes.Keys);
+        var names = new HashSet<string>(localWishes.Keys, StringComparer.Ordinal);
+        foreach (var wishes in memberWishes) {
+            names.UnionWith(wishes.Keys);
+        }
 
         _differentWishNames.Clear();
         foreach (var name in names) {
@@ -406,11 +415,11 @@ internal partial class CoopSave {
                 continue;
             }
 
-            var partnerValue = partnerWishes.TryGetValue(name, out var value) ? value : 0;
             var localValue = localWishes.TryGetValue(name, out var sent) ? sent : 0;
-            var partnerDone = (partnerValue & (WishCompleted | WishEverCompleted)) != 0;
             var localDone = (localValue & (WishCompleted | WishEverCompleted)) != 0;
-            if (partnerDone != localDone) {
+            var memberValues = memberWishes.Select(wishes => wishes.TryGetValue(name, out var value) ? value : 0)
+                .ToList();
+            if (memberValues.Any(value => ((value & (WishCompleted | WishEverCompleted)) != 0) != localDone)) {
                 _differentWishNames.Add(name);
                 continue;
             }
@@ -418,8 +427,8 @@ internal partial class CoopSave {
             // A delivery whose item the local player doesn't carry, like after it broke, isn't accepted for them,
             // because its character takes in an accepted delivery without looking at the item
             var wish = playerData.QuestCompletionData.GetData(name);
-            if (!localDone && (partnerValue & WishAccepted) != 0 && !wish.IsAccepted && !wish.IsCompleted &&
-                !IsUncarriedDelivery(name)) {
+            if (!localDone && memberValues.Any(value => (value & WishAccepted) != 0) && !wish.IsAccepted &&
+                !wish.IsCompleted && !IsUncarriedDelivery(name)) {
                 wish.IsAccepted = true;
                 wish.HasBeenSeen = false;
                 playerData.QuestCompletionData.SetData(name, wish);

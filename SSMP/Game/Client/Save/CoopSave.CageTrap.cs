@@ -94,7 +94,7 @@ internal partial class CoopSave {
     /// <param name="fsm">The FSM that is changing state.</param>
     /// <param name="toState">The state it is changing into.</param>
     private FsmState RedirectCageBait(Fsm fsm, FsmState toState) {
-        if (_checkedWith == null || fsm.Name != CageBaitFsmName) {
+        if (_checkedMembers.Count == 0 || fsm.Name != CageBaitFsmName) {
             return toState;
         }
 
@@ -113,7 +113,7 @@ internal partial class CoopSave {
                     return toState;
                 }
 
-                Logger.Info("Took the bait of a cage without the partner in it, so it does nothing");
+                Logger.Info("Took the bait of a cage without every other member in it, so it does nothing");
                 return fsm.GetState(CageBaitStandState) ?? toState;
             case CageBaitTrailState when IsCageBait(fsm):
                 return fsm.GetState(CageBaitRewaitState) ?? toState;
@@ -130,28 +130,44 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the partner stands in the cage of a bait, where it catches them as well.
+    /// Whether every other member of the save stands in the cage of a bait, where it catches them all, so that nobody
+    /// is left behind above the fight it starts.
     /// </summary>
     private bool IsPartnerInCage(Fsm bait) {
-        if (GetCheckedPartner() is not { IsInLocalScene: true, PlayerObject: { } body } || !body.activeInHierarchy) {
+        if (GetCurrentMarker() is not { } marker) {
+            return false;
+        }
+
+        var members = GetCheckedMembers();
+        if (members.Count < marker.Members.Count) {
             return false;
         }
 
         var inside = bait.GameObject?.transform.parent?.Find(CageInsidePath);
         var area = inside != null ? inside.GetComponent<Collider2D>() : null;
-        return area != null && area.OverlapPoint(body.transform.position);
+        if (area == null) {
+            return false;
+        }
+
+        foreach (var member in members) {
+            if (member is not { IsInLocalScene: true, PlayerObject: { } body } || !body.activeInHierarchy ||
+                !area.OverlapPoint(body.transform.position)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>
     /// Tells the partner that the cage of a bait went off with both players in it.
     /// </summary>
     private void SendCageSprung(Fsm bait) {
-        if (_checkedWith is not { } partnerId || bait.GameObject is not { } gameObject) {
+        if (_checkedMembers.Count == 0 || bait.GameObject is not { } gameObject) {
             return;
         }
 
-        Send(new CoopSaveUpdate {
-            TargetId = partnerId,
+        SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.CageSprung,
             Scene = gameObject.scene.name,
             ObjectPath = ScenePath.Get(gameObject.transform)
@@ -166,7 +182,8 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names the bait by its path in its scene.</param>
     private void OnCageSprung(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+            !_checkedMembers.Contains(player.Id)) {
             return;
         }
 

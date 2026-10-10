@@ -98,14 +98,14 @@ internal partial class CoopSave {
     private bool _partnerMissing;
 
     /// <summary>
-    /// Whether the loaded save is a two-player save whose partner isn't on the server, so that boss fights wait for
+    /// Whether the loaded save is a shared save with a member who isn't on the server, so that boss fights wait for
     /// them. It is worked out once each frame, because boss rooms ask for the events of every object.
     /// </summary>
     public bool IsPartnerMissing() {
         var frame = Time.frameCount;
         if (_partnerMissingFrame != frame) {
             _partnerMissingFrame = frame;
-            _partnerMissing = GetCurrentMarker() is { } marker && FindPartner(marker) == null;
+            _partnerMissing = GetCurrentMarker() is { } marker && !HasAllMembers(marker);
         }
 
         return _partnerMissing;

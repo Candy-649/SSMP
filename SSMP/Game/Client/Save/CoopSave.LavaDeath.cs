@@ -74,12 +74,11 @@ internal partial class CoopSave {
         }
 
         try {
-            if (_lavaChase != null || GetCheckedPartner() is not { IsInLocalScene: true } partner) {
+            if (_lavaChase != null || !IsMemberInRoom()) {
                 return;
             }
 
-            Send(new CoopSaveUpdate {
-                TargetId = partner.Id,
+            SendToMembers(new CoopSaveUpdate {
                 Kind = CoopSaveUpdateKind.LavaDeathEnd,
                 Scene = SceneManager.GetActiveScene().name
             });
@@ -95,7 +94,7 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names the room.</param>
     private void OnPartnerLavaDeathEnd(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCheckedPartner()?.Id != player.Id || _lavaChase != null ||
+        if (!_checkedMembers.Contains(player.Id) || _lavaChase != null ||
             update.Scene != SceneManager.GetActiveScene().name) {
             return;
         }

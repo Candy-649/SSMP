@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
@@ -103,16 +104,22 @@ internal partial class CoopSave {
     private readonly List<TollBench> _tollBenches = [];
 
     /// <summary>
-    /// The toll benches that the partner keeps up in their game, by the scene and path of theirs, whether or not a
-    /// bench here goes with them.
+    /// The toll benches that other members keep up in their games, by the scene and path of theirs, whether or not a
+    /// bench here goes with them: those of <see cref="_tollBenchHolders"/>.
     /// </summary>
     private readonly HashSet<string> _partnerTollBenches = [];
 
     /// <summary>
-    /// The count of the last update about each toll bench that came from the partner, by the scene and path of theirs,
-    /// so that an older update that the network delivers after a newer one is left alone.
+    /// The members who keep each toll bench of <see cref="_partnerTollBenches"/> up, by the scene and path. A bench lets
+    /// go once the last of them does.
     /// </summary>
-    private readonly Dictionary<string, ulong> _partnerTollBenchSequences = new();
+    private readonly Dictionary<string, HashSet<ushort>> _tollBenchHolders = new();
+
+    /// <summary>
+    /// The count of the last update about each toll bench that came from each member, by the member and the scene and
+    /// path of theirs, so that an older update that the network delivers after a newer one is left alone.
+    /// </summary>
+    private readonly Dictionary<(ushort, string), ulong> _partnerTollBenchSequences = new();
 
     /// <summary>
     /// A count that grows with every update about a toll bench that the local game sends.
@@ -391,16 +398,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the partner that the local player keeps a toll bench up, or no longer does.
+    /// Tells the other members that the local player keeps a toll bench up, or no longer does.
     /// </summary>
     private void SendTollBench(TollBench bench, bool keptUp) {
-        if (_checkedWith is not { } partnerId) {
+        if (_checkedMembers.Count == 0) {
             bench.Sent = false;
             return;
         }
 
-        Send(new CoopSaveUpdate {
-            TargetId = partnerId,
+        SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.TollBench,
             Scene = bench.Scene,
             ObjectPath = bench.Path,
@@ -422,35 +428,69 @@ internal partial class CoopSave {
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, which names their toll bench by its scene and path.</param>
     private void OnTollBench(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id) {
+        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+            !_checkedMembers.Contains(player.Id)) {
             return;
         }
 
         var key = update.Scene + "/" + update.ObjectPath;
-        if (_partnerTollBenchSequences.TryGetValue(key, out var last) && update.Sequence <= last) {
+        if (_partnerTollBenchSequences.TryGetValue((player.Id, key), out var last) && update.Sequence <= last) {
             return;
         }
 
-        _partnerTollBenchSequences[key] = update.Sequence;
+        _partnerTollBenchSequences[(player.Id, key)] = update.Sequence;
         if (update.PartCount == 0) {
-            if (!_partnerTollBenches.Remove(key)) {
+            if (!_tollBenchHolders.TryGetValue(key, out var holders) || !holders.Remove(player.Id)) {
                 return;
             }
 
             Logger.Info($"{player.Username} no longer keeps the toll bench '{update.ObjectPath}' in {update.Scene} up");
-
-            // The bench here goes back to the game's own timer, which may have run out while the partner kept it up
-            foreach (var bench in _tollBenches) {
-                if (bench.Key == key) {
-                    bench.RestartPending = true;
-                }
+            if (holders.Count == 0) {
+                LetGoOfTollBench(key);
             }
 
             return;
         }
 
-        if (_partnerTollBenches.Add(key)) {
+        if (!_tollBenchHolders.TryGetValue(key, out var keepers)) {
+            keepers = _tollBenchHolders[key] = [];
+        }
+
+        if (keepers.Add(player.Id)) {
+            _partnerTollBenches.Add(key);
             Logger.Info($"{player.Username} keeps the toll bench '{update.ObjectPath}' in {update.Scene} up");
+        }
+    }
+
+    /// <summary>
+    /// No member keeps a toll bench up any more, so the bench here goes back to the game's own timer, which may have run
+    /// out while they kept it up.
+    /// </summary>
+    private void LetGoOfTollBench(string key) {
+        _tollBenchHolders.Remove(key);
+        if (!_partnerTollBenches.Remove(key)) {
+            return;
+        }
+
+        foreach (var bench in _tollBenches) {
+            if (bench.Key == key) {
+                bench.RestartPending = true;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Lets go of the toll benches that a member who left the save kept up, where no other member keeps them up.
+    /// </summary>
+    private void ForgetTollBenchesOf(ushort id) {
+        foreach (var pair in _tollBenchHolders.ToList()) {
+            if (pair.Value.Remove(id) && pair.Value.Count == 0) {
+                LetGoOfTollBench(pair.Key);
+            }
+        }
+
+        foreach (var key in _partnerTollBenchSequences.Keys.Where(key => key.Item1 == id).ToList()) {
+            _partnerTollBenchSequences.Remove(key);
         }
     }
 
@@ -475,6 +515,7 @@ internal partial class CoopSave {
         }
 
         _partnerTollBenches.Clear();
+        _tollBenchHolders.Clear();
         _partnerTollBenchSequences.Clear();
     }
 

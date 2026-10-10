@@ -245,12 +245,12 @@ internal partial class CoopSave {
                 var name = parts.Length == 3 ? parts[2] : "an item";
                 Chat(parts[0] == TakeItemChange
                     ? Lang.Pick(
-                        $"{GetPartnerName()} used up {name}, so yours is gone too.",
-                        $"{GetPartnerName()} 用掉了 {name}，所以你那份也没了。"
+                        $"{player.Username} used up {name}, so yours is gone too.",
+                        $"{player.Username} 用掉了 {name}，所以你那份也没了。"
                     )
                     : Lang.Pick(
-                        $"{GetPartnerName()} was given {name}, so you got one too.",
-                        $"{GetPartnerName()} 拿到了 {name}，所以你也拿到了一份。"
+                        $"{player.Username} was given {name}, so you got one too.",
+                        $"{player.Username} 拿到了 {name}，所以你也拿到了一份。"
                     ));
                 Logger.Info($"Applied the story item '{change.Replace('\n', ' ')}' of the partner");
             }
@@ -270,14 +270,13 @@ internal partial class CoopSave {
     /// <param name="what">What the local player did, for the log.</param>
     /// <param name="npc">The character that handed the item over, for a gift of a first talk.</param>
     private void SendStoryItem(string change, int amount, string what, BasicNPC? npc = null) {
-        if (!_everChecked || _checkedWith is not { } partnerId) {
+        if (!_everChecked || _checkedMembers.Count == 0) {
             return;
         }
 
         var bytes = new byte[8];
         Random.NextBytes(bytes);
         var update = new CoopSaveUpdate {
-            TargetId = partnerId,
             Kind = CoopSaveUpdateKind.StoryItem,
             Key = BitConverter.ToUInt64(bytes, 0)
         };
@@ -289,8 +288,8 @@ internal partial class CoopSave {
 
         update.Records.Add(change);
         update.Amounts.Add(amount);
-        Send(update);
-        Logger.Info($"Sent to the partner that the local player {what}");
+        SendToMembers(update);
+        Logger.Info($"Sent to {GetCheckedNames()} that the local player {what}");
     }
 
     /// <summary>

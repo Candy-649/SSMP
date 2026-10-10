@@ -109,7 +109,7 @@ internal partial class CoopSave {
         }
 
         var ownStateNames = director.OwnStateNames!;
-        if (ownStateNames.Contains(toState.Name) || GetCheckedPartner() is not { IsInLocalScene: true }) {
+        if (ownStateNames.Contains(toState.Name) || !IsMemberInRoom()) {
             return MachineStep.None;
         }
 
