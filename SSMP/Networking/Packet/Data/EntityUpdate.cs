@@ -73,10 +73,11 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public ushort ReceivedSequence { get; set; }
 
     /// <summary>
-    /// How far the scene host has got through what a scene client did to this entity before telling it, sent only
-    /// while there is something to be waiting on. See <see cref="EntityUpdateType.Anticipation"/>.
+    /// How far the scene host has got through what each scene client did to this entity before telling it, by the tag
+    /// of that client's game, sent only while there is something to be waiting on. See
+    /// <see cref="EntityUpdateType.Anticipation"/>.
     /// </summary>
-    public byte Anticipation { get; set; }
+    public List<(ushort Tag, byte Number)> Anticipations { get; } = [];
 
     /// <summary>
     /// The scale data of the entity.
@@ -118,7 +119,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         // that hands back whatever was last put in it, and a leftover sequence number read as the newest position
         // seen is what once left a room of enemies standing still for nine minutes at a time.
         ReceivedSequence = 0;
-        Anticipation = 0;
+        Anticipations.Clear();
         Scale.Reset();
         AnimationId = 0;
         AnimationWrapMode = 0;
@@ -166,7 +167,12 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         }
 
         if (UpdateTypes.Contains(EntityUpdateType.Anticipation)) {
-            packet.Write(Anticipation);
+            var count = System.Math.Min(Anticipations.Count, byte.MaxValue);
+            packet.Write((byte) count);
+            for (var i = 0; i < count; i++) {
+                packet.Write(Anticipations[i].Tag);
+                packet.Write(Anticipations[i].Number);
+            }
         }
     }
 
@@ -204,7 +210,12 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         }
 
         if (UpdateTypes.Contains(EntityUpdateType.Anticipation)) {
-            Anticipation = packet.ReadByte();
+            Anticipations.Clear();
+            var count = packet.ReadByte();
+            for (var i = 0; i < count; i++) {
+                var tag = packet.ReadUShort();
+                Anticipations.Add((tag, packet.ReadByte()));
+            }
         }
     }
 

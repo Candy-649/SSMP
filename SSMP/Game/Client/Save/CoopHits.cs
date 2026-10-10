@@ -3,6 +3,7 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using GlobalEnums;
 using HutongGames.PlayMaker;
@@ -176,9 +177,9 @@ internal class CoopHits {
     private readonly EntityManager _entityManager;
 
     /// <summary>
-    /// Gets the ID of the partner that the two-player save was checked with, or null outside a checked save.
+    /// Gets the IDs of the members that the two-player save was checked with, none outside a checked save.
     /// </summary>
-    private readonly Func<ushort?> _getPartnerId;
+    private readonly Func<IReadOnlyCollection<ushort>> _getMembers;
 
     /// <summary>
     /// The hooks that are registered while connected to a server.
@@ -288,13 +289,73 @@ internal class CoopHits {
         Dictionary<ushort, ClientPlayerData> playerData,
         GamePatcher gamePatcher,
         EntityManager entityManager,
-        Func<ushort?> getPartnerId
+        Func<IReadOnlyCollection<ushort>> getMembers
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _gamePatcher = gamePatcher;
         _entityManager = entityManager;
-        _getPartnerId = getPartnerId;
+        _getMembers = getMembers;
+        Entity.Entity.FigureOf = FigureOf;
+    }
+
+    /// <summary>
+    /// Whether the two-player save was checked with anyone, which is what has the local player's hits on shared
+    /// things go to the others rather than stay in this game.
+    /// </summary>
+    private bool HasMembers => _getMembers().Count > 0;
+
+    /// <summary>
+    /// The checked members who are in this room, by ID: the games that the local player's hits go to.
+    /// </summary>
+    private List<ushort> GetRoomMembers() {
+        var members = new List<ushort>();
+        foreach (var id in _getMembers()) {
+            if (_playerData.TryGetValue(id, out var member) && member.IsInLocalScene) {
+                members.Add(id);
+            }
+        }
+
+        members.Sort();
+        return members;
+    }
+
+    /// <summary>
+    /// Whether any checked member is in this room to be sent a hit.
+    /// </summary>
+    private bool IsAnyMemberInRoom() {
+        foreach (var id in _getMembers()) {
+            if (_playerData.TryGetValue(id, out var member) && member.IsInLocalScene) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Sends a hit to every checked member in this room: the first of them gets the update itself and every other one
+    /// a copy of its own, since an update is queued as it is and goes to the one player it names. A hit that only the
+    /// scene host takes, like a knockback, goes to all of them too, because nothing here knows which of them is the
+    /// scene host; the others leave it be (<see cref="ApplyKnockback"/>).
+    /// </summary>
+    /// <param name="update">The update.</param>
+    /// <returns>Whether anyone was there to send it to.</returns>
+    private bool SendToRoomMembers(CoopHitUpdate update) {
+        var members = GetRoomMembers();
+        if (members.Count == 0) {
+            return false;
+        }
+
+        update.TargetId = members[0];
+        _netClient.UpdateManager.SetCoopHitUpdate(update);
+        for (var i = 1; i < members.Count; i++) {
+            var copy = update.Copy();
+            copy.TargetId = members[i];
+            _netClient.UpdateManager.SetCoopHitUpdate(copy);
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -458,8 +519,8 @@ internal class CoopHits {
     /// knockback of their hit on an enemy.
     /// </summary>
     public void OnCoopHitUpdate(CoopHitUpdate update) {
-        if (_getPartnerId() != update.PlayerId || !_playerData.TryGetValue(update.PlayerId, out var partner) ||
-            !partner.IsInLocalScene) {
+        if (!_getMembers().Contains(update.PlayerId) || !_playerData.TryGetValue(update.PlayerId, out var member) ||
+            !member.IsInLocalScene) {
             return;
         }
 
@@ -780,7 +841,7 @@ internal class CoopHits {
             return IHitResponder.Response.None;
         }
 
-        if (_getPartnerId() is not { } partnerId) {
+        if (!HasMembers) {
             return responder.Hit(hit);
         }
 
@@ -814,7 +875,7 @@ internal class CoopHits {
             // that it knocks away fell on in the other game
             if (component is TinkEffect tink && hit.IsHeroDamage &&
                 TinkFsmField?.GetValue(tink) is PlayMakerFSM told && told != null) {
-                return HitRoomTink(partnerId, tink, told, hit);
+                return HitRoomTink(tink, told, hit);
             }
 
             if (IsPersonal(component.GetType())) {
@@ -824,14 +885,14 @@ internal class CoopHits {
             // The update is made before the hit, since a hit can break the object and move its parts. An object that
             // lets the attack go on through it says it was not hit, and it still answered when one of its state
             // machines moved on to another state
-            var update = hit.IsHeroDamage ? CreateUpdate(partnerId, component, hit) : null;
+            var update = hit.IsHeroDamage ? CreateUpdate(component, hit) : null;
             var response = default(IHitResponder.HitResponse);
             int[] dice = [];
             var answered = AnswersAttack(() => dice = SharedDice.Record(() => response = responder.Hit(hit))) ||
                            response.response != IHitResponder.Response.None;
             if (update != null && answered && _netClient.IsConnected) {
                 update.Hit = SharedDice.Append(update.Hit, dice);
-                _netClient.UpdateManager.SetCoopHitUpdate(update);
+                SendToRoomMembers(update);
                 NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder}");
             } else if (update != null && !answered) {
                 NoteTraffic(update.Scene, update.Path, $"hit its {update.Responder}, which did not answer: not sent");
@@ -879,9 +940,7 @@ internal class CoopHits {
             // Nothing of this hit happens in the partner's game any more, so what it looked like is sent to them. A hit
             // that the enemy blocked showed only the spark of the block here, and that is what goes, not a wound.
             if (isEnemyEntity && hit.IsHeroDamage && response.response != IHitResponder.Response.None) {
-                SendHitEffect(
-                    partnerId, enemyId, hit, response.response == IHitResponder.Response.Invincible, enemyPosition
-                );
+                SendHitEffect(enemyId, hit, response.response == IHitResponder.Response.Invincible, enemyPosition);
             }
 
             return response;
@@ -972,7 +1031,7 @@ internal class CoopHits {
     /// <param name="isLocal">Whether it is an attack of the local player rather than a copy of the partner's.</param>
     private bool IsPlayerAttackOnRoomObject(Component receiver, Collider2D other, out bool isLocal) {
         isLocal = false;
-        if (_isReplaying || other.gameObject.layer != (int) PhysLayers.HERO_ATTACK || _getPartnerId() == null) {
+        if (_isReplaying || other.gameObject.layer != (int) PhysLayers.HERO_ATTACK || !HasMembers) {
             return false;
         }
 
@@ -991,11 +1050,11 @@ internal class CoopHits {
     /// <param name="touch">Tells the object of the touch.</param>
     private void OnLocalAttackTouch(Component receiver, Collider2D attack, Action touch) {
         // The update is made before the touch, since a touch can break the object and move its parts
-        var update = _getPartnerId() is { } partnerId ? CreateTouchUpdate(partnerId, receiver, attack) : null;
+        var update = HasMembers ? CreateTouchUpdate(receiver, attack) : null;
         int[] dice = [];
         if (AnswersAttack(() => dice = SharedDice.Record(touch)) && update != null && _netClient.IsConnected) {
             update.Hit = SharedDice.Append(update.Hit, dice);
-            _netClient.UpdateManager.SetCoopHitUpdate(update);
+            SendToRoomMembers(update);
             NoteTraffic(update.Scene, update.Path, $"sent a touch of {attack.name} through {update.Responder}");
         }
     }
@@ -1111,7 +1170,7 @@ internal class CoopHits {
     /// attacks of the partner don't knock back enemies, since the partner's game sends its knockback.
     /// </summary>
     private void OnRecoilByDirection(Action<Recoil, int, float> orig, Recoil self, int direction, float magnitude) {
-        if (_hitContext == HitContext.None || _getPartnerId() is not { } partnerId ||
+        if (_hitContext == HitContext.None || !HasMembers ||
             !TryGetEntity(self.gameObject, out var entity, out var isClientCopy)) {
             orig(self, direction, magnitude);
             return;
@@ -1153,7 +1212,7 @@ internal class CoopHits {
 
         // Sent whatever happened here, since the scene host may be able to knock the enemy back when this game
         // could not. A number of zero is one that nothing is waiting on, and the scene host answers it with nothing.
-        if (!SendKnockback(partnerId, entity.Id, direction, magnitude, id) && id != 0) {
+        if (!SendKnockback(entity.Id, direction, magnitude, id) && id != 0) {
             entity.EndAnticipation();
         }
     }
@@ -1178,7 +1237,7 @@ internal class CoopHits {
         _pulledCopies.Clear();
         try {
             var enemies = self.enemies;
-            var ownPull = enemies.Count > 0 && _getPartnerId() != null && IsLocalPull(self);
+            var ownPull = enemies.Count > 0 && HasMembers && IsLocalPull(self);
             for (var i = enemies.Count - 1; i >= 0; i--) {
                 var enemy = enemies[i];
                 if (enemy.Obj == null || enemy.Transform == null || enemy.Collider == null || enemy.Recoil == null) {
@@ -1269,17 +1328,16 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Sends the knockback of a hit of the local player on an enemy that the scene host controls to the partner.
+    /// Sends the knockback of a hit of the local player on an enemy that the scene host controls to the members in the
+    /// room, whose scene host applies it.
     /// </summary>
-    /// <param name="partnerId">The ID of the partner.</param>
     /// <param name="entityId">The ID of the entity that was knocked back.</param>
     /// <param name="direction">The way it was knocked.</param>
     /// <param name="magnitude">How hard it was knocked.</param>
     /// <param name="id">The number to send it under, which comes back stamped on the positions that have it.</param>
     /// <returns>Whether it was sent, which is whether there is anyone there to make it happen.</returns>
-    private bool SendKnockback(ushort partnerId, ushort entityId, int direction, float magnitude, byte id) {
-        if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
-            !partner.IsInLocalScene) {
+    private bool SendKnockback(ushort entityId, int direction, float magnitude, byte id) {
+        if (!_netClient.IsConnected || !IsAnyMemberInRoom()) {
             return false;
         }
 
@@ -1288,16 +1346,14 @@ internal class CoopHits {
         writer.Write(direction);
         writer.Write(magnitude);
         writer.Write(id);
+        writer.Write(Entity.Entity.RequestTag);
         writer.Flush();
 
-        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
-            TargetId = partnerId,
+        return SendToRoomMembers(new CoopHitUpdate {
             Kind = CoopHitKind.EnemyKnockback,
             EntityId = entityId,
             Hit = stream.ToArray()
         });
-
-        return true;
     }
 
     /// <summary>
@@ -1308,11 +1364,13 @@ internal class CoopHits {
         int direction;
         float magnitude;
         byte id;
+        ushort tag;
         try {
             using var reader = new BinaryReader(new MemoryStream(update.Hit));
             direction = reader.ReadInt32();
             magnitude = reader.ReadSingle();
             id = reader.ReadByte();
+            tag = reader.ReadUInt16();
         } catch (IOException) {
             Logger.Warn($"Could not read the knockback of a hit of the partner on entity {update.EntityId}");
             return;
@@ -1329,7 +1387,7 @@ internal class CoopHits {
         var enemy = entity.Object.Host;
         if (enemy == null || !enemy.activeInHierarchy || !enemy.TryGetComponent<Recoil>(out var recoil) ||
             enemy.TryGetComponent<HealthManager>(out var healthManager) && healthManager.GetIsDead()) {
-            entity.NoteAnticipation(id);
+            entity.NoteAnticipation(tag, id);
             return;
         }
 
@@ -1338,7 +1396,7 @@ internal class CoopHits {
         // What is left on the knockback's clock is how much longer this game goes on carrying the enemy along, and
         // the player waiting on this is told nothing until then. They have already watched their own copy go the
         // whole way; a position from the first moment of the same knockback would only pull it back to the start.
-        entity.NoteAnticipation(id, recoil.recoilTimeRemaining);
+        entity.NoteAnticipation(tag, id, recoil.recoilTimeRemaining);
     }
 
     /// <summary>
@@ -1437,13 +1495,11 @@ internal class CoopHits {
     /// told it, so that the bell flies off at the same angle there (see <see cref="SharedDice"/>). The spark and the
     /// recoil stay here.
     /// </summary>
-    /// <param name="partnerId">The ID of the partner.</param>
     /// <param name="tink">The tink that is struck.</param>
     /// <param name="told">The state machine that it tells.</param>
     /// <param name="hit">The hit.</param>
     /// <returns>How the tink responded to the hit.</returns>
     private IHitResponder.HitResponse HitRoomTink(
-        ushort partnerId,
         TinkEffect tink,
         PlayMakerFSM told,
         HitInstance hit
@@ -1459,9 +1515,9 @@ internal class CoopHits {
         }
 
         try {
-            if (_toldRoom.Count > 0 && CreateEventsUpdate(partnerId, told, _toldRoom) is { } update &&
+            if (_toldRoom.Count > 0 && CreateEventsUpdate(told, _toldRoom) is { } update &&
                 _netClient.IsConnected) {
-                _netClient.UpdateManager.SetCoopHitUpdate(update);
+                SendToRoomMembers(update);
                 NoteTraffic(
                     update.Scene, update.Path, $"sent {_toldRoom.Count} event(s) of a tink to {update.Responder}"
                 );
@@ -1482,12 +1538,11 @@ internal class CoopHits {
     /// <param name="eventName">The event.</param>
     /// <param name="dice">The dice.</param>
     public void SendObjectEvent(PlayMakerFSM fsm, string eventName, int[] dice) {
-        if (_getPartnerId() is not { } partnerId || !_netClient.IsConnected ||
-            CreateEventsUpdate(partnerId, fsm, [(eventName, dice)]) is not { } update) {
+        if (!HasMembers || !_netClient.IsConnected || CreateEventsUpdate(fsm, [(eventName, dice)]) is not { } update) {
             return;
         }
 
-        _netClient.UpdateManager.SetCoopHitUpdate(update);
+        SendToRoomMembers(update);
         NoteTraffic(update.Scene, update.Path, $"sent '{eventName}' to {update.Responder}");
     }
 
@@ -1527,8 +1582,8 @@ internal class CoopHits {
         CoopHitUpdate? update = null;
         try {
             if (!_replayingDirection && HitInDirectionField?.GetValue(self) != null &&
-                (_localPersonalHit || IsLocalHeroPart(source)) && _getPartnerId() is { } partnerId) {
-                update = CreateDirectionUpdate(partnerId, self, source, direction);
+                (_localPersonalHit || IsLocalHeroPart(source)) && HasMembers) {
+                update = CreateDirectionUpdate(self, source, direction);
             }
         } catch (Exception e) {
             if (!_sendFailed) {
@@ -1545,7 +1600,7 @@ internal class CoopHits {
         var dice = SharedDice.Record(() => orig(self, source, direction));
         if (_netClient.IsConnected) {
             update.Hit = SharedDice.Append(update.Hit, dice);
-            _netClient.UpdateManager.SetCoopHitUpdate(update);
+            SendToRoomMembers(update);
             NoteTraffic(update.Scene, update.Path, $"sent a hit {direction} on {update.Responder}");
         }
     }
@@ -1562,14 +1617,13 @@ internal class CoopHits {
     /// <summary>
     /// Creates the update that sends the partner a hit of the local player in a direction on a tink of the room.
     /// </summary>
-    /// <returns>The update, or null if the partner isn't in the scene or the tink is not one to send.</returns>
+    /// <returns>The update, or null if no member is in the scene or the tink is not one to send.</returns>
     private CoopHitUpdate? CreateDirectionUpdate(
-        ushort partnerId,
         HitResponseBase tink,
         GameObject? source,
         HitInstance.HitDirection direction
     ) {
-        if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+        if (!IsAnyMemberInRoom()) {
             return null;
         }
 
@@ -1602,7 +1656,6 @@ internal class CoopHits {
         writer.Flush();
 
         return new CoopHitUpdate {
-            TargetId = partnerId,
             Kind = CoopHitKind.ObjectDirection,
             Scene = target.scene.name,
             Path = ScenePath.Get(target.transform),
@@ -1687,13 +1740,9 @@ internal class CoopHits {
     /// <summary>
     /// Creates the update that sends the events that a state machine of the room was told here to the partner.
     /// </summary>
-    /// <returns>The update, or null if the partner isn't in the scene or the object can't be found by others.</returns>
-    private CoopHitUpdate? CreateEventsUpdate(
-        ushort partnerId,
-        PlayMakerFSM fsm,
-        List<(string EventName, int[] Dice)> events
-    ) {
-        if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+    /// <returns>The update, or null if no member is in the scene or the object can't be found by others.</returns>
+    private CoopHitUpdate? CreateEventsUpdate(PlayMakerFSM fsm, List<(string EventName, int[] Dice)> events) {
+        if (!IsAnyMemberInRoom()) {
             return null;
         }
 
@@ -1719,7 +1768,6 @@ internal class CoopHits {
         writer.Flush();
 
         return new CoopHitUpdate {
-            TargetId = partnerId,
             Kind = CoopHitKind.ObjectEvents,
             Scene = target.scene.name,
             Path = ScenePath.Get(target.transform),
@@ -1856,7 +1904,7 @@ internal class CoopHits {
         bool grabbedThePlayer = false,
         bool woken = false
     ) {
-        if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
+        if (!CanSendEntityTouch()) {
             // Alone in the room nothing goes on with the catch, which the part may have started on the player already
             if (grabbedThePlayer && !Entity.Entity.AnyLeadsACatch()) {
                 Entity.Action.EntityFsmActions.LetGoOfTheHeldLocalPlayer(
@@ -1872,7 +1920,7 @@ internal class CoopHits {
                 $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                 $"went to '{input.State}', and the scene host is sent it with where the copy was"
             );
-            SendEntityInput(partnerId, copied.Id, fsmIndex, eventName, input, woken);
+            SendEntityInput(copied.Id, fsmIndex, eventName, input, woken);
             return;
         }
 
@@ -1905,8 +1953,7 @@ internal class CoopHits {
             told = stream.ToArray();
         }
 
-        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
-            TargetId = partnerId,
+        SendToRoomMembers(new CoopHitUpdate {
             Kind = CoopHitKind.EntityTouch,
             EntityId = copied.Id,
             Index = fsmIndex,
@@ -1920,14 +1967,12 @@ internal class CoopHits {
     /// at once (see <see cref="Entity.Entity.PlayHere"/>), with where the copy was and how it moved, the dice the FSM
     /// rolled and this game's round trip to the server.
     /// </summary>
-    /// <param name="partnerId">The ID of the partner.</param>
     /// <param name="entityId">The ID of the entity.</param>
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
     /// <param name="eventName">The event.</param>
     /// <param name="input">What the copy's FSM played.</param>
     /// <param name="woken">Whether the local player woke the creature by coming near, so that it goes after them.</param>
     private void SendEntityInput(
-        ushort partnerId,
         ushort entityId,
         byte fsmIndex,
         string eventName,
@@ -1966,10 +2011,12 @@ internal class CoopHits {
         // Whether the local player woke the creature by coming near
         writer.Write(woken);
 
+        // The tag that the scene host's answer goes under
+        writer.Write(Entity.Entity.RequestTag);
+
         writer.Flush();
 
-        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
-            TargetId = partnerId,
+        SendToRoomMembers(new CoopHitUpdate {
             Kind = CoopHitKind.EntityInput,
             EntityId = entityId,
             Index = fsmIndex,
@@ -2018,8 +2065,9 @@ internal class CoopHits {
                 }
             }
 
-            woken = reader.BaseStream.Position < reader.BaseStream.Length && reader.ReadBoolean();
-            input = new Entity.InputStart(state, position, motion, dice, anticipation, caught, path);
+            woken = reader.ReadBoolean();
+            var tag = reader.ReadUInt16();
+            input = new Entity.InputStart(state, position, motion, dice, anticipation, caught, path, tag);
         } catch (IOException e) {
             Logger.Warn($"Could not read what the partner did to the copy of entity {update.EntityId}: {e.Message}");
             return;
@@ -2037,7 +2085,7 @@ internal class CoopHits {
 
         var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);
         Logger.Info(
-            entity.TakeInput(update.Index, update.Responder, input, elapsed)
+            entity.TakeInput(update.Index, update.Responder, input, elapsed, update.PlayerId, FigureOf(update.PlayerId))
                 ? $"The partner played '{update.Responder}' on the copy of entity {update.EntityId}, so it is played " +
                   $"here from where their copy was with their dice, and went to '{input.State}' too, " +
                   $"{elapsed:0.00} s on"
@@ -2056,12 +2104,11 @@ internal class CoopHits {
     /// <param name="step">The number of the step.</param>
     /// <param name="stateName">The state.</param>
     private void OnCatchWentOn(Entity.Entity copied, byte fsmIndex, byte catchNumber, byte step, string stateName) {
-        if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
+        if (!CanSendEntityTouch()) {
             return;
         }
 
-        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
-            TargetId = partnerId,
+        SendToRoomMembers(new CoopHitUpdate {
             Kind = CoopHitKind.EntityCatchState,
             EntityId = copied.Id,
             Index = fsmIndex,
@@ -2079,12 +2126,11 @@ internal class CoopHits {
     /// <param name="fromState">The state the talk started in.</param>
     /// <param name="toState">The state the talk led to.</param>
     private void OnTalkLedTo(Entity.Entity copied, byte fsmIndex, string fromState, string toState) {
-        if (!CanSendEntityTouch() || _getPartnerId() is not { } partnerId) {
+        if (!CanSendEntityTouch()) {
             return;
         }
 
-        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
-            TargetId = partnerId,
+        SendToRoomMembers(new CoopHitUpdate {
             Kind = CoopHitKind.EntityTalkEnd,
             EntityId = copied.Id,
             Index = fsmIndex,
@@ -2103,7 +2149,7 @@ internal class CoopHits {
             return;
         }
 
-        entity.TakeTalkEnd(update.Index, update.Path, update.Responder);
+        entity.TakeTalkEnd(update.Index, update.Path, update.Responder, FigureOf(update.PlayerId));
     }
 
     /// <summary>
@@ -2116,15 +2162,26 @@ internal class CoopHits {
             return;
         }
 
-        entity.TakeCatchState(update.Index, update.Hit[0], update.Hit[1], update.Responder);
+        entity.TakeCatchState(update.PlayerId, update.Index, update.Hit[0], update.Hit[1], update.Responder);
     }
 
     /// <summary>
-    /// Whether the partner is there to be sent a touch or strike of the copy of an entity: connected and in this room.
+    /// The figure of a player in this room that creatures go after, or null if they have none here: what a catch that
+    /// their game leads puts at the player it caught goes to it (see <see cref="Entity.Entity.PlayForPartner"/>).
+    /// </summary>
+    /// <param name="playerId">The ID of the player.</param>
+    private GameObject? FigureOf(ushort playerId) {
+        return _playerData.TryGetValue(playerId, out var player) && player.PlayerObject is { } figure &&
+               PlayerTargetRegistry.GetTrackedPlayers().Contains(figure)
+            ? figure
+            : null;
+    }
+
+    /// <summary>
+    /// Whether a member is there to be sent a touch or strike of the copy of an entity: connected and in this room.
     /// </summary>
     private bool CanSendEntityTouch() {
-        return _netClient.IsConnected && _getPartnerId() is { } partnerId &&
-               _playerData.TryGetValue(partnerId, out var partner) && partner.IsInLocalScene;
+        return _netClient.IsConnected && IsAnyMemberInRoom();
     }
 
     /// <summary>
@@ -2171,28 +2228,19 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Sends what a hit of the local player on an enemy looked like to the partner, whose copy of the attack no
-    /// longer hits that enemy itself.
+    /// Sends what a hit of the local player on an enemy looked like to the members in the room, whose copies of the
+    /// attack no longer hit that enemy themselves.
     /// </summary>
-    /// <param name="partnerId">The ID of the partner.</param>
     /// <param name="entityId">The ID of the entity that was hit.</param>
     /// <param name="hit">The hit, which decides which effect is played.</param>
     /// <param name="blocked">Whether the enemy blocked the hit rather than took it.</param>
     /// <param name="enemyPosition">Where the enemy stood as the hit landed.</param>
-    private void SendHitEffect(
-        ushort partnerId,
-        ushort entityId,
-        HitInstance hit,
-        bool blocked,
-        Vector3? enemyPosition
-    ) {
-        if (!_netClient.IsConnected || !_playerData.TryGetValue(partnerId, out var partner) ||
-            !partner.IsInLocalScene) {
+    private void SendHitEffect(ushort entityId, HitInstance hit, bool blocked, Vector3? enemyPosition) {
+        if (!_netClient.IsConnected || !IsAnyMemberInRoom()) {
             return;
         }
 
-        _netClient.UpdateManager.SetCoopHitUpdate(new CoopHitUpdate {
-            TargetId = partnerId,
+        SendToRoomMembers(new CoopHitUpdate {
             Kind = blocked ? CoopHitKind.EnemyBlockEffect : CoopHitKind.EnemyHitEffect,
             EntityId = entityId,
             Hit = WriteHit(hit, hit.CircleDirection ? enemyPosition : null)
@@ -2357,12 +2405,12 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Creates the update that sends a hit of the local player to the partner.
+    /// Creates the update that sends a hit of the local player to the members in the room.
     /// </summary>
-    /// <returns>The update, or null if the partner isn't in the scene or the object can't be found by others.</returns>
-    private CoopHitUpdate? CreateUpdate(ushort partnerId, Component component, HitInstance hit) {
+    /// <returns>The update, or null if no member is in the scene or the object can't be found by others.</returns>
+    private CoopHitUpdate? CreateUpdate(Component component, HitInstance hit) {
         try {
-            if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+            if (!IsAnyMemberInRoom()) {
                 return null;
             }
 
@@ -2378,7 +2426,6 @@ internal class CoopHits {
             }
 
             return new CoopHitUpdate {
-                TargetId = partnerId,
                 Scene = target.scene.name,
                 Path = ScenePath.Get(target.transform),
                 Responder = type.FullName,
@@ -2396,12 +2443,13 @@ internal class CoopHits {
     }
 
     /// <summary>
-    /// Creates the update that sends a touch of the local player's attack on an object of the room to the partner.
+    /// Creates the update that sends a touch of the local player's attack on an object of the room to the members in
+    /// the room.
     /// </summary>
-    /// <returns>The update, or null if the partner isn't in the scene or the object can't be found by others.</returns>
-    private CoopHitUpdate? CreateTouchUpdate(ushort partnerId, Component receiver, Collider2D attack) {
+    /// <returns>The update, or null if no member is in the scene or the object can't be found by others.</returns>
+    private CoopHitUpdate? CreateTouchUpdate(Component receiver, Collider2D attack) {
         try {
-            if (!_playerData.TryGetValue(partnerId, out var partner) || !partner.IsInLocalScene) {
+            if (!IsAnyMemberInRoom()) {
                 return null;
             }
 
@@ -2425,7 +2473,6 @@ internal class CoopHits {
             writer.Flush();
 
             return new CoopHitUpdate {
-                TargetId = partnerId,
                 Kind = CoopHitKind.ObjectTouch,
                 Scene = target.scene.name,
                 Path = ScenePath.Get(target.transform),

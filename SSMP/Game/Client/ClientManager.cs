@@ -394,7 +394,7 @@ internal class ClientManager : IClientManager {
         };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _coopHits = new CoopHits(
-            netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedPartnerId
+            netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedMemberIds
         );
         _fleaGameCoop = new FleaGameCoop(
             netClient, _playerData, _entityManager, () => _coopSave.CheckedPartnerId, _coopHits.SendObjectEvent

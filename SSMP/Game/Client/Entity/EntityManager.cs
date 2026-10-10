@@ -444,8 +444,8 @@ internal class EntityManager {
         // handed over with it. An update that carries none says nothing either way, which is not the same as saying
         // the scene host has taken nothing in.
         var anticipation = update.UpdateTypes.Contains(EntityUpdateType.Anticipation)
-            ? update.Anticipation
-            : (byte?) null;
+            ? update.Anticipations
+            : null;
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Position))
             entity.UpdatePosition(update.Position, update.ReceivedSequence, anticipation);

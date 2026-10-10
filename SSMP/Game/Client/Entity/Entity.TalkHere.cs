@@ -517,7 +517,8 @@ internal partial class Entity {
     /// <param name="fsmIndex">The index of the FSM.</param>
     /// <param name="fromState">The state the talk started in.</param>
     /// <param name="toState">The state the talk led to.</param>
-    public void TakeTalkEnd(byte fsmIndex, string fromState, string toState) {
+    /// <param name="figure">The figure of the player who talked, here, or null if there is none.</param>
+    public void TakeTalkEnd(byte fsmIndex, string fromState, string toState, GameObject? figure) {
         if (_isControlled || fsmIndex >= _fsms.Host.Count || _fsms.Host[fsmIndex] is not { } hostFsm ||
             hostFsm == null) {
             return;
@@ -538,7 +539,7 @@ internal partial class Entity {
         // Only the state the talk leads to is kept off this game's player, who did not talk: what it puts at the player
         // goes to the partner's figure. Beyond it - a fight the talk started - the creature is after both players again,
         // and keeping it off this one for the whole fight would leave them never aimed at.
-        PlayForPartner(hostFsm, true, () => hostFsm.Fsm.SetState(toState), [to]);
+        PlayForPartner(hostFsm, true, () => hostFsm.Fsm.SetState(toState), [to], figure);
         Logger.Info(
             $"The partner's talk with entity {Id} took its '{hostFsm.FsmName}' from '{fromState}' to '{toState}'"
         );

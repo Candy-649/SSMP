@@ -146,38 +146,25 @@ internal partial class Entity {
     private float _outstandingExpiry;
 
     /// <summary>
-    /// The number of the last thing a scene client did to this entity that the scene host has been told about but
-    /// which nothing it has sent since can show yet, or zero when there is none.
+    /// What the scene host has been told of the things scene clients did to this entity, one for each game that told
+    /// it, by the tag that game puts on what it asks (see <see cref="RequestTag"/>). Every position goes to everyone in
+    /// the room, and each game takes only what is under its own tag: with more than one other player there, one game
+    /// took the scene host's answer to another as its own, and let go of its wait before its own hit was in.
     /// </summary>
-    private byte _pendingAnticipation;
+    private readonly List<AnticipationStamp> _stamps = [];
 
     /// <summary>
-    /// The step of physics the game was on when <see cref="_pendingAnticipation"/> was taken in. Nothing set in
-    /// motion has moved until a step after that one.
+    /// The tag this game puts on what it asks the scene host to do to an entity, which comes back on the scene host's
+    /// answers (see <see cref="BeginAnticipation"/>). Picked at random once, since a game is not told its own number on
+    /// the server; two games picking the same one is one chance in tens of thousands.
     /// </summary>
-    private uint _pendingSinceStep;
+    internal static readonly ushort RequestTag = PickRequestTag();
 
     /// <summary>
-    /// When what <see cref="_pendingAnticipation"/> stands for has finished happening here, so that what is sent
-    /// from then on has the whole of it in it rather than the first moment of it.
+    /// Gets the figure of a player in the room that creatures go after, by their ID, or null if they have none here,
+    /// like one who left or is down.
     /// </summary>
-    private float _pendingSettledAt;
-
-    /// <summary>
-    /// The number of the last thing a scene client did to this entity which what the scene host sends now has in it.
-    /// </summary>
-    private byte _incorporatedAnticipation;
-
-    /// <summary>
-    /// How many more positions are sent for this entity whether it has moved or not, to carry what the scene host
-    /// has taken in to a player who is waiting on it.
-    /// </summary>
-    private int _anticipationSendsLeft;
-
-    /// <summary>
-    /// Until when what the scene host has taken in is sent beside the positions of this entity.
-    /// </summary>
-    private float _anticipationStampUntil;
+    internal static Func<ushort, GameObject?>? FigureOf { get; set; }
 
     /// <summary>
     /// Which positions of this entity are newer than the one it is standing at.
@@ -1521,18 +1508,29 @@ internal partial class Entity {
         // start of a knockback that their own game finished a round trip ago, so their enemy slides most of a
         // knockback back towards them, and then out again as the rest of the sweep arrives behind it. That is the
         // darting about, and it is why this waits for the end of what was done rather than the beginning of it.
-        if (_pendingAnticipation != 0 && MonoBehaviourUtil.FixedStep > _pendingSinceStep &&
-            Time.unscaledTime >= _pendingSettledAt) {
-            _incorporatedAnticipation = _pendingAnticipation;
-            _pendingAnticipation = 0;
-            _anticipationSendsLeft = AnticipationForcedSends;
-            _anticipationStampUntil = Time.unscaledTime + AnticipationStampTime;
-        }
+        var anticipationTaken = false;
+        var stampTime = Time.unscaledTime;
+        for (var i = _stamps.Count - 1; i >= 0; i--) {
+            var stamp = _stamps[i];
+            if (stamp.Pending != 0 && MonoBehaviourUtil.FixedStep > stamp.PendingSinceStep &&
+                stampTime >= stamp.PendingSettledAt) {
+                stamp.Incorporated = stamp.Pending;
+                stamp.Pending = 0;
+                stamp.SendsLeft = AnticipationForcedSends;
+                stamp.StampUntil = stampTime + AnticipationStampTime;
+            }
 
-        // Sent more than once, because a position travels by the way that drops what it cannot deliver and an enemy
-        // that is standing still gives no second chance of its own: one forced position, lost, and the player
-        // waiting on it waits out their whole timeout instead. Several in a row cost a few dozen bytes.
-        var anticipationTaken = _anticipationSendsLeft > 0;
+            // Nobody can be waiting on it any more
+            if (stamp.Pending == 0 && stampTime >= stamp.StampUntil) {
+                _stamps.RemoveAt(i);
+                continue;
+            }
+
+            // Sent more than once, because a position travels by the way that drops what it cannot deliver and an
+            // enemy that is standing still gives no second chance of its own: one forced position, lost, and the
+            // player waiting on it waits out their whole timeout instead. Several in a row cost a few dozen bytes.
+            anticipationTaken |= stamp.SendsLeft > 0;
+        }
 
         var transform = Object.Host.transform;
 
@@ -1562,8 +1560,10 @@ internal partial class Entity {
             // None is sent while the entity moves by itself from how it set off: the other game moves the copy the
             // same way, and was told where it set off from (OwnMotionComponent).
             if ((newPosition != _lastPosition || anticipationTaken || positionAgain) && !movesByItself) {
-                if (_anticipationSendsLeft > 0) {
-                    _anticipationSendsLeft--;
+                foreach (var stamp in _stamps) {
+                    if (stamp.SendsLeft > 0) {
+                        stamp.SendsLeft--;
+                    }
                 }
 
                 if (newPosition != _lastPosition) {
@@ -1597,8 +1597,17 @@ internal partial class Entity {
 
                 // Beside every position for a while rather than only the once, for the same reason as above, and
                 // then not at all: nobody can still be waiting on it by then, since waiting gives up long before.
-                if (_incorporatedAnticipation != 0 && Time.unscaledTime < _anticipationStampUntil) {
-                    _netClient.UpdateManager.UpdateEntityAnticipation(Id, _incorporatedAnticipation);
+                if (_stamps.Count > 0) {
+                    var stamps = new List<(ushort Tag, byte Number)>();
+                    foreach (var stamp in _stamps) {
+                        if (stamp.Incorporated != 0 && Time.unscaledTime < stamp.StampUntil) {
+                            stamps.Add((stamp.Tag, stamp.Incorporated));
+                        }
+                    }
+
+                    if (stamps.Count > 0) {
+                        _netClient.UpdateManager.UpdateEntityAnticipation(Id, stamps);
+                    }
                 }
             }
 
@@ -3360,6 +3369,7 @@ internal partial class Entity {
     /// Notes that the scene host has been told of something a scene client did to this entity, which what it sends
     /// will have the whole of in it once a step of physics and the time it takes to happen have gone by.
     /// </summary>
+    /// <param name="tag">The tag of the game that sent it (see <see cref="RequestTag"/>).</param>
     /// <param name="anticipation">The number it was sent under.</param>
     /// <param name="settleTime">
     /// How much longer what was done goes on moving the entity here, in seconds. The player waiting on this has
@@ -3367,14 +3377,71 @@ internal partial class Entity {
     /// the middle of it. Nothing that takes no time waits at all, and nothing waits longer than
     /// <see cref="AnticipationSettleCap"/> however long it says it takes.
     /// </param>
-    public void NoteAnticipation(byte anticipation, float settleTime = 0f) {
+    public void NoteAnticipation(ushort tag, byte anticipation, float settleTime = 0f) {
         if (anticipation == 0) {
             return;
         }
 
-        _pendingAnticipation = anticipation;
-        _pendingSinceStep = MonoBehaviourUtil.FixedStep;
-        _pendingSettledAt = Time.unscaledTime + Mathf.Min(settleTime, AnticipationSettleCap);
+        var stamp = _stamps.Find(other => other.Tag == tag);
+        if (stamp == null) {
+            stamp = new AnticipationStamp(tag);
+            _stamps.Add(stamp);
+        }
+
+        stamp.Pending = anticipation;
+        stamp.PendingSinceStep = MonoBehaviourUtil.FixedStep;
+        stamp.PendingSettledAt = Time.unscaledTime + Mathf.Min(settleTime, AnticipationSettleCap);
+    }
+
+    /// <summary>
+    /// Picks the tag of this game (see <see cref="RequestTag"/>). Zero is kept for none.
+    /// </summary>
+    private static ushort PickRequestTag() {
+        var tag = BitConverter.ToUInt16(Guid.NewGuid().ToByteArray(), 0);
+        return tag == 0 ? (ushort) 1 : tag;
+    }
+
+    /// <summary>
+    /// How far the scene host has got through the things one scene client did to this entity (see
+    /// <see cref="NoteAnticipation"/>).
+    /// </summary>
+    /// <param name="tag">The tag of that client's game.</param>
+    private sealed class AnticipationStamp(ushort tag) {
+        public ushort Tag { get; } = tag;
+
+        /// <summary>
+        /// The number of the last thing it did that the scene host has been told about but which nothing it has sent
+        /// since can show yet, or zero when there is none.
+        /// </summary>
+        public byte Pending { get; set; }
+
+        /// <summary>
+        /// The step of physics the game was on when <see cref="Pending"/> was taken in. Nothing set in motion has
+        /// moved until a step after that one.
+        /// </summary>
+        public uint PendingSinceStep { get; set; }
+
+        /// <summary>
+        /// When what <see cref="Pending"/> stands for has finished happening here, so that what is sent from then on
+        /// has the whole of it in it rather than the first moment of it.
+        /// </summary>
+        public float PendingSettledAt { get; set; }
+
+        /// <summary>
+        /// The number of the last thing it did which what the scene host sends now has in it.
+        /// </summary>
+        public byte Incorporated { get; set; }
+
+        /// <summary>
+        /// How many more positions are sent for this entity whether it has moved or not, to carry what the scene host
+        /// has taken in to the player who is waiting on it.
+        /// </summary>
+        public int SendsLeft { get; set; }
+
+        /// <summary>
+        /// Until when what the scene host has taken in is sent beside the positions of this entity.
+        /// </summary>
+        public float StampUntil { get; set; }
     }
 
     /// <summary>
@@ -3383,10 +3450,7 @@ internal partial class Entity {
     /// </summary>
     private void ResetAnticipation() {
         _outstandingAnticipation = 0;
-        _pendingAnticipation = 0;
-        _incorporatedAnticipation = 0;
-        _anticipationSendsLeft = 0;
-        _anticipationStampUntil = 0f;
+        _stamps.Clear();
         _wasMovedHere = false;
     }
 
@@ -3440,18 +3504,26 @@ internal partial class Entity {
     /// old costs a little smoothing, while positions refused forever stop the entity dead, and a room of enemies
     /// once stood still for nine minutes on the wrong side of a gate like this one.
     /// </summary>
-    /// <param name="anticipation">What the scene host said it had taken in, or null if it said nothing.</param>
-    private bool AcceptsWhileAnticipating(byte? anticipation) {
+    /// <param name="stamps">What the scene host said it had taken in of what each game did, by the tag of that game,
+    /// or null if it said nothing.</param>
+    private bool AcceptsWhileAnticipating(IReadOnlyList<(ushort Tag, byte Number)>? stamps) {
         if (!IsAnticipating()) {
             return true;
         }
 
-        // Compared by the sign of the difference in the size the numbers are kept in, so that the step from the
-        // largest back round to one reads as one forward rather than as the whole way back
-        if (anticipation is { } stamp && stamp != 0 && (sbyte) (stamp - _outstandingAnticipation) >= 0) {
-            _outstandingAnticipation = 0;
+        if (stamps == null) {
+            return false;
+        }
 
-            return true;
+        // Only what is under this game's own tag says anything of what this game did. Compared by the sign of the
+        // difference in the size the numbers are kept in, so that the step from the largest back round to one reads
+        // as one forward rather than as the whole way back
+        foreach (var (tag, stamp) in stamps) {
+            if (tag == RequestTag && stamp != 0 && (sbyte) (stamp - _outstandingAnticipation) >= 0) {
+                _outstandingAnticipation = 0;
+
+                return true;
+            }
         }
 
         return false;
@@ -3466,7 +3538,11 @@ internal partial class Entity {
     /// How far the scene host had got through what the local player did to this entity when it sent this, or null if
     /// it didn't say.
     /// </param>
-    public void UpdatePosition(Math_Vector3 position, ushort sequence, byte? anticipation) {
+    public void UpdatePosition(
+        Math_Vector3 position,
+        ushort sequence,
+        IReadOnlyList<(ushort Tag, byte Number)>? anticipation
+    ) {
         // Newer when heard just before the state of the room (see YieldsToNewer)
         if (YieldsToNewer(HeardPosition)) {
             return;

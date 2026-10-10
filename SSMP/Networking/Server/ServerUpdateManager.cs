@@ -375,15 +375,18 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
-    /// Update how far the scene host has got through what a scene client did to an entity before telling it.
+    /// Update how far the scene host has got through what the scene clients did to an entity before telling it.
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>
-    /// <param name="anticipation">The number of the last thing the scene host has taken in.</param>
-    public void UpdateEntityAnticipation(ushort entityId, byte anticipation) {
+    /// <param name="stamps">The number of the last thing the scene host has taken in of each scene client, by the tag
+    /// of that client's game.</param>
+    public void UpdateEntityAnticipation(ushort entityId, IReadOnlyList<(ushort Tag, byte Number)> stamps) {
         lock (Lock) {
             var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ClientUpdatePacketId.EntityUpdate);
             entityUpdate!.UpdateTypes.Add(EntityUpdateType.Anticipation);
-            entityUpdate.Anticipation = anticipation;
+            // Copied, since what it comes from goes back to its pool once read
+            entityUpdate.Anticipations.Clear();
+            entityUpdate.Anticipations.AddRange(stamps);
         }
     }
 

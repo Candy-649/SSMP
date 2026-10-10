@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Linq;
 using SSMP.Animation;
 using SSMP.Game;
@@ -225,15 +226,17 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
-    /// Update how far the scene host has got through what a scene client did to an entity before telling it.
+    /// Update how far the scene host has got through what the scene clients did to an entity before telling it.
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>
-    /// <param name="anticipation">The number of the last thing the scene host has taken in.</param>
-    public void UpdateEntityAnticipation(ushort entityId, byte anticipation) {
+    /// <param name="stamps">The number of the last thing the scene host has taken in of each scene client, by the tag
+    /// of that client's game.</param>
+    public void UpdateEntityAnticipation(ushort entityId, IReadOnlyList<(ushort Tag, byte Number)> stamps) {
         lock (Lock) {
             var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ServerUpdatePacketId.EntityUpdate);
             entityUpdate.UpdateTypes.Add(EntityUpdateType.Anticipation);
-            entityUpdate.Anticipation = anticipation;
+            entityUpdate.Anticipations.Clear();
+            entityUpdate.Anticipations.AddRange(stamps);
         }
     }
 

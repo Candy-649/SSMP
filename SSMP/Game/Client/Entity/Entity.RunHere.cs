@@ -323,7 +323,8 @@ internal partial class Entity {
     /// the input was lost on the way and sent again - kept for a while for the input to take (see
     /// <see cref="TakeEarlyCatchStates"/>).
     /// </summary>
-    private readonly List<(byte FsmIndex, byte Number, byte Step, string State, float Heard)> _earlyCatchStates = [];
+    private readonly List<(ushort PlayerId, byte FsmIndex, byte Number, byte Step, string State, float Heard)>
+        _earlyCatchStates = [];
 
     /// <summary>
     /// How long a state of a catch that came before its input is kept, in seconds.
@@ -765,19 +766,29 @@ internal partial class Entity {
     /// <param name="eventName">The event that the partner's strike or touch told the FSM.</param>
     /// <param name="start">What the partner's game sent with it.</param>
     /// <param name="elapsed">How long ago the partner's copy played it, in seconds.</param>
+    /// <param name="leaderId">The ID of the player whose input it is, who leads a catch that it starts.</param>
+    /// <param name="figure">The figure of that player here, at which what a catch of theirs puts at the player goes;
+    /// null if there is none.</param>
     /// <returns>Whether the entity went the way the partner's copy went.</returns>
-    public bool TakeInput(byte fsmIndex, string eventName, InputStart start, float elapsed) {
+    public bool TakeInput(
+        byte fsmIndex,
+        string eventName,
+        InputStart start,
+        float elapsed,
+        ushort leaderId,
+        GameObject? figure
+    ) {
         if (_isControlled || fsmIndex >= _fsms.Host.Count || _fsms.Host[fsmIndex] is not { } hostFsm ||
             hostFsm == null || Object.Host == null) {
             return false;
         }
 
-        NoteAnticipation(start.Anticipation);
+        NoteAnticipation(start.Tag, start.Anticipation);
 
         var fsm = hostFsm.Fsm;
         if (fsm.ActiveState is not { } state ||
             EntityFsmActions.FindTransition(fsm, state, eventName) is not { } into) {
-            SendEcho(start.Anticipation, fsmIndex, NotTaken);
+            SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
             return false;
         }
 
@@ -791,7 +802,7 @@ internal partial class Entity {
                 $"The '{fsm.Name}' of entity {Id} holds this game's player in '{state.Name}', so it does not take " +
                 $"the partner's '{eventName}'"
             );
-            SendEcho(start.Anticipation, fsmIndex, NotTaken);
+            SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
             return false;
         }
 
@@ -819,7 +830,8 @@ internal partial class Entity {
         if (path is { Length: > 0 }) {
             lead = new Lead(this, hostFsm, fsmIndex, start.Anticipation, EntityFsmActions.StatesOnlyThrough(fsm, into),
                 state) {
-                Allowed = into
+                Allowed = into,
+                LeaderId = leaderId
             };
             BeginLead(lead);
         }
@@ -834,7 +846,7 @@ internal partial class Entity {
             for (var i = 1; i < path!.Length && _leads.Contains(lead); i++) {
                 FollowCatch(lead, path[i]);
             }
-        }, fsm), lead?.States);
+        }, fsm), lead?.States, figure);
 
         var reached = fsm.ActiveState;
         var sameWay = reached != null && reached.Name == start.State;
@@ -861,7 +873,9 @@ internal partial class Entity {
         // The state it went to goes before the echo, which the partner's game holds up against the last state it heard
         // of: a state that runs nothing that is sent is otherwise only sent at the next look at the FSMs
         SendStateChange(fsmIndex);
-        SendEcho(start.Anticipation, fsmIndex, reached == null ? NotTaken : (byte) Array.IndexOf(fsm.States, reached));
+        SendEcho(
+            start.Tag, start.Anticipation, fsmIndex, reached == null ? NotTaken : (byte) Array.IndexOf(fsm.States, reached)
+        );
 
         // Only after the echo, which says where the input itself took it
         if (lead != null && _leads.Contains(lead)) {
@@ -876,16 +890,19 @@ internal partial class Entity {
     /// the state it took that FSM to. It goes with the replays and the rest of what this game sends of the entity, in
     /// order, so the partner's game can tell what was sent before the input was taken from what was sent after.
     /// </summary>
+    /// <param name="tag">The tag of the game whose input it was (see <see cref="RequestTag"/>): the echo goes to
+    /// everyone in the room, and only that game takes it.</param>
     /// <param name="anticipation">The number the input went under.</param>
     /// <param name="fsmIndex">The index of the FSM.</param>
     /// <param name="stateIndex">The index of the state it went to, or <see cref="NotTaken"/>.</param>
-    private void SendEcho(byte anticipation, byte fsmIndex, byte stateIndex) {
+    private void SendEcho(ushort tag, byte anticipation, byte fsmIndex, byte stateIndex) {
         var data = new EntityNetworkData {
             Type = EntityComponentType.Echo
         };
         data.Packet.Write(anticipation);
         data.Packet.Write(fsmIndex);
         data.Packet.Write(stateIndex);
+        data.Packet.Write(tag);
 
         _netClient.UpdateManager.AddEntityData(Id, data);
     }
@@ -901,11 +918,12 @@ internal partial class Entity {
         var anticipation = data.Packet.ReadByte();
         var fsmIndex = data.Packet.ReadByte();
         var stateIndex = data.Packet.ReadByte();
+        var tag = data.Packet.ReadUShort();
 
-        // An answer to an input before the last one says nothing of the last one, which is still on its way. The
-        // numbers are compared by the sign of their difference, so that going round from the largest to one reads as
-        // one forward.
-        if (!WaitsForEcho || (sbyte) (anticipation - _runHereAwaited) < 0) {
+        // An answer to another game's input says nothing of this one's. An answer to an input before the last one
+        // says nothing of the last one, which is still on its way. The numbers are compared by the sign of their
+        // difference, so that going round from the largest to one reads as one forward.
+        if (tag != RequestTag || !WaitsForEcho || (sbyte) (anticipation - _runHereAwaited) < 0) {
             return;
         }
 
@@ -1206,11 +1224,14 @@ internal partial class Entity {
     /// <param name="catchStates">The states of a catch that the partner's game leads, for which the actions stay off
     /// however the FSM goes through them; null for the state it stands in once played and those it alone leads to.
     /// </param>
+    /// <param name="figure">For a catch that the partner's game leads, the figure of that partner here, or null.
+    /// </param>
     public void PlayForPartner(
         PlayMakerFSM hostFsm,
         bool isCatch,
         System.Action play,
-        HashSet<FsmState>? catchStates = null
+        HashSet<FsmState>? catchStates = null,
+        GameObject? figure = null
     ) {
         if (!isCatch) {
             play();
@@ -1222,10 +1243,12 @@ internal partial class Entity {
 
         // In a catch that the partner's game leads, what the creature puts at the player it caught goes to the
         // partner's figure, and what it takes of where they are is taken from there: the stand-in of them that it
-        // carries was left where it was last, far from them, or slid off to the height of this game's player
-        var figure = catchStates != null ? PartnerFigure() : null;
+        // carries was left where it was last, far from them, or slid off to the height of this game's player. It is
+        // the figure of the player whose game leads it, not the nearest one: with more than one other player in the
+        // room, the nearest can be someone the creature never caught.
+        var pointAt = catchStates != null ? figure : null;
         foreach (var action in muted) {
-            KeepOff(action, figure);
+            KeepOff(action, pointAt);
         }
 
         // Whatever the game's code does on the way, what is switched off is never left off for good
@@ -1355,34 +1378,6 @@ internal partial class Entity {
         }
 
         action.Enabled = true;
-    }
-
-    /// <summary>
-    /// The figure of the partner nearest to the room's own object, whom a catch that their game leads is about, or
-    /// null if there is none in the room. There are two players, so the other one in the room is the partner.
-    /// </summary>
-    private GameObject? PartnerFigure() {
-        if (Object.Host == null) {
-            return null;
-        }
-
-        var hero = HeroController.instance != null ? HeroController.instance.gameObject : null;
-        var from = Object.Host.transform.position;
-        GameObject? nearest = null;
-        var nearestDistance = float.MaxValue;
-        foreach (var player in PlayerTargetRegistry.GetTrackedPlayers()) {
-            if (player == hero) {
-                continue;
-            }
-
-            var distance = (player.transform.position - from).sqrMagnitude;
-            if (distance < nearestDistance) {
-                nearest = player;
-                nearestDistance = distance;
-            }
-        }
-
-        return nearest;
     }
 
     /// <summary>
@@ -1836,23 +1831,25 @@ internal partial class Entity {
     /// unless it has already left the catch its own way. What it does there is this game's but for what is this
     /// game's player's own (see <see cref="PlayForPartner"/>).
     /// </summary>
+    /// <param name="playerId">The ID of the player whose game leads the catch: the numbers of two players' catches
+    /// are counted by their own games and can be the same.</param>
     /// <param name="fsmIndex">The index of the FSM.</param>
     /// <param name="catchNumber">The number that the catch went under.</param>
     /// <param name="step">The number of the step, counting from one after the input.</param>
     /// <param name="stateName">The state.</param>
     /// <remarks>An empty state says that the partner's copy stopped playing the catch before it was over: the FSM
     /// lets go at once (see <see cref="LetGo"/>).</remarks>
-    public void TakeCatchState(byte fsmIndex, byte catchNumber, byte step, string stateName) {
+    public void TakeCatchState(ushort playerId, byte fsmIndex, byte catchNumber, byte step, string stateName) {
         if (_isControlled) {
             return;
         }
 
         var lead = _leads.Find(led => led.FsmIndex == fsmIndex);
-        if (lead == null || lead.Number != catchNumber) {
+        if (lead == null || lead.Number != catchNumber || lead.LeaderId != playerId) {
             // Its input may still be on the way
             var now = Time.unscaledTime;
             _earlyCatchStates.RemoveAll(early => now - early.Heard > EarlyCatchStateLife);
-            _earlyCatchStates.Add((fsmIndex, catchNumber, step, stateName, now));
+            _earlyCatchStates.Add((playerId, fsmIndex, catchNumber, step, stateName, now));
             return;
         }
 
@@ -1889,12 +1886,14 @@ internal partial class Entity {
     /// </summary>
     /// <param name="lead">The catch.</param>
     private void TakeEarlyCatchStates(Lead lead) {
-        var early = _earlyCatchStates.FindAll(state => state.FsmIndex == lead.FsmIndex && state.Number == lead.Number);
+        var early = _earlyCatchStates.FindAll(state => state.PlayerId == lead.LeaderId &&
+                                                       state.FsmIndex == lead.FsmIndex && state.Number == lead.Number);
         if (early.Count == 0) {
             return;
         }
 
-        _earlyCatchStates.RemoveAll(state => state.FsmIndex == lead.FsmIndex && state.Number == lead.Number);
+        _earlyCatchStates.RemoveAll(state => state.PlayerId == lead.LeaderId && state.FsmIndex == lead.FsmIndex &&
+                                             state.Number == lead.Number);
         early.Sort((a, b) => ((sbyte) (a.Step - b.Step)).CompareTo(0));
         foreach (var state in early) {
             if (!_leads.Contains(lead)) {
@@ -1995,8 +1994,10 @@ internal partial class Entity {
             return;
         }
 
+        // The figure of the player whose game led the catch as it is now: one who left or went down meanwhile has
+        // none, and what the creature would put at them is switched off instead
         var muted = EntityFsmActions.PlayersOwnActionsOf(fsm).FindAll(action => after.Contains(action.State));
-        var figure = PartnerFigure();
+        var figure = FigureOf?.Invoke(lead.LeaderId);
         foreach (var action in muted) {
             KeepOff(action, figure);
         }
@@ -2195,6 +2196,11 @@ internal partial class Entity {
         /// The one state that the FSM is let go to next, however it goes there, or null.
         /// </summary>
         public FsmState? Allowed { get; set; }
+
+        /// <summary>
+        /// The ID of the player whose game leads it.
+        /// </summary>
+        public ushort LeaderId { get; init; }
     }
 
     /// <summary>

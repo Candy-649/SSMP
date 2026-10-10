@@ -16,7 +16,8 @@ internal readonly struct InputStart {
         int[] dice,
         byte anticipation,
         ToldValues? caught = null,
-        string[]? path = null
+        string[]? path = null,
+        ushort tag = 0
     ) {
         State = state;
         Position = position;
@@ -25,6 +26,7 @@ internal readonly struct InputStart {
         Anticipation = anticipation;
         Caught = caught;
         Path = path;
+        Tag = tag;
     }
 
     /// <summary>
@@ -53,6 +55,12 @@ internal readonly struct InputStart {
     /// <see cref="Entity.BeginAnticipation"/>).
     /// </summary>
     public byte Anticipation { get; }
+
+    /// <summary>
+    /// The tag of the game of the player who did it, which the scene host's answers go under (see
+    /// <see cref="Entity.RequestTag"/>). Filled in where it arrives; the game that sends it puts its own.
+    /// </summary>
+    public ushort Tag { get; }
 
     /// <summary>
     /// For a catch - a part of the copy caught the player or a thing of theirs, and told the FSM so - what the part set

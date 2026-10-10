@@ -58,6 +58,24 @@ internal class CoopHitUpdate : IPacketData {
     /// </summary>
     public byte[] Hit { get; set; } = [];
 
+    /// <summary>
+    /// A copy of this update, for sending the same hit to one more player. The hit itself is shared: nothing changes it
+    /// once it is queued.
+    /// </summary>
+    public CoopHitUpdate Copy() {
+        return new CoopHitUpdate {
+            PlayerId = PlayerId,
+            TargetId = TargetId,
+            Kind = Kind,
+            EntityId = EntityId,
+            Scene = Scene,
+            Path = Path,
+            Responder = Responder,
+            Index = Index,
+            Hit = Hit
+        };
+    }
+
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
         packet.Write(PlayerId);
