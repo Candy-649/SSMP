@@ -181,6 +181,54 @@ internal static class SteamRelayMessaging {
     }
 
     /// <summary>
+    /// Says in words how Steam's link to a player stands, and how this machine's access to the relay network does, for
+    /// the log of a connection that hears nothing.
+    ///
+    /// A player once joined three times and heard nothing back, while the host's game logged that it had accepted
+    /// every session and its own loop that reads them was running throughout; only a new lobby got through. Neither
+    /// log said what Steam itself made of the link, so there was nothing left to tell why.
+    /// </summary>
+    /// <param name="steamId">The player to ask about.</param>
+    public static string DescribeSession(ulong steamId) {
+        try {
+            if (steamId == 0) {
+                return "no player to ask about";
+            }
+
+            if (steamId == SteamUser.GetSteamID().m_SteamID) {
+                return "the player is this one, so nothing leaves the machine";
+            }
+
+            var identity = IdentityOf(steamId);
+            var state = SteamNetworkingMessages.GetSessionConnectionInfo(ref identity, out var info, out var status);
+            var endSaid = info.m_szEndDebug;
+            var session = state == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_None
+                ? "Steam has no session with them"
+                : $"Steam's session with them is {state}, ended for {(ESteamNetConnectionEnd) info.m_eEndReason}" +
+                  $"{(string.IsNullOrEmpty(endSaid) ? "" : $" ('{endSaid}')")}, relay {info.m_idPOPRelay}, " +
+                  $"ping {status.m_nPing} ms";
+
+            return $"{session}; {DescribeRelayNetwork()}";
+        } catch (Exception e) {
+            return $"Steam could not say how the link stands: {e.Message}";
+        }
+    }
+
+    /// <summary>
+    /// Says in words whether this machine can reach Steam's relay network, which every session here goes through.
+    /// </summary>
+    public static string DescribeRelayNetwork() {
+        try {
+            var availability = SteamNetworkingUtils.GetRelayNetworkStatus(out var network);
+            var said = network.m_debugMsg;
+            return $"relay network {availability} (its settings {network.m_eAvailNetworkConfig}, any relay " +
+                   $"{network.m_eAvailAnyRelay}{(string.IsNullOrEmpty(said) ? "" : $", '{said}'")})";
+        } catch (Exception e) {
+            return $"Steam could not say how its relay network stands: {e.Message}";
+        }
+    }
+
+    /// <summary>
     /// Sends a buffer to a player over the relay network.
     /// </summary>
     /// <returns>Whether Steam accepted the message for sending.</returns>

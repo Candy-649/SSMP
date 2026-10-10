@@ -61,6 +61,12 @@ public static class SteamManager {
     public static event Action<CSteamID>? LobbyJoinedEvent;
 
     /// <summary>
+    /// Event fired when joining a lobby failed, with what Steam answered, or null when Steam did not answer at all.
+    /// Nothing said so before, so a player who accepted an invite to a lobby that was gone saw nothing happen.
+    /// </summary>
+    public static event Action<EChatRoomEnterResponse?>? LobbyJoinFailedEvent;
+
+    /// <summary>
     /// Stored username for lobby creation callback.
     /// </summary>
     private static string? _pendingLobbyUsername;
@@ -466,11 +472,13 @@ public static class SteamManager {
     private static void OnLobbyEnter(LobbyEnter_t callback, bool ioFailure) {
         if (ioFailure) {
             Logger.Error("Failed to join lobby: IO Failure");
+            LobbyJoinFailedEvent?.Invoke(null);
             return;
         }
 
         if (callback.m_EChatRoomEnterResponse != (uint) EChatRoomEnterResponse.k_EChatRoomEnterResponseSuccess) {
             Logger.Error($"Failed to join lobby: {(EChatRoomEnterResponse) callback.m_EChatRoomEnterResponse}");
+            LobbyJoinFailedEvent?.Invoke((EChatRoomEnterResponse) callback.m_EChatRoomEnterResponse);
             return;
         }
 

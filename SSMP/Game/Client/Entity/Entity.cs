@@ -564,6 +564,21 @@ internal partial class Entity {
             }
         }
 
+        // A wave of an arena takes the wish items off the corpses of the creatures in it as the room loads
+        // (BattleWave.UpdateChildInfo), but only off the room's own objects. The copy, made from one of them and sitting
+        // under no wave, kept them, so the game that follows the room dropped wish items that the game that runs it
+        // never did.
+        if (Object.Host.transform.parent is { } roomParent && roomParent.GetComponent<BattleWave>() != null) {
+            foreach (var variant in Object.Client.GetComponentsInChildren<SpecialQuestItemVariant>(true)) {
+                variant.SetInactive();
+            }
+
+            var deathEffects = Object.Client.GetComponent<EnemyDeathEffects>();
+            if (deathEffects != null) {
+                deathEffects.DisableSpecialQuestDrops();
+            }
+        }
+
         _broadcastHook ??= new Hook(
             typeof(HutongGames.PlayMaker.Fsm).GetMethod(
                 nameof(HutongGames.PlayMaker.Fsm.BroadcastEventToGameObject),

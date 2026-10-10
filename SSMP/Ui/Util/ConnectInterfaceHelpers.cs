@@ -201,12 +201,16 @@ internal static class ConnectInterfaceHelpers {
     /// <param name="color">The color of the text.</param>
     /// <param name="text">The content of the text.</param>
     /// <param name="currentCoroutine">The current hide coroutine (will be stopped if not null).</param>
-    /// <returns>The new hide coroutine.</returns>
-    public static Coroutine SetFeedbackText(
+    /// <param name="hidesItself">Whether the text goes away by itself after a while. A text that says a connection is
+    /// still being made, or why one failed, stays until something else is shown: gone after ten seconds, it left a
+    /// player looking at an empty screen for the rest of a thirty-second wait, and missing why it failed.</param>
+    /// <returns>The new hide coroutine, or null for a text that stays.</returns>
+    public static Coroutine? SetFeedbackText(
         ITextComponent feedbackText,
         Color color,
         string text,
-        Coroutine? currentCoroutine
+        Coroutine? currentCoroutine,
+        bool hidesItself = true
     ) {
         feedbackText.SetColor(color);
         feedbackText.SetText(text);
@@ -216,7 +220,7 @@ internal static class ConnectInterfaceHelpers {
             MonoBehaviourUtil.Instance.StopCoroutine(currentCoroutine);
         }
 
-        return MonoBehaviourUtil.Instance.StartCoroutine(WaitHideFeedbackText(feedbackText));
+        return hidesItself ? MonoBehaviourUtil.Instance.StartCoroutine(WaitHideFeedbackText(feedbackText)) : null;
     }
 
     /// <summary>

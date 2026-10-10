@@ -42,6 +42,11 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     public bool SessionUp => _isLoopback || SteamRelayMessaging.SessionUp(_remoteSteamId);
 
     /// <inheritdoc />
+    public string DescribeSession() => _isLoopback
+        ? "the host is this player, so nothing leaves the machine"
+        : SteamRelayMessaging.DescribeSession(_remoteSteamId);
+
+    /// <inheritdoc />
     public int MaxPacketSize => SteamRelayMessaging.MaxPacketSize;
 
     /// <summary>
@@ -102,6 +107,8 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
                 Callback<SteamNetworkingMessagesSessionRequest_t>.Create(OnSessionRequest);
             _sessionFailedCallback =
                 Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);
+
+            Logger.Info($"Steam relay: as this player starts to connect, {SteamRelayMessaging.DescribeRelayNetwork()}");
         }
 
         _receiveTokenSource = new CancellationTokenSource();

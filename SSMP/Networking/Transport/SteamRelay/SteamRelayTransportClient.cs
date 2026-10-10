@@ -47,6 +47,9 @@ internal class SteamRelayTransportClient : IReliableTransportClient, ISessionSta
     public bool SessionUp => SteamRelayMessaging.SessionUp(SteamId);
 
     /// <inheritdoc />
+    public string DescribeSession() => SteamRelayMessaging.DescribeSession(SteamId);
+
+    /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
 
     public SteamRelayTransportClient(ulong steamId) {

@@ -63,6 +63,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private Func<bool>? _transportSessionUp;
 
     /// <summary>
+    /// Asks the transport how its link to the other side stands in words, or null for a transport that cannot say.
+    /// </summary>
+    private Func<string>? _transportDescribeSession;
+
+    /// <summary>
     /// The reliability manager for packet loss detection and resending.
     /// Lazily initialized only when transport requires reliability.
     /// </summary>
@@ -182,6 +187,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
             _transportPing = () => value.Ping;
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
+            _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
@@ -200,6 +206,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
             _transportPing = () => value.Ping;
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
+            _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
@@ -542,6 +549,9 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     public void Reset() {
         StopUpdates();
 
+        // Said again for a new connection, which the last one's silence must not keep quiet
+        _timeoutGraceTold = false;
+
         lock (Lock) {
             _receivedSequences?.Clear();
             _localSequence = 0;
@@ -558,6 +568,15 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                 _congestionManager = new CongestionManager<TOutgoing, TPacketId>(this, _rttTracker);
             }
         }
+    }
+
+    /// <summary>
+    /// How the transport's link to the other side stands, as a part to add to a line of the log, or nothing for a
+    /// transport that cannot say.
+    /// </summary>
+    private string DescribeTransportSession() {
+        var described = _transportDescribeSession?.Invoke();
+        return string.IsNullOrEmpty(described) ? "" : $" ({described})";
     }
 
     /// <summary>
@@ -619,9 +638,9 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                         Logger.Info(
                             sessionUp
                                 ? $"Nothing has arrived for {quietFor / 1000:F1}s, which is as long as a quiet " +
-                                  "connection is kept, so this counts as a disconnect"
+                                  "connection is kept, so this counts as a disconnect" + DescribeTransportSession()
                                 : $"Nothing has arrived for {quietFor / 1000:F1}s and the transport says the " +
-                                  "session is over, so this counts as a disconnect"
+                                  "session is over, so this counts as a disconnect" + DescribeTransportSession()
                         );
 
                         TimeoutEvent?.Invoke();
@@ -635,7 +654,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                         _timeoutGraceTold = true;
                         Logger.Info(
                             $"Nothing has arrived for {quietFor / 1000:F1}s, but the transport still has the " +
-                            "session, so this is not being taken as a disconnect yet"
+                            "session, so this is not being taken as a disconnect yet" + DescribeTransportSession()
                         );
                     }
                 }

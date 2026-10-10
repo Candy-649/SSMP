@@ -23,6 +23,17 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
     /// </summary>
     private const long MaxLagMS = 500;
 
+    /// <summary>
+    /// How often, in milliseconds, a player whose session was accepted and from whom nothing has arrived is written
+    /// down, and how many times: a joining player gives up after 30 seconds.
+    /// </summary>
+    private const int SilenceToldEvery = 5000;
+
+    /// <summary>
+    /// How many times a player who has sent nothing that arrived is written down.
+    /// </summary>
+    private const int SilenceToldTimes = 5;
+
     /// <inheritdoc />
     public event Action<IEncryptedTransportClient>? ClientConnectedEvent;
 
@@ -45,6 +56,21 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
     private CancellationTokenSource? _receiveTokenSource;
     private Thread? _receiveThread;
     private SteamRelayLoopbackChannel? _loopbackChannel;
+
+    /// <summary>
+    /// The time this server has run for, which the receive loop marks each time it looks for messages.
+    /// </summary>
+    private readonly Stopwatch _clock = Stopwatch.StartNew();
+
+    /// <summary>
+    /// When the receive loop last looked for messages, on <see cref="_clock"/>.
+    /// </summary>
+    private long _lastLookedMs;
+
+    /// <summary>
+    /// What writes down, by Steam ID, a player whose session was accepted and from whom nothing has arrived yet.
+    /// </summary>
+    private readonly ConcurrentDictionary<ulong, Timer> _silenceWatches = new();
 
     /// <inheritdoc />
     public void Start(int port) {
@@ -69,7 +95,7 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         _loopbackChannel = SteamRelayLoopbackChannel.GetOrCreate();
         _loopbackChannel.RegisterServer(this);
 
-        Logger.Info("Steam relay: server started, waiting for players");
+        Logger.Info($"Steam relay: server started, waiting for players; {SteamRelayMessaging.DescribeRelayNetwork()}");
 
         _receiveTokenSource = new CancellationTokenSource();
         _receiveThread = new Thread(ReceiveLoop) {
@@ -99,6 +125,12 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
 
         _receiveTokenSource?.Dispose();
         _receiveTokenSource = null;
+
+        foreach (var watch in _silenceWatches.Values) {
+            watch.Dispose();
+        }
+
+        _silenceWatches.Clear();
 
         foreach (var client in _clients.Values) {
             DisconnectClientInternal(client);
@@ -152,7 +184,49 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
 
         if (!SteamNetworkingMessages.AcceptSessionWithUser(ref identity)) {
             Logger.Warn($"Steam relay: could not accept the session with {steamId}");
+            return;
         }
+
+        WatchForSilence(steamId);
+    }
+
+    /// <summary>
+    /// Writes down, every few seconds for half a minute, how the link to a player whose session was just accepted
+    /// stands for as long as nothing from them has arrived, and when this server last looked for messages. Whether
+    /// the player could not reach this machine, or this machine stopped looking, could not be told apart before.
+    /// </summary>
+    private void WatchForSilence(ulong steamId) {
+        var acceptedAt = _clock.ElapsedMilliseconds;
+        var told = 0;
+        Timer? watch = null;
+        watch = new Timer(_ => {
+            if (!_isRunning || _clients.ContainsKey(steamId) || ++told > SilenceToldTimes) {
+                if (watch != null && _silenceWatches.TryGetValue(steamId, out var current) && current == watch) {
+                    _silenceWatches.TryRemove(steamId, out var _);
+                }
+
+                watch?.Dispose();
+                return;
+            }
+
+            // Nothing may leave a timer's thread: an exception there would close the game
+            try {
+                var now = _clock.ElapsedMilliseconds;
+                Logger.Info(
+                    $"Steam relay: nothing from {steamId} has arrived in the {(now - acceptedAt) / 1000.0:F0}s since " +
+                    $"their session was accepted; {SteamRelayMessaging.DescribeSession(steamId)}; this server last " +
+                    $"looked for messages {now - Interlocked.Read(ref _lastLookedMs)} ms ago"
+                );
+            } catch (Exception) {
+                // Only a line of the log is lost
+            }
+        }, null, SilenceToldEvery, SilenceToldEvery);
+
+        if (_silenceWatches.TryRemove(steamId, out var earlier)) {
+            earlier.Dispose();
+        }
+
+        _silenceWatches[steamId] = watch;
     }
 
     /// <summary>
@@ -239,6 +313,8 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
                     Logger.Info("Steam relay: Steam shut down, leaving the server receive loop");
                     break;
                 }
+
+                Interlocked.Exchange(ref _lastLookedMs, _clock.ElapsedMilliseconds);
 
                 var currentTime = stopwatch.ElapsedMilliseconds;
                 if (currentTime > nextPollTime + MaxLagMS) {

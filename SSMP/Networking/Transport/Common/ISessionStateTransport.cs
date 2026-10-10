@@ -13,4 +13,9 @@ internal interface ISessionStateTransport {
     /// Whether the link to the other side is there or is being built, as opposed to closed, refused or given up on.
     /// </summary>
     bool SessionUp { get; }
+
+    /// <summary>
+    /// Says in words how the link to the other side stands, for the log of a connection that hears nothing.
+    /// </summary>
+    string DescribeSession();
 }

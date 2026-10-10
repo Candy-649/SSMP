@@ -347,6 +347,15 @@ internal class ConnectInterface {
     private static string ErrorTimeout => Lang.Pick("Failed to connect:\nConnection timed out", "连接失败：\n连接超时");
 
     /// <summary>
+    /// Error message for a Steam lobby whose host's game never answered.
+    /// </summary>
+    private static string ErrorHostNeverAnswered => Lang.Pick(
+        "Failed to connect:\nThe host's game never answered. The host can close the lobby, open a new one and " +
+        "invite you again.",
+        "连接失败：\n房主的游戏一直没有回应。可以请房主关掉房间、重新开一个再邀请你。"
+    );
+
+    /// <summary>
     /// Fallback error message for unknown failures.
     /// </summary>
     private static string ErrorUnknown => Lang.Pick("Failed to connect:\nUnknown reason", "连接失败：\n原因不明");
@@ -584,6 +593,12 @@ internal class ConnectInterface {
     /// Whether the current bottom feedback message is being driven by matchmaking status UI.
     /// </summary>
     private bool _isMatchmakingFeedbackActive;
+
+    /// <summary>
+    /// Whether this player has joined a Steam lobby and waits for its host's game to answer. What is shown meanwhile
+    /// says so, and opening the friends list does not put anything else in its place.
+    /// </summary>
+    private bool _waitingForHost;
 
     /// <summary>
     /// Whether MMS has reported that this client is too old for matchmaking.
@@ -857,6 +872,8 @@ internal class ConnectInterface {
     private void SubscribeToSteamEvents() {
         SteamManager.LobbyListReceivedEvent += OnLobbyListReceived;
         SteamManager.LobbyJoinedEvent += OnLobbyJoined;
+        // Steam's answers come on the thread that runs its callbacks; the screen is changed on the game's own
+        SteamManager.LobbyJoinFailedEvent += response => ThreadUtil.RunActionOnMainThread(() => OnLobbyJoinFailed(response));
     }
 
     /// <summary>
@@ -1551,7 +1568,7 @@ internal class ConnectInterface {
     /// Coroutine to join a lobby, handling both Matchmaking and Steam types.
     /// </summary>
     private IEnumerator JoinLobbyCoroutine(string lobbyId, string username) {
-        ShowFeedback(Color.yellow, Lang.Pick("Joining lobby...", "正在加入房间……"));
+        ShowFeedback(Color.yellow, Lang.Pick("Joining lobby...", "正在加入房间……"), stays: true);
 
         // Create hole-punch socket for non-Steam lobbies
         var holePunchSocket = CreateHolePunchSocket(_modSettings.MmsSettings.LocalBindIp);
@@ -1966,7 +1983,7 @@ internal class ConnectInterface {
             return;
         }
 
-        ShowFeedback(Color.yellow, Lang.Pick("Joining Steam lobby...", "正在加入 Steam 房间……"));
+        ShowFeedback(Color.yellow, Lang.Pick("Joining Steam lobby...", "正在加入 Steam 房间……"), stays: true);
         SteamManager.JoinLobby(new CSteamID(steamLobbyId));
     }
 
@@ -1981,6 +1998,13 @@ internal class ConnectInterface {
         }
 
         SteamFriends.ActivateGameOverlay("Friends");
+
+        // A join that still waits for its host keeps saying so: put in its place, the screen no longer showed that a
+        // connection was being made at all
+        if (_waitingForHost) {
+            return;
+        }
+
         ShowFeedback(Color.yellow, Lang.Pick(
             "Opened Steam Friends. Right-click friend to Join Game.",
             "已打开 Steam 好友列表。右键点击好友，选择加入游戏。"
@@ -2085,12 +2109,16 @@ internal class ConnectInterface {
             ShowFeedback(Color.red, Lang.Pick(
                 "You are on different versions of the mod. Both players need the same one.",
                 "你们两个装的模组版本不一样。两个人必须用同一个版本。"
-            ));
+            ), stays: true);
 
             return;
         }
 
-        ShowFeedback(Color.green, Lang.Pick("Joined lobby! Connecting to host...", "已加入房间！正在连接房主……"));
+        // Stays until the host's game answers or the wait is given up on, half a minute later: gone after ten seconds,
+        // it left the screen empty for the rest of the wait
+        ShowFeedback(
+            Color.green, Lang.Pick("Joined lobby! Connecting to host...", "已加入房间！正在连接房主……"), stays: true
+        );
 
         var hostId = SteamManager.GetLobbyOwner(lobbyId);
 
@@ -2099,6 +2127,7 @@ internal class ConnectInterface {
         }
 
         // Connect using Steam ID as address, over the relay network
+        _waitingForHost = true;
         ConnectButtonPressed?.Invoke(hostId.ToString(), 0, username, TransportType.SteamRelay, null);
     }
 
@@ -2121,8 +2150,32 @@ internal class ConnectInterface {
             return;
         }
 
-        ShowFeedback(Color.yellow, Lang.Pick("Joining Steam lobby...", "正在加入 Steam 房间……"));
+        ShowFeedback(Color.yellow, Lang.Pick("Joining Steam lobby...", "正在加入 Steam 房间……"), stays: true);
         SteamManager.JoinLobby(new CSteamID(steamLobbyId));
+    }
+
+    /// <summary>
+    /// Called when joining a Steam lobby failed, with what Steam answered, or null when it did not answer at all.
+    /// </summary>
+    private void OnLobbyJoinFailed(EChatRoomEnterResponse? response) {
+        _waitingForHost = false;
+        ResetConnectionButtons();
+        ShowFeedback(Color.red, response switch {
+            null => Lang.Pick("Failed to join the lobby:\nSteam did not answer.", "加入房间失败：\nSteam 没有回应。"),
+            EChatRoomEnterResponse.k_EChatRoomEnterResponseDoesntExist => Lang.Pick(
+                "Failed to join the lobby:\nIt is no longer open.", "加入房间失败：\n这个房间已经关了。"
+            ),
+            EChatRoomEnterResponse.k_EChatRoomEnterResponseFull => Lang.Pick(
+                "Failed to join the lobby:\nIt is full.", "加入房间失败：\n房间满了。"
+            ),
+            EChatRoomEnterResponse.k_EChatRoomEnterResponseLimited => Lang.Pick(
+                "Failed to join the lobby:\nA limited Steam account cannot join.",
+                "加入房间失败：\n受限的 Steam 账号不能加入。"
+            ),
+            _ => Lang.Pick(
+                $"Failed to join the lobby:\nSteam refused ({response}).", $"加入房间失败：\nSteam 拒绝了（{response}）。"
+            )
+        }, stays: true);
     }
 
     #endregion
@@ -2144,6 +2197,7 @@ internal class ConnectInterface {
             MonoBehaviourUtil.Instance.StartCoroutine(FinalizeHostedSteamLobbyCoroutine(steamLobbyId, isPublic));
         }
 
+        _waitingForHost = false;
         ShowFeedback(Color.green, MsgConnected);
         ResetConnectionButtons();
     }
@@ -2153,6 +2207,8 @@ internal class ConnectInterface {
     /// Resets the connection UI to allow reconnection.
     /// </summary>
     public void OnClientDisconnect() {
+        _waitingForHost = false;
+
         // The waiting room belongs to a game that is open; without a connection there is nothing left to wait in
         if (_waitingRoomActive) {
             HideWaitingRoom();
@@ -2169,10 +2225,19 @@ internal class ConnectInterface {
     /// <param name="result">Details about why the connection failed.</param>
     /// <param name="fallbackAddress">Optional fallback address (IP:Port) to attempt on failure.</param>
     public void OnFailedConnect(ConnectionFailedResult result, string? fallbackAddress = null) {
+        // Whether this player waited for the host of a Steam lobby they joined. Read here and not from still being in
+        // a lobby: a failed join stayed in it, and a later connection of another kind that timed out was then told
+        // that a Steam host had never answered.
+        var waitedForHost = _waitingForHost;
+        _waitingForHost = false;
+
         // If we have a fallback connection to try, we do so now
         if (!string.IsNullOrEmpty(fallbackAddress) &&
             TryParseConnectionData(fallbackAddress, out var address, out var port)) {
-            ShowFeedback(Color.yellow, Lang.Pick("LAN failed, retrying Public...", "局域网连接失败，正在改用公开方式重试……"));
+            ShowFeedback(
+                Color.yellow, Lang.Pick("LAN failed, retrying Public...", "局域网连接失败，正在改用公开方式重试……"),
+                stays: true
+            );
             Logger.Info($"ConnectInterface: LAN connection failed, retrying Public at {address}:{port}");
 
             // Trigger the fallback connection using the current username input
@@ -2191,7 +2256,9 @@ internal class ConnectInterface {
                     $"ConnectInterface: Connection timed out. Retrying full join flow for lobby {lobbyIdToRetry} once."
                 );
                 SetLobbyJoinInProgress();
-                ShowFeedback(Color.yellow, Lang.Pick("Connection timed out. Retrying...", "连接超时。正在重试……"));
+                ShowFeedback(
+                    Color.yellow, Lang.Pick("Connection timed out. Retrying...", "连接超时。正在重试……"), stays: true
+                );
                 MonoBehaviourUtil.Instance.StartCoroutine(JoinLobbyCoroutine(lobbyIdToRetry, username));
                 return;
             }
@@ -2200,8 +2267,15 @@ internal class ConnectInterface {
         ResetConnectionButtons();
         _pendingHolePunchRetryLobbyId = null;
 
-        var message = GetFailureMessage(result);
-        ShowFeedback(Color.red, message);
+        // The lobby of a host that never answered is left: the player joins it again by accepting the invite again
+        if (waitedForHost && SteamManager.IsInLobby && !SteamManager.IsHostingLobby) {
+            SteamManager.LeaveLobby();
+        }
+
+        // Stays until something else is shown: gone after ten seconds, it was easily missed, with the friends list
+        // open over the game or anywhere else, and the join looked as if it had never ended
+        var message = GetFailureMessage(result, waitedForHost);
+        ShowFeedback(Color.red, message, stays: true);
     }
 
     #endregion
@@ -2267,13 +2341,16 @@ internal class ConnectInterface {
     /// </summary>
     /// <param name="color">The color of the feedback text.</param>
     /// <param name="message">The message to display.</param>
-    private void ShowFeedback(Color color, string message) {
+    /// <param name="stays">Whether the message stays until another is shown, for one that says a connection is still
+    /// being made and something will follow it, or why one failed.</param>
+    private void ShowFeedback(Color color, string message, bool stays = false) {
         _isMatchmakingFeedbackActive = false;
         _feedbackHideCoroutine = ConnectInterfaceHelpers.SetFeedbackText(
             _feedbackText,
             color,
             message,
-            _feedbackHideCoroutine
+            _feedbackHideCoroutine,
+            hidesItself: !stays
         );
     }
 
@@ -2390,12 +2467,14 @@ internal class ConnectInterface {
     /// Converts a connection failure result into a user-friendly error message.
     /// </summary>
     /// <param name="result">The connection failure details.</param>
+    /// <param name="waitedForHost">Whether the player waited for the host of a Steam lobby they joined.</param>
     /// <returns>A formatted error message string.</returns>
-    private static string GetFailureMessage(ConnectionFailedResult result) {
+    private static string GetFailureMessage(ConnectionFailedResult result, bool waitedForHost) {
         return result.Reason switch {
             ConnectionFailedReason.InvalidAddons => ErrorInvalidAddons,
             ConnectionFailedReason.SocketException or
                 ConnectionFailedReason.IOException => ErrorInternal,
+            ConnectionFailedReason.TimedOut when waitedForHost => ErrorHostNeverAnswered,
             ConnectionFailedReason.TimedOut => ErrorTimeout,
             ConnectionFailedReason.Other =>
                 $"Failed to connect:\n{((ConnectionFailedMessageResult) result).Message}",
@@ -2449,7 +2528,7 @@ internal class ConnectInterface {
             return;
         }
 
-        ShowFeedback(Color.green, connectionInfo.Value.FeedbackMessage);
+        ShowFeedback(Color.green, connectionInfo.Value.FeedbackMessage, stays: true);
 
         // Pass the pre-bound socket to the transport layer before connecting
         HolePunchEncryptedTransport.HolePunchSocket = holePunchSocket;
