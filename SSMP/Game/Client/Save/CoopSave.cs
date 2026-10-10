@@ -361,6 +361,7 @@ internal partial class CoopSave {
         RegisterArrivalHooks();
         RegisterTrapdoorHooks();
         RegisterPrisonCaptureHooks();
+        RegisterCreatureDeathHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
         EventHooks.LanguageGet += OnLanguageGet;
@@ -967,6 +968,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.FleaGamesOutroReady:
                 OnFleaGamesOutroReady?.Invoke(player, update);
+                break;
+            case CoopSaveUpdateKind.CreatureDeath:
+                OnCreatureDeath(player, update);
                 break;
         }
     }

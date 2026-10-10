@@ -179,6 +179,22 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     private bool _hadHealth;
 
+    /// <summary>
+    /// Raised as the copy in this game dies or lives again: whether it is dead now, and whether its death was seen here
+    /// rather than found as this player walked into the room (see Entity.RecordCopyDeath).
+    /// </summary>
+    public event System.Action<bool, bool>? CopyDeathChanged;
+
+    /// <summary>
+    /// Whether the copy was dead as this game last looked (see <see cref="CopyDeathChanged"/>).
+    /// </summary>
+    private bool _copyWasDead;
+
+    /// <summary>
+    /// Whether the copy was killed here as this player walked into the room, for a creature that died before.
+    /// </summary>
+    private bool _copyKilledOnWalkIn;
+
     public HealthManagerComponent(
         NetClient netClient,
         ushort entityId,
@@ -419,6 +435,20 @@ internal class HealthManagerComponent : EntityComponent {
         var observedHealthManager = IsControlled ? _healthManager.Client : _healthManager.Host;
         if (observedHealthManager == null) {
             return;
+        }
+
+        // Whether the copy is dead goes into this game's save the way the game that runs the creature keeps it: from
+        // whatever set it, not from every death the copy is told of - one that has a death of its own takes one and
+        // can live on, and it is dead only once that is played out
+        if (IsControlled) {
+            var copyDead = observedHealthManager.GetIsDead();
+            if (copyDead != _copyWasDead) {
+                _copyWasDead = copyDead;
+                CopyDeathChanged?.Invoke(copyDead, !_copyKilledOnWalkIn);
+                if (!copyDead) {
+                    _copyKilledOnWalkIn = false;
+                }
+            }
         }
 
         var newHp = observedHealthManager.hp;
@@ -776,6 +806,7 @@ internal class HealthManagerComponent : EntityComponent {
         // told it has no health, which some are alive at. A player who is scene host needs none of this: their own
         // object dies by itself and tells the others.
         if (alreadyInSceneUpdate && _toldDead && client != null && !client.GetIsDead()) {
+            _copyKilledOnWalkIn = !Entity.FromRoomState;
             _allowDeath = true;
             _clientCorpse = null;
             client.Die(null, AttackTypes.Generic, true);

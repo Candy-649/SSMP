@@ -880,6 +880,7 @@ internal partial class Entity {
             _components[EntityComponentType.Death] = hmComponent;
             _components[EntityComponentType.Health] = hmComponent;
             _components[EntityComponentType.Invincibility] = hmComponent;
+            hmComponent.CopyDeathChanged += RecordCopyDeath;
 
             // Check if the object from the health manager is in any of the colosseum trial scenes and remove the
             // geo drops from them if so

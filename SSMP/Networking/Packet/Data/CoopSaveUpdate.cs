@@ -662,5 +662,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    MachineGo
+    MachineGo,
+
+    /// <summary>
+    /// A creature that the game brings back after a rest died in the sender's game, which keeps it dead in its save until
+    /// then. <see cref="CoopSaveUpdate.ItemScenes"/> and <see cref="CoopSaveUpdate.ItemIds"/> name it the way the
+    /// creature's item saves it.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    CreatureDeath
 }

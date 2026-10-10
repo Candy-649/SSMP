@@ -278,6 +278,22 @@ internal class BenchCoop {
         }
 
         SceneDataResetMethod.Invoke(sceneData, null);
+
+        // The loaded rooms stay as they are while the players are in them, but go into the save as reset: what is set
+        // in them, like a creature that was killed, was saved again as the room was left, and was still so after the
+        // rest whenever that game ran the room next
+        foreach (var item in UnityEngine.Object.FindObjectsByType<PersistentBoolItem>(
+                     FindObjectsInactive.Include, FindObjectsSortMode.None
+                 )) {
+            try {
+                // Not one that never started: it has nothing set yet, and an FSM it would read is not found
+                if (item.started && !item.dontSave && item.GetIsSemiPersistent() && item.GetCurrentValue()) {
+                    item.dontSave = true;
+                }
+            } catch (Exception e) {
+                Logger.Warn($"Could not leave '{item.name}' reset in the save:\n{e}");
+            }
+        }
     }
 
     /// <summary>
