@@ -166,6 +166,37 @@ internal class CoopSaveUpdate : IPacketData {
     /// </summary>
     public List<string> Names { get; set; } = [];
 
+    /// <summary>
+    /// A copy of this update with lists of its own, for sending the same update to one more player.
+    /// </summary>
+    public CoopSaveUpdate Copy() {
+        return new CoopSaveUpdate {
+            PlayerId = PlayerId,
+            TargetId = TargetId,
+            Kind = Kind,
+            Key = Key,
+            PartnerKey = PartnerKey,
+            Part = Part,
+            PartCount = PartCount,
+            Records = [..Records],
+            ItemScenes = [..ItemScenes],
+            ItemIds = [..ItemIds],
+            FlagNames = [..FlagNames],
+            FlagValues = [..FlagValues],
+            WishNames = [..WishNames],
+            WishValues = [..WishValues],
+            PlayTime = PlayTime,
+            Sequence = Sequence,
+            Amounts = [..Amounts],
+            Scene = Scene,
+            ObjectPath = ObjectPath,
+            FsmName = FsmName,
+            StateName = StateName,
+            Values = [..Values],
+            Names = [..Names]
+        };
+    }
+
     /// <inheritdoc />
     public void WriteData(IPacket packet) {
         packet.Write(PlayerId);

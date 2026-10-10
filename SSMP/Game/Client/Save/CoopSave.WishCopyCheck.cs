@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -8,8 +9,8 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Asking the partner what they carry at the moment a wish that takes something from both players is handed in. A
-/// turn-in takes a full copy from each of them, and whether the partner had theirs used to be read from amounts that
+/// Asking the other members what they carry at the moment a wish that takes something from every player is handed in.
+/// A turn-in takes a full copy from each of them, and whether the partner had theirs used to be read from amounts that
 /// their game pushed whenever they changed. One push that never arrived, like one that came while the local game was
 /// riding between rooms, which drops what arrives meanwhile, then kept a partner who had plenty "short" until their
 /// amount changed again. So nothing about the partner's bag is kept any more: opening a board that would hand such
@@ -235,20 +236,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Asks the partner's game what it carries for wishes.
+    /// Asks the games of the members what they carry for wishes.
     /// </summary>
-    /// <returns>The key that the answer comes back with.</returns>
-    private ulong SendWishCopyAsk(ushort partnerId, List<string> wishes) {
+    /// <returns>The key that the answers come back with.</returns>
+    private ulong SendWishCopyAsk(List<string> wishes) {
         var bytes = new byte[8];
         Random.NextBytes(bytes);
         var update = new CoopSaveUpdate {
-            TargetId = partnerId,
             Kind = CoopSaveUpdateKind.WishCopyCheck,
             PartCount = WishCopyAsk,
             Key = BitConverter.ToUInt64(bytes, 0)
         };
         update.WishNames.AddRange(wishes);
-        Send(update);
+        SendToMembers(update);
         return update.Key;
     }
 
@@ -257,7 +257,7 @@ internal partial class CoopSave {
     /// </summary>
     private void OnWishCopyCheck(ClientPlayerData player, CoopSaveUpdate update) {
         try {
-            if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+            if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player)) {
                 return;
             }
 
@@ -313,11 +313,11 @@ internal partial class CoopSave {
             : _donationHold is { } donation && donation.Key == update.Key
                 ? donation
                 : null;
-        if (hold == null || hold.Answer != null || hold.PartnerId != player.Id) {
+        if (hold == null || !hold.IsAsked(player.Id) || hold.Answers.ContainsKey(player.Id)) {
             return;
         }
 
-        hold.Answer = ReadCopies(update);
+        hold.Answers[player.Id] = ReadCopies(update);
         Logger.Info(
             $"{player.Username} said what they carry for {hold.Wishes.Count} wishes, " +
             $"{Time.unscaledTime - hold.Started:0.00} s after the question"
@@ -388,12 +388,12 @@ internal partial class CoopSave {
             _boardOpenHold = null;
         }
 
-        if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
+        if (GetMemberTalkingAt(board) != null) {
             return false;
         }
 
-        var partner = GetCheckedPartner();
-        if (partner == null || GetBoardAbsence(partner, marker, "") != null) {
+        var members = GetCheckedMembers();
+        if (members.Count == 0 || GetBoardAbsence(marker, members, "", out _) != null) {
             return false;
         }
 
@@ -408,117 +408,160 @@ internal partial class CoopSave {
             return false;
         }
 
-        var key = SendWishCopyAsk(partner.Id, wishes);
+        var key = SendWishCopyAsk(wishes);
         Logger.Info(
-            $"The board '{board.name}' waits for {partner.Username} to say what they carry for {wishes.Count} wishes"
+            $"The board '{board.name}' waits for {GetCheckedNames()} to say what they carry for {wishes.Count} wishes"
         );
 
         // Last, so that nothing above throwing can leave the board both opened and waiting
-        _boardOpenHold = new BoardOpenHold(key, partner, wishes, board, proceed);
+        _boardOpenHold = new BoardOpenHold(key, members, wishes, board, proceed);
         return true;
     }
 
     /// <summary>
-    /// Finds the wishes ready on a board that the partner is short of, by their game's answer, which stay on the board
-    /// this time, and tells the local player why. Without an answer, every wish that takes something from the partner
-    /// stays.
+    /// Finds the wishes ready on a board that any member is short of, by their games' answers, which stay on the board
+    /// this time, and tells the local player why. Without an answer from every member, every wish that takes something
+    /// from them stays.
     /// </summary>
     /// <returns>The wishes that stay on the board, or null if none does.</returns>
     private HashSet<string>? GetBoardTurnInsLeftOut(List<FullQuestBase> ready, BoardOpenHold resumed) {
         HashSet<string>? leftOut = null;
         var notices = 0;
+        var silent = resumed.GetSilentNames();
         foreach (var quest in ready) {
             if (!NeedsPartnerCopy(quest)) {
                 continue;
             }
 
-            int amount;
-            int needed;
-            QuestTargetCounter? counter;
-            if (resumed.Answer == null) {
-                amount = -1;
-                needed = 0;
-                counter = null;
-            } else if (!resumed.Answer.Lacks(quest, out amount, out needed, out counter)) {
-                continue;
+            // The first member who is short of it, or the ones whose games didn't answer
+            string? shortName = null;
+            var amount = -1;
+            var needed = 0;
+            QuestTargetCounter? counter = null;
+            if (silent.Count > 0) {
+                shortName = JoinNames(silent);
+            } else {
+                foreach (var (id, name) in resumed.Members) {
+                    if (resumed.Answers[id].Lacks(quest, out amount, out needed, out counter)) {
+                        shortName = name;
+                        break;
+                    }
+                }
+
+                if (shortName == null) {
+                    continue;
+                }
             }
 
             leftOut ??= new HashSet<string>(StringComparer.Ordinal);
             leftOut.Add(quest.name);
             Logger.Info(
-                $"The wish '{quest.name}' stays on the board, because {resumed.PartnerName} has " +
+                $"The wish '{quest.name}' stays on the board, because {shortName} has " +
                 (amount < 0 ? "an amount that their game didn't say" : $"{amount}") + $" of the {needed} it takes"
             );
 
-            if (resumed.Answer != null && notices < MaxShortCopyNotices) {
+            if (silent.Count == 0 && notices < MaxShortCopyNotices) {
                 notices++;
                 Chat(
-                    DescribeShortCopy(resumed.PartnerName, amount, needed, counter) + Lang.Pick(
-                        $" So \"{quest.GetPopupName()}\" stays on the board this time. Both of you pay one to hand it in.",
-                        $"所以「{quest.GetPopupName()}」这次留在板子上没交。要交的话，你们两个各出一份。"
-                    )
+                    DescribeShortCopy(shortName, amount, needed, counter) + (resumed.Members.Count == 1
+                        ? Lang.Pick(
+                            $" So \"{quest.GetPopupName()}\" stays on the board this time. Both of you pay one to hand it in.",
+                            $"所以「{quest.GetPopupName()}」这次留在板子上没交。要交的话，你们两个各出一份。"
+                        )
+                        : Lang.Pick(
+                            $" So \"{quest.GetPopupName()}\" stays on the board this time. Each of you pays one to hand it in.",
+                            $"所以「{quest.GetPopupName()}」这次留在板子上没交。要交的话，每个人各出一份。"
+                        ))
                 );
             }
         }
 
-        if (leftOut != null && resumed.Answer == null) {
-            Chat(Lang.Pick(
-                $"{resumed.PartnerName}'s game didn't answer in time (the connection may be lagging), so the wishes " +
-                "that take something from both of you stay on the board this time. Try again in a moment.",
-                $"没及时收到 {resumed.PartnerName} 那边的回应（可能是网络卡了），所以要两个人都出东西的愿望这次留在板子上没交。" +
-                "过一会儿再试。"
-            ));
+        if (leftOut != null && silent.Count > 0) {
+            var names = JoinNames(silent);
+            Chat(resumed.Members.Count == 1
+                ? Lang.Pick(
+                    $"{names}'s game didn't answer in time (the connection may be lagging), so the wishes " +
+                    "that take something from both of you stay on the board this time. Try again in a moment.",
+                    $"没及时收到 {names} 那边的回应（可能是网络卡了），所以要两个人都出东西的愿望这次留在板子上没交。" +
+                    "过一会儿再试。"
+                )
+                : Lang.Pick(
+                    $"The games of {names} didn't answer in time (the connection may be lagging), so the wishes " +
+                    "that take something from all of you stay on the board this time. Try again in a moment.",
+                    $"没及时收到 {names} 那边的回应（可能是网络卡了），所以要大家都出东西的愿望这次留在板子上没交。" +
+                    "过一会儿再试。"
+                ));
         }
 
         return leftOut;
     }
 
     /// <summary>
-    /// Asks the partner what they carry before a donation that the local player said yes to goes through, which waits
-    /// for the answer: the yes runs again once it came (see <see cref="UpdateWishCopyChecks"/>). The board keeps
+    /// Asks the members what they carry before a donation that the local player said yes to goes through, which waits
+    /// for their answers: the yes runs again once they came (see <see cref="UpdateWishCopyChecks"/>). The board keeps
     /// asking meanwhile, and answering no there takes the yes back.
     /// </summary>
     private void AskBeforeDonation(
         QuestItemBoard itemBoard,
         FullQuestBase quest,
-        ClientPlayerData partner,
+        List<ClientPlayerData> members,
         Action proceed
     ) {
         var wishes = new List<string> { quest.name };
-        var key = SendWishCopyAsk(partner.Id, wishes);
-        Logger.Info($"The donation '{quest.name}' waits for {partner.Username} to say what they carry");
+        var key = SendWishCopyAsk(wishes);
+        Logger.Info(
+            $"The donation '{quest.name}' waits for {JoinNames(members.Select(member => member.Username))} to say " +
+            "what they carry"
+        );
 
         // Last, so that nothing above throwing can leave the donation both declined and waiting
-        _donationHold = new DonationHold(key, partner, wishes, itemBoard, quest, proceed);
+        _donationHold = new DonationHold(key, members, wishes, itemBoard, quest, proceed);
     }
 
     /// <summary>
-    /// Whether the partner's answer lets a donation that waited for it go through, telling the local player why not.
+    /// Whether the members' answers let a donation that waited for them go through, telling the local player why not.
     /// </summary>
     private bool CanPartnerPayDonation(FullQuestBase quest, DonationHold resumed) {
-        if (resumed.Answer == null) {
-            Chat(Lang.Pick(
-                $"{resumed.PartnerName}'s game didn't answer in time (the connection may be lagging), so nothing was " +
-                "donated. Try again in a moment.",
-                $"没及时收到 {resumed.PartnerName} 那边的回应（可能是网络卡了），所以这次没捐。过一会儿再试。"
-            ));
-            Logger.Info($"The donation '{quest.name}' didn't go through, because the partner's game didn't answer");
+        var silent = resumed.GetSilentNames();
+        if (silent.Count > 0) {
+            var names = JoinNames(silent);
+            Chat(silent.Count == 1
+                ? Lang.Pick(
+                    $"{names}'s game didn't answer in time (the connection may be lagging), so nothing was " +
+                    "donated. Try again in a moment.",
+                    $"没及时收到 {names} 那边的回应（可能是网络卡了），所以这次没捐。过一会儿再试。"
+                )
+                : Lang.Pick(
+                    $"The games of {names} didn't answer in time (the connection may be lagging), so nothing was " +
+                    "donated. Try again in a moment.",
+                    $"没及时收到 {names} 那边的回应（可能是网络卡了），所以这次没捐。过一会儿再试。"
+                ));
+            Logger.Info($"The donation '{quest.name}' didn't go through, because the games of {names} didn't answer");
             return false;
         }
 
-        if (!resumed.Answer.Lacks(quest, out var amount, out var needed, out var counter)) {
-            return true;
+        foreach (var (id, name) in resumed.Members) {
+            if (!resumed.Answers[id].Lacks(quest, out var amount, out var needed, out var counter)) {
+                continue;
+            }
+
+            Chat(DescribeShortCopy(name, amount, needed, counter) + (resumed.Members.Count == 1
+                ? Lang.Pick(
+                    " So nothing was donated. Both of you pay the donation.",
+                    "所以这次没捐。捐赠需要你们两个各出一份。"
+                )
+                : Lang.Pick(
+                    " So nothing was donated. Each of you pays the donation.",
+                    "所以这次没捐。捐赠需要每个人各出一份。"
+                )));
+            Logger.Info(
+                $"The donation '{quest.name}' didn't go through, because {name} has " +
+                (amount < 0 ? "an amount that their game didn't say" : $"{amount}") + $" of the {needed} it takes"
+            );
+            return false;
         }
 
-        Chat(DescribeShortCopy(resumed.PartnerName, amount, needed, counter) + Lang.Pick(
-            " So nothing was donated. Both of you pay the donation.",
-            "所以这次没捐。捐赠需要你们两个各出一份。"
-        ));
-        Logger.Info(
-            $"The donation '{quest.name}' didn't go through, because {resumed.PartnerName} has " +
-            (amount < 0 ? "an amount that their game didn't say" : $"{amount}") + $" of the {needed} it takes"
-        );
-        return false;
+        return true;
     }
 
     /// <summary>
@@ -531,10 +574,15 @@ internal partial class CoopSave {
             return null;
         }
 
-        return DescribeShortCopy(player.Username, amount, needed, counter) + Lang.Pick(
-            " So nothing was taken. Both of you pay one to hand it in.",
-            "所以什么都没拿走。要交的话，你们两个各出一份。"
-        );
+        return DescribeShortCopy(player.Username, amount, needed, counter) + (_checkedMembers.Count <= 1
+            ? Lang.Pick(
+                " So nothing was taken. Both of you pay one to hand it in.",
+                "所以什么都没拿走。要交的话，你们两个各出一份。"
+            )
+            : Lang.Pick(
+                " So nothing was taken. Each of you pays one to hand it in.",
+                "所以什么都没拿走。要交的话，每个人各出一份。"
+            ));
     }
 
     /// <summary>
@@ -569,30 +617,24 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// A turn-in that waits for the partner's game to say what it carries.
+    /// A turn-in that waits for the games of the members to say what they carry.
     /// </summary>
     private abstract class CopyCheckHold {
-        protected CopyCheckHold(ulong key, ushort partnerId, string partnerName, List<string> wishes) {
+        protected CopyCheckHold(ulong key, List<ClientPlayerData> members, List<string> wishes) {
             Key = key;
-            PartnerId = partnerId;
-            PartnerName = partnerName;
+            Members = members.ConvertAll(member => (member.Id, member.Username));
             Wishes = wishes;
         }
 
         /// <summary>
-        /// The key that the answer comes back with.
+        /// The key that the answers come back with.
         /// </summary>
         public ulong Key { get; }
 
         /// <summary>
-        /// Who was asked. Only their answer counts.
+        /// Who was asked, with their names. Only their answers count.
         /// </summary>
-        public ushort PartnerId { get; }
-
-        /// <summary>
-        /// Their name, for what the local player is told.
-        /// </summary>
-        public string PartnerName { get; }
+        public List<(ushort Id, string Name)> Members { get; }
 
         /// <summary>
         /// The wishes that they were asked about.
@@ -605,27 +647,39 @@ internal partial class CoopSave {
         public float Started { get; } = Time.unscaledTime;
 
         /// <summary>
-        /// What they said they carry, or null until they answered.
+        /// What each member said they carry, by member, as the answers come.
         /// </summary>
-        public PartnerCopies? Answer { get; set; }
+        public Dictionary<ushort, PartnerCopies> Answers { get; } = new();
 
         /// <summary>
-        /// Whether the turn-in goes on now: they answered, or the wait ran out.
+        /// Whether a member was asked.
         /// </summary>
-        public bool IsDue => Answer != null || Time.unscaledTime - Started > WishCopyCheckTimeout;
+        public bool IsAsked(ushort id) => Members.Exists(member => member.Id == id);
+
+        /// <summary>
+        /// The names of the members whose games didn't answer.
+        /// </summary>
+        public List<string> GetSilentNames() =>
+            Members.Where(member => !Answers.ContainsKey(member.Id)).Select(member => member.Name).ToList();
+
+        /// <summary>
+        /// Whether the turn-in goes on now: every member answered, or the wait ran out.
+        /// </summary>
+        public bool IsDue => Members.TrueForAll(member => Answers.ContainsKey(member.Id)) ||
+                             Time.unscaledTime - Started > WishCopyCheckTimeout;
     }
 
     /// <summary>
-    /// The opening of a board that waits for the partner's answer before it hands wishes in.
+    /// The opening of a board that waits for the members' answers before it hands wishes in.
     /// </summary>
     private sealed class BoardOpenHold : CopyCheckHold {
         public BoardOpenHold(
             ulong key,
-            ClientPlayerData partner,
+            List<ClientPlayerData> members,
             List<string> wishes,
             QuestBoardInteractable board,
             Action proceed
-        ) : base(key, partner.Id, partner.Username, wishes) {
+        ) : base(key, members, wishes) {
             Board = board;
             Proceed = proceed;
         }
@@ -647,12 +701,12 @@ internal partial class CoopSave {
     private sealed class DonationHold : CopyCheckHold {
         public DonationHold(
             ulong key,
-            ClientPlayerData partner,
+            List<ClientPlayerData> members,
             List<string> wishes,
             QuestItemBoard itemBoard,
             FullQuestBase quest,
             Action proceed
-        ) : base(key, partner.Id, partner.Username, wishes) {
+        ) : base(key, members, wishes) {
             ItemBoard = itemBoard;
             Quest = quest;
             Proceed = proceed;

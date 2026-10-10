@@ -532,8 +532,8 @@ internal partial class CoopSave {
         AddKnownWorldItems();
         RememberWishes();
         RememberStoryFlags();
-        SendPendingWishTurnIns(members[0]);
-        AskAboutWishesRead(members[0]);
+        SendPendingWishTurnIns(members);
+        AskAboutWishesRead(members);
 
         foreach (var member in members) {
             if (FindMarkerMember(marker, member) is { } entry) {

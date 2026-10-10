@@ -159,9 +159,10 @@ internal partial class CoopSave {
     private WishTalk? _wishTalk;
 
     /// <summary>
-    /// The key dialogue that the partner is in, whose character doesn't talk to the local player meanwhile, or null.
+    /// The key dialogue that each other member is in, by member, whose character doesn't talk to the local player
+    /// meanwhile.
     /// </summary>
-    private PartnerTalk? _partnerTalk;
+    private readonly Dictionary<ushort, PartnerTalk> _partnerTalks = new();
 
     /// <summary>
     /// The actions of dialogue FSMs that offer wishes and take them in, by FSM, found the first time.
@@ -175,15 +176,10 @@ internal partial class CoopSave {
     private readonly Dictionary<Fsm, (string Event, HashSet<string> States)> _talkStates = new();
 
     /// <summary>
-    /// The progress of each target of the accepted wishes in the save of the partner that counts from either player,
-    /// like kills, by wish. What a wish takes isn't among it: that is asked when the wish is handed in.
+    /// The progress of each target of the accepted wishes in the save of each other member that counts from any
+    /// player, like kills, by member. What a wish takes isn't among it: that is asked when the wish is handed in.
     /// </summary>
-    private readonly Dictionary<string, int[]> _partnerWishProgress = new(StringComparer.Ordinal);
-
-    /// <summary>
-    /// The key of the update that the progress of each wish of the partner last came in, by wish.
-    /// </summary>
-    private readonly Dictionary<string, ulong> _partnerWishProgressKeys = new(StringComparer.Ordinal);
+    private readonly Dictionary<ushort, MemberWishProgress> _partnerWishProgress = new();
 
     /// <summary>
     /// The progress of each target of the wishes that the partner last got, by wish.
@@ -228,10 +224,10 @@ internal partial class CoopSave {
     private int _talkGainDepth;
 
     /// <summary>
-    /// Dialogue about wishes that ended while the game checked the save with the partner again, which goes to the partner
-    /// once that check is done.
+    /// Dialogue about wishes that ended while the game checked the save with a member again, which goes to each member
+    /// who didn't get it yet once that check is done.
     /// </summary>
-    private readonly List<CoopSaveUpdate> _pendingWishTurnIns = [];
+    private readonly List<PendingTurnIn> _pendingWishTurnIns = [];
 
     /// <summary>
     /// Whether dialogue about wishes threw, which is only logged once.
@@ -581,7 +577,42 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Key dialogue of the partner with a character in the local scene.
+    /// The progress of the wishes of a member, by wish, with the key of the update that each last came in.
+    /// </summary>
+    private sealed class MemberWishProgress {
+        /// <summary>
+        /// The progress of each target, by wish.
+        /// </summary>
+        public Dictionary<string, int[]> Amounts { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// The key of the update that the progress of each wish last came in, by wish.
+        /// </summary>
+        public Dictionary<string, ulong> Keys { get; } = new(StringComparer.Ordinal);
+    }
+
+    /// <summary>
+    /// Dialogue about wishes that waits for a check to finish, with the members who got it already.
+    /// </summary>
+    private sealed class PendingTurnIn {
+        public PendingTurnIn(CoopSaveUpdate update, IEnumerable<ushort> sentTo) {
+            Update = update;
+            SentTo = [..sentTo];
+        }
+
+        /// <summary>
+        /// The dialogue.
+        /// </summary>
+        public CoopSaveUpdate Update { get; }
+
+        /// <summary>
+        /// The members who got it already.
+        /// </summary>
+        public HashSet<ushort> SentTo { get; }
+    }
+
+    /// <summary>
+    /// Key dialogue of a member with a character in the local scene.
     /// </summary>
     private sealed class PartnerTalk {
         public PartnerTalk(NPCControlBase? npc) {
@@ -589,7 +620,7 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// The character, who doesn't talk to the local player until the partner is done, or null.
+        /// The character, who doesn't talk to the local player until the member is done, or null.
         /// </summary>
         public NPCControlBase? Npc { get; }
 
@@ -840,10 +871,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Ends dialogue whose character stopped talking, frees the character that the partner talked to, and sends the
+    /// Ends dialogue whose character stopped talking, frees the characters that the members talked to, and sends the
     /// progress of the wishes.
     /// </summary>
-    private void UpdateWishTalk(ClientPlayerData? partner) {
+    private void UpdateWishTalk() {
         try {
             if (_wishTalk is { } talk) {
                 var now = Time.unscaledTime;
@@ -859,9 +890,12 @@ internal partial class CoopSave {
                 }
             }
 
-            if (_partnerTalk is { } partnerTalk && (partner == null || !partner.IsInLocalScene ||
-                                                    Time.unscaledTime - partnerTalk.Started > PartnerTalkTimeout)) {
-                _partnerTalk = null;
+            // A member's character is free again once they left the room or the server, or after a while
+            foreach (var pair in _partnerTalks.ToList()) {
+                if (!_playerData.TryGetValue(pair.Key, out var member) || !member.IsInLocalScene ||
+                    Time.unscaledTime - pair.Value.Started > PartnerTalkTimeout) {
+                    _partnerTalks.Remove(pair.Key);
+                }
             }
 
             UpdateWishConfirm();
@@ -879,8 +913,8 @@ internal partial class CoopSave {
         }
 
         // Each in its own try: something above that throws on every frame must neither leave a question on the screen,
-        // nor leave the hero standing at a board that waits for the partner's answer, nor keep the partner from hearing
-        // the progress that counts from either player
+        // nor leave the hero standing at a board that waits for the members' answers, nor keep the members from hearing
+        // the progress that counts from any player
         try {
             UpdateDonationPrompt();
         } catch (Exception e) {
@@ -894,8 +928,8 @@ internal partial class CoopSave {
         }
 
         try {
-            if (partner != null && _checkedWith == partner.Id) {
-                UpdateWishProgress(partner);
+            if (_checkedMembers.Count > 0) {
+                UpdateWishProgress();
             }
         } catch (Exception e) {
             LogWishTalkError(e);
@@ -923,7 +957,7 @@ internal partial class CoopSave {
     /// </summary>
     private bool IsHeldByWishTalk(string name) {
         return (_wishTalk != null && _wishTalk.Wishes.Contains(name)) ||
-               _pendingWishTurnIns.Exists(update => update.WishNames.Contains(name));
+               _pendingWishTurnIns.Exists(pending => pending.Update.WishNames.Contains(name));
     }
 
     /// <summary>
@@ -936,20 +970,27 @@ internal partial class CoopSave {
             LogWishTalkError(e);
         }
 
-        _partnerTalk = null;
+        _partnerTalks.Clear();
         _lastKeyTalk = null;
         _donationPrompt = null;
         _wishActions.Clear();
         _talkStates.Clear();
 
-        // The dialogue went with its scene before the partner read to the step that begins its wish. The save
+        // The dialogue went with its scene before every member read to the step that begins its wish. The save
         // remembers that its player read to it, and nothing that came after the step ran, so nothing goes on.
-        if (_heldBegin != null) {
-            EndHeldBegin(Lang.Pick(
-                $"You left before {GetPartnerName()} read to that point, so the wish isn't taken yet. Once they read " +
-                "that dialogue to the same point too, you both take it.",
-                $"{GetPartnerName()} 还没读到那一步你就离开了，这个愿望先不接。等 {GetPartnerName()} 也把那段对话读到同一步，你们会一起接下。"
-            ), false);
+        if (_heldBegin is { } held) {
+            var missing = JoinNames(held.GetMissingNames());
+            EndHeldBegin(held.Members.Count == 1
+                ? Lang.Pick(
+                    $"You left before {missing} read to that point, so the wish isn't taken yet. Once they read " +
+                    "that dialogue to the same point too, you both take it.",
+                    $"{missing} 还没读到那一步你就离开了，这个愿望先不接。等 {missing} 也把那段对话读到同一步，你们会一起接下。"
+                )
+                : Lang.Pick(
+                    $"You left before {missing} read to that point, so the wish isn't taken yet. Once everyone has " +
+                    "read that dialogue to the same point, you take it together.",
+                    $"{missing} 还没读到那一步你就离开了，这个愿望先不接。等大家都把那段对话读到同一步，你们会一起接下。"
+                ), false);
         }
 
         ResetWishConfirm();
@@ -961,7 +1002,7 @@ internal partial class CoopSave {
     /// </summary>
     private void ResetWishTalk() {
         _wishTalk = null;
-        _partnerTalk = null;
+        _partnerTalks.Clear();
         _donationPrompt = null;
         _wishActions.Clear();
         _talkStates.Clear();
@@ -977,11 +1018,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the progress of the wishes of the partner and what the partner got, for a new check.
+    /// Forgets the progress of the wishes of the members and what the members got, for a new check.
     /// </summary>
     private void ResetWishProgress() {
         _partnerWishProgress.Clear();
-        _partnerWishProgressKeys.Clear();
         _sentWishProgress.Clear();
         _nextWishProgressTime = 0f;
     }
@@ -1000,11 +1040,12 @@ internal partial class CoopSave {
             // at their own prompt. Both may look at a board at once too; what one of them turns in or donates there
             // meanwhile waits for the other (StartBoardTalk, CanDonateTogether)
             if (_heldBegin is { } held && held.Npc == self) {
-                // Its dialogue stands at a step that waits for the partner, and talking to it again could move it on
+                // Its dialogue stands at a step that waits for the members, and talking to it again could move it on
                 // without them (CoopSave.WishRead)
+                var missing = JoinNames(held.GetMissingNames());
                 Chat(Lang.Pick(
-                    $"Waiting for {GetPartnerName()} to read to the same point.",
-                    $"正在等 {GetPartnerName()} 也读到同一步。"
+                    $"Waiting for {missing} to read to the same point.",
+                    $"正在等 {missing} 也读到同一步。"
                 ));
                 allowed = false;
             } else if (_everChecked && GetCurrentMarker() is { } marker && self is PlayMakerNPC npc) {
@@ -1037,17 +1078,19 @@ internal partial class CoopSave {
             return true;
         }
 
-        var partner = _checkedWith is { } partnerId && _playerData.TryGetValue(partnerId, out var checkedPartner)
-            ? checkedPartner
-            : null;
-        var absence = partner == null ? Lang.Pick($"This wish needs {marker.PartnerName} here too.", $"这个愿望也需要 {marker.PartnerName} 在场。") : GetWishTalkAbsence(partner);
-        if (absence != null || partner == null) {
-            Chat(absence ?? Lang.Pick($"This wish needs {marker.PartnerName} here too.", $"这个愿望也需要 {marker.PartnerName} 在场。"));
-            if (partner != null) {
-                Send(CreateWishTalkUpdate(partner.Id, npc.gameObject.scene.name, ScenePath.Get(npc.transform), WishTalkRefused));
+        // Every member has to be close by. One who isn't checked in is named from the pairing, and the ones who are
+        // away hear that they are wanted
+        var members = GetCheckedMembers();
+        var absence = GetWishTalkAbsence(marker, members, out var away);
+        if (absence != null) {
+            Chat(absence);
+            foreach (var member in away) {
+                Send(CreateWishTalkUpdate(
+                    member.Id, npc.gameObject.scene.name, ScenePath.Get(npc.transform), WishTalkRefused
+                ));
             }
 
-            Logger.Info($"Key dialogue with '{npc.name}' didn't start, because the partner isn't close by");
+            Logger.Info($"Key dialogue with '{npc.name}' didn't start, because not every member is close by");
             return false;
         }
 
@@ -1055,8 +1098,8 @@ internal partial class CoopSave {
         var talk = new WishTalk(npc, fsms, true);
         _wishTalk = talk;
         _lastKeyTalk = talk;
-        Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
-        Logger.Info($"Key dialogue with '{npc.name}' starts with {partner.Username} close by");
+        SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkStarted));
+        Logger.Info($"Key dialogue with '{npc.name}' starts with {GetCheckedNames()} close by");
         return true;
     }
 
@@ -1091,7 +1134,45 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Why the partner can't join key dialogue now, for the message to the local player, or null if they can.
+    /// Why the other members can't join key dialogue now, for the message to the local player, or null if they can. A
+    /// member who isn't checked in is named from the pairing.
+    /// </summary>
+    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="members">The checked members.</param>
+    /// <param name="away">The checked members who aren't close by, who hear that they are wanted.</param>
+    private string? GetWishTalkAbsence(
+        CoopSaveMarker marker,
+        List<ClientPlayerData> members,
+        out List<ClientPlayerData> away
+    ) {
+        away = members.FindAll(member => GetWishTalkAbsence(member) != null);
+        var missing = MatchMembers(marker)
+            .Where(match => match.Player == null || !_checkedMembers.Contains(match.Player.Id))
+            .Select(match => match.Member.Name)
+            .ToList();
+        if (missing.Count > 0) {
+            var names = JoinNames(missing);
+            return Lang.Pick($"This wish needs {names} here too.", $"这个愿望也需要 {names} 在场。");
+        }
+
+        if (away.Count <= 1) {
+            return away.Count == 0 ? null : GetWishTalkAbsence(away[0]);
+        }
+
+        var awayNames = JoinNames(away.Select(member => member.Username));
+        return away.Exists(member => !member.IsInLocalScene || member.PlayerObject == null)
+            ? Lang.Pick(
+                $"This wish needs {awayNames} here too. Come back together.",
+                $"这个愿望也需要 {awayNames} 在场。一起回来吧。"
+            )
+            : Lang.Pick(
+                $"{awayNames} need to come closer for this wish.",
+                $"{awayNames} 要再靠近一点才能弄这个愿望。"
+            );
+    }
+
+    /// <summary>
+    /// Why a member can't join key dialogue now, for the message to the local player, or null if they can.
     /// </summary>
     private static string? GetWishTalkAbsence(ClientPlayerData partner) {
         var hero = HeroController.instance;
@@ -1112,9 +1193,9 @@ internal partial class CoopSave {
             : null;
     }
 
-    private static CoopSaveUpdate CreateWishTalkUpdate(ushort partnerId, string scene, string path, ushort kind) {
+    private static CoopSaveUpdate CreateWishTalkUpdate(ushort targetId, string scene, string path, ushort kind) {
         return new CoopSaveUpdate {
-            TargetId = partnerId,
+            TargetId = targetId,
             Kind = CoopSaveUpdateKind.WishTalk,
             PartCount = kind,
             Scene = scene,
@@ -1364,8 +1445,8 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Ends the dialogue of the local player. The partner can talk to the character again, and if the dialogue accepted
-    /// or completed wishes, the save of the partner gets them with what the dialogue took and gave.
+    /// Ends the dialogue of the local player. The members can talk to the character again, and if the dialogue accepted
+    /// or completed wishes, the saves of the members get them with what the dialogue took and gave.
     /// </summary>
     private void EndWishTalk() {
         if (_wishTalk is not { } talk) {
@@ -1373,27 +1454,27 @@ internal partial class CoopSave {
         }
 
         _wishTalk = null;
-        var partner = GetCurrentMarker() is { } marker ? FindPartner(marker) : null;
-        if ((talk.IsKey || talk.IsDelivery) && partner != null) {
-            Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkEnded));
+        if ((talk.IsKey || talk.IsDelivery) && GetCurrentMarker() is { } marker && FindMembers(marker).Count > 0) {
+            SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkEnded));
         }
 
-        SendTalkChanges(talk, partner);
+        SendTalkChanges(talk);
     }
 
     /// <summary>
-    /// Sends the wishes that dialogue accepted or completed to the partner, with what it took and gave, if it changed
-    /// any. Changes that went to the partner before, like a delivery, go again for what the dialogue changed afterwards,
-    /// which the partner takes if they took those changes.
+    /// Sends the wishes that dialogue accepted or completed to the members, with what it took and gave, if it changed
+    /// any. Changes that went to them before, like a delivery, go again for what the dialogue changed afterwards, which
+    /// they take if they took those changes.
     /// </summary>
-    private void SendTalkChanges(WishTalk talk, ClientPlayerData? partner) {
+    private void SendTalkChanges(WishTalk talk) {
         if (talk.Changes.Count == 0 || !talk.HasUnsentChanges) {
             return;
         }
 
-        if (partner == null) {
+        var members = GetCurrentMarker() is { } marker ? FindMembers(marker) : [];
+        if (members.Count == 0) {
             // The next check finds the wishes changed in one save only
-            Logger.Warn("Dialogue about wishes ended without the partner, so its wishes stay with the local save");
+            Logger.Warn("Dialogue about wishes ended without a member on the server, so its wishes stay with the local save");
             return;
         }
 
@@ -1432,50 +1513,68 @@ internal partial class CoopSave {
         // Kept in case this save loses the accept before it is saved, for the next check to give back with it
         KeepAcceptTalk(update);
 
-        if (_checkedWith != partner.Id) {
-            // The game checks the save with the partner again, which sends these wishes as they were before, so the
-            // dialogue goes to the partner once the check is done
-            _pendingWishTurnIns.Add(update);
-            Logger.Info($"Dialogue about {talk.Wishes.Count} wishes waits for the check with {partner.Username}");
-            return;
+        // A member whose check runs gets these wishes as they were before in it, so the dialogue goes to them once it
+        // is done. The members checked already get it now.
+        var checkedNow = members.FindAll(member => _checkedMembers.Contains(member.Id));
+        if (checkedNow.Count < members.Count) {
+            _pendingWishTurnIns.Add(new PendingTurnIn(
+                checkedNow.Count > 0 ? update.Copy() : update, checkedNow.Select(member => member.Id)
+            ));
+            Logger.Info(
+                $"Dialogue about {talk.Wishes.Count} wishes waits for the check with " +
+                $"{JoinNames(members.Where(member => !_checkedMembers.Contains(member.Id)).Select(member => member.Username))}"
+            );
         }
 
-        SendWishTurnIn(update, partner);
+        if (checkedNow.Count > 0) {
+            SendWishTurnIn(update, checkedNow);
+        }
     }
 
     /// <summary>
-    /// Sends dialogue about wishes to the partner, who gets its wishes with it, so the wish log doesn't send them again.
+    /// Sends dialogue about wishes to members, who get its wishes with it, so the wish log doesn't send them again. Every
+    /// one of them gets it with the same stamp, so that it counts as the same change wherever it goes.
     /// </summary>
-    private void SendWishTurnIn(CoopSaveUpdate update, ClientPlayerData partner) {
-        update.TargetId = partner.Id;
+    private void SendWishTurnIn(CoopSaveUpdate update, List<ClientPlayerData> members) {
+        update.TargetId = members[0].Id;
         Send(update);
-        // Changes that went to the partner before are known already, and the wish log may have changed since
+        for (var i = 1; i < members.Count; i++) {
+            SendCopy(update, members[i].Id);
+        }
+
+        // Changes that went to the members before are known already, and the wish log may have changed since
         for (var i = (int) update.PartCount; i < update.WishNames.Count && i < update.WishValues.Count; i++) {
             _knownWishes[update.WishNames[i]] = update.WishValues[i];
         }
 
         Logger.Info(
-            $"Sent dialogue with {update.WishNames.Count} changes of wishes to {partner.Username}, with " +
-            $"{update.ItemIds.Count} item changes and {update.FlagNames.Count} flags"
+            $"Sent dialogue with {update.WishNames.Count} changes of wishes to " +
+            $"{JoinNames(members.Select(member => member.Username))}, with {update.ItemIds.Count} item changes and " +
+            $"{update.FlagNames.Count} flags"
         );
     }
 
     /// <summary>
-    /// Sends the dialogue about wishes that ended during the check with the partner, once the check is done.
+    /// Sends the dialogue about wishes that ended during a check to each member of it who didn't get it yet, once the
+    /// check is done. It goes with a stamp of its own made now rather than the one the others got: a change carries the
+    /// check it was sent in, and one from another check is taken as old (IsNewerChange).
     /// </summary>
-    private void SendPendingWishTurnIns(ClientPlayerData partner) {
-        foreach (var update in _pendingWishTurnIns) {
-            SendWishTurnIn(update, partner);
+    private void SendPendingWishTurnIns(List<ClientPlayerData> members) {
+        foreach (var pending in _pendingWishTurnIns) {
+            var targets = members.FindAll(member => !pending.SentTo.Contains(member.Id));
+            if (targets.Count > 0) {
+                SendWishTurnIn(pending.Update, targets);
+            }
         }
 
         _pendingWishTurnIns.Clear();
     }
 
     /// <summary>
-    /// The partner started or ended key dialogue, or couldn't start it without the local player close by.
+    /// A member started or ended key dialogue, or couldn't start it without the local player close by.
     /// </summary>
     private void OnWishTalk(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player)) {
             return;
         }
 
@@ -1496,11 +1595,12 @@ internal partial class CoopSave {
                     );
                     break;
                 case WishTalkEnded:
-                    _partnerTalk = null;
+                    _partnerTalks.Remove(player.Id);
                     break;
                 case WishTalkStarted:
                     var target = ScenePath.Find(update.ObjectPath, update.Scene);
-                    _partnerTalk = new PartnerTalk(target != null ? target.GetComponent<NPCControlBase>() : null);
+                    _partnerTalks[player.Id] =
+                        new PartnerTalk(target != null ? target.GetComponent<NPCControlBase>() : null);
                     break;
             }
         } catch (Exception e) {
@@ -1731,7 +1831,7 @@ internal partial class CoopSave {
     /// </summary>
     private void OnWishTurnIn(ClientPlayerData player, CoopSaveUpdate update) {
         var playerData = PlayerData.instance;
-        if (playerData == null || GetCurrentMarker() is not { } marker || !IsPartner(player, marker) ||
+        if (playerData == null || GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
             !IsFromCurrentCheck(player, update)) {
             return;
         }
@@ -2107,12 +2207,12 @@ internal partial class CoopSave {
     #region Progress
 
     /// <summary>
-    /// Sends the progress of the targets of the accepted wishes that changed since the partner last got it. Only
-    /// progress that counts from either player, like kills, goes: what a wish takes counts for each player alone and
-    /// is asked for at the moment the wish is handed in (see CoopSave.WishCopyCheck), so it is sent as nothing here,
-    /// and money or items changing never sends anything.
+    /// Sends the progress of the targets of the accepted wishes that changed since the members last got it. Only
+    /// progress that counts from any player, like kills, goes: what a wish takes counts for each player alone and is
+    /// asked for at the moment the wish is handed in (see CoopSave.WishCopyCheck), so it is sent as nothing here, and
+    /// money or items changing never sends anything.
     /// </summary>
-    private void UpdateWishProgress(ClientPlayerData partner) {
+    private void UpdateWishProgress() {
         var playerData = PlayerData.instance;
         if (playerData == null || Time.unscaledTime < _nextWishProgressTime) {
             return;
@@ -2154,12 +2254,11 @@ internal partial class CoopSave {
 
             // The targets of a wish stay together in one update, so newer progress of a wish never mixes with older
             if (update != null && update.WishNames.Count + amounts.Length > WishProgressEntriesPerUpdate) {
-                Send(update);
+                SendToMembers(update);
                 update = null;
             }
 
             update ??= new CoopSaveUpdate {
-                TargetId = partner.Id,
                 Kind = CoopSaveUpdateKind.WishProgress,
                 Key = ++_wishProgressCounter,
                 Sequence = (_checkKey >> 16) << 32
@@ -2172,7 +2271,7 @@ internal partial class CoopSave {
         }
 
         if (update != null) {
-            Send(update);
+            SendToMembers(update);
         }
     }
 
@@ -2195,30 +2294,34 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Remembers the progress of the wishes of the partner. An update that the network delivered after a newer one
-    /// doesn't undo newer progress.
+    /// Remembers the progress of the wishes of a member. An update that the network delivered after a newer one doesn't
+    /// undo newer progress.
     /// </summary>
     private void OnWishProgress(ClientPlayerData player, CoopSaveUpdate update) {
         // Progress from an earlier check can be older than what the current check agreed on
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkKey == 0 ||
-            update.Sequence >> 32 != _checkKey >> 16) {
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
+            _checkKey == 0 || update.Sequence >> 32 != _checkKey >> 16) {
             return;
+        }
+
+        if (!_partnerWishProgress.TryGetValue(player.Id, out var progress)) {
+            progress = _partnerWishProgress[player.Id] = new MemberWishProgress();
         }
 
         for (var i = 0; i < update.WishNames.Count && i < update.WishValues.Count && i < update.Amounts.Count; i++) {
             var name = update.WishNames[i];
             var index = update.WishValues[i];
             if (index < 0 || index >= MaxWishTargets ||
-                (_partnerWishProgressKeys.TryGetValue(name, out var key) && key > update.Key)) {
+                (progress.Keys.TryGetValue(name, out var key) && key > update.Key)) {
                 continue;
             }
 
-            _partnerWishProgressKeys[name] = update.Key;
-            if (!_partnerWishProgress.TryGetValue(name, out var amounts) || amounts.Length <= index) {
+            progress.Keys[name] = update.Key;
+            if (!progress.Amounts.TryGetValue(name, out var amounts) || amounts.Length <= index) {
                 var grown = new int[index + 1];
                 amounts?.CopyTo(grown, 0);
                 amounts = grown;
-                _partnerWishProgress[name] = amounts;
+                progress.Amounts[name] = amounts;
             }
 
             amounts[index] = update.Amounts[i];
@@ -2227,16 +2330,38 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Hook for <see cref="FullQuestBase.Counters"/>: progress that isn't taken, like kills, counts from whichever
-    /// player has more of it. What a wish takes counts for each player alone.
+    /// player has most of it. What a wish takes counts for each player alone.
     /// </summary>
     private IEnumerable<int> OnGetWishCounters(Func<FullQuestBase, IEnumerable<int>> orig, FullQuestBase self) {
         var counters = orig(self);
-        if (_checkedWith == null || _partnerWishProgress.Count == 0 || self == null ||
-            !_partnerWishProgress.TryGetValue(self.name, out var partnerAmounts) || self.IsCompleted) {
+        if (_checkedMembers.Count == 0 || _partnerWishProgress.Count == 0 || self == null || self.IsCompleted) {
             return counters;
         }
 
-        return MergeWishCounters(self.Targets, counters, partnerAmounts);
+        // The most of each target over the checked members, which only a member who left drops out of
+        int[]? most = null;
+        foreach (var pair in _partnerWishProgress) {
+            if (!_checkedMembers.Contains(pair.Key) || !pair.Value.Amounts.TryGetValue(self.name, out var amounts)) {
+                continue;
+            }
+
+            if (most == null) {
+                most = (int[]) amounts.Clone();
+                continue;
+            }
+
+            if (most.Length < amounts.Length) {
+                var grown = new int[amounts.Length];
+                most.CopyTo(grown, 0);
+                most = grown;
+            }
+
+            for (var i = 0; i < amounts.Length; i++) {
+                most[i] = Mathf.Max(most[i], amounts[i]);
+            }
+        }
+
+        return most == null ? counters : MergeWishCounters(self.Targets, counters, most);
     }
 
     private static IEnumerable<int> MergeWishCounters(

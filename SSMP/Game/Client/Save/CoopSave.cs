@@ -515,8 +515,8 @@ internal partial class CoopSave {
             }
         }
 
-        UpdateWishTalk(partner);
-        UpdateDeliverySummon(hero, checkedPartner);
+        UpdateWishTalk();
+        UpdateDeliverySummon(hero);
         UpdateRescue(hero, checkedPartner);
         UpdateLavaChase(hero, checkedPartner);
         UpdateChaseStandUp(hero, checkedPartner);
@@ -826,8 +826,13 @@ internal partial class CoopSave {
         var name = check?.Name;
 
         // A step of dialogue that waits for them goes on without the wish, which waits for them to read to it too
-        if (_heldBegin is { } heldBegin && heldBegin.PartnerId == id) {
-            EndHeldBegin(GetPartnerGoneMessage(), true);
+        if (_heldBegin is { } heldBegin && heldBegin.HasMember(id)) {
+            EndHeldBegin(
+                GetPartnerGoneMessage(
+                    heldBegin.Members.Find(member => member.Id == id).Name ?? name ?? "?", heldBegin.Members.Count
+                ),
+                true
+            );
         }
 
         // Before the member is forgotten: a question of theirs still on screen is answered back to them, and a
@@ -2687,7 +2692,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends an update of a two-player save to another player.
+    /// Sends a copy of an update that was sent already to one more player, as it is: with the stamp it got, so that the
+    /// same change counts as one wherever it goes.
+    /// </summary>
+    private void SendCopy(CoopSaveUpdate update, ushort targetId) {
+        var copy = update.Copy();
+        copy.TargetId = targetId;
+        if (_netClient.IsConnected) {
+            _netClient.UpdateManager.SetCoopSaveUpdate(copy);
+        }
+    }
+
+    /// <summary>
+    /// Sends an update of a co-op save to another player, or to every other player.
     /// </summary>
     private void Send(CoopSaveUpdate update) {
         if (update.Kind is CoopSaveUpdateKind.WorldChange or CoopSaveUpdateKind.WishChange or

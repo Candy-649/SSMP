@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using GlobalEnums;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -163,10 +164,26 @@ internal partial class CoopSave {
     /// A delivery whose item broke for the local player.
     /// </summary>
     private sealed class BrokenDelivery {
-        public BrokenDelivery(int value, ulong report) {
+        public BrokenDelivery(int value, ulong report, IEnumerable<ushort> members) {
             Value = value;
             Report = report;
+            Members = [..members];
         }
+
+        /// <summary>
+        /// The members who were told of the break, whose answers say whether the delivery still counts.
+        /// </summary>
+        public HashSet<ushort> Members { get; }
+
+        /// <summary>
+        /// The members who said that they still carry theirs, as long as nothing broke theirs since.
+        /// </summary>
+        public HashSet<ushort> CarriedBy { get; } = [];
+
+        /// <summary>
+        /// The members who said that they don't carry theirs either.
+        /// </summary>
+        public HashSet<ushort> FailedBy { get; } = [];
 
         /// <summary>
         /// The packed state of the wish right after the break.
@@ -179,7 +196,7 @@ internal partial class CoopSave {
         public ulong Report { get; }
 
         /// <summary>
-        /// Whether the partner answered that they still carry theirs.
+        /// Whether a member answered that they still carry theirs, which the local player was told.
         /// </summary>
         public bool StillCarried { get; set; }
     }
@@ -197,7 +214,7 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// The partner who turns in the delivery.
+        /// The member who turns in the delivery.
         /// </summary>
         public ushort PlayerId { get; }
 
@@ -317,36 +334,36 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the partner that the item of a delivery broke for the local player if that cancelled the delivery in the
-    /// local save. The partner decides whether the delivery still counts, so it doesn't go to them as a normal change of
+    /// Tells the members that the item of a delivery broke for the local player if that cancelled the delivery in the
+    /// local save. The members decide whether the delivery still counts, so it doesn't go to them as a normal change of
     /// the wish log.
     /// </summary>
     private void NoticeDeliveryBreak(FullQuestBase quest, int before) {
         var name = quest.name;
-        if (GetPackedWish(name) is not { } after || after == before || GetCheckedPartner() is not { } partner) {
+        if (GetPackedWish(name) is not { } after || after == before || _checkedMembers.Count == 0) {
             return;
         }
 
         _knownWishes[name] = after;
         var report = new CoopSaveUpdate {
-            TargetId = partner.Id,
             Kind = CoopSaveUpdateKind.DeliveryBreak,
             PartCount = DeliveryBreakReport,
             WishNames = [name],
             WishValues = [after]
         };
-        Send(report);
-        _brokenDeliveries[name] = new BrokenDelivery(after, report.Sequence);
-        Logger.Info($"The item of the delivery '{name}' broke, telling {partner.Username}");
+        SendToMembers(report);
+        _brokenDeliveries[name] = new BrokenDelivery(after, report.Sequence, _checkedMembers);
+        Logger.Info($"The item of the delivery '{name}' broke, telling {GetCheckedNames()}");
     }
 
     /// <summary>
-    /// The item of a delivery broke for the partner, or the partner answered whether they still carry a delivery whose
-    /// item broke for the local player.
+    /// The item of a delivery broke for a member, or a member answered whether they still carry a delivery whose item
+    /// broke for the local player. It failed once every member said they don't carry theirs either.
     /// </summary>
     private void OnDeliveryBreak(ClientPlayerData player, CoopSaveUpdate update) {
         var playerData = PlayerData.instance;
-        if (playerData == null || GetCurrentMarker() is not { } marker || !IsPartner(player, marker)) {
+        if (playerData == null || GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
+            !IsFromMemberInSave(player)) {
             return;
         }
 
@@ -359,24 +376,40 @@ internal partial class CoopSave {
                 }
 
                 // An answer to an earlier break, like one that the network delivered late, changes nothing
-                if (!_brokenDeliveries.TryGetValue(name, out var broken) || broken.Report != update.Key) {
+                if (!_brokenDeliveries.TryGetValue(name, out var broken) || broken.Report != update.Key ||
+                    !broken.Members.Contains(player.Id)) {
                     continue;
                 }
 
-                if (update.PartCount == DeliveryStillCarried && !broken.StillCarried) {
-                    broken.StillCarried = true;
-                    Chat(
-                        Lang.Pick(
-                            $"Your delivery broke, but {player.Username} still carries theirs. If they deliver it, you " +
-                            "get the reward too.",
-                            $"你要送的东西坏了，但 {player.Username} 手上那份还在。只要对方送到，你也能拿到奖励。"
-                        )
-                    );
+                if (update.PartCount == DeliveryStillCarried) {
+                    broken.CarriedBy.Add(player.Id);
+                    if (!broken.StillCarried) {
+                        broken.StillCarried = true;
+                        Chat(
+                            Lang.Pick(
+                                $"Your delivery broke, but {player.Username} still carries theirs. If they deliver it, " +
+                                "you get the reward too.",
+                                $"你要送的东西坏了，但 {player.Username} 手上那份还在。只要对方送到，你也能拿到奖励。"
+                            )
+                        );
+                    }
                 } else if (update.PartCount == DeliveryFailed) {
+                    broken.FailedBy.Add(player.Id);
+
+                    // Failed only once no member carries theirs any more
+                    if (broken.CarriedBy.Count > 0 || !broken.Members.All(broken.FailedBy.Contains)) {
+                        continue;
+                    }
+
                     _brokenDeliveries.Remove(name);
+                    var failed = JoinNames(
+                        broken.Members.Select(id => _playerData.TryGetValue(id, out var member) ? member.Username : "?")
+                    );
                     Chat(Lang.Pick(
-                        $"{player.Username} doesn't carry this delivery either, so it failed.",
-                        $"{player.Username} 手上也没有这份要送的东西，所以这次托运失败了。"
+                        broken.Members.Count == 1
+                            ? $"{failed} doesn't carry this delivery either, so it failed."
+                            : $"{failed} don't carry this delivery either, so it failed.",
+                        $"{failed} 手上也没有这份要送的东西，所以这次托运失败了。"
                     ));
                 }
             }
@@ -386,10 +419,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The item of a delivery broke for the partner. While the local player still carries theirs, the delivery stays
-    /// accepted in the local save and still counts for both, and a delivery that the local player turned in meanwhile
-    /// counts for the partner through that turn-in. Otherwise it failed, and the local wish log takes the state of the
-    /// partner.
+    /// The item of a delivery broke for a member. While the local player still carries theirs, or another member said
+    /// they still carry theirs, the delivery stays accepted in the local save and still counts for all, and a delivery
+    /// that the local player turned in meanwhile counts for the member through that turn-in. Otherwise it failed, and
+    /// the local wish log takes the state of the member.
     /// </summary>
     private void OnPartnerDeliveryBroke(
         ClientPlayerData player,
@@ -417,14 +450,43 @@ internal partial class CoopSave {
             _brokenDeliveries.Remove(name);
             SendDeliveryAnswer(player, report, name, value, DeliveryStillCarried);
             Chat(
-                Lang.Pick(
-                    $"{player.Username}'s delivery broke, but yours is still intact. If you deliver it, you both get the " +
-                    "reward.",
-                    $"{player.Username} 要送的东西坏了，但你那份还好好的。只要你送到，你们两个都能拿到奖励。"
-                )
+                _checkedMembers.Count <= 1
+                    ? Lang.Pick(
+                        $"{player.Username}'s delivery broke, but yours is still intact. If you deliver it, you both " +
+                        "get the reward.",
+                        $"{player.Username} 要送的东西坏了，但你那份还好好的。只要你送到，你们两个都能拿到奖励。"
+                    )
+                    : Lang.Pick(
+                        $"{player.Username}'s delivery broke, but yours is still intact. If you deliver it, you all " +
+                        "get the reward.",
+                        $"{player.Username} 要送的东西坏了，但你那份还好好的。只要你送到，大家都能拿到奖励。"
+                    )
             );
             Logger.Info($"The delivery '{name}' broke for {player.Username}, but the local player still carries it");
             return;
+        }
+
+        // Another member who said that they still carry theirs keeps the delivery going for the local player too.
+        // The member whose item broke now is no longer one of them.
+        if (_brokenDeliveries.TryGetValue(name, out var mine)) {
+            mine.CarriedBy.Remove(player.Id);
+            mine.FailedBy.Add(player.Id);
+            if (mine.CarriedBy.Count > 0) {
+                SendDeliveryAnswer(player, report, name, value, DeliveryFailed);
+                Logger.Info($"The delivery '{name}' broke for {player.Username}, and another member still carries it");
+                return;
+            }
+
+            // A member who hasn't answered the break of the local player yet may still carry theirs. Failing it now
+            // dropped their answer that they do, and both games said it failed while it was still being carried. It
+            // fails with the last of the answers instead (OnDeliveryBreak).
+            if (!mine.Members.All(mine.FailedBy.Contains)) {
+                SendDeliveryAnswer(player, report, name, value, DeliveryFailed);
+                Logger.Info(
+                    $"The delivery '{name}' broke for {player.Username} too, which waits for the answers of the others"
+                );
+                return;
+            }
         }
 
         var wasActive = _brokenDeliveries.Remove(name) || (local.IsAccepted && !local.IsCompleted);
@@ -504,8 +566,8 @@ internal partial class CoopSave {
         EndWishTalk();
         var talk = new WishTalk(npc, fsms, false) { IsDelivery = true };
         _wishTalk = talk;
-        if (GetCheckedPartner() is { } partner) {
-            Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
+        if (_checkedMembers.Count > 0) {
+            SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkStarted));
         }
 
         Logger.Info($"Dialogue with '{npc.name}' can turn in a delivery");
@@ -534,34 +596,34 @@ internal partial class CoopSave {
         }
 
         _deliveredWishes[name] = value;
-        SendTalkChanges(talk, GetCurrentMarker() is { } marker ? FindPartner(marker) : null);
+        SendTalkChanges(talk);
         talk.ClearChanges();
         talk.AddWish(quest, value);
         talk.SentChanges = talk.Changes.Count;
-        Logger.Info($"The delivery '{name}' was turned in, sent to the partner at once");
+        Logger.Info($"The delivery '{name}' was turned in, sent to the members at once");
 
         SendDeliverySummon(talk);
     }
 
     /// <summary>
-    /// Asks the game of the partner to bring the partner to the character that took in a delivery.
+    /// Asks the games of the members to bring each of them to the character that took in a delivery. A member who is
+    /// close by already stays where they are.
     /// </summary>
     private void SendDeliverySummon(WishTalk talk) {
         var hero = HeroController.instance;
-        if (GetCheckedPartner() is not { } partner || hero == null) {
+        if (_checkedMembers.Count == 0 || hero == null) {
             return;
         }
 
         var position = (Vector2) hero.transform.position;
-        Send(new CoopSaveUpdate {
-            TargetId = partner.Id,
+        SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.DeliverySummon,
             Scene = talk.Scene,
             ObjectPath = talk.Path,
             Records = [GetSummonGate(talk.Scene, position)],
             Values = [position.x, position.y]
         });
-        Logger.Info($"Bringing {partner.Username} to the delivery at '{talk.Path}'");
+        Logger.Info($"Bringing {GetCheckedNames()} to the delivery at '{talk.Path}'");
     }
 
     /// <summary>
@@ -695,11 +757,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The partner turned in a delivery, so the local player is brought to its character once that is safe.
+    /// A member turned in a delivery, so the local player is brought to its character once that is safe. A newer one
+    /// of another member takes the place of one that still waits.
     /// </summary>
     private void OnDeliverySummon(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsPartner(player, marker) || _checkedWith != player.Id ||
-            _summon is { Stage: not SummonStage.Waiting }) {
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
+            !_checkedMembers.Contains(player.Id) || _summon is { Stage: not SummonStage.Waiting }) {
             return;
         }
 
@@ -713,16 +776,16 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Brings the local player to a delivery of the partner step by step: waits until they can be moved, goes to the
-    /// scene of the delivery, and moves the hero next to the partner while the screen is dark.
+    /// Brings the local player to a delivery of a member step by step: waits until they can be moved, goes to the scene
+    /// of the delivery, and moves the hero next to the member while the screen is dark.
     /// </summary>
-    private void UpdateDeliverySummon(HeroController hero, ClientPlayerData? partner) {
+    private void UpdateDeliverySummon(HeroController hero) {
         if (_summon is not { } summon) {
             return;
         }
 
         try {
-            if (partner == null || partner.Id != summon.PlayerId) {
+            if (!_checkedMembers.Contains(summon.PlayerId) || !_playerData.TryGetValue(summon.PlayerId, out var partner)) {
                 FinishSummon(hero);
                 return;
             }

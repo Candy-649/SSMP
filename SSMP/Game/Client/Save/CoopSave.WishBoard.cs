@@ -1,7 +1,9 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
+using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 using SSMP.Util;
@@ -9,13 +11,13 @@ using SSMP.Util;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Wish boards in a checked two-player save. Turning in wishes at a board and donating at it work like key dialogue about
-/// wishes (see CoopSave.WishTalk): they need the partner close by, and the partner pays their own copy of what the board
-/// takes and gets the reward too. Whether the partner has that copy is asked right then (see CoopSave.WishCopyCheck), and
-/// a wish they are short for stays on the board. Without the partner close by, the board still opens to look at and
-/// accept wishes, and its wishes that are ready to turn in stay on it. Both players can look at a board at the same
-/// time; while one of them turns in or donates there, the other's board opens without turning in and doesn't take a
-/// donation.
+/// Wish boards in a checked co-op save. Turning in wishes at a board and donating at it work like key dialogue about
+/// wishes (see CoopSave.WishTalk): they need every other member close by, and each of them pays their own copy of what
+/// the board takes and gets the reward too. Whether they have that copy is asked right then (see CoopSave.WishCopyCheck),
+/// and a wish that any of them is short for stays on the board. Without all of them close by, the board still opens to
+/// look at and accept wishes, and its wishes that are ready to turn in stay on it. Every player can look at a board at
+/// the same time; while one of them turns in or donates there, the others' boards open without turning in and don't take
+/// a donation.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -191,24 +193,25 @@ internal partial class CoopSave {
             return false;
         }
 
-        // The partner started to turn in or donate here while the local hero walked up to the board
-        if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
+        // A member started to turn in or donate here while the local hero walked up to the board
+        if (GetMemberTalkingAt(board) is { } talker) {
             Chat(Lang.Pick(
-                $"{GetPartnerName()} is turning in or donating at this board right now, so it opens without " +
+                $"{talker.Username} is turning in or donating at this board right now, so it opens without " +
                 "turning in wishes.",
-                $"{GetPartnerName()} 正在这块板子上交愿望或捐赠，所以这次只打开，不交愿望。"
+                $"{talker.Username} 正在这块板子上交愿望或捐赠，所以这次只打开，不交愿望。"
             ));
             _wishTalk = new WishTalk(board, fsms, false);
             return true;
         }
 
-        var partner = GetCheckedPartner();
+        var members = GetCheckedMembers();
         var absence = GetBoardAbsence(
-            partner,
             marker,
-            Lang.Pick("turn in wishes at this board", "在这块板子上交愿望")
+            members,
+            Lang.Pick("turn in wishes at this board", "在这块板子上交愿望"),
+            out var away
         );
-        if (partner == null || absence != null) {
+        if (absence != null) {
             // Looking at the board again soon doesn't repeat why its wishes stay
             if (Time.unscaledTime >= _nextBoardHoldNoticeTime) {
                 _nextBoardHoldNoticeTime = Time.unscaledTime + BoardHoldNoticeInterval;
@@ -216,15 +219,15 @@ internal partial class CoopSave {
                     $"{absence} Until then, the board opens without turning them in.",
                     $"{absence} 在那之前，这块板子只会打开，不交愿望。"
                 ));
-                if (partner != null) {
+                foreach (var member in away) {
                     Send(CreateWishTalkUpdate(
-                        partner.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
+                        member.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
                     ));
                 }
             }
 
             _wishTalk = new WishTalk(board, fsms, false);
-            Logger.Info($"Wishes stay on the board '{board.name}', because the partner isn't close by");
+            Logger.Info($"Wishes stay on the board '{board.name}', because not every member is close by");
             return true;
         }
 
@@ -240,8 +243,8 @@ internal partial class CoopSave {
 
         var talk = new WishTalk(board, fsms, true);
         _wishTalk = talk;
-        Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
-        Logger.Info($"Wishes are turned in at the board '{board.name}' with {partner.Username} close by");
+        SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkStarted));
+        Logger.Info($"Wishes are turned in at the board '{board.name}' with {GetCheckedNames()} close by");
         return false;
     }
 
@@ -333,12 +336,17 @@ internal partial class CoopSave {
         try {
             // It still shows, since the list is only drawn again once something on it was taken, and picking it asked
             // the local player to pay for a wish that is done
-            if (_checkedWith != null && quest is FullQuestBase { IsCompleted: true } done && done != null &&
+            if (_checkedMembers.Count > 0 && quest is FullQuestBase { IsCompleted: true } done && done != null &&
                 BoardQuestActionedMethod != null && BoardFadeRoutineField?.GetValue(self) == null) {
-                Chat(Lang.Pick(
-                    $"{GetPartnerName()} already turned in this wish with you.",
-                    $"这个愿望 {GetPartnerName()} 已经和你一起交过了。"
-                ));
+                Chat(_checkedMembers.Count == 1
+                    ? Lang.Pick(
+                        $"{GetPartnerName()} already turned in this wish with you.",
+                        $"这个愿望 {GetPartnerName()} 已经和你一起交过了。"
+                    )
+                    : Lang.Pick(
+                        "Your teammates already turned in this wish with you.",
+                        "这个愿望队友们已经和你一起交过了。"
+                    ));
                 BoardQuestActionedMethod.Invoke(self, null);
                 return;
             }
@@ -348,7 +356,7 @@ internal partial class CoopSave {
 
         orig(self, quest);
         try {
-            if (_checkedWith != null && quest is FullQuestBase { IsDonateType: true } donation && donation != null &&
+            if (_checkedMembers.Count > 0 && quest is FullQuestBase { IsDonateType: true } donation && donation != null &&
                 BoardYesNoQuestField?.GetValue(self) as FullQuestBase == donation) {
                 _donationPrompt = self;
             }
@@ -358,10 +366,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Hook for QuestItemBoard.AcceptDonation: a donation needs the partner close by and able to pay too, since both
-    /// players pay it, and not using the board themselves. Whether they can pay is asked right then: the yes waits for
-    /// their game's answer and runs again once it came (see CoopSave.WishCopyCheck). Otherwise the board goes back to its
-    /// list. A wish that the partner completed while the board asked is never paid again.
+    /// Hook for QuestItemBoard.AcceptDonation: a donation needs every other member close by and able to pay too, since
+    /// every player pays it, and none of them using the board themselves. Whether they can pay is asked right then: the
+    /// yes waits for their games' answers and runs again once they came (see CoopSave.WishCopyCheck). Otherwise the board
+    /// goes back to its list. A wish that a member completed while the board asked is never paid again.
     /// </summary>
     private void OnBoardAcceptDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
         _donationPrompt = null;
@@ -383,16 +391,16 @@ internal partial class CoopSave {
 
             if (_everChecked && GetCurrentMarker() is { } marker &&
                 BoardYesNoQuestField?.GetValue(self) is FullQuestBase quest && quest != null) {
-                if (!CanDonateTogether(self, quest, marker, out var board, out var partner)) {
+                if (!CanDonateTogether(self, quest, marker, out var board, out var members)) {
                     self.DeclineDonation();
                     return;
                 }
 
-                if (board != null && partner != null) {
+                if (board != null && members is { Count: > 0 }) {
                     if (NeedsPartnerCopy(quest)) {
                         if (resumed == null) {
-                            // Runs again from UpdateWishCopyChecks once the partner answered or the wait ran out
-                            AskBeforeDonation(self, quest, partner, () => OnBoardAcceptDonation(orig, self));
+                            // Runs again from UpdateWishCopyChecks once every member answered or the wait ran out
+                            AskBeforeDonation(self, quest, members, () => OnBoardAcceptDonation(orig, self));
                             return;
                         }
 
@@ -402,7 +410,7 @@ internal partial class CoopSave {
                         }
                     }
 
-                    StartDonationTalk(board, partner, quest);
+                    StartDonationTalk(board, members, quest);
                 }
             } else if (resumed != null) {
                 // The save stopped being shared while the donation waited, so it isn't paid for both
@@ -496,75 +504,81 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Checks that a donation at a board can go through with the partner: close by, and not using the board
-    /// themselves. The local player hears why not.
+    /// Checks that a donation at a board can go through with every other member: close by, and none of them using the
+    /// board themselves. The local player hears why not.
     /// </summary>
     /// <param name="itemBoard">The list of the board that asked.</param>
     /// <param name="quest">The wish that the donation completes.</param>
     /// <param name="marker">The pairing of the loaded save.</param>
-    /// <param name="board">The board, or null if it can't be found, in which case the partner doesn't pay.</param>
-    /// <param name="partner">The partner who pays too, or null if they don't.</param>
+    /// <param name="board">The board, or null if it can't be found, in which case the members don't pay.</param>
+    /// <param name="members">The members who pay too, or null if they don't.</param>
     /// <returns>Whether the donation may go through.</returns>
     private bool CanDonateTogether(
         QuestItemBoard itemBoard,
         FullQuestBase quest,
         CoopSaveMarker marker,
         out QuestBoardInteractable? board,
-        out ClientPlayerData? partner
+        out List<ClientPlayerData>? members
     ) {
-        partner = null;
+        members = null;
         board = FindBoard(itemBoard);
         if (board == null) {
-            Logger.Warn($"Could not find the board of the donation '{quest.name}', so the partner doesn't pay it");
+            Logger.Warn($"Could not find the board of the donation '{quest.name}', so the members don't pay it");
             return true;
         }
 
-        if (_partnerTalk?.Npc is { } partnerNpc && partnerNpc == board) {
+        if (GetMemberTalkingAt(board) is { } talker) {
             Chat(Lang.Pick(
-                $"{GetPartnerName()} is turning in or donating at this board right now. Donate once they are done.",
-                $"{GetPartnerName()} 正在这块板子上交愿望或捐赠，等交完再捐。"
+                $"{talker.Username} is turning in or donating at this board right now. Donate once they are done.",
+                $"{talker.Username} 正在这块板子上交愿望或捐赠，等交完再捐。"
             ));
             return false;
         }
 
-        partner = GetCheckedPartner();
+        var checkedMembers = GetCheckedMembers();
         var absence = GetBoardAbsence(
-            partner,
             marker,
-            Lang.Pick("donate, since both of you pay", "一起捐赠（两个人都要出）")
+            checkedMembers,
+            marker.Members.Count <= 1
+                ? Lang.Pick("donate, since both of you pay", "一起捐赠（两个人都要出）")
+                : Lang.Pick("donate, since all of you pay", "一起捐赠（每个人都要出）"),
+            out var away
         );
-        if (partner == null || absence != null) {
-            Chat(absence!);
-            if (partner != null) {
+        if (absence != null) {
+            Chat(absence);
+            foreach (var member in away) {
                 Send(CreateWishTalkUpdate(
-                    partner.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
+                    member.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
                 ));
             }
 
             return false;
         }
 
+        members = checkedMembers;
         return true;
     }
 
     /// <summary>
-    /// Records a donation that goes through with the use of its board, which the partner can't use until it went
+    /// Records a donation that goes through with the use of its board, which the members can't use until it went
     /// through.
     /// </summary>
-    private void StartDonationTalk(QuestBoardInteractable board, ClientPlayerData partner, FullQuestBase quest) {
+    private void StartDonationTalk(QuestBoardInteractable board, List<ClientPlayerData> members, FullQuestBase quest) {
         // The use of the board may have stopped recording while its list stayed open for long
         var talk = _wishTalk;
         if (talk == null || talk.Npc != board) {
             EndWishTalk();
             talk = new WishTalk(board, GetBoardFsms(board), true);
             _wishTalk = talk;
-            Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
+            SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkStarted));
         } else if (!talk.IsKey) {
             talk.IsKey = true;
-            Send(CreateWishTalkUpdate(partner.Id, talk.Scene, talk.Path, WishTalkStarted));
+            SendToMembers(CreateWishTalkUpdate(CoopTargets.Everyone, talk.Scene, talk.Path, WishTalkStarted));
         }
 
-        Logger.Info($"Donation '{quest.name}' goes through with {partner.Username} close by");
+        Logger.Info(
+            $"Donation '{quest.name}' goes through with {JoinNames(members.Select(member => member.Username))} close by"
+        );
     }
 
     /// <summary>
@@ -595,29 +609,60 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Why the partner can't join a use of a board now, for the message to the local player, or null if they can. Never
-    /// null without a checked partner.
+    /// The member whose key dialogue or use of a board is with a character or board, or null.
     /// </summary>
-    private static string? GetBoardAbsence(ClientPlayerData? partner, CoopSaveMarker marker, string use) {
-        if (partner == null) {
+    private ClientPlayerData? GetMemberTalkingAt(NPCControlBase npc) {
+        foreach (var pair in _partnerTalks) {
+            if (pair.Value.Npc is { } talkNpc && talkNpc != null && talkNpc == npc &&
+                _playerData.TryGetValue(pair.Key, out var member)) {
+                return member;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Why the other members can't join a use of a board now, for the message to the local player, or null if they
+    /// can. A member who isn't checked in is named from the pairing.
+    /// </summary>
+    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="members">The checked members.</param>
+    /// <param name="use">What the board would be used for, for the message.</param>
+    /// <param name="away">The checked members who aren't close by, who hear that they are wanted.</param>
+    private string? GetBoardAbsence(
+        CoopSaveMarker marker,
+        List<ClientPlayerData> members,
+        string use,
+        out List<ClientPlayerData> away
+    ) {
+        away = members.FindAll(member => GetWishTalkAbsence(member) != null);
+        var missing = MatchMembers(marker)
+            .Where(match => match.Player == null || !_checkedMembers.Contains(match.Player.Id))
+            .Select(match => match.Member.Name)
+            .ToList();
+        if (missing.Count > 0) {
+            var names = JoinNames(missing);
             return Lang.Pick(
-                $"{marker.PartnerName} needs to be here too to {use}.",
-                $"{marker.PartnerName} 也要在场，才能{use}。"
+                missing.Count == 1 ? $"{names} needs to be here too to {use}." : $"{names} need to be here too to {use}.",
+                $"{names} 也要在场，才能{use}。"
             );
         }
 
-        if (GetWishTalkAbsence(partner) == null) {
+        if (away.Count == 0) {
             return null;
         }
 
-        return partner.IsInLocalScene && partner.PlayerObject != null
+        var awayNames = JoinNames(away.Select(member => member.Username));
+        var one = away.Count == 1;
+        return away.TrueForAll(member => member.IsInLocalScene && member.PlayerObject != null)
             ? Lang.Pick(
-                $"{partner.Username} needs to come closer to {use}.",
-                $"{partner.Username} 要再靠近一点，才能{use}。"
+                one ? $"{awayNames} needs to come closer to {use}." : $"{awayNames} need to come closer to {use}.",
+                $"{awayNames} 要再靠近一点，才能{use}。"
             )
             : Lang.Pick(
-                $"{partner.Username} needs to be here too to {use}.",
-                $"{partner.Username} 也要在场，才能{use}。"
+                one ? $"{awayNames} needs to be here too to {use}." : $"{awayNames} need to be here too to {use}.",
+                $"{awayNames} 也要在场，才能{use}。"
             );
     }
 
