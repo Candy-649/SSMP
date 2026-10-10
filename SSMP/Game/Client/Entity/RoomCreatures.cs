@@ -311,7 +311,7 @@ internal class RoomCreatures {
 
         var entity = processor.Entities[0];
         Logger.Info($"Notifying server of the room making entity ({creature.name}, {entity.Type}) with ID {entity.Id}");
-        _netClient.UpdateManager.SetEntitySpawn(entity.Id, EntityType.Room, entity.Type);
+        _entityManager.TellSpawn(entity.Id, EntityType.Room, entity.Type);
     }
 
     /// <summary>

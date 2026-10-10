@@ -48,6 +48,11 @@ internal class TintComponent : EntityComponent {
         };
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        _lastSent = null;
+    }
+
     /// <summary>
     /// Callback method to check whether the colour of the sprite has changed and settled.
     /// </summary>

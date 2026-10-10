@@ -35,6 +35,11 @@ internal class VelocityComponent : EntityComponent {
         _lastVelocity = rigidbody.velocity;
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        _lastVelocity = new Vector2(float.NaN, float.NaN);
+    }
+
     /// <summary>
     /// Callback method to check for updates.
     /// </summary>

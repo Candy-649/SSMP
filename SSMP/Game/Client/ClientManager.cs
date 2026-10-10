@@ -259,6 +259,16 @@ internal class ClientManager : IClientManager {
     private float _roomStateAskedAt = float.MinValue;
 
     /// <summary>
+    /// The least time between two answers to the server asking for the state of the room this game runs, in seconds.
+    /// </summary>
+    private const float RoomResendInterval = 3f;
+
+    /// <summary>
+    /// When the state of the room this game runs was last sent for the server, in unscaled seconds.
+    /// </summary>
+    private float _roomResentAt = float.MinValue;
+
+    /// <summary>
     /// When this game last heard that each other player came into or left its room, in unscaled seconds.
     /// </summary>
     private readonly Dictionary<ushort, float> _roomEventAt = new();
@@ -577,6 +587,10 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.RoomState,
             OnRoomState
         );
+        _packetManager.RegisterClientUpdatePacketHandler(
+            ClientUpdatePacketId.RoomResendRequest,
+            OnRoomResendRequest
+        );
         _packetManager.RegisterClientUpdatePacketHandler<ClientPlayerLeaveScene>(
             ClientUpdatePacketId.PlayerLeaveScene,
             OnPlayerLeaveScene
@@ -665,6 +679,7 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerEnterScene);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerAlreadyInScene);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.RoomState);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.RoomResendRequest);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerLeaveScene);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerRoom);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerUpdate);
@@ -1193,6 +1208,39 @@ internal class ClientManager : IClientManager {
         _roomStateAskedAt = Time.unscaledTime;
         Logger.Info($"Nothing arrived for {gap:F1}s, so asking for the state of this room again");
         _netClient.UpdateManager.SetRoomStateRequest();
+    }
+
+    /// <summary>
+    /// Callback for the server asking for the state of the room that this game runs: nothing of this game's reached it
+    /// for a while, and what this game sent then may never come (ServerManager.OnClientReceiveResumed) - an enemy killed
+    /// here stayed alive for the other player. The state goes in one piece (EntityManager.MakeRoomSnapshot), which the
+    /// server keeps and tells the other players of the room; and what the components of each creature last said is said
+    /// again as it is now (Entity.SendStateAgain).
+    /// </summary>
+    private void OnRoomResendRequest() {
+        if (!_fullSynchronisation || !_sceneHostDetermined || !_entityManager.IsSceneHost) {
+            Logger.Info("The server asked for the state of this room, which this game does not run, so nothing is sent");
+            return;
+        }
+
+        if (Time.unscaledTime - _roomResentAt < RoomResendInterval) {
+            return;
+        }
+
+        _roomResentAt = Time.unscaledTime;
+        var sceneName = SceneManager.GetActiveScene().name;
+        var snapshot = _entityManager.MakeRoomSnapshot(sceneName);
+        if (snapshot != null) {
+            _netClient.UpdateManager.SetRoomSnapshot(snapshot);
+        }
+
+        _entityManager.SendStateAgain();
+        Logger.Info(
+            $"The server asked for the state of {sceneName}, which this game runs, so it is sent again: " +
+            (snapshot != null
+                ? $"{snapshot.ReliableEntityUpdateList.Count} entities, {snapshot.EntitySpawnList.Count} spawned"
+                : "what each creature's parts are only")
+        );
     }
 
     /// <summary>

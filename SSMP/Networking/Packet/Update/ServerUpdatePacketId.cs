@@ -125,5 +125,13 @@ public enum ServerUpdatePacketId {
     /// entering the room, it is answered with <see cref="ClientUpdatePacketId.RoomState"/>, which the player's game
     /// takes as a correction of a room it is already in.
     /// </summary>
-    RoomStateRequest = 22
+    RoomStateRequest = 22,
+
+    /// <summary>
+    /// The state of the room this player's game runs, sent when the server asks for it
+    /// (<see cref="ClientUpdatePacketId.RoomResendRequest"/>): whether each creature is on, where it stands, the clip it
+    /// shows, its health and what its FSMs hold, all in one piece. The server keeps it in place of what it had, and
+    /// tells the room's other players the state of the room again (<see cref="ClientUpdatePacketId.RoomState"/>).
+    /// </summary>
+    RoomSnapshot = 23
 }

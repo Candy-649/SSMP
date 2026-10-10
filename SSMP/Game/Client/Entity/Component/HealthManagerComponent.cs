@@ -317,6 +317,36 @@ internal class HealthManagerComponent : EntityComponent {
         }
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        if (_healthManager.Host != null) {
+            _lastInvincible = !_healthManager.Host.IsInvincible;
+        }
+    }
+
+    /// <inheritdoc />
+    public override void AddToRoomSnapshot(System.Collections.Generic.List<EntityNetworkData> data) {
+        if (IsControlled) {
+            return;
+        }
+
+        // The health as it is, as a change from itself to itself: a copy that hears it as it happens adds nothing to
+        // its own, and the state of a room takes from it only a death that was missed (UpdateHealth). None for a
+        // creature that is alive with no health - some are set up with none of their own - since a copy told it has
+        // none dies
+        var hp = GetCurrentHp();
+        if (hp <= 0 && _healthManager.Host != null && !_healthManager.Host.GetIsDead()) {
+            return;
+        }
+        var hpData = new EntityNetworkData {
+            Type = EntityComponentType.Health
+        };
+        hpData.Packet.Write(hp);
+        hpData.Packet.Write(hp);
+        hpData.Packet.Write(_currentHealthEpoch);
+        data.Add(hpData);
+    }
+
     /// <summary>
     /// Callback method for updates to check whether health or invincibility changes.
     /// </summary>

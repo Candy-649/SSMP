@@ -32,6 +32,13 @@ internal class ChildrenActivationComponent : EntityComponent {
         _clientChildren = gameObject.Client.GetChildren();
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        if (_hostChildren.Count > 0 && _hostChildren[0] != null) {
+            _lastActive = !_hostChildren[0].activeSelf;
+        }
+    }
+
     /// <summary>
     /// Callback for checking the gravity scale each update.
     /// </summary>

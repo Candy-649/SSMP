@@ -27,6 +27,13 @@ internal class SpriteRendererComponent : EntityComponent {
         _lastEnabled = spriteRenderer.Host.enabled;
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        if (_spriteRenderer.Host != null) {
+            _lastEnabled = !_spriteRenderer.Host.enabled;
+        }
+    }
+
     /// <summary>
     /// Callback method to check for sprite renderer updates.
     /// </summary>

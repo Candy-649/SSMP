@@ -268,6 +268,9 @@ internal abstract class ServerManager : IServerManager {
 
         // Register a handler for when a client wants to connect
         _netServer.ConnectionRequestEvent += OnConnectionRequest;
+
+        // And one for when something arrives from a client after a stretch in which nothing did
+        _netServer.ClientReceiveResumedEvent += OnClientReceiveResumed;
     }
 
     /// <summary>
@@ -396,6 +399,10 @@ internal abstract class ServerManager : IServerManager {
                 ServerUpdatePacketId.ReliableEntityUpdate,
                 OnReliableEntityUpdate
             );
+            _packetManager.RegisterServerUpdatePacketHandler<ClientPlayerAlreadyInScene>(
+                ServerUpdatePacketId.RoomSnapshot,
+                OnRoomSnapshot
+            );
             _packetManager.RegisterServerUpdatePacketHandler<SaveUpdate>(
                 ServerUpdatePacketId.SaveUpdate,
                 OnSaveUpdate
@@ -418,6 +425,7 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SceneResyncRequest);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.RoomStateRequest);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.RoomSnapshot);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopSaveUpdate);
@@ -655,9 +663,12 @@ internal abstract class ServerManager : IServerManager {
                     entityUpdate.Position = entityData.Position;
                 }
 
+                // Copies of what is kept, here and for the FSMs below: the packet is written on another thread, while
+                // what is kept goes on changing on this one as it is heard
                 if (!entityData.Scale.IsEmpty) {
                     entityUpdate.UpdateTypes.Add(EntityUpdateType.Scale);
-                    entityUpdate.Scale = entityData.Scale;
+                    entityUpdate.Scale = new EntityUpdate.ScaleData();
+                    entityUpdate.Scale.Merge(entityData.Scale);
                 }
 
                 if (entityData.AnimationId.HasValue) {
@@ -688,7 +699,9 @@ internal abstract class ServerManager : IServerManager {
                     reliableEntityUpdate.UpdateTypes.Add(EntityUpdateType.HostFsm);
 
                     foreach (var pair in entityData.HostFsmData) {
-                        reliableEntityUpdate.HostFsmData[pair.Key] = pair.Value;
+                        var fsmData = new EntityHostFsmData();
+                        fsmData.MergeData(pair.Value);
+                        reliableEntityUpdate.HostFsmData[pair.Key] = fsmData;
                     }
                 }
 
@@ -996,6 +1009,7 @@ internal abstract class ServerManager : IServerManager {
             _entityData[serverEntityKey] = entityData;
         }
 
+        var now = DateTime.UtcNow;
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Position)) {
             SendDataInSameScene(
                 id,
@@ -1009,6 +1023,7 @@ internal abstract class ServerManager : IServerManager {
             );
 
             entityData.Position = entityUpdate.Position;
+            entityData.HeardAt[HeardPosition] = now;
         }
 
         // Not kept for players who walk in later, unlike the position: this says how far the scene host has got
@@ -1040,6 +1055,7 @@ internal abstract class ServerManager : IServerManager {
             );
 
             entityData.Scale.Merge(entityUpdate.Scale);
+            entityData.HeardAt[HeardScale] = now;
         }
 
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Animation)) {
@@ -1057,6 +1073,7 @@ internal abstract class ServerManager : IServerManager {
 
             entityData.AnimationId = entityUpdate.AnimationId;
             entityData.AnimationWrapMode = entityUpdate.AnimationWrapMode;
+            entityData.HeardAt[HeardClip] = now;
         }
     }
 
@@ -1088,6 +1105,7 @@ internal abstract class ServerManager : IServerManager {
             _entityData[serverEntityKey] = entityData;
         }
 
+        var now = DateTime.UtcNow;
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Active)) {
             SendDataInSameScene(
                 id,
@@ -1101,6 +1119,7 @@ internal abstract class ServerManager : IServerManager {
             );
 
             entityData.IsActive = entityUpdate.IsActive;
+            entityData.HeardAt[HeardActive] = now;
         }
 
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Data)) {
@@ -1134,21 +1153,11 @@ internal abstract class ServerManager : IServerManager {
                 );
             }
 
-            void ReplaceExistingDataWithSameType(EntityNetworkData updateData) {
-                var existingData = entityData.GenericData.Find(d => d.Type == updateData.Type
-                );
-                if (existingData == null) {
-                    entityData.GenericData.Add(updateData.Clone());
-                } else {
-                    existingData.Packet = new Packet(updateData.Packet.ToArray());
-                    existingData.SenderId = updateData.SenderId;
-                }
-            }
-
             if (filteredGenericData.Count > 0) {
                 foreach (var updateData in filteredGenericData) {
                     if (updateData.Type > EntityComponentType.Death) {
-                        ReplaceExistingDataWithSameType(updateData);
+                        KeepGenericData(entityData, updateData);
+                        entityData.HeardAt[(int) updateData.Type] = now;
                     }
                 }
             }
@@ -1171,6 +1180,7 @@ internal abstract class ServerManager : IServerManager {
                 }
 
                 existingData.MergeData(data);
+                entityData.HeardAt[HeardFsmVariables + fsmIndex] = now;
 
                 SendDataInSameScene(
                     id,
@@ -1397,6 +1407,205 @@ internal abstract class ServerManager : IServerManager {
             id,
             playerData.CurrentScene,
             otherId => { _netServer.GetUpdateManagerForClient(otherId)?.AddPlayerDeathData(id); }
+        );
+    }
+
+    /// <summary>
+    /// Keeps the data of a kind about an entity in place of what was kept of that kind before, for a player who walks in
+    /// later and for the state of the room told again.
+    /// </summary>
+    /// <param name="entityData">What the server keeps of the entity.</param>
+    /// <param name="updateData">The data.</param>
+    private static void KeepGenericData(ServerEntityData entityData, EntityNetworkData updateData) {
+        var existingData = entityData.GenericData.Find(d => d.Type == updateData.Type);
+        if (existingData == null) {
+            entityData.GenericData.Add(updateData.Clone());
+        } else {
+            existingData.Packet = new Packet(updateData.Packet.ToArray());
+            existingData.SenderId = updateData.SenderId;
+        }
+    }
+
+    /// <summary>
+    /// The kinds of things heard of an entity besides its data, which go by their component type (see
+    /// <see cref="ServerEntityData.HeardAt"/>): whether it is on, its clip, its scale, where it stands, and the variables
+    /// of each FSM from this one on.
+    /// </summary>
+    private const int HeardActive = -1, HeardClip = -2, HeardScale = -3, HeardPosition = -4, HeardFsmVariables = 1000;
+
+    /// <summary>
+    /// How recently a kind of thing must have been heard as it happened for the state of a room to leave it be, in
+    /// seconds (see <see cref="OnRoomSnapshot"/>).
+    /// </summary>
+    private const double RoomSnapshotYieldTime = 1.0;
+
+    /// <summary>
+    /// The shortest stretch without anything arriving from the player whose game runs a room, in seconds, after which
+    /// that player is asked for the state of it (see <see cref="OnClientReceiveResumed"/>).
+    /// </summary>
+    private const double RoomResendGap = 3.0;
+
+    /// <summary>
+    /// The least time between two requests to the same player for the state of the room their game runs, in seconds.
+    /// </summary>
+    private const double RoomResendMinInterval = 5.0;
+
+    /// <summary>
+    /// When each player was last asked for the state of the room their game runs.
+    /// </summary>
+    private readonly ConcurrentDictionary<ushort, DateTime> _roomResendAskedAt = new();
+
+    /// <summary>
+    /// Callback for something arriving from a player after a stretch in which nothing did. What their game sent in it
+    /// may never come, and for the room it runs that is what every other player sees of it, and what a player who walks
+    /// in later is given: an enemy killed there stays alive for everyone else. So the player is asked for the state of
+    /// the room (USER 10-10: "把反方向也做了"). The other way round - a player who missed what the server sent - is
+    /// that player's to ask for (ClientManager.OnReceiveResumed).
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="gap">How long nothing arrived from them, in seconds.</param>
+    private void OnClientReceiveResumed(ushort id, double gap) {
+        if (gap < RoomResendGap || !_fullSynchronisation || !_playerData.TryGetValue(id, out var playerData) ||
+            !playerData.IsSceneHost || string.IsNullOrEmpty(playerData.CurrentScene)) {
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        if (_roomResendAskedAt.TryGetValue(id, out var askedAt) && (now - askedAt).TotalSeconds < RoomResendMinInterval) {
+            return;
+        }
+
+        _roomResendAskedAt[id] = now;
+        Logger.Info(
+            $"Nothing arrived from ({id}, {playerData.Username}) for {gap:F1}s, and their game runs " +
+            $"'{playerData.CurrentScene}', so they are asked for the state of it"
+        );
+        _netServer.GetUpdateManagerForClient(id)?.SetRoomResendRequest();
+    }
+
+    /// <summary>
+    /// Callback for the state of a room from the game that runs it, which the server asked for (see
+    /// <see cref="OnClientReceiveResumed"/>). It is kept in place of what the server had of the room, except what was
+    /// heard as it happened just before: that came in the same packet and was taken in first, since a packet's contents
+    /// are taken in in the order of their kind, so it is the newer of the two. The room's other players are then told
+    /// the state of the room again, which they take as a correction (ClientManager.OnRoomState).
+    /// </summary>
+    /// <param name="id">The ID of the player whose game runs the room.</param>
+    /// <param name="snapshot">The state of the room.</param>
+    private void OnRoomSnapshot(ushort id, ClientPlayerAlreadyInScene snapshot) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
+            return;
+        }
+
+        var sceneName = playerData.CurrentScene;
+        if (string.IsNullOrEmpty(sceneName) || snapshot.SceneName != sceneName || !playerData.IsSceneHost) {
+            Logger.Info(
+                $"The state of '{snapshot.SceneName}' came from ({id}, {playerData.Username}), who " +
+                (snapshot.SceneName != sceneName ? $"is in '{sceneName}' now" : "does not run it any more") +
+                ", so it is not kept"
+            );
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+
+        bool HeardJustNow(ServerEntityData data, int kind) =>
+            data.HeardAt.TryGetValue(kind, out var at) && (now - at).TotalSeconds < RoomSnapshotYieldTime;
+
+        // Health is the exception: what the other players' games send of it is what their copies took from their own
+        // hits, which go on while the creature they show is already dead in the game that runs it; and nothing heard
+        // is newer than a death
+        bool YieldsTo(ServerEntityData data, EntityNetworkData genericData) {
+            if (!HeardJustNow(data, (int) genericData.Type)) {
+                return false;
+            }
+
+            if (genericData.Type != EntityComponentType.Health) {
+                return true;
+            }
+
+            var packet = new Packet(genericData.Packet.ToArray());
+            packet.ReadInt();
+            return packet.ReadInt() > 0 &&
+                   data.GenericData.Find(kept => kept.Type == EntityComponentType.Health)?.SenderId == id;
+        }
+
+        ServerEntityData DataOf(ushort entityId) {
+            var key = new ServerEntityKey(sceneName, entityId);
+            if (!_entityData.TryGetValue(key, out var data)) {
+                data = new ServerEntityData();
+                _entityData[key] = data;
+            }
+
+            return data;
+        }
+
+        foreach (var spawn in snapshot.EntitySpawnList) {
+            var data = DataOf(spawn.Id);
+            data.Spawned = true;
+            data.SpawningType = spawn.SpawningType;
+            data.SpawnedType = spawn.SpawnedType;
+        }
+
+        foreach (var update in snapshot.EntityUpdateList) {
+            var data = DataOf(update.Id);
+            if (update.UpdateTypes.Contains(EntityUpdateType.Position) && !HeardJustNow(data, HeardPosition)) {
+                data.Position = update.Position;
+            }
+
+            if (update.UpdateTypes.Contains(EntityUpdateType.Scale) && !HeardJustNow(data, HeardScale)) {
+                data.Scale.Merge(update.Scale);
+            }
+
+            if (update.UpdateTypes.Contains(EntityUpdateType.Animation) && !HeardJustNow(data, HeardClip)) {
+                data.AnimationId = update.AnimationId;
+                data.AnimationWrapMode = update.AnimationWrapMode;
+            }
+        }
+
+        foreach (var update in snapshot.ReliableEntityUpdateList) {
+            var data = DataOf(update.Id);
+            if (update.UpdateTypes.Contains(EntityUpdateType.Active) && !HeardJustNow(data, HeardActive)) {
+                data.IsActive = update.IsActive;
+            }
+
+            if (update.UpdateTypes.Contains(EntityUpdateType.Data)) {
+                foreach (var genericData in update.GenericData) {
+                    if (genericData.Type > EntityComponentType.Death && !YieldsTo(data, genericData)) {
+                        genericData.SenderId = id;
+                        KeepGenericData(data, genericData);
+                    }
+                }
+            }
+
+            if (update.UpdateTypes.Contains(EntityUpdateType.HostFsm)) {
+                foreach (var (fsmIndex, fsmData) in update.HostFsmData) {
+                    if (HeardJustNow(data, HeardFsmVariables + fsmIndex)) {
+                        continue;
+                    }
+
+                    if (!data.HostFsmData.TryGetValue(fsmIndex, out var kept)) {
+                        kept = new EntityHostFsmData();
+                        data.HostFsmData[fsmIndex] = kept;
+                    }
+
+                    kept.MergeData(fsmData);
+                }
+            }
+        }
+
+        var told = 0;
+        foreach (var otherPlayerData in _playerData.Values) {
+            if (otherPlayerData.Id != id && otherPlayerData.CurrentScene == sceneName) {
+                OnClientEnterScene(otherPlayerData, roomState: true);
+                told++;
+            }
+        }
+
+        Logger.Info(
+            $"Kept the state of '{sceneName}' from ({id}, {playerData.Username}): " +
+            $"{snapshot.ReliableEntityUpdateList.Count} entities, {snapshot.EntitySpawnList.Count} spawned; told " +
+            $"{told} other players"
         );
     }
 

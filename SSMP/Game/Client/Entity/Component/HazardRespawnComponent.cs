@@ -148,6 +148,13 @@ internal class HazardRespawnComponent : EntityComponent {
     //     }
     // }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        if (_ascendRespawnsObject) {
+            _lastActiveAscendsRespawns = !_ascendRespawnsObject.activeSelf;
+        }
+    }
+
     /// <summary>
     /// Update hook to check for changes in the active state of the Ascend Respawns object and network them.
     /// </summary>

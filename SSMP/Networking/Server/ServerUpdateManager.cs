@@ -483,6 +483,16 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Asks this player, whose game runs their room, for the state of it, in the current packet (see
+    /// <see cref="ClientUpdatePacketId.RoomResendRequest"/>).
+    /// </summary>
+    public void SetRoomResendRequest() {
+        lock (Lock) {
+            CurrentUpdatePacket.SetSendingPacketData(ClientUpdatePacketId.RoomResendRequest, new ReliableEmptyData());
+        }
+    }
+
+    /// <summary>
     /// Add player death data to the current packet.
     /// </summary>
     /// <param name="id">The ID of the player.</param>

@@ -303,6 +303,11 @@ internal class PartsComponent : EntityComponent {
         return path.ToString();
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        _lastSent = null;
+    }
+
     /// <summary>
     /// Callback method to check whether the parts have changed and settled.
     /// </summary>

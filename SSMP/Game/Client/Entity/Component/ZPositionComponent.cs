@@ -20,6 +20,11 @@ internal class ZPositionComponent : EntityComponent {
         _lastZ = gameObject.Host != null ? gameObject.Host.transform.position.z : 0f;
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        _lastZ = float.NaN;
+    }
+
     /// <summary>
     /// Callback for checking the Z-position each update.
     /// </summary>

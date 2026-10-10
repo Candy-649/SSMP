@@ -30,6 +30,11 @@ internal class BodyTypeComponent : EntityComponent {
         _hostBody = hostBody;
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        _lastType = null;
+    }
+
     /// <summary>
     /// Callback for checking the kind of body each update.
     /// </summary>

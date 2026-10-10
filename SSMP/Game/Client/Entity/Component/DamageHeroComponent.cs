@@ -44,6 +44,13 @@ internal class DamageHeroComponent : EntityComponent {
         ).ToArray();
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        for (var i = 0; i < _lastDamageDealt.Length; i++) {
+            _lastDamageDealt[i] = int.MinValue;
+        }
+    }
+
     /// <summary>
     /// Callback method to check for damage hero updates.
     /// </summary>

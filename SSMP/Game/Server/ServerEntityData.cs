@@ -53,6 +53,12 @@ internal class ServerEntityData {
     /// </summary>
     public Dictionary<byte, EntityHostFsmData> HostFsmData { get; }
 
+    /// <summary>
+    /// When the server last took in each kind of thing about this entity as it happened, by the kind (see
+    /// ServerManager.OnRoomSnapshot).
+    /// </summary>
+    public Dictionary<int, System.DateTime> HeardAt { get; } = new();
+
     public ServerEntityData() {
         Scale = new EntityUpdate.ScaleData();
         GenericData = [];

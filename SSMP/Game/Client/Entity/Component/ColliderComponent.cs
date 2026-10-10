@@ -27,6 +27,11 @@ internal class ColliderComponent : EntityComponent {
         _collider = collider;
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        _lastEnabled = null;
+    }
+
     /// <summary>
     /// Callback for checking the collider each update.
     /// </summary>

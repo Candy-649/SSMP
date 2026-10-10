@@ -96,6 +96,12 @@ internal class NetServer : INetServer {
     public event Action<ushort>? ClientTimeoutEvent;
 
     /// <summary>
+    /// Event that is called when something arrives from a client after a stretch in which nothing did, with the ID of
+    /// the client and the length of the stretch in seconds. What the client sent in it may never come.
+    /// </summary>
+    public event Action<ushort, double>? ClientReceiveResumedEvent;
+
+    /// <summary>
     /// Event that is called when the server shuts down.
     /// </summary>
     public event Action? ShutdownEvent;
@@ -245,6 +251,11 @@ internal class NetServer : INetServer {
         netServerClient.ConnectionManager.StartAcceptingConnection();
 
         netServerClient.UpdateManager.TimeoutEvent += () => HandleClientTimeout(netServerClient);
+        netServerClient.UpdateManager.ReceiveResumed += gap => {
+            if (netServerClient.IsRegistered) {
+                ClientReceiveResumedEvent?.Invoke(netServerClient.Id, gap);
+            }
+        };
         netServerClient.UpdateManager.StartUpdates();
 
         // Only add to _clientsById dictionary

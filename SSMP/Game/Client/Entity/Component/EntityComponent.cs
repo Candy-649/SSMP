@@ -84,6 +84,22 @@ internal abstract class EntityComponent {
     }
 
     /// <summary>
+    /// Has the component of this game's creature say again what it is now, as if it had just changed: what it said
+    /// while nothing of this game's reached the server may never have come (see Entity.SendStateAgain).
+    /// </summary>
+    public virtual void SendAgain() {
+    }
+
+    /// <summary>
+    /// Puts what the component keeps of this game's creature into the state of the room that this game runs, for what
+    /// is not said again as it is (see <see cref="SendAgain"/>) - its health, which goes as a change (see
+    /// Entity.AddToRoomSnapshot).
+    /// </summary>
+    /// <param name="data">The data of the creature in the state of the room.</param>
+    public virtual void AddToRoomSnapshot(System.Collections.Generic.List<EntityNetworkData> data) {
+    }
+
+    /// <summary>
     /// Update the entity component with the given data.
     /// </summary>
     /// <param name="data">The data to update with.</param>

@@ -24,6 +24,11 @@ internal class LayerComponent : EntityComponent {
     ) : base(netClient, entityId, gameObject) {
     }
 
+    /// <inheritdoc />
+    public override void SendAgain() {
+        _lastLayer = -1;
+    }
+
     /// <summary>
     /// Callback for checking the layer each update.
     /// </summary>
