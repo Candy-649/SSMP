@@ -2264,6 +2264,22 @@ internal class CoopHits {
         }
 
         var type = FindEntity(update.EntityId)!.Type;
+
+        // A hit that the enemy is immune to does nothing to it but tell it of a blocked explosion, and one that
+        // extracts from it only tells it so (HealthManager.TakeDamage): neither shows anything. The partner's game
+        // sends them all the same, as the enemy takes them
+        if (healthManager.IsImmuneTo(hit, _entityManager.IsSceneHost)) {
+            return;
+        }
+
+        if (HitCounters.Extracts(healthManager, hit)) {
+            if (_entityManager.IsSceneHost) {
+                HitCounters.Extract(healthManager, type);
+            }
+
+            return;
+        }
+
         if (_entityManager.IsSceneHost) {
             HitCounters.Count(healthManager, hit, type);
         }
@@ -2272,7 +2288,7 @@ internal class CoopHits {
         // a nest, hears of the partner's hit the way it heard of the local player's as that landed (see
         // EntityRegistryEntry.EachGameFsms). One that pays the player who struck hears of their own hits only
         // (EntityRegistryEntry.HitterGameFsms)
-        foreach (var eventName in HitCounters.EventsOf(hit)) {
+        foreach (var eventName in HitCounters.EventsOf(healthManager, hit)) {
             foreach (var fsm in healthManager.GetComponents<PlayMakerFSM>()) {
                 if (EntityRegistry.IsEachGameFsm(type, fsm.FsmName)) {
                     fsm.SendEvent(eventName);
@@ -2293,18 +2309,14 @@ internal class CoopHits {
 
     /// <summary>
     /// Plays what a hit of the partner looked like that an enemy blocked: the spark where it struck and the clink,
-    /// placed the way the enemy's own blocked hit places them. The rest of a blocked hit - the enemy's state machine
-    /// hearing of it, the knockback of the player who struck and the shake of their screen - belongs to the game where
-    /// it happened, and is left out.
+    /// placed the way the enemy's own blocked hit places them. In the game that runs the enemy, its state machines
+    /// hear of it too (<see cref="HitCounters.Block"/>): some block, bounce off or strike back at a blocked hit, which
+    /// they did for the hits of the scene host's player alone. The knockback of the player who struck and the shake of
+    /// their screen belong to their game.
     /// </summary>
     /// <param name="update">The update of the partner's hit.</param>
     private void ApplyBlockEffect(CoopHitUpdate update) {
         if (FindHitEnemy(update.EntityId) is not { } healthManager) {
-            return;
-        }
-
-        // The game plays one block at a time for an enemy, and none at all for the ones that never clink
-        if (healthManager.tinkTimer > 0f || healthManager.GetComponent<DontClinkGates>() != null) {
             return;
         }
 
@@ -2314,15 +2326,25 @@ internal class CoopHits {
         }
 
         PlaceAroundEnemy(ref source, healthManager.transform);
+        hit.Source = GetHitSource(source);
+        var enemy = healthManager.transform;
+        var direction = DirectionUtils.GetCardinalDirection(hit.GetActualDirection(enemy, default));
+
+        // The game plays one block at a time for an enemy, and none at all for the ones that never clink
+        var clinks = healthManager.tinkTimer <= 0f && healthManager.GetComponent<DontClinkGates>() == null;
+        if (_entityManager.IsSceneHost && FindEntity(update.EntityId) is { } entity) {
+            HitCounters.Block(healthManager, hit, entity.Type, direction, clinks);
+        }
+
+        if (!clinks) {
+            return;
+        }
 
         healthManager.tinkTimer = 0.1f;
         if (healthManager.PreventInvincibleEffect || healthManager.blockHitPrefab == null) {
             return;
         }
 
-        hit.Source = GetHitSource(source);
-        var enemy = healthManager.transform;
-        var direction = DirectionUtils.GetCardinalDirection(hit.GetActualDirection(enemy, default));
         GetBlockEffectPlace(healthManager, hit.Source.transform.position, direction, out var position, out var angle);
 
         var spark = healthManager.blockHitPrefab.Spawn();
