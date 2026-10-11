@@ -450,6 +450,17 @@ internal partial class CoopSave {
             return;
         }
 
+        // A living creature that a put-back of a player would send back to where it started, while another player is
+        // in the room, goes nowhere at all (see CoopSave.PutBack)
+        try {
+            if (KeepsCreatureInPlace(self, toState)) {
+                MachineSwitchToStateField?.SetValue(self, null);
+                return;
+            }
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Machines of the room that the scene host paces before anything else: one held here goes nowhere at all
         var machineStep = MachineStep.None;
         MachineKind? machineKind = null;

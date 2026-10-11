@@ -1090,6 +1090,14 @@ internal partial class CoopSave {
         }
 
         orig(self);
+
+        // And the game that runs the room, if it is another's, brings back what the game brings back for the player
+        // it put back (see CoopSave.PutBack)
+        try {
+            TellRoomOfPutBack();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
     }
 
     /// <summary>

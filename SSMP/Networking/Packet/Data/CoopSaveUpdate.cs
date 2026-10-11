@@ -760,5 +760,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    HostSave
+    HostSave,
+
+    /// <summary>
+    /// The sender was put back at the last safe place in the room that <see cref="CoopSaveUpdate.Scene"/> names, which
+    /// another game runs: that game brings back its creatures that the game brings back for a put-back of its own
+    /// player (see CoopSave.PutBack).
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    PutBack
 }

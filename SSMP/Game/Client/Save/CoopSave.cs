@@ -976,6 +976,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.MachineGo:
                 OnMachineGo(player, update);
                 break;
+            case CoopSaveUpdateKind.PutBack:
+                OnPutBack(player, update);
+                break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);
                 break;
