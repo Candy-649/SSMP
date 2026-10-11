@@ -264,6 +264,46 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     private Killer _killer;
 
+    /// <summary>
+    /// How many of the newest blows of this game's player that the game that runs the creature has not taken in yet go
+    /// with the damage as a blow lands: that blow, and the one before it in case the message of that one went missing.
+    /// All of them go only when the damage is sent again (see <see cref="OwnDamageResendTime"/>). Sent with every
+    /// blow, each message was longer than the last for as long as nothing came back, and a long silence queued
+    /// hundreds of kilobytes.
+    /// </summary>
+    private const int BlowsSentWithABlow = 2;
+
+    /// <summary>
+    /// Hooks on what puts tag damage on a creature - a thing that leaves it on what it touches (TagDamager), the
+    /// imbuement of the nail (DamageEnemies.DoEnemyDamageNailImbuement) - on the stack that all of it goes on
+    /// (TagDamageTaker.AddDamageTagToStack) and on a tick of it (DamageTag.OnHit). Made once, for every creature.
+    /// </summary>
+    private static Hook? _tagDamagerHook, _imbuementHook, _addTagHook, _tagTickHook;
+
+    /// <summary>
+    /// What puts tag damage on something now, for the stack to be known as this game's player's or not (see
+    /// <see cref="TagDamageTakerOnAddTag"/>): a thing that leaves it on what it touches, or else whether the blow that
+    /// brings it is theirs; neither for anything else.
+    /// </summary>
+    private static TagDamager? _taggingDamager;
+
+    /// <inheritdoc cref="_taggingDamager" />
+    private static bool? _taggingBlowIsOwn;
+
+    /// <summary>
+    /// What a tick of tag damage hits now, and its tag (see <see cref="DamageTagOnHit"/>).
+    /// </summary>
+    private static HealthManager? _tickedHealthManager;
+
+    /// <inheritdoc cref="_tickedHealthManager" />
+    private static DamageTag? _tickingTag;
+
+    /// <summary>
+    /// The tags on the creature and its copy in this game whose stacks this game's player put on them, by the health
+    /// manager: whoever put a tag on last decides whose its ticks are (see <see cref="TagDamageTakerOnAddTag"/>).
+    /// </summary>
+    private HashSet<(HealthManager, DamageTag)>? _ownTags;
+
     public HealthManagerComponent(
         NetClient netClient,
         ushort entityId,
@@ -353,6 +393,150 @@ internal class HealthManagerComponent : EntityComponent {
         _takeDamageHook = new Hook(takeDamage, HealthManagerOnTakeDamage);
         _extraDamageHook = new Hook(extraDamage, HealthManagerOnExtraDamage);
         _dieDropFlingHook = new Hook(dieDropFling, HealthManagerOnDieDropFling);
+
+        // Without these, a tick of tag damage is judged by its kind of tag, as the game marks it
+        var tagDamagerEnter = typeof(TagDamager).GetMethod(
+            "OnTriggerEnter2D", HookBindingFlags, Type.DefaultBinder, [typeof(Collider2D)], null
+        );
+        var imbuement = typeof(DamageEnemies).GetMethod(
+            "DoEnemyDamageNailImbuement", HookBindingFlags, Type.DefaultBinder,
+            [typeof(HealthManager), typeof(HitInstance)], null
+        );
+        var addTag = typeof(TagDamageTaker).GetMethod(
+            nameof(TagDamageTaker.AddDamageTagToStack), HookBindingFlags, Type.DefaultBinder,
+            [typeof(DamageTag), typeof(int)], null
+        );
+        var tagTick = typeof(DamageTag).GetMethod(
+            nameof(DamageTag.OnHit), HookBindingFlags, Type.DefaultBinder, [typeof(ITagDamageTakerOwner)], null
+        );
+        if (tagDamagerEnter == null || imbuement == null || addTag == null || tagTick == null) {
+            Logger.Error("Could not find the methods that put tag damage on creatures; its ticks go by their tag");
+            return;
+        }
+
+        _tagDamagerHook = new Hook(tagDamagerEnter, TagDamagerOnTriggerEnter2D);
+        _imbuementHook = new Hook(imbuement, DamageEnemiesOnNailImbuement);
+        _addTagHook = new Hook(addTag, TagDamageTakerOnAddTag);
+        _tagTickHook = new Hook(tagTick, DamageTagOnHit);
+    }
+
+    /// <summary>
+    /// A thing that leaves tag damage on what it touches touching something (TagDamager.OnTriggerEnter2D), which puts
+    /// its tag on it if it is a creature (see <see cref="TagDamageTakerOnAddTag"/>).
+    /// </summary>
+    private static void TagDamagerOnTriggerEnter2D(
+        Action<TagDamager, Collider2D> orig,
+        TagDamager self,
+        Collider2D collision
+    ) {
+        var taggingDamager = _taggingDamager;
+        var taggingBlowIsOwn = _taggingBlowIsOwn;
+        _taggingDamager = self;
+        _taggingBlowIsOwn = null;
+        try {
+            orig(self, collision);
+        } finally {
+            _taggingDamager = taggingDamager;
+            _taggingBlowIsOwn = taggingBlowIsOwn;
+        }
+    }
+
+    /// <summary>
+    /// The imbuement of the nail putting its tag on a creature after a blow of it
+    /// (DamageEnemies.DoEnemyDamageNailImbuement), which the game does once the blow itself is over: the tag is of the
+    /// player whose blow it was.
+    /// </summary>
+    private static void DamageEnemiesOnNailImbuement(
+        Action<DamageEnemies, HealthManager, HitInstance> orig,
+        DamageEnemies self,
+        HealthManager healthManager,
+        HitInstance hitInstance
+    ) {
+        var taggingDamager = _taggingDamager;
+        var taggingBlowIsOwn = _taggingBlowIsOwn;
+        _taggingDamager = null;
+        _taggingBlowIsOwn = IsOwnPlayerBlow(hitInstance);
+        try {
+            orig(self, healthManager, hitInstance);
+        } finally {
+            _taggingDamager = taggingDamager;
+            _taggingBlowIsOwn = taggingBlowIsOwn;
+        }
+    }
+
+    /// <summary>
+    /// A tag of damage put on a creature or a copy, or on it again (TagDamageTaker.AddDamageTagToStack). The ticks of
+    /// its stack are this game's player's if they put it on (see <see cref="IsOwnTagDamager"/> and
+    /// <see cref="OnBlow"/>), and otherwise not; whoever puts a tag on last decides.
+    /// </summary>
+    private static void TagDamageTakerOnAddTag(
+        Action<TagDamageTaker, DamageTag, int> orig,
+        TagDamageTaker self,
+        DamageTag damageTag,
+        int hitAmountOverride
+    ) {
+        orig(self, damageTag, hitAmountOverride);
+
+        if (damageTag == null || self.owner is not HealthManager healthManager ||
+            !ComponentOf.TryGetValue(healthManager, out var component)) {
+            return;
+        }
+
+        var own = _taggingDamager != null ? IsOwnTagDamager(_taggingDamager) : _taggingBlowIsOwn == true;
+        component._ownTags ??= [];
+        if (own) {
+            component._ownTags.Add((healthManager, damageTag));
+        } else {
+            component._ownTags.Remove((healthManager, damageTag));
+        }
+    }
+
+    /// <summary>
+    /// A tick of tag damage on something (DamageTag.OnHit), which takes a creature's health through
+    /// ApplyExtraDamage (see <see cref="OnBlow"/>).
+    /// </summary>
+    private static void DamageTagOnHit(
+        Action<DamageTag, ITagDamageTakerOwner> orig,
+        DamageTag self,
+        ITagDamageTakerOwner owner
+    ) {
+        var tickedHealthManager = _tickedHealthManager;
+        var tickingTag = _tickingTag;
+        _tickedHealthManager = owner as HealthManager;
+        _tickingTag = self;
+        try {
+            orig(self, owner);
+        } finally {
+            _tickedHealthManager = tickedHealthManager;
+            _tickingTag = tickingTag;
+        }
+    }
+
+    /// <summary>
+    /// Whether a thing that leaves tag damage on what it touches is this game's player's: marked as one of their tools,
+    /// on their hero, or spawned. The census of the game (10-11) has only the things that the player's tools and
+    /// skills spawn - the dust of their bombs, the poison trail of their brew, the poison that bursts from their
+    /// health - and the dust of the barnacles of a few rooms, which is the room's. Those of other players are copies,
+    /// which leave none (see ToolCopies and FleaBrew).
+    /// </summary>
+    /// <param name="damager">The thing.</param>
+    private static bool IsOwnTagDamager(TagDamager damager) {
+        var gameObject = damager.gameObject;
+        if (RemoteAttackComponent.IsRemoteAttack(gameObject)) {
+            return false;
+        }
+
+        if (LocalToolComponent.IsLocalTool(gameObject) || gameObject.GetComponentInParent<HeroController>() != null) {
+            return true;
+        }
+
+        for (var transform = gameObject.transform; transform != null; transform = transform.parent) {
+            if (ObjectPool.IsSpawned(transform.gameObject)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -389,6 +573,11 @@ internal class HealthManagerComponent : EntityComponent {
     /// - A blow on the creature that this game runs runs as it is, and a death it brings is this game's player's if
     ///   the blow is theirs. One that kills it tells its death the tool damage (see
     ///   <see cref="HealthManagerOnDieDropFling"/>).
+    /// A tick of tag damage - the zap or poison that a tool or the nail leaves on a creature, the dust of a bomb - is a
+    /// blow of whoever put the tag on (see <see cref="TagDamageTakerOnAddTag"/>). The game marks it as the player's by
+    /// its kind of tag alone: a zap as nobody's, so that the zap of this game's player on a copy was lost, and the dust
+    /// of a room's barnacles as the player's, so that it was counted on a copy on top of the game that runs the
+    /// creature. A tag that a blow puts on is the blow's.
     /// </summary>
     /// <param name="orig">The hooked method.</param>
     /// <param name="self">The health manager that the blow hit.</param>
@@ -406,33 +595,66 @@ internal class HealthManagerComponent : EntityComponent {
             return;
         }
 
-        if (self != component._healthManager.Client) {
+        var own = !fromTakeDamage && _tickedHealthManager == self && _tickingTag != null
+            ? component._ownTags?.Contains((self, _tickingTag)) == true
+            : IsOwnPlayerBlow(hitInstance);
+
+        var taggingDamager = _taggingDamager;
+        var taggingBlowIsOwn = _taggingBlowIsOwn;
+        _taggingDamager = null;
+        _taggingBlowIsOwn = own;
+        try {
+            component.TakeBlow(orig, self, hitInstance, fromTakeDamage, own);
+        } finally {
+            _taggingDamager = taggingDamager;
+            _taggingBlowIsOwn = taggingBlowIsOwn;
+        }
+    }
+
+    /// <summary>
+    /// A blow on the creature or its copy in this game (see <see cref="OnBlow"/>).
+    /// </summary>
+    /// <param name="orig">The hooked method.</param>
+    /// <param name="self">The health manager that the blow hit.</param>
+    /// <param name="hitInstance">The blow.</param>
+    /// <param name="fromTakeDamage">Whether the blow is one of TakeDamage.</param>
+    /// <param name="own">Whether the blow is one of this game's player.</param>
+    private void TakeBlow(
+        Action<HealthManager, HitInstance> orig,
+        HealthManager self,
+        HitInstance hitInstance,
+        bool fromTakeDamage,
+        bool own
+    ) {
+        if (self != _healthManager.Client) {
             // The tool damage of a blow that killed the creature goes with the death the blow brings, and no further:
-            // a blow whose death did not come is not left to a later one
-            var takingOwnPlayerBlow = component._takingOwnPlayerBlow;
-            component._takingOwnPlayerBlow = IsOwnPlayerBlow(hitInstance);
+            // a blow whose death did not come is not left to a later one. A blow on one with no health left since
+            // another blow took the last of it is not the one that killed it: a death that it brings, like one that
+            // the creature's own death goes on to, is of whoever struck that one
+            var takingOwnPlayerBlow = _takingOwnPlayerBlow;
+            _takingOwnPlayerBlow = own && (self.hp > 0 || _killer.Kind == KillerKind.None);
             try {
                 orig(self, hitInstance);
             } finally {
-                component._takingOwnPlayerBlow = takingOwnPlayerBlow;
-                component._killingToolDamage = ToolDamageFlags.None;
+                _takingOwnPlayerBlow = takingOwnPlayerBlow;
+                _killingToolDamage = ToolDamageFlags.None;
             }
 
             return;
         }
 
-        if (!component.IsControlled) {
+        if (!IsControlled) {
             orig(self, hitInstance);
             return;
         }
 
         // A change of the health before the blow that was not counted yet is not the blow's
-        component.CountOwnBlows();
-        if (!IsOwnPlayerBlow(hitInstance)) {
+        CountOwnBlows();
+        if (!own) {
             try {
                 orig(self, hitInstance);
             } finally {
-                component.PutBackToldHealth();
+                PutBackToldHealth();
             }
 
             return;
@@ -442,26 +664,27 @@ internal class HealthManagerComponent : EntityComponent {
         try {
             orig(self, hitInstance);
         } finally {
-            component.AfterOwnBlow(death);
+            AfterOwnBlow(death);
         }
     }
 
     /// <summary>
     /// Whether a blow is one of this game's player: of their attacks, tools and what their skills leave in the world,
     /// which the game marks as the player's (HitInstance.IsHeroDamage, as SSMP takes the player's hits), or of a thing
-    /// that they threw or set.
+    /// that they threw or set. Never of a copy of another player's attack, which the game marks as the player's too.
     /// </summary>
     /// <param name="hitInstance">The blow.</param>
     private static bool IsOwnPlayerBlow(HitInstance hitInstance) {
-        return hitInstance.IsHeroDamage || LocalToolComponent.IsLocalTool(hitInstance.Source);
+        return (hitInstance.IsHeroDamage || LocalToolComponent.IsLocalTool(hitInstance.Source)) &&
+               !RemoteAttackComponent.IsRemoteAttack(hitInstance.Source);
     }
 
     /// <summary>
     /// What a blow of this game's player on the copy kills the creature with, worked out the way the game does at a
     /// blow that kills (see <see cref="BlowDeath"/>), here, where the blow struck. A blow of TakeDamage throws the body
     /// the way the blow went, harder for a critical hit, and the player's downward strike throws it the way they face
-    /// rather than into the ground; a blow of ApplyExtraDamage throws it nowhere, keeps no way it came from, and breaks
-    /// no items.
+    /// rather than into the ground; a blow of ApplyExtraDamage throws it nowhere, keeps no way it came from, breaks no
+    /// items, and can always kill.
     /// </summary>
     /// <param name="copy">The copy that the blow struck.</param>
     /// <param name="hit">The blow.</param>
@@ -469,7 +692,8 @@ internal class HealthManagerComponent : EntityComponent {
     private static BlowDeath BlowDeathOf(HealthManager copy, HitInstance hit, bool fromTakeDamage) {
         if (!fromTakeDamage) {
             return new BlowDeath(
-                null, 0f, -1, hit.AttackType, hit.NailElement, hit.IgnoreInvulnerable, hit.ToolDamageFlags, false
+                null, 0f, -1, hit.AttackType, hit.NailElement, hit.IgnoreInvulnerable, hit.ToolDamageFlags, false,
+                false
             );
         }
 
@@ -499,7 +723,8 @@ internal class HealthManagerComponent : EntityComponent {
             hit.NailElement,
             hit.IgnoreInvulnerable,
             hit.ToolDamageFlags,
-            breaksItems
+            breaksItems,
+            hit.NonLethal
         );
     }
 
@@ -544,7 +769,7 @@ internal class HealthManagerComponent : EntityComponent {
 
         _ownDamageResends = 0;
         if (send) {
-            SendOwnDamage();
+            SendOwnDamage(allBlows: false);
         }
 
         return true;
@@ -975,6 +1200,12 @@ internal class HealthManagerComponent : EntityComponent {
             } else if (observedHealthManager.gameObject.activeInHierarchy) {
                 _killAfterFrame = -1;
                 Logger.Info($"'{observedHealthManager.name}', taken over, dies of the blows of this player");
+
+                // The way the blow came from is the creature's before it hears of it, as for a blow of the game
+                if (_killAfterFrameBlow is { } blow) {
+                    KeepLastAttack(observedHealthManager, blow);
+                }
+
                 TellOfPartnerBlow(observedHealthManager.gameObject, "HIT");
                 TellOfPartnerBlow(observedHealthManager.gameObject, "TOOK DAMAGE");
                 DieOfTakenInBlow(observedHealthManager, _killAfterFrameBlow, new Killer(KillerKind.Host, 0));
@@ -1045,9 +1276,10 @@ internal class HealthManagerComponent : EntityComponent {
         } else if (IsControlled && _ownDamage > _ownDamageTaken &&
                    Time.unscaledTime - _ownDamageSentAt >=
                    (_ownDamageResends < OwnDamageQuickResends ? OwnDamageResendTime : OwnDamageSlowResendTime)) {
-            // The game that runs the creature has not told health with all of it in: sent again, as it is all of it
+            // The game that runs the creature has not told health with all of it in: sent again, as it is all of it,
+            // with all of its blows
             _ownDamageResends++;
-            SendOwnDamage();
+            SendOwnDamage(allBlows: true);
         }
 
         var newInvincible = _healthManager.Host.IsInvincible;
@@ -1076,17 +1308,18 @@ internal class HealthManagerComponent : EntityComponent {
         // here, and taking the room over would lose them: the creature goes on with them. Not for a creature that is
         // dead already, told so or dead here.
         var ownDamageNotTakenIn = 0;
+        var healthAfter = 0;
         BlowDeath? killingBlow = null;
         if (_wasRunElsewhere) {
             CountOwnBlows(send: false);
 
             var dead = _toldDead || _healthManager.Client != null && _healthManager.Client.GetIsDead();
-            if (!dead) {
-                ownDamageNotTakenIn = System.Math.Max(0, _ownDamage - _ownDamageTaken);
+            if (!dead && _ownDamage > _ownDamageTaken) {
+                ownDamageNotTakenIn = _ownDamage - _ownDamageTaken;
 
-                // The blow among them that takes the last of the health, if they do, as the game that ran the creature
-                // would have found it (see TakeInOwnDamage)
-                killingBlow = KillingBlow(_ownBlows, _ownDamageTaken + GetCurrentHp());
+                // The health they leave, and the blow among them that takes the last of it if they do, as the game
+                // that ran the creature would have taken them in (see TakeInOwnDamage)
+                healthAfter = HealthAfter(GetCurrentHp(), _ownDamageTaken, _ownDamage, _ownBlows, out killingBlow);
             }
         }
 
@@ -1095,7 +1328,7 @@ internal class HealthManagerComponent : EntityComponent {
         // The health the copies were made with, which the copies in the other games were made with too
         var copiedHp = _lastHp;
         var healthBefore = GetCurrentHp();
-        var currentHp = healthBefore - ownDamageNotTakenIn;
+        var currentHp = ownDamageNotTakenIn > 0 ? healthAfter : healthBefore;
         if (ownDamageNotTakenIn > 0) {
             Logger.Info(
                 $"Taking over '{GameObject.Host?.name}' with {ownDamageNotTakenIn} damage of this player that the " +
@@ -1185,9 +1418,11 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// Tells the game that runs the creature all the damage that the copy took from this game's player so far in the
-    /// current epoch, with the blows in it that it has not told it took in (see <see cref="TakeInOwnDamage"/>).
+    /// current epoch, with blows in it that it has not told it took in (see <see cref="TakeInOwnDamage"/>): the newest
+    /// of them as a blow lands (see <see cref="BlowsSentWithABlow"/>), or all of them.
     /// </summary>
-    private void SendOwnDamage() {
+    /// <param name="allBlows">Whether all of the blows go, rather than the newest.</param>
+    private void SendOwnDamage(bool allBlows) {
         var hpData = ObjectPool<EntityNetworkData>.Get();
         hpData.Type = EntityComponentType.Health;
         hpData.Packet.Write(HealthMessage.OwnDamage);
@@ -1196,9 +1431,12 @@ internal class HealthManagerComponent : EntityComponent {
         hpData.Packet.Write(_ownDamage);
 
         _ownBlows.RemoveAll(blow => blow.DamageAfter <= _ownDamageTaken);
-        var count = System.Math.Min(_ownBlows.Count, byte.MaxValue);
+        var count = System.Math.Min(
+            allBlows ? _ownBlows.Count : System.Math.Min(_ownBlows.Count, BlowsSentWithABlow), byte.MaxValue
+        );
+        var first = allBlows ? 0 : _ownBlows.Count - count;
         hpData.Packet.Write((byte) count);
-        for (var i = 0; i < count; i++) {
+        for (var i = first; i < first + count; i++) {
             WriteOwnBlow(hpData, _ownBlows[i]);
         }
 
@@ -1226,6 +1464,7 @@ internal class HealthManagerComponent : EntityComponent {
         data.Packet.Write(death.IgnoreInvulnerable);
         data.Packet.Write((int) death.ToolDamage);
         data.Packet.Write(death.BreaksItems);
+        data.Packet.Write(death.NonLethal);
     }
 
     /// <summary>
@@ -1242,12 +1481,13 @@ internal class HealthManagerComponent : EntityComponent {
         var ignoreInvulnerable = data.Packet.ReadBool();
         var toolDamage = (ToolDamageFlags) data.Packet.ReadInt();
         var breaksItems = data.Packet.ReadBool();
+        var nonLethal = data.Packet.ReadBool();
         return new OwnBlow(
             damageBefore,
             damageAfter,
             new BlowDeath(
                 direction, magnitude, lastAttackDirection, attackType, nailElement, ignoreInvulnerable, toolDamage,
-                breaksItems
+                breaksItems, nonLethal
             )
         );
     }
@@ -1258,14 +1498,50 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     /// <param name="blows">The blows, as in <see cref="_ownBlows"/>.</param>
     /// <param name="killedAt">How far the copy's damage had to come for the health to run out.</param>
-    private static BlowDeath? KillingBlow(List<OwnBlow> blows, int killedAt) {
+    private static OwnBlow? KillingBlow(List<OwnBlow> blows, int killedAt) {
         foreach (var blow in blows) {
             if (blow.DamageBefore < killedAt && killedAt <= blow.DamageAfter) {
-                return blow.Death;
+                return blow;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// The health that a creature is left with by damage of a copy's player that it has not taken in yet, and the blow
+    /// in it that kills the creature if it does, as the game would take the blows one by one: a blow that kills
+    /// nothing (see <see cref="BlowDeath.NonLethal"/>) leaves it 1 health where it would have taken the last, and only
+    /// a later blow can kill it. The copy counts such a blow up to the health it last showed less 1, every time, and
+    /// taken in at once those blows killed a creature that the game keeps alive.
+    /// </summary>
+    /// <param name="health">Its health.</param>
+    /// <param name="taken">How far the copy's damage had come in that health.</param>
+    /// <param name="damage">How far the copy's damage has come.</param>
+    /// <param name="blows">The blows of the copy's damage that were kept, or null for none.</param>
+    /// <param name="killingBlow">What the blow that kills it kills with, if one does and was kept.</param>
+    private static int HealthAfter(
+        int health,
+        int taken,
+        int damage,
+        List<OwnBlow>? blows,
+        out BlowDeath? killingBlow
+    ) {
+        killingBlow = null;
+        var newHp = health - (damage - taken);
+        var killedAt = taken + health;
+        while (newHp <= 0 && blows != null && KillingBlow(blows, killedAt) is { } blow) {
+            if (!blow.Death.NonLethal) {
+                killingBlow = blow.Death;
+                break;
+            }
+
+            // Left 1 health, which the blows after it wear down
+            newHp = 1 - (damage - blow.DamageAfter);
+            killedAt = blow.DamageAfter + 1;
+        }
+
+        return newHp;
     }
 
     /// <summary>
@@ -1520,8 +1796,6 @@ internal class HealthManagerComponent : EntityComponent {
         if (damage > taken.damage) {
             // The creature keeps the way the last of the blows came from and its kind, as it does for the blows of
             // this game's player, for a death that its FSM plays
-            var health = GetCurrentHp();
-            BlowDeath? killingBlow = null;
             if (blows != null && _healthManager.Host != null) {
                 for (var i = blows.Count - 1; i >= 0 && blows[i].DamageAfter > taken.damage; i--) {
                     if (blows[i].Death.LastAttackDirection >= 0) {
@@ -1529,16 +1803,12 @@ internal class HealthManagerComponent : EntityComponent {
                         break;
                     }
                 }
-
-                // The health runs out where the copy's damage passes what of it is in the health already and the
-                // health left: the blow there kills the creature
-                killingBlow = KillingBlow(blows, taken.damage + health);
             }
 
-            ApplyHp(
-                health - (damage - taken.damage), triggerHostDeath: true, killingBlow,
-                new Killer(KillerKind.Copy, copyKey)
-            );
+            // The health runs out where the copy's damage passes what of it is in the health already and the health
+            // left: the blow there kills the creature, unless it kills nothing
+            var newHp = HealthAfter(GetCurrentHp(), taken.damage, damage, blows, out var killingBlow);
+            ApplyHp(newHp, triggerHostDeath: true, killingBlow, new Killer(KillerKind.Copy, copyKey));
             taken.damage = damage;
         }
 
@@ -1656,6 +1926,8 @@ internal class HealthManagerComponent : EntityComponent {
     /// <param name="IgnoreInvulnerable">Whether the blow passes over the creature's evasion.</param>
     /// <param name="ToolDamage">The tool damage of the blow, by which it drops the item of a wish.</param>
     /// <param name="BreaksItems">Whether the source of the blow breaks items, which drops nothing at all.</param>
+    /// <param name="NonLethal">Whether the blow kills nothing: the game leaves a creature 1 health where it would have
+    /// taken the last (HitInstance.NonLethal, of the player's harpoon and the dash stab of one crest).</param>
     private readonly record struct BlowDeath(
         float? Direction,
         float Magnitude,
@@ -1664,7 +1936,8 @@ internal class HealthManagerComponent : EntityComponent {
         NailElements NailElement,
         bool IgnoreInvulnerable,
         ToolDamageFlags ToolDamage,
-        bool BreaksItems
+        bool BreaksItems,
+        bool NonLethal
     );
 
     /// <summary>

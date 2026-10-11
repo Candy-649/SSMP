@@ -62,8 +62,8 @@ internal class FleaBrew : BaseAttackTool {
         particles.name = ParticlesName;
 
         // Set up poison clouds
-        if (isPoison && ShouldDoDamage && ServerSettings.IsPvpEnabled) {
-            SetPoisonTrail(particles);
+        if (isPoison) {
+            SetPoisonTrail(particles, ShouldDoDamage && ServerSettings.IsPvpEnabled);
         }
 
         // Play sprite flash
@@ -144,10 +144,15 @@ internal class FleaBrew : BaseAttackTool {
     }
 
     /// <summary>
-    /// Sets up a poison trail that deals damage.
+    /// Has the poisoned Flea Brew particles of a remote player spawn a copy of the poison trail: marked as that
+    /// player's attack, without the poison that the trail leaves on creatures, and hurting the local player only with
+    /// PvP on. Without PvP the particles spawned the trail of the game, which poisoned the creatures of this game while
+    /// the trail in the game of the player who drank the brew poisoned theirs, and the game that runs a creature took
+    /// the poison of both. The particles are made for this player alone, so the trail they spawn is theirs to change.
     /// </summary>
     /// <param name="particles">The poisoned Flea Brew particle spawner.</param>
-    private void SetPoisonTrail(GameObject particles) {
+    /// <param name="hurtsPlayers">Whether the trail hurts the local player.</param>
+    private void SetPoisonTrail(GameObject particles, bool hurtsPlayers) {
         // Find the prefab spawner
         var spawnerObj = particles.FindGameObjectInChildren("Trail Spawner");
         if (!spawnerObj) return;
@@ -168,23 +173,25 @@ internal class FleaBrew : BaseAttackTool {
             _modifiedPoisonTrail.name = "Hornet Poison Trail Modified";
             _modifiedPoisonTrail.AddComponentIfNotPresent<RemoteAttackComponent>();
 
+            // The poison on creatures is counted in the game of the player who drank the brew, whose own trail leaves
+            // it on them there
+            foreach (var tagDamager in _modifiedPoisonTrail.GetComponentsInChildren<TagDamager>(true)) {
+                Object.DestroyImmediate(tagDamager);
+            }
+
             // Re-add recycler so that it de-spawns
             // Since this is a new object, it won't override the other pool
             var recycler = _modifiedPoisonTrail.AddComponent<AutoRecycleSelf>();
             recycler.afterEvent = GlobalEnums.AfterEvent.TIME;
             recycler.timeToWait = 1.1f;
+        }
 
-            // Set the damager
-            var damager = _modifiedPoisonTrail.FindGameObjectInChildren("damager");
-            if (damager) {
-                AddDamageHeroComponent(damager, ServerSettings.PoisonBrewDamage);
+        // Set the damager every time the brew is used, as PvP and the damage amount can change
+        var damager = _modifiedPoisonTrail.FindGameObjectInChildren("damager");
+        if (damager) {
+            SetDamageHeroState(damager, hurtsPlayers, ServerSettings.PoisonBrewDamage);
+            if (hurtsPlayers) {
                 damager.layer = 17;
-            }
-        } else {
-            // Ensure the damage amount is correct every time the brew is used
-            var damagerObj = _modifiedPoisonTrail.FindGameObjectInChildren("damager");
-            if (damagerObj && damagerObj.TryGetComponent<DamageHero>(out var damager)) {
-                damager.damageDealt = ServerSettings.PoisonBrewDamage;
             }
         }
 
