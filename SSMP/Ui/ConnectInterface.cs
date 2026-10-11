@@ -215,6 +215,11 @@ internal class ConnectInterface {
     /// </summary>
     private static string DirectIpTabText => Lang.Pick("Direct IP", "直连 IP");
 
+    /// <summary>
+    /// Label for the Settings tab.
+    /// </summary>
+    private static string SettingsTabText => Lang.Pick("Settings", "设置");
+
     // Matchmaking tab
 
     /// <summary>
@@ -454,6 +459,11 @@ internal class ConnectInterface {
     /// </summary>
     private readonly TabButtonComponent _directIpTab;
 
+    /// <summary>
+    /// Tab button for the settings page.
+    /// </summary>
+    private readonly TabButtonComponent _settingsTab;
+
     // Tab content groups
     /// <summary>
     /// Component group holding Matchmaking tab content.
@@ -469,6 +479,11 @@ internal class ConnectInterface {
     /// Component group holding Direct IP tab content.
     /// </summary>
     private readonly ComponentGroup _directIpGroup;
+
+    /// <summary>
+    /// The settings page, which stands in for a tab's content the way the panels do.
+    /// </summary>
+    private readonly SettingsPanel _settingsPanel;
 
     // Matchmaking tab components
     /// <summary>
@@ -530,6 +545,12 @@ internal class ConnectInterface {
     /// instead of the buttons that would start a second lobby.
     /// </summary>
     private bool _waitingRoomActive;
+
+    /// <summary>
+    /// The last tab open other than the settings page, which a waiting room that comes up, or comes back, while the
+    /// settings page is open goes to.
+    /// </summary>
+    private Tab _lastConnectTab = Tab.Matchmaking;
 
     /// <summary>
     /// The lobby the waiting room belongs to, kept for inviting people to it.
@@ -696,7 +717,8 @@ internal class ConnectInterface {
     private enum Tab {
         Matchmaking,
         Steam,
-        DirectIp
+        DirectIp,
+        Settings
     }
 
     #endregion
@@ -728,6 +750,7 @@ internal class ConnectInterface {
         _matchmakingTab = tabElements.matchmaking;
         _steamTab = tabElements.steam;
         _directIpTab = tabElements.directIp;
+        _settingsTab = tabElements.settings;
 
         // Where the panels that stand in for a tab's content begin
         var panelY = currentY + PanelRaise / UiManager.ScreenHeightRatio;
@@ -761,8 +784,7 @@ internal class ConnectInterface {
         _waitingRoomPanel = new WaitingRoomPanel(
             _backgroundGroup,
             new Vector2(InitialX, panelY),
-            new Vector2(ContentWidth, WaitingRoomPanel.Height),
-            _modSettings
+            new Vector2(ContentWidth, WaitingRoomPanel.Height)
         );
         _waitingRoomPanel.SetOnInvite(() => {
                 if (!SteamManager.IsInitialized || _waitingRoomLobbyId == default) {
@@ -782,10 +804,16 @@ internal class ConnectInterface {
         );
         _waitingRoomPanel.SetOnLeave(() => {
                 HideWaitingRoom();
-                _steamGroup?.SetActive(_activeTab == Tab.Steam);
                 ShowFeedback(Color.yellow, Lang.Pick("Stopped waiting. Your game is closed again.", "已停止等待。你的游戏重新关上了。"));
                 StopWaitingRoomHostingEvent?.Invoke();
             }
+        );
+
+        _settingsPanel = new SettingsPanel(
+            _backgroundGroup,
+            new Vector2(InitialX, panelY),
+            new Vector2(ContentWidth, SettingsPanel.Height),
+            _modSettings
         );
 
         var steamComponents = CreateSteamTab(currentY);
@@ -955,10 +983,10 @@ internal class ConnectInterface {
     }
 
     /// <summary>
-    /// Creates the tab navigation buttons (Matchmaking, Steam, Direct IP).
+    /// Creates the tab navigation buttons (Matchmaking, Steam, Direct IP, Settings).
     /// </summary>
-    private (TabButtonComponent matchmaking, TabButtonComponent? steam, TabButtonComponent directIp)
-        CreateTabButtons(ref float currentY) {
+    private (TabButtonComponent matchmaking, TabButtonComponent? steam, TabButtonComponent directIp,
+        TabButtonComponent settings) CreateTabButtons(ref float currentY) {
         var matchmaking = ConnectInterfaceHelpers.CreateTabButton(
             _backgroundGroup,
             InitialX - TabButtonWidth,
@@ -991,9 +1019,19 @@ internal class ConnectInterface {
             () => SwitchTab(Tab.DirectIp)
         );
 
+        // Placed for good with the others once the frame is built
+        var settings = ConnectInterfaceHelpers.CreateTabButton(
+            _backgroundGroup,
+            directIpX + TabButtonWidth,
+            currentY,
+            TabButtonWidth,
+            SettingsTabText,
+            () => SwitchTab(Tab.Settings)
+        );
+
         currentY -= TabSpacing / UiManager.ScreenHeightRatio;
 
-        return (matchmaking, steam, directIp);
+        return (matchmaking, steam, directIp, settings);
     }
 
     #endregion
@@ -1276,7 +1314,8 @@ internal class ConnectInterface {
             _backgroundPanel,
             _matchmakingTab,
             _steamTab,
-            _directIpTab
+            _directIpTab,
+            _settingsTab
         );
 
         LogFinalPositions();
@@ -1310,6 +1349,9 @@ internal class ConnectInterface {
     /// <param name="tab">The tab to activate.</param>
     private void SwitchTab(Tab tab) {
         _activeTab = tab;
+        if (tab != Tab.Settings) {
+            _lastConnectTab = tab;
+        }
 
         // Hide lobby browsers and config panels if visible
         _lobbyBrowserPanel.Hide();
@@ -1320,6 +1362,7 @@ internal class ConnectInterface {
         _matchmakingTab.SetTabActive(tab == Tab.Matchmaking);
         _steamTab?.SetTabActive(tab == Tab.Steam);
         _directIpTab.SetTabActive(tab == Tab.DirectIp);
+        _settingsTab.SetTabActive(tab == Tab.Settings);
 
         // Show only the active tab's content
         _matchmakingGroup.SetActive(
@@ -1331,15 +1374,41 @@ internal class ConnectInterface {
         _steamGroup?.SetActive(tab == Tab.Steam);
         _directIpGroup.SetActive(tab == Tab.DirectIp);
 
-        // A host that is still waiting gets their waiting room back rather than the buttons that would open a
-        // second lobby underneath it
+        if (tab == Tab.Settings) {
+            _settingsPanel.Show();
+        } else {
+            _settingsPanel.Hide();
+        }
+
+        // A player who is still waiting gets their waiting room on every tab but the settings page, rather than the
+        // buttons that would connect, or open a second lobby, while they are already in one
         _waitingRoomPanel.Hide();
-        if (_waitingRoomActive && tab == Tab.Steam) {
-            _steamGroup?.SetActive(false);
+        if (_waitingRoomActive && tab != Tab.Settings) {
+            GroupOf(tab)?.SetActive(false);
             _waitingRoomPanel.Show();
         }
 
         RefreshMatchmakingStatusFeedback();
+    }
+
+    /// <summary>
+    /// The content of a tab that has any besides a panel, which the waiting room hides while it is up.
+    /// </summary>
+    /// <param name="tab">The tab.</param>
+    /// <returns>The group holding the content, or null for the settings page and a Steam tab without Steam.</returns>
+    private ComponentGroup? GroupOf(Tab tab) => tab switch {
+        Tab.Matchmaking => _matchmakingGroup,
+        Tab.Steam => _steamGroup,
+        Tab.DirectIp => _directIpGroup,
+        _ => null
+    };
+
+    /// <summary>
+    /// Puts the waiting room on screen: on the open tab, or on the last tab before the settings page if that is the
+    /// one open, since the room is what there is to look at now.
+    /// </summary>
+    private void ShowRoomTab() {
+        SwitchTab(_activeTab == Tab.Settings ? _lastConnectTab : _activeTab);
     }
 
     /// <summary>
@@ -1376,11 +1445,7 @@ internal class ConnectInterface {
         _waitingRoomPlayers.Clear();
         _waitingRoomPlayers.AddRange(players);
 
-        _steamGroup?.SetActive(false);
-        _steamLobbyConfigPanel?.Hide();
-        _steamLobbyBrowserPanel?.Hide();
-
-        _waitingRoomPanel.Show();
+        ShowRoomTab();
         RefreshWaitingRoom();
     }
 
@@ -1457,6 +1522,9 @@ internal class ConnectInterface {
         _waitingRoomPlayers.Clear();
         _waitingRoomReadyNames.Clear();
         _waitingRoomPanel.Hide();
+
+        // Whatever the open tab shows without a room comes back, however the room closed: the room had hidden it
+        SwitchTab(_activeTab);
     }
 
     /// <summary>
@@ -1476,7 +1544,6 @@ internal class ConnectInterface {
             return;
         }
 
-        _steamGroup?.SetActive(false);
         _waitingRoomProceeded = false;
 
         // Backing out of the save menu means the host is not ready after all. Without this the room would see both
@@ -1487,7 +1554,7 @@ internal class ConnectInterface {
             WaitingRoomReadyToggled?.Invoke(false);
         }
 
-        _waitingRoomPanel.Show();
+        ShowRoomTab();
         RefreshWaitingRoom();
     }
 
@@ -1890,6 +1957,12 @@ internal class ConnectInterface {
             yield break;
         }
 
+        // The player may have moved on while the list was coming: to another tab, or into a waiting room, which the
+        // list would be drawn over
+        if (_waitingRoomActive || _activeTab != Tab.Matchmaking) {
+            yield break;
+        }
+
         // Update panel with lobbies and show
         _lobbyBrowserPanel.SetLobbies(lobbies);
         _lobbyBrowserPanel.Show();
@@ -2231,7 +2304,6 @@ internal class ConnectInterface {
         // The waiting room belongs to a game that is open; without a connection there is nothing left to wait in
         if (_waitingRoomActive) {
             HideWaitingRoom();
-            _steamGroup?.SetActive(_activeTab == Tab.Steam);
         }
 
         ResetConnectionButtons();
@@ -2420,7 +2492,9 @@ internal class ConnectInterface {
     /// Keeps matchmaking status messages aligned with the standard bottom feedback area.
     /// </summary>
     private void RefreshMatchmakingStatusFeedback() {
-        if (_activeTab != Tab.Matchmaking) {
+        // Not under a waiting room either: whoever is in one is connected already, and matchmaking's state says
+        // nothing about that room
+        if (_activeTab != Tab.Matchmaking || _waitingRoomActive) {
             if (_isMatchmakingFeedbackActive) {
                 _feedbackText.SetActive(false);
                 _isMatchmakingFeedbackActive = false;

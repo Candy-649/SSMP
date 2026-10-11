@@ -140,32 +140,35 @@ internal static class ConnectInterfaceHelpers {
     }
 
     /// <summary>
-    /// Positions the tab buttons to fit within the background panel bounds.
+    /// Positions the tab buttons side by side across the background panel, in the order given, each as wide as the
+    /// others. A tab that is not there, such as Steam's without Steam, is left out and the rest close up.
     /// </summary>
     /// <param name="backgroundPanel">The background panel GameObject.</param>
-    /// <param name="matchmakingTab">The matchmaking tab button.</param>
-    /// <param name="steamTab">The steam tab button (optional).</param>
-    /// <param name="directIpTab">The direct IP tab button.</param>
-    public static void PositionTabButtonsFixed(
-        GameObject backgroundPanel,
-        TabButtonComponent matchmakingTab,
-        TabButtonComponent? steamTab,
-        TabButtonComponent directIpTab
-    ) {
+    /// <param name="tabs">The tab buttons from left to right, null for one that is not there.</param>
+    public static void PositionTabButtonsFixed(GameObject backgroundPanel, params TabButtonComponent?[] tabs) {
         var bgWidth = backgroundPanel.GetComponent<RectTransform>().sizeDelta.x;
 
-        if (steamTab != null) {
-            // 3 buttons
-            var buttonWidth = (bgWidth - 2 * PanelBorderWidth) / 3f;
-            AdjustButtonFixed(matchmakingTab.GameObject, -buttonWidth, buttonWidth);
-            AdjustButtonFixed(steamTab.GameObject, 0f, buttonWidth);
-            AdjustButtonFixed(directIpTab.GameObject, buttonWidth, buttonWidth);
-        } else {
-            // 2 buttons
-            var buttonWidth = (bgWidth - 2 * PanelBorderWidth) / 2f;
-            var offset = buttonWidth / 2f;
-            AdjustButtonFixed(matchmakingTab.GameObject, -offset, buttonWidth);
-            AdjustButtonFixed(directIpTab.GameObject, offset, buttonWidth);
+        var shown = 0;
+        foreach (var tab in tabs) {
+            if (tab != null) {
+                shown++;
+            }
+        }
+
+        if (shown == 0) {
+            return;
+        }
+
+        var buttonWidth = (bgWidth - 2 * PanelBorderWidth) / shown;
+        var index = 0;
+        foreach (var tab in tabs) {
+            if (tab == null) {
+                continue;
+            }
+
+            // Centred on the panel: the middle of the row is at 0
+            AdjustButtonFixed(tab.GameObject, (index - (shown - 1) / 2f) * buttonWidth, buttonWidth);
+            index++;
         }
     }
 

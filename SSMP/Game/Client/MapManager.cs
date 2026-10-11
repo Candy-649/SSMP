@@ -318,6 +318,12 @@ internal class MapManager : IMapManager {
             return;
         }
 
+        // Turned off in the settings, which only change in the menu, so the next time the map opens is soon enough
+        if (!_modSettings.OutlineOwnMapIcon) {
+            RemoveOwnOutline();
+            return;
+        }
+
         var head = gameMap.compassIcon;
         if (head == null) {
             return;

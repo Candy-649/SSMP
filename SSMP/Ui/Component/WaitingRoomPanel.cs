@@ -57,24 +57,6 @@ internal class WaitingRoomPanel : IRootedComponent {
     /// <summary>The button that opens Steam's invite dialog, which only the host has anyone to invite with.</summary>
     private readonly GameObject _inviteButton;
 
-    /// <summary>The settings of this machine, which say how this player's own name is drawn.</summary>
-    private readonly Game.Settings.ModSettings _modSettings;
-
-    /// <summary>The background of the heavier-name button, which says at a glance whether it is on.</summary>
-    private readonly Image _boldImage;
-
-    /// <summary>The label of the heavier-name button.</summary>
-    private readonly Text _boldText;
-
-    /// <summary>The background of the coloured-name button.</summary>
-    private readonly Image _colourImage;
-
-    /// <summary>The label of the coloured-name button.</summary>
-    private readonly Text _colourText;
-
-    /// <summary>The swatch of each colour that may be picked, by the name of that colour.</summary>
-    private readonly Dictionary<string, Image> _swatches = [];
-
     private Action? _onInvite;
     private Action? _onReady;
     private Action? _onLeave;
@@ -85,7 +67,7 @@ internal class WaitingRoomPanel : IRootedComponent {
     /// <summary>Parent component group for visibility management.</summary>
     private readonly ComponentGroup _componentGroup;
 
-    // Slimmer than they were (34 and 6), so that four players fit in a panel that ends above the feedback text of the
+    // Slimmer than they were (34 and 6), so that the players fit in a panel that ends above the feedback text of the
     // menu
     private const float RowHeight = 30f;
     private const float RowSpacing = 5f;
@@ -95,36 +77,37 @@ internal class WaitingRoomPanel : IRootedComponent {
     private const float ButtonAreaHeight = 58f;
 
     /// <summary>
-    /// How much room the choices about this player's own name take, under the list of who is here.
+    /// How many players the list shows before it runs into the buttons under it. Six take the room the choices about
+    /// this player's own name had before they moved to the settings page, so the panel is as tall as before, to within
+    /// 2, and the feedback text under it stays where it was.
     /// </summary>
-    public const float NameSettingsHeight = 68f;
+    private const int ListRows = 6;
 
     /// <summary>
-    /// How many players the list shows before it runs into the name settings under it.
-    /// </summary>
-    private const int ListRows = 4;
-
-    /// <summary>
-    /// Height of the panel: the header, the status line, room for <see cref="ListRows"/> players, the name settings and
-    /// the buttons. Rows start 2 below the top of the list, which starts 4 below the status line.
+    /// Height of the panel: the header, the status line, room for <see cref="ListRows"/> players and the buttons.
+    /// Rows start 2 below the top of the list, which starts 4 below the status line.
     /// </summary>
     public const float Height = HeaderHeight + StatusHeight + 4f + 2f + ListRows * RowHeight +
-                                (ListRows - 1) * RowSpacing + NameSettingsHeight + ButtonAreaHeight;
+                                (ListRows - 1) * RowSpacing + ButtonAreaHeight;
 
-    private static readonly Color Accent = new(1f, 0.85f, 0.6f, 1f);
+    /// <summary>The colour of headings, shared with the settings page.</summary>
+    internal static readonly Color Accent = new(1f, 0.85f, 0.6f, 1f);
+
     private static readonly Color RowBackground = new(0.12f, 0.12f, 0.15f, 1f);
-    private static readonly Color ReadyOn = new(0.2f, 0.5f, 0.3f, 1f);
-    private static readonly Color ReadyOff = new(0.35f, 0.3f, 0.15f, 1f);
+
+    /// <summary>The colour of a button that is on, shared with the settings page.</summary>
+    internal static readonly Color ReadyOn = new(0.2f, 0.5f, 0.3f, 1f);
+
+    /// <summary>The colour of a button that is off, shared with the settings page.</summary>
+    internal static readonly Color ReadyOff = new(0.35f, 0.3f, 0.15f, 1f);
     private static readonly Color ReadyMark = new(0.45f, 0.85f, 0.55f, 1f);
     private static readonly Color WaitingMark = new(0.6f, 0.6f, 0.6f, 1f);
 
     public WaitingRoomPanel(
         ComponentGroup parent,
         Vector2 position,
-        Vector2 size,
-        Game.Settings.ModSettings modSettings
+        Vector2 size
     ) {
-        _modSettings = modSettings;
         GameObject = new GameObject("WaitingRoomPanel");
         var rect = GameObject.AddComponent<RectTransform>();
         rect.anchorMin = rect.anchorMax = new Vector2(position.x / 1920f, position.y / 1080f);
@@ -161,7 +144,7 @@ internal class WaitingRoomPanel : IRootedComponent {
         _content = listObj.AddComponent<RectTransform>();
         _content.anchorMin = new Vector2(0f, 0f);
         _content.anchorMax = new Vector2(1f, 1f);
-        _content.offsetMin = new Vector2(Padding, ButtonAreaHeight + NameSettingsHeight);
+        _content.offsetMin = new Vector2(Padding, ButtonAreaHeight);
         _content.offsetMax = new Vector2(-Padding, -HeaderHeight - StatusHeight - 4f);
         listObj.transform.SetParent(GameObject.transform, false);
 
@@ -212,108 +195,6 @@ internal class WaitingRoomPanel : IRootedComponent {
             out _readyText
         );
 
-        // Under the list of who is here rather than over it: this is set once and then not looked at again, while
-        // who is in the room is what anyone opens this to see. It is also the only place these can be set, since
-        // there is nowhere to stand still and read a menu once the game has started.
-        var nameArea = new GameObject("NameSettings");
-        var nameAreaRect = nameArea.AddComponent<RectTransform>();
-        nameAreaRect.anchorMin = new Vector2(0f, 0f);
-        nameAreaRect.anchorMax = new Vector2(1f, 0f);
-        nameAreaRect.pivot = new Vector2(0.5f, 0f);
-        nameAreaRect.anchoredPosition = new Vector2(0f, ButtonAreaHeight);
-        nameAreaRect.sizeDelta = new Vector2(0f, NameSettingsHeight);
-        nameArea.transform.SetParent(GameObject.transform, false);
-
-        CreateLabel(
-            nameArea.transform,
-            "NameSettingsLabel",
-            Lang.Pick("MY NAME", "我的名字"),
-            new Vector2(0.03f, 1f),
-            new Vector2(0.30f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -1f),
-            14,
-            Accent,
-            TextAnchor.MiddleLeft
-        );
-
-        CreateLabel(
-            nameArea.transform,
-            "NameColourLabel",
-            Lang.Pick("COLOUR", "颜色"),
-            new Vector2(0.03f, 1f),
-            new Vector2(0.30f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -34f),
-            14,
-            new Color(0.75f, 0.75f, 0.75f, 1f),
-            TextAnchor.MiddleLeft
-        );
-
-        CreateButton(
-            nameArea.transform,
-            "BoldButton",
-            "",
-            new Vector2(0.32f, 0.54f),
-            new Vector2(0.63f, 0.96f),
-            ReadyOff,
-            () => {
-                _modSettings.BoldOwnName = !_modSettings.BoldOwnName;
-                _modSettings.Save();
-                RefreshNameSettings();
-            },
-            out _boldImage,
-            out _boldText
-        );
-
-        CreateButton(
-            nameArea.transform,
-            "ColourButton",
-            "",
-            new Vector2(0.66f, 0.54f),
-            new Vector2(0.97f, 0.96f),
-            ReadyOff,
-            () => {
-                _modSettings.ColourOwnName = !_modSettings.ColourOwnName;
-                _modSettings.Save();
-                RefreshNameSettings();
-            },
-            out _colourImage,
-            out _colourText
-        );
-
-        var colourNames = Game.Client.PlayerManager.OwnNameColourNames;
-        for (var i = 0; i < colourNames.Length; i++) {
-            // Copied out, because the button keeps the action rather than running it, and one shared counter would
-            // have every swatch pick whatever the last one was
-            var colourName = colourNames[i];
-            var slot = 0.65f / colourNames.Length;
-            var left = 0.32f + slot * i;
-
-            CreateButton(
-                nameArea.transform,
-                $"Swatch{colourName}",
-                "",
-                new Vector2(left + 0.008f, 0.06f),
-                new Vector2(left + slot - 0.008f, 0.46f),
-                Color.white,
-                () => {
-                    _modSettings.OwnNameColour = colourName;
-                    // Picking a colour is asking for one, so it turns the colour on as well rather than being
-                    // silently stored against a switch that is off
-                    _modSettings.ColourOwnName = true;
-                    _modSettings.Save();
-                    RefreshNameSettings();
-                },
-                out var swatch,
-                out _
-            );
-
-            _swatches[colourName] = swatch;
-        }
-
-        RefreshNameSettings();
-
         _componentGroup = parent;
         _activeSelf = false;
         parent.AddComponent(this);
@@ -324,7 +205,10 @@ internal class WaitingRoomPanel : IRootedComponent {
         SetRoom([], localReady: false, hosting: true);
     }
 
-    private static Text CreateLabel(
+    /// <summary>
+    /// Makes a line of text. Shared with the settings page.
+    /// </summary>
+    internal static Text CreateLabel(
         Transform parent,
         string name,
         string text,
@@ -355,7 +239,10 @@ internal class WaitingRoomPanel : IRootedComponent {
         return textComponent;
     }
 
-    private static GameObject CreateButton(
+    /// <summary>
+    /// Makes a button with a coloured background and a label. Shared with the settings page.
+    /// </summary>
+    internal static GameObject CreateButton(
         Transform parent,
         string name,
         string text,
@@ -396,35 +283,6 @@ internal class WaitingRoomPanel : IRootedComponent {
         obj.transform.SetParent(parent, false);
         Object.DontDestroyOnLoad(obj);
         return obj;
-    }
-
-    /// <summary>
-    /// Draws the choices about this player's own name as they currently stand.
-    /// </summary>
-    private void RefreshNameSettings() {
-        var bold = _modSettings.BoldOwnName;
-        _boldImage.color = bold ? ReadyOn : ReadyOff;
-        _boldText.text = bold
-            ? Lang.Pick("BOLD: ON", "加粗：开")
-            : Lang.Pick("BOLD: OFF", "加粗：关");
-
-        var coloured = _modSettings.ColourOwnName;
-        _colourImage.color = coloured ? ReadyOn : ReadyOff;
-        _colourText.text = coloured
-            ? Lang.Pick("COLOUR: ON", "换色：开")
-            : Lang.Pick("COLOUR: OFF", "换色：关");
-
-        foreach (var pair in _swatches) {
-            if (!Game.Client.PlayerManager.OwnNameColours.TryGetValue(pair.Key, out var colour)) {
-                continue;
-            }
-
-            // The one in use is shown at its full strength and the rest are faded. A tick or an outline would need
-            // a colour of its own, and a colour laid over a row of colours is the one thing that cannot be read.
-            var picked = coloured &&
-                         string.Equals(pair.Key, _modSettings.OwnNameColour, StringComparison.OrdinalIgnoreCase);
-            pair.Value.color = picked ? colour : new Color(colour.r, colour.g, colour.b, 0.3f);
-        }
     }
 
     /// <summary>Sets what happens when the host asks to invite someone.</summary>

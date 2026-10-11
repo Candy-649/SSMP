@@ -116,6 +116,19 @@ internal class ModSettings : IModSettings {
     } = "yellow";
 
     /// <summary>
+    /// Whether to draw an outline in <see cref="OwnNameColour"/> around this player's own head on the map, which is
+    /// otherwise the same icon as everyone else's. Only on this machine, like the name settings.
+    /// </summary>
+    public bool OutlineOwnMapIcon {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(OutlineOwnMapIcon));
+        }
+    } = true;
+
+    /// <summary>
     /// Set of addon names for addons that are disabled by the user.
     /// </summary>
     // ReSharper disable once AutoPropertyCanBeMadeGetOnly.Global

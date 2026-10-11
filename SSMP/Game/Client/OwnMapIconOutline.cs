@@ -75,6 +75,18 @@ internal class OwnMapIconOutline : MonoBehaviour {
     private static bool _flatShaderMissing;
 
     /// <summary>
+    /// The material of the bright ring. Made once and kept, like the shader: there is only ever one outline, and a
+    /// material of an outline whose head was never shown would outlive it, because Unity does not call OnDestroy on
+    /// an object that was never active.
+    /// </summary>
+    private static Material? _brightMaterial;
+
+    /// <summary>
+    /// The material of the dark ring, made once and kept like the bright one.
+    /// </summary>
+    private static Material? _darkMaterial;
+
+    /// <summary>
     /// The copies of the head, each with the direction it is moved in and how far, as a part of the head's larger
     /// side.
     /// </summary>
@@ -89,16 +101,6 @@ internal class OwnMapIconOutline : MonoBehaviour {
     /// The renderer of the head, whose texture the copies draw with.
     /// </summary>
     private Renderer? _headRenderer;
-
-    /// <summary>
-    /// The material of the bright ring.
-    /// </summary>
-    private Material? _brightMaterial;
-
-    /// <summary>
-    /// The material of the dark ring.
-    /// </summary>
-    private Material? _darkMaterial;
 
     /// <summary>
     /// The mesh the copies were last given.
@@ -127,18 +129,34 @@ internal class OwnMapIconOutline : MonoBehaviour {
             return null;
         }
 
+        // Anything left on the head by an outline that was not finished, so that a failure does not add one more
+        // every time the map opens
+        var left = head.transform.Find(ObjectName);
+        if (left != null) {
+            left.gameObject.SetActive(false);
+            Destroy(left.gameObject);
+        }
+
+        if (_brightMaterial == null) {
+            _brightMaterial = new Material(shader);
+        }
+
+        if (_darkMaterial == null) {
+            _darkMaterial = new Material(shader) { color = DarkColour };
+        }
+
+        _brightMaterial.color = colour;
+
         var holder = new GameObject(ObjectName) { layer = head.layer };
         holder.transform.SetParent(head.transform, false);
 
         var outline = holder.AddComponent<OwnMapIconOutline>();
         outline._headFilter = headFilter;
         outline._headRenderer = headRenderer;
-        outline._brightMaterial = new Material(shader) { color = colour };
-        outline._darkMaterial = new Material(shader) { color = DarkColour };
 
         // The dark ring lowest, then the bright ring, then the head itself
-        outline.AddRing(outline._darkMaterial, headRenderer.sortingOrder - 2, DarkReach);
-        outline.AddRing(outline._brightMaterial, headRenderer.sortingOrder - 1, BrightReach);
+        outline.AddRing(_darkMaterial, headRenderer.sortingOrder - 2, DarkReach);
+        outline.AddRing(_brightMaterial, headRenderer.sortingOrder - 1, BrightReach);
         outline.Follow();
 
         return outline;
@@ -216,16 +234,6 @@ internal class OwnMapIconOutline : MonoBehaviour {
 
     private void LateUpdate() {
         Follow();
-    }
-
-    private void OnDestroy() {
-        if (_brightMaterial != null) {
-            Destroy(_brightMaterial);
-        }
-
-        if (_darkMaterial != null) {
-            Destroy(_darkMaterial);
-        }
     }
 
     /// <summary>
