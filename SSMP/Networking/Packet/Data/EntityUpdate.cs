@@ -877,8 +877,9 @@ internal static class HealthMessage {
 
     /// <summary>
     /// All the damage that a copy took from the player of its game in the epoch: the epoch, the number of the copy,
-    /// the damage, and blows in it not taken in yet, the newest as a blow lands and all of them when it is sent again -
-    /// for each, the damage before it and after it, and what it kills with if it does: which way the body is thrown
+    /// the damage, whether every blow in it not taken in yet comes with it, and blows in it not taken in yet, the
+    /// newest as a blow lands and all of them when it is sent again - for each, the damage before it and after it,
+    /// and what it kills with if it does: which way the body is thrown
     /// and how hard, which way the blow came from, its kind of attack and element, whether it passes over the
     /// creature's evasion, its tool damage, whether its source breaks items, and whether it kills nothing.
     /// </summary>

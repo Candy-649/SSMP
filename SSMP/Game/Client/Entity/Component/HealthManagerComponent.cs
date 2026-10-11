@@ -153,12 +153,13 @@ internal class HealthManagerComponent : EntityComponent {
     private int _ownDamageTaken;
 
     /// <summary>
-    /// When the copy's damage was last sent.
+    /// When the copy's damage was last sent with every blow in it that was not taken in yet.
     /// </summary>
     private float _ownDamageSentAt;
 
     /// <summary>
-    /// How many times the copy's damage was sent again since this game's player last hit it.
+    /// How many times the copy's damage was sent again since it last went with every blow as one landed, or the game
+    /// that runs the creature last told its health.
     /// </summary>
     private int _ownDamageResends;
 
@@ -266,12 +267,13 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// How many of the newest blows of this game's player that the game that runs the creature has not taken in yet go
-    /// with the damage as a blow lands: that blow, and the one before it in case the message of that one went missing.
-    /// All of them go only when the damage is sent again (see <see cref="OwnDamageResendTime"/>). Sent with every
-    /// blow, each message was longer than the last for as long as nothing came back, and a long silence queued
-    /// hundreds of kilobytes.
+    /// with the damage at most as a blow lands: while it answers, that is all of them, and the few that went missing
+    /// with lost messages. Past that, all of them go only when the damage is sent again (see
+    /// <see cref="OwnDamageResendTime"/>), and damage that kills the creature before the first of those that came
+    /// waits for it (see <see cref="TakeInOwnDamage"/>): sent with every blow, each message was longer than the last
+    /// for as long as nothing came back, and a long silence queued hundreds of kilobytes.
     /// </summary>
-    private const int BlowsSentWithABlow = 2;
+    private const int BlowsSentWithABlow = 8;
 
     /// <summary>
     /// Hooks on what puts tag damage on a creature - a thing that leaves it on what it touches (TagDamager), the
@@ -299,8 +301,8 @@ internal class HealthManagerComponent : EntityComponent {
     private static DamageTag? _tickingTag;
 
     /// <summary>
-    /// The tags on the creature and its copy in this game whose stacks this game's player put on them, by the health
-    /// manager: whoever put a tag on last decides whose its ticks are (see <see cref="TagDamageTakerOnAddTag"/>).
+    /// The tags on the creature and its copy in this game whose stacks this game's player put on them, and nothing else
+    /// since, by the health manager (see <see cref="TagDamageTakerOnAddTag"/>).
     /// </summary>
     private HashSet<(HealthManager, DamageTag)>? _ownTags;
 
@@ -466,8 +468,13 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// A tag of damage put on a creature or a copy, or on it again (TagDamageTaker.AddDamageTagToStack). The ticks of
-    /// its stack are this game's player's if they put it on (see <see cref="IsOwnTagDamager"/> and
-    /// <see cref="OnBlow"/>), and otherwise not; whoever puts a tag on last decides.
+    /// its stack are this game's player's if they put it on while it was off (see <see cref="IsOwnTagDamager"/> and
+    /// <see cref="OnBlow"/>) and nothing else has put it on since; once something else has, they are not, until it
+    /// wears off, however often the player puts it on again. A tag has one stack whoever puts it on, which ticks no
+    /// more for two of them: the dust of the player's bomb on a creature in the dust of a room's barnacle ticks once,
+    /// and the game that runs the creature takes those ticks from its own barnacle already. Counted as the player's
+    /// from the bomb on, they were taken twice; the bomb's own ticks are lost instead while the barnacle keeps the dust
+    /// on.
     /// </summary>
     private static void TagDamageTakerOnAddTag(
         Action<TagDamageTaker, DamageTag, int> orig,
@@ -475,7 +482,8 @@ internal class HealthManagerComponent : EntityComponent {
         DamageTag damageTag,
         int hitAmountOverride
     ) {
-        orig(self, damageTag, hitAmountOverride);
+        var wasOn = damageTag != null && self.taggedDamage.ContainsKey(damageTag);
+        orig(self, damageTag!, hitAmountOverride);
 
         if (damageTag == null || self.owner is not HealthManager healthManager ||
             !ComponentOf.TryGetValue(healthManager, out var component)) {
@@ -484,10 +492,10 @@ internal class HealthManagerComponent : EntityComponent {
 
         var own = _taggingDamager != null ? IsOwnTagDamager(_taggingDamager) : _taggingBlowIsOwn == true;
         component._ownTags ??= [];
-        if (own) {
-            component._ownTags.Add((healthManager, damageTag));
-        } else {
+        if (!own) {
             component._ownTags.Remove((healthManager, damageTag));
+        } else if (!wasOn) {
+            component._ownTags.Add((healthManager, damageTag));
         }
     }
 
@@ -767,9 +775,8 @@ internal class HealthManagerComponent : EntityComponent {
             _ownBlows.Add(new OwnBlow(damageBefore, _ownDamage, blow));
         }
 
-        _ownDamageResends = 0;
         if (send) {
-            SendOwnDamage(allBlows: false);
+            SendOwnDamage(resend: false);
         }
 
         return true;
@@ -1279,7 +1286,7 @@ internal class HealthManagerComponent : EntityComponent {
             // The game that runs the creature has not told health with all of it in: sent again, as it is all of it,
             // with all of its blows
             _ownDamageResends++;
-            SendOwnDamage(allBlows: true);
+            SendOwnDamage(resend: true);
         }
 
         var newInvincible = _healthManager.Host.IsInvincible;
@@ -1418,11 +1425,13 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// Tells the game that runs the creature all the damage that the copy took from this game's player so far in the
-    /// current epoch, with blows in it that it has not told it took in (see <see cref="TakeInOwnDamage"/>): the newest
-    /// of them as a blow lands (see <see cref="BlowsSentWithABlow"/>), or all of them.
+    /// current epoch, with blows in it that it has not told it took in (see <see cref="TakeInOwnDamage"/>): as a blow
+    /// lands, the newest of them (see <see cref="BlowsSentWithABlow"/>), and when it is sent again, all of them. Only a
+    /// message with every one of them puts off sending it again: one with the newest alone is no help if those before
+    /// them went missing, and the damage went again only when the player stopped hitting for a while.
     /// </summary>
-    /// <param name="allBlows">Whether all of the blows go, rather than the newest.</param>
-    private void SendOwnDamage(bool allBlows) {
+    /// <param name="resend">Whether the damage is sent again, rather than as a blow lands.</param>
+    private void SendOwnDamage(bool resend) {
         var hpData = ObjectPool<EntityNetworkData>.Get();
         hpData.Type = EntityComponentType.Health;
         hpData.Packet.Write(HealthMessage.OwnDamage);
@@ -1432,9 +1441,14 @@ internal class HealthManagerComponent : EntityComponent {
 
         _ownBlows.RemoveAll(blow => blow.DamageAfter <= _ownDamageTaken);
         var count = System.Math.Min(
-            allBlows ? _ownBlows.Count : System.Math.Min(_ownBlows.Count, BlowsSentWithABlow), byte.MaxValue
+            resend ? _ownBlows.Count : System.Math.Min(_ownBlows.Count, BlowsSentWithABlow), byte.MaxValue
         );
-        var first = allBlows ? 0 : _ownBlows.Count - count;
+        var first = resend ? 0 : _ownBlows.Count - count;
+
+        // Whether the game that runs the creature has every blow it will get with this: all of those not taken in,
+        // or as many as there is room for, the oldest, when the damage is sent again
+        var whole = resend || count == _ownBlows.Count;
+        hpData.Packet.Write(whole);
         hpData.Packet.Write((byte) count);
         for (var i = first; i < first + count; i++) {
             WriteOwnBlow(hpData, _ownBlows[i]);
@@ -1442,7 +1456,12 @@ internal class HealthManagerComponent : EntityComponent {
 
         SendData(hpData);
 
-        _ownDamageSentAt = Time.unscaledTime;
+        if (whole) {
+            _ownDamageSentAt = Time.unscaledTime;
+            if (!resend) {
+                _ownDamageResends = 0;
+            }
+        }
     }
 
     /// <summary>
@@ -1760,12 +1779,15 @@ internal class HealthManagerComponent : EntityComponent {
     /// creature's health yet. All of the copy's damage so far comes each time, so none is taken in twice and none is
     /// lost with a message that went missing. Answered by telling the health as it is then, which is how the copy
     /// knows its damage was taken in. Damage that kills the creature kills it here, of the blow in it that took the
-    /// last of its health.
+    /// last of its health. Damage that kills it before the first of the blows that came with it waits for the copy to
+    /// send them all, as it does when nothing answers it for a while: the blow there may have killed nothing, and the
+    /// creature should die of it if it did.
     /// </summary>
     private void TakeInOwnDamage(EntityNetworkData data) {
         var epoch = data.Packet.ReadUInt();
         var copyKey = data.Packet.ReadUInt();
         var damage = data.Packet.ReadInt();
+        var whole = data.Packet.ReadBool();
 
         if (IsControlled) {
             return;
@@ -1793,6 +1815,15 @@ internal class HealthManagerComponent : EntityComponent {
             taken = (copyKey, 0);
         }
 
+        var health = GetCurrentHp();
+        if (!whole && health > 0 && health - (damage - taken.damage) <= 0 && blows is { Count: > 0 } &&
+            taken.damage + health <= blows[0].DamageBefore) {
+            // Answered with the health as it is, which has the copy send all of its blows soon
+            _damageTaken[data.SenderId] = taken;
+            SendHealthState();
+            return;
+        }
+
         if (damage > taken.damage) {
             // The creature keeps the way the last of the blows came from and its kind, as it does for the blows of
             // this game's player, for a death that its FSM plays
@@ -1807,7 +1838,7 @@ internal class HealthManagerComponent : EntityComponent {
 
             // The health runs out where the copy's damage passes what of it is in the health already and the health
             // left: the blow there kills the creature, unless it kills nothing
-            var newHp = HealthAfter(GetCurrentHp(), taken.damage, damage, blows, out var killingBlow);
+            var newHp = HealthAfter(health, taken.damage, damage, blows, out var killingBlow);
             ApplyHp(newHp, triggerHostDeath: true, killingBlow, new Killer(KillerKind.Copy, copyKey));
             taken.damage = damage;
         }

@@ -14,9 +14,16 @@ internal class FleaBrew : BaseAttackTool {
     private const string ParticlesName = "Flea Brew Particles";
 
     /// <summary>
-    /// Cached reference to a modified version of the poisoned flea brew trail.
+    /// Cached reference to a modified version of the poisoned flea brew trail that hurts the local player.
     /// </summary>
-    private static GameObject? _modifiedPoisonTrail;
+    private static GameObject? _hurtingPoisonTrail;
+
+    /// <summary>
+    /// Cached reference to a modified version of the poisoned flea brew trail that does not hurt the local player. Each
+    /// brew spawns its trail from one of the two for as long as it lasts, so setting up a single one for every brew
+    /// changed the trails of brews still running: of another remote player, or from before PvP was turned off.
+    /// </summary>
+    private static GameObject? _harmlessPoisonTrail;
 
     /// <summary>
     /// Cached values of sprite flashes for Flea Brews.
@@ -162,32 +169,61 @@ internal class FleaBrew : BaseAttackTool {
         }
 
         // Set up a modified version of the prefab
-        if (!_modifiedPoisonTrail) {
+        var trail = hurtsPlayers ? _hurtingPoisonTrail : _harmlessPoisonTrail;
+        if (!trail) {
             var prefab = spawner.prefab;
             if (!prefab) return;
 
-            _modifiedPoisonTrail = EffectUtils.SpawnGlobalPoolObject(prefab, particles.transform, 0);
-            if (!_modifiedPoisonTrail) return;
+            trail = MakePoisonTrail(prefab, particles.transform, hurtsPlayers);
+            if (!trail) return;
 
-            _modifiedPoisonTrail.SetActive(false);
-            _modifiedPoisonTrail.name = "Hornet Poison Trail Modified";
-            _modifiedPoisonTrail.AddComponentIfNotPresent<RemoteAttackComponent>();
-
-            // The poison on creatures is counted in the game of the player who drank the brew, whose own trail leaves
-            // it on them there
-            foreach (var tagDamager in _modifiedPoisonTrail.GetComponentsInChildren<TagDamager>(true)) {
-                Object.DestroyImmediate(tagDamager);
+            if (hurtsPlayers) {
+                _hurtingPoisonTrail = trail;
+            } else {
+                _harmlessPoisonTrail = trail;
             }
-
-            // Re-add recycler so that it de-spawns
-            // Since this is a new object, it won't override the other pool
-            var recycler = _modifiedPoisonTrail.AddComponent<AutoRecycleSelf>();
-            recycler.afterEvent = GlobalEnums.AfterEvent.TIME;
-            recycler.timeToWait = 1.1f;
         }
 
-        // Set the damager every time the brew is used, as PvP and the damage amount can change
-        var damager = _modifiedPoisonTrail.FindGameObjectInChildren("damager");
+        // Set the damage every time the brew is used, as the damage amount can change
+        if (hurtsPlayers) {
+            var damager = trail.FindGameObjectInChildren("damager");
+            if (damager) {
+                SetDamageHeroState(damager, true, ServerSettings.PoisonBrewDamage);
+            }
+        }
+
+        // Set the spawner's prefab
+        spawner.prefab = trail;
+    }
+
+    /// <summary>
+    /// Makes a modified version of the poisoned flea brew trail for remote players (see <see cref="SetPoisonTrail"/>).
+    /// </summary>
+    /// <param name="prefab">The trail of the game.</param>
+    /// <param name="parent">Where to make it.</param>
+    /// <param name="hurtsPlayers">Whether it hurts the local player.</param>
+    /// <returns>The modified trail, or null if it could not be made.</returns>
+    private GameObject? MakePoisonTrail(GameObject prefab, Transform parent, bool hurtsPlayers) {
+        var trail = EffectUtils.SpawnGlobalPoolObject(prefab, parent, 0);
+        if (!trail) return null;
+
+        trail.SetActive(false);
+        trail.name = hurtsPlayers ? "Hornet Poison Trail Hurting" : "Hornet Poison Trail Harmless";
+        trail.AddComponentIfNotPresent<RemoteAttackComponent>();
+
+        // The poison on creatures is counted in the game of the player who drank the brew, whose own trail leaves
+        // it on them there
+        foreach (var tagDamager in trail.GetComponentsInChildren<TagDamager>(true)) {
+            Object.DestroyImmediate(tagDamager);
+        }
+
+        // Re-add recycler so that it de-spawns
+        // Since this is a new object, it won't override the other pool
+        var recycler = trail.AddComponent<AutoRecycleSelf>();
+        recycler.afterEvent = GlobalEnums.AfterEvent.TIME;
+        recycler.timeToWait = 1.1f;
+
+        var damager = trail.FindGameObjectInChildren("damager");
         if (damager) {
             SetDamageHeroState(damager, hurtsPlayers, ServerSettings.PoisonBrewDamage);
             if (hurtsPlayers) {
@@ -195,7 +231,6 @@ internal class FleaBrew : BaseAttackTool {
             }
         }
 
-        // Set the spawner's prefab
-        spawner.prefab = _modifiedPoisonTrail;
+        return trail;
     }
 }
