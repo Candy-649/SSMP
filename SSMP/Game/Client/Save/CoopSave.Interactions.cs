@@ -450,8 +450,8 @@ internal partial class CoopSave {
             return;
         }
 
-        // A living creature that a put-back of a player would send back to where it started, while another player is
-        // in the room, goes nowhere at all (see CoopSave.PutBack)
+        // A living creature that a put-back of a player would send back to where it started or switch off, while
+        // another player is in the room, stays as it is (see CoopSave.PutBack)
         try {
             if (KeepsCreatureInPlace(self, toState)) {
                 MachineSwitchToStateField?.SetValue(self, null);
