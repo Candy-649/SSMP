@@ -48,9 +48,20 @@ internal class MapManager : IMapManager {
     /// </summary>
     private bool _displayingIcons;
 
-    public MapManager(NetClient netClient, ServerSettings serverSettings) {
+    /// <summary>
+    /// The settings of this player, for the colour of the outline around their own head.
+    /// </summary>
+    private readonly ModSettings _modSettings;
+
+    /// <summary>
+    /// The outline around this player's own head on the map, while connected and once the map has been opened.
+    /// </summary>
+    private OwnMapIconOutline? _ownOutline;
+
+    public MapManager(NetClient netClient, ServerSettings serverSettings, ModSettings modSettings) {
         _netClient = netClient;
         _serverSettings = serverSettings;
+        _modSettings = modSettings;
 
         _mapEntries = new Dictionary<ushort, PlayerMapEntry>();
     }
@@ -293,6 +304,53 @@ internal class MapManager : IMapManager {
         // Otherwise, we have opened the map
         _displayingIcons = true;
         UpdateMapIconsActive();
+
+        OutlineOwnIcon(gameMap);
+    }
+
+    /// <summary>
+    /// Put the outline around this player's own head on the map, or bring its colour up to date. The colour is the
+    /// one this player picked for their own name, so that the same colour means them in the room and on the map.
+    /// </summary>
+    /// <param name="gameMap">The GameMap instance.</param>
+    private void OutlineOwnIcon(GameMap gameMap) {
+        if (!_netClient.IsConnected) {
+            return;
+        }
+
+        var head = gameMap.compassIcon;
+        if (head == null) {
+            return;
+        }
+
+        if (!PlayerManager.OwnNameColours.TryGetValue(_modSettings.OwnNameColour ?? "", out var colour)) {
+            colour = PlayerManager.OwnNameColours["yellow"];
+        }
+
+        if (_ownOutline != null && _ownOutline.transform.parent == head.transform) {
+            _ownOutline.SetColour(colour);
+            return;
+        }
+
+        RemoveOwnOutline();
+
+        // Only a look, so it never stands in the way of the map opening
+        try {
+            _ownOutline = OwnMapIconOutline.Attach(head, colour);
+        } catch (System.Exception e) {
+            Logger.Error($"Could not outline own head on the map:\n{e}");
+        }
+    }
+
+    /// <summary>
+    /// Remove the outline around this player's own head, if there is one.
+    /// </summary>
+    private void RemoveOwnOutline() {
+        if (_ownOutline != null) {
+            Object.Destroy(_ownOutline.gameObject);
+        }
+
+        _ownOutline = null;
     }
 
     /// <summary>
@@ -333,6 +391,19 @@ internal class MapManager : IMapManager {
             gameMap.gameObject.transform
         );
         mapIcon.SetActive(_displayingIcons);
+
+        // The copy is taken from this player's own head, outline and all. The outline is only for this player's own
+        // head, and the copy is drawn below it and its outline, so that a head over this player's own does not hide it
+        var copiedOutline = mapIcon.transform.Find(OwnMapIconOutline.ObjectName);
+        if (copiedOutline != null) {
+            copiedOutline.gameObject.SetActive(false);
+            Object.Destroy(copiedOutline.gameObject);
+        }
+
+        if (mapIcon.TryGetComponent<tk2dSprite>(out var sprite) &&
+            compassIconPrefab.TryGetComponent<Renderer>(out var ownRenderer)) {
+            sprite.SortingOrder = ownRenderer.sortingOrder - OwnMapIconOutline.OtherHeadsBelow;
+        }
 
         var unityPosition = new Vector3(
             position.X,
@@ -381,6 +452,7 @@ internal class MapManager : IMapManager {
     /// </summary>
     private void OnDisconnect() {
         RemoveAllIcons();
+        RemoveOwnOutline();
 
         _mapEntries.Clear();
 

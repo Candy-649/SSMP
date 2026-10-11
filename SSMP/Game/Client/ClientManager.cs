@@ -348,7 +348,7 @@ internal class ClientManager : IClientManager {
         _playerManager = new PlayerManager(serverSettings, modSettings, netClient, _playerData);
         _modSettings.ChangedEvent += OnModSettingChanged;
         _animationManager = new AnimationManager(netClient, _playerManager, serverSettings, _playerData);
-        _mapManager = new MapManager(netClient, serverSettings);
+        _mapManager = new MapManager(netClient, serverSettings, modSettings);
 
         _entityManager = new EntityManager(netClient);
         ToolCopies.IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost;
