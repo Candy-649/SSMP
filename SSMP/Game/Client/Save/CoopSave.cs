@@ -465,6 +465,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a clock on its way to theirs gets there
+        try {
+            UpdateRoomClocks();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also while another member is gone, so that the members who are in keep in step with each other
         if (checkedPartner != null) {
             UpdateInteractions();
@@ -978,6 +985,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.PutBack:
                 OnPutBack(player, update);
+                break;
+            case CoopSaveUpdateKind.RoomClocks:
+                OnRoomClocks(player, update);
                 break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);

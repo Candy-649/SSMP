@@ -770,5 +770,16 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    PutBack
+    PutBack,
+
+    /// <summary>
+    /// How far along the things of its room that go round by a clock of their own are in the game of the sender, who
+    /// is the scene host, so that the other games in the room bring theirs there (see CoopSave.RoomClocks).
+    /// <see cref="CoopSaveUpdate.Values"/> holds the time of the sender's game to the server and back in milliseconds,
+    /// then the time of each clock, and <see cref="CoopSaveUpdate.Amounts"/> the clocks by their keys.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    RoomClocks
 }
