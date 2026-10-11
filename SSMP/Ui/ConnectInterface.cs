@@ -156,16 +156,18 @@ internal class ConnectInterface {
     private const float PortLabelSpacing = 38f;
 
     /// <summary>
-    /// Height of the waiting room, the tallest of the panels that take the place of a tab's content.
+    /// How far above the start of a tab's content the panels that take its place begin, which puts their headers just
+    /// under the row of tabs. Level with the content they began a whole header lower, and the waiting room pushed
+    /// everything under it down to the bottom of the menu.
     /// </summary>
-    private const float WaitingRoomHeight = 280f + WaitingRoomPanel.NameSettingsHeight;
+    private const float PanelRaise = 25f;
 
     /// <summary>
-    /// Y-offset for the feedback/error text relative to the content area. It sits just below the waiting room: the
-    /// message that a lobby was created comes up together with that room, and any higher it was drawn over the room's
-    /// buttons.
+    /// Y-offset for the feedback/error text relative to the content area. It sits just below the waiting room, the
+    /// tallest of the panels: the message that a lobby was created comes up together with that room, so the two must
+    /// not overlap.
     /// </summary>
-    private const float FeedbackTextOffset = WaitingRoomHeight + 8f;
+    private const float FeedbackTextOffset = WaitingRoomPanel.Height - PanelRaise + 10f;
 
     /// <summary>
     /// Height of the bottom feedback area so longer matchmaking messages can wrap cleanly.
@@ -727,6 +729,9 @@ internal class ConnectInterface {
         _steamTab = tabElements.steam;
         _directIpTab = tabElements.directIp;
 
+        // Where the panels that stand in for a tab's content begin
+        var panelY = currentY + PanelRaise / UiManager.ScreenHeightRatio;
+
         // Create tab-specific content
         var matchmakingComponents = CreateMatchmakingTab(currentY);
         _matchmakingGroup = matchmakingComponents.group;
@@ -736,7 +741,7 @@ internal class ConnectInterface {
         // Create lobby browser panel
         _lobbyBrowserPanel = new LobbyBrowserPanel(
             _backgroundGroup,
-            new Vector2(InitialX, currentY),
+            new Vector2(InitialX, panelY),
             new Vector2(ContentWidth, 280f)
         );
         _lobbyBrowserPanel.SetOnLobbySelected(lobby => {
@@ -755,8 +760,8 @@ internal class ConnectInterface {
 
         _waitingRoomPanel = new WaitingRoomPanel(
             _backgroundGroup,
-            new Vector2(InitialX, currentY),
-            new Vector2(ContentWidth, WaitingRoomHeight),
+            new Vector2(InitialX, panelY),
+            new Vector2(ContentWidth, WaitingRoomPanel.Height),
             _modSettings
         );
         _waitingRoomPanel.SetOnInvite(() => {
@@ -793,7 +798,7 @@ internal class ConnectInterface {
         if (_steamGroup != null) {
             _steamLobbyBrowserPanel = new LobbyBrowserPanel(
                 _backgroundGroup,
-                new Vector2(InitialX, currentY),
+                new Vector2(InitialX, panelY),
                 new Vector2(ContentWidth, 280f)
             );
             _steamLobbyBrowserPanel.SetOnLobbySelected(lobby => {
@@ -821,7 +826,7 @@ internal class ConnectInterface {
             // Create Steam lobby config panel
             _steamLobbyConfigPanel = new LobbyConfigPanel(
                 _backgroundGroup,
-                new Vector2(InitialX, currentY),
+                new Vector2(InitialX, panelY),
                 new Vector2(ContentWidth, 280f),
                 PublicLobbyType.Steam
             );
@@ -841,7 +846,7 @@ internal class ConnectInterface {
         // Create matchmaking lobby config panel
         _lobbyConfigPanel = new LobbyConfigPanel(
             _backgroundGroup,
-            new Vector2(InitialX, currentY),
+            new Vector2(InitialX, panelY),
             new Vector2(ContentWidth, 280f)
         );
         _lobbyConfigPanel.SetOnCreate(visibility => {

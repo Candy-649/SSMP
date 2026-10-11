@@ -85,8 +85,10 @@ internal class WaitingRoomPanel : IRootedComponent {
     /// <summary>Parent component group for visibility management.</summary>
     private readonly ComponentGroup _componentGroup;
 
-    private const float RowHeight = 34f;
-    private const float RowSpacing = 6f;
+    // Slimmer than they were (34 and 6), so that four players fit in a panel that ends above the feedback text of the
+    // menu
+    private const float RowHeight = 30f;
+    private const float RowSpacing = 5f;
     private const float Padding = 15f;
     private const float HeaderHeight = 32f;
     private const float StatusHeight = 26f;
@@ -96,6 +98,18 @@ internal class WaitingRoomPanel : IRootedComponent {
     /// How much room the choices about this player's own name take, under the list of who is here.
     /// </summary>
     public const float NameSettingsHeight = 68f;
+
+    /// <summary>
+    /// How many players the list shows before it runs into the name settings under it.
+    /// </summary>
+    private const int ListRows = 4;
+
+    /// <summary>
+    /// Height of the panel: the header, the status line, room for <see cref="ListRows"/> players, the name settings and
+    /// the buttons. Rows start 2 below the top of the list, which starts 4 below the status line.
+    /// </summary>
+    public const float Height = HeaderHeight + StatusHeight + 4f + 2f + ListRows * RowHeight +
+                                (ListRows - 1) * RowSpacing + NameSettingsHeight + ButtonAreaHeight;
 
     private static readonly Color Accent = new(1f, 0.85f, 0.6f, 1f);
     private static readonly Color RowBackground = new(0.12f, 0.12f, 0.15f, 1f);
