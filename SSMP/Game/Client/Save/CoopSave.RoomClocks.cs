@@ -8,15 +8,17 @@ using Object = UnityEngine.Object;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Things of a room that go along a curve over and over by a clock of their own (a VectorCurveAnimator that loops),
-/// like the spiked cogs that run back and forth along their rails in four rooms, 30 of them (census 10-11). Each game
+/// Things of a room that go along a curve over and over by a clock of their own (a VectorCurveAnimator that loops)
+/// and keep going where no one looks: the spiked cogs that run back and forth along their rails in four rooms, 30 of
+/// them, and a few that swing or turn (census 10-11: 52 of the 2941 that loop, 2 of them the hero's own). Each game
 /// started their clocks as its room loaded and stopped them for the moments that it held still, so the players saw a
 /// cog at different points of its way: one ran through where the cog was for the other, and was hurt where the other
 /// saw nothing. They keep to the clocks of the scene host's game now: the host tells every so often how far each of
 /// them is along, and the other game brings its own there, as far as the host's will have got by the time the word
 /// arrives. It speeds a clock up or holds it still until it is there, rather than putting it there at once, which could
 /// drop a cog on the player; a game that held still since lets its clocks fall behind again, and the next word brings
-/// them back.
+/// them back. The rest stop wherever the game does not show them, by its own camera, so where they are is each game's
+/// own: following the host's, the partner's held still on their screen while the host looked elsewhere.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -36,6 +38,13 @@ internal partial class CoopSave {
     private float _roomClocksToldAt;
 
     /// <summary>
+    /// The players that the saves were checked with who were in the room as the scene host last looked, by ID: one
+    /// that walks in, or is in the room as this game comes to run it, is told the clocks at once rather than in up to
+    /// <see cref="RoomClockTellInterval"/>, with its clocks where its room started them until then.
+    /// </summary>
+    private readonly HashSet<ushort> _roomClockMembers = [];
+
+    /// <summary>
     /// How far each clock here still has to go to be where the scene host's is, in its own seconds: forward, or back
     /// for one that is ahead and waits.
     /// </summary>
@@ -43,13 +52,38 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Brings the clocks here along to the scene host's, and in the scene host's game tells them every so often while
-    /// another player is in the room.
+    /// another player is in the room, and as one walks in. Not while the host's game stands still: its clocks stand
+    /// with it, and the other games, told the same every time, held theirs still or ran them on by turns.
     /// </summary>
     private void UpdateRoomClocks() {
         CatchUpRoomClocks();
 
-        if (IsSceneHost?.Invoke() != true || !IsMemberInRoom() ||
-            Time.unscaledTime - _roomClocksToldAt < RoomClockTellInterval) {
+        if (IsSceneHost?.Invoke() != true) {
+            _roomClockMembers.Clear();
+            return;
+        }
+
+        if (Time.timeScale <= 0f) {
+            return;
+        }
+
+        var walkedIn = false;
+        var inRoom = 0;
+        foreach (var id in _checkedMembers) {
+            if (_playerData.TryGetValue(id, out var member) && member.IsInLocalScene) {
+                inRoom++;
+                walkedIn |= _roomClockMembers.Add(id);
+            } else {
+                _roomClockMembers.Remove(id);
+            }
+        }
+
+        // A player who is no longer one of them, who left, walks in anew if they come back
+        if (_roomClockMembers.Count != inRoom) {
+            _roomClockMembers.IntersectWith(_checkedMembers);
+        }
+
+        if (inRoom == 0 || !walkedIn && Time.unscaledTime - _roomClocksToldAt < RoomClockTellInterval) {
             return;
         }
 
@@ -140,9 +174,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The clocks of the room here that go round: those of its objects that are switched on, loop and have started,
-    /// each by a key that is the same in every game, the hash of its scene and its path in it. Two that share a key
-    /// are left out, as nothing tells them apart.
+    /// The clocks of the room here that go round: those of its objects that are switched on, loop, have started and
+    /// keep going where the game does not show them, each by a key that is the same in every game, the hash of its
+    /// scene and its path in it. Two that share a key are left out, as nothing tells them apart, and so are those of
+    /// objects taken from the pool, which each game takes for its own: the bell of a player's bind spun with that of
+    /// the host's player.
     /// </summary>
     private static List<(uint Key, VectorCurveAnimator Clock)> GetRoomClocks() {
         var room = SceneUtil.GetCurrentSceneName();
@@ -151,7 +187,8 @@ internal partial class CoopSave {
                      FindObjectsInactive.Exclude, FindObjectsSortMode.None
                  )) {
             if (!clock.loop || !clock.isAnimating || clock.delayLeft > 0f || clock.duration <= 0f ||
-                !IsPartOfRoom(clock.gameObject.scene.name, room)) {
+                clock.cullingMode != 0 || !IsPartOfRoom(clock.gameObject.scene.name, room) ||
+                IsFromPool(clock.transform)) {
                 continue;
             }
 
@@ -167,6 +204,19 @@ internal partial class CoopSave {
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// Whether an object, or one it is part of, was taken from the pool of the game.
+    /// </summary>
+    private static bool IsFromPool(Transform transform) {
+        for (var part = transform; part != null; part = part.parent) {
+            if (ObjectPool.IsSpawned(part.gameObject)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
