@@ -196,28 +196,54 @@ internal class HealthManagerComponent : EntityComponent {
     private bool _copyKilledOnWalkIn;
 
     /// <summary>
-    /// The component of each copy in this game, by the health manager of the copy, for the hooks on blows (see
-    /// <see cref="BeforeOwnBlow"/>).
+    /// The component of each creature and copy in this game, by its health manager, for the hooks on blows and on what
+    /// a blow that kills drops (see <see cref="OnBlow"/>).
     /// </summary>
-    private static readonly Dictionary<HealthManager, HealthManagerComponent> ComponentOfCopy = new();
+    private static readonly Dictionary<HealthManager, HealthManagerComponent> ComponentOf = new();
 
     /// <summary>
-    /// The health manager of this component's copy as it was put in <see cref="ComponentOfCopy"/>, to take it out again
-    /// even once the copy is gone.
+    /// The health managers of this component's creature and copy as they were put in <see cref="ComponentOf"/>, to
+    /// take them out again even once they are gone.
     /// </summary>
-    private readonly HealthManager? _copyHealthManager;
+    private readonly HealthManager? _creatureHealthManager, _copyHealthManager;
 
     /// <summary>
-    /// Hooks on the two ways a blow takes health that can end in a death with what a blow's death drops:
-    /// HealthManager.TakeDamage and ApplyExtraDamage(HitInstance). Made once, for every copy.
+    /// Hooks on the two ways a blow takes health that can end in a death with what a blow that kills drops,
+    /// HealthManager.TakeDamage and ApplyExtraDamage(HitInstance), and on the queueing of that drop, DieDropFling.
+    /// Made once, for every creature.
     /// </summary>
-    private static Hook? _takeDamageHook, _extraDamageHook;
+    private static Hook? _takeDamageHook, _extraDamageHook, _dieDropFlingHook;
+
+    /// <summary>
+    /// The blows of this game's player on the copy in the current epoch that drop something if they kill, as far as
+    /// the game that runs the creature has not told that it took them in: how far the copy's damage had come before
+    /// each and after it (see <see cref="_ownDamage"/>), and the tool damage it dealt. They go with the damage, for
+    /// that game to know what the blow that kills the creature drops (see <see cref="TakeInOwnDamage"/>).
+    /// </summary>
+    private readonly List<(int damageBefore, int damageAfter, ToolDamageFlags toolDamage)> _ownToolBlows = new();
+
+    /// <summary>
+    /// In the game that runs the creature: the tool damage of the blow that is killing it, kept as the game queues what
+    /// the blow drops (see <see cref="HealthManagerOnDieDropFling"/>), for its death to tell the other games (see
+    /// <see cref="HealthManagerOnDie"/>); otherwise none.
+    /// </summary>
+    private ToolDamageFlags _killingToolDamage;
+
+    /// <summary>
+    /// Whether what the copy's death drops for the blow that killed the creature is being queued, which the hook on
+    /// DieDropFling lets through (see <see cref="HealthManagerOnDieDropFling"/>).
+    /// </summary>
+    private bool _queueingDeathDrop;
 
     /// <summary>
     /// For the room's own creature taken over with blows of this game's player that killed it: the frame after which
-    /// it dies of them, or -1 for none (see <see cref="InitializeHost"/>).
+    /// it dies of them, or -1 for none, and the tool damage of the blow among them that killed it (see
+    /// <see cref="InitializeHost"/>).
     /// </summary>
     private int _killAfterFrame = -1;
+
+    /// <inheritdoc cref="_killAfterFrame" />
+    private ToolDamageFlags _killAfterFrameToolDamage;
 
     public HealthManagerComponent(
         NetClient netClient,
@@ -269,14 +295,19 @@ internal class HealthManagerComponent : EntityComponent {
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
 
         HookBlows();
+        if (healthManager.Host != null) {
+            _creatureHealthManager = healthManager.Host;
+            ComponentOf[healthManager.Host] = this;
+        }
+
         if (healthManager.Client != null) {
             _copyHealthManager = healthManager.Client;
-            ComponentOfCopy[healthManager.Client] = this;
+            ComponentOf[healthManager.Client] = this;
         }
     }
 
     /// <summary>
-    /// Makes the hooks on blows, once for all copies.
+    /// Makes the hooks on blows and on what a blow that kills drops, once for all creatures.
     /// </summary>
     private static void HookBlows() {
         if (_takeDamageHook != null) {
@@ -289,66 +320,110 @@ internal class HealthManagerComponent : EntityComponent {
         var extraDamage = typeof(HealthManager).GetMethod(
             nameof(HealthManager.ApplyExtraDamage), HookBindingFlags, Type.DefaultBinder, [typeof(HitInstance)], null
         );
-        if (takeDamage == null || extraDamage == null) {
+        var dieDropFling = typeof(HealthManager).GetMethod(
+            "DieDropFling", HookBindingFlags, Type.DefaultBinder, [typeof(ToolDamageFlags), typeof(bool)], null
+        );
+        if (takeDamage == null || extraDamage == null || dieDropFling == null) {
             throw new MissingMethodException(
                 typeof(HealthManager).FullName,
-                $"TakeDamage({nameof(HitInstance)}) or {nameof(HealthManager.ApplyExtraDamage)}({nameof(HitInstance)})"
+                $"TakeDamage({nameof(HitInstance)}), {nameof(HealthManager.ApplyExtraDamage)}({nameof(HitInstance)}) " +
+                $"or DieDropFling({nameof(ToolDamageFlags)}, bool)"
             );
         }
 
-        _takeDamageHook = new Hook(takeDamage, HealthManagerOnBlow);
-        _extraDamageHook = new Hook(extraDamage, HealthManagerOnBlow);
+        _takeDamageHook = new Hook(takeDamage, HealthManagerOnTakeDamage);
+        _extraDamageHook = new Hook(extraDamage, HealthManagerOnExtraDamage);
+        _dieDropFlingHook = new Hook(dieDropFling, HealthManagerOnDieDropFling);
     }
 
     /// <summary>
-    /// A blow on a creature. One on a copy in this game is taken from the health that the game that runs the creature
-    /// will have once it takes in the blows of this game's player, and then counted, sent, and put back (see
-    /// <see cref="BeforeOwnBlow"/>).
+    /// A blow of HealthManager.TakeDamage (see <see cref="OnBlow"/>).
     /// </summary>
-    private static void HealthManagerOnBlow(
+    private static void HealthManagerOnTakeDamage(
         Action<HealthManager, HitInstance> orig,
         HealthManager self,
         HitInstance hitInstance
     ) {
-        if (!ComponentOfCopy.TryGetValue(self, out var component) || !component.IsControlled) {
+        OnBlow(orig, self, hitInstance, fromTakeDamage: true);
+    }
+
+    /// <summary>
+    /// A blow of HealthManager.ApplyExtraDamage(HitInstance) (see <see cref="OnBlow"/>).
+    /// </summary>
+    private static void HealthManagerOnExtraDamage(
+        Action<HealthManager, HitInstance> orig,
+        HealthManager self,
+        HitInstance hitInstance
+    ) {
+        OnBlow(orig, self, hitInstance, fromTakeDamage: false);
+    }
+
+    /// <summary>
+    /// A blow on a creature. The game decides at a blow that kills what the blow drops for it: the item for a wish that
+    /// the damage of a tool drops (DieDropFling). Whether a blow kills is decided only in the game that runs the
+    /// creature, and every player gets their own drops, so that game tells the others with the death the tool damage of
+    /// the blow that killed it, and each game drops by it what it drops for its own player.
+    /// - A blow of this game's player on a copy is counted and sent with its tool damage, and the copy put back at the
+    ///   health last told (see <see cref="AfterOwnBlow"/>).
+    /// - A blow on the creature that this game runs runs as it is; one that kills it tells its death the tool damage
+    ///   (see <see cref="HealthManagerOnDieDropFling"/>).
+    /// </summary>
+    /// <param name="orig">The hooked method.</param>
+    /// <param name="self">The health manager that the blow hit.</param>
+    /// <param name="hitInstance">The blow.</param>
+    /// <param name="fromTakeDamage">Whether the blow is one of TakeDamage, whose blow from a source that breaks items
+    /// drops nothing. ApplyExtraDamage tells DieDropFling that the source breaks none.</param>
+    private static void OnBlow(
+        Action<HealthManager, HitInstance> orig,
+        HealthManager self,
+        HitInstance hitInstance,
+        bool fromTakeDamage
+    ) {
+        if (!ComponentOf.TryGetValue(self, out var component)) {
             orig(self, hitInstance);
             return;
         }
 
-        component.BeforeOwnBlow();
+        if (self != component._healthManager.Client) {
+            // The tool damage of a blow that killed the creature goes with the death the blow brings, and no further:
+            // a blow whose death did not come is not left to a later one
+            try {
+                orig(self, hitInstance);
+            } finally {
+                component._killingToolDamage = ToolDamageFlags.None;
+            }
+
+            return;
+        }
+
+        if (!component.IsControlled) {
+            orig(self, hitInstance);
+            return;
+        }
+
+        // The tool damage of the blow as DieDropFling takes it: none for one from a source that breaks items
+        var toolDamage = hitInstance.ToolDamageFlags;
+        if (fromTakeDamage && hitInstance.Source != null &&
+            hitInstance.Source.GetComponent<BreakItemsOnContact>() != null) {
+            toolDamage = ToolDamageFlags.None;
+        }
+
+        // A change of the health before the blow that was not counted yet is not the blow's
+        component.CountOwnBlows();
         try {
             orig(self, hitInstance);
         } finally {
-            component.AfterOwnBlow();
+            component.AfterOwnBlow(toolDamage);
         }
     }
 
     /// <summary>
-    /// Just before a blow on the copy. The game decides at the blow whether it kills, and with that what a blow that
-    /// kills drops, such as the item that a tool blow drops for a wish (DieDropFling): from the health it takes the
-    /// blow from. The copy shows the health last told, which leaves out the blows of this game's player that are not in
-    /// it yet, so for the blow it has the health that the game that runs the creature will have once it takes them in -
-    /// the blow that kills it there kills it here. The copy still does not die of it (HealthManagerOnDie): it dies when
-    /// the creature does, and drops then what the blow left it to drop.
+    /// Just after a blow of this game's player on the copy: counted and sent with its tool damage, and the copy back at
+    /// the health last told.
     /// </summary>
-    private void BeforeOwnBlow() {
-        var client = _healthManager.Client;
-        if (client == null || client.GetIsDead()) {
-            return;
-        }
-
-        CountOwnBlows();
-
-        var healthAfterOwnBlows = _toldHp - System.Math.Max(0, _ownDamage - _ownDamageTaken);
-        client.hp = healthAfterOwnBlows;
-        _lastHp = healthAfterOwnBlows;
-    }
-
-    /// <summary>
-    /// Just after a blow on the copy: counted, sent, and the copy back at the health last told.
-    /// </summary>
-    private void AfterOwnBlow() {
-        CountOwnBlows();
+    /// <param name="toolDamage">The tool damage of the blow.</param>
+    private void AfterOwnBlow(ToolDamageFlags toolDamage) {
+        CountOwnBlows(toolDamage: toolDamage);
         if (_healthManager.Client != null && !_healthManager.Client.GetIsDead()) {
             ApplyHp(_toldHp, triggerHostDeath: false);
         }
@@ -359,21 +434,96 @@ internal class HealthManagerComponent : EntityComponent {
     /// damage so far is what is sent, so that what went missing on the way comes with the next.
     /// </summary>
     /// <param name="send">Whether to send the damage so far to the game that runs the creature.</param>
+    /// <param name="toolDamage">For a drop that is one blow: the tool damage of the blow (see
+    /// <see cref="_ownToolBlows"/>).</param>
     /// <returns>Whether the health had dropped.</returns>
-    private bool CountOwnBlows(bool send = true) {
+    private bool CountOwnBlows(bool send = true, ToolDamageFlags toolDamage = ToolDamageFlags.None) {
         var client = _healthManager.Client;
         if (client == null || client.hp >= _lastHp) {
             return false;
         }
 
+        var damageBefore = _ownDamage;
         _ownDamage += _lastHp - client.hp;
         _lastHp = client.hp;
+        if (toolDamage != ToolDamageFlags.None) {
+            _ownToolBlows.Add((damageBefore, _ownDamage, toolDamage));
+        }
+
         _ownDamageResends = 0;
         if (send) {
             SendOwnDamage();
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// What a blow that kills drops being queued (DieDropFling), which the game does only for a blow that kills, just
+    /// before the death.
+    /// - On the creature that this game runs: the blow's tool damage is kept for the death to tell the other games
+    ///   (see <see cref="HealthManagerOnDie"/>). A death that came of no blow, such as one that an FSM brings, tells
+    ///   none, as it drops none here.
+    /// - A copy queues nothing for a blow on it, as whether the blow kills is not decided in its game. It queues what
+    ///   the blow drops that the game that runs the creature told killed it, just before it dies (see
+    ///   <see cref="QueueDeathDrop"/>).
+    /// </summary>
+    private static void HealthManagerOnDieDropFling(
+        Action<HealthManager, ToolDamageFlags, bool> orig,
+        HealthManager self,
+        ToolDamageFlags toolDamage,
+        bool breaksItems
+    ) {
+        if (ComponentOf.TryGetValue(self, out var component)) {
+            if (self != component._healthManager.Client) {
+                component._killingToolDamage = breaksItems ? ToolDamageFlags.None : toolDamage;
+            } else if (!component._queueingDeathDrop) {
+                return;
+            }
+        }
+
+        orig(self, toolDamage, breaksItems);
+    }
+
+    /// <summary>
+    /// Queues on the copy, just before it dies, what the blow that killed the creature drops, the way the game queues
+    /// it for a blow of its own that kills: here for the player of this game. The copy dies all the same if that fails.
+    /// </summary>
+    /// <param name="copy">The copy.</param>
+    /// <param name="killingToolDamage">The tool damage of the blow that killed the creature.</param>
+    private void QueueDeathDrop(HealthManager copy, ToolDamageFlags killingToolDamage) {
+        if (killingToolDamage == ToolDamageFlags.None) {
+            return;
+        }
+
+        _queueingDeathDrop = true;
+        try {
+            copy.DieDropFling(killingToolDamage, false);
+        } catch (Exception e) {
+            Logger.Error($"Could not queue what the blow that killed '{copy.name}' drops:\n{e}");
+        } finally {
+            _queueingDeathDrop = false;
+        }
+    }
+
+    /// <summary>
+    /// Kills the creature that this game runs of a blow that it took in as health, from a copy in another game or from
+    /// the copy here before this game took the room over: what the blow drops is queued as for a blow of this game,
+    /// and the death tells the other games the blow's tool damage (see <see cref="HealthManagerOnDieDropFling"/>). The
+    /// creature dies all the same if the queueing fails.
+    /// </summary>
+    /// <param name="creature">The room's own creature.</param>
+    /// <param name="killingToolDamage">The tool damage of the blow that kills it.</param>
+    private void DieOfTakenInBlow(HealthManager creature, ToolDamageFlags killingToolDamage) {
+        if (killingToolDamage != ToolDamageFlags.None) {
+            try {
+                creature.DieDropFling(killingToolDamage, false);
+            } catch (Exception e) {
+                Logger.Error($"Could not queue what the blow that killed '{creature.name}' drops:\n{e}");
+            }
+        }
+
+        creature.Die(null, AttackTypes.Generic, true);
     }
 
     /// <summary>
@@ -523,6 +673,12 @@ internal class HealthManagerComponent : EntityComponent {
         data.Packet.Write(hasSpecialDeath);
         data.Packet.Write(overrideSpecialDeath);
 
+        // The tool damage of the blow that killed the creature, if a blow did: each game drops by it what it drops for
+        // its own player. Told with this death only - one that comes of the same blow, such as a death of the
+        // creature's own that its FSM plays out at once, has dropped it already
+        data.Packet.Write((int) _killingToolDamage);
+        _killingToolDamage = ToolDamageFlags.None;
+
         _hostCorpse = null;
 
         SendData(data);
@@ -578,7 +734,7 @@ internal class HealthManagerComponent : EntityComponent {
                 Logger.Info($"'{observedHealthManager.name}', taken over, dies of the blows of this player");
                 TellOfPartnerBlow(observedHealthManager.gameObject, "HIT");
                 TellOfPartnerBlow(observedHealthManager.gameObject, "TOOK DAMAGE");
-                observedHealthManager.Die(null, AttackTypes.Generic, true);
+                DieOfTakenInBlow(observedHealthManager, _killAfterFrameToolDamage);
             }
         }
 
@@ -674,12 +830,17 @@ internal class HealthManagerComponent : EntityComponent {
         // here, and taking the room over would lose them: the creature goes on with them. Not for a creature that is
         // dead already, told so or dead here.
         var ownDamageNotTakenIn = 0;
+        var killingToolDamage = ToolDamageFlags.None;
         if (_wasRunElsewhere) {
             CountOwnBlows(send: false);
 
             var dead = _toldDead || _healthManager.Client != null && _healthManager.Client.GetIsDead();
             if (!dead) {
                 ownDamageNotTakenIn = System.Math.Max(0, _ownDamage - _ownDamageTaken);
+
+                // The blow among them that takes the last of the health, if they do, as the game that ran the creature
+                // would have found it (see TakeInOwnDamage)
+                killingToolDamage = KillingToolDamage(_ownToolBlows, _ownDamageTaken + GetCurrentHp());
             }
         }
 
@@ -702,6 +863,7 @@ internal class HealthManagerComponent : EntityComponent {
         // the next frame, if it is on and still alive then (OnUpdate)
         if (ownDamageNotTakenIn > 0 && healthBefore > 0 && currentHp <= 0) {
             _killAfterFrame = Time.frameCount;
+            _killAfterFrameToolDamage = killingToolDamage;
         }
 
         // A room can set the health of its creatures as it starts, before it is settled which game runs them: a fight
@@ -777,7 +939,8 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// Tells the game that runs the creature all the damage that the copy took from this game's player so far in the
-    /// current epoch (see <see cref="TakeInOwnDamage"/>).
+    /// current epoch, with the blows in it that it has not told it took in and that drop something if they kill (see
+    /// <see cref="TakeInOwnDamage"/>).
     /// </summary>
     private void SendOwnDamage() {
         var hpData = ObjectPool<EntityNetworkData>.Get();
@@ -786,9 +949,40 @@ internal class HealthManagerComponent : EntityComponent {
         hpData.Packet.Write(_currentHealthEpoch);
         hpData.Packet.Write(_copyKey);
         hpData.Packet.Write(_ownDamage);
+
+        _ownToolBlows.RemoveAll(blow => blow.damageAfter <= _ownDamageTaken);
+        var count = System.Math.Min(_ownToolBlows.Count, byte.MaxValue);
+        hpData.Packet.Write((byte) count);
+        for (var i = 0; i < count; i++) {
+            var (damageBefore, damageAfter, toolDamage) = _ownToolBlows[i];
+            hpData.Packet.Write(damageBefore);
+            hpData.Packet.Write(damageAfter);
+            hpData.Packet.Write((int) toolDamage);
+        }
+
         SendData(hpData);
 
         _ownDamageSentAt = Time.unscaledTime;
+    }
+
+    /// <summary>
+    /// The tool damage of the blow that took the last of a creature's health, among blows of one copy with tool damage:
+    /// the one in which the copy's damage passed the amount at which the health ran out. None if that was in a blow
+    /// with none.
+    /// </summary>
+    /// <param name="toolBlows">The blows, as in <see cref="_ownToolBlows"/>.</param>
+    /// <param name="killedAt">How far the copy's damage had to come for the health to run out.</param>
+    private static ToolDamageFlags KillingToolDamage(
+        List<(int damageBefore, int damageAfter, ToolDamageFlags toolDamage)> toolBlows,
+        int killedAt
+    ) {
+        foreach (var (damageBefore, damageAfter, toolDamage) in toolBlows) {
+            if (damageBefore < killedAt && killedAt <= damageAfter) {
+                return toolDamage;
+            }
+        }
+
+        return ToolDamageFlags.None;
     }
 
     /// <summary>
@@ -813,6 +1007,7 @@ internal class HealthManagerComponent : EntityComponent {
             _ownDamage = 0;
             _ownDamageTaken = 0;
             _ownDamageResends = 0;
+            _ownToolBlows.Clear();
             _damageTaken.Clear();
             _tellNumber = 0;
         }
@@ -853,6 +1048,7 @@ internal class HealthManagerComponent : EntityComponent {
                 // switched-off FSM and was never seen to die
                 _healthManager.Client.hasSpecialDeath = data.Packet.ReadBool();
                 var overrideSpecialDeath = data.Packet.ReadBool();
+                var killingToolDamage = (ToolDamageFlags) data.Packet.ReadInt();
 
                 // A creature whose FSM plays its own death threw out its body in the replay of that, which came just
                 // before this from the same death in the scene host's game (EntityFsmActions, SimulateDeath), and the
@@ -863,6 +1059,11 @@ internal class HealthManagerComponent : EntityComponent {
                 // Set a boolean to indicate that the client health manager is allowed to execute the Die method
                 _allowDeath = true;
                 _clientCorpse = null;
+                // What the blow that killed the creature drops, whoever struck it: every player gets their own drops.
+                // Not for a copy that is dead already, which a death does not drop anything from again
+                if (!_healthManager.Client.GetIsDead()) {
+                    QueueDeathDrop(_healthManager.Client, killingToolDamage);
+                }
                 // What the short overload passes, apart from whether the special death was passed over
                 _healthManager.Client.Die(
                     attackDirection, attackType, NailElements.None, null, ignoreEvasion, 1f, overrideSpecialDeath, false
@@ -990,7 +1191,8 @@ internal class HealthManagerComponent : EntityComponent {
     /// Takes in the damage of a copy in another game on the creature that this game runs: what of it is not in the
     /// creature's health yet. All of the copy's damage so far comes each time, so none is taken in twice and none is
     /// lost with a message that went missing. Answered by telling the health as it is then, which is how the copy
-    /// knows its damage was taken in.
+    /// knows its damage was taken in. Damage that kills the creature kills it here, of the blow in it that took the
+    /// last of its health.
     /// </summary>
     private void TakeInOwnDamage(EntityNetworkData data) {
         var epoch = data.Packet.ReadUInt();
@@ -999,6 +1201,13 @@ internal class HealthManagerComponent : EntityComponent {
 
         if (IsControlled) {
             return;
+        }
+
+        List<(int damageBefore, int damageAfter, ToolDamageFlags toolDamage)>? toolBlows = null;
+        var toolBlowCount = data.Packet.ReadByte();
+        for (var i = 0; i < toolBlowCount; i++) {
+            toolBlows ??= new List<(int, int, ToolDamageFlags)>(toolBlowCount);
+            toolBlows.Add((data.Packet.ReadInt(), data.Packet.ReadInt(), (ToolDamageFlags) data.Packet.ReadInt()));
         }
 
         // Damage counted against health that another game told, which this game does not go on from. A copy that
@@ -1017,7 +1226,13 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         if (damage > taken.damage) {
-            ApplyHp(GetCurrentHp() - (damage - taken.damage), triggerHostDeath: true);
+            // The health runs out where the copy's damage passes what of it is in the health already and the health
+            // left: the blow there kills the creature
+            var health = GetCurrentHp();
+            var killingToolDamage = toolBlows != null
+                ? KillingToolDamage(toolBlows, taken.damage + health)
+                : ToolDamageFlags.None;
+            ApplyHp(health - (damage - taken.damage), triggerHostDeath: true, killingToolDamage);
             taken.damage = damage;
         }
 
@@ -1039,7 +1254,12 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     /// <param name="newHp">The HP value to apply.</param>
     /// <param name="triggerHostDeath">Whether the scene host should run death when HP crosses zero.</param>
-    private void ApplyHp(int newHp, bool triggerHostDeath) {
+    /// <param name="killingToolDamage">For a death that it runs: the tool damage of the blow that kills.</param>
+    private void ApplyHp(
+        int newHp,
+        bool triggerHostDeath,
+        ToolDamageFlags killingToolDamage = ToolDamageFlags.None
+    ) {
         var wasAlive = GetCurrentHp() > 0;
         var killsHost = triggerHostDeath && !IsControlled && wasAlive && newHp <= 0 && _healthManager.Host != null;
 
@@ -1064,7 +1284,7 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         if (killsHost) {
-            _healthManager.Host!.Die(null, AttackTypes.Generic, true);
+            DieOfTakenInBlow(_healthManager.Host!, killingToolDamage);
         }
     }
 
@@ -1098,9 +1318,11 @@ internal class HealthManagerComponent : EntityComponent {
         _healthManagerDieHook = null;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
 
-        if (_copyHealthManager is { } copy && ComponentOfCopy.TryGetValue(copy, out var component) &&
-            ReferenceEquals(component, this)) {
-            ComponentOfCopy.Remove(copy);
+        foreach (var healthManager in new[] { _creatureHealthManager, _copyHealthManager }) {
+            if (healthManager is not null && ComponentOf.TryGetValue(healthManager, out var component) &&
+                ReferenceEquals(component, this)) {
+                ComponentOf.Remove(healthManager);
+            }
         }
     }
 }

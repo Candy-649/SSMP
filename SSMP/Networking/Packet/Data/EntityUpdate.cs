@@ -877,7 +877,8 @@ internal static class HealthMessage {
 
     /// <summary>
     /// All the damage that a copy took from the player of its game in the epoch: the epoch, the number of the copy,
-    /// the damage.
+    /// the damage, and the blows in it not taken in yet that drop something if they kill - for each, the damage before
+    /// it and after it, and its tool damage.
     /// </summary>
     public const byte OwnDamage = 1;
 
