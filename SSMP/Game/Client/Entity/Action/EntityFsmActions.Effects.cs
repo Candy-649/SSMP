@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Entity.Component;
 using SSMP.Networking.Packet.Data;
 
 // ReSharper disable UnusedMember.Local
@@ -322,6 +323,10 @@ internal static partial class EntityFsmActions {
     // to go back into hiding and be called up again, like what a boss summons. The copy's FSM never plays that death,
     // so on the other game the creature simply went out with nothing to show how it died. The copy dies the same way
     // here, its own kill counted in this player's journal as a creature dying any other way is.
+    //
+    // Such a death throws the body the way the last blow came from and holds the moment still, which each game took
+    // from its own creature. The replay carries both from the game that runs the creature, with who struck the blow,
+    // for the moment to be held in that player's game only (HealthManagerComponent.WriteDeathOf).
 
     /// <summary>
     /// Whether an action plays the death of a creature whose FSM plays its own death (see the replays below).
@@ -337,6 +342,7 @@ internal static partial class EntityFsmActions {
         EntityNetworkData data,
         EnemyDeathEffectsRegular.SimulateDeath action
     ) {
+        HealthManagerComponent.WriteDeathOf(DyingCreature(action, action.target), data);
         return true;
     }
 
@@ -345,7 +351,21 @@ internal static partial class EntityFsmActions {
         EntityNetworkData? data,
         EnemyDeathEffectsRegular.SimulateDeath action
     ) {
+        if (data != null) {
+            HealthManagerComponent.TakeDeathOf(DyingCreature(action, action.target), data);
+        }
+
         RunMoment(data, action);
+    }
+
+    /// <summary>
+    /// The health manager of the creature whose death an action plays, if it has one.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="target">The object that the action plays the death of.</param>
+    private static HealthManager? DyingCreature(FsmStateAction action, FsmOwnerDefault target) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(target);
+        return gameObject != null ? gameObject.GetComponent<HealthManager>() : null;
     }
 
     #endregion
@@ -357,6 +377,7 @@ internal static partial class EntityFsmActions {
         EntityNetworkData data,
         EnemyDeathEffectsRegular.SimulateDeathV2 action
     ) {
+        HealthManagerComponent.WriteDeathOf(DyingCreature(action, action.Target), data);
         return true;
     }
 
@@ -365,6 +386,10 @@ internal static partial class EntityFsmActions {
         EntityNetworkData? data,
         EnemyDeathEffectsRegular.SimulateDeathV2 action
     ) {
+        if (data != null) {
+            HealthManagerComponent.TakeDeathOf(DyingCreature(action, action.Target), data);
+        }
+
         RunMoment(data, action);
     }
 
@@ -377,6 +402,7 @@ internal static partial class EntityFsmActions {
         EntityNetworkData data,
         EnemyDeathEffectsRegular.SimulateDeathNoCorpse action
     ) {
+        HealthManagerComponent.WriteDeathOf(DyingCreature(action, action.Target), data);
         return true;
     }
 
@@ -385,6 +411,10 @@ internal static partial class EntityFsmActions {
         EntityNetworkData? data,
         EnemyDeathEffectsRegular.SimulateDeathNoCorpse action
     ) {
+        if (data != null) {
+            HealthManagerComponent.TakeDeathOf(DyingCreature(action, action.Target), data);
+        }
+
         RunMoment(data, action);
     }
 
