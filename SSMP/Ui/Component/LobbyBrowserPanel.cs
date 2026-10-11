@@ -12,9 +12,12 @@ namespace SSMP.Ui.Component;
 /// A full-screen overlay panel that displays public lobbies from MMS.
 /// Includes Back and Refresh buttons at the bottom.
 /// </summary>
-internal class LobbyBrowserPanel : IComponent {
+internal class LobbyBrowserPanel : IRootedComponent {
     /// <summary>The root GameObject for this panel.</summary>
     private GameObject GameObject { get; }
+
+    /// <inheritdoc />
+    public GameObject Root => GameObject;
 
     /// <summary>Content container for the scrollable lobby list.</summary>
     private readonly RectTransform _content;

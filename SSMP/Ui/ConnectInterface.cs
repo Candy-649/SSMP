@@ -156,9 +156,16 @@ internal class ConnectInterface {
     private const float PortLabelSpacing = 38f;
 
     /// <summary>
-    /// Y-offset for the feedback/error text relative to the content area.
+    /// Height of the waiting room, the tallest of the panels that take the place of a tab's content.
     /// </summary>
-    private const float FeedbackTextOffset = 310f;
+    private const float WaitingRoomHeight = 280f + WaitingRoomPanel.NameSettingsHeight;
+
+    /// <summary>
+    /// Y-offset for the feedback/error text relative to the content area. It sits just below the waiting room: the
+    /// message that a lobby was created comes up together with that room, and any higher it was drawn over the room's
+    /// buttons.
+    /// </summary>
+    private const float FeedbackTextOffset = WaitingRoomHeight + 8f;
 
     /// <summary>
     /// Height of the bottom feedback area so longer matchmaking messages can wrap cleanly.
@@ -749,7 +756,7 @@ internal class ConnectInterface {
         _waitingRoomPanel = new WaitingRoomPanel(
             _backgroundGroup,
             new Vector2(InitialX, currentY),
-            new Vector2(ContentWidth, 280f + WaitingRoomPanel.NameSettingsHeight),
+            new Vector2(ContentWidth, WaitingRoomHeight),
             _modSettings
         );
         _waitingRoomPanel.SetOnInvite(() => {

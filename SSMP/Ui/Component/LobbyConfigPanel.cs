@@ -11,9 +11,12 @@ namespace SSMP.Ui.Component;
 /// A modal panel for configuring lobby settings before creation.
 /// Shows lobby name, max players, visibility toggle, and create/cancel buttons.
 /// </summary>
-internal class LobbyConfigPanel : IComponent {
+internal class LobbyConfigPanel : IRootedComponent {
     /// <summary>The root GameObject for this panel.</summary>
     private GameObject GameObject { get; }
+
+    /// <inheritdoc />
+    public GameObject Root => GameObject;
 
     /// <summary>Text displaying the current visibility option (Steam only).</summary>
     private readonly Text _visibilityText;

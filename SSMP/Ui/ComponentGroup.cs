@@ -121,6 +121,10 @@ internal class ComponentGroup {
         foreach (var component in _components) {
             if (component is SSMP.Ui.Component.Component baseComponent && baseComponent.GameObject != null) {
                 baseComponent.GameObject.transform.SetParent(newParent.transform, true);
+            } else if (component is SSMP.Ui.Component.IRootedComponent rooted && rooted.Root != null) {
+                // The panels that stand in for a tab's content move too, or they keep the place they had before the
+                // canvas was scaled to the screen while the rest of the menu moves with the background
+                rooted.Root.transform.SetParent(newParent.transform, true);
             }
         }
 

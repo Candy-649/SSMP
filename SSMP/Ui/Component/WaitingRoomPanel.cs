@@ -32,9 +32,12 @@ internal readonly struct WaitingRoomMember {
 /// other player was still waiting - the two sides were never looking at the same thing. Both sides wait here instead,
 /// and neither save menu opens until both have said they are ready.
 /// </summary>
-internal class WaitingRoomPanel : IComponent {
+internal class WaitingRoomPanel : IRootedComponent {
     /// <summary>The root GameObject for this panel.</summary>
     private GameObject GameObject { get; }
+
+    /// <inheritdoc />
+    public GameObject Root => GameObject;
 
     /// <summary>Container the player rows are built in.</summary>
     private readonly RectTransform _content;

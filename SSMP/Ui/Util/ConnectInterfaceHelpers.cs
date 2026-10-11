@@ -33,9 +33,10 @@ internal static class ConnectInterfaceHelpers {
     private const float PanelWidth = 450f;
 
     /// <summary>
-    /// The height of the background panel.
+    /// The height of the background panel. It holds the waiting room, the tallest thing shown in it, with the feedback
+    /// text below that room.
     /// </summary>
-    private const float PanelHeight = 600f;
+    private const float PanelHeight = 650f;
 
     /// <summary>
     /// The width of the border of the background panel.
