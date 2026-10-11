@@ -871,13 +871,13 @@ internal static class HealthMessage {
     /// <summary>
     /// The health of the creature, told by the game that runs it: the scene-host epoch, the number of the telling in
     /// it, the health, whether the creature is dead, and for each copy in another game how much of its damage is in
-    /// the health.
+    /// the health and whether its death in that game was taken in.
     /// </summary>
     public const byte State = 0;
 
     /// <summary>
     /// All the damage that a copy took from the player of its game in the epoch: the epoch, the number of the copy,
-    /// the damage.
+    /// the damage, and whether the copy died of it in that game, with the way the last blow went.
     /// </summary>
     public const byte OwnDamage = 1;
 
