@@ -32,8 +32,9 @@ public class PlayerActionSetConverter : JsonConverter {
         while (reader.TokenType == JsonToken.PropertyName) {
             var name = (string) reader.Value!;
             if (!filter(name)) {
-                // value
+                // value, all of it: a binding written as a list is more than one token
                 reader.Read();
+                reader.Skip();
                 // JsonToken.PropertyName
                 reader.Read();
                 continue;
@@ -77,7 +78,11 @@ public class PlayerActionSetConverter : JsonConverter {
                     Logger.Warn($"Expected a string or a list for keybind, got `{reader.Value}");
                 }
             } else {
-                Logger.Warn($"Invalid keybind name {name}");
+                // A keybind that is gone, like the key that paired saves before 0.4.91. Its value is skipped whole:
+                // read one token at a time, a list left the reader inside it, and the rest of the settings file was
+                // read from the wrong place.
+                Logger.Info($"Skipped the keybind {name}, which isn't used any more");
+                reader.Skip();
             }
 
             // JsonToken.PropertyName

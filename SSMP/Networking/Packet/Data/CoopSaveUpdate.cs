@@ -167,6 +167,11 @@ internal class CoopSaveUpdate : IPacketData {
     public List<string> Names { get; set; } = [];
 
     /// <summary>
+    /// For a part of the host's save, its bytes.
+    /// </summary>
+    public byte[] Bytes { get; set; } = [];
+
+    /// <summary>
     /// A copy of this update with lists of its own, for sending the same update to one more player.
     /// </summary>
     public CoopSaveUpdate Copy() {
@@ -193,7 +198,8 @@ internal class CoopSaveUpdate : IPacketData {
             FsmName = FsmName,
             StateName = StateName,
             Values = [..Values],
-            Names = [..Names]
+            Names = [..Names],
+            Bytes = [..Bytes]
         };
     }
 
@@ -238,6 +244,8 @@ internal class CoopSaveUpdate : IPacketData {
         }
 
         WriteStrings(packet, Names);
+        packet.Write((ushort) Bytes.Length);
+        packet.Write(Bytes);
     }
 
     /// <inheritdoc />
@@ -285,6 +293,8 @@ internal class CoopSaveUpdate : IPacketData {
         }
 
         Names = ReadStrings(packet);
+        var byteCount = packet.ReadUShort();
+        Bytes = byteCount == 0 ? [] : packet.ReadBytes(byteCount);
     }
 
     /// <summary>
@@ -727,7 +737,28 @@ internal enum CoopSaveUpdateKind : byte {
 
     /// <summary>
     /// A member agrees to make a shared save of more than two players a normal save again, which goes to every member.
-    /// The member who asked unpairs all of them once each agreed.
+    /// The member who asked unpairs all of them once each agreed. No longer sent since saves aren't paired (0.4.91).
     /// </summary>
-    UnpairAccept
+    UnpairAccept,
+
+    /// <summary>
+    /// The sender chose a save in the menu to join the host's game with and asks for the host's save, which goes to
+    /// every player and which only the host's game answers. <see cref="CoopSaveUpdate.Key"/> names the request.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    HostSaveRequest,
+
+    /// <summary>
+    /// A part of the host's save, for the request that <see cref="CoopSaveUpdate.Key"/> names.
+    /// <see cref="CoopSaveUpdate.Part"/> is the part, counting from 0, <see cref="CoopSaveUpdate.PartCount"/> how many
+    /// parts there are, <see cref="CoopSaveUpdate.Bytes"/> its bytes, and <see cref="CoopSaveUpdate.FsmName"/> is
+    /// "gzip" when the save is compressed. With a part count of 0 it carries no part: it is the host's answer, sent as
+    /// soon as the request arrives, that the save follows once the host is in the game.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    HostSave
 }

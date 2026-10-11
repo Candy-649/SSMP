@@ -604,7 +604,8 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                     Sequence = update.Sequence,
                     Amounts = update.Amounts,
                     Values = update.Values,
-                    Names = update.Names
+                    Names = update.Names,
+                    Bytes = update.Bytes
                 }
             );
         }

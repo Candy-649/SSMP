@@ -288,6 +288,13 @@ internal partial class CoopSave {
             return checkPlayTime;
         }
 
+        // The host's story wins every check: a co-op save follows the host's world (the user's rule of 2026-10-11)
+        if (IsHosting?.Invoke() == true) {
+            _checkPlayTimeSinceTogether = false;
+            _checkPlayTime = float.MaxValue;
+            return float.MaxValue;
+        }
+
         var playTime = PlayerData.instance != null ? PlayerData.instance.playTime : 0f;
         var checkedPlayTime = GetMarker(_sessionSlot)?.CheckedPlayTime;
         _checkPlayTimeSinceTogether = checkedPlayTime != null;
@@ -349,6 +356,12 @@ internal partial class CoopSave {
 
         _differentStoryFlags = 0;
         var changes = new CoopSaveUpdate();
+
+        // Flags that only ever get added, like a flea that either player saved, stay set from any save rather than
+        // following the host's, as they do when a save joins (CoopHostSync)
+        var addedFlags = GetHostSyncData()?.Fields.TryGetValue("or", out var orNames) == true
+            ? new HashSet<string>(orNames, StringComparer.Ordinal)
+            : [];
         foreach (var name in names) {
             if (!StoryFieldIndices.TryGetValue(name, out var index) || _flagSequences.ContainsKey(name)) {
                 continue;
@@ -365,7 +378,7 @@ internal partial class CoopSave {
                 ? winnerValue
                 : localValue;
             if (fields[index].FieldType == typeof(bool) &&
-                (worldItemFlags.Contains(name) || StoryRecordNames.Contains(name))) {
+                (worldItemFlags.Contains(name) || StoryRecordNames.Contains(name) || addedFlags.Contains(name))) {
                 value = 1;
             }
 

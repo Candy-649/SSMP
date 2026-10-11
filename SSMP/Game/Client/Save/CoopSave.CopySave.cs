@@ -137,9 +137,9 @@ internal partial class CoopSave {
             return;
         }
 
-        // A pairing left behind by a save that was deleted outside the game would make the copy a two-player save
+        // A co-op mark left behind by a save that was deleted outside the game would make the copy a co-op save
         if (RemoveMarker(target)) {
-            Logger.Info($"Save slot {target} had a pairing from an old save, which was dropped for the copy");
+            Logger.Info($"Save slot {target} had a co-op mark from an old save, which was dropped for the copy");
         }
 
         var message = Lang.Pick(
@@ -148,8 +148,9 @@ internal partial class CoopSave {
         );
         if (GetMarker(slot) != null) {
             message += Lang.Pick(
-                " The copy is a normal save: to play it together, pair it with /coopsave.",
-                "副本是普通存档，要两人一起玩得再用 /coopsave 配对。"
+                " The copy is a normal save, which becomes a co-op save once someone joins your game with it open, or " +
+                "you join someone's game with it.",
+                "副本是普通存档：用它开房有人加入，或者用它加入别人的游戏时，它会变成联机存档。"
             );
         }
 
