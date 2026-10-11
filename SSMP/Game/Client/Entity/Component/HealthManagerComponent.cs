@@ -164,9 +164,9 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// In the game that runs the creature: the damage of each other player's copy that is in its health, by player -
-    /// the number of the copy, all of its damage taken in, and whether the copy's death in that game was taken in.
+    /// the number of the copy, and all of its damage taken in.
     /// </summary>
-    private readonly Dictionary<ushort, (uint copyKey, int damage, bool killed)> _damageTaken = new();
+    private readonly Dictionary<ushort, (uint copyKey, int damage)> _damageTaken = new();
 
     /// <summary>
     /// In the game that runs the creature: the number of its last telling of its health in the current epoch.
@@ -196,27 +196,28 @@ internal class HealthManagerComponent : EntityComponent {
     private bool _copyKilledOnWalkIn;
 
     /// <summary>
-    /// Whether the copy died of this game's player's blow, at once and here (see <see cref="CanDieHere"/>). It goes with
-    /// this game's damage each time that is sent, so that the game that runs the creature has it die there too, its
-    /// body thrown the way the blow went.
+    /// The component of each copy in this game, by the health manager of the copy, for the hooks on blows (see
+    /// <see cref="BeforeOwnBlow"/>).
     /// </summary>
-    private bool _killedHere;
-
-    /// <inheritdoc cref="_killedHere" />
-    private float? _killDirection;
+    private static readonly Dictionary<HealthManager, HealthManagerComponent> ComponentOfCopy = new();
 
     /// <summary>
-    /// Whether the game that runs the creature told its health with the copy's death taken in (see
-    /// <see cref="_killedHere"/>), after which it is no longer sent again.
+    /// The health manager of this component's copy as it was put in <see cref="ComponentOfCopy"/>, to take it out again
+    /// even once the copy is gone.
     /// </summary>
-    private bool _killTakenIn;
+    private readonly HealthManager? _copyHealthManager;
 
     /// <summary>
-    /// Whether the copy died here (see <see cref="_killedHere"/>) and the game that runs the creature has not said yet
-    /// that it died there too. Until then, that game still has the creature alive and may say it is switched on, which
-    /// would bring the copy's body back.
+    /// Hooks on the two ways a blow takes health that can end in a death with what a blow's death drops:
+    /// HealthManager.TakeDamage and ApplyExtraDamage(HitInstance). Made once, for every copy.
     /// </summary>
-    internal bool DiedHere { get; private set; }
+    private static Hook? _takeDamageHook, _extraDamageHook;
+
+    /// <summary>
+    /// For the room's own creature taken over with blows of this game's player that killed it: the frame after which
+    /// it dies of them, or -1 for none (see <see cref="InitializeHost"/>).
+    /// </summary>
+    private int _killAfterFrame = -1;
 
     public HealthManagerComponent(
         NetClient netClient,
@@ -266,6 +267,113 @@ internal class HealthManagerComponent : EntityComponent {
 
         _healthManagerDieHook = new Hook(dieMethod, HealthManagerOnDie);
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
+
+        HookBlows();
+        if (healthManager.Client != null) {
+            _copyHealthManager = healthManager.Client;
+            ComponentOfCopy[healthManager.Client] = this;
+        }
+    }
+
+    /// <summary>
+    /// Makes the hooks on blows, once for all copies.
+    /// </summary>
+    private static void HookBlows() {
+        if (_takeDamageHook != null) {
+            return;
+        }
+
+        var takeDamage = typeof(HealthManager).GetMethod(
+            "TakeDamage", HookBindingFlags, Type.DefaultBinder, [typeof(HitInstance)], null
+        );
+        var extraDamage = typeof(HealthManager).GetMethod(
+            nameof(HealthManager.ApplyExtraDamage), HookBindingFlags, Type.DefaultBinder, [typeof(HitInstance)], null
+        );
+        if (takeDamage == null || extraDamage == null) {
+            throw new MissingMethodException(
+                typeof(HealthManager).FullName,
+                $"TakeDamage({nameof(HitInstance)}) or {nameof(HealthManager.ApplyExtraDamage)}({nameof(HitInstance)})"
+            );
+        }
+
+        _takeDamageHook = new Hook(takeDamage, HealthManagerOnBlow);
+        _extraDamageHook = new Hook(extraDamage, HealthManagerOnBlow);
+    }
+
+    /// <summary>
+    /// A blow on a creature. One on a copy in this game is taken from the health that the game that runs the creature
+    /// will have once it takes in the blows of this game's player, and then counted, sent, and put back (see
+    /// <see cref="BeforeOwnBlow"/>).
+    /// </summary>
+    private static void HealthManagerOnBlow(
+        Action<HealthManager, HitInstance> orig,
+        HealthManager self,
+        HitInstance hitInstance
+    ) {
+        if (!ComponentOfCopy.TryGetValue(self, out var component) || !component.IsControlled) {
+            orig(self, hitInstance);
+            return;
+        }
+
+        component.BeforeOwnBlow();
+        try {
+            orig(self, hitInstance);
+        } finally {
+            component.AfterOwnBlow();
+        }
+    }
+
+    /// <summary>
+    /// Just before a blow on the copy. The game decides at the blow whether it kills, and with that what a blow that
+    /// kills drops, such as the item that a tool blow drops for a wish (DieDropFling): from the health it takes the
+    /// blow from. The copy shows the health last told, which leaves out the blows of this game's player that are not in
+    /// it yet, so for the blow it has the health that the game that runs the creature will have once it takes them in -
+    /// the blow that kills it there kills it here. The copy still does not die of it (HealthManagerOnDie): it dies when
+    /// the creature does, and drops then what the blow left it to drop.
+    /// </summary>
+    private void BeforeOwnBlow() {
+        var client = _healthManager.Client;
+        if (client == null || client.GetIsDead()) {
+            return;
+        }
+
+        CountOwnBlows();
+
+        var healthAfterOwnBlows = _toldHp - System.Math.Max(0, _ownDamage - _ownDamageTaken);
+        client.hp = healthAfterOwnBlows;
+        _lastHp = healthAfterOwnBlows;
+    }
+
+    /// <summary>
+    /// Just after a blow on the copy: counted, sent, and the copy back at the health last told.
+    /// </summary>
+    private void AfterOwnBlow() {
+        CountOwnBlows();
+        if (_healthManager.Client != null && !_healthManager.Client.GetIsDead()) {
+            ApplyHp(_toldHp, triggerHostDeath: false);
+        }
+    }
+
+    /// <summary>
+    /// Counts what the copy's health dropped by since it was last looked at as blows of this game's player. All of the
+    /// damage so far is what is sent, so that what went missing on the way comes with the next.
+    /// </summary>
+    /// <param name="send">Whether to send the damage so far to the game that runs the creature.</param>
+    /// <returns>Whether the health had dropped.</returns>
+    private bool CountOwnBlows(bool send = true) {
+        var client = _healthManager.Client;
+        if (client == null || client.hp >= _lastHp) {
+            return false;
+        }
+
+        _ownDamage += _lastHp - client.hp;
+        _lastHp = client.hp;
+        _ownDamageResends = 0;
+        if (send) {
+            SendOwnDamage();
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -359,9 +467,7 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         if (self == _healthManager.Client) {
-            if (!_allowDeath && CanDieHere(self)) {
-                DieHere(self, attackDirection, InvokeOrig);
-            } else if (!_allowDeath) {
+            if (!_allowDeath) {
                 // Said once: a copy with no health left asks to die every frame for as long as the room lasts
                 if (!_toldRefusedDeath) {
                     _toldRefusedDeath = true;
@@ -431,94 +537,6 @@ internal class HealthManagerComponent : EntityComponent {
         }
     }
 
-    /// <summary>
-    /// The events that the death of a creature sends its own FSMs (HealthManager.Die).
-    /// </summary>
-    private static readonly HashSet<string> DeathEvents = ["ZERO HP", "FATAL DAMAGE", "LAVA DEATH"];
-
-    /// <summary>
-    /// Whether the copy can die here and now of a blow of this game's player, rather than stand on with no health left
-    /// until the game that runs the creature says that it died there: a whole round trip after the blow, for the player
-    /// who struck it. Only for a death that is all the game's own, the same wherever it plays:
-    /// - one that the blow brought about here, taking health the copy had to none, not health it was told;
-    /// - not one that the creature's own FSM plays (a special death), nor one that an FSM of it hears of and goes on
-    ///   from, nor one that it tells another object of: all of that plays in the game that runs it, and comes here as
-    ///   the copy's part in it;
-    /// - not one that the creature gets up from again (a death reset), which goes on in the game that runs it;
-    /// - not one that the game turns down, as it does for some creatures while the player is dead themselves, so that
-    ///   it is known before the death whether there is one: a creature that goes back into its pool is marked alive
-    ///   again before its death is over;
-    /// - not a boss's, whose death is a sequence of its own.
-    /// </summary>
-    /// <param name="copy">The copy's health.</param>
-    private bool CanDieHere(HealthManager copy) {
-        if (!IsControlled || !IsConnected || copy.GetIsDead() || copy.hp > 0 || _lastHp <= 0 || copy.hasSpecialDeath ||
-            copy.deathReset || copy.zeroHPEventOverride != null || copy.sendKilledTo != null ||
-            copy.preventDeathAfterHero && HeroController.SilentInstance is { } hero && hero.cState.dead) {
-            return false;
-        }
-
-        foreach (var playMakerFsm in copy.GetComponents<PlayMakerFSM>()) {
-            if (playMakerFsm == null || playMakerFsm.Fsm == null) {
-                continue;
-            }
-
-            foreach (var transition in playMakerFsm.FsmGlobalTransitions ?? []) {
-                if (DeathEvents.Contains(transition.EventName)) {
-                    return false;
-                }
-            }
-
-            foreach (var state in playMakerFsm.FsmStates ?? []) {
-                foreach (var transition in state.Transitions ?? []) {
-                    if (DeathEvents.Contains(transition.EventName)) {
-                        return false;
-                    }
-                }
-            }
-        }
-
-        return !Ui.EnemyHealthBars.IsBoss(copy);
-    }
-
-    /// <summary>
-    /// Has the copy die here of the blow of this game's player that took the last of its health (see
-    /// <see cref="CanDieHere"/>), and tells the game that runs the creature along with the blow, so that it dies there
-    /// too. The copy goes away with its death, so the death is kept in this game's save at once.
-    /// </summary>
-    /// <param name="copy">The copy's health.</param>
-    /// <param name="attackDirection">The way the blow went.</param>
-    /// <param name="die">The game's own death of the copy.</param>
-    private void DieHere(HealthManager copy, float? attackDirection, System.Action die) {
-        // The blow is counted first, and the room's own creature here is kept at the same health, as for every blow
-        // (OnUpdate): it is the one that carries on if the room changes hands
-        var hp = copy.hp;
-        _ownDamage += _lastHp - hp;
-        _lastHp = hp;
-        _ownDamageResends = 0;
-        if (_healthManager.Host != null) {
-            _healthManager.Host.hp = hp;
-        }
-
-        // Taken as dead before the death runs, which can leave the copy marked alive (see CanDieHere): sent again until
-        // it is taken in, even if something in the death goes wrong
-        _killedHere = true;
-        _killDirection = attackDirection;
-        DiedHere = true;
-        Logger.Info($"The copy of '{copy.name}' dies here of the local player's blow, and the scene host is told");
-
-        die();
-
-        // Kept in the save, as OnUpdate does for a death it sees. A creature that went back into its pool is alive as
-        // far as its health says, and never was kept, as before
-        if (copy.GetIsDead()) {
-            _copyWasDead = true;
-            CopyDeathChanged?.Invoke(true, true);
-        }
-
-        SendOwnDamage();
-    }
-
     /// <inheritdoc />
     public override void SendAgain() {
         if (_healthManager.Host != null) {
@@ -547,13 +565,21 @@ internal class HealthManagerComponent : EntityComponent {
     public override void OnUpdate() {
         var observedHealthManager = IsControlled ? _healthManager.Client : _healthManager.Host;
         if (observedHealthManager == null) {
-            // A copy can be gone with its death, and the game that runs the creature still has to hear of the blows it
-            // took here, the one that killed it among them
-            if (IsControlled) {
-                ResendOwnDamageIfDue();
-            }
-
             return;
+        }
+
+        // The room's own creature, taken over with blows of this game's player that killed it, dies of them once it is
+        // switched on and set up (see InitializeHost)
+        if (!IsControlled && _killAfterFrame >= 0 && Time.frameCount > _killAfterFrame) {
+            if (observedHealthManager.GetIsDead() || observedHealthManager.hp > 0) {
+                _killAfterFrame = -1;
+            } else if (observedHealthManager.gameObject.activeInHierarchy) {
+                _killAfterFrame = -1;
+                Logger.Info($"'{observedHealthManager.name}', taken over, dies of the blows of this player");
+                TellOfPartnerBlow(observedHealthManager.gameObject, "HIT");
+                TellOfPartnerBlow(observedHealthManager.gameObject, "TOOK DAMAGE");
+                observedHealthManager.Die(null, AttackTypes.Generic, true);
+            }
         }
 
         // Whether the copy is dead goes into this game's save the way the game that runs the creature keeps it: from
@@ -566,12 +592,6 @@ internal class HealthManagerComponent : EntityComponent {
                 CopyDeathChanged?.Invoke(copyDead, !_copyKilledOnWalkIn);
                 if (!copyDead) {
                     _copyKilledOnWalkIn = false;
-
-                    // Living again, the copy has no death of its own to tell any more
-                    _killedHere = false;
-                    _killDirection = null;
-                    _killTakenIn = false;
-                    DiedHere = false;
                 }
             }
         }
@@ -597,29 +617,35 @@ internal class HealthManagerComponent : EntityComponent {
             }
 
             _hasPendingControlledHealCorrection = false;
-            var previousHp = _lastHp;
-            _lastHp = newHp;
-
-            // The copy that is not running is kept at the same health. It is the one that carries on when the room
-            // changes hands, and left at the health from before this game's own hits it gave all of them back: the
-            // game that took the room over put both copies at its health, and since nothing had changed as far as it
-            // could tell, never said so to the player who came back in, who kept the health that had been sent
-            var otherHealthManager = IsControlled ? _healthManager.Host : _healthManager.Client;
-            if (otherHealthManager != null) {
-                otherHealthManager.hp = newHp;
-            }
 
             if (IsControlled) {
-                // A blow of this game's player on the copy. All of the damage so far is what is sent, so that what
-                // went missing on the way comes with the next
-                _ownDamage += previousHp - newHp;
-                _ownDamageResends = 0;
-                SendOwnDamage();
+                // A blow of this game's player on the copy that the hooks on blows did not see. Health changes only in
+                // the game that runs the creature: the blow is counted and sent, and the copy goes straight back to
+                // the health last told, which shows the blow once that game has taken it in. A blow that would have
+                // left the copy no health is no different: the copy dies when the creature does. The hit itself - its
+                // flash, sound and knockback - was played here at once all the same.
+                CountOwnBlows();
+                ApplyHp(_toldHp, triggerHostDeath: false);
             } else {
+                _lastHp = newHp;
+
+                // The copy that is not running is kept at the same health. It is the one that carries on when the
+                // room changes hands, and left at the health from before this game's own hits it gave all of them
+                // back: the game that took the room over put both copies at its health, and since nothing had changed
+                // as far as it could tell, never said so to the player who came back in, who kept the health that had
+                // been sent
+                if (_healthManager.Client != null) {
+                    _healthManager.Client.hp = newHp;
+                }
+
                 SendHealthState();
             }
-        } else if (IsControlled) {
-            ResendOwnDamageIfDue();
+        } else if (IsControlled && _ownDamage > _ownDamageTaken &&
+                   Time.unscaledTime - _ownDamageSentAt >=
+                   (_ownDamageResends < OwnDamageQuickResends ? OwnDamageResendTime : OwnDamageSlowResendTime)) {
+            // The game that runs the creature has not told health with all of it in: sent again, as it is all of it
+            _ownDamageResends++;
+            SendOwnDamage();
         }
 
         var newInvincible = _healthManager.Host.IsInvincible;
@@ -643,12 +669,40 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void InitializeHost(uint sceneHostEpoch) {
+        // The blows of this game's player on the copy that the game that ran the creature had not taken in yet, a blow
+        // of this very frame among them. The copy only ever showed the health that game told, so they are in no health
+        // here, and taking the room over would lose them: the creature goes on with them. Not for a creature that is
+        // dead already, told so or dead here.
+        var ownDamageNotTakenIn = 0;
+        if (_wasRunElsewhere) {
+            CountOwnBlows(send: false);
+
+            var dead = _toldDead || _healthManager.Client != null && _healthManager.Client.GetIsDead();
+            if (!dead) {
+                ownDamageNotTakenIn = System.Math.Max(0, _ownDamage - _ownDamageTaken);
+            }
+        }
+
         ResetHealthOrderingForEpoch(sceneHostEpoch);
 
         // The health the copies were made with, which the copies in the other games were made with too
         var copiedHp = _lastHp;
-        var currentHp = GetCurrentHp();
+        var healthBefore = GetCurrentHp();
+        var currentHp = healthBefore - ownDamageNotTakenIn;
+        if (ownDamageNotTakenIn > 0) {
+            Logger.Info(
+                $"Taking over '{GameObject.Host?.name}' with {ownDamageNotTakenIn} damage of this player that the " +
+                "scene host had not taken in"
+            );
+        }
+
         ApplyHp(currentHp, triggerHostDeath: false);
+
+        // Killed by them: not here, as the room's own creature was switched on only now, before it is set up, but in
+        // the next frame, if it is on and still alive then (OnUpdate)
+        if (ownDamageNotTakenIn > 0 && healthBefore > 0 && currentHp <= 0) {
+            _killAfterFrame = Time.frameCount;
+        }
 
         // A room can set the health of its creatures as it starts, before it is settled which game runs them: a fight
         // gives its creatures the health of its first part. Nothing watched the room's own creature until now, so the
@@ -675,10 +729,10 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// Tells the other games the health of the creature as it is here, in the game that runs it, and how much of the
-    /// damage of each of their copies is in it already. A copy takes it as it is, less the damage of its own player
-    /// that is not in it yet (UpdateHealth). Changes used to be sent as such, from one value to another, and each one
-    /// lost on the way left the copies off by that much for as long as the creature lived, more with every stretch in
-    /// which nothing arrived; health told as it is is made right by whichever telling comes next.
+    /// damage of each of their copies is in it already. A copy takes it as it is (UpdateHealth): the blows of its own
+    /// player show in it once they are taken in here. Changes used to be sent as such, from one value to another, and
+    /// each one lost on the way left the copies off by that much for as long as the creature lived, more with every
+    /// stretch in which nothing arrived; health told as it is is made right by whichever telling comes next.
     /// </summary>
     private void SendHealthState() {
         if (!HasHealthToTell()) {
@@ -699,23 +753,17 @@ internal class HealthManagerComponent : EntityComponent {
         data.Packet.Write(_currentHealthEpoch);
         data.Packet.Write(++_tellNumber);
         data.Packet.Write(GetCurrentHp());
-
-        // A copy that died here of this game's player's blow leaves the room's own creature switched off and never dead
-        // as this game takes the room over: told alive at no health, the copies of the others could never kill it
-        data.Packet.Write(
-            (_healthManager.Host != null ? _healthManager.Host.GetIsDead() : _lastHp <= 0) || _killedHere
-        );
+        data.Packet.Write(_healthManager.Host != null ? _healthManager.Host.GetIsDead() : _lastHp <= 0);
 
         var count = System.Math.Min(_damageTaken.Count, byte.MaxValue);
         data.Packet.Write((byte) count);
-        foreach (var (copyKey, damage, killed) in _damageTaken.Values) {
+        foreach (var (copyKey, damage) in _damageTaken.Values) {
             if (count-- == 0) {
                 break;
             }
 
             data.Packet.Write(copyKey);
             data.Packet.Write(damage);
-            data.Packet.Write(killed);
         }
     }
 
@@ -738,27 +786,9 @@ internal class HealthManagerComponent : EntityComponent {
         hpData.Packet.Write(_currentHealthEpoch);
         hpData.Packet.Write(_copyKey);
         hpData.Packet.Write(_ownDamage);
-        hpData.Packet.Write(_killedHere);
-        hpData.Packet.Write(_killDirection.HasValue);
-        hpData.Packet.Write(_killDirection ?? 0f);
         SendData(hpData);
 
         _ownDamageSentAt = Time.unscaledTime;
-    }
-
-    /// <summary>
-    /// Sends the copy's damage again, with its death if it died here, while the game that runs the creature has not told
-    /// its health with all of it in: a second apart at first, then further apart.
-    /// </summary>
-    private void ResendOwnDamageIfDue() {
-        if (_ownDamage <= _ownDamageTaken && (!_killedHere || _killTakenIn) ||
-            Time.unscaledTime - _ownDamageSentAt <
-            (_ownDamageResends < OwnDamageQuickResends ? OwnDamageResendTime : OwnDamageSlowResendTime)) {
-            return;
-        }
-
-        _ownDamageResends++;
-        SendOwnDamage();
     }
 
     /// <summary>
@@ -785,9 +815,6 @@ internal class HealthManagerComponent : EntityComponent {
             _ownDamageResends = 0;
             _damageTaken.Clear();
             _tellNumber = 0;
-
-            // A death of the copy here stands whoever runs the creature: the game that does from now on hears of it too
-            _killTakenIn = false;
         }
 
         _currentHealthEpoch = sceneHostEpoch;
@@ -802,17 +829,6 @@ internal class HealthManagerComponent : EntityComponent {
 
         switch (data.Type) {
             case EntityComponentType.Death: {
-                // The copy died here already, of this game's player's blow, and threw out its own body (DieHere): the
-                // game that runs the creature only says that it died there too
-                if (DiedHere) {
-                    DiedHere = false;
-                    Logger.Info(
-                        $"The scene host's '{(_healthManager.Host != null ? _healthManager.Host.name : "?")}' died " +
-                        "too, as its copy did here"
-                    );
-                    break;
-                }
-
                 var attackDirection = new float?();
                 if (data.Packet.ReadBool()) {
                     attackDirection = data.Packet.ReadFloat();
@@ -899,15 +915,12 @@ internal class HealthManagerComponent : EntityComponent {
         var hp = data.Packet.ReadInt();
         var dead = data.Packet.ReadBool();
         var ownDamageTaken = 0;
-        var ownKillTaken = false;
         var count = data.Packet.ReadByte();
         for (var i = 0; i < count; i++) {
             var copyKey = data.Packet.ReadUInt();
             var damage = data.Packet.ReadInt();
-            var killed = data.Packet.ReadBool();
             if (copyKey == _copyKey) {
                 ownDamageTaken = damage;
-                ownKillTaken = killed;
             }
         }
 
@@ -925,13 +938,11 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         // A blow of this game's player that the copy took before this, and that was not counted yet, is counted first:
-        // set over, it would be lost
+        // set over, it would be lost. The copy goes back to the health last told, whatever this telling turns out to
+        // be.
         var client = _healthManager.Client;
-        if (client != null && client.hp < _lastHp) {
-            _ownDamage += _lastHp - client.hp;
-            _lastHp = client.hp;
-            _ownDamageResends = 0;
-            SendOwnDamage();
+        if (CountOwnBlows()) {
+            ApplyHp(_toldHp, triggerHostDeath: false);
         }
 
         if (epoch > _currentHealthEpoch) {
@@ -943,10 +954,6 @@ internal class HealthManagerComponent : EntityComponent {
             _toldNumber = number;
             _toldDead = dead;
             _ownDamageTaken = ownDamageTaken;
-            _killTakenIn = ownKillTaken;
-            if (dead) {
-                DiedHere = false;
-            }
 
             // The game that runs the creature is heard from: what of this game's damage is not in it yet goes again
             // soon, however long it went unheard before
@@ -960,8 +967,8 @@ internal class HealthManagerComponent : EntityComponent {
             return;
         }
 
-        // As told, less the damage of this game's player that is not in it yet: on its way, or lost and sent again
-        ApplyHp(_toldHp - System.Math.Max(0, _ownDamage - _ownDamageTaken), triggerHostDeath: false);
+        // As told: a blow of this game's player that is not in it yet shows once it is, not before
+        ApplyHp(_toldHp, triggerHostDeath: false);
 
         // Walking into a room that the other player already cleared sends the health of everything in it, but never
         // the deaths themselves - the server keeps health and whether an object is active, and drops death data. The
@@ -989,9 +996,6 @@ internal class HealthManagerComponent : EntityComponent {
         var epoch = data.Packet.ReadUInt();
         var copyKey = data.Packet.ReadUInt();
         var damage = data.Packet.ReadInt();
-        var killed = data.Packet.ReadBool();
-        var hasKillDirection = data.Packet.ReadBool();
-        var killDirection = data.Packet.ReadFloat();
 
         if (IsControlled) {
             return;
@@ -1009,30 +1013,12 @@ internal class HealthManagerComponent : EntityComponent {
 
         // A copy of a later visit of the player to the room counts from nothing again
         if (!_damageTaken.TryGetValue(data.SenderId, out var taken) || taken.copyKey != copyKey) {
-            taken = (copyKey, 0, false);
+            taken = (copyKey, 0);
         }
 
-        // The body of a creature that the copy's death killed is thrown the way the blow went, as the copy's was
-        float? direction = killed && hasKillDirection ? killDirection : null;
-
-        var diedOfIt = false;
         if (damage > taken.damage) {
-            diedOfIt = ApplyHp(GetCurrentHp() - (damage - taken.damage), triggerHostDeath: true, direction);
+            ApplyHp(GetCurrentHp() - (damage - taken.damage), triggerHostDeath: true);
             taken.damage = damage;
-        }
-
-        // The copy died of the blow in its own game, where the blow was played at once (DieHere), so the creature dies
-        // here as well, once: also when there was more health left in it here than the copy had, which the copy had not
-        // heard of yet. Whichever game the last blow was struck in has the say over that blow.
-        if (killed && !taken.killed) {
-            taken.killed = true;
-            if (!diedOfIt && GetCurrentHp() > 0) {
-                Logger.Info(
-                    $"The copy of '{(_healthManager.Host != null ? _healthManager.Host.name : "?")}' died in the game of " +
-                    $"player {data.SenderId} with {GetCurrentHp()} health left here, so it dies here too"
-                );
-                ApplyHp(0, triggerHostDeath: true, direction);
-            }
         }
 
         _damageTaken[data.SenderId] = taken;
@@ -1053,11 +1039,7 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     /// <param name="newHp">The HP value to apply.</param>
     /// <param name="triggerHostDeath">Whether the scene host should run death when HP crosses zero.</param>
-    /// <param name="attackDirection">For that death, the way the last blow went, if it is known. The death stays a
-    /// generic one whatever the blow was, which is what keeps the stop that the game puts on a kill to the player who
-    /// struck it.</param>
-    /// <returns>Whether the creature was made to die of it.</returns>
-    private bool ApplyHp(int newHp, bool triggerHostDeath, float? attackDirection = null) {
+    private void ApplyHp(int newHp, bool triggerHostDeath) {
         var wasAlive = GetCurrentHp() > 0;
         var killsHost = triggerHostDeath && !IsControlled && wasAlive && newHp <= 0 && _healthManager.Host != null;
 
@@ -1082,10 +1064,8 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         if (killsHost) {
-            _healthManager.Host!.Die(attackDirection, AttackTypes.Generic, true);
+            _healthManager.Host!.Die(null, AttackTypes.Generic, true);
         }
-
-        return killsHost;
     }
 
     /// <summary>
@@ -1117,5 +1097,10 @@ internal class HealthManagerComponent : EntityComponent {
         _healthManagerDieHook?.Dispose();
         _healthManagerDieHook = null;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
+
+        if (_copyHealthManager is { } copy && ComponentOfCopy.TryGetValue(copy, out var component) &&
+            ReferenceEquals(component, this)) {
+            ComponentOfCopy.Remove(copy);
+        }
     }
 }

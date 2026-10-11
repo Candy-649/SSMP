@@ -3822,13 +3822,6 @@ internal partial class Entity {
 
         if (Object.Client != null) {
             //Logger.Info($"Entity '{Object.Client.name}' received active: {active}");
-            // A copy that died here of the local player's blow stays dead: the scene host's creature is alive until the
-            // blow reaches it, and saying so would bring back the copy's body
-            if (active && _components.TryGetValue(EntityComponentType.Health, out var health) &&
-                health is HealthManagerComponent { DiedHere: true }) {
-                return;
-            }
-
             if (Object.Client.TryGetComponent<SaysWhoSwitchesTheCopyOff>(out var says)) {
                 says.Caller = null;
             } else if (active) {

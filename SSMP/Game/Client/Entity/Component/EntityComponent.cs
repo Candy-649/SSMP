@@ -44,11 +44,6 @@ internal abstract class EntityComponent {
     }
 
     /// <summary>
-    /// Whether this game is connected, and so has the other games to send its data to.
-    /// </summary>
-    protected bool IsConnected => _netClient.IsConnected;
-
-    /// <summary>
     /// Send the given <see cref="EntityNetworkData"/>.
     /// </summary>
     /// <param name="data">The data to send.</param>

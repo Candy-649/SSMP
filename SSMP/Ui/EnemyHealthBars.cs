@@ -431,7 +431,7 @@ internal class EnemyHealthBars {
     /// Whether a creature is a boss: one of its FSMs shows the title of a boss, as an FSM of almost every boss's own
     /// does, or the room shows its title.
     /// </summary>
-    internal static bool IsBoss(HealthManager healthManager) {
+    private static bool IsBoss(HealthManager healthManager) {
         var gameObject = healthManager.gameObject;
         if (RoomTitledBosses.Contains(gameObject.name.Replace("(Clone)", "").Trim())) {
             return true;
