@@ -90,6 +90,11 @@ internal partial class CoopSave {
     private bool _worldChangeFailed;
 
     /// <summary>
+    /// The players and reasons for which a dropped change of the world was reported already, as "id:reason".
+    /// </summary>
+    private readonly HashSet<string> _worldChangeDropsTold = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The clock of the changes of the world, changes of the wish log and interactions that the local game sends. It
     /// counts up with every such update and jumps ahead to the counts in the updates of the partner, so a change that the
     /// local player makes after one of the partner arrived has a larger count.
@@ -126,6 +131,7 @@ internal partial class CoopSave {
     /// Forgets the saved objects of the world that were found and known to both saves, for a new check or session.
     /// </summary>
     private void ResetWorldChanges() {
+        _worldChangeDropsTold.Clear();
         _loadedWorldItems.Clear();
         _knownWorldItems.Clear();
         _loadedWorldItemsDirty = true;
@@ -376,13 +382,20 @@ internal partial class CoopSave {
     /// because the game of the partner may have finished its check already and doesn't send them again.
     /// </summary>
     private void OnWorldChange(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
-            PlayerData.instance == null || SceneData.instance == null) {
-            // Said, because a change that is dropped is never sent again, and the saves stay apart in it
-            if (update.ItemIds.Count > 0 || update.FlagNames.Count > 0 || update.Names.Count > 0) {
+        var marker = GetCurrentMarker();
+        var dropped = marker == null ? "no two-player save is loaded here"
+            : !IsMember(player, marker) ? "they are not a member of the loaded save"
+            : !IsFromMemberInSave(player) ? "the saves were not checked with them yet"
+            : PlayerData.instance == null || SceneData.instance == null ? "the save is not loaded yet"
+            : null;
+        if (dropped != null) {
+            // Said once for each player and reason, because a change that is dropped is never sent again and the
+            // saves stay apart in it, while every change of other players' saves on the server comes here too
+            if ((update.ItemIds.Count > 0 || update.FlagNames.Count > 0 || update.Names.Count > 0) &&
+                _worldChangeDropsTold.Add($"{player.Id}:{dropped}")) {
                 Logger.Info(
                     $"Dropped a change of the world from {player.Username} with {update.ItemIds.Count} saved " +
-                    $"objects and {update.FlagNames.Count} player data flags: no save checked with them is loaded here"
+                    $"objects and {update.FlagNames.Count} player data flags, and any more like it: {dropped}"
                 );
             }
 
@@ -421,11 +434,11 @@ internal partial class CoopSave {
         }
 
         // Flags that changed again after this change, like in both games at about the same time, keep the newer change
-        // in every game
+        // in every game. A change from an earlier check is not taken either.
         if (older.Count > 0) {
             Logger.Info(
-                $"Kept the newer changes of {older.Count} player data flags over those from {player.Username}: " +
-                string.Join(", ", older)
+                $"Did not take {older.Count} player data flags from {player.Username}, changed again since or from " +
+                $"an earlier check: {string.Join(", ", older)}"
             );
         }
     }

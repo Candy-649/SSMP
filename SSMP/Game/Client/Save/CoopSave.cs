@@ -744,6 +744,11 @@ internal partial class CoopSave {
     public void OnPlayerDisconnect(ushort id, string username) {
         _hostSaveRequests.Remove(id);
 
+        // What they sent while this game was out of the rooms belongs to the session they just left. A player who
+        // comes back with the same number would have their old round started again from it, and the next round
+        // exchanges their world anyway.
+        _updatesOutOfRoom.RemoveAll(update => update.PlayerId == id);
+
         if (_memberChecks.ContainsKey(id) || _checkedMembers.Contains(id)) {
             PartnerLeft(id, Lang.Pick("left", "离开了"), username);
 
@@ -836,6 +841,7 @@ internal partial class CoopSave {
 
         _hostSaveRequests.Clear();
         _hostSaveSends.Clear();
+        _updatesOutOfRoom.Clear();
         ForgetJoin();
         if (_joinButton != null) {
             ClearJoin();
@@ -874,7 +880,11 @@ internal partial class CoopSave {
     /// ……不用敲环就在，但是我朋友那边需要敲").
     /// </summary>
     public void OnCoopSaveUpdate(CoopSaveUpdate update) {
-        if (IsSaveOutOfRoom()) {
+        // Not the ones about joining a host from the menu, which read nothing of the loaded save: a host on a ride who
+        // held the first answer to a join kept the joining player waiting, and after ten seconds of that they are told
+        // nobody answered and offered their save as it is
+        if (IsSaveOutOfRoom() && update.Kind is not (CoopSaveUpdateKind.HostSaveRequest or CoopSaveUpdateKind.HostSave
+                or CoopSaveUpdateKind.WaitingRoomReady)) {
             if (_updatesOutOfRoom.Count == 0) {
                 var scene = SceneUtil.GetCurrentSceneName();
                 Logger.Info($"Keeping the updates of other players for the next room while '{scene}' plays");
