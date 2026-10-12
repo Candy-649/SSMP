@@ -1320,13 +1320,18 @@ internal class HealthManagerComponent : EntityComponent {
         if (_wasRunElsewhere) {
             CountOwnBlows(send: false);
 
-            var dead = _toldDead || _healthManager.Client != null && _healthManager.Client.GetIsDead();
+            var copyDead = _healthManager.Client != null && _healthManager.Client.GetIsDead();
+            var dead = _toldDead || copyDead;
             if (!dead && _ownDamage > _ownDamageTaken) {
                 ownDamageNotTakenIn = _ownDamage - _ownDamageTaken;
 
                 // The health they leave, and the blow among them that takes the last of it if they do, as the game
                 // that ran the creature would have taken them in (see TakeInOwnDamage)
                 healthAfter = HealthAfter(GetCurrentHp(), _ownDamageTaken, _ownDamage, _ownBlows, out killingBlow);
+            }
+
+            if (dead) {
+                TakeOverDead(copyDead);
             }
         }
 
@@ -1365,6 +1370,29 @@ internal class HealthManagerComponent : EntityComponent {
             );
             SendHealthState();
         }
+    }
+
+    /// <summary>
+    /// Has the room's own creature dead, as this game takes it over dead: its copy died here, or this game was told it
+    /// died. The room's own never ran in this game and never died here, and the health this game tells from now on
+    /// says whether it is dead. A creature that the partner killed while this player stayed in the room was told alive
+    /// once the partner left and this game took the room over, so when the partner came back in, the creature was
+    /// neither dead nor there for them: no body, and nothing that the replay of its death drops (USER 10-12, "她刷完之后
+    /// 呆在房间里，我再出去进来就刷不了了，看不到尸体了"). The room's own item saved the "alive" it was built with as this
+    /// game left the room as well, unless the copy had died here. Only for a creature that stays off: one that is on is
+    /// a body still playing out its death, and the game switches a dead creature off as soon as it is switched on.
+    /// </summary>
+    /// <param name="copyDead">Whether the copy died here, rather than only being told so.</param>
+    private void TakeOverDead(bool copyDead) {
+        var host = _healthManager.Host;
+        if (host == null || host.GetIsDead() || host.gameObject.activeSelf) {
+            return;
+        }
+
+        host.SetIsDead(true);
+        Logger.Info(
+            $"'{host.name}' is taken over dead, as its copy {(copyDead ? "died here" : "was told it died")}"
+        );
     }
 
     /// <inheritdoc />
