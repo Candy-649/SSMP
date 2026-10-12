@@ -44,14 +44,15 @@ internal class OwnMapIconOutline : MonoBehaviour {
     private const int Directions = 12;
 
     /// <summary>
-    /// How far the bright ring reaches out from the head, as a part of the head's larger side.
+    /// How far the bright ring reaches out from the head, as a part of the head's larger side. At 0.08, with the dark
+    /// ring at 0.13, the outline was too thick for the player.
     /// </summary>
-    private const float BrightReach = 0.08f;
+    private const float BrightReach = 0.05f;
 
     /// <summary>
     /// How far the dark ring reaches out from the head, as a part of the head's larger side.
     /// </summary>
-    private const float DarkReach = 0.13f;
+    private const float DarkReach = 0.08f;
 
     /// <summary>
     /// Where the inner copies of a ring sit, as a part of its reach. Copies only at the full reach would leave gaps
