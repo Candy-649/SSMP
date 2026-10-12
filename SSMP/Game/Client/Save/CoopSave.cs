@@ -293,6 +293,7 @@ internal partial class CoopSave {
         RegisterPrisonCaptureHooks();
         RegisterCreatureDeathHooks();
         RegisterSlidePlatformHooks();
+        RegisterPodSequenceHooks();
         RegisterHostSyncHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;
@@ -1006,6 +1007,15 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.SlidePlatform:
                 OnSlidePlatform(player, update);
+                break;
+            case CoopSaveUpdateKind.PodStrike:
+                OnPodStrike(player, update);
+                break;
+            case CoopSaveUpdateKind.PodOutcome:
+                OnPodOutcome(player, update);
+                break;
+            case CoopSaveUpdateKind.PodProgress:
+                OnPodProgress(player, update);
                 break;
         }
     }

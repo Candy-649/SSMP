@@ -781,5 +781,38 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    RoomClocks
+    RoomClocks,
+
+    /// <summary>
+    /// The player of the sender struck a bell of a music box in the room that <see cref="CoopSaveUpdate.Scene"/> names,
+    /// which the other games in it ring and the game that runs the room judges (see CoopSave.PodSequences).
+    /// <see cref="CoopSaveUpdate.Amounts"/> holds the key of the music box, the bell by its place among the bells of
+    /// the box, and the side it was struck from: -1, 1, or 0 for one struck from above.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    PodStrike,
+
+    /// <summary>
+    /// What a strike on a music box came to in the game of the sender, which runs the room that
+    /// <see cref="CoopSaveUpdate.Scene"/> names, for the other games in it to play out (see CoopSave.PodSequences).
+    /// <see cref="CoopSaveUpdate.Amounts"/> holds the key of the music box, 1 for the right bell or 0 for a wrong one,
+    /// and the bell and the round that the box was at before it.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    PodOutcome,
+
+    /// <summary>
+    /// How many rounds of a music box are won, as the game saves it, for the saves of the other members: the saved
+    /// number by its scene in <see cref="CoopSaveUpdate.ItemScenes"/> and its ID in
+    /// <see cref="CoopSaveUpdate.ItemIds"/>, and in <see cref="CoopSaveUpdate.Amounts"/> the rounds and 1 if the save
+    /// keeps them only until the next rest (see CoopSave.PodSequences).
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    PodProgress
 }
