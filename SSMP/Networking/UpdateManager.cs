@@ -68,6 +68,18 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private Func<string>? _transportDescribeSession;
 
     /// <summary>
+    /// Asks the transport to write down how its link to the other side has stood each second, or null for a transport
+    /// that keeps no record of it (see <see cref="RecordTransportSession"/>).
+    /// </summary>
+    private Action<string, int>? _transportRecordSession;
+
+    /// <summary>
+    /// How many seconds from before a quiet stretch began are written down with it, to show how the link stood as it
+    /// went quiet.
+    /// </summary>
+    private const int SecondsBeforeQuiet = 15;
+
+    /// <summary>
     /// The reliability manager for packet loss detection and resending.
     /// Lazily initialized only when transport requires reliability.
     /// </summary>
@@ -188,6 +200,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportPing = () => value.Ping;
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
+            _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
@@ -207,6 +220,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportPing = () => value.Ping;
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
+            _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
@@ -571,6 +585,22 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     }
 
     /// <summary>
+    /// Has the transport write down how its link to the other side has stood each second, for the last
+    /// <paramref name="secondsBack"/> seconds and from then on until things arrive from the other side again; nothing
+    /// for a transport that keeps no record of it. For a stretch in which nothing arrives, so that it can be told
+    /// afterwards where things stopped.
+    /// </summary>
+    /// <param name="why">Why, as it ends a sentence of the log: "written down as ...".</param>
+    /// <param name="secondsBack">How many seconds of the record to write down first.</param>
+    public void RecordTransportSession(string why, int secondsBack) {
+        try {
+            _transportRecordSession?.Invoke(why, secondsBack);
+        } catch (Exception e) {
+            Logger.Warn($"Could not write down how the link stands: {e.Message}");
+        }
+    }
+
+    /// <summary>
     /// How the transport's link to the other side stands, as a part to add to a line of the log, or nothing for a
     /// transport that cannot say.
     /// </summary>
@@ -643,6 +673,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                                   "session is over, so this counts as a disconnect" + DescribeTransportSession()
                         );
 
+                        // Already being written down if the stretch was told of as it began, which it was unless this
+                        // loop stood still for all of it
+                        RecordQuietStretch(quietFor);
+
                         TimeoutEvent?.Invoke();
                         // We don't break immediately, we might want to let the user decide via the event (e.g. disconnect)
                         // usually the event handler will call Disconnect() which stops updates.
@@ -656,6 +690,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                             $"Nothing has arrived for {quietFor / 1000:F1}s, but the transport still has the " +
                             "session, so this is not being taken as a disconnect yet" + DescribeTransportSession()
                         );
+                        RecordQuietStretch(quietFor);
                     }
                 }
 
@@ -671,6 +706,18 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                 nextSendTime += CurrentSendRate;
             }
         }
+    }
+
+    /// <summary>
+    /// Has the transport write down how its link stood through a stretch in which nothing arrived, and a little before
+    /// it, and go on until things arrive again (see <see cref="RecordTransportSession"/>).
+    /// </summary>
+    /// <param name="quietFor">How long nothing has arrived, in milliseconds.</param>
+    private void RecordQuietStretch(double quietFor) {
+        RecordTransportSession(
+            $"nothing has arrived from them for {quietFor / 1000:F1}s",
+            (int) System.Math.Ceiling(quietFor / 1000) + SecondsBeforeQuiet
+        );
     }
 
     /// <summary>

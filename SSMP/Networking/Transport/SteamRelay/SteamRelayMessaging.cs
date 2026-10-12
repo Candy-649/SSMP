@@ -205,7 +205,8 @@ internal static class SteamRelayMessaging {
             var session = state == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_None
                 ? "Steam has no session with them"
                 : $"Steam's session with them is {state}, ended for {(ESteamNetConnectionEnd) info.m_eEndReason}" +
-                  $"{(string.IsNullOrEmpty(endSaid) ? "" : $" ('{endSaid}')")}, relay {info.m_idPOPRelay}, " +
+                  $"{(string.IsNullOrEmpty(endSaid) ? "" : $" ('{endSaid}')")}, relay " +
+                  $"{SteamRelayRecorder.RelayName(info.m_idPOPRelay)}, " +
                   $"ping {status.m_nPing} ms";
 
             return $"{session}; {DescribeRelayNetwork()}";
@@ -252,6 +253,7 @@ internal static class SteamRelayMessaging {
                 channel
             );
 
+            SteamRelayRecorder.Gave(steamId, length, result == EResult.k_EResultOK);
             if (result == EResult.k_EResultOK) {
                 return true;
             }
@@ -269,6 +271,7 @@ internal static class SteamRelayMessaging {
     /// </summary>
     /// <returns>How many messages were handled.</returns>
     public static int Drain(int channel, IntPtr[] messageBuffer, Action<ulong, byte[], int> handle) {
+        SteamRelayRecorder.Looked(channel);
         var count = SteamNetworkingMessages.ReceiveMessagesOnChannel(channel, messageBuffer, messageBuffer.Length);
         if (count <= 0) {
             return 0;
@@ -286,7 +289,9 @@ internal static class SteamRelayMessaging {
                 if (size > 0 && message.m_pData != IntPtr.Zero) {
                     var data = new byte[size];
                     Marshal.Copy(message.m_pData, data, 0, size);
-                    handle(message.m_identityPeer.GetSteamID64(), data, size);
+                    var sender = message.m_identityPeer.GetSteamID64();
+                    SteamRelayRecorder.Took(sender, size);
+                    handle(sender, data, size);
                 }
             } catch (Exception e) {
                 Logger.Error($"Steam relay: error handling a received message: {e}");
@@ -322,6 +327,6 @@ internal static class SteamRelayMessaging {
             _ => "no further detail"
         };
 
-        return $"{reason} ({detail}), state {info.m_eState}, relay {info.m_idPOPRelay}";
+        return $"{reason} ({detail}), state {info.m_eState}, relay {SteamRelayRecorder.RelayName(info.m_idPOPRelay)}";
     }
 }

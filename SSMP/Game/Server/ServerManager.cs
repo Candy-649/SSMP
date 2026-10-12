@@ -1654,13 +1654,31 @@ internal abstract class ServerManager : IServerManager {
     private const double RoomStateMinInterval = 3.0;
 
     /// <summary>
+    /// How many seconds of what was kept of a player's link are written down when they ask for the state of their
+    /// room: the stretch that made them ask is under 30 s, as a longer one ends their connection, and the seconds
+    /// before it show how it began.
+    /// </summary>
+    private const int RoomStateRecordSeconds = 45;
+
+    /// <summary>
     /// Callback for when a player who has been in their room all along asks for its state, after a stretch in which
     /// nothing reached them. What was sent in it may never come: the death of an enemy, a creature switched off, the
     /// other player leaving. The answer holds what the answer to entering the room holds, and decides nothing over.
     /// </summary>
     /// <param name="id">The ID of the player asking.</param>
     private void OnRoomStateRequest(ushort id) {
-        if (!_playerData.TryGetValue(id, out var playerData) || string.IsNullOrEmpty(playerData.CurrentScene)) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
+            return;
+        }
+
+        // Only the player's game knows that nothing from here reached it for a while; this is where this game hears of
+        // it, while what it kept of the link through that stretch is still there to write down
+        _netServer.GetUpdateManagerForClient(id)?.RecordTransportSession(
+            "they asked for the state of their room after a stretch in which nothing from here reached them",
+            RoomStateRecordSeconds
+        );
+
+        if (string.IsNullOrEmpty(playerData.CurrentScene)) {
             return;
         }
 

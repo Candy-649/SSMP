@@ -50,6 +50,9 @@ internal class SteamRelayTransportClient : IReliableTransportClient, ISessionSta
     public string DescribeSession() => SteamRelayMessaging.DescribeSession(SteamId);
 
     /// <inheritdoc />
+    public void RecordSession(string why, int secondsBack) => SteamRelayRecorder.Record(SteamId, why, secondsBack);
+
+    /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
 
     public SteamRelayTransportClient(ulong steamId) {

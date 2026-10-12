@@ -18,4 +18,14 @@ internal interface ISessionStateTransport {
     /// Says in words how the link to the other side stands, for the log of a connection that hears nothing.
     /// </summary>
     string DescribeSession();
+
+    /// <summary>
+    /// Writes down in the log how the link to the other side has stood each second, for the last
+    /// <paramref name="secondsBack"/> seconds and from then on until things arrive from the other side again, so that a
+    /// stretch in which nothing arrives can be placed afterwards. Nothing is written by a transport that keeps no
+    /// record of its link.
+    /// </summary>
+    /// <param name="why">Why, as it ends a sentence of the log: "written down as ...".</param>
+    /// <param name="secondsBack">How many seconds of the record to write down first.</param>
+    void RecordSession(string why, int secondsBack);
 }

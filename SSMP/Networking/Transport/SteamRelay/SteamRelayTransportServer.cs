@@ -88,6 +88,7 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         // Warms the relay network before anyone tries to join
         SteamNetworkingUtils.InitRelayNetworkAccess();
         SteamRelayMessaging.WaitLongerThanTheMod();
+        SteamRelayRecorder.Start();
 
         _sessionRequestCallback = Callback<SteamNetworkingMessagesSessionRequest_t>.Create(OnSessionRequest);
         _sessionFailedCallback = Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);
@@ -150,6 +151,8 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         _sessionFailedCallback?.Dispose();
         _sessionFailedCallback = null;
 
+        SteamRelayRecorder.Stop();
+
         Logger.Info("Steam relay: server stopped");
     }
 
@@ -162,6 +165,10 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
 
     private void DisconnectClientInternal(SteamRelayTransportClient client) {
         if (!_clients.TryRemove(client.SteamId, out _)) return;
+
+        // Whichever way they leave: a player who heard nothing from here leaves by their own game's choice, which this
+        // game is told as an ordinary leave, and this is all that is left to tell where its messages stopped
+        SteamRelayRecorder.Forget(client.SteamId, "the link to them is closed");
 
         if (SteamManager.IsInitialized && client.SteamId != SteamUser.GetSteamID().m_SteamID) {
             var identity = SteamRelayMessaging.IdentityOf(client.SteamId);
@@ -269,6 +276,10 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         var client = new SteamRelayTransportClient(steamId);
         if (_clients.TryAdd(steamId, client)) {
             Logger.Info($"Steam relay: new player connected: {steamId}");
+            if (steamId != SteamUser.GetSteamID().m_SteamID) {
+                SteamRelayRecorder.Watch(steamId, SteamRelayMessaging.ClientToServerChannel);
+            }
+
             ClientConnectedEvent?.Invoke(client);
             return client;
         }

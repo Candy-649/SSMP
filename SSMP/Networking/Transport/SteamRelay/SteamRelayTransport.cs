@@ -47,6 +47,13 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
         : SteamRelayMessaging.DescribeSession(_remoteSteamId);
 
     /// <inheritdoc />
+    public void RecordSession(string why, int secondsBack) {
+        if (_recording) {
+            SteamRelayRecorder.Record(_remoteSteamId, why, secondsBack);
+        }
+    }
+
+    /// <inheritdoc />
     public int MaxPacketSize => SteamRelayMessaging.MaxPacketSize;
 
     /// <summary>
@@ -63,6 +70,12 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     /// Whether this transport is currently connected.
     /// </summary>
     private volatile bool _isConnected;
+
+    /// <summary>
+    /// Whether the link to the host is being kept a record of (<see cref="SteamRelayRecorder"/>), which it is unless
+    /// the host is this player.
+    /// </summary>
+    private volatile bool _recording;
 
     /// <summary>
     /// Reused buffer of message pointers for draining the channel.
@@ -109,6 +122,13 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
                 Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);
 
             Logger.Info($"Steam relay: as this player starts to connect, {SteamRelayMessaging.DescribeRelayNetwork()}");
+
+            if (!_recording) {
+                SteamRelayRecorder.Start();
+                _recording = true;
+            }
+
+            SteamRelayRecorder.Watch(steamId, SteamRelayMessaging.ServerToClientChannel);
         }
 
         _receiveTokenSource = new CancellationTokenSource();
@@ -285,6 +305,12 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
             }
 
             _receiveThread = null;
+        }
+
+        if (_recording) {
+            _recording = false;
+            SteamRelayRecorder.Forget(_remoteSteamId, null);
+            SteamRelayRecorder.Stop();
         }
 
         _remoteSteamId = 0;
