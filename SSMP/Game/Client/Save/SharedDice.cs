@@ -217,6 +217,13 @@ internal static class SharedDice {
     /// is that game's own, and the enemies roll where the scene host runs them.
     /// </summary>
     private static void OnRollingActionEnter(Action<FsmStateAction> orig, FsmStateAction self) {
+        // A thing that a creature threw rolls by its name, the same in every game (ThrownThings), whatever set it off
+        if (ThrownThings.Count > 0 && self.Fsm?.FsmComponent is { } thrownFsm &&
+            ThrownThings.TryGetMark(thrownFsm.gameObject, out var mark)) {
+            ThrownThings.Rolling(mark.NextRoll(Identify(self, thrownFsm)), () => orig(self));
+            return;
+        }
+
         if (Recordings.Count == 0 && _thrown == null || self.Fsm?.FsmComponent is not { } fsm ||
             self.Fsm != _entityFsm && !CoopHits.IsRoomObject(fsm)) {
             orig(self);

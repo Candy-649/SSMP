@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Save;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -62,6 +63,7 @@ internal static partial class EntityFsmActions {
         data.Packet.Write(euler.y);
         data.Packet.Write(euler.z);
 
+        ThrownThings.WriteThrows(data, action);
         return true;
     }
 
@@ -77,15 +79,18 @@ internal static partial class EntityFsmActions {
             data.Packet.ReadFloat(),
             data.Packet.ReadFloat()
         );
+        var throws = ThrownThings.ReadThrows(data);
 
-        if (action.gameObject == null) {
+        if (action.gameObject == null || action.gameObject.Value is not { } prefab) {
             return;
         }
 
         SayIfThrownUnseen(action, position, "on the game that watches it");
 
-        var spawnedObject = action.gameObject.Value.Spawn(position, Quaternion.Euler(euler));
-        action.storeObject.Value = spawnedObject;
+        // Under the name that the game that runs the creature gave it, which what happens to it is sent under
+        using (ThrownThings.Expect(prefab, throws)) {
+            action.storeObject.Value = prefab.Spawn(position, Quaternion.Euler(euler));
+        }
     }
 
     /// <summary>
@@ -287,6 +292,7 @@ internal static partial class EntityFsmActions {
         }
 
         queue.Clear();
+        ThrownThings.WriteThrows(data, action);
         return true;
     }
 
@@ -298,20 +304,18 @@ internal static partial class EntityFsmActions {
             data.Packet.ReadFloat()
         );
 
-        var numSpawns = data.Packet.ReadByte();
-        for (var i = 0; i < numSpawns; i++) {
-            var go = action.gameObject.Value.Spawn(position, Quaternion.Euler(Vector3.zero));
+        var flings = ReadFlings(data);
+        var throws = ThrownThings.ReadThrows(data);
+        if (action.gameObject.Value is not { } prefab) {
+            return;
+        }
 
-            var originVariationX = data.Packet.ReadFloat();
-            position.x += originVariationX;
-
-            var originVariationY = data.Packet.ReadFloat();
-            position.y += originVariationY;
-
-            go.transform.position = position;
-
-            var speed = data.Packet.ReadFloat();
-            var angle = data.Packet.ReadFloat();
+        using var named = ThrownThings.Expect(prefab, throws);
+        foreach (var (originVariationX, originVariationY, speed, angle) in flings) {
+            // Each from the point it is flung from, as the game does it, rather than from where the one before went
+            var go = prefab.Spawn(position, Quaternion.Euler(Vector3.zero));
+            go.transform.position = new Vector3(position.x + originVariationX, position.y + originVariationY,
+                position.z);
 
             var x = speed * Mathf.Cos(angle * ((float) System.Math.PI / 180f));
             var y = speed * Mathf.Sin(angle * ((float) System.Math.PI / 180f));
@@ -327,6 +331,20 @@ internal static partial class EntityFsmActions {
                 FSMUtility.LocateFSM(go, action.FSM.Value).SendEvent(action.FSMEvent.Value);
             }
         }
+    }
+
+    /// <summary>
+    /// Reads what a fling sent of each thing it flung: how far from the point it is flung from it starts, and how fast
+    /// and which way it goes, as two numbers.
+    /// </summary>
+    private static (float OriginX, float OriginY, float First, float Second)[] ReadFlings(EntityNetworkData data) {
+        var flings = new (float, float, float, float)[data.Packet.ReadByte()];
+        for (var i = 0; i < flings.Length; i++) {
+            flings[i] = (data.Packet.ReadFloat(), data.Packet.ReadFloat(), data.Packet.ReadFloat(),
+                data.Packet.ReadFloat());
+        }
+
+        return flings;
     }
 
     #endregion
@@ -414,6 +432,7 @@ internal static partial class EntityFsmActions {
         }
 
         queue.Clear();
+        ThrownThings.WriteThrows(data, action);
         return true;
     }
 
@@ -425,20 +444,17 @@ internal static partial class EntityFsmActions {
             data.Packet.ReadFloat()
         );
 
-        var numSpawns = data.Packet.ReadByte();
-        for (var i = 0; i < numSpawns; i++) {
-            var go = action.gameObject.Value.Spawn(position, Quaternion.Euler(Vector3.zero));
+        var flings = ReadFlings(data);
+        var throws = ThrownThings.ReadThrows(data);
+        if (action.gameObject.Value is not { } prefab) {
+            return;
+        }
 
-            var originVariationX = data.Packet.ReadFloat();
-            position.x += originVariationX;
-
-            var originVariationY = data.Packet.ReadFloat();
-            position.y += originVariationY;
-
-            go.transform.position = position;
-
-            var speedX = data.Packet.ReadFloat();
-            var speedY = data.Packet.ReadFloat();
+        using var named = ThrownThings.Expect(prefab, throws);
+        foreach (var (originVariationX, originVariationY, speedX, speedY) in flings) {
+            var go = prefab.Spawn(position, Quaternion.Euler(Vector3.zero));
+            go.transform.position = new Vector3(position.x + originVariationX, position.y + originVariationY,
+                position.z);
 
             var rigidBody = go.GetComponent<Rigidbody2D>();
             if (rigidBody == null) {

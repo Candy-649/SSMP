@@ -15,6 +15,7 @@ using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using SSMP.Game.Client.Entity;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
@@ -35,7 +36,7 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// Knockback of enemies is local first as well: a hit of the local player knocks back an enemy at once, also when the
 /// scene host controls the enemy, and the game of the scene host applies the same knockback when the hit arrives.
 /// </summary>
-internal class CoopHits {
+internal partial class CoopHits {
     /// <summary>
     /// Binding flags for the instance methods that are hooked.
     /// </summary>
@@ -469,6 +470,8 @@ internal class CoopHits {
 
         // Hooked by the game patcher, before the tink's own rewritten method that calls it (GamePatcher)
         GamePatcher.HitInDirectionDetour = OnSendHitInDirection;
+
+        RegisterThrownHooks();
     }
 
     /// <summary>
@@ -487,6 +490,7 @@ internal class CoopHits {
         }
 
         _hooks.Clear();
+        DeregisterThrownHooks();
         _isReplaying = false;
         _hitContext = HitContext.None;
         ReplayedRanges.Clear();
@@ -584,7 +588,7 @@ internal class CoopHits {
             return;
         }
 
-        var target = ScenePath.Find(update.Path, update.Scene);
+        var target = FindPlace(update);
         if (target == null) {
             NotReplayed(update, "hit", "the object is not here");
             return;
@@ -618,6 +622,7 @@ internal class CoopHits {
 
         var sourceObject = GetHitSource(source);
         hit.Source = sourceObject;
+        PutThrownWhereItWas(target, update);
 
         var response = default(IHitResponder.HitResponse);
         bool answered;
@@ -884,8 +889,10 @@ internal class CoopHits {
 
             // The update is made before the hit, since a hit can break the object and move its parts. An object that
             // lets the attack go on through it says it was not hit, and it still answered when one of its state
-            // machines moved on to another state
+            // machines moved on to another state. A thing that a creature threw goes after the player who struck it.
             var update = hit.IsHeroDamage ? CreateUpdate(component, hit) : null;
+            GameObject? before = null;
+            var turned = update != null ? TurnThrownToLocalPlayer(component.gameObject, out before) : null;
             var response = default(IHitResponder.HitResponse);
             int[] dice = [];
             var answered = AnswersAttack(() => dice = SharedDice.Record(() => response = responder.Hit(hit))) ||
@@ -896,6 +903,7 @@ internal class CoopHits {
                 NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder}");
             } else if (update != null && !answered) {
                 NoteTraffic(update.Scene, update.Path, $"hit its {update.Responder}, which did not answer: not sent");
+                TurnThrownBack(turned, before);
             }
 
             return response;
@@ -952,14 +960,17 @@ internal class CoopHits {
     /// <summary>
     /// Hook for the component that tells the state machines of an object of something coming into it (see
     /// <see cref="TouchReceiverTypes"/>). The local player's attack touching an object of the room goes to
-    /// <see cref="OnLocalAttackTouch"/>, and the copy of the partner's attack touches nothing there.
+    /// <see cref="OnLocalAttackTouch"/>, and the copy of the partner's attack touches nothing there. The local
+    /// player's body touching a thing that a creature threw goes to <see cref="WatchThrown"/>.
     /// </summary>
     private void OnTouchEnter(
         Action<PlayMakerTriggerEnter2D, Collider2D> orig,
         PlayMakerTriggerEnter2D self,
         Collider2D other
     ) {
-        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+        if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
+            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+        } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
             OnLocalAttackTouch(self, other, () => orig(self, other));
@@ -975,7 +986,9 @@ internal class CoopHits {
         PlayMakerTriggerStay2D self,
         Collider2D other
     ) {
-        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+        if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
+            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+        } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
             OnLocalAttackTouch(self, other, () => orig(self, other));
@@ -991,7 +1004,9 @@ internal class CoopHits {
         PlayMakerTriggerExit2D self,
         Collider2D other
     ) {
-        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+        if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
+            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+        } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
             OnLocalAttackTouch(self, other, () => orig(self, other));
@@ -1007,7 +1022,9 @@ internal class CoopHits {
         CustomPlayMakerTriggerStay2D self,
         Collider2D other
     ) {
-        if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
+        if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
+            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+        } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
             OnLocalAttackTouch(self, other, () => orig(self, other));
@@ -1049,10 +1066,15 @@ internal class CoopHits {
     /// <param name="attack">The attack.</param>
     /// <param name="touch">Tells the object of the touch.</param>
     private void OnLocalAttackTouch(Component receiver, Collider2D attack, Action touch) {
-        // The update is made before the touch, since a touch can break the object and move its parts
+        // The update is made before the touch, since a touch can break the object and move its parts. A thing that a
+        // creature threw goes after the player who touched it.
         var update = HasMembers ? CreateTouchUpdate(receiver, attack) : null;
+        GameObject? before = null;
+        var turned = update != null ? TurnThrownToLocalPlayer(receiver.gameObject, out before) : null;
         int[] dice = [];
-        if (AnswersAttack(() => dice = SharedDice.Record(touch)) && update != null && _netClient.IsConnected) {
+        if (!AnswersAttack(() => dice = SharedDice.Record(touch))) {
+            TurnThrownBack(turned, before);
+        } else if (update != null && _netClient.IsConnected) {
             update.Hit = SharedDice.Append(update.Hit, dice);
             SendToRoomMembers(update);
             NoteTraffic(update.Scene, update.Path, $"sent a touch of {attack.name} through {update.Responder}");
@@ -1085,7 +1107,18 @@ internal class CoopHits {
             _statesBefore[self] = self.ActiveState;
         }
 
-        orig(self, toState);
+        if (_watchedThrown == null) {
+            orig(self, toState);
+            return;
+        }
+
+        // What a watched thrown thing does on its way into a state follows from what it was told (WatchThrown)
+        _watchedDepth++;
+        try {
+            orig(self, toState);
+        } finally {
+            _watchedDepth--;
+        }
     }
 
     /// <summary>
@@ -1504,6 +1537,11 @@ internal class CoopHits {
         PlayMakerFSM told,
         HitInstance hit
     ) {
+        // A thing that a creature threw goes after the player who struck it, and goes by its name and where it was as
+        // they struck: what the tink tells it can put it back into the pool, which takes its name off it
+        var turned = TurnThrownToLocalPlayer(tink.gameObject, out var before);
+        var thrownPath = turned != null ? ThrownThings.PathOf(told.gameObject) : null;
+
         _toldByTink = told;
         _toldRoom.Clear();
 
@@ -1515,8 +1553,9 @@ internal class CoopHits {
         }
 
         try {
-            if (_toldRoom.Count > 0 && CreateEventsUpdate(told, _toldRoom) is { } update &&
-                _netClient.IsConnected) {
+            if (_toldRoom.Count == 0) {
+                TurnThrownBack(turned, before);
+            } else if (CreateEventsUpdate(told, _toldRoom, thrownPath) is { } update && _netClient.IsConnected) {
                 SendToRoomMembers(update);
                 NoteTraffic(
                     update.Scene, update.Path, $"sent {_toldRoom.Count} event(s) of a tink to {update.Responder}"
@@ -1629,8 +1668,8 @@ internal class CoopHits {
 
         var target = tink.gameObject;
         var type = tink.GetType();
-        if (!target.scene.IsValid() || target.scene.name == "DontDestroyOnLoad" || !IsPersonal(type) ||
-            !IsRoomObject(tink) || PersonalPlaces.Contains(target)) {
+        if (!IsPersonal(type) || !IsRoomObject(tink) || PersonalPlaces.Contains(target) ||
+            !TryGetPlace(target, out var scene, out var path)) {
             return null;
         }
 
@@ -1657,8 +1696,8 @@ internal class CoopHits {
 
         return new CoopHitUpdate {
             Kind = CoopHitKind.ObjectDirection,
-            Scene = target.scene.name,
-            Path = ScenePath.Get(target.transform),
+            Scene = scene,
+            Path = path,
             Responder = type.FullName ?? type.Name,
             Index = (byte) index,
             Hit = stream.ToArray()
@@ -1676,7 +1715,7 @@ internal class CoopHits {
             return;
         }
 
-        var target = ScenePath.Find(update.Path, update.Scene);
+        var target = FindPlace(update);
         if (target == null) {
             NotReplayed(update, "direction", "the object is not here");
             return;
@@ -1721,6 +1760,7 @@ internal class CoopHits {
 
         _directionSourceRoot.transform.position = rootPosition;
         _directionSource.transform.position = sourcePosition;
+        PutThrownWhereItWas(target, update);
 
         _replayingDirection = true;
         try {
@@ -1740,14 +1780,26 @@ internal class CoopHits {
     /// <summary>
     /// Creates the update that sends the events that a state machine of the room was told here to the partner.
     /// </summary>
+    /// <param name="fsm">The state machine.</param>
+    /// <param name="events">The events, each with the dice as it was told.</param>
+    /// <param name="thrownPath">For a state machine of a thing that a creature threw, its path as it was before it
+    /// was told them (see <see cref="ThrownThings.PathOf(GameObject)"/>), which they can take away.</param>
     /// <returns>The update, or null if no member is in the scene or the object can't be found by others.</returns>
-    private CoopHitUpdate? CreateEventsUpdate(PlayMakerFSM fsm, List<(string EventName, int[] Dice)> events) {
+    private CoopHitUpdate? CreateEventsUpdate(
+        PlayMakerFSM fsm,
+        List<(string EventName, int[] Dice)> events,
+        string? thrownPath = null
+    ) {
         if (!IsAnyMemberInRoom()) {
             return null;
         }
 
         var target = fsm.gameObject;
-        if (!target.scene.IsValid() || target.scene.name == "DontDestroyOnLoad" || !IsRoomObject(fsm)) {
+        string scene, path;
+        if (thrownPath != null) {
+            scene = SceneManager.GetActiveScene().name;
+            path = thrownPath;
+        } else if (!IsRoomObject(fsm) || !TryGetPlace(target, out scene, out path)) {
             return null;
         }
 
@@ -1769,8 +1821,8 @@ internal class CoopHits {
 
         return new CoopHitUpdate {
             Kind = CoopHitKind.ObjectEvents,
-            Scene = target.scene.name,
-            Path = ScenePath.Get(target.transform),
+            Scene = scene,
+            Path = path,
             Responder = fsm.FsmName,
             Index = (byte) index,
             Hit = stream.ToArray()
@@ -1782,7 +1834,7 @@ internal class CoopHits {
     /// game had as it was told: by a tink of the partner's attack, or by the director of a game of the festival.
     /// </summary>
     private void ReplayObjectEvents(CoopHitUpdate update) {
-        var target = ScenePath.Find(update.Path, update.Scene);
+        var target = FindPlace(update);
         if (target == null) {
             NotReplayed(update, "events", "the object is not here");
             return;
@@ -1812,6 +1864,8 @@ internal class CoopHits {
             Logger.Warn($"Could not read the events the partner's game told {update.Path}");
             return;
         }
+
+        PutThrownWhereItWas(target, update);
 
         var answered = false;
         _isReplaying = true;
@@ -2437,7 +2491,7 @@ internal class CoopHits {
             }
 
             var target = component.gameObject;
-            if (!target.scene.IsValid() || target.scene.name == "DontDestroyOnLoad") {
+            if (!TryGetPlace(target, out var scene, out var path)) {
                 return null;
             }
 
@@ -2448,8 +2502,8 @@ internal class CoopHits {
             }
 
             return new CoopHitUpdate {
-                Scene = target.scene.name,
-                Path = ScenePath.Get(target.transform),
+                Scene = scene,
+                Path = path,
                 Responder = type.FullName,
                 Index = (byte) index,
                 Hit = WriteHit(hit, null, target)
@@ -2478,7 +2532,8 @@ internal class CoopHits {
             var target = receiver.gameObject;
             var type = receiver.GetType();
             var index = Array.IndexOf(target.GetComponents(type), receiver);
-            if (index is < 0 or > byte.MaxValue || type.FullName == null) {
+            if (index is < 0 or > byte.MaxValue || type.FullName == null ||
+                !TryGetPlace(target, out var scene, out var path)) {
                 return null;
             }
 
@@ -2496,8 +2551,8 @@ internal class CoopHits {
 
             return new CoopHitUpdate {
                 Kind = CoopHitKind.ObjectTouch,
-                Scene = target.scene.name,
-                Path = ScenePath.Get(target.transform),
+                Scene = scene,
+                Path = path,
                 Responder = type.FullName,
                 Index = (byte) index,
                 Hit = stream.ToArray()
@@ -2523,7 +2578,7 @@ internal class CoopHits {
             return;
         }
 
-        var target = ScenePath.Find(update.Path, update.Scene);
+        var target = FindPlace(update);
         if (target == null) {
             NotReplayed(update, "touch", "the object is not here");
             return;
@@ -2552,6 +2607,7 @@ internal class CoopHits {
         }
 
         var attack = GetTouchSource(touch);
+        PutThrownWhereItWas(target, update);
 
         bool answered;
         _isReplaying = true;
@@ -2595,7 +2651,7 @@ internal class CoopHits {
     private static void NotReplayed(CoopHitUpdate update, string what, string reason) {
         NoteTraffic(update.Scene, update.Path, $"got a {what} through {update.Responder}, not replayed: {reason}");
 
-        var key = update.Scene + "/" + update.Path;
+        var key = ThrownThings.IsPath(update.Path) ? "#thrown" : update.Scene + "/" + update.Path;
         if (NextNotReplayedLogTime.TryGetValue(key, out var next) && Time.unscaledTime < next) {
             return;
         }
@@ -2797,16 +2853,19 @@ internal class CoopHits {
     /// Whether an object is a part of the room itself, which both games have in the same place: in a scene rather than
     /// kept across scenes, placed there rather than spawned, and neither a creature nor a part of one, since enemy
     /// sync takes care of creatures. The kinds that were replayed before the others count when spawned too (see
-    /// <see cref="ReplayedWhenSpawnedTypes"/>).
+    /// <see cref="ReplayedWhenSpawnedTypes"/>), and so does a thing that a creature threw, which both games know by
+    /// its name (see <see cref="ThrownThings"/>).
     /// </summary>
     internal static bool IsRoomObject(Component component) {
+        // A thing that a creature threw, which every game knows by its name rather than by a place in the room
+        var isThrown = ThrownThings.Count > 0 && ThrownThings.IsThrown(component.gameObject);
         var scene = component.gameObject.scene;
-        if (!scene.IsValid() || scene.name == "DontDestroyOnLoad" ||
+        if (!isThrown && (!scene.IsValid() || scene.name == "DontDestroyOnLoad") ||
             component.GetComponentInParent<HealthManager>(true) != null) {
             return false;
         }
 
-        var countsWhenSpawned = IsOfType(
+        var countsWhenSpawned = isThrown || IsOfType(
             component.GetType(), ReplayedWhenSpawnedTypes, IsReplayedWhenSpawnedByType
         );
         for (var current = component.transform; current != null; current = current.parent) {

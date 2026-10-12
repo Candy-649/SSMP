@@ -8,6 +8,7 @@ using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity.Component;
+using SSMP.Game.Client.Save;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -74,6 +75,11 @@ internal static partial class EntityFsmActions {
     /// Used to log the results of random calls to network to clients.
     /// </summary>
     private static readonly ConditionalWeakTable<FsmStateAction, Queue<object>> RandomActionValues = new();
+
+    /// <summary>
+    /// The most results of random calls that are kept for one action, far more than one run of it rolls.
+    /// </summary>
+    private const int MaxRandomValuesKept = 512;
 
     /// <summary>
     /// List of actions that are executing while in a state and need to be stopped again when the state is exited.
@@ -224,6 +230,11 @@ internal static partial class EntityFsmActions {
             [data, action],
             null!
         );
+
+        // What a throw that does not go to the other game threw keeps no name for it (ThrownThings)
+        if (returnObject is not true) {
+            ThrownThings.DropHostThrows(action);
+        }
 
         // Return whether the return object is a bool and has the value 'true'
         return returnObject is true;
@@ -913,6 +924,13 @@ internal static partial class EntityFsmActions {
                 if (!RandomActionValues.TryGetValue(instance, out var queue)) {
                     queue = new Queue<object>();
                     RandomActionValues.Add(instance, queue);
+                }
+
+                // Only what a creature's own action rolls is taken out again, as its data is made: what the state
+                // machine of anything else rolls would pile up for as long as that lives, a thrown thing of the pool
+                // for the whole session
+                while (queue.Count >= MaxRandomValuesKept) {
+                    queue.Dequeue();
                 }
 
                 queue.Enqueue(value);

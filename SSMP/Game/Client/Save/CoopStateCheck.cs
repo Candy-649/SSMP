@@ -702,10 +702,12 @@ internal class CoopStateCheck {
     /// <summary>
     /// Whether a component of the room is compared: it is part of the room itself, which both games have in the same
     /// place (see <see cref="CoopHits.IsRoomObject"/>), and not of an object that is there for each player alone, nor
-    /// in a place that is (see <see cref="PersonalPlaces"/>).
+    /// in a place that is (see <see cref="PersonalPlaces"/>). A thing that a creature threw has a name in both games
+    /// but no place in the room to be found by.
     /// </summary>
     private bool IsCompared(MonoBehaviour behaviour) {
-        if (!CoopHits.IsRoomObject(behaviour) || PersonalPlaces.Contains(behaviour.gameObject)) {
+        if (!CoopHits.IsRoomObject(behaviour) || ThrownThings.IsThrown(behaviour.gameObject) ||
+            PersonalPlaces.Contains(behaviour.gameObject)) {
             return false;
         }
 

@@ -36,13 +36,16 @@ internal partial class CoopSave {
     /// <param name="hazardType">The kind of harm.</param>
     /// <param name="flags">What else the damage was marked with.</param>
     /// <param name="healthBefore">The health of the player before the hurt.</param>
+    /// <param name="sourceText">What hit the player as it was before the hurt (see <see cref="DescribeHurtSource"/>),
+    /// or null to describe it as it is now.</param>
     private static void NoteHurt(
         HeroController hero,
         GameObject? source,
         int damageAmount,
         GlobalEnums.HazardType hazardType,
         GlobalEnums.DamagePropertyFlags flags,
-        int healthBefore
+        int healthBefore,
+        string? sourceText
     ) {
         try {
             var playerData = PlayerData.instance;
@@ -69,42 +72,62 @@ internal partial class CoopSave {
             var line = new StringBuilder();
             line.Append($"[Hurts] {healthBefore} -> {healthAfter}/{playerData.maxHealth} from {damageAmount} damage");
             line.Append($" ({hazardType}{(((int) flags & 2) != 0 ? ", not lethal" : "")})");
+            line.Append(sourceText ?? DescribeHurtSource(hero, source));
 
             var heroPosition = hero.transform.position;
-            if (source == null) {
-                line.Append(", with nothing named as its source");
-            } else {
-                var sourcePosition = source.transform.position;
-                line.Append($" by '{PathOf(source.transform)}'");
-                line.Append(source.activeInHierarchy ? "" : " (switched off)");
-                line.Append($", {DescribeDrawn(source)} on it");
-
-                // The creature it belongs to: the nearest object above it that can be hurt itself
-                var creature = source.GetComponentInParent<HealthManager>(true);
-                if (creature != null && creature.gameObject != source) {
-                    line.Append($", part of '{creature.name}' ({DescribeDrawn(creature.gameObject)})");
-                }
-
-                var copied = Entity.Entity.FindByCopyPart(source);
-                line.Append(copied != null
-                    ? $", which is this game's copy of entity {copied.Id} ({copied.Type})"
-                    : ", which is this game's own");
-                line.Append(
-                    $", {Vector2.Distance(sourcePosition, heroPosition):0.0} away at " +
-                    $"({sourcePosition.x:0.00}, {sourcePosition.y:0.00})"
-                );
-
-                // Which way it faces and goes, and which side of it the player is on: a creature that charged a
-                // player back first (USER 10-10, "飞天怪用屁股撞") shows here as one going towards the player while its
-                // x scale says it faces the other way
-                var body = creature != null ? creature.gameObject : source;
-                line.Append($", {DescribeFacing(body, copied, heroPosition)}");
-            }
-
             line.Append($"; the player at ({heroPosition.x:0.00}, {heroPosition.y:0.00})");
             Logger.Info(line.ToString());
         } catch (Exception e) {
             Logger.Warn($"Could not write down a hurt of the player: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// What hits the local player, for <see cref="NoteHurt"/>: what it is and belongs to, how much of it is drawn,
+    /// where it is and which way it goes. Asked before the game deals with the hurt, since that can take it away: a
+    /// caltrop that hurt the player is put back into the pool at once, and was written down as switched off with
+    /// nothing to draw, which looked like thin air.
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    /// <param name="source">What hits the player, as the game was given it.</param>
+    private static string DescribeHurtSource(HeroController hero, GameObject? source) {
+        if (source == null) {
+            return ", with nothing named as its source";
+        }
+
+        try {
+            var line = new StringBuilder();
+            var heroPosition = hero.transform.position;
+            var sourcePosition = source.transform.position;
+            line.Append($" by '{PathOf(source.transform)}'");
+            line.Append(source.activeInHierarchy ? "" : " (switched off)");
+            line.Append($", {DescribeDrawn(source)} on it");
+
+            // The creature it belongs to: the nearest object above it that can be hurt itself
+            var creature = source.GetComponentInParent<HealthManager>(true);
+            if (creature != null && creature.gameObject != source) {
+                line.Append($", part of '{creature.name}' ({DescribeDrawn(creature.gameObject)})");
+            }
+
+            var copied = Entity.Entity.FindByCopyPart(source);
+            line.Append(copied != null
+                ? $", which is this game's copy of entity {copied.Id} ({copied.Type})"
+                : ThrownThings.IsThrown(source)
+                    ? ", which a creature threw and every game has"
+                    : ", which is this game's own");
+            line.Append(
+                $", {Vector2.Distance(sourcePosition, heroPosition):0.0} away at " +
+                $"({sourcePosition.x:0.00}, {sourcePosition.y:0.00})"
+            );
+
+            // Which way it faces and goes, and which side of it the player is on: a creature that charged a player
+            // back first (USER 10-10, "飞天怪用屁股撞") shows here as one going towards the player while its x scale
+            // says it faces the other way
+            var body = creature != null ? creature.gameObject : source;
+            line.Append($", {DescribeFacing(body, copied, heroPosition)}");
+            return line.ToString();
+        } catch (Exception e) {
+            return $", by something that could not be described: {e.Message}";
         }
     }
 

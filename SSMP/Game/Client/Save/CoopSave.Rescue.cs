@@ -597,9 +597,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // What hits the player is written down as it is before the game deals with the hurt, which can take it away;
+        // a player safe from hits for the moment is not hurt by most things, and it is written down after for the rest
         var healthBefore = PlayerData.instance == null ? 0 : PlayerData.instance.health;
+        var sourceText = self.cState.invulnerable ? null : DescribeHurtSource(self, go);
         orig(self, go, damageSide, damageAmount, hazardType, damagePropertyFlags);
-        NoteHurt(self, go, damageAmount, hazardType, damagePropertyFlags, healthBefore);
+        NoteHurt(self, go, damageAmount, hazardType, damagePropertyFlags, healthBefore, sourceText);
     }
 
     /// <summary>

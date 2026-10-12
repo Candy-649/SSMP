@@ -296,6 +296,28 @@ internal partial class Entity {
     private readonly Dictionary<FsmStateAction, HookedEntityAction> _hookedActions;
 
     /// <summary>
+    /// The entity that each action of the room's own creatures that throws something is sent for, whose throws are
+    /// named for the other game to know them by (see ThrownThings).
+    /// </summary>
+    private static readonly ConditionalWeakTable<FsmStateAction, Entity> ThrowingActions = new();
+
+    /// <summary>
+    /// Whether an action throws something for a creature that this game runs, and sends the throw to the other game.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="thrower">The room's own creature that throws.</param>
+    public static bool TryGetThrower(FsmStateAction action, out GameObject thrower) {
+        thrower = null!;
+        if (!ThrowingActions.TryGetValue(action, out var entity) || entity._isControlled ||
+            entity.Object.Host == null) {
+            return false;
+        }
+
+        thrower = entity.Object.Host;
+        return true;
+    }
+
+    /// <summary>
     /// Set of FSM action types that have been hooked to prevent duplicate hooks.
     /// </summary>
     private readonly HashSet<Type> _hookedTypes;
@@ -724,6 +746,11 @@ internal partial class Entity {
                     StateIndex = i,
                     ActionIndex = j
                 };
+
+                if (action is SpawnObjectFromGlobalPool or FlingObjectsFromGlobalPool
+                    or FlingObjectsFromGlobalPoolVel) {
+                    ThrowingActions.AddOrUpdate(action, this);
+                }
                 //Logger.Info(
                 //    $"Created hooked action: {action.GetType()}, {_fsms.Host.IndexOf(fsm)}, {stateName}, {j}"
                 //);
