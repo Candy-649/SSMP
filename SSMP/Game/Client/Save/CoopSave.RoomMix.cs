@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using MonoMod.RuntimeDetour;
 using UnityEngine.Audio;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
 
@@ -50,9 +51,21 @@ internal partial class CoopSave {
     /// Writes down the sound that the game asks for.
     /// </summary>
     private void RegisterRoomMixHooks() {
+        // Not on AudioMixerSnapshot.TransitionTo, which is what the game calls: it is short enough to be copied into
+        // the code that calls it, and the room's own code that was compiled before this hook was made - the settings
+        // a room gives itself as it loads, the FSM actions that set them - would never reach the hook. All it does is
+        // call this one, which is too long to be copied anywhere
         _snapshotHook = CreateHook(
-            typeof(AudioMixerSnapshot).GetMethod("TransitionTo", InstanceFlags, null, [typeof(float)], null),
-            new Action<Action<AudioMixerSnapshot, float>, AudioMixerSnapshot, float>(OnSnapshotTransition)
+            typeof(AudioMixer).GetMethod(
+                "TransitionToSnapshot",
+                InstanceFlags,
+                null,
+                [typeof(AudioMixerSnapshot), typeof(float)],
+                null
+            ),
+            new Action<Action<AudioMixer, AudioMixerSnapshot, float>, AudioMixer, AudioMixerSnapshot, float>(
+                OnSnapshotTransition
+            )
         );
         _snapshotBlendHook = CreateHook(
             typeof(AudioMixer).GetMethod(
@@ -85,13 +98,19 @@ internal partial class CoopSave {
     private static bool IsAskedByTheDeath() => FsmExecutionStack.ExecutingFsm?.Name == DeathAnimFsmName;
 
     /// <summary>
-    /// Hook for AudioMixerSnapshot.TransitionTo: writes down the setting of its mixer.
+    /// Hook for AudioMixer.TransitionToSnapshot, which AudioMixerSnapshot.TransitionTo calls: writes down the setting
+    /// of the mixer.
     /// </summary>
-    private void OnSnapshotTransition(Action<AudioMixerSnapshot, float> orig, AudioMixerSnapshot self, float time) {
-        orig(self, time);
+    private void OnSnapshotTransition(
+        Action<AudioMixer, AudioMixerSnapshot, float> orig,
+        AudioMixer self,
+        AudioMixerSnapshot snapshot,
+        float time
+    ) {
+        orig(self, snapshot, time);
 
-        if (self != null && !IsAskedByTheDeath() && self.audioMixer is { } mixer && mixer != null) {
-            _roomMix[mixer] = ([self], [1f]);
+        if (self != null && snapshot != null && !IsAskedByTheDeath()) {
+            _roomMix[self] = ([snapshot], [1f]);
         }
     }
 
@@ -107,8 +126,17 @@ internal partial class CoopSave {
     ) {
         orig(self, snapshots, weights, time);
 
-        // Copies, because the game fills the same arrays again for the next blend
-        if (self != null && snapshots != null && weights != null && !IsAskedByTheDeath()) {
+        if (self == null || snapshots == null || weights == null || IsAskedByTheDeath()) {
+            return;
+        }
+
+        // Copies, because the game fills the same arrays again for the next blend. A room with spots that change its
+        // sound blends again each time the camera moves, so the copies are kept and filled again when they fit
+        if (_roomMix.TryGetValue(self, out var kept) && kept.Snapshots.Length == snapshots.Length &&
+            kept.Weights.Length == weights.Length) {
+            Array.Copy(snapshots, kept.Snapshots, snapshots.Length);
+            Array.Copy(weights, kept.Weights, weights.Length);
+        } else {
             _roomMix[self] = ((AudioMixerSnapshot[]) snapshots.Clone(), (float[]) weights.Clone());
         }
     }
@@ -140,7 +168,19 @@ internal partial class CoopSave {
     /// <param name="music">The music to put back if none was written down yet.</param>
     /// <param name="fadeTime">How long the mixers take to get there, in seconds.</param>
     private void RestoreRoomMix(global::GameManager gameManager, MusicCue? music, float fadeTime) {
-        if ((_roomMusic ?? music) is { } cue && cue != null) {
+        // Whatever goes wrong here, the rest of the rescue still has to stand the player up
+        try {
+            PutBackRoomMix(gameManager, music, fadeTime);
+        } catch (Exception e) {
+            Logger.Error($"Could not put the sound of the room back:\n{e}");
+        }
+    }
+
+    /// <inheritdoc cref="RestoreRoomMix" />
+    private void PutBackRoomMix(global::GameManager gameManager, MusicCue? music, float fadeTime) {
+        // Music written down whose asset is gone since counts as none
+        var cue = _roomMusic != null ? _roomMusic : music;
+        if (cue != null) {
             // Music that is playing already only stays: the game sees it is the same and does not start it again
             gameManager.AudioManager.ApplyMusicCue(cue, 0f, 0f, false);
         }
