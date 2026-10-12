@@ -112,6 +112,45 @@ internal static class FontManager {
     private const string EmojiFontFile = "seguiemj.ttf";
 
     /// <summary>
+    /// The fonts of Windows that the chat falls back on, in this order, for whatever neither its own face nor the
+    /// emoji font can draw: the face in each file, and what it is there for. Kaomoji are made of the letters of many
+    /// scripts - ಠ_ಠ, ༼ つ ◕_◕ ༽つ, ᕦ(ò_óˇ)ᕤ, (๑•̀ㅂ•́)و✧ - and with only those two to draw
+    /// from, the chat showed a square for each letter of them (USER 10-12, "聊天框打颜文字的时候会有方块"). A file
+    /// that a Windows lacks is left out; one is asked only for what everything before it could not draw.
+    /// </summary>
+    private static readonly (string File, int Face)[] ScriptFonts = [
+        // Latin, Greek and Cyrillic beyond the plain ones, Arabic, Hebrew, the phonetic letters and accents
+        ("segoeui.ttf", 0),
+        // Symbols, arrows, shapes, box drawing, Braille
+        ("seguisym.ttf", 0),
+        // The scripts of India: ಠ. One file on Windows 11, another on Windows 10
+        ("Nirmala.ttc", 0),
+        ("Nirmala.ttf", 0),
+        // Thai, Lao and Khmer: ๑
+        ("LeelawUI.ttf", 0),
+        // Canadian syllabics and Cherokee: ᕦ ᕤ
+        ("gadugi.ttf", 0),
+        // Tibetan: ༼ ༽
+        ("himalaya.ttf", 0),
+        // Ethiopic, N'Ko, Vai
+        ("ebrima.ttf", 0),
+        // Yi: ꉂ
+        ("msyi.ttf", 0),
+        // Javanese: ꧁ ꧂
+        ("javatext.ttf", 0),
+        // Korean
+        ("malgun.ttf", 0),
+        // Chinese and Japanese that the game's own face does not have
+        ("msyh.ttc", 0),
+        // Myanmar, Mongolian, and scripts no longer written such as runes
+        ("mmrtext.ttf", 0),
+        ("monbaiti.ttf", 0),
+        ("seguihis.ttf", 0),
+        // Cambria Math, the second face in its file: the letters of mathematics, 𝓪
+        ("cambria.ttc", 1)
+    ];
+
+    /// <summary>
     /// The fonts to ask Windows for if the game turns out to have none that can draw Chinese, in order of preference.
     /// </summary>
     private static readonly string[] ChineseOsFonts = [
@@ -407,7 +446,78 @@ internal static class FontManager {
         _chatFont = TMPro.TMP_FontAsset.CreateFontAsset(
             face, 48, 6, GlyphRenderMode.SDFAA, 1024, 1024, TMPro.AtlasPopulationMode.Dynamic, true
         );
-        var material = _chatFont.material;
+        OutlineMessageFace(_chatFont.material);
+
+        ChatInputFont = TMPro.TMP_FontAsset.CreateFontAsset(
+            face, pixelSize, 4, GlyphRenderMode.SMOOTH, 1024, 1024, TMPro.AtlasPopulationMode.Dynamic, true
+        );
+        Set("m_defaultFontAsset", ChatInputFont);
+
+        // What the face cannot draw is drawn from the fonts of Windows: the emoji first, then the other scripts. Each
+        // of these makes its texture only once it has something to draw in it
+        var fonts = Environment.GetFolderPath(Environment.SpecialFolder.Fonts);
+        List<TMPro.TMP_FontAsset> messageFallbacks = [], inputFallbacks = [];
+
+        var emoji = TMPro.TMP_FontAsset.CreateFontAsset(
+            Path.Combine(fonts, EmojiFontFile), 0, pixelSize, 4, GlyphRenderMode.COLOR, 1024, 1024
+        );
+        if (emoji == null) {
+            Logger.Warn($"Could not load '{EmojiFontFile}', so the chat cannot show emoji");
+        } else {
+            messageFallbacks.Add(emoji);
+            inputFallbacks.Add(emoji);
+        }
+
+        var missing = new List<string>();
+        foreach (var (file, faceIndex) in ScriptFonts) {
+            var path = Path.Combine(fonts, file);
+            if (!File.Exists(path)) {
+                missing.Add(file);
+                continue;
+            }
+
+            // Drawn the way the face they stand in for is drawn: the messages from the distance to the edges of the
+            // letters, with the same outline, and the input as plain pixels at its own size. A font that cannot be
+            // read is left out, and the rest still come
+            TMPro.TMP_FontAsset? message, input;
+            try {
+                message = TMPro.TMP_FontAsset.CreateFontAsset(
+                    path, faceIndex, 48, 6, GlyphRenderMode.SDFAA, 512, 512
+                );
+                input = TMPro.TMP_FontAsset.CreateFontAsset(
+                    path, faceIndex, pixelSize, 4, GlyphRenderMode.SMOOTH, 512, 512
+                );
+            } catch (Exception e) {
+                Logger.Warn($"Could not load '{file}' for the chat: {e.Message}");
+                continue;
+            }
+
+            if (message == null || input == null) {
+                missing.Add(file);
+                continue;
+            }
+
+            OutlineMessageFace(message.material);
+            messageFallbacks.Add(message);
+            inputFallbacks.Add(input);
+        }
+
+        if (missing.Count > 0) {
+            Logger.Info(
+                $"The chat falls back on {inputFallbacks.Count} fonts; not found: {string.Join(", ", missing)}"
+            );
+        }
+
+        _chatFont.fallbackFontAssetTable = messageFallbacks;
+        ChatInputFont.fallbackFontAssetTable = inputFallbacks;
+    }
+
+    /// <summary>
+    /// Gives a face of the chat's messages its black outline, drawn by the game's own shader for faces made of the
+    /// distance to the edges of the letters.
+    /// </summary>
+    /// <param name="material">The material of the face.</param>
+    private static void OutlineMessageFace(Material material) {
         material.shader = Shader.Find("TextMeshPro/Distance Field");
         material.SetFloat(TMPro.ShaderUtilities.ID_OutlineWidth, 0.2f);
         material.SetColor(TMPro.ShaderUtilities.ID_OutlineColor, Color.black);
@@ -415,23 +525,6 @@ internal static class FontManager {
         // much again to keep their weight
         material.SetFloat(TMPro.ShaderUtilities.ID_FaceDilate, 0.2f);
         TMPro.ShaderUtilities.UpdateShaderRatios(material);
-
-        ChatInputFont = TMPro.TMP_FontAsset.CreateFontAsset(
-            face, pixelSize, 4, GlyphRenderMode.SMOOTH, 1024, 1024, TMPro.AtlasPopulationMode.Dynamic, true
-        );
-        Set("m_defaultFontAsset", ChatInputFont);
-
-        var emoji = TMPro.TMP_FontAsset.CreateFontAsset(
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.Fonts), EmojiFontFile),
-            0, pixelSize, 4, GlyphRenderMode.COLOR, 1024, 1024
-        );
-        if (emoji == null) {
-            Logger.Warn($"Could not load '{EmojiFontFile}', so the chat cannot show emoji");
-            return;
-        }
-
-        _chatFont.fallbackFontAssetTable = [emoji];
-        ChatInputFont.fallbackFontAssetTable = [emoji];
     }
 
     /// <summary>
