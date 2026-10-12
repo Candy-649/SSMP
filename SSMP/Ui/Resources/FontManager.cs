@@ -119,14 +119,19 @@ internal static class FontManager {
     /// that a Windows lacks is left out; one is asked only for what everything before it could not draw.
     /// </summary>
     private static readonly (string File, int Face)[] ScriptFonts = [
-        // Latin, Greek and Cyrillic beyond the plain ones, Arabic, Hebrew, the phonetic letters and accents
+        // Latin, Greek and Cyrillic beyond the plain ones, Arabic, Hebrew, the phonetic letters, accents, and the
+        // Thai digits: ๑
         ("segoeui.ttf", 0),
-        // Symbols, arrows, shapes, box drawing, Braille
+        // Symbols, arrows, shapes, box drawing, Braille, the letters of mathematics: 𝓪
         ("seguisym.ttf", 0),
+        // Chinese and Japanese that the game's own face does not have, and all of it in a game set to a language
+        // whose face has none. Before the fonts below, several of which carry Chinese characters and brackets drawn
+        // the way their own languages draw them
+        ("msyh.ttc", 0),
         // The scripts of India: ಠ. One file on Windows 11, another on Windows 10
         ("Nirmala.ttc", 0),
         ("Nirmala.ttf", 0),
-        // Thai, Lao and Khmer: ๑
+        // Thai, Lao and Khmer letters
         ("LeelawUI.ttf", 0),
         // Canadian syllabics and Cherokee: ᕦ ᕤ
         ("gadugi.ttf", 0),
@@ -140,14 +145,10 @@ internal static class FontManager {
         ("javatext.ttf", 0),
         // Korean
         ("malgun.ttf", 0),
-        // Chinese and Japanese that the game's own face does not have
-        ("msyh.ttc", 0),
         // Myanmar, Mongolian, and scripts no longer written such as runes
         ("mmrtext.ttf", 0),
         ("monbaiti.ttf", 0),
-        ("seguihis.ttf", 0),
-        // Cambria Math, the second face in its file: the letters of mathematics, 𝓪
-        ("cambria.ttc", 1)
+        ("seguihis.ttf", 0)
     ];
 
     /// <summary>
@@ -468,7 +469,7 @@ internal static class FontManager {
             inputFallbacks.Add(emoji);
         }
 
-        var missing = new List<string>();
+        List<string> missing = [], unreadable = [];
         foreach (var (file, faceIndex) in ScriptFonts) {
             var path = Path.Combine(fonts, file);
             if (!File.Exists(path)) {
@@ -479,21 +480,27 @@ internal static class FontManager {
             // Drawn the way the face they stand in for is drawn: the messages from the distance to the edges of the
             // letters, with the same outline, and the input as plain pixels at its own size. A font that cannot be
             // read is left out, and the rest still come
-            TMPro.TMP_FontAsset? message, input;
+            TMPro.TMP_FontAsset? message = null, input = null;
             try {
                 message = TMPro.TMP_FontAsset.CreateFontAsset(
                     path, faceIndex, 48, 6, GlyphRenderMode.SDFAA, 512, 512
                 );
-                input = TMPro.TMP_FontAsset.CreateFontAsset(
-                    path, faceIndex, pixelSize, 4, GlyphRenderMode.SMOOTH, 512, 512
-                );
+                if (message != null) {
+                    input = TMPro.TMP_FontAsset.CreateFontAsset(
+                        path, faceIndex, pixelSize, 4, GlyphRenderMode.SMOOTH, 512, 512
+                    );
+                }
             } catch (Exception e) {
                 Logger.Warn($"Could not load '{file}' for the chat: {e.Message}");
-                continue;
             }
 
             if (message == null || input == null) {
-                missing.Add(file);
+                // The face for the messages is of no use without the one for the input
+                if (message != null) {
+                    UnityEngine.Object.Destroy(message);
+                }
+
+                unreadable.Add(file);
                 continue;
             }
 
@@ -502,9 +509,10 @@ internal static class FontManager {
             inputFallbacks.Add(input);
         }
 
-        if (missing.Count > 0) {
+        if (missing.Count > 0 || unreadable.Count > 0) {
             Logger.Info(
-                $"The chat falls back on {inputFallbacks.Count} fonts; not found: {string.Join(", ", missing)}"
+                $"The chat falls back on {inputFallbacks.Count} fonts; not on this Windows: " +
+                $"{string.Join(", ", missing)}; could not be read: {string.Join(", ", unreadable)}"
             );
         }
 
