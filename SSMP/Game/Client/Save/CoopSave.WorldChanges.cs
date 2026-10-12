@@ -378,6 +378,14 @@ internal partial class CoopSave {
     private void OnWorldChange(ClientPlayerData player, CoopSaveUpdate update) {
         if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
             PlayerData.instance == null || SceneData.instance == null) {
+            // Said, because a change that is dropped is never sent again, and the saves stay apart in it
+            if (update.ItemIds.Count > 0 || update.FlagNames.Count > 0 || update.Names.Count > 0) {
+                Logger.Info(
+                    $"Dropped a change of the world from {player.Username} with {update.ItemIds.Count} saved " +
+                    $"objects and {update.FlagNames.Count} player data flags: no save checked with them is loaded here"
+                );
+            }
+
             return;
         }
 
@@ -403,12 +411,22 @@ internal partial class CoopSave {
         // through that same method, and would bring down everything the partner ever collapsed at once
         ReplayLoadedCollapses(loadedItems);
 
-        flags += ApplyInteractionFlags(update);
+        var older = new List<string>();
+        flags += ApplyInteractionFlags(update, older);
 
         var bosses = AddBossScenes(update.Names);
 
         if (items > 0 || flags > 0 || bosses > 0) {
             Logger.Info($"Added {items} changes of the world from {player.Username}, with {flags} player data flags and {bosses} boss scenes");
+        }
+
+        // Flags that changed again after this change, like in both games at about the same time, keep the newer change
+        // in every game
+        if (older.Count > 0) {
+            Logger.Info(
+                $"Kept the newer changes of {older.Count} player data flags over those from {player.Username}: " +
+                string.Join(", ", older)
+            );
         }
     }
 

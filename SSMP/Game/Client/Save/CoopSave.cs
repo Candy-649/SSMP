@@ -183,6 +183,12 @@ internal partial class CoopSave {
     private int _sessionSlot = -1;
 
     /// <summary>
+    /// The updates of other players that came while the loaded save played a scene that is no room, like the cinematic
+    /// of a ride, in the order they came. They are taken once the local game is in a room again.
+    /// </summary>
+    private readonly List<CoopSaveUpdate> _updatesOutOfRoom = new();
+
+    /// <summary>
     /// Whether the local player waits for the partner and can't move or get up from their bench.
     /// </summary>
     private bool _held;
@@ -332,6 +338,9 @@ internal partial class CoopSave {
     /// </summary>
     private void OnHeroControllerUpdate(HeroController hero) {
         try {
+            // First, so that what the partner did before the local game came back to a room is in the save before
+            // anything of the local save is looked at or sent
+            TakeUpdatesOutOfRoom();
             UpdateSession(hero);
         } catch (Exception e) {
             if (!_updateFailed) {
@@ -624,6 +633,7 @@ internal partial class CoopSave {
         _holdOnlyAtBench = false;
         _rosterStarted = false;
         _droppedMembers.Clear();
+        _updatesOutOfRoom.Clear();
 
         // A step of dialogue that waits for the partner doesn't go on: its scene is going, and going on would run what
         // comes after the wish, like saving the game, on the way out (CoopSave.WishRead)
@@ -855,8 +865,60 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Handles an update of a two-player save from another player.
+    ///
+    /// While the loaded save plays a scene that is no room, like the cinematic of a ride, nothing of the save can be
+    /// looked up (GetCurrentMarker), so every update would be dropped there as if no save were loaded. One that comes
+    /// then waits for the next room instead, in the order it came. A partner who rode right after the local player had
+    /// what the passing of time rolled for them reach this game during its own ride, among it whether the seller of
+    /// maps was out, and the two saves stayed apart in it for the rest of the session (USER 10-12, "有不一致，我这里
+    /// ……不用敲环就在，但是我朋友那边需要敲").
     /// </summary>
     public void OnCoopSaveUpdate(CoopSaveUpdate update) {
+        if (IsSaveOutOfRoom()) {
+            if (_updatesOutOfRoom.Count == 0) {
+                var scene = SceneUtil.GetCurrentSceneName();
+                Logger.Info($"Keeping the updates of other players for the next room while '{scene}' plays");
+            }
+
+            _updatesOutOfRoom.Add(update);
+            return;
+        }
+
+        TakeUpdatesOutOfRoom();
+        TakeUpdate(update);
+    }
+
+    /// <summary>
+    /// Whether the loaded save plays a scene that is no room, like the cinematic of a ride.
+    /// </summary>
+    private bool IsSaveOutOfRoom() => _sessionSlot >= 0 && !IsInGame();
+
+    /// <summary>
+    /// Takes the updates of other players that came while the loaded save played a scene that is no room, once the
+    /// local game is in a room again.
+    /// </summary>
+    private void TakeUpdatesOutOfRoom() {
+        if (_updatesOutOfRoom.Count == 0 || IsSaveOutOfRoom()) {
+            return;
+        }
+
+        var updates = _updatesOutOfRoom.ToList();
+        _updatesOutOfRoom.Clear();
+        Logger.Info($"Taking {updates.Count} updates of other players that came while out of the rooms");
+        foreach (var update in updates) {
+            // One that throws must not lose the ones after it
+            try {
+                TakeUpdate(update);
+            } catch (Exception e) {
+                Logger.Error($"Could not take an update ({update.Kind}) that came while out of the rooms:\n{e}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Hands an update of another player to what handles its kind.
+    /// </summary>
+    private void TakeUpdate(CoopSaveUpdate update) {
         if (!_playerData.TryGetValue(update.PlayerId, out var player)) {
             return;
         }

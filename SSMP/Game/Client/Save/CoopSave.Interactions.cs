@@ -1337,8 +1337,10 @@ internal partial class CoopSave {
     /// Sets the flags of the player data that the partner set, like with a mechanism or in the story, and takes them as
     /// known by both games.
     /// </summary>
+    /// <param name="update">The update with the flags.</param>
+    /// <param name="older">Gets the names of the flags whose change is older than their last change, if given.</param>
     /// <returns>How many flags changed.</returns>
-    private int ApplyInteractionFlags(CoopSaveUpdate update) {
+    private int ApplyInteractionFlags(CoopSaveUpdate update, List<string>? older = null) {
         var playerData = PlayerData.instance;
         if (playerData == null) {
             return 0;
@@ -1353,8 +1355,12 @@ internal partial class CoopSave {
 
             // A mark of the partner's own arrival is theirs alone, also in dialogue kept from before such marks stopped
             // being sent (see CoopSave.Arrivals)
-            if (BossRoomCoop.IsHeroStateName(name) || IsOwnArrivalMark(name) ||
-                !IsNewerChange(_flagSequences, update, name)) {
+            if (BossRoomCoop.IsHeroStateName(name) || IsOwnArrivalMark(name)) {
+                continue;
+            }
+
+            if (!IsNewerChange(_flagSequences, update, name)) {
+                older?.Add(name);
                 continue;
             }
 
