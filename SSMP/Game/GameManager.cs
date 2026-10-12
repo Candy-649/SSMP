@@ -98,15 +98,29 @@ internal class GameManager {
     public void Shutdown() {
         Logging.Logger.Info("GameManager: Shutting down...");
 
+        // Each step on its own, so that one that fails does not keep the ones after it from running: Steam is let go
+        // last, and only once nothing is left asking it anything (SteamRelayRecorder)
+
         // Stop client first to disconnect from any server
-        _clientManager.Disconnect();
+        ShutDownStep("disconnect from the server", () => _clientManager.Disconnect());
 
         // Stop server if hosting
-        _serverManager.Stop();
-        
+        ShutDownStep("stop the server", () => _serverManager.Stop());
+
         // Clean up Steam if initialized
         if (SteamManager.IsInitialized) {
-            SteamManager.Shutdown();
+            ShutDownStep("let Steam go", SteamManager.Shutdown);
+        }
+    }
+
+    /// <summary>
+    /// Does one step of shutting down, saying so if it fails rather than leaving the rest undone.
+    /// </summary>
+    private static void ShutDownStep(string what, System.Action step) {
+        try {
+            step();
+        } catch (System.Exception e) {
+            Logging.Logger.Error($"GameManager: could not {what} while shutting down: {e}");
         }
     }
 }

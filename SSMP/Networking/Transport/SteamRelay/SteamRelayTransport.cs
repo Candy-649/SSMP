@@ -78,6 +78,11 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     private volatile bool _recording;
 
     /// <summary>
+    /// Guards starting and stopping the record of the link, which connecting and disconnecting may do at once.
+    /// </summary>
+    private readonly object _recordingGate = new();
+
+    /// <summary>
     /// Reused buffer of message pointers for draining the channel.
     /// </summary>
     private readonly IntPtr[] _messageBuffer = new IntPtr[SteamRelayMessaging.ReceiveBatchSize];
@@ -123,12 +128,17 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
 
             Logger.Info($"Steam relay: as this player starts to connect, {SteamRelayMessaging.DescribeRelayNetwork()}");
 
-            if (!_recording) {
-                SteamRelayRecorder.Start();
-                _recording = true;
-            }
+            lock (_recordingGate) {
+                // Not once this was disconnected while it connected: nothing would stop the record again
+                if (_isConnected) {
+                    if (!_recording) {
+                        SteamRelayRecorder.Start();
+                        _recording = true;
+                    }
 
-            SteamRelayRecorder.Watch(steamId, SteamRelayMessaging.ServerToClientChannel);
+                    SteamRelayRecorder.Watch(steamId, SteamRelayMessaging.ServerToClientChannel);
+                }
+            }
         }
 
         _receiveTokenSource = new CancellationTokenSource();
@@ -265,6 +275,21 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     }
 
     /// <summary>
+    /// Stops keeping a record of the link to the host, if one is kept.
+    /// </summary>
+    private void StopRecording() {
+        lock (_recordingGate) {
+            if (!_recording) {
+                return;
+            }
+
+            _recording = false;
+            SteamRelayRecorder.Forget(_remoteSteamId, null);
+            SteamRelayRecorder.Stop();
+        }
+    }
+
+    /// <summary>
     /// Receives a packet that never left the machine.
     /// </summary>
     public void ReceiveLoopbackPacket(byte[] data, int length) {
@@ -275,9 +300,14 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
 
     /// <inheritdoc />
     public void Disconnect() {
-        if (!_isConnected) return;
-
+        // The record of the link is stopped even when this is no longer connected: a disconnect that crossed the
+        // connecting finds nothing else to do here, while the connecting still started the record
+        var wasConnected = _isConnected;
         _isConnected = false;
+        StopRecording();
+
+        if (!wasConnected) return;
+
         _receiveTokenSource?.Cancel();
 
         if (_loopbackChannel != null) {
@@ -305,12 +335,6 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
             }
 
             _receiveThread = null;
-        }
-
-        if (_recording) {
-            _recording = false;
-            SteamRelayRecorder.Forget(_remoteSteamId, null);
-            SteamRelayRecorder.Stop();
         }
 
         _remoteSteamId = 0;

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Text;
 using System.Threading;
@@ -19,8 +20,9 @@ namespace SSMP.Networking.Transport.SteamRelay;
 /// session connected throughout. Neither log could say where the host's messages stopped: in the host's game, in Steam
 /// on the host's machine, on the relay, or in Steam or the game on the other machine. What is written down here tells
 /// these apart: how much the mod handed to Steam and took from it each second, how much Steam sent and received, what
-/// it held back and for how long, how much of what was sent the other side says arrived, which relays the link went
-/// through, how long ago the mod last looked for what had arrived, and what Steam reported in its own words.
+/// it had not yet sent or not yet had acknowledged, how long a new message would wait, how much of what was sent the
+/// other side says arrived, which relay the link went through, how long ago the mod last looked for what had arrived,
+/// and what Steam reported in its own words.
 /// </summary>
 internal static class SteamRelayRecorder {
     /// <summary>
@@ -46,24 +48,31 @@ internal static class SteamRelayRecorder {
     private const int HeardAgainFor = 5;
 
     /// <summary>
+    /// How long, in milliseconds, stopping waits for a pass that is under way to finish.
+    /// </summary>
+    private const int PassWait = 1000;
+
+    /// <summary>
     /// How many of Steam's lines may wait to be written, beyond which they are left out and counted.
     /// </summary>
     private const int SteamLinesWaiting = 200;
 
     /// <summary>
-    /// How many of Steam's lines are written each second at most.
+    /// How many of Steam's lines are written as they come each minute at most, so that Steam saying a lot for a long
+    /// time cannot fill the log. The rest are held back (see <see cref="SteamLinesHeldBack"/>).
     /// </summary>
-    private const int SteamLinesEachSecond = 20;
+    private const int SteamLinesEachMinute = 20;
 
     /// <summary>
-    /// How many of Steam's lines are written in all, after which this stops listening to Steam, so that Steam saying a
-    /// lot for a long time cannot fill the log.
+    /// How many of Steam's lines beyond those of the minute are held back, the newest, to be written with the next
+    /// record of a link that is written down: what Steam said just before that is the part worth having.
     /// </summary>
-    private const int SteamLinesAtMost = 2000;
+    private const int SteamLinesHeldBack = 50;
 
     /// <summary>
     /// What Steam's own messages are asked for down to: its messages about each connection - one going wrong, one
-    /// closing, a route lost or chosen - and about the relay network. Below this are messages about each packet.
+    /// closing - and about the relay network. Messages about routes and packets have levels of their own, which are
+    /// left as Steam has them.
     /// </summary>
     private const ESteamNetworkingSocketsDebugOutputType SteamLevel =
         ESteamNetworkingSocketsDebugOutputType.k_ESteamNetworkingSocketsDebugOutputType_Msg;
@@ -84,7 +93,8 @@ internal static class SteamRelayRecorder {
     private static Timer? _timer;
 
     /// <summary>
-    /// Whether a pass of <see cref="_timer"/> is under way, so that a slow one is not run over by the next.
+    /// Whether a pass of <see cref="_timer"/> is under way, so that a slow one is not run over by the next, and so that
+    /// stopping can wait for it.
     /// </summary>
     private static int _ticking;
 
@@ -104,7 +114,8 @@ internal static class SteamRelayRecorder {
     private static readonly Stopwatch Clock = Stopwatch.StartNew();
 
     /// <summary>
-    /// When the mod last looked for what had arrived on each of the two channels, on <see cref="Clock"/>.
+    /// When the mod last looked for what had arrived on each of the two channels, on <see cref="Clock"/>, or 0 before
+    /// it ever did.
     /// </summary>
     private static readonly long[] LastLookedMs = new long[2];
 
@@ -126,14 +137,30 @@ internal static class SteamRelayRecorder {
     private static int _steamLinesWaiting;
 
     /// <summary>
-    /// How many of Steam's messages were left out since that was last written down.
+    /// How many of Steam's messages were left out, as more came at once than may wait, since that was last told.
     /// </summary>
     private static int _steamLinesLeftOut;
 
     /// <summary>
-    /// How many of Steam's messages have been written in all.
+    /// Steam's messages beyond those written in their minute, the newest <see cref="SteamLinesHeldBack"/>. Also what
+    /// guards the writing of Steam's messages.
     /// </summary>
-    private static int _steamLinesWritten;
+    private static readonly Queue<string> HeldBack = new();
+
+    /// <summary>
+    /// How many held-back messages of Steam's were let go for newer ones since they were last written.
+    /// </summary>
+    private static int _heldBackDropped;
+
+    /// <summary>
+    /// The minute, on <see cref="Clock"/>, whose messages of Steam's are being counted.
+    /// </summary>
+    private static long _steamMinute = -1;
+
+    /// <summary>
+    /// How many of Steam's messages were written as they came in <see cref="_steamMinute"/>.
+    /// </summary>
+    private static int _steamWrittenThisMinute;
 
     /// <summary>
     /// Starts keeping the record and listening to Steam, for one more transport that uses the relay. Each call is
@@ -146,15 +173,12 @@ internal static class SteamRelayRecorder {
             }
 
             _timer = new Timer(_ => Tick(), null, SampleEvery, SampleEvery);
-            if (Volatile.Read(ref _steamLinesWritten) < SteamLinesAtMost) {
-                ListenToSteam(true);
-            }
+            ListenToSteam(true);
         }
     }
 
     /// <summary>
-    /// Stops keeping the record and listening to Steam, once the last transport that used them is done with them:
-    /// before the game lets Steam go, which it does as it closes.
+    /// Stops keeping the record and listening to Steam, once the last transport that used them is done with them.
     /// </summary>
     public static void Stop() {
         lock (Gate) {
@@ -164,9 +188,55 @@ internal static class SteamRelayRecorder {
 
             _timer?.Dispose();
             _timer = null;
+        }
+
+        Finish();
+    }
+
+    /// <summary>
+    /// Stops keeping the record and listening to Steam at once, whatever still uses them: for the game letting Steam
+    /// go, which must not happen while Steam is being asked something here or may still call this game. A transport
+    /// whose connecting and disconnecting crossed is never stopped, and would otherwise keep both going for as long as
+    /// the game runs.
+    /// </summary>
+    public static void Halt() {
+        lock (Gate) {
+            if (_users == 0) {
+                return;
+            }
+
+            _users = 0;
+            _timer?.Dispose();
+            _timer = null;
+        }
+
+        Finish();
+    }
+
+    /// <summary>
+    /// What stopping does once the timer is let go: waits for a pass that is under way, stops listening to Steam,
+    /// writes what Steam said last and lets go of the records.
+    /// </summary>
+    private static void Finish() {
+        // A pass under way goes on after its timer is let go. It asks Steam about no further player once nothing uses
+        // the record, and only waiting for it here keeps it from asking while the game lets Steam go. Not waited for
+        // while holding the gate, which nothing in a pass takes
+        SpinWait.SpinUntil(() => Volatile.Read(ref _ticking) == 0, PassWait);
+
+        lock (Gate) {
+            // Started again in the meantime
+            if (_users > 0) {
+                return;
+            }
+
             ListenToSteam(false);
-            WriteSteamLines(SteamLinesWaiting);
             Peers.Clear();
+        }
+
+        WriteSteamLines(ignoreTheMinute: true);
+        var held = new StringBuilder("[Steam] What Steam said last that was held back:");
+        if (AppendHeldBack(held)) {
+            Logger.Info(held.ToString());
         }
     }
 
@@ -200,9 +270,9 @@ internal static class SteamRelayRecorder {
 
     /// <summary>
     /// Writes down how the link to a player has stood each second for the last <paramref name="secondsBack"/>
-    /// seconds, and goes on writing it down each second until things have arrived from them for
-    /// <see cref="HeardAgainFor"/> seconds in a row, or for <see cref="LiveAtMost"/> seconds. Nothing is written again
-    /// while it is being written down already.
+    /// seconds, leaving out seconds written down before, and goes on writing it down each second until things have
+    /// arrived from them for <see cref="HeardAgainFor"/> seconds in a row, or for <see cref="LiveAtMost"/> seconds.
+    /// Nothing is written again while it is being written down already.
     /// </summary>
     /// <param name="steamId">The player.</param>
     /// <param name="why">Why, as it ends a sentence of the log: "written down as ...".</param>
@@ -240,7 +310,8 @@ internal static class SteamRelayRecorder {
     }
 
     /// <summary>
-    /// Counts a message the mod took from Steam that came from a player.
+    /// Counts a message the mod took from Steam that came from a player. The first message from a player who just
+    /// joined comes before the host keeps a record of them, and is not counted.
     /// </summary>
     public static void Took(ulong steamId, int bytes) {
         if (!Peers.TryGetValue(steamId, out var peer)) {
@@ -291,26 +362,43 @@ internal static class SteamRelayRecorder {
 
         // Nothing may leave a timer's thread: an exception there would close the game
         try {
-            if (Volatile.Read(ref _users) == 0 || !SteamManager.IsInitialized) {
-                return;
-            }
-
             foreach (var pair in Peers) {
-                TakeSample(pair.Key, pair.Value);
-            }
+                // Asked again before each player: whatever stops the record stops the pass at the next one
+                if (Volatile.Read(ref _users) == 0 || !SteamManager.IsInitialized) {
+                    return;
+                }
 
-            WriteSteamLines(SteamLinesEachSecond);
-        } catch (Exception e) {
-            if (!_tickFailureTold) {
-                _tickFailureTold = true;
+                // One player that cannot be asked about does not keep the others from being asked about
                 try {
-                    Logger.Warn($"[Link] Could not write down how the links stand: {e}");
-                } catch (Exception) {
-                    // Only a line of the log is lost
+                    TakeSample(pair.Key, pair.Value);
+                } catch (Exception e) {
+                    TellTickFailure(e);
                 }
             }
+
+            if (Volatile.Read(ref _users) > 0) {
+                WriteSteamLines(ignoreTheMinute: false);
+            }
+        } catch (Exception e) {
+            TellTickFailure(e);
         } finally {
             Interlocked.Exchange(ref _ticking, 0);
+        }
+    }
+
+    /// <summary>
+    /// Writes down, the first time only, that a pass went wrong.
+    /// </summary>
+    private static void TellTickFailure(Exception e) {
+        if (_tickFailureTold) {
+            return;
+        }
+
+        _tickFailureTold = true;
+        try {
+            Logger.Warn($"[Link] Could not write down how the links stand: {e}");
+        } catch (Exception) {
+            // Only a line of the log is lost
         }
     }
 
@@ -321,11 +409,12 @@ internal static class SteamRelayRecorder {
     private static void TakeSample(ulong steamId, Peer peer) {
         var identity = SteamRelayMessaging.IdentityOf(steamId);
         var state = SteamNetworkingMessages.GetSessionConnectionInfo(ref identity, out var info, out var status);
+        var looked = Interlocked.Read(ref LastLookedMs[peer.Channel]);
         var sample = new Sample {
             At = DateTime.Now,
             State = state,
             Relay = info.m_idPOPRelay,
-            TheirRelay = info.m_idPOPRemote,
+            OtherEnd = info.m_idPOPRemote,
             Ping = status.m_nPing,
             QualityHere = status.m_flConnectionQualityLocal,
             QualityThere = status.m_flConnectionQualityRemote,
@@ -334,19 +423,20 @@ internal static class SteamRelayRecorder {
             InPackets = status.m_flInPacketsPerSec,
             InBytes = status.m_flInBytesPerSec,
             SendRate = status.m_nSendRateBytesPerSecond,
-            WaitingUnreliable = status.m_cbPendingUnreliable,
-            WaitingReliable = status.m_cbPendingReliable,
+            UnsentUnreliable = status.m_cbPendingUnreliable,
+            UnsentReliable = status.m_cbPendingReliable,
             Unacked = status.m_cbSentUnackedReliable,
-            QueuedMicroseconds = status.m_usecQueueTime.m_SteamNetworkingMicroseconds,
+            WaitMicroseconds = status.m_usecQueueTime.m_SteamNetworkingMicroseconds,
             Gave = Interlocked.Exchange(ref peer.Gave, 0),
             GaveBytes = Interlocked.Exchange(ref peer.GaveBytes, 0),
             Refused = Interlocked.Exchange(ref peer.Refused, 0),
             Took = Interlocked.Exchange(ref peer.Took, 0),
             TookBytes = Interlocked.Exchange(ref peer.TookBytes, 0),
-            LookedAgoMs = Clock.ElapsedMilliseconds - Interlocked.Read(ref LastLookedMs[peer.Channel])
+            LookedAgoMs = looked == 0 ? -1 : Clock.ElapsedMilliseconds - looked
         };
 
         lock (peer) {
+            sample.Number = ++peer.Numbered;
             peer.Ring[peer.Next] = sample;
             peer.Next = (peer.Next + 1) % Kept;
             peer.Count = System.Math.Min(peer.Count + 1, Kept);
@@ -356,6 +446,7 @@ internal static class SteamRelayRecorder {
             }
 
             Logger.Info(Describe(steamId, sample));
+            peer.WrittenUpTo = sample.Number;
             peer.HeardRun = sample.Took > 0 ? peer.HeardRun + 1 : 0;
             if (peer.HeardRun >= HeardAgainFor) {
                 peer.LiveLeft = 0;
@@ -370,20 +461,33 @@ internal static class SteamRelayRecorder {
     }
 
     /// <summary>
-    /// Writes down, as one entry of the log, the last <paramref name="secondsBack"/> seconds of the record of a link.
-    /// Called with the record locked.
+    /// Writes down, as one entry of the log, the seconds of the last <paramref name="secondsBack"/> of the record of a
+    /// link that were not written down before, with what Steam said that was held back. Seconds are written down once
+    /// only: a player whose link keeps faltering asks for the state of their room every few seconds, and each time
+    /// wrote the same 45 seconds again. Called with the record locked.
     /// </summary>
     private static void WriteDown(ulong steamId, Peer peer, string why, int secondsBack) {
         var count = System.Math.Min(System.Math.Max(secondsBack, 0), peer.Count);
-        var entry = new StringBuilder(
-            $"[Link] How the link with {steamId} has stood each second, written down as {why}: " +
-            $"{(count == 0 ? "nothing was kept yet" : $"the last {count} s")}"
-        );
-
+        var lines = new List<string>();
         for (var back = count; back > 0; back--) {
-            entry.Append('\n').Append(Describe(steamId, peer.Ring[(peer.Next - back + Kept) % Kept]));
+            var sample = peer.Ring[(peer.Next - back + Kept) % Kept];
+            if (sample.Number <= peer.WrittenUpTo) {
+                continue;
+            }
+
+            lines.Add(Describe(steamId, sample));
+            peer.WrittenUpTo = sample.Number;
         }
 
+        var entry = new StringBuilder(
+            $"[Link] How the link with {steamId} has stood each second, written down as {why}: " +
+            (lines.Count > 0 ? $"{lines.Count} s not written down before" : "nothing kept that was not written down")
+        );
+        foreach (var line in lines) {
+            entry.Append('\n').Append(line);
+        }
+
+        AppendHeldBack(entry);
         Logger.Info(entry.ToString());
     }
 
@@ -393,20 +497,23 @@ internal static class SteamRelayRecorder {
     private static string Describe(ulong steamId, in Sample sample) {
         var mod = $"the mod gave Steam {sample.Gave} ({sample.GaveBytes / 1000.0:F1} kB" +
                   $"{(sample.Refused > 0 ? $", {sample.Refused} refused" : "")}), took {sample.Took} " +
-                  $"({sample.TookBytes / 1000.0:F1} kB), looked {sample.LookedAgoMs} ms ago";
+                  $"({sample.TookBytes / 1000.0:F1} kB), " +
+                  (sample.LookedAgoMs < 0 ? "never looked for messages yet" : $"looked {sample.LookedAgoMs} ms ago");
 
         if (sample.State == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_None) {
             return $"[Link] {sample.At:HH:mm:ss} {steamId}: no session; {mod}";
         }
 
         var state = sample.State.ToString().Replace("k_ESteamNetworkingConnectionState_", "");
-        return $"[Link] {sample.At:HH:mm:ss} {steamId}: {state} via {RelayName(sample.Relay)} " +
-               $"(theirs {RelayName(sample.TheirRelay)}), ping {sample.Ping} ms, arrived {Share(sample.QualityHere)} " +
-               $"here {Share(sample.QualityThere)} there, out {sample.OutPackets:F0}/s " +
-               $"{sample.OutBytes / 1000:F1} kB/s, in {sample.InPackets:F0}/s {sample.InBytes / 1000:F1} kB/s, " +
-               $"may send {sample.SendRate / 1000} kB/s, waiting {sample.WaitingUnreliable} B + " +
-               $"{sample.WaitingReliable} B reliable, unacked {sample.Unacked} B, queued " +
-               $"{sample.QueuedMicroseconds / 1000} ms; {mod}";
+        var otherEnd = sample.OtherEnd.m_SteamNetworkingPOPID == 0
+            ? ""
+            : $", the other end in {RelayName(sample.OtherEnd)}";
+        return $"[Link] {sample.At:HH:mm:ss} {steamId}: {state} via relay {RelayName(sample.Relay)}{otherEnd}, " +
+               $"ping {sample.Ping} ms, arrived {Share(sample.QualityHere)} here {Share(sample.QualityThere)} there, " +
+               $"out {sample.OutPackets:F0}/s {sample.OutBytes / 1000:F1} kB/s, in {sample.InPackets:F0}/s " +
+               $"{sample.InBytes / 1000:F1} kB/s, may send {sample.SendRate / 1000} kB/s, unsent " +
+               $"{sample.UnsentUnreliable} B unreliable + {sample.UnsentReliable} B reliable, unacked " +
+               $"{sample.Unacked} B, a new message would wait {sample.WaitMicroseconds / 1000} ms; {mod}";
     }
 
     /// <summary>
@@ -455,29 +562,61 @@ internal static class SteamRelayRecorder {
     }
 
     /// <summary>
-    /// Writes at most <paramref name="atMost"/> of Steam's waiting messages, says how many were left out, and stops
-    /// listening to Steam once <see cref="SteamLinesAtMost"/> have been written.
+    /// Writes Steam's waiting messages, as many as their minute allows unless told to write them all, and holds back
+    /// the rest.
     /// </summary>
-    private static void WriteSteamLines(int atMost) {
-        for (var written = 0; written < atMost && SteamLines.TryDequeue(out var line); written++) {
-            Interlocked.Decrement(ref _steamLinesWaiting);
-            Logger.Info($"[Steam] {line}");
-
-            if (Interlocked.Increment(ref _steamLinesWritten) != SteamLinesAtMost) {
-                continue;
+    private static void WriteSteamLines(bool ignoreTheMinute) {
+        lock (HeldBack) {
+            var minute = Clock.ElapsedMilliseconds / 60000;
+            if (minute != _steamMinute) {
+                _steamMinute = minute;
+                _steamWrittenThisMinute = 0;
             }
 
-            lock (Gate) {
-                ListenToSteam(false);
+            var leftOut = Interlocked.Exchange(ref _steamLinesLeftOut, 0);
+            if (leftOut > 0) {
+                SteamLines.Enqueue($"{DateTime.Now:HH:mm:ss} ({leftOut} more of Steam's lines came at once than wait)");
+                Interlocked.Increment(ref _steamLinesWaiting);
             }
 
-            Logger.Info($"[Steam] Stopped listening to Steam, after {SteamLinesAtMost} of its lines were written");
-            break;
+            while (SteamLines.TryDequeue(out var line)) {
+                Interlocked.Decrement(ref _steamLinesWaiting);
+                if (ignoreTheMinute || _steamWrittenThisMinute < SteamLinesEachMinute) {
+                    _steamWrittenThisMinute++;
+                    Logger.Info($"[Steam] {line}");
+                    continue;
+                }
+
+                if (HeldBack.Count == SteamLinesHeldBack) {
+                    HeldBack.Dequeue();
+                    _heldBackDropped++;
+                }
+
+                HeldBack.Enqueue(line);
+            }
         }
+    }
 
-        var leftOut = Interlocked.Exchange(ref _steamLinesLeftOut, 0);
-        if (leftOut > 0) {
-            Logger.Info($"[Steam] {leftOut} of Steam's lines were left out, as more came than could wait");
+    /// <summary>
+    /// Adds Steam's held-back messages to an entry of the log, and lets go of them.
+    /// </summary>
+    /// <returns>Whether there were any.</returns>
+    private static bool AppendHeldBack(StringBuilder entry) {
+        lock (HeldBack) {
+            if (HeldBack.Count == 0) {
+                return false;
+            }
+
+            entry.Append(
+                $"\n[Steam] {HeldBack.Count} of Steam's own lines held back, as more came than the log is given" +
+                (_heldBackDropped > 0 ? $", after {_heldBackDropped} older ones were let go:" : ":")
+            );
+            while (HeldBack.Count > 0) {
+                entry.Append("\n[Steam] ").Append(HeldBack.Dequeue());
+            }
+
+            _heldBackDropped = 0;
+            return true;
         }
     }
 
@@ -506,6 +645,16 @@ internal static class SteamRelayRecorder {
         public int Count;
 
         /// <summary>
+        /// The number of the last second kept, counted from 1.
+        /// </summary>
+        public long Numbered;
+
+        /// <summary>
+        /// The number of the last second written down, or 0 for none.
+        /// </summary>
+        public long WrittenUpTo;
+
+        /// <summary>
         /// How many more seconds are written down as they go; none while the link is not being written down.
         /// </summary>
         public int LiveLeft;
@@ -532,10 +681,11 @@ internal static class SteamRelayRecorder {
     /// One second of the record of a link.
     /// </summary>
     private struct Sample {
+        public long Number;
         public DateTime At;
         public ESteamNetworkingConnectionState State;
         public SteamNetworkingPOPID Relay;
-        public SteamNetworkingPOPID TheirRelay;
+        public SteamNetworkingPOPID OtherEnd;
         public int Ping;
         public float QualityHere;
         public float QualityThere;
@@ -544,10 +694,10 @@ internal static class SteamRelayRecorder {
         public float InPackets;
         public float InBytes;
         public int SendRate;
-        public int WaitingUnreliable;
-        public int WaitingReliable;
+        public int UnsentUnreliable;
+        public int UnsentReliable;
         public int Unacked;
-        public long QueuedMicroseconds;
+        public long WaitMicroseconds;
         public int Gave;
         public int GaveBytes;
         public int Refused;

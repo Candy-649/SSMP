@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Threading;
 using Steamworks;
 using SSMP.Logging;
+using SSMP.Networking.Transport.SteamRelay;
 
 namespace SSMP.Game;
 
@@ -349,6 +350,9 @@ public static class SteamManager {
 
             // Stop the callback timer
             StopCallbackTimer();
+
+            // Nothing may ask Steam anything or be called by it once it is let go
+            SteamRelayRecorder.Halt();
 
             SteamAPI.Shutdown();
             IsInitialized = false;
