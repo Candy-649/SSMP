@@ -578,6 +578,11 @@ internal partial class CoopHits {
             return;
         }
 
+        if (update.Kind == CoopHitKind.ObjectHurtPlayer) {
+            ReplayHurt(update);
+            return;
+        }
+
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
         if (type == null || !typeof(IHitResponder).IsAssignableFrom(type)) {
             NotReplayed(update, "hit", "that kind of object is unknown here");
@@ -961,7 +966,7 @@ internal partial class CoopHits {
     /// Hook for the component that tells the state machines of an object of something coming into it (see
     /// <see cref="TouchReceiverTypes"/>). The local player's attack touching an object of the room goes to
     /// <see cref="OnLocalAttackTouch"/>, and the copy of the partner's attack touches nothing there. The local
-    /// player's body touching a thing that a creature threw goes to <see cref="WatchThrown"/>.
+    /// player's body touching a thing that a creature threw goes to <see cref="OnLocalTouchOfThrown"/>.
     /// </summary>
     private void OnTouchEnter(
         Action<PlayMakerTriggerEnter2D, Collider2D> orig,
@@ -969,7 +974,7 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
@@ -987,7 +992,7 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
@@ -1005,7 +1010,7 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
@@ -1023,7 +1028,7 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            WatchThrown(thrown, () => orig(self, other), "a touch of the body");
+            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
@@ -1107,18 +1112,7 @@ internal partial class CoopHits {
             _statesBefore[self] = self.ActiveState;
         }
 
-        if (_watchedThrown == null) {
-            orig(self, toState);
-            return;
-        }
-
-        // What a watched thrown thing does on its way into a state follows from what it was told (WatchThrown)
-        _watchedDepth++;
-        try {
-            orig(self, toState);
-        } finally {
-            _watchedDepth--;
-        }
+        orig(self, toState);
     }
 
     /// <summary>
@@ -2520,10 +2514,14 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Creates the update that sends a touch of the local player's attack on an object of the room to the members in
-    /// the room.
+    /// the room, or of their body on a thing that a creature threw.
     /// </summary>
+    /// <param name="receiver">The component that tells the object of the touch.</param>
+    /// <param name="attack">What touches it.</param>
+    /// <param name="thrownPath">For a thing that a creature threw, its path as it was before the touch (see
+    /// <see cref="ThrownThings.PathOf(GameObject)"/>), which the touch can take away.</param>
     /// <returns>The update, or null if no member is in the scene or the object can't be found by others.</returns>
-    private CoopHitUpdate? CreateTouchUpdate(Component receiver, Collider2D attack) {
+    private CoopHitUpdate? CreateTouchUpdate(Component receiver, Collider2D attack, string? thrownPath = null) {
         try {
             if (!IsAnyMemberInRoom()) {
                 return null;
@@ -2532,8 +2530,15 @@ internal partial class CoopHits {
             var target = receiver.gameObject;
             var type = receiver.GetType();
             var index = Array.IndexOf(target.GetComponents(type), receiver);
-            if (index is < 0 or > byte.MaxValue || type.FullName == null ||
-                !TryGetPlace(target, out var scene, out var path)) {
+            string scene, path;
+            if (thrownPath != null) {
+                scene = SceneManager.GetActiveScene().name;
+                path = thrownPath;
+            } else if (!TryGetPlace(target, out scene, out path)) {
+                return null;
+            }
+
+            if (index is < 0 or > byte.MaxValue || type.FullName == null) {
                 return null;
             }
 

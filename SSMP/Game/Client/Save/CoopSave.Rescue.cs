@@ -551,12 +551,32 @@ internal partial class CoopSave {
                 GlobalEnums.DamagePropertyFlags>, HeroController, GameObject, GlobalEnums.CollisionSide, int,
                 GlobalEnums.HazardType, GlobalEnums.DamagePropertyFlags>(OnTakeDamage)
         );
+        _hurtSourceHook = CreateHook(
+            typeof(DamageHero).GetMethod("SendHeroDamagedEvent", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<DamageHero>, DamageHero>(OnHurtSourceTold)
+        );
     }
 
     /// <summary>
     /// The hook on the player being hurt.
     /// </summary>
     private Hook? _takeDamageHook;
+
+    /// <summary>
+    /// The hook on a thing that hurt the player being told of it.
+    /// </summary>
+    private Hook? _hurtSourceHook;
+
+    /// <summary>
+    /// What hits the player in the hurt that the game deals with now, or null.
+    /// </summary>
+    private static GameObject? _hurtSource;
+
+    /// <summary>
+    /// What hit the player in the hurt that the game deals with now, as it was when the game told it of the hurt, or
+    /// null (see <see cref="OnHurtSourceTold"/>).
+    /// </summary>
+    private static string? _hurtSourceText;
 
     /// <summary>
     /// How many hurts were kept off the player since they last went down, so that only the first of each wait is written
@@ -597,12 +617,34 @@ internal partial class CoopSave {
             return;
         }
 
-        // What hits the player is written down as it is before the game deals with the hurt, which can take it away;
-        // a player safe from hits for the moment is not hurt by most things, and it is written down after for the rest
+        // What hits the player is written down as it was when the game told it of the hurt, if it did, since what it
+        // does on that can take it away (OnHurtSourceTold), and as it is after the hurt otherwise
         var healthBefore = PlayerData.instance == null ? 0 : PlayerData.instance.health;
-        var sourceText = self.cState.invulnerable ? null : DescribeHurtSource(self, go);
-        orig(self, go, damageSide, damageAmount, hazardType, damagePropertyFlags);
+        var (lastSource, lastSourceText) = (_hurtSource, _hurtSourceText);
+        (_hurtSource, _hurtSourceText) = (go, null);
+        string? sourceText;
+        try {
+            orig(self, go, damageSide, damageAmount, hazardType, damagePropertyFlags);
+        } finally {
+            sourceText = _hurtSourceText;
+            (_hurtSource, _hurtSourceText) = (lastSource, lastSourceText);
+        }
+
         NoteHurt(self, go, damageAmount, hazardType, damagePropertyFlags, healthBefore, sourceText);
+    }
+
+    /// <summary>
+    /// Describes what hit the player as the game tells it of the hurt, which it does once it deals the hurt, before
+    /// what the thing does on it can take it away: a caltrop that hurt the player is put back into the pool at once,
+    /// and was written down after as switched off with nothing to draw, which looked like thin air.
+    /// </summary>
+    private static void OnHurtSourceTold(Action<DamageHero> orig, DamageHero self) {
+        var hero = HeroController.SilentInstance;
+        if (_hurtSource != null && _hurtSourceText == null && self.gameObject == _hurtSource && hero != null) {
+            _hurtSourceText = DescribeHurtSource(hero, _hurtSource);
+        }
+
+        orig(self);
     }
 
     /// <summary>

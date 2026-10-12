@@ -247,20 +247,31 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Has a thing that a creature threw go after a player wherever it looks at one (see SetTargetOf), or takes that
-    /// away when the player is null: every part of it with a state machine of its own, since each is asked about on its
-    /// own. Without a word in the log, since things are thrown many at a time.
+    /// The parts of a thing that a creature threw that are asked whom they go after, by instance ID: every part of it
+    /// with a state machine of its own, since each is asked about on its own (see <see cref="AimThrownAt"/>).
     /// </summary>
     /// <param name="thing">The thing.</param>
-    /// <param name="player">The player, or null.</param>
-    public static void AimThrownAt(GameObject thing, GameObject? player) {
+    public static int[] ThrownTargetOwners(GameObject thing) {
+        var owners = new List<int>();
         foreach (var fsm in thing.GetComponentsInChildren<PlayMakerFSM>(true)) {
             var owner = GetEnemyTargetOwner(fsm.gameObject);
-            if (owner == null) {
-                continue;
+            if (owner != null && !owners.Contains(owner.GetInstanceID())) {
+                owners.Add(owner.GetInstanceID());
             }
+        }
 
-            var id = owner.GetInstanceID();
+        return owners.ToArray();
+    }
+
+    /// <summary>
+    /// Has a thing that a creature threw go after a player wherever it looks at one (see SetTargetOf), or takes that
+    /// away when the player is null, by its parts that are asked (see <see cref="ThrownTargetOwners"/>). Without a word
+    /// in the log, since things are thrown many at a time.
+    /// </summary>
+    /// <param name="owners">The parts of the thing that are asked whom they go after.</param>
+    /// <param name="player">The player, or null.</param>
+    public static void AimThrownAt(int[] owners, GameObject? player) {
+        foreach (var id in owners) {
             if (player == null) {
                 EnemyApprovedTargets.Remove(id);
                 EnemyTargetLocks.Remove(id);

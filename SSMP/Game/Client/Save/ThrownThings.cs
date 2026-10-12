@@ -271,7 +271,7 @@ internal static class ThrownThings {
     /// <param name="player">The player, or null for no one.</param>
     public static void TurnTo(ThrownMark mark, GameObject? player) {
         mark.Target = player;
-        GamePatcher.AimThrownAt(mark.gameObject, player);
+        GamePatcher.AimThrownAt(mark.Owners, player);
     }
 
     /// <summary>
@@ -286,7 +286,7 @@ internal static class ThrownThings {
         var frame = Time.frameCount;
         if (!HostThrows.TryGetValue(action, out var thrown) || thrown.Frame != frame) {
             HostThrows.Remove(action);
-            thrown = new HostThrow(frame, CodeOf?.Invoke(target) ?? NoPlayer);
+            thrown = new HostThrow(frame, CodeOf?.Invoke(target) ?? NoPlayer, prefab.name);
             HostThrows.Add(action, thrown);
         }
 
@@ -314,7 +314,8 @@ internal static class ThrownThings {
     /// <param name="throws">The names, as they were read with the throw (see <see cref="ReadThrows"/>).</param>
     /// <returns>What stops the naming once the throw is over.</returns>
     public static IDisposable Expect(GameObject prefab, Throws throws) {
-        if (throws.Count == 0) {
+        // A copy that throws something else than the creature did, from a variable it was never given, names nothing
+        if (throws.Count == 0 || throws.PrefabName != prefab.name) {
             return Nothing.Instance;
         }
 
@@ -327,21 +328,31 @@ internal static class ThrownThings {
 
     /// <summary>
     /// Writes what the action of a creature that this game runs threw, under which names and after which player, for
-    /// <see cref="ReadThrows"/> in the other game: its prefix, the number of the first, how many, and the player.
+    /// <see cref="ReadThrows"/> in the other game: its prefix, the number of the first, how many, the player, and what
+    /// was thrown.
     /// </summary>
     /// <param name="data">The data that goes with the action.</param>
     /// <param name="action">The action.</param>
     public static void WriteThrows(EntityNetworkData data, FsmStateAction action) {
+        HostThrows.TryGetValue(action, out var thrown);
+        HostThrows.Remove(action);
+
         // The names go as the first and how many, which only says them all when they follow one another
-        var hasThrown = HostThrows.TryGetValue(action, out var thrown) && thrown.Frame == Time.frameCount &&
-                        thrown.Numbers.Count > 0 && thrown.Numbers.Count <= byte.MaxValue &&
+        var hasThrown = thrown != null && thrown.Frame == Time.frameCount && thrown.Numbers.Count > 0 &&
+                        thrown.Numbers.Count <= byte.MaxValue &&
                         thrown.Numbers[thrown.Numbers.Count - 1] - thrown.Numbers[0] == thrown.Numbers.Count - 1;
 
         data.Packet.Write(Prefix);
         data.Packet.Write(hasThrown ? thrown!.Numbers[0] : 0);
         data.Packet.Write((byte) (hasThrown ? thrown!.Numbers.Count : 0));
         data.Packet.Write(hasThrown ? thrown!.Target : NoPlayer);
-        HostThrows.Remove(action);
+        data.Packet.Write(hasThrown ? thrown!.PrefabName : "");
+
+        // What goes without its names keeps none here either: what it rolls and what is done to it would go by names
+        // that the other game does not know
+        if (thrown != null && !hasThrown) {
+            ForgetAll(thrown);
+        }
     }
 
     /// <summary>
@@ -351,7 +362,7 @@ internal static class ThrownThings {
     public static Throws ReadThrows(EntityNetworkData data) {
         return new Throws(
             data.Packet.ReadString(), data.Packet.ReadInt(), data.Packet.ReadByte(), data.Packet.ReadUShort(),
-            data.SenderId
+            data.Packet.ReadString(), data.SenderId
         );
     }
 
@@ -366,6 +377,13 @@ internal static class ThrownThings {
         }
 
         HostThrows.Remove(action);
+        ForgetAll(thrown);
+    }
+
+    /// <summary>
+    /// Takes the names off everything of a throw.
+    /// </summary>
+    private static void ForgetAll(HostThrow thrown) {
         foreach (var mark in thrown.Marks) {
             if (mark != null) {
                 Forget(mark);
@@ -398,7 +416,7 @@ internal static class ThrownThings {
         mark.Begin(key, pending.Target);
         ByKey[key] = mark;
         pending.Marks?.Add(mark);
-        GamePatcher.AimThrownAt(gameObject, pending.Target);
+        GamePatcher.AimThrownAt(mark.Owners, pending.Target);
     }
 
     /// <summary>
@@ -416,7 +434,7 @@ internal static class ThrownThings {
 
         mark.End();
         if (mark != null) {
-            GamePatcher.AimThrownAt(mark.gameObject, null);
+            GamePatcher.AimThrownAt(mark.Owners, null);
         }
     }
 
@@ -473,15 +491,24 @@ internal static class ThrownThings {
     /// <param name="First">The number of the first.</param>
     /// <param name="Count">How many.</param>
     /// <param name="Target">Who they go after (see <see cref="CodeOf"/>).</param>
+    /// <param name="PrefabName">The name of what was thrown.</param>
     /// <param name="Thrower">The player whose game threw them.</param>
-    public readonly record struct Throws(string Prefix, int First, int Count, ushort Target, ushort Thrower);
+    public readonly record struct Throws(
+        string Prefix,
+        int First,
+        int Count,
+        ushort Target,
+        string PrefabName,
+        ushort Thrower
+    );
 
     /// <summary>
     /// What an action of a creature that this game runs threw in one frame.
     /// </summary>
-    private sealed class HostThrow(int frame, ushort target) {
+    private sealed class HostThrow(int frame, ushort target, string prefabName) {
         public readonly int Frame = frame;
         public readonly ushort Target = target;
+        public readonly string PrefabName = prefabName;
         public readonly List<int> Numbers = [];
         public readonly List<ThrownMark> Marks = [];
     }
@@ -569,6 +596,16 @@ internal sealed class ThrownMark : MonoBehaviour {
     /// How many times each of its actions rolled, by what the action is (see SharedDice).
     /// </summary>
     private readonly Dictionary<int, int> _rolls = new();
+
+    /// <summary>
+    /// The parts of the thing that are asked whom they go after, found once: a thing of the pool keeps its parts.
+    /// </summary>
+    private int[]? _owners;
+
+    /// <summary>
+    /// The parts of the thing that are asked whom they go after, by instance ID (see GamePatcher.AimThrownAt).
+    /// </summary>
+    public int[] Owners => _owners ??= GamePatcher.ThrownTargetOwners(gameObject);
 
     /// <summary>
     /// Gives the thing a name.

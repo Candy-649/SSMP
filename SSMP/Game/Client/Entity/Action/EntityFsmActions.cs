@@ -327,7 +327,7 @@ internal static partial class EntityFsmActions {
     /// </summary>
     /// <param name="action">The action.</param>
     /// <param name="withAim">Whether the object an action aims at, chases or faces counts too.</param>
-    private static bool WorksOnThePlayerCharacter(FsmStateAction action, bool withAim) {
+    internal static bool WorksOnThePlayerCharacter(FsmStateAction action, bool withAim) {
         if (action.Fsm == null || ReadsWithoutActing.Contains(action.GetType().Name)) {
             return false;
         }

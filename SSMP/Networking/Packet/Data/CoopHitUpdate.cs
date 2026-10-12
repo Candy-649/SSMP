@@ -195,5 +195,13 @@ internal enum CoopHitKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently change
     /// what every later kind means to a game running an older build.
     /// </summary>
-    ObjectDirection
+    ObjectDirection,
+
+    /// <summary>
+    /// A thing that a creature threw, found by its name in <see cref="CoopHitUpdate.Path"/> with where it was (see
+    /// ThrownThings.PathOf), that hurt the sender's player through its part that hurts at
+    /// <see cref="CoopHitUpdate.Index"/> among those of its object; the other game tells its own of it the same way.
+    /// Appended at the end, like the one before.
+    /// </summary>
+    ObjectHurtPlayer
 }

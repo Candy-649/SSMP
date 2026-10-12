@@ -36,8 +36,8 @@ internal partial class CoopSave {
     /// <param name="hazardType">The kind of harm.</param>
     /// <param name="flags">What else the damage was marked with.</param>
     /// <param name="healthBefore">The health of the player before the hurt.</param>
-    /// <param name="sourceText">What hit the player as it was before the hurt (see <see cref="DescribeHurtSource"/>),
-    /// or null to describe it as it is now.</param>
+    /// <param name="sourceText">What hit the player as it was when the game told it of the hurt (see
+    /// <see cref="DescribeHurtSource"/>), or null to describe it as it is now.</param>
     private static void NoteHurt(
         HeroController hero,
         GameObject? source,
@@ -84,9 +84,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// What hits the local player, for <see cref="NoteHurt"/>: what it is and belongs to, how much of it is drawn,
-    /// where it is and which way it goes. Asked before the game deals with the hurt, since that can take it away: a
-    /// caltrop that hurt the player is put back into the pool at once, and was written down as switched off with
-    /// nothing to draw, which looked like thin air.
+    /// where it is and which way it goes.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     /// <param name="source">What hits the player, as the game was given it.</param>

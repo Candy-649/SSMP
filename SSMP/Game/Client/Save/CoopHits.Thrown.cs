@@ -4,6 +4,7 @@ using System.Reflection;
 using GlobalEnums;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Entity.Action;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -19,7 +20,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// names them as they come out of the pool, rolls their bounces by their names, and sends what the local player does to
 /// them to the others like what they do to an object of the room, under the thing's name rather than its place: a
 /// strike, a touch of their attack, a touch of their body and a hurt. Each goes with where the thing was and how it
-/// moved as it happened, which its twin is put at first, and the thing goes after that player from then on.
+/// moved as it happened, which its twin is put at first, and the thing goes after that player from then on. What a
+/// thing does in a replay of the partner's never works on this game's own player (see
+/// <see cref="OnThrownTransition"/>).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>
@@ -28,21 +31,22 @@ internal partial class CoopHits {
     private const BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 
     /// <summary>
-    /// The thrown thing whose state machines are watched while the local player touches it or is hurt by it, or null.
+    /// How many states a thrown thing goes through by itself after a replay of the partner's takes it into one, as far
+    /// as they are looked through for what works on this game's player (see <see cref="WorksOnThePlayerFrom"/>).
     /// </summary>
-    private ThrownMark? _watchedThrown;
+    private const int MaxStatesLookedThrough = 8;
 
     /// <summary>
-    /// How many changes of state are under way while a thrown thing is watched. Only what is told from outside is
-    /// written down: what the state machines then tell each other and themselves on the way follows from it again in
-    /// the other games.
+    /// The fields of each kind of action that hold a text, by kind, which are looked through for one that names the
+    /// player's controller (see <see cref="NamesThePlayer"/>).
     /// </summary>
-    private int _watchedDepth;
+    private static readonly Dictionary<Type, FieldInfo[]> TextFields = new();
 
     /// <summary>
-    /// What the state machines of the watched thrown thing were told and went on from, in order.
+    /// The states of thrown things that a replay of the partner's was kept out of, by the thing and the state, each
+    /// written down once.
     /// </summary>
-    private readonly List<(PlayMakerFSM Fsm, string EventName)> _watchedEvents = [];
+    private static readonly HashSet<string> KeptOutOfStates = [];
 
     /// <summary>
     /// Whether naming a thrown thing or sending what happened to one threw, which is only logged once.
@@ -61,8 +65,8 @@ internal partial class CoopHits {
     );
 
     /// <summary>
-    /// Registers the hooks that name thrown things, roll their bounces and watch what the local player's body does to
-    /// them.
+    /// Registers the hooks that name thrown things, roll their bounces, send what hurts the local player and keep
+    /// replays from working on the local player.
     /// </summary>
     private void RegisterThrownHooks() {
         ThrownThings.CodeOf = CodeOfPlayer;
@@ -101,12 +105,9 @@ internal partial class CoopHits {
     /// <summary>
     /// Lets go of what <see cref="RegisterThrownHooks"/> set, apart from the hooks themselves.
     /// </summary>
-    private void DeregisterThrownHooks() {
+    private static void DeregisterThrownHooks() {
         ThrownThings.CodeOf = null;
         ThrownThings.FigureOf = null;
-        _watchedThrown = null;
-        _watchedDepth = 0;
-        _watchedEvents.Clear();
     }
 
     /// <summary>
@@ -159,8 +160,17 @@ internal partial class CoopHits {
             return null;
         }
 
+        // Only what the action itself throws, as it starts: the action stays the last one of its state for as long as
+        // the state lasts, and what else comes out of the pool meanwhile - the effect that a black thread puts on each
+        // thing thrown, what the state spawns later - is not a part of the throw that the other game is sent
         var action = FsmExecutionStack.ExecutingAction;
-        if (action is not (SpawnObjectFromGlobalPool or FlingObjectsFromGlobalPool or FlingObjectsFromGlobalPoolVel) ||
+        var thrownPrefab = action switch {
+            SpawnObjectFromGlobalPool spawn => spawn.gameObject?.Value,
+            FlingObjectsFromGlobalPool fling => fling.gameObject?.Value,
+            FlingObjectsFromGlobalPoolVel flingVel => flingVel.gameObject?.Value,
+            _ => null
+        };
+        if (action == null || thrownPrefab == null || thrownPrefab != prefab || action.Finished ||
             !Entity.Entity.TryGetThrower(action, out var thrower) || !ThrownThings.CanBeThrown(prefab)) {
             return null;
         }
@@ -206,120 +216,141 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Hook for what a thing that hurt the local player tells of it, which for a thrown thing is watched and sent to
-    /// the others (see <see cref="WatchThrown"/>): a caltrop that hurt the player flies off, in every game.
+    /// Hook for a thing that hurt the local player being told of it, which for a thrown thing is sent to the others
+    /// after, for their twin of it to be told the same (see <see cref="ReplayHurt"/>): a caltrop that hurt the player
+    /// flies off in every game. The thing goes after the player it hurt from then on.
     /// </summary>
     private void OnSendHeroDamagedEvent(Action<DamageHero> orig, DamageHero self) {
-        if (ThrownThings.Count == 0 || _isReplaying || _watchedThrown != null || !HasMembers ||
+        if (ThrownThings.Count == 0 || _isReplaying || !HasMembers ||
             !ThrownThings.TryGetMark(self.gameObject, out var mark)) {
             orig(self);
             return;
         }
 
-        WatchThrown(mark, () => orig(self), "a hurt");
+        // Its name and where it was as it hurt the player: what it does on it can put it back into the pool, which
+        // takes its name off it
+        var key = mark.Key;
+        var place = ThrownThings.PlaceOf(mark);
+        var index = Array.IndexOf(self.GetComponents<DamageHero>(), self);
+        TurnThrownToLocalPlayer(self.gameObject, out _);
+
+        orig(self);
+
+        try {
+            if (key == null || index is < 0 or > byte.MaxValue || !_netClient.IsConnected || !IsAnyMemberInRoom()) {
+                return;
+            }
+
+            var update = new CoopHitUpdate {
+                Kind = CoopHitKind.ObjectHurtPlayer,
+                Scene = SceneManager.GetActiveScene().name,
+                Path = ThrownThings.PathOf(key, mark, self.gameObject, place),
+                Responder = nameof(DamageHero),
+                Index = (byte) index
+            };
+            SendToRoomMembers(update);
+            NoteTraffic(update.Scene, update.Path, "sent a hurt of the player");
+        } catch (Exception e) {
+            if (!_thrownFailed) {
+                _thrownFailed = true;
+                Logger.Error($"Could not send a hurt of the player by a thrown thing:\n{e}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Tells the twin here of a thing that a creature threw that it hurt the partner's player, as their game told it:
+    /// the same event to its state machine, the same that a script of it hears, put where it was in their game as it
+    /// hurt them. What it does on it to the player it hurt does not happen here (see <see cref="OnThrownTransition"/>).
+    /// </summary>
+    private void ReplayHurt(CoopHitUpdate update) {
+        var target = FindPlace(update);
+        if (target == null) {
+            NotReplayed(update, "hurt", "the thing is not here");
+            return;
+        }
+
+        var damagers = target.GetComponents<DamageHero>();
+        if (update.Index >= damagers.Length) {
+            NotReplayed(update, "hurt", $"the thing has only {damagers.Length} parts that hurt here");
+            return;
+        }
+
+        var damager = damagers[update.Index];
+        if (!damager.isActiveAndEnabled || !IsRoomObject(damager)) {
+            NotReplayed(update, "hurt", "the part that hurt is switched off here");
+            return;
+        }
+
+        PutThrownWhereItWas(target, update);
+
+        _isReplaying = true;
+        try {
+            _gamePatcher.RunAsRemoteHit(damager.SendHeroDamagedEvent);
+        } catch (Exception e) {
+            Logger.Warn($"Could not replay a hurt of the partner by {update.Path}:\n{e}");
+            NoteTraffic(update.Scene, update.Path, "got a hurt of the partner, whose replay failed");
+            return;
+        } finally {
+            _isReplaying = false;
+        }
+
+        NoteTraffic(update.Scene, update.Path, "got a hurt of the partner, replayed");
     }
 
     /// <summary>
     /// Whether something touching an object is the body of the local player, rather than their attack, and the object
-    /// a part of a named thrown thing, which then hears of it through <see cref="WatchThrown"/>. Asked of every touch
-    /// that is not an attack once something is named, so the cheap checks come first.
+    /// a part of a named thrown thing, which then hears of it through <see cref="OnLocalTouchOfThrown"/>. Asked of
+    /// every touch that is not an attack once something is named, so the cheap checks come first.
     /// </summary>
     /// <param name="receiver">The component that tells the object of the touch.</param>
     /// <param name="other">What touches the object.</param>
     /// <param name="mark">The mark of the thrown thing.</param>
     private bool IsBodyTouchOnThrown(Component receiver, Collider2D other, out ThrownMark mark) {
         mark = null!;
-        return !_isReplaying && _watchedThrown == null && other.gameObject.layer != (int) PhysLayers.HERO_ATTACK &&
+        return !_isReplaying && other.gameObject.layer != (int) PhysLayers.HERO_ATTACK &&
                IsLocalHeroPart(other.gameObject) && HasMembers &&
                ThrownThings.TryGetMark(receiver.gameObject, out mark);
     }
 
     /// <summary>
-    /// Has the local player touch, or be hurt by, a thrown thing, and sends the others what its state machines were
-    /// told of it and went on from, for their twin of it to be told the same. A touch of the body and a hurt are this
-    /// game's alone: the figure of this player in another game does not touch or get hurt by anything there.
+    /// Handles the local player's body touching a thing that a creature threw. A touch that the thing answered goes to
+    /// the others like a touch of an attack, with what touched it - its name, kind and place - for their twin of it to
+    /// be told of a touch of the same through the same component (see <see cref="ReplayTouch"/>). The update is made
+    /// after the touch, which only answers now and then while the player stands on the thing, from its name and place
+    /// as they were before it.
     /// </summary>
     /// <param name="mark">The mark of the thing.</param>
-    /// <param name="act">What touches it or tells it of the hurt.</param>
-    /// <param name="what">What it is, for the log.</param>
-    private void WatchThrown(ThrownMark mark, Action act, string what) {
-        // Its name and where it was as it happened, which it is put at in the others' games first: what it is told can
-        // put it back into the pool, which takes its name off it
+    /// <param name="receiver">The component that tells the thing of the touch.</param>
+    /// <param name="body">The part of the player that touches it.</param>
+    /// <param name="touch">Tells the thing of the touch.</param>
+    private void OnLocalTouchOfThrown(ThrownMark mark, Component receiver, Collider2D body, Action touch) {
         var key = mark.Key;
         var place = ThrownThings.PlaceOf(mark);
-        var turned = TurnThrownToLocalPlayer(mark.gameObject, out var before);
-
-        _watchedThrown = mark;
-        _watchedDepth = 0;
-        _watchedEvents.Clear();
-        try {
-            act();
-        } finally {
-            _watchedThrown = null;
+        var turned = TurnThrownToLocalPlayer(receiver.gameObject, out var before);
+        int[] dice = [];
+        if (!AnswersAttack(() => dice = SharedDice.Record(touch))) {
+            TurnThrownBack(turned, before);
+            return;
         }
 
-        try {
-            if (_watchedEvents.Count == 0) {
-                // It took no notice, and goes after whom it went after, as it does in the others' games
-                TurnThrownBack(turned, before);
-                return;
-            }
-
-            if (key != null && _netClient.IsConnected) {
-                SendWatchedEvents(key, mark, place, what);
-            }
-        } catch (Exception e) {
-            if (!_thrownFailed) {
-                _thrownFailed = true;
-                Logger.Error($"Could not send what a thrown thing was told:\n{e}");
-            }
-        } finally {
-            _watchedEvents.Clear();
+        if (key == null || !_netClient.IsConnected ||
+            CreateTouchUpdate(receiver, body, ThrownThings.PathOf(key, mark, receiver.gameObject, place)) is not
+                { } update) {
+            return;
         }
+
+        update.Hit = SharedDice.Append(update.Hit, dice);
+        SendToRoomMembers(update);
+        NoteTraffic(update.Scene, update.Path, $"sent a touch of the body through {update.Responder}");
     }
 
     /// <summary>
-    /// Sends what the state machines of the watched thrown thing were told, one update for each state machine, under
-    /// the name and place of the thing as it was (see <see cref="WatchThrown"/>).
-    /// </summary>
-    /// <param name="key">The key of the thing as it was.</param>
-    /// <param name="mark">The mark of the thing.</param>
-    /// <param name="place">Where the thing was.</param>
-    /// <param name="what">What it was, for the log.</param>
-    private void SendWatchedEvents(string key, ThrownMark mark, ThrownThings.ThrownPlace place, string what) {
-        var told = new List<PlayMakerFSM>();
-        var events = new Dictionary<PlayMakerFSM, List<(string EventName, int[] Dice)>>();
-        foreach (var (fsm, eventName) in _watchedEvents) {
-            if (fsm == null) {
-                continue;
-            }
-
-            if (!events.TryGetValue(fsm, out var list)) {
-                list = [];
-                events[fsm] = list;
-                told.Add(fsm);
-            }
-
-            // Without dice: what a named thing rolls goes by its name
-            list.Add((eventName, []));
-        }
-
-        foreach (var fsm in told) {
-            var path = ThrownThings.PathOf(key, mark, fsm.gameObject, place);
-            if (CreateEventsUpdate(fsm, events[fsm], path) is not { } update) {
-                continue;
-            }
-
-            SendToRoomMembers(update);
-            NoteTraffic(
-                update.Scene, update.Path, $"sent {events[fsm].Count} event(s) of {what} to {update.Responder}"
-            );
-        }
-    }
-
-    /// <summary>
-    /// Hook for a state machine going on from an event, which writes down the events that the watched thrown thing is
-    /// told from outside (see <see cref="WatchThrown"/>). A state machine finishing a state is not told anything.
+    /// Hook for a state machine going on from an event, which keeps a thing that a creature threw from going into a
+    /// state on a replay of the partner's when that state, or one it goes on to by itself, works on the player. Such a
+    /// state is about the player it touched or hurt, the partner, who has no character here: a catcher grabbed, a glob
+    /// stuck to, a blob made sick this game's player, wherever they stood, for something the partner did. The thing
+    /// stays as it is here, as it did before the partner's touches and hurts were sent at all.
     /// </summary>
     private bool OnThrownTransition(
         Func<Fsm, FsmTransition, bool, bool> orig,
@@ -327,24 +358,93 @@ internal partial class CoopHits {
         FsmTransition transition,
         bool isGlobal
     ) {
-        if (_watchedThrown is not { } watched || _watchedDepth > 0) {
-            return orig(self, transition, isGlobal);
+        try {
+            if ((_isReplaying || _replayingDirection) && ThrownThings.Count > 0 && transition?.ToFsmState is { } to &&
+                self.FsmComponent is { } fsm && fsm != null && ThrownThings.TryGetMark(fsm.gameObject, out _) &&
+                WorksOnThePlayerFrom(to) is { } acting) {
+                SayKeptOutOfState(fsm, to, acting);
+                return false;
+            }
+        } catch (Exception e) {
+            if (!_thrownFailed) {
+                _thrownFailed = true;
+                Logger.Error($"Could not look at where a thrown thing goes on a replay:\n{e}");
+            }
         }
 
-        var index = -1;
-        if (transition?.EventName is { Length: > 0 } eventName && eventName != "FINISHED" &&
-            self.FsmComponent is { } fsm && fsm != null && watched != null &&
-            fsm.transform.IsChildOf(watched.transform)) {
-            index = _watchedEvents.Count;
-            _watchedEvents.Add((fsm, eventName));
+        return orig(self, transition!, isGlobal);
+    }
+
+    /// <summary>
+    /// The first action that works on this game's player in a state, or in the states it goes on to by itself once
+    /// it is finished, or null.
+    /// </summary>
+    private static FsmStateAction? WorksOnThePlayerFrom(FsmState state) {
+        var current = state;
+        for (var i = 0; current != null && i < MaxStatesLookedThrough; i++) {
+            foreach (var action in current.Actions) {
+                if (action != null && action.Enabled && WorksOnThePlayer(action)) {
+                    return action;
+                }
+            }
+
+            current = Array.Find(current.Transitions, next => next.EventName == "FINISHED")?.ToFsmState;
         }
 
-        var changed = orig(self, transition!, isGlobal);
-        if (!changed && index >= 0 && index < _watchedEvents.Count) {
-            _watchedEvents.RemoveAt(index);
+        return null;
+    }
+
+    /// <summary>
+    /// Whether an action of a thrown thing works on, or goes by, this game's player: one that acts on the character or
+    /// what it carries (EntityFsmActions), one named for the player or that calls on its controller by name, a state
+    /// machine run inside the state, and a message to everything that listens. A thing setting how much it hurts the
+    /// player only sets something of its own.
+    /// </summary>
+    private static bool WorksOnThePlayer(FsmStateAction action) {
+        var name = action.GetType().Name;
+        if (name.StartsWith("SetDamageHero", StringComparison.Ordinal)) {
+            return false;
         }
 
-        return changed;
+        return name.Contains("Hero") || action is RunFSM ||
+               name.StartsWith("SendEventToRegister", StringComparison.Ordinal) || NamesThePlayer(action) ||
+               EntityFsmActions.WorksOnThePlayerCharacter(action, false);
+    }
+
+    /// <summary>
+    /// Whether a text that an action is given names the player's controller, as a call of one of its methods does.
+    /// </summary>
+    private static bool NamesThePlayer(FsmStateAction action) {
+        var type = action.GetType();
+        if (!TextFields.TryGetValue(type, out var fields)) {
+            fields = Array.FindAll(
+                type.GetFields(BindingFlags.Public | BindingFlags.Instance),
+                field => field.FieldType == typeof(FsmString)
+            );
+            TextFields[type] = fields;
+        }
+
+        foreach (var field in fields) {
+            if (field.GetValue(action) is FsmString { Value: { } text } && text.Contains("Hero")) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Writes down once, for each thing and state, that a replay of the partner's was kept from taking a thrown thing
+    /// into a state that works on the player.
+    /// </summary>
+    private static void SayKeptOutOfState(PlayMakerFSM fsm, FsmState state, FsmStateAction acting) {
+        var thing = ThrownThings.TryGetMark(fsm.gameObject, out var mark) ? mark.name : fsm.name;
+        if (KeptOutOfStates.Add($"{thing}/{fsm.FsmName}/{state.Name}")) {
+            Logger.Info(
+                $"[Thrown] Kept '{thing}' ({fsm.FsmName}) out of '{state.Name}' on a replay of the partner's: " +
+                $"{acting.GetType().Name} there works on this game's player"
+            );
+        }
     }
 
     /// <summary>
@@ -384,9 +484,9 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Puts the twin here of a thing that a creature threw where it was in the partner's game as they struck or
-    /// touched it, moving as it moved there, and has it go after their figure from now on, as it goes after them
-    /// there.
+    /// Puts the twin here of a thing that a creature threw where it was in the partner's game as they struck,
+    /// touched or were hurt by it, moving as it moved there, and has it go after their figure from now on, as it goes
+    /// after them there.
     /// </summary>
     /// <param name="target">The object of the thing that the update is for.</param>
     /// <param name="update">The update of the partner.</param>
