@@ -10,7 +10,7 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Entity.Component;
 
 /// <inheritdoc />
-/// This component carries the colours of the sprites that a creature's own FSMs colour (see <see cref="FindSprites"/>)
+/// This component carries the colours of the sprites that the FSMs on a creature colour (see <see cref="FindSprites"/>)
 /// from the game that runs it to the other one. While both players are in the room the copy runs the creature's colour
 /// changes itself (see EntityFsmActions.Effects), but not the ones made before the copy was set up, and not all of one
 /// that was cut short: the copy eases a colour in only while the scene host's creature is still in the state that eases
@@ -94,11 +94,11 @@ internal class TintComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Finds the sprites of a creature that its FSMs colour, by their paths under it, the creature's own sprite being
-    /// the empty path. What they colour outside the creature is left out.
+    /// Finds the sprites of a creature that the FSMs on it colour, by their paths under it, the creature's own sprite
+    /// being the empty path. What they colour outside the creature is left out, and so are the FSMs on its children.
     /// </summary>
     /// <param name="root">The room's own creature.</param>
-    /// <param name="fsms">Its FSMs that the scene host runs for both games.</param>
+    /// <param name="fsms">The FSMs on it that the scene host runs for both games.</param>
     /// <returns>The paths in ordinal order, which is the order of their colours in both games.</returns>
     public static List<string> FindSprites(GameObject root, IEnumerable<PlayMakerFSM> fsms) {
         var paths = new List<string>();

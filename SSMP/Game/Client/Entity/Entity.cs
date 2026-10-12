@@ -1078,7 +1078,7 @@ internal partial class Entity {
             );
         }
 
-        // The sprites that the creature's own FSMs colour, where the copy may not have followed them
+        // The sprites that the FSMs on the creature colour, where the copy may not have followed them
         var spritePaths = TintComponent.FindSprites(Object.Host, _fsms.Host.Where(fsm => !IsRunByEachGame(fsm)));
         if (spritePaths.Count > 0) {
             _components[EntityComponentType.Tint] = new TintComponent(_netClient, Id, Object, spritePaths);
@@ -2407,7 +2407,7 @@ internal partial class Entity {
     /// the FSM goes on from where the copy was, without the state that tinted it last. A crow that roosts in front of
     /// the room is drawn black until it flies at the player: the room's own one had been made black by its own first
     /// states, before it was put to sleep for the other game to run, and went on fighting black once this game took it
-    /// over. The sprites under the creature that its FSMs colour go the same way.
+    /// over. The sprites under the creature that the FSMs on it colour go the same way.
     /// </summary>
     private void TakeTintFromCopy() {
         if (Object.Client.TryGetComponent<tk2dBaseSprite>(out var copySprite) &&
@@ -3955,10 +3955,16 @@ internal partial class Entity {
                 continue;
             }
 
-            // How the entity moves by itself is its own FSM's to say while that runs here, and held until the scene
-            // host has answered the input (PlayHere)
-            if (data.Type == EntityComponentType.OwnMotion && WaitsForEcho) {
+            // How the entity moves by itself, and the colours its FSMs leave it in, are its own FSM's to say while that
+            // runs here, and held until the scene host has answered the input (PlayHere)
+            if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint) && WaitsForEcho) {
                 HoldForEcho(data);
+                continue;
+            }
+
+            // The colours are the copy's own while it runs the part of an FSM that each game runs by itself, or waits
+            // to: the scene host's run of that part colours the scene host's creature (RunEachGamePart)
+            if (data.Type == EntityComponentType.Tint && (_runHereForGood || _eachGamePartWaiting != null)) {
                 continue;
             }
 
