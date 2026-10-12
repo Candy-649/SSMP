@@ -172,7 +172,7 @@ internal class PartsComponent : EntityComponent {
     /// <summary>
     /// A hash of paths in their order (32-bit FNV-1a), the same in every game.
     /// </summary>
-    private static int HashPaths(IReadOnlyList<string> paths) {
+    internal static int HashPaths(IReadOnlyList<string> paths) {
         unchecked {
             var hash = 2166136261u;
             foreach (var path in paths) {
@@ -194,7 +194,10 @@ internal class PartsComponent : EntityComponent {
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="target">What an action of the FSM is given to work on.</param>
-    private static GameObject? FindNamedTarget(HutongGames.PlayMaker.Fsm fsm, HutongGames.PlayMaker.FsmOwnerDefault target) {
+    internal static GameObject? FindNamedTarget(
+        HutongGames.PlayMaker.Fsm fsm,
+        HutongGames.PlayMaker.FsmOwnerDefault target
+    ) {
         if (target.OwnerOption != HutongGames.PlayMaker.OwnerDefaultOption.SpecifyGameObject ||
             target.GameObject is not { UseVariable: true, Name: { Length: > 0 } name }) {
             return null;
@@ -284,7 +287,7 @@ internal class PartsComponent : EntityComponent {
     /// <summary>
     /// The path of an object under another, as Transform.Find takes it.
     /// </summary>
-    private static string GetPath(Transform root, Transform part) {
+    internal static string GetPath(Transform root, Transform part) {
         var names = new List<string>();
         for (var current = part; current != null && current != root; current = current.parent) {
             names.Add(current.name);

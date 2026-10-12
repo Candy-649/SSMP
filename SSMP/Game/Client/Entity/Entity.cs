@@ -1078,6 +1078,12 @@ internal partial class Entity {
             );
         }
 
+        // The sprites that the creature's own FSMs colour, where the copy may not have followed them
+        var spritePaths = TintComponent.FindSprites(Object.Host, _fsms.Host.Where(fsm => !IsRunByEachGame(fsm)));
+        if (spritePaths.Count > 0) {
+            _components[EntityComponentType.Tint] = new TintComponent(_netClient, Id, Object, spritePaths);
+        }
+
         //Logger.Debug(addedComponentsString);
     }
 
@@ -2397,11 +2403,11 @@ internal partial class Entity {
 
     /// <summary>
     /// Gives the room's own creature the tint of the copy as this game takes it over. The copy has been tinted by the
-    /// scene host's colour actions all along, and by the colour it had when this game walked in (TintComponent), and the
-    /// FSM goes on from where the copy was, without the state that tinted it last. A crow that roosts in front of the
-    /// room is drawn black until it flies at the player: the room's own one had been made black by its own first
+    /// scene host's colour actions all along, and by the colours its sprites ended up with there (TintComponent), and
+    /// the FSM goes on from where the copy was, without the state that tinted it last. A crow that roosts in front of
+    /// the room is drawn black until it flies at the player: the room's own one had been made black by its own first
     /// states, before it was put to sleep for the other game to run, and went on fighting black once this game took it
-    /// over.
+    /// over. The sprites under the creature that its FSMs colour go the same way.
     /// </summary>
     private void TakeTintFromCopy() {
         if (Object.Client.TryGetComponent<tk2dBaseSprite>(out var copySprite) &&
@@ -2412,6 +2418,10 @@ internal partial class Entity {
         if (Object.Client.TryGetComponent<SpriteRenderer>(out var copyRenderer) &&
             Object.Host.TryGetComponent<SpriteRenderer>(out var roomRenderer)) {
             roomRenderer.color = copyRenderer.color;
+        }
+
+        if (_components.TryGetValue(EntityComponentType.Tint, out var component) && component is TintComponent tint) {
+            tint.TakeFromCopy();
         }
     }
 

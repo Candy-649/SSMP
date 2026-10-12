@@ -148,8 +148,8 @@ internal enum EntityComponentType : ushort {
     Echo,
 
     /// <summary>
-    /// The colour of the sprite, for a player who walks in after the creature changed it (see
-    /// <see cref="TintComponent"/>).
+    /// The colours of the sprites that the creature's own FSMs colour, where they ended up, for a copy that did not
+    /// follow them there and a player who walks in after the creature changed them (see <see cref="TintComponent"/>).
     /// </summary>
     Tint,
 
