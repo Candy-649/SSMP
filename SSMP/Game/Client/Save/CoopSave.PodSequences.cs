@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using MonoMod.RuntimeDetour;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
@@ -65,6 +66,27 @@ internal partial class CoopSave {
     /// Whether keeping a music box together threw, which is only logged once.
     /// </summary>
     private bool _podSequenceFailed;
+
+    /// <summary>
+    /// How long a strike of the partner that reached this game while its music box still played the tune waits for
+    /// the tune to end, in seconds.
+    /// </summary>
+    private const float PodStrikeHoldTime = 3f;
+
+    /// <summary>
+    /// The bell that the music box waits for in the game that runs the room, partway through a round, by the box
+    /// here: kept on the box while this game does not judge. Its own tune puts it back at the first bell as it ends,
+    /// which can be after the strikes of the round that the box here took from the outcomes, and the box judged by
+    /// that once this game came to run the room.
+    /// </summary>
+    private readonly Dictionary<BouncePodSequence, int> _podJudgedBells = new();
+
+    /// <summary>
+    /// The strikes of the partner that reached this game, which runs the room, while its music box still played the
+    /// tune, in the order they came, with when. The box takes no strike before the tune ends, and the tune of the
+    /// partner's game started and ended a moment before, so they are taken once it does, one a frame.
+    /// </summary>
+    private readonly List<(BouncePodSequence Box, int Bell, int Side, float At)> _heldPodStrikes = [];
 
     /// <summary>
     /// Registers the hooks on the bells and the music boxes.
@@ -172,7 +194,7 @@ internal partial class CoopSave {
         }
 
         try {
-            if (FindPodSequence(update.Scene, (uint) update.Amounts[0]) is not { pods: { } pods }) {
+            if (FindPodSequence(update.Scene, (uint) update.Amounts[0]) is not { pods: { } pods } sequence) {
                 return;
             }
 
@@ -183,22 +205,65 @@ internal partial class CoopSave {
                 return;
             }
 
-            _ringingPartnerStrike = true;
-            try {
-                pod.Ring(true);
-                pod.SendInertHit(update.Amounts[2] < 0 ? -1f : 1f);
-            } finally {
-                _ringingPartnerStrike = false;
+            pod.Ring(true);
+
+            // The box here still plays the tune, which the partner's ended already: the strike waits for it here
+            var side = update.Amounts[2];
+            var playingTune = sequence.targetPodIndex < 0 && sequence.playSequenceRoutine != null;
+            if (playingTune && IsSceneHost?.Invoke() == true) {
+                _heldPodStrikes.Add((sequence, index, side, Time.unscaledTime));
+                return;
             }
+
+            TakePartnerStrike(pod, side);
         } catch (Exception e) {
             LogPodSequenceError(e);
         }
     }
 
     /// <summary>
+    /// Has the music box here take a strike of the partner on a bell like one of this game's player.
+    /// </summary>
+    private void TakePartnerStrike(BouncePod pod, int side) {
+        _ringingPartnerStrike = true;
+        try {
+            pod.SendInertHit(side < 0 ? -1f : 1f);
+        } finally {
+            _ringingPartnerStrike = false;
+        }
+    }
+
+    /// <summary>
+    /// Has the music box take the first strike of the partner that waited for its tune to end, once it has: one a
+    /// frame, so that each is judged by itself, as two in a frame come to one. Those that waited too long are let go.
+    /// </summary>
+    private void TakeHeldPodStrike(BouncePodSequence sequence) {
+        for (var i = 0; i < _heldPodStrikes.Count; i++) {
+            var (box, bell, side, at) = _heldPodStrikes[i];
+            if (box == null || Time.unscaledTime - at > PodStrikeHoldTime) {
+                _heldPodStrikes.RemoveAt(i--);
+                continue;
+            }
+
+            if (box != sequence || sequence.targetPodIndex < 0) {
+                continue;
+            }
+
+            _heldPodStrikes.RemoveAt(i);
+            if (sequence.pods is { } pods && bell < pods.Length && pods[bell] is { } pod && pod.IsActive) {
+                TakePartnerStrike(pod, side);
+            }
+
+            return;
+        }
+    }
+
+    /// <summary>
     /// A music box judging the strikes of a frame. With the partner in the room, only the game that runs the room
-    /// judges them, and the other games let go of what the strikes here set (see <see cref="OnPodOutcome"/>). A strike
-    /// on a bell of no round there fails the round like a wrong bell, which the game that runs the room tells first.
+    /// judges them, and the other games let go of what the strikes here set (see <see cref="OnPodOutcome"/>), keeping
+    /// their box at the bell that the judging box waits for. A strike on a bell of no round there fails the round like
+    /// a wrong bell, which the game that runs the room tells first. A strike of the partner that waited for the tune
+    /// here to end is taken once it has (see <see cref="OnPodStrike"/>).
     /// </summary>
     private void OnPodSequenceUpdate(Action<BouncePodSequence> orig, BouncePodSequence self) {
         if (ArePodSequencesShared()) {
@@ -206,8 +271,21 @@ internal partial class CoopSave {
                 self.anonPodWasHit = false;
                 self.queuedSuccess = false;
                 self.queuedFail = false;
-            } else if (self.anonPodWasHit) {
-                TellPodOutcome(self, false);
+                if (_podJudgedBells.TryGetValue(self, out var bell)) {
+                    self.targetPodIndex = bell;
+                }
+            } else {
+                if (_podJudgedBells.Count > 0) {
+                    _podJudgedBells.Remove(self);
+                }
+
+                if (_heldPodStrikes.Count > 0) {
+                    TakeHeldPodStrike(self);
+                }
+
+                if (self.anonPodWasHit) {
+                    TellPodOutcome(self, false);
+                }
             }
         }
 
@@ -301,9 +379,44 @@ internal partial class CoopSave {
             } finally {
                 _playingPodOutcome = false;
             }
+
+            // Partway through a round, the bell the judging box waits for now; a round that ended starts again at the
+            // first bell, which the tune here sets as it ends
+            KeepPodJudgedBell(
+                sequence,
+                update.Amounts[1] != 0 && !sequence.isComplete && sequence.currentSequenceIndex == round
+            );
         } catch (Exception e) {
             LogPodSequenceError(e);
         }
+    }
+
+    /// <summary>
+    /// Keeps the bell that a music box waits for in the game that runs the room on the box here, or lets go of it.
+    /// </summary>
+    /// <param name="sequence">The music box.</param>
+    /// <param name="keep">Whether to keep its bell, rather than let go of it.</param>
+    private void KeepPodJudgedBell(BouncePodSequence sequence, bool keep) {
+        if (!keep) {
+            _podJudgedBells.Remove(sequence);
+            return;
+        }
+
+        // Those of boxes that went with their room are let go first
+        if (_podJudgedBells.Count > 0) {
+            var gone = new List<BouncePodSequence>();
+            foreach (var box in _podJudgedBells.Keys) {
+                if (box == null) {
+                    gone.Add(box!);
+                }
+            }
+
+            foreach (var box in gone) {
+                _podJudgedBells.Remove(box);
+            }
+        }
+
+        _podJudgedBells[sequence] = sequence.targetPodIndex;
     }
 
     /// <summary>
@@ -333,7 +446,8 @@ internal partial class CoopSave {
     /// <summary>
     /// Keeps the rounds of a music box won in the partner's game in this save, and on the box here where this game has
     /// it, as far as it got: rounds are only ever won. Not on a box in a room that this game runs with the partner in
-    /// it, which the partner's box follows.
+    /// it, which the partner's box follows, nor on a box in the partner's room, which the outcomes keep with theirs,
+    /// nor on one partway through a round or a tune here, whose tune would go on with the bells of another round.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update, with the saved number and the rounds.</param>
@@ -357,10 +471,15 @@ internal partial class CoopSave {
                 });
             }
 
+            if (player.IsInLocalScene) {
+                return;
+            }
+
             foreach (var sequence in Object.FindObjectsByType<BouncePodSequence>(
                          FindObjectsInactive.Include, FindObjectsSortMode.None
                      )) {
-                if (sequence.persistent == null || sequence.currentSequenceIndex >= rounds) {
+                if (sequence.persistent == null || sequence.currentSequenceIndex >= rounds ||
+                    sequence.targetPodIndex >= 0 || sequence.playSequenceRoutine != null) {
                     continue;
                 }
 
