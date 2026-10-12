@@ -1,3 +1,4 @@
+using SSMP.Game.Client.Entity.Component;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -226,12 +227,16 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether the copy died here or is no more. The room's own object, taking the creature over, never ran in this
-    /// game and does not know it.
+    /// Whether the copy died here or is no more, or the creature was told dead. The room's own object, taking the
+    /// creature over, never ran in this game and does not know it. A death that was only told is not this game's to
+    /// keep either: the partner's game sends one of a creature that comes back (CoopSave.CreatureDeaths), and one that
+    /// never does stays theirs (see <see cref="RecordCopyDeath"/>).
     /// </summary>
     private bool CopyIsGone() {
         return Object.Client == null ||
-               (Object.Client.TryGetComponent<HealthManager>(out var health) && health.GetIsDead());
+               (Object.Client.TryGetComponent<HealthManager>(out var health) && health.GetIsDead()) ||
+               (_components.TryGetValue(EntityComponentType.Health, out var component) &&
+                component is HealthManagerComponent { ToldDead: true });
     }
 
     /// <summary>

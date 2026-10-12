@@ -1330,7 +1330,9 @@ internal class HealthManagerComponent : EntityComponent {
                 healthAfter = HealthAfter(GetCurrentHp(), _ownDamageTaken, _ownDamage, _ownBlows, out killingBlow);
             }
 
-            if (dead) {
+            // Dead as the game that ran the creature last told, if it told anything: a copy stays dead after the
+            // creature lives again in a game that brought it back while the copy was off
+            if (_toldNumber > 0 ? _toldDead : dead) {
                 TakeOverDead(copyDead);
             }
         }
@@ -1373,19 +1375,20 @@ internal class HealthManagerComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Has the room's own creature dead, as this game takes it over dead: its copy died here, or this game was told it
-    /// died. The room's own never ran in this game and never died here, and the health this game tells from now on
-    /// says whether it is dead. A creature that the partner killed while this player stayed in the room was told alive
-    /// once the partner left and this game took the room over, so when the partner came back in, the creature was
-    /// neither dead nor there for them: no body, and nothing that the replay of its death drops (USER 10-12, "她刷完之后
-    /// 呆在房间里，我再出去进来就刷不了了，看不到尸体了"). The room's own item saved the "alive" it was built with as this
-    /// game left the room as well, unless the copy had died here. Only for a creature that stays off: one that is on is
-    /// a body still playing out its death, and the game switches a dead creature off as soon as it is switched on.
+    /// Has the room's own creature dead, as this game takes it over dead: it died in the game that ran it, and here
+    /// only the copy died, or was told so. The health this game tells from now on says whether the room's own is dead,
+    /// and it was not: a creature that the partner killed while this player stayed in the room was told alive once the
+    /// partner left and this game took the room over, so when the partner came back in, the creature was neither dead
+    /// nor there for them - no body, and nothing that the replay of its death drops (USER 10-12, "她刷完之后呆在房间里，
+    /// 我再出去进来就刷不了了，看不到尸体了"). Only for a creature that is off: one that is on may still be playing out
+    /// its death and is left as it is, and the game switches a dead creature off a frame after it is switched on, which
+    /// for one under a parent that is off is when the parent comes on, as in a game where it died. What the room's own
+    /// keeps in the save is not saved by this game for such a creature (Entity.CopyIsGone).
     /// </summary>
     /// <param name="copyDead">Whether the copy died here, rather than only being told so.</param>
     private void TakeOverDead(bool copyDead) {
         var host = _healthManager.Host;
-        if (host == null || host.GetIsDead() || host.gameObject.activeSelf) {
+        if (host == null || host.GetIsDead() || host.gameObject.activeInHierarchy) {
             return;
         }
 
@@ -1394,6 +1397,11 @@ internal class HealthManagerComponent : EntityComponent {
             $"'{host.name}' is taken over dead, as its copy {(copyDead ? "died here" : "was told it died")}"
         );
     }
+
+    /// <summary>
+    /// Whether the health last told of the creature said that it is dead, until this game tells its own.
+    /// </summary>
+    public bool ToldDead => _toldDead;
 
     /// <inheritdoc />
     public override void InitializeClient(uint sceneHostEpoch) {
