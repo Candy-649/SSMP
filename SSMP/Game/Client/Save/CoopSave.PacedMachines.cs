@@ -153,7 +153,17 @@ internal partial class CoopSave {
                 "Init", "Deactivate Positions", "Encountered?", "Dormant", "Gate Close", "Light Open",
                 "Beat Start Pause", "Pendulum Prepare", "Beat Start"
             ]
-        )
+        ),
+
+        // The controllers of the fight on the stage, which the other game follows in every state but those where each
+        // finds its parts (see CoopSave.DirectedFights): the one that sets off flares over the stage, in an order it
+        // shuffles, each at a height and after a wait that it rolls, and the one that bursts the floor open in a row
+        // that it picks. Only the objects of these names, since the flares under the first are named after it.
+        new(
+            ["Flare Glitter"], "Control", [], sceneName: "Library_13", ownStateNames: ["Init", "Build Array"],
+            wholeNames: true
+        ),
+        new(["Trapdoor Bursts"], "Control", [], sceneName: "Library_13", ownStateNames: ["Init"], wholeNames: true)
     ];
 
     /// <summary>
@@ -456,7 +466,14 @@ internal partial class CoopSave {
         }
 
         try {
-            word.Amounts = [.. SharedDice.Record(() => orig(fsm, toState))];
+            word.Amounts = [
+                .. SharedDice.Record(() => {
+                    orig(fsm, toState);
+                    if (kind.IsDirector) {
+                        StartSwitchedOnParts(fsm);
+                    }
+                })
+            ];
         } finally {
             Send(word);
             if (kind.IsDirector) {
@@ -1023,7 +1040,8 @@ internal partial class CoopSave {
 
             name ??= gameObject.name;
             foreach (var prefix in kind.NamePrefixes) {
-                if (name.StartsWith(prefix, StringComparison.Ordinal) && (kind.SceneName == null ||
+                var isNamed = kind.WholeNames ? name == prefix : name.StartsWith(prefix, StringComparison.Ordinal);
+                if (isNamed && (kind.SceneName == null ||
                         string.Equals(gameObject.scene.name, kind.SceneName, StringComparison.OrdinalIgnoreCase))) {
                     return kind;
                 }
@@ -1050,7 +1068,8 @@ internal partial class CoopSave {
             string[] roundStateNames,
             bool isGrinder = false,
             string? sceneName = null,
-            string[]? ownStateNames = null
+            string[]? ownStateNames = null,
+            bool wholeNames = false
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -1058,12 +1077,20 @@ internal partial class CoopSave {
             IsGrinder = isGrinder;
             SceneName = sceneName;
             OwnStateNames = ownStateNames == null ? null : new HashSet<string>(ownStateNames, StringComparer.Ordinal);
+            WholeNames = wholeNames;
         }
 
         /// <summary>
-        /// What the objects of this kind are called, of which the name of one starts with any of them.
+        /// What the objects of this kind are called, of which the name of one starts with any of them, or is one of
+        /// them for a kind of <see cref="WholeNames"/>.
         /// </summary>
         public string[] NamePrefixes { get; }
+
+        /// <summary>
+        /// Whether an object of this kind is called one of <see cref="NamePrefixes"/> as a whole, for a kind whose
+        /// parts are named after it.
+        /// </summary>
+        public bool WholeNames { get; }
 
         /// <summary>
         /// The state machine that runs it.

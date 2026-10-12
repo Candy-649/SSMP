@@ -20,6 +20,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// run the room saw the ring with no joined move after it, and later the joined move with no ring before it (USER
 /// 10-07), and charges crossed the room for them at other times than for the host.
 ///
+/// In the fight on the stage, the creature only sets going what two controllers of the room do, which their own clocks
+/// set going again too: one sets off flares over the stage that burst in rings that hurt, the other bursts the floor
+/// open in a row. Each rolls which go off, where and when, so the rings and the bursts came at other places and times
+/// for each player (USER 10-13).
+///
 /// The other game's controller now follows the host's in every state. The host's tells the other game each state it
 /// goes into, with the dice the state rolled, which pick the charges and their order too; the other game's goes into
 /// the same state as the word comes, with those dice, and holds back every step it would take by itself, for as long
@@ -32,6 +37,12 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// that start is kept, and the controller takes it where its start ends. Anything else that would send it into the
 /// fight before that, like a dancer's word of a fight that is further on in the host's game, is turned away, so that
 /// the start is played to the end.
+///
+/// The parts that a state of a controller switches on, like the flares, start their own state machines, which roll
+/// where a flare bursts and how large. One switched on again starts again at once, in the middle of the state, so its
+/// rolls go with the dice of the state; but the game starts one that was never on a moment later, after the state, so
+/// the first time each flare went off, each game rolled its own. Both games now start the parts that a state switched
+/// on as the state is gone into.
 ///
 /// The controller goes into a state of the host's word the way the game goes into a state in an update of its own:
 /// the steps that the state's actions set going wait until it is in, rather than running in the middle of it. The
@@ -155,7 +166,10 @@ internal partial class CoopSave {
             }
 
             try {
-                SharedDice.Throw(dice, enter);
+                SharedDice.Throw(dice, () => {
+                    enter();
+                    StartSwitchedOnParts(fsm);
+                });
             } finally {
                 (_startingMachineRound, _startingMachineState) = lastStarting;
             }
@@ -164,6 +178,25 @@ internal partial class CoopSave {
         } finally {
             FsmExecutionStack.PopFsm();
             Fsm.EventData = eventData;
+        }
+    }
+
+    /// <summary>
+    /// Starts the state machines of the parts of a controller of a fight here that the state it went into switched on
+    /// for the first time, which the game would start a moment later, before they first update. One that was switched
+    /// on before starts again as it is switched on, in the middle of the state, so what it rolls as it starts goes
+    /// with the dice of the state; started a moment later, it rolled by itself in each game. Started at once, it is the
+    /// same in both games from the first time on.
+    /// </summary>
+    private static void StartSwitchedOnParts(Fsm fsm) {
+        if (fsm.GameObject is not { } gameObject || gameObject == null) {
+            return;
+        }
+
+        foreach (var part in gameObject.GetComponentsInChildren<PlayMakerFSM>()) {
+            if (part != null && part.isActiveAndEnabled && part.Fsm is { Started: false } partFsm) {
+                partFsm.Start();
+            }
         }
     }
 
