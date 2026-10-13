@@ -678,6 +678,7 @@ internal partial class CoopSave {
     /// </summary>
     private void OnReturnToMainMenu() {
         ResetSession(true);
+        ForgetLocalLayout();
         _sessionSlot = -1;
     }
 

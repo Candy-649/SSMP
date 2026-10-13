@@ -340,10 +340,13 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the local player or a member is in a room of the maze or on the way into it.
+    /// Whether the local player or a member is in a room of the maze or on the way into it: by the word of a member in
+    /// the save, also while a new round of the check runs and nobody is checked, or by the room the server says a
+    /// checked member is in.
     /// </summary>
     private bool IsLayoutHeld(string scene) {
         return IsSameScene(_localLayoutPlace.Scene, scene) ||
+               _memberLayoutPlaces.Values.Any(place => IsSameScene(place.Scene, scene)) ||
                GetCheckedMembers().Any(member => IsSameScene(PlaceOf(member).Scene, scene));
     }
 
@@ -367,12 +370,19 @@ internal partial class CoopSave {
     /// member going into the room of the local player gets its layout at once.
     /// </summary>
     private void OnRoomLayoutPlace(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !_checkedMembers.Contains(player.Id)) {
+        // Also from a member who is in the save while this game still finishes the round: the word that a check
+        // sends at its end comes as the member's game finishes it
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player)) {
             return;
         }
 
+        // A word said again after a check, of the room the member is in already, keeps its place in the order: the
+        // member did not go anywhere, and coming later would let a player who is to wait for them stop waiting
         var scene = IsLayoutScene(update.Scene) ? update.Scene : "";
-        _memberLayoutPlaces[player.Id] = new LayoutPlace(scene, update.Part == 0, ++_layoutWordCount);
+        var order = _memberLayoutPlaces.TryGetValue(player.Id, out var said) && IsSameScene(said.Scene, scene)
+            ? said.Order
+            : ++_layoutWordCount;
+        _memberLayoutPlaces[player.Id] = new LayoutPlace(scene, update.Part == 0, order);
         ForgetEmptyLayouts();
 
         if (scene.Length > 0 && IsSameScene(scene, _localLayoutPlace.Scene) &&
@@ -387,12 +397,20 @@ internal partial class CoopSave {
     /// counts in every game, and the doors of the room of the local player go where its doors go.
     /// </summary>
     private void OnRoomLayout(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !_checkedMembers.Contains(player.Id) ||
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
             !IsLayoutScene(update.Scene) || ReadLayout(update) is not { } layout || !IsLayoutHeld(layout.Scene)) {
             return;
         }
 
+        // The layout that this game still writes down for the room counts as known before it is sent: one of a smaller
+        // key that came in the meantime would otherwise take the doors here, and this game would then send its own
+        // and keep the other's doors
         var known = _layouts.TryGetValue(layout.Scene, out var have) ? have : null;
+        if (known == null && _recordingLayout is { Sent: false } recording &&
+            IsSameScene(recording.Scene, layout.Scene)) {
+            known = recording;
+        }
+
         if (known != null && (known.DeciderKey == layout.DeciderKey ||
                               string.CompareOrdinal(layout.DeciderKey, known.DeciderKey) < 0)) {
             return;
@@ -421,14 +439,11 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Tells the members of a round that just finished which room of the maze the local player is in, with its layout,
-    /// since a member who came into the save later never heard the word.
+    /// or that they are not in the maze: a member who came into the save later never heard the word, and a word that
+    /// went while the round ran was not taken.
     /// </summary>
     private void TellRoomLayoutAfterCheck(List<ClientPlayerData> members) {
         var scene = _localLayoutPlace.Scene;
-        if (scene.Length == 0) {
-            return;
-        }
-
         foreach (var member in members) {
             Send(new CoopSaveUpdate {
                 TargetId = member.Id,
@@ -436,7 +451,7 @@ internal partial class CoopSave {
                 Scene = scene,
                 Part = (ushort) (_localLayoutPlace.Founder ? 0 : 1)
             });
-            if (_layouts.TryGetValue(scene, out var layout)) {
+            if (scene.Length > 0 && _layouts.TryGetValue(scene, out var layout)) {
                 SendLayout(layout, member.Id);
             }
         }
@@ -452,16 +467,29 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets everything about the rooms of the maze, as the save is left.
+    /// Forgets what is known of the rooms of the maze from the members, as the save is left or another loads. The room
+    /// of the local player stays as it is, with what this game wrote down or followed for it: a save loads its room
+    /// before it counts as loaded, so that a session begins with the room laid out already, and a member who comes
+    /// into it later takes its layout.
     /// </summary>
     private void ResetRoomLayouts() {
-        _layouts.Clear();
         _memberLayoutPlaces.Clear();
+        foreach (var scene in _layouts.Keys.ToList()) {
+            if (!IsSameScene(_localLayoutPlace.Scene, scene)) {
+                _layouts.Remove(scene);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Forgets the room of the maze of the local player as well, as the game goes to the main menu.
+    /// </summary>
+    private void ForgetLocalLayout() {
+        _layouts.Clear();
         _localLayoutPlace = LayoutPlace.None;
         _layoutLoad = null;
         _recordingLayout = null;
         _followedLayout = null;
-        _layoutPickingStates.Clear();
     }
 
     /// <summary>
@@ -608,12 +636,16 @@ internal partial class CoopSave {
         List<TransitionPoint> doors
     ) {
         var layout = LayoutOf(self.gameObject);
-        if (layout != null && layout != _recordingLayout && layout.Doors.Count > 0) {
-            try {
-                LinkDoorsAs(self, doors, layout);
-                return;
-            } catch (Exception e) {
-                LogInteractionError(e);
+        if (layout != null && layout != _recordingLayout) {
+            if (layout.Doors.Count == 0) {
+                Logger.Info($"The layout of '{layout.Scene}' followed here has no doors, so this game links them");
+            } else {
+                try {
+                    LinkDoorsAs(self, doors, layout);
+                    return;
+                } catch (Exception e) {
+                    LogInteractionError(e);
+                }
             }
         }
 
@@ -634,7 +666,7 @@ internal partial class CoopSave {
             foreach (var door in doors) {
                 if (door != null) {
                     layout.Doors[ScenePath.Get(door.transform)] = new LayoutDoor(
-                        door.targetScene ?? "", door.entryPoint ?? "", self.correctDoors.Contains(door)
+                        door.targetScene ?? "", door.entryPoint ?? "", self.correctDoors.IndexOf(door)
                     );
                 }
             }
@@ -647,11 +679,12 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Links the doors of a room the way a layout has them: where each leads, at which door it comes in there, and
-    /// which of them lead on through the maze. A door that the layout has nothing of keeps where it leads.
+    /// which of them lead on through the maze, in the order that the game which laid the room out has them, since what
+    /// looks for the way on takes the first. A door that the layout has nothing of keeps where it leads.
     /// </summary>
     private static void LinkDoorsAs(MazeController controller, IEnumerable<TransitionPoint> doors,
         LayoutRecord layout) {
-        controller.correctDoors.Clear();
+        var leadingOn = new List<(int Order, TransitionPoint Door)>();
         foreach (var door in doors) {
             if (door == null || !layout.Doors.TryGetValue(ScenePath.Get(door.transform), out var link)) {
                 continue;
@@ -659,10 +692,13 @@ internal partial class CoopSave {
 
             door.SetTargetScene(link.Scene);
             door.entryPoint = link.Entry;
-            if (link.Correct) {
-                controller.correctDoors.Add(door);
+            if (link.LeadsOn >= 0) {
+                leadingOn.Add((link.LeadsOn, door));
             }
         }
+
+        controller.correctDoors.Clear();
+        controller.correctDoors.AddRange(leadingOn.OrderBy(pair => pair.Order).Select(pair => pair.Door));
     }
 
     /// <summary>
@@ -785,7 +821,8 @@ internal partial class CoopSave {
     /// Writes a layout into an update: <see cref="CoopSaveUpdate.Names"/> holds what rolled, and
     /// <see cref="CoopSaveUpdate.Amounts"/> how many results each has followed by them;
     /// <see cref="CoopSaveUpdate.Records"/> holds the path of each door, where it leads and at which door it comes in
-    /// there, and <see cref="CoopSaveUpdate.Values"/> whether each leads on through the maze.
+    /// there, and <see cref="CoopSaveUpdate.Values"/> 0 for each that does not lead on through the maze, else 1 more
+    /// than its place among those that do.
     /// </summary>
     private static CoopSaveUpdate WriteLayout(LayoutRecord layout) {
         var update = new CoopSaveUpdate {
@@ -803,7 +840,7 @@ internal partial class CoopSave {
             update.Records.Add(pair.Key);
             update.Records.Add(pair.Value.Scene);
             update.Records.Add(pair.Value.Entry);
-            update.Values.Add(pair.Value.Correct ? 1f : 0f);
+            update.Values.Add(pair.Value.LeadsOn + 1);
         }
 
         return update;
@@ -835,7 +872,7 @@ internal partial class CoopSave {
 
         for (var i = 0; i < update.Values.Count; i++) {
             layout.Doors[update.Records[i * 3]] = new LayoutDoor(
-                update.Records[i * 3 + 1], update.Records[i * 3 + 2], update.Values[i] != 0f
+                update.Records[i * 3 + 1], update.Records[i * 3 + 2], Mathf.RoundToInt(update.Values[i]) - 1
             );
         }
 
@@ -885,8 +922,8 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="Scene">The scene it leads to.</param>
     /// <param name="Entry">The door of that scene it comes in at.</param>
-    /// <param name="Correct">Whether it leads on through the maze.</param>
-    private readonly record struct LayoutDoor(string Scene, string Entry, bool Correct);
+    /// <param name="LeadsOn">Its place among the doors that lead on through the maze, or -1 if it does not.</param>
+    private readonly record struct LayoutDoor(string Scene, string Entry, int LeadsOn);
 
     /// <summary>
     /// How a room of the maze is laid out, as the game that came into it first wrote it down.
