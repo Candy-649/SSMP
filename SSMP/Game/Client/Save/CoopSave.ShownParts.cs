@@ -312,6 +312,9 @@ internal partial class CoopSave {
         FsmEventTarget? eventTarget,
         FsmEvent? fsmEvent
     ) {
+        // What an object of the room that rolls under a name tells rolls under a name made from it (see ToldParts)
+        ToldParts.PassOn(self, eventTarget);
+
         if (_shownControllers.Count == 0 || !_shownControllers.TryGetValue(self, out var shown)) {
             orig(self, eventTarget, fsmEvent);
             return;
@@ -878,6 +881,7 @@ internal partial class CoopSave {
         _shownControllers.Clear();
         _shownControllerList.Clear();
         SharedDice.ForgetRollNames();
+        ToldParts.Forget();
     }
 
     /// <summary>

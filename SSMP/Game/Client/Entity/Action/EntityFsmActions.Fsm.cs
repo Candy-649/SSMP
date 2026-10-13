@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Save;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -175,16 +176,20 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventByName action) {
+        // The name and the player of what it told (see ToldParts)
+        ToldParts.Write(data, action);
         return action.eventTarget.gameObject.GameObject.Value != action.Fsm.GameObject.gameObject;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventByName action) {
+        var told = ToldParts.Read(data);
         if (action.delay.Value < 1.0 / 1000.0) {
-            BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
+            SendToldEvent(action.Fsm, action.eventTarget, action.sendEvent.Value, told);
         } else {
             // We need to delay the event sending ourselves, because the FSM that we are executing in is not enabled
             // The usual implementation of SendEventByName will thus not work
+            ToldParts.BeforeReplayedTell(action.Fsm, action.eventTarget, action.sendEvent.Value, told, false);
             MonoBehaviourUtil.Instance.StartCoroutine(DelayEvent());
 
             IEnumerator DelayEvent() {
@@ -195,22 +200,40 @@ internal static partial class EntityFsmActions {
         }
     }
 
+    /// <summary>
+    /// Sends an event of the scene host's creature at once, with what it told, unless nothing took it in the host's
+    /// game (see ToldParts).
+    /// </summary>
+    private static void SendToldEvent(
+        HutongGames.PlayMaker.Fsm fsm,
+        FsmEventTarget eventTarget,
+        string eventName,
+        ToldParts.Told told
+    ) {
+        if (ToldParts.BeforeReplayedTell(fsm, eventTarget, eventName, told, true)) {
+            BossRoomCoop.SendNetworkEvent(fsm, eventTarget, eventName);
+        }
+    }
+
     #endregion
 
     #region SendEventByNameV2
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventByNameV2 action) {
+        ToldParts.Write(data, action);
         return action.eventTarget.gameObject.GameObject.Value != action.Fsm.GameObject.gameObject;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventByNameV2 action) {
+        var told = ToldParts.Read(data);
         if (action.delay.Value < 1.0 / 1000.0) {
-            BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
+            SendToldEvent(action.Fsm, action.eventTarget, action.sendEvent.Value, told);
         } else {
             // We need to delay the event sending ourselves, because the FSM that we are executing in is not enabled
             // The usual implementation of SendEventByNameV2 will thus not work
+            ToldParts.BeforeReplayedTell(action.Fsm, action.eventTarget, action.sendEvent.Value, told, false);
             MonoBehaviourUtil.Instance.StartCoroutine(DelayEvent());
 
             IEnumerator DelayEvent() {
@@ -231,6 +254,7 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventByNameOnExit action) {
+        ToldParts.Write(data, action);
         return action.eventTarget.gameObject.GameObject.Value != action.Fsm.GameObject.gameObject;
     }
 
@@ -241,7 +265,7 @@ internal static partial class EntityFsmActions {
             return;
         }
 
-        BossRoomCoop.SendNetworkEvent(action.Fsm, action.eventTarget, action.sendEvent.Value);
+        SendToldEvent(action.Fsm, action.eventTarget, action.sendEvent.Value, ToldParts.Read(data));
     }
 
     #endregion
@@ -292,12 +316,26 @@ internal static partial class EntityFsmActions {
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventToRegister action) {
         // Sent, because some creatures keep the event in a variable
         data.Packet.Write(action.eventName.Value);
+        ToldParts.Write(data, action);
         return true;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventToRegister action) {
-        SendEventToRoom(action.Fsm, data == null ? action.eventName.Value : data.Packet.ReadString());
+        var eventName = data == null ? action.eventName.Value : data.Packet.ReadString();
+        SendToldBroadcast(action.Fsm, eventName, ToldParts.Read(data));
+    }
+
+    /// <summary>
+    /// Broadcasts an event of the scene host's creature to the room, with the names of the parts of the room that
+    /// roll among those registered for it (see ToldParts).
+    /// </summary>
+    private static void SendToldBroadcast(HutongGames.PlayMaker.Fsm fsm, string eventName, ToldParts.Told told) {
+        if (!PlayerEvents.Contains(eventName)) {
+            ToldParts.BeforeReplayedBroadcast(eventName, told);
+        }
+
+        SendEventToRoom(fsm, eventName);
     }
 
     #endregion
@@ -309,12 +347,14 @@ internal static partial class EntityFsmActions {
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SendEventToRegisterV2 action) {
         data.Packet.Write(action.EventName.Value);
+        ToldParts.Write(data, action);
         return true;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SendEventToRegisterV2 action) {
-        SendEventToRoom(action.Fsm, data == null ? action.EventName.Value : data.Packet.ReadString());
+        var eventName = data == null ? action.EventName.Value : data.Packet.ReadString();
+        SendToldBroadcast(action.Fsm, eventName, ToldParts.Read(data));
     }
 
     #endregion

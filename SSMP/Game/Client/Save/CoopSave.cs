@@ -302,6 +302,9 @@ internal partial class CoopSave {
         RegisterSlidePlatformHooks();
         RegisterPodSequenceHooks();
         RegisterShownPartHooks();
+        ToldParts.RegisterHooks();
+        ToldParts.IsFollowedInEveryState = machine =>
+            FindMachineKind(machine.gameObject, machine.FsmName) is { IsDirector: true };
         RegisterHostSyncHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;

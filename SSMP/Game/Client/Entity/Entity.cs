@@ -296,16 +296,17 @@ internal partial class Entity {
     private readonly Dictionary<FsmStateAction, HookedEntityAction> _hookedActions;
 
     /// <summary>
-    /// The entity that each action of the room's own creatures that throws something is sent for, whose throws are
-    /// named for the other game to know them by (see ThrownThings).
+    /// The entity that each action of the room's own creatures that throws or tells something is sent for, whose throws
+    /// are named for the other game to know them by (see ThrownThings), and so are the parts of the room it tells (see
+    /// ToldParts).
     /// </summary>
     private static readonly ConditionalWeakTable<FsmStateAction, Entity> ThrowingActions = new();
 
     /// <summary>
-    /// Whether an action throws something for a creature that this game runs, and sends the throw to the other game.
+    /// Whether an action throws or tells something for a creature that this game runs, and sends it to the other game.
     /// </summary>
     /// <param name="action">The action.</param>
-    /// <param name="thrower">The room's own creature that throws.</param>
+    /// <param name="thrower">The room's own creature that throws or tells.</param>
     public static bool TryGetThrower(FsmStateAction action, out GameObject thrower) {
         thrower = null!;
         if (!ThrowingActions.TryGetValue(action, out var entity) || entity._isControlled ||
@@ -748,7 +749,8 @@ internal partial class Entity {
                 };
 
                 if (action is SpawnObjectFromGlobalPool or FlingObjectsFromGlobalPool
-                    or FlingObjectsFromGlobalPoolVel) {
+                    or FlingObjectsFromGlobalPoolVel or SendEventByName or SendEventByNameV2 or SendEventByNameOnExit
+                    or SendEventToRegister or SendEventToRegisterV2) {
                     ThrowingActions.AddOrUpdate(action, this);
                 }
                 //Logger.Info(

@@ -79,6 +79,12 @@ internal partial class GamePatcher {
     private static readonly Dictionary<int, GameObject> SetOffByEnemy = new();
 
     /// <summary>
+    /// For each target owner that is no enemy itself, by instance ID, the player whom the creature that set it off went
+    /// after in the game that runs the creature, as that game told (see <see cref="SetOffFor"/>).
+    /// </summary>
+    private static readonly Dictionary<int, GameObject> SetOffForPlayer = new();
+
+    /// <summary>
     /// Searches active assemblies to find a PlayMaker FSM action type matching the given class name.
     /// </summary>
     /// <param name="name">The name of the action class.</param>
@@ -201,7 +207,17 @@ internal partial class GamePatcher {
     /// <returns>The target, or <see langword="null"/> when no enemy set it off.</returns>
     private static GameObject? GetTargetOfWhoSetItOff(GameObject requester) {
         var owner = GetEnemyTargetOwner(requester);
-        if (owner == null || !SetOffByEnemy.TryGetValue(owner.GetInstanceID(), out var enemy)) {
+        if (owner == null) {
+            return null;
+        }
+
+        // Set off here for the player that the game running the creature said it went after
+        if (SetOffForPlayer.TryGetValue(owner.GetInstanceID(), out var player) && player != null &&
+            player.activeInHierarchy) {
+            return player;
+        }
+
+        if (!SetOffByEnemy.TryGetValue(owner.GetInstanceID(), out var enemy)) {
             return null;
         }
 
@@ -244,6 +260,21 @@ internal partial class GamePatcher {
     /// <param name="player">The player.</param>
     public static void SetTargetOf(GameObject thing, GameObject player) {
         ApproveEnemyTarget(thing, player);
+    }
+
+    /// <summary>
+    /// Has something of the room that the scene host's creature set off go after the player the creature went after
+    /// in the host's game, wherever it looks at a player, as it does in that game where the creature set it off itself
+    /// (<see cref="NoteWhatAnEnemySetsOff"/>): the copy of the creature here only passes on what the host's did, which
+    /// the creature's own actions never see (see ToldParts).
+    /// </summary>
+    /// <param name="thing">The thing, or one of its parts.</param>
+    /// <param name="player">The player.</param>
+    public static void SetOffFor(GameObject thing, GameObject player) {
+        var owner = GetEnemyTargetOwner(thing);
+        if (owner != null) {
+            SetOffForPlayer[owner.GetInstanceID()] = player;
+        }
     }
 
     /// <summary>
@@ -383,6 +414,7 @@ internal partial class GamePatcher {
         EnemyTargetLocks.Clear();
         TargetOwnerCache.Clear();
         SetOffByEnemy.Clear();
+        SetOffForPlayer.Clear();
         ClearNeedolinTargets();
     }
 

@@ -51,7 +51,9 @@ namespace SSMP.Game.Client.Save;
 /// Only an object that is given a name to roll under rolls the same later too, as the things that creatures throw do
 /// (<see cref="RollByName"/>): each roll of each of its actions comes from the name and how many times that action
 /// rolled under it before, whatever the frame rate. A part that a controller of a fight sends off is given one by the
-/// word that tells the other game, for as long as it goes.
+/// word that tells the other game, for as long as it goes; so is a part of the room that a creature tells to go, by
+/// what goes with the creature's action (see ToldParts), and a machine of the room for each round that the scene host
+/// paces (see CoopSave.PacedMachines). What such a part tells in turn is named after it in every game alike.
 /// </summary>
 internal static class SharedDice {
     /// <summary>
@@ -132,7 +134,19 @@ internal static class SharedDice {
     /// The objects of the room that roll under a name rather than with the game's own dice, the same in every game,
     /// with how many times each of their actions rolled under it (see <see cref="RollByName"/>).
     /// </summary>
-    private static readonly Dictionary<GameObject, (string Name, Dictionary<int, int> Times)> NamedRollers = new();
+    private static readonly Dictionary<GameObject, NamedRoller> NamedRollers = new();
+
+    /// <summary>
+    /// <see cref="RollingActionNames"/> as a set, to look an action up by the name of its kind.
+    /// </summary>
+    private static readonly HashSet<string> RollingActionSet = new(RollingActionNames, StringComparer.Ordinal);
+
+    /// <summary>
+    /// The state machines found to have an action that rolls or that aims at a player (see <see cref="Rolls"/> and
+    /// <see cref="Aims"/>), each with which of the two, kept until the room is left. Only what was found is kept: the
+    /// actions of a state machine that hasn't woken yet may not be there to look at.
+    /// </summary>
+    private static readonly Dictionary<HutongGames.PlayMaker.Fsm, (bool Rolls, bool Aims)> FoundMachines = new();
 
     /// <summary>
     /// The state machine of an entity that rolls with the dice of what is being set off, or null for none. Otherwise
@@ -272,7 +286,83 @@ internal static class SharedDice {
     /// <param name="gameObject">The object.</param>
     /// <param name="name">The name, the same in every game.</param>
     public static void RollByName(GameObject gameObject, string name) {
-        NamedRollers[gameObject] = (name, new Dictionary<int, int>());
+        NamedRollers[gameObject] = new NamedRoller(name);
+    }
+
+    /// <summary>
+    /// Whether an object of the room rolls under a name now.
+    /// </summary>
+    public static bool RollsByName(GameObject gameObject) {
+        return NamedRollers.Count > 0 && NamedRollers.ContainsKey(gameObject);
+    }
+
+    /// <summary>
+    /// The name that what an object rolling under a name tells next rolls under, made from its own name and how many
+    /// things it told under it before, so that every game that gave it the same name makes the same one (see
+    /// ToldParts), or null if the object rolls with the game's own dice.
+    /// </summary>
+    /// <param name="gameObject">The object that tells something.</param>
+    public static string? NextTellName(GameObject gameObject) {
+        if (NamedRollers.Count == 0 || !NamedRollers.TryGetValue(gameObject, out var named)) {
+            return null;
+        }
+
+        named.Tells++;
+        return named.Name + ">" + named.Tells.ToString(CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// Whether a state machine has an action that rolls as it starts, whose rolls a name would decide.
+    /// </summary>
+    public static bool Rolls(PlayMakerFSM machine) {
+        return Find(machine).Rolls;
+    }
+
+    /// <summary>
+    /// Whether a state machine has an action that aims at whom its object goes after (see
+    /// ActionRegistry.TargetedFsmActionTypes): where it looks at a player, it looks at that one.
+    /// </summary>
+    public static bool Aims(PlayMakerFSM machine) {
+        return Find(machine).Aims;
+    }
+
+    /// <summary>
+    /// Whether a state machine has an action that rolls, and one that aims at a player, as found once and kept.
+    /// </summary>
+    private static (bool Rolls, bool Aims) Find(PlayMakerFSM machine) {
+        if (machine == null || machine.Fsm is not { } fsm) {
+            return (false, false);
+        }
+
+        if (FoundMachines.TryGetValue(fsm, out var found)) {
+            return found;
+        }
+
+        var rolls = false;
+        var aims = false;
+        foreach (var state in fsm.States) {
+            // A state machine that hasn't woken has no actions to look at yet: asked for them, the game writes an
+            // error to its log and loads them early
+            if (state.Fsm == null) {
+                return (false, false);
+            }
+
+            foreach (var action in state.Actions) {
+                if (action is not { Enabled: true }) {
+                    continue;
+                }
+
+                var name = action.GetType().Name;
+                rolls |= RollingActionSet.Contains(name);
+                aims |= Entity.Action.ActionRegistry.TargetedFsmActionTypes.Contains(name);
+            }
+        }
+
+        if (rolls || aims) {
+            FoundMachines[fsm] = (rolls, aims);
+        }
+
+        return (rolls, aims);
     }
 
     /// <summary>
@@ -280,6 +370,7 @@ internal static class SharedDice {
     /// </summary>
     public static void ForgetRollNames() {
         NamedRollers.Clear();
+        FoundMachines.Clear();
     }
 
     /// <summary>
@@ -628,5 +719,25 @@ internal static class SharedDice {
         }
 
         return MemoryMarshal.Cast<int, Random.State>(state)[0];
+    }
+
+    /// <summary>
+    /// An object of the room that rolls under a name (see <see cref="RollByName"/>).
+    /// </summary>
+    private sealed class NamedRoller(string name) {
+        /// <summary>
+        /// The name, the same in every game.
+        /// </summary>
+        public string Name { get; } = name;
+
+        /// <summary>
+        /// How many times each of its actions rolled under the name, by the number of the action.
+        /// </summary>
+        public Dictionary<int, int> Times { get; } = new();
+
+        /// <summary>
+        /// How many things it told under the name (see <see cref="NextTellName"/>).
+        /// </summary>
+        public int Tells { get; set; }
     }
 }

@@ -15,20 +15,23 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
 /// Machines of a room that run by themselves on a clock of their own, in a checked two-player save: boxes that drop to
-/// be stood on and are ground away, chutes that pour debris, grinders that smash back and forth, and vents and columns
-/// that puff steam and exhaust that hurt (found by FsmScan --hazards, USER 10-13). Each game ran its
-/// own from the moment its room loaded, so the two players saw them at different points of their rounds and stood on
-/// boxes that weren't there for the other. A player that a grinder caught had their own grinders go back to where they
-/// began as they were put back at the last safe place, and only theirs. The user decided (10-06) that both games show
-/// these machines the way the scene host's game has them, and that being caught no longer sends them back.
+/// be stood on and are ground away, chutes that pour debris, grinders that smash back and forth, vents and columns
+/// that puff steam and exhaust that hurt, and lava falls, bolts, spiking floors and rubble of fights (found by FsmScan
+/// --hazards, USER 10-13). Each game ran its own from the moment it was on, so the two players saw them at different
+/// points of their rounds and stood on boxes that weren't there for the other. A player that a grinder caught had
+/// their own grinders go back to where they began as they were put back at the last safe place, and only theirs. The
+/// user decided (10-06) that both games show these machines the way the scene host's game has them, and that being
+/// caught no longer sends them back.
 ///
-/// The scene host runs its own and tells the other game each time one of them starts a round, with the dice the round
-/// rolled. The other game runs its own copy too, but holds each round back until the host says that round started: the
-/// machine waits where it is, at the end of its last round, and then goes the way the host's went. A word that comes
-/// while the machine is still in the middle of a round is kept and taken where the round ends. A grinder is also put
-/// where the host's is and given the host's next way to go, since a grinder stopped by a catch in one game would go on
-/// from somewhere else. Machines that a controller sets going, the boxes and chutes of a pattern, start their rounds on
-/// the host's word as well, so they keep to the host's even where the controller here is late.
+/// The scene host runs its own and tells the other game each time one of them starts a round. The other game runs its
+/// own copy too, but holds each round back until the host says that round started: the machine waits where it is, at
+/// the end of its last round, and then goes the way the host's went. A word that comes while the machine is still in
+/// the middle of a round is kept, and the machine goes through the rest of its round without waiting to take it. The
+/// round rolls under a name made from the word in both games, so what it rolls later in the round, after a wait, comes
+/// out the same as well, and so does what the parts it tells roll (USER 10-13). A grinder is also put where the host's
+/// is and given the host's next way to go, since a grinder stopped by a catch in one game would go on from somewhere
+/// else. Machines that a controller sets going, the boxes and chutes of a pattern, start their rounds on the host's
+/// word as well, so they keep to the host's even where the controller here is late.
 ///
 /// A grinder that catches a player stops, with the grinders that go with it, until the player is put back at the last
 /// safe place, and that only happened in the game of the player it caught. The user decided (10-06) that whoever is
@@ -157,6 +160,17 @@ internal partial class CoopSave {
 
         // Grinders, in groups that go together, which go through their list of ways without rolling anything
         new(["Understore_Grinder"], "Control", [GrinderNextWayStateName], isGrinder: true),
+
+        // Machines of fights that go round by themselves once they are on, and some of them when the creature tells
+        // them to as well (FsmScan --hazards, USER 10-13): the lava falls of one fight, the middle one pouring after a
+        // wait it rolls and the two at the sides in a row of their own; the bolts of another that zap over and over
+        // while a player is near, after a pause they roll; the floors of a third that spike up, and the fields there
+        // that rain rubble. A floor's round, its spikes out for as long as nobody breaks them, can last longer than
+        // other machines wait for the host's word.
+        new(["Lava_Waterfall"], "Control", ["Lava Antic", "Lava 1"], sceneName: "Dock_09"),
+        new(["Bolt"], "Control", ["Antic"], sceneName: "Coral_29"),
+        new(["Spike Floor"], "Control", ["Attack Delay"], sceneName: "Cradle_03", holdLimit: 20f),
+        new(["Rubble Field"], "FSM", ["Set Attack", "Set Attack Long"], sceneName: "Cradle_03"),
 
         // The controller of the fight with the two dancers, which the other game follows in every state from the first
         // beat on (see CoopSave.DirectedFights). The start of the fight before that, with the gates, the lights and the
@@ -489,6 +503,9 @@ internal partial class CoopSave {
 
             if (kind.IsDirector) {
                 partsBefore = TakeParts(fsm);
+            } else {
+                // The whole round rolls by a name the other game has from the word, not only its start
+                SharedDice.RollByName(gameObject, RoundRollName(word));
             }
         } catch (Exception e) {
             LogInteractionError(e);
@@ -645,6 +662,12 @@ internal partial class CoopSave {
             return;
         }
 
+        try {
+            SharedDice.RollByName(fsm.GameObject, RoundRollName(update));
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         var lastStarting = _startingMachineRound;
         _startingMachineRound = fsm;
         try {
@@ -652,6 +675,15 @@ internal partial class CoopSave {
         } finally {
             _startingMachineRound = lastStarting;
         }
+    }
+
+    /// <summary>
+    /// The name that a round of a machine that the scene host paces rolls under in every game, from the machine and the
+    /// number of the host's word: what it rolls later in the round, after a wait, comes out the same as well, and so
+    /// does what it rolls between rounds and what the parts it tells roll (see SharedDice.RollByName and ToldParts).
+    /// </summary>
+    private static string RoundRollName(CoopSaveUpdate word) {
+        return word.Scene + "|" + word.ObjectPath + "|" + word.FsmName + "#" + word.Sequence;
     }
 
     /// <summary>
@@ -803,7 +835,7 @@ internal partial class CoopSave {
             var fsm = pair.Key;
             var held = pair.Value;
             if (fsm.GameObject == null || held.From != fsm.ActiveState || runsTheRoom ||
-                (Time.unscaledTime - held.Since > MachineHoldLimit && FindDirector(fsm) == null)) {
+                (Time.unscaledTime - held.Since > HoldLimitOf(fsm) && FindDirector(fsm) == null)) {
                 (released ??= []).Add(fsm);
             }
         }
@@ -895,6 +927,16 @@ internal partial class CoopSave {
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// How long a machine here waits for the scene host's word before it starts its round by itself, in seconds.
+    /// </summary>
+    private static float HoldLimitOf(Fsm fsm) {
+        return fsm.GameObject is { } gameObject && gameObject != null &&
+               FindMachineKind(gameObject, fsm.Name) is { HoldLimit: { } limit }
+            ? limit
+            : MachineHoldLimit;
     }
 
     /// <summary>
@@ -1176,7 +1218,8 @@ internal partial class CoopSave {
             string[]? ownStateNames = null,
             bool wholeNames = false,
             bool showsParts = false,
-            bool partsTold = false
+            bool partsTold = false,
+            float? holdLimit = null
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -1187,7 +1230,14 @@ internal partial class CoopSave {
             WholeNames = wholeNames;
             ShowsParts = showsParts;
             PartsTold = partsTold;
+            HoldLimit = holdLimit;
         }
+
+        /// <summary>
+        /// How long a machine of this kind waits for the scene host's word before it starts its round by itself, in
+        /// seconds, for a kind whose rounds last longer than <see cref="MachineHoldLimit"/>; null for that.
+        /// </summary>
+        public float? HoldLimit { get; }
 
         /// <summary>
         /// For a controller of a fight, whether the other game doesn't follow its states but shows its parts the way
