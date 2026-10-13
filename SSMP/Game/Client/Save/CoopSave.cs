@@ -301,6 +301,7 @@ internal partial class CoopSave {
         RegisterCreatureDeathHooks();
         RegisterSlidePlatformHooks();
         RegisterPodSequenceHooks();
+        RegisterShownPartHooks();
         RegisterHostSyncHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;

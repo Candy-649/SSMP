@@ -817,14 +817,17 @@ internal enum CoopSaveUpdateKind : byte {
     PodProgress,
 
     /// <summary>
-    /// A part of a controller of a fight went up or moved in the game of the sender, which runs the room, for the
-    /// other games to show it as it is there (see CoopSave.ShownParts). <see cref="CoopSaveUpdate.Scene"/>,
-    /// <see cref="CoopSaveUpdate.ObjectPath"/> and <see cref="CoopSaveUpdate.FsmName"/> name the controller, and
-    /// <see cref="CoopSaveUpdate.StateName"/> the path of the part under it. <see cref="CoopSaveUpdate.Part"/> is 1 for
-    /// a part that went up, 0 for one that moved. <see cref="CoopSaveUpdate.Values"/> holds the time since the last
-    /// word of the controller, the x and y of the part, and for one that went up with a state machine of its own its
-    /// size and the place and size of each of its pieces; <see cref="CoopSaveUpdate.Names"/> and
-    /// <see cref="CoopSaveUpdate.Amounts"/> its flags.
+    /// A part of a controller of a fight went up, moved, played its particles or went out in the game of the sender,
+    /// which runs the room, for the other games to show it as it is there (see CoopSave.ShownParts).
+    /// <see cref="CoopSaveUpdate.Scene"/>, <see cref="CoopSaveUpdate.ObjectPath"/> and
+    /// <see cref="CoopSaveUpdate.FsmName"/> name the controller, and <see cref="CoopSaveUpdate.StateName"/> the path of
+    /// the part under it. <see cref="CoopSaveUpdate.Part"/> is 0 for a part that moved or whose flags changed, 1 for
+    /// one that went up, 2 for particles played and 3 for one that went out. <see cref="CoopSaveUpdate.Values"/> holds
+    /// the time in the sender's game and the x and y of the part, and then: for one that went up with a state machine
+    /// of its own, its size and the place and size of each of its pieces; for particles, how many were let out at once
+    /// and whether they start over; for one that went out, how long it was up. <see cref="CoopSaveUpdate.Names"/> and
+    /// <see cref="CoopSaveUpdate.Amounts"/> hold the flags of a part with a state machine that went up or moved.
+    /// <see cref="CoopSaveUpdate.Sequence"/> tells a word that comes again.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.

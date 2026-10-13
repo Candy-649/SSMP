@@ -35,8 +35,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 ///
 /// Where a part goes up hangs on more than the dice of the state, though: on where an earlier state left it, or on
 /// what the state puts it next to, which each game came to by itself. So the word also says where the parts right under
-/// the controller stand that the state switched on or moved, and the other game puts its own there (USER 10-13:
-/// 每次出这招就发一次烟花的位置).
+/// the controller stand that the state switched on or moved, and the other game puts its own there, rather than work
+/// it out again, as the user asked for the parts of the fight on the stage (USER 10-13: 烟花的位置不能直接拿到吗).
 ///
 /// The start of the fight before the first beat each game still has by itself, since what it does there is for its
 /// own player: the gates, the lights and the beat setting off. A word that comes while the controller here is still in
