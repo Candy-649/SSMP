@@ -16,12 +16,12 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// <summary>
 /// Machines of a room that run by themselves on a clock of their own, in a checked two-player save: boxes that drop to
 /// be stood on and are ground away, chutes that pour debris, grinders that smash back and forth, vents and columns
-/// that puff steam and exhaust that hurt, and lava falls, bolts, spiking floors and rubble of fights (found by FsmScan
-/// --hazards, USER 10-13). Each game ran its own from the moment it was on, so the two players saw them at different
-/// points of their rounds and stood on boxes that weren't there for the other. A player that a grinder caught had
-/// their own grinders go back to where they began as they were put back at the last safe place, and only theirs. The
-/// user decided (10-06) that both games show these machines the way the scene host's game has them, and that being
-/// caught no longer sends them back.
+/// that puff steam and exhaust that hurt, bolts of lightning that zap over and over while a player is near, and lava
+/// falls, spiking floors and rubble of fights (found by FsmScan --hazards, USER 10-13). Each game ran its own from the
+/// moment it was on, so the two players saw them at different points of their rounds and stood on boxes that weren't
+/// there for the other. A player that a grinder caught had their own grinders go back to where they began as they were
+/// put back at the last safe place, and only theirs. The user decided (10-06) that both games show these machines the
+/// way the scene host's game has them, and that being caught no longer sends them back.
 ///
 /// The scene host runs its own and tells the other game each time one of them starts a round. The other game runs its
 /// own copy too, but holds each round back until the host says that round started: the machine waits where it is, at
@@ -172,6 +172,10 @@ internal partial class CoopSave {
         new(["Spike Floor"], "Control", ["Attack Delay"], sceneName: "Cradle_03", holdLimit: 20f),
         new(["Rubble Field"], "FSM", ["Set Attack", "Set Attack Long"], sceneName: "Cradle_03"),
 
+        // Bolts like those of the fight elsewhere, which a player near sets zapping, or a controller of theirs that
+        // tells them to in turn as a player comes. The controller has the same name before its own, but no round.
+        new(["Zap Worm Lightning"], "Control", ["Antic"]),
+
         // The controller of the fight with the two dancers, which the other game follows in every state from the first
         // beat on (see CoopSave.DirectedFights). The start of the fight before that, with the gates, the lights and the
         // beat setting off, each game has by itself.
@@ -179,6 +183,15 @@ internal partial class CoopSave {
             ["Dancer Control"], "Control", [], sceneName: "Cog_Dancers_boss", ownStateNames: [
                 "Init", "Deactivate Positions", "Encountered?", "Dormant", "Gate Close", "Light Open",
                 "Beat Start Pause", "Pendulum Prepare", "Beat Start"
+            ]
+        ),
+
+        // The same controller in another fight with two dancers (FsmScan --hazards), whose start brings the dancers in
+        // by itself, with the gates and the camera, before the beat sets off
+        new(
+            ["Dancer Control"], "Control", [], sceneName: "Clover_10", ownStateNames: [
+                "Init", "Deactivate Positions", "Encountered?", "Dormant", "Activate Dancers", "Gate Close",
+                "Beat Start"
             ]
         ),
 
