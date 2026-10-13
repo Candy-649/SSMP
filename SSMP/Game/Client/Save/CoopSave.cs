@@ -304,6 +304,7 @@ internal partial class CoopSave {
         RegisterShownPartHooks();
         RegisterRoomLayoutHooks();
         ToldParts.RegisterHooks();
+        WishDrops.RegisterHooks();
         ToldParts.IsFollowedInEveryState = machine =>
             FindMachineKind(machine.gameObject, machine.FsmName) is { IsDirector: true };
         ToldParts.IsPaced = machine => FindMachineKind(machine.gameObject, machine.FsmName) != null;
