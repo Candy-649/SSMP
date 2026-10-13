@@ -25,7 +25,9 @@ namespace SSMP.Game.Client.Save;
 /// than show (see <see cref="OnlyShows"/>): its colliders, a sprite swapped for a part that explodes after a moment,
 /// hurts whoever is near and shuts the pod, a blast that shakes the screen and the pad, the screen shake of the
 /// strike, its spark, whose effect shakes the pad, and the pollen trail that follows the striker. Before, each game
-/// showed its own player's strikes alone. The bells of a music box go their own way (see CoopSave.PodSequences).
+/// showed its own player's strikes alone. A pod that a creature carries is found by the creature: the game that runs
+/// it shows the room's own, the other a copy, which hangs and swings its pods by the physics as well (see
+/// EntityInitializer.FindPodSwingBodies). The bells of a music box go their own way (see CoopSave.PodSequences).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>
@@ -236,15 +238,30 @@ internal partial class CoopHits {
     /// <param name="x">For a balloon, where the player was across.</param>
     private void SendBounceLook(Component thing, BounceLook look, float direction, float x) {
         var target = thing.gameObject;
-        if (!IsAnyMemberInRoom() || PersonalPlaces.Contains(target) ||
-            !TryGetPlace(target, out var scene, out var path)) {
+        if (!IsAnyMemberInRoom() || PersonalPlaces.Contains(target)) {
             return;
         }
 
+        // A part of a creature that both games keep goes by the creature and its place under it: the game that runs
+        // the creature shows the room's own, the other the copy, which is another object. Anything else that a room
+        // spawned may not be found by its place in the others' games
+        Entity.Entity? creature = null;
+        var path = "";
         for (var current = target.transform; current != null; current = current.parent) {
+            if (TryGetEntity(current.gameObject, out var entity, out _)) {
+                creature = entity;
+                path = ScenePath.GetUnder(target.transform, current);
+                break;
+            }
+
             if (current.name.Contains("(Clone)") || EntityProcessor.IsRegistered(current.gameObject)) {
                 return;
             }
+        }
+
+        var scene = target.scene.name;
+        if (creature == null && !TryGetPlace(target, out scene, out path)) {
+            return;
         }
 
         var type = thing.GetType();
@@ -258,10 +275,12 @@ internal partial class CoopHits {
         writer.Write((byte) look);
         writer.Write(direction);
         writer.Write(x);
+        writer.Write(creature != null);
         writer.Flush();
 
         SendToRoomMembers(new CoopHitUpdate {
             Kind = CoopHitKind.BounceLook,
+            EntityId = creature?.Id ?? 0,
             Scene = scene,
             Path = path,
             Responder = type.FullName,
@@ -288,7 +307,37 @@ internal partial class CoopHits {
             return;
         }
 
-        var target = FindPlace(update);
+        BounceLook look;
+        float direction, x;
+        bool onCreature;
+        try {
+            using var reader = new BinaryReader(new MemoryStream(update.Hit));
+            look = (BounceLook) reader.ReadByte();
+            direction = reader.ReadSingle();
+            x = reader.ReadSingle();
+            onCreature = reader.ReadBoolean();
+        } catch (Exception e) {
+            Logger.Warn($"Could not read a strike of the partner on {update.Path}: {e.Message}");
+            return;
+        }
+
+        // A part of a creature is found under the creature on show here: the room's own where this game runs it, the
+        // copy where the other game does
+        GameObject? target;
+        if (onCreature) {
+            if (FindEntity(update.EntityId) is not { } entity) {
+                NotReplayed(update, "strike", $"the creature {update.EntityId} is not here");
+                return;
+            }
+
+            var shown = entity.Object.Host != null && entity.Object.Host.activeInHierarchy
+                ? entity.Object.Host
+                : entity.Object.Client;
+            target = shown != null ? ScenePath.FindUnder(shown.transform, update.Path) : null;
+        } else {
+            target = FindPlace(update);
+        }
+
         if (target == null) {
             NotReplayed(update, "strike", "the object is not here");
             return;
@@ -297,18 +346,6 @@ internal partial class CoopHits {
         var components = target.GetComponents(type);
         if (update.Index >= components.Length) {
             NotReplayed(update, "strike", $"the object has only {components.Length} parts of that kind here");
-            return;
-        }
-
-        BounceLook look;
-        float direction, x;
-        try {
-            using var reader = new BinaryReader(new MemoryStream(update.Hit));
-            look = (BounceLook) reader.ReadByte();
-            direction = reader.ReadSingle();
-            x = reader.ReadSingle();
-        } catch (Exception e) {
-            Logger.Warn($"Could not read a strike of the partner on {update.Path}: {e.Message}");
             return;
         }
 

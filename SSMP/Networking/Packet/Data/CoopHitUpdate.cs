@@ -206,9 +206,11 @@ internal enum CoopHitKind : byte {
     ObjectHurtPlayer,
 
     /// <summary>
-    /// A pod or a balloon of the room that the sender's player struck, found like a tink, which the other game shows
+    /// A pod or a balloon of the room that the sender's player struck, found like a tink, or for one that a creature
+    /// carries by <see cref="CoopHitUpdate.EntityId"/> and its path under the creature, which the other game shows
     /// struck the same way without flinging or shutting anything there. <see cref="CoopHitUpdate.Hit"/> holds how it
-    /// was struck, the way a pod swings and where the player was across. Appended at the end, like the ones before.
+    /// was struck, the way a pod swings, where the player was across and whether a creature carries it. Appended at
+    /// the end, like the ones before.
     /// </summary>
     BounceLook
 }
