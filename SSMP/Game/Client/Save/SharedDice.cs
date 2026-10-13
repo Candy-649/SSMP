@@ -39,7 +39,9 @@ namespace SSMP.Game.Client.Save;
 /// had shuffled the list once more than the other (USER 10-13: 骰子先供给给一个列表，还要再客机那边后处理的就不行). So
 /// what goes with a shuffle is not its dice but the order it came to, thing by thing, each known by where it is in the
 /// scene or by its value. The other game puts the same things of its own list in that order and shuffles nothing (USER
-/// 10-13: 为什么不直接同步列表的结果). A list that doesn't hold the same things over there is shuffled there by itself.
+/// 10-13: 为什么不直接同步列表的结果), and goes on from the dice as the shuffle left them, for what is rolled after it
+/// in the same moment. A list that doesn't hold the same things over there is shuffled there by itself, with a line in
+/// the log.
 ///
 /// It covers only what happens at once, in the same call: what the thing rolls later, after a wait, each game rolls
 /// again. This is no seed shared by the room. That was turned down, since each game rolls at its own frame rate and for
@@ -69,7 +71,8 @@ internal static class SharedDice {
 
         /// <summary>
         /// The order that a shuffle put the part of its list in that it goes through: where that part starts in the
-        /// list, then the number of each thing in it in turn (see <see cref="KeyOf"/>).
+        /// list, the state of <see cref="Random"/> after the shuffle, then the number of each thing in it in turn (see
+        /// <see cref="KeyOf"/>).
         /// </summary>
         Order = 1
     }
@@ -209,12 +212,15 @@ internal static class SharedDice {
                 return null;
             }
 
+            // Dice of another kind of build are left whole, rather than read in part
+            var kind = (RecordKind) dice[at];
             var length = dice[at + 2];
-            if (length < 0 || length > dice.Count - at - RecordHeadSize) {
+            if (kind != RecordKind.Roll && kind != RecordKind.Order || length < 0 ||
+                length > dice.Count - at - RecordHeadSize) {
                 return null;
             }
 
-            records.Add(((RecordKind) dice[at], dice[at + 1], at + RecordHeadSize, length));
+            records.Add((kind, dice[at + 1], at + RecordHeadSize, length));
             at += RecordHeadSize + length;
         }
 
@@ -323,8 +329,7 @@ internal static class SharedDice {
 
         // A shuffle takes the order the partner's came to, rather than its dice
         if (self is ArrayShuffle shuffle) {
-            if (_thrown is { } thrownOrder && TakeRecord(RecordKind.Order, action) is { } order &&
-                PutInOrder(shuffle, thrownOrder, order.Start, order.Length)) {
+            if (_thrown is { } thrownOrder && TakeOrder(shuffle, thrownOrder, action)) {
                 shuffle.Finish();
             } else {
                 orig(self);
@@ -354,23 +359,58 @@ internal static class SharedDice {
     }
 
     /// <summary>
+    /// Puts the list of a shuffle here in the first order written down under the same action that no shuffle took yet
+    /// and whose things the list here holds, and takes that order, with the state of <see cref="Random"/> that the
+    /// partner's shuffle left. The name of an object is no path, so another list of an object with the same name may
+    /// have written down an order under the same action, which is passed over.
+    /// </summary>
+    /// <returns>Whether the list was put in an order of the partner's.</returns>
+    private static bool TakeOrder(ArrayShuffle shuffle, IReadOnlyList<int> dice, int action) {
+        if (_records is not { } records || _taken is not { } taken) {
+            return false;
+        }
+
+        var hadOrder = false;
+        for (var index = 0; index < records.Length; index++) {
+            var record = records[index];
+            if (taken[index] || record.Kind != RecordKind.Order || record.Action != action) {
+                continue;
+            }
+
+            hadOrder = true;
+            if (PutInOrder(shuffle, dice, record.Start, record.Length)) {
+                taken[index] = true;
+                Random.state = ToState(dice, record.Start + 1);
+                return true;
+            }
+        }
+
+        Logger.Info(
+            $"A shuffle of '{shuffle.Fsm?.GameObjectName}' shuffles by itself, since " + (hadOrder
+                ? "its list holds other things than the partner's"
+                : "no order of the partner's came for it")
+        );
+        return false;
+    }
+
+    /// <summary>
     /// Puts the part of the list of a shuffle here that the shuffle goes through in the order that the partner's came
     /// to, thing by thing, rather than shuffling it.
     /// </summary>
     /// <param name="shuffle">The shuffle.</param>
     /// <param name="dice">The dice that the partner's order is in.</param>
-    /// <param name="start">Where the order starts in the dice: where the part starts in the list, then the number of
-    /// each thing in turn (see <see cref="KeyOf"/>).</param>
+    /// <param name="start">Where the order starts in the dice: where the part starts in the list, the state after the
+    /// shuffle, then the number of each thing in turn (see <see cref="KeyOf"/>).</param>
     /// <param name="length">How many numbers the order is.</param>
     /// <returns>Whether that part of the list here holds the same things as the partner's, and so was put in order.
     /// </returns>
     private static bool PutInOrder(ArrayShuffle shuffle, IReadOnlyList<int> dice, int start, int length) {
-        if (shuffle.array is not { } array || array.Values is not { } values || length < 1) {
+        if (shuffle.array is not { } array || array.Values is not { } values || length < 1 + StateSize) {
             return false;
         }
 
         var (first, count) = ShuffledPart(shuffle, values.Length);
-        if (dice[start] != first || length - 1 != count) {
+        if (dice[start] != first || length - 1 - StateSize != count) {
             return false;
         }
 
@@ -382,7 +422,7 @@ internal static class SharedDice {
         var used = new bool[count];
         var ordered = (object[]) values.Clone();
         for (var place = 0; place < count; place++) {
-            var key = dice[start + 1 + place];
+            var key = dice[start + 1 + StateSize + place];
             var found = -1;
             for (var i = 0; i < count; i++) {
                 if (!used[i] && keys[i] == key) {
@@ -392,10 +432,6 @@ internal static class SharedDice {
             }
 
             if (found < 0) {
-                Logger.Debug(
-                    $"The list of a shuffle of {shuffle.Fsm?.GameObjectName} holds other things than the partner's, " +
-                    "so it is shuffled here by itself"
-                );
                 return false;
             }
 
@@ -408,8 +444,9 @@ internal static class SharedDice {
     }
 
     /// <summary>
-    /// Writes down the order that a shuffle here put its list in, for each thing being set off here that goes to the
-    /// partner.
+    /// Writes down the order that a shuffle here put its list in, with the state of <see cref="Random"/> that it left,
+    /// for each thing being set off here that goes to the partner: what the game rolls after the shuffle in the same
+    /// moment, outside the actions that are written down, then comes out the same there.
     /// </summary>
     private static void WriteOrder(ArrayShuffle shuffle, int action) {
         if (Recordings.Count == 0 || shuffle.array?.Values is not { } values) {
@@ -417,13 +454,14 @@ internal static class SharedDice {
         }
 
         var (first, count) = ShuffledPart(shuffle, values.Length);
-        var order = new int[RecordHeadSize + 1 + count];
+        var order = new int[RecordHeadSize + 1 + StateSize + count];
         order[0] = (int) RecordKind.Order;
         order[1] = action;
-        order[2] = 1 + count;
+        order[2] = 1 + StateSize + count;
         order[3] = first;
+        TakeState().CopyTo(order, RecordHeadSize + 1);
         for (var i = 0; i < count; i++) {
-            order[RecordHeadSize + 1 + i] = KeyOf(values[first + i]);
+            order[RecordHeadSize + 1 + StateSize + i] = KeyOf(values[first + i]);
         }
 
         foreach (var recording in Recordings) {
@@ -463,13 +501,10 @@ internal static class SharedDice {
     private static int KeyOf(object? thing) {
         var text = thing switch {
             null => "",
-            GameObject gameObject => gameObject == null
-                ? ""
-                : gameObject.scene.name + "|" + ScenePath.Get(gameObject.transform),
+            GameObject gameObject => gameObject == null ? "" : PlaceOf(gameObject.transform),
             Component component => component == null
                 ? ""
-                : component.gameObject.scene.name + "|" + ScenePath.Get(component.transform) + "|" +
-                  component.GetType().FullName,
+                : PlaceOf(component.transform) + "|" + component.GetType().FullName,
             UnityEngine.Object unityObject => unityObject == null
                 ? ""
                 : unityObject.GetType().FullName + "|" + unityObject.name,
@@ -485,6 +520,24 @@ internal static class SharedDice {
         }
 
         return unchecked((int) hash);
+    }
+
+    /// <summary>
+    /// Where an object is, for <see cref="KeyOf"/>: its scene and its path there; for one in no loaded scene, like a
+    /// prefab, which has no path to find, only its name.
+    /// </summary>
+    private static string PlaceOf(Transform transform) {
+        var scene = transform.gameObject.scene;
+        if (!scene.IsValid() || !scene.isLoaded) {
+            return "|" + transform.name;
+        }
+
+        try {
+            return scene.name + "|" + ScenePath.Get(transform);
+        } catch (Exception e) {
+            Logger.Debug($"No path for '{transform.name}' to know it by in a shuffled list: {e.Message}");
+            return scene.name + "|" + transform.name;
+        }
     }
 
     /// <summary>
