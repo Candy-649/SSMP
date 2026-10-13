@@ -45,7 +45,8 @@ internal partial class CoopHits {
     /// <summary>
     /// The kinds of objects of the room that are there for the player who hits them: they fling that player off them,
     /// heal or pay them, or ring or spark against their weapon, where their own game has them. A hit on one is not
-    /// sent, and the copy of the partner's attack leaves the one here alone, so each player has their own. Every other
+    /// sent, and the copy of the partner's attack leaves the one here alone, so each player has their own. What a
+    /// strike on a pod or a balloon looks like goes to the others still (see <see cref="ShowBounceLook"/>). Every other
     /// object of the room takes the partner's hits as replays of them (see <see cref="IsRoomObject"/>).
     /// </summary>
     private static readonly Type[] PersonalTypes = [
@@ -472,6 +473,7 @@ internal partial class CoopHits {
         GamePatcher.HitInDirectionDetour = OnSendHitInDirection;
 
         RegisterThrownHooks();
+        RegisterBounceHooks();
     }
 
     /// <summary>
@@ -491,6 +493,7 @@ internal partial class CoopHits {
 
         _hooks.Clear();
         DeregisterThrownHooks();
+        _shownShutPods.Clear();
         _isReplaying = false;
         _hitContext = HitContext.None;
         ReplayedRanges.Clear();
@@ -580,6 +583,11 @@ internal partial class CoopHits {
 
         if (update.Kind == CoopHitKind.ObjectHurtPlayer) {
             ReplayHurt(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.BounceLook) {
+            ShowBounceLook(update);
             return;
         }
 
