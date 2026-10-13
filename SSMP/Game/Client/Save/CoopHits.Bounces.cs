@@ -2,11 +2,13 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using GlobalEnums;
+using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
 using UnityEngine.Events;
 using Logger = SSMP.Logging.Logger;
+using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client.Save;
 
@@ -16,12 +18,14 @@ namespace SSMP.Game.Client.Save;
 /// <see cref="PersonalTypes"/>): the fling is theirs, and so is the moment after a strike in which some pods are shut
 /// and let no one bounce off them, so that the partner who follows does not find one shut for them (USER 10-13, "样子
 /// 同步，能用各管各的", like the floors that crumble and come back). What a strike looks like is no longer theirs alone:
-/// the game of the player who struck one tells the other games in the room how, and they show it - its swing and
-/// sound, and what it sets off around it, like the dust it puffs, the platform it hangs from bobbing, or its shell
-/// closing and, after the same time, opening again - without the parts that only the striker has: it does not shut
-/// there, flings nobody and shakes no screen, and the spark of the strike is left out, whose effect shakes the pad,
-/// as is the pollen trail that follows the striker. Before, each game showed its own player's strikes alone. The bells
-/// of a music box go their own way (see CoopSave.PodSequences).
+/// the game of the player who struck one tells the other games in the room how, and they show it - its animation, its
+/// swing and sound, and of what it sets off around it what only shows, like the dust it puffs, a shake of its own, the
+/// platform it hangs from bobbing, or a part switched on that only draws; a pod that closes after a strike opens again
+/// after the same time. Not what only the striker has: it does not shut there and flings nobody. Nor what does more
+/// than show (see <see cref="OnlyShows"/>): its colliders, a sprite swapped for a part that explodes after a moment,
+/// hurts whoever is near and shuts the pod, a blast that shakes the screen and the pad, the screen shake of the
+/// strike, its spark, whose effect shakes the pad, and the pollen trail that follows the striker. Before, each game
+/// showed its own player's strikes alone. The bells of a music box go their own way (see CoopSave.PodSequences).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>
@@ -48,6 +52,35 @@ internal partial class CoopHits {
         /// </summary>
         BalloonBounce
     }
+
+    /// <summary>
+    /// The kinds of parts that a pod tells as it is struck or opens again whose answer only shows: its dust, its sound,
+    /// a shake of its own and the bob of the platform it hangs from (see <see cref="OnlyShows"/>).
+    /// </summary>
+    private static readonly Type[] ShowingPartTypes = [
+        typeof(ParticleSystemPool),
+        typeof(PlayParticleEffects),
+        typeof(AudioSource),
+        typeof(PlayRandomAudioEvent),
+        typeof(JitterSelfForTime),
+        typeof(CurveOffsetAnimation)
+    ];
+
+    /// <summary>
+    /// The kinds of components of an object that only draw it, so that switching it on or off only shows something
+    /// (see <see cref="IsDrawnOnly"/>): what draws and animates it, and what switches it off again once it is drawn.
+    /// </summary>
+    private static readonly Type[] DrawingTypes = [
+        typeof(Transform),
+        typeof(Renderer),
+        typeof(MeshFilter),
+        typeof(tk2dBaseSprite),
+        typeof(tk2dSpriteAnimator),
+        typeof(Animator),
+        typeof(ParticleSystem),
+        typeof(DisableAfterTime),
+        typeof(DeactivateAfter2dtkAnimation)
+    ];
 
     /// <summary>
     /// Whether the hit that a pod is taking is one of this game's player, while it takes one, or null between hits. A
@@ -194,7 +227,8 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Sends the members in the room how this game's player struck a pod or a balloon of the room. Not one in a place
-    /// that each player has to themselves, nor one that a room spawned, which the others may not find by its place.
+    /// that each player has to themselves, nor one that a room spawned or a part of a creature that both games keep a
+    /// copy of, which the others don't find by its place or have switched off there.
     /// </summary>
     /// <param name="thing">The pod or the balloon.</param>
     /// <param name="look">How it was struck.</param>
@@ -203,8 +237,14 @@ internal partial class CoopHits {
     private void SendBounceLook(Component thing, BounceLook look, float direction, float x) {
         var target = thing.gameObject;
         if (!IsAnyMemberInRoom() || PersonalPlaces.Contains(target) ||
-            !TryGetPlace(target, out var scene, out var path) || path.Contains("(Clone)")) {
+            !TryGetPlace(target, out var scene, out var path)) {
             return;
+        }
+
+        for (var current = target.transform; current != null; current = current.parent) {
+            if (current.name.Contains("(Clone)") || EntityProcessor.IsRegistered(current.gameObject)) {
+                return;
+            }
         }
 
         var type = thing.GetType();
@@ -294,10 +334,10 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Shows a pod struck by the partner: its animation and sound, what it sets off around it as it is struck, apart
-    /// from switching its colliders, and its swing. One that shuts after a strike looks shut until it shows opening
-    /// again after the same time (see <see cref="OnPodUpdate"/>), unless it is shut for this game's player already,
-    /// which it opens by itself from.
+    /// Shows a pod struck by the partner: its animation and sound, of what it sets off around it as it is struck what
+    /// only shows (see <see cref="OnlyShows"/>), and its swing, if it swings freely here. One that closes after a
+    /// strike shows opening again after the same time (see <see cref="OnPodUpdate"/>), unless it is shut for this
+    /// game's player already, which it opens by itself from.
     /// </summary>
     /// <returns>Why it was not shown, or null if it was.</returns>
     private string? ShowPodStrike(BouncePod pod, BounceLook look, float direction) {
@@ -316,9 +356,10 @@ internal partial class CoopHits {
         var bounce = look == BounceLook.PodBounce;
         pod.PlayAnim(bounce ? pod.bounceAnim : pod.hitAnim, false);
         pod.bounceSounds.SpawnAndPlayOneShot(pod.transform.position);
-        ShowWithoutColliders(bounce ? pod.onBounceHit : pod.onInertHit);
+        ShowEffects(bounce ? pod.onBounceHit : pod.onInertHit);
 
-        if (pod.bounceReactBody != null) {
+        // A body that is held where it is, like one of a copy, would go on at that speed for good
+        if (pod.bounceReactBody != null && pod.bounceReactBody.bodyType == RigidbodyType2D.Dynamic) {
             var velocity = bounce ? pod.bounceReactVelocity : pod.hitReactVelocity;
             velocity.x *= direction;
             pod.bounceReactBody.linearVelocity = velocity;
@@ -334,8 +375,8 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Hook for a pod's frame, which has a pod shown shut for a strike of the partner show opening again once as long
-    /// has gone by as it is shut in their game, counted while it runs, as the game counts its own. One struck by this
-    /// game's player since is shut for them too, and opens by itself.
+    /// has gone by as it is shut in their game, counted while it runs, as the game counts its own and opens it, also
+    /// one switched off meanwhile. One struck by this game's player since is shut for them too, and opens by itself.
     /// </summary>
     private void OnPodUpdate(Action<BouncePod> orig, BouncePod self) {
         orig(self);
@@ -355,14 +396,33 @@ internal partial class CoopHits {
         }
 
         _shownShutPods.Remove(self);
+        ShowPodOpening(self);
+    }
+
+    /// <summary>
+    /// Shows a pod opening again: its animation, and of what it sets off what only shows.
+    /// </summary>
+    private void ShowPodOpening(BouncePod pod) {
         try {
-            if (!self.isBroken && self.IsActive) {
-                self.PlayAnim(self.inertRecoverAnim, false);
-                ShowWithoutColliders(self.onRecover);
-            }
+            pod.PlayAnim(pod.inertRecoverAnim, false);
+            ShowEffects(pod.onRecover);
         } catch (Exception e) {
             LogBounceLookError(e);
         }
+    }
+
+    /// <summary>
+    /// Shows the pods shown shut for a strike of the partner opening at once, as the games part, rather than leaving
+    /// them shut-looking until their room loads again. Not those shut for this game's player, which open by themselves.
+    /// </summary>
+    private void OpenShownShutPods() {
+        foreach (var pod in _shownShutPods.Keys) {
+            if (pod != null && pod.inertTimeLeft <= 0f) {
+                ShowPodOpening(pod);
+            }
+        }
+
+        _shownShutPods.Clear();
     }
 
     /// <summary>
@@ -390,8 +450,8 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Shows a balloon struck by the partner while it is up here: its bob, sound and dust, and, if it raised them,
-    /// what it shows of that where they were across.
+    /// Shows a balloon struck by the partner while it is up here: its bob, sound and dust, and, if it raised them, what
+    /// it shows of that (see <see cref="OnlyShows"/>) where they were across.
     /// </summary>
     /// <returns>Why it was not shown, or null if it was.</returns>
     private static string? ShowBalloonStrike(BounceBalloon balloon, BounceLook look, float x) {
@@ -416,7 +476,7 @@ internal partial class CoopHits {
             return null;
         }
 
-        balloon.OnBounce.Invoke();
+        ShowEffects(balloon.OnBounce);
         if (balloon.bounceEffects != null) {
             var effects = balloon.bounceEffects.transform;
             var place = effects.position;
@@ -427,17 +487,17 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Plays what a thing sets off as it is struck or opens again, apart from what switches colliders on or off:
-    /// whether it takes a player is each game's own.
+    /// Plays of what a thing sets off as it is struck or opens again what only shows (see <see cref="OnlyShows"/>):
+    /// what else it tells is held off while it does, and then put back the way it was.
     /// </summary>
-    private static void ShowWithoutColliders(UnityEvent? look) {
+    private static void ShowEffects(UnityEvent? look) {
         if (look == null) {
             return;
         }
 
         List<(int Index, UnityEventCallState State)>? held = null;
         for (var i = 0; i < look.GetPersistentEventCount(); i++) {
-            if (look.GetPersistentTarget(i) is not Collider2D) {
+            if (OnlyShows(look.GetPersistentTarget(i))) {
                 continue;
             }
 
@@ -454,6 +514,35 @@ internal partial class CoopHits {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Whether what a pod or a balloon tells a part of as it is struck or opens again only shows: a part that plays
+    /// dust or a sound, shakes itself or bobs a platform (see <see cref="ShowingPartTypes"/>), or an object switched on
+    /// or off that only draws. Not what switches a collider, which is whether it takes a player; nor a sprite switched
+    /// off, which some swap for a part that does more; nor a state machine told something; nor an object that does
+    /// more than draw, like the part of a pod that explodes after a moment, hurts whoever is near and shuts the pod, or
+    /// a blast that shakes the screen and the pad as it plays.
+    /// </summary>
+    private static bool OnlyShows(Object? target) {
+        return target switch {
+            GameObject gameObject => IsDrawnOnly(gameObject),
+            Component component => Array.Exists(ShowingPartTypes, type => type.IsInstanceOfType(component)),
+            _ => false
+        };
+    }
+
+    /// <summary>
+    /// Whether everything on an object and under it only draws it (see <see cref="DrawingTypes"/>).
+    /// </summary>
+    private static bool IsDrawnOnly(GameObject gameObject) {
+        foreach (var component in gameObject.GetComponentsInChildren<Component>(true)) {
+            if (component == null || !Array.Exists(DrawingTypes, type => type.IsInstanceOfType(component))) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>

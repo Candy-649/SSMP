@@ -493,7 +493,7 @@ internal partial class CoopHits {
 
         _hooks.Clear();
         DeregisterThrownHooks();
-        _shownShutPods.Clear();
+        OpenShownShutPods();
         _isReplaying = false;
         _hitContext = HitContext.None;
         ReplayedRanges.Clear();
