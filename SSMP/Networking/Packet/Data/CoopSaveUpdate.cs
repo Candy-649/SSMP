@@ -835,5 +835,24 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    MachinePart
+    MachinePart,
+
+    /// <summary>
+    /// The sender is going into a room of the maze, as their load begins, or left the maze (see
+    /// CoopSave.RoomLayouts). <see cref="CoopSaveUpdate.Scene"/> is the room, or empty for none, and
+    /// <see cref="CoopSaveUpdate.Part"/> is 0 when nobody was known to be in it or on the way into it, 1 otherwise.
+    /// Appended at the end, like every kind.
+    /// </summary>
+    RoomLayoutPlace,
+
+    /// <summary>
+    /// How a room of the maze is laid out, as the game of the player who came into it first wrote it down (see
+    /// CoopSave.RoomLayouts). <see cref="CoopSaveUpdate.Scene"/> is the room and
+    /// <see cref="CoopSaveUpdate.PartnerKey"/> the save key of that player. <see cref="CoopSaveUpdate.Names"/> holds
+    /// what rolled for the room, and <see cref="CoopSaveUpdate.Amounts"/> how many results each has, followed by them;
+    /// <see cref="CoopSaveUpdate.Records"/> holds the path of each door, the scene it leads to and the door it comes in
+    /// at there, and <see cref="CoopSaveUpdate.Values"/> 1 for each that leads on through the maze. Appended at the
+    /// end, like every kind.
+    /// </summary>
+    RoomLayout
 }

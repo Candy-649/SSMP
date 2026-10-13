@@ -513,6 +513,7 @@ internal partial class CoopSave {
         RememberStoryFlags();
         SendPendingWishTurnIns(members);
         AskAboutWishesRead(members);
+        TellRoomLayoutAfterCheck(members);
 
         foreach (var member in members) {
             if (FindMarkerMember(marker, member) is { } entry) {

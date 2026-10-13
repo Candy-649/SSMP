@@ -302,6 +302,7 @@ internal partial class CoopSave {
         RegisterSlidePlatformHooks();
         RegisterPodSequenceHooks();
         RegisterShownPartHooks();
+        RegisterRoomLayoutHooks();
         ToldParts.RegisterHooks();
         ToldParts.IsFollowedInEveryState = machine =>
             FindMachineKind(machine.gameObject, machine.FsmName) is { IsDirector: true };
@@ -488,6 +489,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also while nobody else is in, so that a member who comes into the room later gets its layout
+        try {
+            UpdateRoomLayouts();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also while another member is gone, so that the members who are in keep in step with each other
         if (checkedPartner != null) {
             UpdateInteractions();
@@ -662,6 +670,7 @@ internal partial class CoopSave {
         ResetRaces();
         ResetPrisonCapture();
         ResetClothesGrab();
+        ResetRoomLayouts();
     }
 
     /// <summary>
@@ -685,6 +694,7 @@ internal partial class CoopSave {
         // First, so that none of the others throwing on the way can keep them from running. Forgetting the machines
         // only empties lists, which can't throw.
         ResetMachines();
+        _layoutPickingStates.Clear();
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
         ResetInteractions();
@@ -803,6 +813,9 @@ internal partial class CoopSave {
             ForgetTollBenchesOf(id);
             ForgetPlatesOf(id);
         }
+
+        // Also for the last of them: the rooms of the maze they were in lay themselves out anew without them
+        ForgetLayoutPlaceOf(id);
 
         // This path does not go through ResetSession, so a cocoon of theirs left standing in the room would stay for
         // good, and this player would be remembered as waiting to be pulled up by someone who is gone - which would
@@ -1064,6 +1077,12 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.MachinePart:
                 OnMachinePart(player, update);
+                break;
+            case CoopSaveUpdateKind.RoomLayoutPlace:
+                OnRoomLayoutPlace(player, update);
+                break;
+            case CoopSaveUpdateKind.RoomLayout:
+                OnRoomLayout(player, update);
                 break;
             case CoopSaveUpdateKind.PutBack:
                 OnPutBack(player, update);
