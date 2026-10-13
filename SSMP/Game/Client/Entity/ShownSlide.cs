@@ -18,6 +18,11 @@ namespace SSMP.Game.Client.Entity;
 /// before, and as soon as the frame is drawn it is put back where it is. Everything else - its state machines, its
 /// body and what it hits, what this game sends of it - has it where it is all along, so the event the partner's input
 /// played went from the copy's place as before.
+///
+/// Physics takes a body whose object was moved as moved there, and puts it where its object is at its next step. That
+/// is where the body is already for a body drawn where physics left it, but not for one drawn between the steps of
+/// physics, or one put somewhere by its body since the last step: a creature with such a body anywhere under it is not
+/// shown sliding, or stops sliding, and goes the rest of the way at once as before.
 /// </summary>
 internal static class ShownSlide {
     /// <summary>
@@ -45,6 +50,11 @@ internal static class ShownSlide {
     private const float LoggedDistance = 1f;
 
     /// <summary>
+    /// How far a body may be from its object for the two to count as in the same place.
+    /// </summary>
+    private const float SamePlace = 0.0001f;
+
+    /// <summary>
     /// The creatures shown sliding.
     /// </summary>
     private static readonly List<Slide> Slides = [];
@@ -55,9 +65,12 @@ internal static class ShownSlide {
     private static bool _registered;
 
     /// <summary>
-    /// Whether what puts the creatures back after each frame is drawn runs.
+    /// Whether what puts the creatures back after each frame is drawn runs, and the last frame it ran in or started.
     /// </summary>
     private static bool _puttingBack;
+
+    /// <inheritdoc cref="_puttingBack"/>
+    private static int _putBackFrame;
 
     /// <summary>
     /// Whether something went wrong here already and was said in the log, which is said once.
@@ -67,31 +80,37 @@ internal static class ShownSlide {
     /// <summary>
     /// A creature shown sliding to where it is.
     /// </summary>
-    private sealed class Slide(Transform target, Vector2 way, float duration) {
+    private sealed class Slide(Transform target, Rigidbody2D[] bodies, Vector2 way, float duration) {
         /// <summary>
         /// The creature.
         /// </summary>
         public readonly Transform Target = target;
 
         /// <summary>
+        /// The bodies of the creature and of everything under it, which move with it.
+        /// </summary>
+        public readonly Rigidbody2D[] Bodies = bodies;
+
+        /// <summary>
         /// From where it is to where it is shown at the start.
         /// </summary>
-        public Vector2 Way = way;
+        public readonly Vector2 Way = way;
 
         /// <summary>
         /// When it started, in the game's time.
         /// </summary>
-        public float StartedAt = Time.time;
+        public readonly float StartedAt = Time.time;
 
         /// <summary>
         /// How long it takes, in seconds.
         /// </summary>
-        public float Duration = duration;
+        public readonly float Duration = duration;
 
         /// <summary>
-        /// Where the creature is while it is moved for the frame being drawn, to be put back there; null when it isn't.
+        /// While the creature is moved for the frame being drawn: where it was before and where it was moved to, to be
+        /// put back; null when it isn't moved.
         /// </summary>
-        public Vector3? MovedFrom;
+        public (Vector3 From, Vector3 To)? Moved;
 
         /// <summary>
         /// What is left of the way, at a time: all of it at the start, none at the end, slowing in and out.
@@ -117,17 +136,20 @@ internal static class ShownSlide {
                 Slides.RemoveAt(index);
             }
 
-            // A body drawn between the steps of physics would be put where it was drawn by moving it for a frame, which
-            // physics takes as moving the body there
             var distance = way.magnitude;
-            if (distance < LeastDistance || distance > MostDistance ||
-                target.TryGetComponent<Rigidbody2D>(out var body) &&
-                body.interpolation != RigidbodyInterpolation2D.None) {
+            if (distance < LeastDistance || distance > MostDistance) {
                 return;
             }
 
+            var bodies = target.GetComponentsInChildren<Rigidbody2D>();
+            foreach (var body in bodies) {
+                if (body.interpolation != RigidbodyInterpolation2D.None) {
+                    return;
+                }
+            }
+
             var duration = Mathf.Clamp(0.1f + 0.03f * distance, LeastTime, MostTime);
-            Slides.Add(new Slide(target, way, duration));
+            Slides.Add(new Slide(target, bodies, way, duration));
             if (distance >= LoggedDistance) {
                 Logger.Info($"'{target.name}' is shown sliding {distance:0.00} units in {duration:0.00} s to {why}");
             }
@@ -137,10 +159,7 @@ internal static class ShownSlide {
                 Application.onBeforeRender += OnBeforeRender;
             }
 
-            if (!_puttingBack) {
-                _puttingBack = true;
-                MonoBehaviourUtil.Instance.StartCoroutine(PutBackAfterDrawing());
-            }
+            KeepPuttingBack();
         } catch (Exception e) {
             SayFailed(e);
         }
@@ -157,24 +176,63 @@ internal static class ShownSlide {
         try {
             // Any that were not put back after the last frame, which should not happen, are put back first, so as not
             // to be moved twice
-            PutBack();
+            if (PutBack()) {
+                Logger.Warn("Creatures shown sliding were not put back after the last frame was drawn");
+            }
 
             var time = Time.time;
             for (var i = Slides.Count - 1; i >= 0; i--) {
                 var slide = Slides[i];
-                if (slide.Target == null || time - slide.StartedAt >= slide.Duration) {
+                if (slide.Target == null || time - slide.StartedAt >= slide.Duration || !BodiesInPlace(slide)) {
                     Slides.RemoveAt(i);
                     continue;
                 }
 
                 var position = slide.Target.position;
                 var left = slide.LeftAt(time);
-                slide.MovedFrom = position;
-                slide.Target.position = new Vector3(position.x + left.x, position.y + left.y, position.z);
+                var shown = new Vector3(position.x + left.x, position.y + left.y, position.z);
+                slide.Target.position = shown;
+                slide.Moved = (position, shown);
+            }
+
+            if (Slides.Count > 0) {
+                KeepPuttingBack();
             }
         } catch (Exception e) {
             SayFailed(e);
         }
+    }
+
+    /// <summary>
+    /// Whether each body that moves with a creature is where its object is, so that moving the object for the frame
+    /// and back leaves the body where it is (see <see cref="ShownSlide"/>).
+    /// </summary>
+    private static bool BodiesInPlace(Slide slide) {
+        foreach (var body in slide.Bodies) {
+            if (body == null || !body.simulated || !body.gameObject.activeInHierarchy) {
+                continue;
+            }
+
+            if (body.interpolation != RigidbodyInterpolation2D.None ||
+                ((Vector2) body.transform.position - body.position).sqrMagnitude > SamePlace * SamePlace) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Starts what puts the creatures back after each frame is drawn, unless it runs: it ran in the last frame or
+    /// this one.
+    /// </summary>
+    private static void KeepPuttingBack() {
+        if (_puttingBack && Time.frameCount - _putBackFrame <= 1) {
+            return;
+        }
+
+        _putBackFrame = Time.frameCount;
+        _puttingBack = MonoBehaviourUtil.Instance.StartCoroutine(PutBackAfterDrawing()) != null;
     }
 
     /// <summary>
@@ -186,6 +244,7 @@ internal static class ShownSlide {
             while (Slides.Count > 0) {
                 yield return endOfFrame;
 
+                _putBackFrame = Time.frameCount;
                 PutBack();
             }
         } finally {
@@ -194,19 +253,29 @@ internal static class ShownSlide {
     }
 
     /// <summary>
-    /// Puts each creature moved for the frame back where it is.
+    /// Puts each creature moved for the frame back where it is: where it was before, or, should something have moved
+    /// it since, by the way it was moved.
     /// </summary>
-    private static void PutBack() {
+    /// <returns>Whether any creature was moved.</returns>
+    private static bool PutBack() {
+        var any = false;
         foreach (var slide in Slides) {
-            if (slide.MovedFrom is not { } position) {
+            if (slide.Moved is not { } moved) {
                 continue;
             }
 
-            slide.MovedFrom = null;
-            if (slide.Target != null) {
-                slide.Target.position = position;
+            var (from, to) = moved;
+            any = true;
+            slide.Moved = null;
+            if (slide.Target == null) {
+                continue;
             }
+
+            var position = slide.Target.position;
+            slide.Target.position = position == to ? from : position - (to - from);
         }
+
+        return any;
     }
 
     /// <summary>
