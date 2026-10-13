@@ -180,6 +180,16 @@ internal sealed class CoopHostSyncLock {
 /// </summary>
 internal sealed class CoopHostSyncReport {
     /// <summary>
+    /// <see cref="Refusal"/> for a save in the mode in which a death ends it (Steel Soul) whose host's save is not.
+    /// </summary>
+    public const string SteelSoulWithNormalHost = "steel soul save, normal host";
+
+    /// <summary>
+    /// <see cref="Refusal"/> where the save or the host's is in that mode and a death already ended it.
+    /// </summary>
+    public const string SteelSoulEnded = "steel soul run ended";
+
+    /// <summary>
     /// Why the saves can't be merged, or null.
     /// </summary>
     public string? Refusal { get; set; }
@@ -366,8 +376,18 @@ internal static class CoopHostSync {
         }
 
         public JObject? Run(string version, int revisionBreak) {
-            if (Int(_host, "permadeathMode") != Int(_client, "permadeathMode")) {
-                _report.Refusal = "game mode";
+            // PlayerData.permadeathMode: 0 normal, 1 a death ends the save (Steel Soul), 2 a death ended it. A normal
+            // save may follow the world of a Steel Soul host and stays normal itself (the mode is never merged); a
+            // Steel Soul save follows only a Steel Soul world, and a run that a death ended follows none
+            var hostMode = Int(_host, "permadeathMode");
+            var clientMode = Int(_client, "permadeathMode");
+            if (hostMode == 2 || clientMode == 2) {
+                _report.Refusal = CoopHostSyncReport.SteelSoulEnded;
+                return null;
+            }
+
+            if (hostMode != clientMode && !(clientMode == 0 && hostMode == 1)) {
+                _report.Refusal = CoopHostSyncReport.SteelSoulWithNormalHost;
                 return null;
             }
 

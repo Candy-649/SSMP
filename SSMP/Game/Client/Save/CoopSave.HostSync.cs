@@ -616,21 +616,36 @@ internal partial class CoopSave {
         var merged = CoopHostSync.Merge(hostSave, client, data, out var report, version, revisionBreak);
         if (merged == null) {
             Logger.Info($"Save slot {slot} can't be aligned with the host's save: {report.Refusal}");
-            ShowMessage(Lang.Pick(
-                "Your save and the host's are of different game modes, so they can't be played together.",
-                "你的存档和房主的存档游戏模式不一样，不能一起玩。"
-            ));
+            ShowMessage(report.Refusal == CoopHostSyncReport.SteelSoulEnded
+                ? Lang.Pick(
+                    "A Steel Soul save that a death has ended can't be played together.",
+                    "钢魂存档已经因为死亡结束了，不能一起玩。"
+                )
+                : Lang.Pick(
+                    "Your save is a Steel Soul save, which a death ends, and the host's isn't, so it can't follow " +
+                    "the host's world. Choose a normal save, or have the host play a Steel Soul save.",
+                    "你的存档是钢魂存档（死一次存档就没了），房主的不是，所以不能跟着房主的世界走。" +
+                    "换一个普通存档，或者让房主也用钢魂存档。"
+                ));
             return;
         }
 
         var marker = GetMarker(slot);
         var aheadBosses = report.AheadBosses.Count;
         var firstTime = hasSave && marker == null;
-        var permadeath = !hasSave && (int?) hostSave["playerData"]?["permadeathMode"] == PermadeathMode;
-        if (firstTime || permadeath || aheadBosses > 0 || report.AheadAct) {
+        var hostSteelSoul = (int?) hostSave["playerData"]?["permadeathMode"] == PermadeathMode;
+        var permadeath = !hasSave && hostSteelSoul;
+
+        // A normal save that follows a Steel Soul host's world stays normal (the mode is never merged), which it hears
+        // with the rest of what becoming a co-op save means
+        var followsSteelSoul = firstTime && hostSteelSoul &&
+                               (int?) client["playerData"]?["permadeathMode"] != PermadeathMode;
+        if (firstTime || permadeath || followsSteelSoul || aheadBosses > 0 || report.AheadAct) {
             // A second choice goes ahead when the warning would say the same again. One that would say something
             // else, like after the host played on or another host came, is shown first.
-            var warning = GetJoinWarning(hostName, firstTime, permadeath, aheadBosses, report.AheadAct);
+            var warning = GetJoinWarning(
+                hostName, firstTime, permadeath, followsSteelSoul, aheadBosses, report.AheadAct
+            );
             if (slot != _warnedSlot || warning != _warnedText) {
                 _warnedSlot = slot;
                 _warnedText = warning;
@@ -682,13 +697,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// What the local player hears before their save is aligned with the host's for the first time, before a new save
-    /// starts in the mode in which a death ends it, or before it undoes beaten bosses or an act.
+    /// What the local player hears before their save is aligned with the host's for the first time (a normal save
+    /// following a host's save in the mode in which a death ends it hears what that means), before a new save starts in
+    /// that mode, or before it undoes beaten bosses or an act.
     /// </summary>
     private static string GetJoinWarning(
         string hostName,
         bool firstTime,
         bool permadeath,
+        bool followsSteelSoul,
         int aheadBosses,
         bool aheadAct
     ) {
@@ -709,6 +726,16 @@ internal partial class CoopSave {
             parts.Add(Lang.Pick(
                 $"{hostName} plays the mode in which a death ends the save, so this new save is in that mode too.",
                 $"{hostName} 玩的是死一次存档就没了的模式，这个新存档也会是这个模式。"
+            ));
+        }
+
+        if (followsSteelSoul) {
+            parts.Add(Lang.Pick(
+                $"{hostName} plays a Steel Soul save, which a death ends. Yours stays a normal save: when you die, " +
+                $"you come back as usual. When {hostName} dies, their save is over and you can't go on in this " +
+                "world together; your own save stays.",
+                $"{hostName} 玩的是钢魂存档（死一次存档就没了）。你的存档还是普通存档，死了照常能回来。" +
+                $"但 {hostName} 死了的话，房主的存档就没了，你们不能再在这个世界一起玩；你自己的存档还在。"
             ));
         }
 
