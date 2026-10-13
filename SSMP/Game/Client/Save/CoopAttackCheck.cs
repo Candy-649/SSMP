@@ -25,13 +25,15 @@ namespace SSMP.Game.Client.Save;
 /// log what came up in one game only, or in another place in each. Nothing of the game is changed.
 ///
 /// A thing that can hurt a player is a DamageHero, which the game keeps a list of (DamageHero._damageHeroes); it comes
-/// up when it, its object and its collider are all switched on, after being off for more than a moment. Each game knows
-/// it by the same name: under the key of the thrown thing it is a part of (see <see cref="ThrownThings"/>), under the
-/// path of the room's own object of the creature it is a part of (a scene client shows a copy of it, whose parts are
-/// named the same), under what was spawned, or by its path in the room. The same thing comes up in two games a little
-/// apart, as a copy follows the game that runs the room by the time a word takes, and a game stands still for a moment
-/// when its player is hit; so the two count as one when they came up within a moment of each other, by the clocks of
-/// the two games set side by side with the words between them.
+/// up when it, its object and its collider are all switched on, after being off for more than a moment. Each thing has
+/// two names, both the same in every game: one that tells it apart, which pairs it with its twin in another game - the
+/// key of the thrown thing it is a part of (see <see cref="ThrownThings"/>), the ID of the creature it is a part of (a
+/// scene client shows a copy of it, whose parts are named the same), what was spawned, or its path in the room - and
+/// one for the log, which is the same for every throw or creature of a kind, so that the log counts them under one
+/// name rather than writing each down. The same thing comes up in two games a little apart, as a copy follows the game
+/// that runs the room by the time a word takes, and a game stands still for a moment when its player is hit; so the
+/// two count as one when they came up within a moment of each other, by the clocks of the two games set side by side
+/// with the words between them.
 /// </summary>
 internal class CoopAttackCheck {
     /// <summary>
@@ -51,15 +53,15 @@ internal class CoopAttackCheck {
     private const int MaxPerBatch = 100;
 
     /// <summary>
-    /// How far apart in time the same thing may come up in two games, in seconds, besides the time a word takes there
-    /// and back.
+    /// How far apart in time the same thing may come up in two games, in seconds, besides the time words take there
+    /// and back between the two games.
     /// </summary>
     private const float BaseWindow = 0.6f;
 
     /// <summary>
-    /// The most that the time a word takes there and back widens <see cref="BaseWindow"/> by, in seconds.
+    /// The most that the time words take there and back widens <see cref="BaseWindow"/> by, in seconds.
     /// </summary>
-    private const float MaxRoundTrip = 1f;
+    private const float MaxRoundTrip = 1.5f;
 
     /// <summary>
     /// How far apart the same thing may come up in two games, in units of the room. A copy of a creature that moves
@@ -68,7 +70,9 @@ internal class CoopAttackCheck {
     private const float PlaceTolerance = 3f;
 
     /// <summary>
-    /// How long a thing has to be off before it comes up again, in seconds, so that one that flickers counts once.
+    /// How long a thing of the room has to be off before it comes up again, in seconds, so that one that flickers
+    /// counts once. A spawned one comes up each time: which of the spawned objects of a pool a game takes again is its
+    /// own, so one game could take back one that just went off where the other takes another.
     /// </summary>
     private const float FlickerTime = 0.15f;
 
@@ -87,6 +91,11 @@ internal class CoopAttackCheck {
     /// which counts: the one that took the least time on the way.
     /// </summary>
     private const int ClockReadings = 30;
+
+    /// <summary>
+    /// How many of the last pairs tell how far behind the things of a member's game usually come up.
+    /// </summary>
+    private const int LagReadings = 15;
 
     /// <summary>
     /// How long one look at everything that can hurt may take before it is written down, in milliseconds.
@@ -134,6 +143,11 @@ internal class CoopAttackCheck {
     private readonly List<DamageHero> _gone = [];
 
     /// <summary>
+    /// The things that came up in a look, which are written down after it.
+    /// </summary>
+    private readonly List<DamageHero> _cameUp = [];
+
+    /// <summary>
     /// When the current room was entered.
     /// </summary>
     private float _sceneEnteredAt;
@@ -152,6 +166,17 @@ internal class CoopAttackCheck {
     /// How many things came up here in the room.
     /// </summary>
     private int _visitCount;
+
+    /// <summary>
+    /// How many things came up here in the room that the words could not carry.
+    /// </summary>
+    private int _visitDropped;
+
+    /// <summary>
+    /// The times of this game's words that could not carry all that came up here, by its clock: what came up in a
+    /// member's game then is not judged, since what was left out here may have been it.
+    /// </summary>
+    private readonly List<(float From, float To)> _ownGaps = [];
 
     /// <summary>
     /// Whether a look took long, which is written down once a visit.
@@ -194,6 +219,12 @@ internal class CoopAttackCheck {
     private readonly Dictionary<ushort, HashSet<uint>> _namesSent = new();
 
     /// <summary>
+    /// What is known of the game of each member beyond a visit, by their ID: the text of its names and how its clock
+    /// stands to this one's.
+    /// </summary>
+    private readonly Dictionary<ushort, MemberGame> _memberGames = new();
+
+    /// <summary>
     /// What each member's game said came up in the room, by their ID.
     /// </summary>
     private readonly Dictionary<ushort, Partner> _partners = new();
@@ -202,17 +233,6 @@ internal class CoopAttackCheck {
     /// The room that each member's game watched while this one watched another, by their ID.
     /// </summary>
     private readonly Dictionary<ushort, string> _otherScenes = new();
-
-    /// <summary>
-    /// How many things came up here in the room that the words could not carry.
-    /// </summary>
-    private int _visitDropped;
-
-    /// <summary>
-    /// The times of this game's words that could not carry all that came up here, by its clock: what came up in a
-    /// member's game then is not judged, since what was left out here may have been it.
-    /// </summary>
-    private readonly List<(float From, float To)> _ownGaps = [];
 
     /// <summary>
     /// The members whose players are in the room of the local player, found each frame.
@@ -278,6 +298,7 @@ internal class CoopAttackCheck {
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
         EndVisit();
         ForgetRoom();
+        _memberGames.Clear();
     }
 
     /// <summary>
@@ -384,14 +405,18 @@ internal class CoopAttackCheck {
         _dropped = 0;
 
         _watches.Clear();
+        var on = 0;
         foreach (var damager in DamageHero._damageHeroes.Values) {
             if (damager != null) {
-                _watches[damager] = new Watch { On = IsOn(damager) };
+                var watch = new Watch { On = IsOn(damager) };
+                _watches[damager] = watch;
+                on += watch.On ? 1 : 0;
             }
         }
 
         Logger.Info(
-            $"[Attacks] Watching {_watches.Count} things that can hurt in {_visitScene} with the members in it"
+            $"[Attacks] Watching {_visitScene} with the members in it: {_watches.Count} things that can hurt are " +
+            $"known to the game, kept ones of other rooms too, {on} of them on now"
         );
     }
 
@@ -429,14 +454,27 @@ internal class CoopAttackCheck {
                 _watches[damager] = watch;
             }
 
-            if (on && !watch.On && (watch.OffAt < 0f || now - watch.OffAt >= FlickerTime)) {
-                ComeUp(damager, now);
+            if (on && !watch.On &&
+                (watch.OffAt < 0f || now - watch.OffAt >= FlickerTime || IsSpawned(damager, watch))) {
+                _cameUp.Add(damager);
             } else if (!on && watch.On) {
                 watch.OffAt = now;
             }
 
             watch.On = on;
         }
+
+        // After the look, so that nothing called for one can change the list of the game while it is being read, and
+        // one that fails to be written down is on by now and does not come up again each frame
+        foreach (var damager in _cameUp) {
+            try {
+                ComeUp(damager, now);
+            } catch (Exception e) {
+                Fail($"Could not write down a thing that came up:\n{e}");
+            }
+        }
+
+        _cameUp.Clear();
 
         // The game takes destroyed ones off its list itself; these are the ones it left
         foreach (var damager in _gone) {
@@ -459,6 +497,23 @@ internal class CoopAttackCheck {
     }
 
     /// <summary>
+    /// Whether a thing that can hurt is a part of something spawned or thrown, found once for each.
+    /// </summary>
+    private static bool IsSpawned(DamageHero damager, Watch watch) {
+        if (watch.Spawned is { } spawned) {
+            return spawned;
+        }
+
+        var found = ThrownThings.IsThrown(damager.gameObject);
+        for (var current = damager.transform; !found && current != null; current = current.parent) {
+            found = current.name.Contains("(Clone)");
+        }
+
+        watch.Spawned = found;
+        return found;
+    }
+
+    /// <summary>
     /// Forgets the watches of things that were destroyed.
     /// </summary>
     private void ForgetDestroyedWatches() {
@@ -473,7 +528,7 @@ internal class CoopAttackCheck {
     /// Writes down a thing that came up, unless it is a part of a player.
     /// </summary>
     private void ComeUp(DamageHero damager, float now) {
-        if (IsOfAPlayer(damager.transform)) {
+        if (damager == null || IsOfAPlayer(damager.transform)) {
             return;
         }
 
@@ -483,9 +538,9 @@ internal class CoopAttackCheck {
             return;
         }
 
-        var key = KeyOf(damager.gameObject, out var what);
+        var (pairKey, name, what) = NamesOf(damager.gameObject);
         var appearance = new Appearance(
-            key, Hash(key), now, damager.transform.position, Describe(damager, what)
+            Hash(pairKey), name, Hash(name), now, damager.transform.position, Describe(damager, what)
         );
         _here.Add(appearance);
         _unsent.Add(appearance);
@@ -512,20 +567,32 @@ internal class CoopAttackCheck {
     }
 
     /// <summary>
-    /// The name of a thing that can hurt, which is the same in every game, and what it is a part of.
+    /// The names of a thing that can hurt, each the same in every game: the one that tells it apart, the one it is
+    /// counted under in the log, and what it is a part of.
     /// </summary>
-    private static string KeyOf(GameObject gameObject, out string what) {
+    private static (string Pair, string Name, string What) NamesOf(GameObject gameObject) {
+        // Each throw has a key of its own, which tells it apart; in the log the throws of a kind count as one
         if (ThrownThings.TryGetMark(gameObject, out var mark)) {
-            what = "a part of a thing that a creature threw";
-            return $"thrown {mark.Key}/{PartsComponent.GetPath(mark.transform, gameObject.transform)}";
+            var part = PartsComponent.GetPath(mark.transform, gameObject.transform);
+            return (
+                $"thrown {mark.Key}/{part}",
+                $"thrown {WithoutClone(mark.gameObject.name)}/{part}",
+                $"a part of a thing that a creature threw, {mark.Key}"
+            );
         }
 
-        if (EntityProcessor.TryGetEntityObject(gameObject, out var root, out var roomObject)) {
-            what = ReferenceEquals(root, roomObject)
-                ? "a part of a creature run in this game"
-                : "a part of the shown copy of a creature";
-            return $"creature {ScenePath.Get(roomObject.transform)}|" +
-                   PartsComponent.GetPath(root.transform, gameObject.transform);
+        // A creature by its ID, which is the same in every game wherever each game keeps the creature, unlike the path
+        // of a summoned one; in the log the creatures of a kind count as one
+        if (EntityProcessor.TryGetEntityObject(gameObject, out var id, out var root, out var roomObject)) {
+            var part = PartsComponent.GetPath(root.transform, gameObject.transform);
+            var whose = ReferenceEquals(root, roomObject)
+                ? "a creature run in this game"
+                : "the shown copy of a creature";
+            return (
+                $"creature #{id}|{part}",
+                $"creature {WithoutClone(roomObject.name)}|{part}",
+                $"a part of {whose}, #{id} at {ScenePath.Get(roomObject.transform)}"
+            );
         }
 
         // The outermost spawned object above it, whose name is the same in every game, unlike where it is kept
@@ -537,13 +604,13 @@ internal class CoopAttackCheck {
         }
 
         if (spawned != null) {
-            what = "a part of something spawned";
-            return $"spawned {WithoutClone(spawned.name)}/" +
-                   WithoutClone(PartsComponent.GetPath(spawned, gameObject.transform));
+            var name = $"spawned {WithoutClone(spawned.name)}/" +
+                       WithoutClone(PartsComponent.GetPath(spawned, gameObject.transform));
+            return (name, name, "a part of something spawned");
         }
 
-        what = "a part of the room";
-        return $"room {gameObject.scene.name}|{ScenePath.Get(gameObject.transform)}";
+        var path = $"room {gameObject.scene.name}|{ScenePath.Get(gameObject.transform)}";
+        return (path, path, "a part of the room");
     }
 
     /// <summary>
@@ -599,7 +666,7 @@ internal class CoopAttackCheck {
 
     /// <summary>
     /// Sends the members in the room what came up since the last word, with the text of each name the member did not
-    /// get yet. A word goes also when nothing came up, which tells the members that nothing did.
+    /// get yet in this visit. A word goes also when nothing came up, which tells the members that nothing did.
     /// </summary>
     private void SendBatch(float now, List<ushort> members) {
         foreach (var id in members) {
@@ -615,23 +682,25 @@ internal class CoopAttackCheck {
             writer.Write(_batchStart);
             writer.Write(now);
             writer.Write((ushort) System.Math.Min(_dropped, ushort.MaxValue));
+            writer.Write((ushort) Mathf.Clamp(_netClient.UpdateManager.AverageRtt, 0, ushort.MaxValue));
 
             var names = new List<Appearance>();
             foreach (var appearance in _unsent) {
-                if (sent.Add(appearance.KeyHash)) {
+                if (sent.Add(appearance.NameHash)) {
                     names.Add(appearance);
                 }
             }
 
             writer.Write((ushort) names.Count);
             foreach (var appearance in names) {
-                writer.Write(appearance.KeyHash);
-                writer.Write(appearance.Key);
+                writer.Write(appearance.NameHash);
+                writer.Write(appearance.Name);
             }
 
             writer.Write((ushort) _unsent.Count);
             foreach (var appearance in _unsent) {
-                writer.Write(appearance.KeyHash);
+                writer.Write(appearance.PairHash);
+                writer.Write(appearance.NameHash);
                 writer.Write((ushort) Mathf.Clamp((appearance.Time - _batchStart) * 1000f, 0f, ushort.MaxValue));
                 writer.Write(ToShort(appearance.Place.x));
                 writer.Write(ToShort(appearance.Place.y));
@@ -663,10 +732,12 @@ internal class CoopAttackCheck {
     }
 
     /// <summary>
-    /// Takes what came up in the game of a member in the same room.
+    /// Takes what came up in the game of a member. The text of its names and the reading of its clock are kept also
+    /// while this game does not watch the same room: a member already in a room sends its first word before the game of
+    /// a player who comes in starts to watch, and that word carries the names of what was going on there.
     /// </summary>
     public void OnAttacks(CoopCheckUpdate update) {
-        if (_visitScene == null || !_getMembers().Contains(update.PlayerId)) {
+        if (!_getMembers().Contains(update.PlayerId)) {
             return;
         }
 
@@ -678,14 +749,39 @@ internal class CoopAttackCheck {
             var start = reader.ReadSingle();
             var sentAt = reader.ReadSingle();
             var dropped = reader.ReadUInt16();
+            var roundTrip = reader.ReadUInt16();
+
+            if (!_memberGames.TryGetValue(update.PlayerId, out var game) || game.RunId != runId) {
+                game = new MemberGame(runId);
+                _memberGames[update.PlayerId] = game;
+                _partners.Remove(update.PlayerId);
+            }
+
+            game.RoundTrip = roundTrip;
+            game.ClockReadings.Enqueue(Time.unscaledTime - sentAt);
+            if (game.ClockReadings.Count > ClockReadings) {
+                game.ClockReadings.Dequeue();
+            }
+
+            game.Offset = game.ClockReadings.Min();
+
+            var names = reader.ReadUInt16();
+            for (var i = 0; i < names; i++) {
+                var hash = reader.ReadUInt32();
+                game.Names[hash] = reader.ReadString();
+            }
+
+            if (_visitScene == null) {
+                return;
+            }
 
             if (scene != _visitScene) {
                 _otherScenes[update.PlayerId] = scene;
                 return;
             }
 
-            if (!_partners.TryGetValue(update.PlayerId, out var partner) || partner.RunId != runId) {
-                partner = new Partner(runId, start);
+            if (!_partners.TryGetValue(update.PlayerId, out var partner)) {
+                partner = new Partner(game, start);
                 _partners[update.PlayerId] = partner;
             }
 
@@ -693,20 +789,13 @@ internal class CoopAttackCheck {
                 return;
             }
 
-            partner.Batches++;
-            partner.ClockReadings.Enqueue(Time.unscaledTime - sentAt);
-            if (partner.ClockReadings.Count > ClockReadings) {
-                partner.ClockReadings.Dequeue();
-            }
-
-            partner.Offset = partner.ClockReadings.Min();
-
-            // Each word starts where the one before ended, so one that starts later followed a time that the member's
-            // game did not watch the room, like while its player was away from it with others still here
-            if (partner.Batches > 1 && start > partner.CoveredUntil + BatchInterval / 2f) {
+            // Each word of a visit starts where the one before ended, so one that starts later followed a time that the
+            // member's game did not watch the room, or watched it and threw away what it had not sent yet as it stopped
+            if (partner.Batches > 0 && start > partner.CoveredUntil + 0.001f) {
                 partner.Gaps.Add((partner.CoveredUntil, start));
             }
 
+            partner.Batches++;
             partner.Start = System.Math.Min(partner.Start, start);
             partner.CoveredUntil = System.Math.Max(partner.CoveredUntil, sentAt);
             if (dropped > 0) {
@@ -714,18 +803,13 @@ internal class CoopAttackCheck {
                 partner.Dropped += dropped;
             }
 
-            var names = reader.ReadUInt16();
-            for (var i = 0; i < names; i++) {
-                var hash = reader.ReadUInt32();
-                partner.Names[hash] = reader.ReadString();
-            }
-
             var count = reader.ReadUInt16();
             for (var i = 0; i < count; i++) {
-                var hash = reader.ReadUInt32();
+                var pairHash = reader.ReadUInt32();
+                var nameHash = reader.ReadUInt32();
                 var time = start + reader.ReadUInt16() / 1000f;
                 var place = new Vector2(FromShort(reader.ReadInt16()), FromShort(reader.ReadInt16()));
-                partner.Theirs.Add(new TheirAppearance(hash, time, place));
+                partner.Theirs.Add(new TheirAppearance(pairHash, nameHash, time, place));
                 partner.Count++;
             }
         } catch (Exception e) {
@@ -752,10 +836,13 @@ internal class CoopAttackCheck {
     #region Comparing
 
     /// <summary>
-    /// How far apart in time the same thing may come up in two games now, in seconds.
+    /// How far apart in time the same thing may come up in this game and a member's, in seconds: words go through the
+    /// server, so the time they take there and back between the two games is what each game takes to the server and
+    /// back, which is nothing for the game that runs it.
     /// </summary>
-    private float Window() {
-        return BaseWindow + Mathf.Min(_netClient.UpdateManager.AverageRtt / 1000f, MaxRoundTrip);
+    private float WindowWith(Partner partner) {
+        var roundTrip = (_netClient.UpdateManager.AverageRtt + partner.Game.RoundTrip) / 1000f;
+        return BaseWindow + Mathf.Min(roundTrip, MaxRoundTrip);
     }
 
     /// <summary>
@@ -764,16 +851,15 @@ internal class CoopAttackCheck {
     /// have it is written to the log.
     /// </summary>
     private void Judge(float now) {
-        var window = Window();
         foreach (var pair in _partners) {
             var partner = pair.Value;
             if (partner.Batches == 0) {
                 continue;
             }
 
-            Match(pair.Key, partner, window);
+            var window = WindowWith(partner);
             JudgeTheirs(pair.Key, partner, now, window);
-            JudgeOurs(pair.Key, partner, window);
+            JudgeOurs(pair.Key, partner, now, window);
             partner.Theirs.RemoveAll(theirs => theirs.Done && theirs.Time + partner.Offset < now - KeepTime);
         }
 
@@ -781,39 +867,54 @@ internal class CoopAttackCheck {
     }
 
     /// <summary>
-    /// Pairs each thing that came up in the game of a member with the first one of the same name that came up here
-    /// within a moment of it, and writes down a pair that came up far apart.
+    /// Pairs each thing that came up in the game of a member, once all that can pair with it here came up, with the one
+    /// of the same name here that came up nearest to when the member's things usually come up here, and writes down a
+    /// pair that came up far apart; one that nothing here pairs with came up only there. One from before this game
+    /// watched the room, or from a time this game's word could not carry all of, is left alone.
     /// </summary>
-    private void Match(ushort id, Partner partner, float window) {
+    private void JudgeTheirs(ushort id, Partner partner, float now, float window) {
         foreach (var theirs in partner.Theirs) {
             if (theirs.Done) {
                 continue;
             }
 
             var at = theirs.Time + partner.Offset;
+            if (now < at + window + JudgeInterval) {
+                continue;
+            }
+
+            theirs.Done = true;
+            var expected = at + partner.Lag;
             Appearance? found = null;
+            var nearest = float.MaxValue;
             for (var i = FirstHereFrom(at - window); i < _here.Count; i++) {
                 var ours = _here[i];
                 if (ours.Time > at + window) {
                     break;
                 }
 
-                if (ours.KeyHash == theirs.KeyHash && !ours.IsDoneFor(id)) {
+                if (ours.PairHash == theirs.PairHash && !ours.IsDoneFor(id) &&
+                    System.Math.Abs(ours.Time - expected) < nearest) {
                     found = ours;
-                    break;
+                    nearest = System.Math.Abs(ours.Time - expected);
                 }
             }
 
-            if (found == null) {
+            if (found != null) {
+                found.SetDoneFor(id);
+                partner.Matched++;
+                partner.NoteLag(found.Time - at);
+                var distance = Vector2.Distance(found.Place, theirs.Place);
+                if (distance > PlaceTolerance) {
+                    OnMoved(id, partner, found, theirs, distance, found.Time - at);
+                }
+
                 continue;
             }
 
-            theirs.Done = true;
-            found.SetDoneFor(id);
-            partner.Matched++;
-            var distance = Vector2.Distance(found.Place, theirs.Place);
-            if (distance > PlaceTolerance) {
-                OnMoved(id, partner, found, theirs, distance, found.Time - at);
+            if (at >= _visitStart + window && !IsInGap(_ownGaps, at, window) &&
+                !(_dropped > 0 && at >= _batchStart - window)) {
+                OnOnlyThere(id, partner, theirs, at);
             }
         }
     }
@@ -837,41 +938,18 @@ internal class CoopAttackCheck {
     }
 
     /// <summary>
-    /// Writes down each thing that came up in the game of a member and not here, once nothing here can pair with it any
-    /// more. One from before this game watched the room, or from a time this game's word could not carry all of, is
-    /// left alone.
-    /// </summary>
-    private void JudgeTheirs(ushort id, Partner partner, float now, float window) {
-        foreach (var theirs in partner.Theirs) {
-            if (theirs.Done) {
-                continue;
-            }
-
-            var at = theirs.Time + partner.Offset;
-            if (now < at + window + JudgeInterval) {
-                continue;
-            }
-
-            theirs.Done = true;
-            if (at >= _visitStart + window && !IsInGap(_ownGaps, at, window)) {
-                OnOnlyThere(id, partner, theirs, at);
-            }
-        }
-    }
-
-    /// <summary>
     /// Writes down each thing that came up here and not in the game of a member, once the member's words cover the
-    /// time it could have come up there. One from before the member's game watched the room, or from a time its word
-    /// could not carry all of, is left alone.
+    /// time it could have come up there and everything of theirs that could pair with it was paired. One from before
+    /// the member's game watched the room, or from a time its words did not cover in full, is left alone.
     /// </summary>
-    private void JudgeOurs(ushort id, Partner partner, float window) {
+    private void JudgeOurs(ushort id, Partner partner, float now, float window) {
         var covered = partner.CoveredUntil + partner.Offset;
         foreach (var ours in _here) {
             if (ours.IsDoneFor(id)) {
                 continue;
             }
 
-            if (covered < ours.Time + window) {
+            if (covered < ours.Time + window || now < ours.Time + 2f * window + JudgeInterval) {
                 break;
             }
 
@@ -904,17 +982,20 @@ internal class CoopAttackCheck {
     /// Writes down a thing that came up here and not in the game of a member: in full the first time in the visit.
     /// </summary>
     private void OnOnlyHere(ushort id, Partner partner, Appearance ours) {
-        if (Count(partner.OnlyHere, ours.Key) > 1) {
+        if (Count(partner.OnlyHere, ours.Name) > 1) {
             return;
         }
 
         _builder.Clear();
         _builder.Append("[Attacks] Only in this game in ").Append(_visitScene).Append(", not in ").Append(NameOf(id))
-            .Append("'s: ").Append(ours.Key)
+            .Append("'s: ").Append(ours.Name)
             .AppendLine().Append("    came up at ").Append(Where(ours.Place)).Append(", ")
             .Append(Seconds(ours.Time - _visitStart)).Append(" into the visit")
             .AppendLine().Append("    ").Append(ours.Context);
-        AppendNearest(partner.Theirs, ours.KeyHash, ours.Time - partner.Offset, ours.Place, "in the partner's game");
+        AppendNearest(
+            partner.Theirs, ours.NameHash, ours.Time - partner.Offset - partner.Lag, ours.Place,
+            $"in {NameOf(id)}'s game"
+        );
         AppendRunner();
         Logger.Info(_builder.ToString());
     }
@@ -923,7 +1004,7 @@ internal class CoopAttackCheck {
     /// Writes down a thing that came up in the game of a member and not here: in full the first time in the visit.
     /// </summary>
     private void OnOnlyThere(ushort id, Partner partner, TheirAppearance theirs, float at) {
-        var name = partner.Names.TryGetValue(theirs.KeyHash, out var text) ? text : $"#{theirs.KeyHash:X8}";
+        var name = partner.Game.Names.TryGetValue(theirs.NameHash, out var text) ? text : $"#{theirs.NameHash:X8}";
         if (Count(partner.OnlyThere, name) > 1) {
             return;
         }
@@ -933,7 +1014,7 @@ internal class CoopAttackCheck {
             .Append(", not in this one: ").Append(name)
             .AppendLine().Append("    came up there at ").Append(Where(theirs.Place)).Append(", about ")
             .Append(Seconds(at - _visitStart)).Append(" into the visit by this game's clock");
-        AppendNearest(_here, theirs.KeyHash, at, theirs.Place, "here");
+        AppendNearest(_here, theirs.NameHash, at + partner.Lag, theirs.Place, "here");
         AppendRunner();
         Logger.Info(_builder.ToString());
     }
@@ -949,9 +1030,9 @@ internal class CoopAttackCheck {
         float distance,
         float apart
     ) {
-        if (!partner.Moved.TryGetValue(ours.Key, out var moved)) {
+        if (!partner.Moved.TryGetValue(ours.Name, out var moved)) {
             moved = new Moved();
-            partner.Moved[ours.Key] = moved;
+            partner.Moved[ours.Name] = moved;
         }
 
         moved.Count++;
@@ -962,24 +1043,26 @@ internal class CoopAttackCheck {
 
         _builder.Clear();
         _builder.Append("[Attacks] In another place in ").Append(_visitScene).Append(" than in ").Append(NameOf(id))
-            .Append("'s game: ").Append(ours.Key)
+            .Append("'s game: ").Append(ours.Name)
             .AppendLine().Append("    here at ").Append(Where(ours.Place)).Append(", there at ")
             .Append(Where(theirs.Place)).Append(", ").Append(distance.ToString("0.0", CultureInfo.InvariantCulture))
-            .Append(" apart, ").Append(Milliseconds(apart)).Append(" from there to here")
+            .Append(" apart; here ").Append(Milliseconds(apart))
+            .Append(" after there by the clocks set side by side, the way of a word included, where ")
+            .Append(Milliseconds(partner.Lag)).Append(" is usual")
             .AppendLine().Append("    ").Append(ours.Context);
         AppendRunner();
         Logger.Info(_builder.ToString());
     }
 
     /// <summary>
-    /// Adds to a line of the log the nearest in time of the same name on the other side, which tells a thing that came
-    /// up late from one that did not come up at all.
+    /// Adds to a line of the log the thing counted under the same name on the other side that came up nearest to when
+    /// it would have, which tells a thing that came up late from one that did not come up at all.
     /// </summary>
-    private void AppendNearest<T>(List<T> list, uint keyHash, float time, Vector2 place, string where)
+    private void AppendNearest<T>(List<T> list, uint nameHash, float time, Vector2 place, string where)
         where T : class, ISeen {
         T? nearest = null;
         foreach (var seen in list) {
-            if (seen.KeyHash == keyHash &&
+            if (seen.NameHash == nameHash &&
                 (nearest == null || System.Math.Abs(seen.Time - time) < System.Math.Abs(nearest.Time - time))) {
                 nearest = seen;
             }
@@ -987,13 +1070,13 @@ internal class CoopAttackCheck {
 
         _builder.AppendLine().Append("    ");
         if (nearest == null) {
-            _builder.Append("nothing of that name came up ").Append(where).Append(" in the last ")
+            _builder.Append("nothing under that name came up ").Append(where).Append(" in the last ")
                 .Append(Seconds(KeepTime));
             return;
         }
 
-        _builder.Append("the nearest of that name ").Append(where).Append(" came up ")
-            .Append(Milliseconds(nearest.Time - time)).Append(" from it, ")
+        _builder.Append("the nearest under that name ").Append(where).Append(" came up ")
+            .Append(Milliseconds(nearest.Time - time)).Append(" from when it would have, ")
             .Append(Vector2.Distance(nearest.Place, place).ToString("0.0", CultureInfo.InvariantCulture))
             .Append(" away");
     }
@@ -1043,9 +1126,11 @@ internal class CoopAttackCheck {
             _builder.Clear();
             _builder.Append("[Attacks] Left ").Append(scene).Append(" after ").Append(Seconds(now - _visitStart))
                 .Append(" with ").Append(NameOf(pair.Key)).Append(": ").Append(_visitCount).Append(" came up here, ")
-                .Append(partner.Count).Append(" there, ").Append(partner.Matched).Append(" of them in both");
+                .Append(partner.Count).Append(" there, ").Append(partner.Matched).Append(" of them in both; things ")
+                .Append("there usually came up here ").Append(Milliseconds(partner.Lag))
+                .Append(" later by the clocks set side by side");
             if (partner.Dropped > 0 || _visitDropped > 0) {
-                _builder.Append(", too many to send: ").Append(_visitDropped).Append(" here, ").Append(partner.Dropped)
+                _builder.Append("; too many to send: ").Append(_visitDropped).Append(" here, ").Append(partner.Dropped)
                     .Append(" there");
             }
 
@@ -1142,16 +1227,26 @@ internal class CoopAttackCheck {
         /// When it last went off, or less than 0 if it did not since it was first seen.
         /// </summary>
         public float OffAt = -1f;
+
+        /// <summary>
+        /// Whether it is a part of something spawned or thrown, once that was found.
+        /// </summary>
+        public bool? Spawned;
     }
 
     /// <summary>
-    /// A thing that came up in a game: its name, when and where.
+    /// A thing that came up in a game: its names, when and where.
     /// </summary>
     private interface ISeen {
         /// <summary>
-        /// The hash of its name.
+        /// The hash of the name that tells it apart.
         /// </summary>
-        uint KeyHash { get; }
+        uint PairHash { get; }
+
+        /// <summary>
+        /// The hash of the name it is counted under in the log.
+        /// </summary>
+        uint NameHash { get; }
 
         /// <summary>
         /// When it came up, by the clock of the game it came up in.
@@ -1167,14 +1262,24 @@ internal class CoopAttackCheck {
     /// <summary>
     /// A thing that came up here.
     /// </summary>
-    private sealed class Appearance(string key, uint keyHash, float time, Vector2 place, string context) : ISeen {
+    private sealed class Appearance(
+        uint pairHash,
+        string name,
+        uint nameHash,
+        float time,
+        Vector2 place,
+        string context
+    ) : ISeen {
+        /// <inheritdoc />
+        public uint PairHash { get; } = pairHash;
+
         /// <summary>
-        /// Its name.
+        /// The name it is counted under in the log.
         /// </summary>
-        public string Key { get; } = key;
+        public string Name { get; } = name;
 
         /// <inheritdoc />
-        public uint KeyHash { get; } = keyHash;
+        public uint NameHash { get; } = nameHash;
 
         /// <inheritdoc />
         public float Time { get; } = time;
@@ -1210,9 +1315,12 @@ internal class CoopAttackCheck {
     /// <summary>
     /// A thing that came up in the game of a member.
     /// </summary>
-    private sealed class TheirAppearance(uint keyHash, float time, Vector2 place) : ISeen {
+    private sealed class TheirAppearance(uint pairHash, uint nameHash, float time, Vector2 place) : ISeen {
         /// <inheritdoc />
-        public uint KeyHash { get; } = keyHash;
+        public uint PairHash { get; } = pairHash;
+
+        /// <inheritdoc />
+        public uint NameHash { get; } = nameHash;
 
         /// <inheritdoc />
         public float Time { get; } = time;
@@ -1242,13 +1350,48 @@ internal class CoopAttackCheck {
     }
 
     /// <summary>
-    /// What the game of a member said came up in the room, and what the comparison with it found.
+    /// What is known of the game of a member beyond a visit, for as long as that run of it lasts.
     /// </summary>
-    private sealed class Partner(uint runId, float start) {
+    private sealed class MemberGame(uint runId) {
         /// <summary>
         /// The number that the run of the member's game puts on its words.
         /// </summary>
         public uint RunId { get; } = runId;
+
+        /// <summary>
+        /// The text of its names, by their hashes.
+        /// </summary>
+        public Dictionary<uint, string> Names { get; } = new();
+
+        /// <summary>
+        /// The last readings of what the clock of this game is ahead of the member's by, with the time on the way.
+        /// </summary>
+        public Queue<float> ClockReadings { get; } = new();
+
+        /// <summary>
+        /// What the clock of this game is ahead of the member's by, as a word took the least time on the way.
+        /// </summary>
+        public float Offset { get; set; }
+
+        /// <summary>
+        /// The time that words take from the member's game to the server and back, as its last word said, in ms.
+        /// </summary>
+        public int RoundTrip { get; set; }
+    }
+
+    /// <summary>
+    /// What the game of a member said came up in the room, and what the comparison with it found.
+    /// </summary>
+    private sealed class Partner(MemberGame game, float start) {
+        /// <summary>
+        /// What is known of the member's game beyond the visit.
+        /// </summary>
+        public MemberGame Game { get; } = game;
+
+        /// <summary>
+        /// What the clock of this game is ahead of the member's by.
+        /// </summary>
+        public float Offset => Game.Offset;
 
         /// <summary>
         /// When the member's game began to watch the room, as far as its words say, by its clock.
@@ -1261,16 +1404,6 @@ internal class CoopAttackCheck {
         public float CoveredUntil { get; set; } = start;
 
         /// <summary>
-        /// What the clock of this game is ahead of the member's by, as a word took the least time on the way.
-        /// </summary>
-        public float Offset { get; set; }
-
-        /// <summary>
-        /// The last readings of what the clock of this game is ahead of the member's by, with the time on the way.
-        /// </summary>
-        public Queue<float> ClockReadings { get; } = new();
-
-        /// <summary>
         /// The numbers of the words taken, so that one that comes twice is taken once.
         /// </summary>
         public HashSet<uint> Seqs { get; } = [];
@@ -1279,11 +1412,6 @@ internal class CoopAttackCheck {
         /// How many words of this room came.
         /// </summary>
         public int Batches { get; set; }
-
-        /// <summary>
-        /// The text of the names, by their hashes.
-        /// </summary>
-        public Dictionary<uint, string> Names { get; } = new();
 
         /// <summary>
         /// What came up in the member's game and is yet to be compared, or was compared a short while ago.
@@ -1295,6 +1423,18 @@ internal class CoopAttackCheck {
         /// carry all that came up, and times between words while it did not watch the room.
         /// </summary>
         public List<(float From, float To)> Gaps { get; } = [];
+
+        /// <summary>
+        /// How much later than in the member's game, by the clocks set side by side, the things of the last pairs
+        /// came up here.
+        /// </summary>
+        private readonly Queue<float> _lags = new();
+
+        /// <summary>
+        /// How much later than in the member's game things usually come up here, by the clocks set side by side: the
+        /// middle of the last pairs, or 0 before any.
+        /// </summary>
+        public float Lag { get; private set; }
 
         /// <summary>
         /// How many things came up in the member's game in the room, as its words carried them.
@@ -1325,5 +1465,18 @@ internal class CoopAttackCheck {
         /// How often each name came up in another place in each game.
         /// </summary>
         public Dictionary<string, Moved> Moved { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>
+        /// Takes how much later a pair came up here than there into what is usual.
+        /// </summary>
+        public void NoteLag(float lag) {
+            _lags.Enqueue(lag);
+            if (_lags.Count > LagReadings) {
+                _lags.Dequeue();
+            }
+
+            var sorted = _lags.OrderBy(value => value).ToList();
+            Lag = sorted[sorted.Count / 2];
+        }
     }
 }
