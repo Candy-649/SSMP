@@ -56,11 +56,13 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// list of spiked balls, tells the first few which way to fly, and each ball then rolls how high it goes, how long it
 /// waits, how far to one side it starts, and as it flies how it turns and how large it is. Each game ran its own, and
 /// the balls flew from other places to other heights for each player (USER 10-13: 另一场boss战那个也看一下吧). The
-/// host's controller tells the other game each part it told something, with what it told it and where the part stood
-/// (the list never leaves the host's game, only which ball was told what), and the other game tells its own part the
-/// same, standing there, at the host's spacing. A part told something goes by itself from then on, the way it does in
-/// the host's game, so its moves aren't told. What it rolls - in answer and later as it flies - both games roll under
-/// a name made from the word, the same in both (see SharedDice), until it is told something again.
+/// host's controller tells the other game each part it told something, with what it told it and where the part and the
+/// controller stood (the list never leaves the host's game, only which ball was told what), and the other game tells
+/// its own part the same, standing there, at the host's spacing; a part still busy there with something the host's had
+/// finished goes back to where the host's was first. A part told something goes by itself from then on, the way it
+/// does in the host's game, so of such a controller only what it tells is told. What a part rolls - in answer and
+/// later as it flies - both games roll under a name made from the word, the same in both (see SharedDice), until it is
+/// told something again.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -113,9 +115,10 @@ internal partial class CoopSave {
         WentOut = 3,
 
         /// <summary>
-        /// The controller told it something. The word holds where it stood as it was told, and 1 if the event went to
-        /// the state machines under it as well; <see cref="CoopSaveUpdate.Names"/> holds the event and the name of the
-        /// state machine it went to, or nothing for all of them.
+        /// The controller told it something. The word holds where it stood as it was told, 1 if the event went to the
+        /// state machines under it as well, and where the controller stood; <see cref="CoopSaveUpdate.Names"/> holds
+        /// the event, the name of the state machine it went to or nothing for all of them, and the name of the one
+        /// that took it and the state that one was in.
         /// </summary>
         Told = 4
     }
@@ -164,12 +167,13 @@ internal partial class CoopSave {
     /// <summary>
     /// Notes a controller whose parts the other game shows, the first time it is seen.
     /// </summary>
-    private ShownController NoteShownController(Fsm fsm) {
+    private ShownController NoteShownController(Fsm fsm, MachineKind kind) {
         if (!_shownControllers.TryGetValue(fsm, out var shown)) {
             shown = new ShownController();
             _shownControllers[fsm] = shown;
         }
 
+        shown.PartsTold = kind.PartsTold;
         return shown;
     }
 
@@ -206,13 +210,15 @@ internal partial class CoopSave {
             }
 
             if (runsTheRoom) {
-                // Words of a scene host that this game took over from are no longer the room's
+                // Words of a scene host that this game took over from are no longer the room's. Of a controller that
+                // only tells its parts, only that is told.
                 shown.ForgetWords();
-                WatchParts(fsm, controller.transform, shown, tells);
+                if (!shown.PartsTold) {
+                    WatchParts(fsm, controller.transform, shown, tells);
+                }
             } else {
                 // What this game knew of its own parts is not what the host's are
                 shown.Parts.Clear();
-                shown.LastTold = -1f;
                 ShowDueParts(fsm, shown);
                 PutOutDueParts(shown);
             }
@@ -314,13 +320,14 @@ internal partial class CoopSave {
         CoopSaveUpdate? word = null;
         Transform? part = null;
         try {
-            if (fsmEvent?.Name is { Length: > 0 } eventName && eventTarget != null && TellsShownParts() &&
+            if (fsmEvent?.Name is { Length: > 0 } eventName && eventTarget != null &&
                 self.GameObject is { } controller && controller != null &&
-                FindToldPart(self, eventTarget, controller.transform, out var fsmName) is { } told &&
-                !EntityProcessor.IsRegistered(told.gameObject) &&
-                TakesEvent(told, eventName, fsmName, eventTarget.sendToChildren?.Value == true)) {
+                FindToldPart(self, eventTarget, controller.transform, out var fsmName, out var children) is { } told &&
+                !EntityProcessor.IsRegistered(told.gameObject) && TellsShownParts() &&
+                FindTaker(told, eventName, fsmName, children) is { } taker) {
                 part = told;
                 var place = part.position;
+                var controllerPlace = controller.transform.position;
                 word = new CoopSaveUpdate {
                     TargetId = CoopTargets.Everyone,
                     Kind = CoopSaveUpdateKind.MachinePart,
@@ -330,8 +337,10 @@ internal partial class CoopSave {
                     StateName = PathUnder(part, controller.transform),
                     Part = (ushort) PartChange.Told,
                     Sequence = ++_machineRoundCount,
-                    Values = [Time.time, place.x, place.y, eventTarget.sendToChildren?.Value == true ? 1f : 0f],
-                    Names = [eventName, fsmName]
+                    Values = [
+                        Time.time, place.x, place.y, children ? 1f : 0f, controllerPlace.x, controllerPlace.y
+                    ],
+                    Names = [eventName, fsmName, taker.FsmName, taker.Fsm?.ActiveState?.Name ?? ""]
                 };
                 SharedDice.RollByName(part.gameObject, PartRollName(word));
             }
@@ -346,7 +355,6 @@ internal partial class CoopSave {
         }
 
         shown.RunsItself.Add(part);
-        shown.LastTold = Time.time;
         try {
             Send(word);
         } catch (Exception e) {
@@ -356,19 +364,23 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The part of a controller that an event goes to, if it goes to one object under the controller, with the name of
-    /// the state machine that it goes to there, or nothing for all of them.
+    /// the state machine that it goes to there, or nothing for all of them, and whether it goes to the state machines
+    /// under the object as well.
     /// </summary>
     private static Transform? FindToldPart(
         Fsm sender,
         FsmEventTarget eventTarget,
         Transform controller,
-        out string fsmName
+        out string fsmName,
+        out bool children
     ) {
         fsmName = "";
+        children = false;
         GameObject? target;
         switch (eventTarget.target) {
             case FsmEventTarget.EventTarget.GameObject:
                 target = sender.GetOwnerDefaultTarget(eventTarget.gameObject);
+                children = eventTarget.sendToChildren?.Value == true;
                 break;
             case FsmEventTarget.EventTarget.GameObjectFSM:
                 target = sender.GetOwnerDefaultTarget(eventTarget.gameObject);
@@ -391,11 +403,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a state machine of a part, or under it, takes an event where it is: one that is busy with something
-    /// else, like a ball still in flight that the controller picks again, lets it go by, in the host's game as in the
-    /// other, and isn't told.
+    /// The state machine of a part, or under it, that takes an event where it is, or null for none: one that is busy
+    /// with something else, like a ball still in flight that the controller picks again, lets it go by, and isn't told.
     /// </summary>
-    private static bool TakesEvent(Transform part, string eventName, string fsmName, bool children) {
+    private static PlayMakerFSM? FindTaker(Transform part, string eventName, string fsmName, bool children) {
         var machines = children ? part.GetComponentsInChildren<PlayMakerFSM>() : part.GetComponents<PlayMakerFSM>();
         foreach (var machine in machines) {
             if (machine == null || fsmName.Length > 0 && machine.FsmName != fsmName || machine.Fsm is not { } fsm) {
@@ -403,11 +414,11 @@ internal partial class CoopSave {
             }
 
             if (HasWayOut(fsm.ActiveState?.Transitions, eventName) || HasWayOut(fsm.GlobalTransitions, eventName)) {
-                return true;
+                return machine;
             }
         }
 
-        return false;
+        return null;
     }
 
     /// <summary>
@@ -508,8 +519,6 @@ internal partial class CoopSave {
                 Sequence = ++_machineRoundCount,
                 Values = [Time.time, place.x, place.y]
             };
-            shown.LastTold = Time.time;
-
             var hasMachine = part.GetComponent<PlayMakerFSM>() != null;
             switch (change) {
                 case PartChange.WentUp when hasMachine:
@@ -572,12 +581,12 @@ internal partial class CoopSave {
         }
 
         if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target ||
-            FindMachineKind(target, update.FsmName) is not { ShowsParts: true } ||
+            FindMachineKind(target, update.FsmName) is not { ShowsParts: true } kind ||
             FindMachineFsm(target, update.FsmName) is not { } fsm) {
             return;
         }
 
-        var shown = NoteShownController(fsm);
+        var shown = NoteShownController(fsm, kind);
 
         // The words of another scene host go by its own clock
         if (shown.HostId != player.Id) {
@@ -696,30 +705,36 @@ internal partial class CoopSave {
                 shown.OffAt[part] = since + values[3];
                 return;
             case PartChange.Told:
-                TellPartHere(part, word);
+                TellPartHere(controller.transform, part, word);
                 return;
         }
     }
 
     /// <summary>
-    /// Tells a part of a controller here what the scene host's controller told the host's: standing where the host's
-    /// stood, with its rolls from then on under the name of the word, as the host's are. A part that is still busy
-    /// here with what it was told before, which the host's had finished, lets it go by and stays where it is.
+    /// Tells a part of a controller here what the scene host's controller told the host's, with the controller and the
+    /// part standing where the host's stood, and the part's rolls from then on under the name of the word, as the
+    /// host's are. The host's controller moves itself, and its parts in flight with it, so this one is put there too.
+    /// A part that is still busy here with something that the host's had finished, like a ball that broke on this
+    /// game's player only, goes back to where the host's was as it was told, so that it takes the word as the host's
+    /// did rather than leaving out a move that the host's game made.
     /// </summary>
-    private static void TellPartHere(Transform part, CoopSaveUpdate word) {
+    private static void TellPartHere(Transform controller, Transform part, CoopSaveUpdate word) {
         var values = word.Values;
-        if (values.Count < 4 || word.Names.Count < 2 || word.Names[0] is not { Length: > 0 } eventName) {
+        if (values.Count < 6 || word.Names.Count < 4 || word.Names[0] is not { Length: > 0 } eventName) {
+            return;
+        }
+
+        var fsmName = word.Names[1];
+        var children = values[3] > 0.5f;
+        if (FindTaker(part, eventName, fsmName, children) == null &&
+            (!PutBackToTake(part, word.Names[2], word.Names[3], eventName) ||
+             FindTaker(part, eventName, fsmName, children) == null)) {
+            Logger.Info($"The part '{part.name}' can't take '{eventName}' of the scene host where it is");
             return;
         }
 
         SharedDice.RollByName(part.gameObject, PartRollName(word));
-        var fsmName = word.Names[1];
-        var children = values[3] > 0.5f;
-        if (!TakesEvent(part, eventName, fsmName, children)) {
-            Logger.Info($"The part '{part.name}' is still busy and lets '{eventName}' of the scene host go by");
-            return;
-        }
-
+        controller.position = new Vector3(values[4], values[5], controller.position.z);
         part.position = new Vector3(values[1], values[2], part.position.z);
         var machines = children ? part.GetComponentsInChildren<PlayMakerFSM>() : part.GetComponents<PlayMakerFSM>();
         foreach (var machine in machines) {
@@ -727,6 +742,33 @@ internal partial class CoopSave {
                 machine.Fsm?.Event(eventName);
             }
         }
+    }
+
+    /// <summary>
+    /// Puts the state machine of a part here that took an event in the scene host's game into the state the host's
+    /// was in as it took it.
+    /// </summary>
+    /// <returns>Whether it was put there.</returns>
+    private static bool PutBackToTake(Transform part, string takerName, string stateName, string eventName) {
+        if (stateName.Length == 0) {
+            return false;
+        }
+
+        foreach (var machine in part.GetComponentsInChildren<PlayMakerFSM>()) {
+            if (machine == null || machine.FsmName != takerName || machine.Fsm is not { } fsm ||
+                fsm.GetState(stateName) == null || fsm.ActiveState?.Name == stateName) {
+                continue;
+            }
+
+            Logger.Info(
+                $"The part '{part.name}' goes back to '{stateName}' from '{fsm.ActiveState?.Name}' to take " +
+                $"'{eventName}' of the scene host, as the host's did"
+            );
+            fsm.SetState(stateName);
+            return true;
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -880,6 +922,12 @@ internal partial class CoopSave {
         public readonly HashSet<Transform> RunsItself = [];
 
         /// <summary>
+        /// Whether the controller sends its parts off only by telling them, so that only that is told of them (see
+        /// MachineKind.PartsTold).
+        /// </summary>
+        public bool PartsTold;
+
+        /// <summary>
         /// The player whose words these are.
         /// </summary>
         public ushort HostId = ushort.MaxValue;
@@ -904,10 +952,6 @@ internal partial class CoopSave {
         /// </summary>
         public float LastShownAt;
 
-        /// <summary>
-        /// When this game last told a part of it, in game time, or -1 for not yet.
-        /// </summary>
-        public float LastTold = -1f;
 
         /// <summary>
         /// Forgets the words of the host and what they did here.

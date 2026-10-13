@@ -170,10 +170,11 @@ internal partial class CoopSave {
 
         // The controllers of another fight that send spiked balls flying, one for each part of the fight, which tell
         // the balls of their pick which way to fly; the other game shows which ball was told what, and holds its own
-        // past the state where each finds the creature (see CoopSave.ShownParts)
+        // past the state where each finds the creature (see CoopSave.ShownParts). The balls are never switched on or
+        // off, and fly by themselves once told.
         new(
             ["Spike Balls", "Spike Balls P1"], "Control", [], sceneName: "Shellwood_11b_Memory",
-            ownStateNames: ["Init"], wholeNames: true, showsParts: true
+            ownStateNames: ["Init"], wholeNames: true, showsParts: true, partsTold: true
         )
     ];
 
@@ -314,7 +315,7 @@ internal partial class CoopSave {
         if (FindDirector(fsm) is { } director) {
             kind = director;
             if (director.ShowsParts) {
-                NoteShownController(fsm);
+                NoteShownController(fsm, director);
             }
 
             return DecideDirectorSwitch(fsm, toState, director);
@@ -813,10 +814,14 @@ internal partial class CoopSave {
             );
 
             // A machine of a game that now runs the room goes through the hook as any other, so that the round is said
-            // to a partner in the room; one that only gave up on the word is let through
-            if (FindDirector(fsm) != null) {
+            // to a partner in the room; one that only gave up on the word is let through. A controller whose parts the
+            // other game shows, held in the fight, goes into the state it was held in afresh rather than on to the
+            // step it was held from, which was set going long ago: by the creature's word to send balls flying, which
+            // the copy passed on here.
+            if (FindDirector(fsm) is { } director) {
+                var goTo = director.ShowsParts && !director.OwnStateNames!.Contains(from.Name) ? from.Name : state.Name;
                 try {
-                    EnterDirectedState(fsm, null, null, () => fsm.SetState(state.Name));
+                    EnterDirectedState(fsm, null, null, () => fsm.SetState(goTo));
                 } catch (Exception e) {
                     LogInteractionError(e);
                 }
@@ -1103,7 +1108,8 @@ internal partial class CoopSave {
             string? sceneName = null,
             string[]? ownStateNames = null,
             bool wholeNames = false,
-            bool showsParts = false
+            bool showsParts = false,
+            bool partsTold = false
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -1113,6 +1119,7 @@ internal partial class CoopSave {
             OwnStateNames = ownStateNames == null ? null : new HashSet<string>(ownStateNames, StringComparer.Ordinal);
             WholeNames = wholeNames;
             ShowsParts = showsParts;
+            PartsTold = partsTold;
         }
 
         /// <summary>
@@ -1121,6 +1128,12 @@ internal partial class CoopSave {
         /// CoopSave.ShownParts).
         /// </summary>
         public bool ShowsParts { get; }
+
+        /// <summary>
+        /// For a controller whose parts the other game shows, whether it sends its parts off only by telling them, so
+        /// that only what it tells them is told to the other game, and not how they go up, move or go out.
+        /// </summary>
+        public bool PartsTold { get; }
 
         /// <summary>
         /// What the objects of this kind are called, of which the name of one starts with any of them, or is one of

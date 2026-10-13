@@ -43,14 +43,15 @@ namespace SSMP.Game.Client.Save;
 /// in the same moment. A list that doesn't hold the same things over there is shuffled there by itself, with a line in
 /// the log.
 ///
-/// An object of the room can also be given a name to roll under, the same in every game, as the things that creatures
-/// throw have (<see cref="RollByName"/>): a part that a controller of a fight sends off rolls so from the word that
-/// tells the other game, for as long as it goes, rather than for only one moment.
-///
 /// It covers only what happens at once, in the same call: what the thing rolls later, after a wait, each game rolls
 /// again. This is no seed shared by the room. That was turned down, since each game rolls at its own frame rate and for
 /// its own player, so the same seed soon gives different numbers. Here the dice are lent for the one thing and handed
 /// back.
+///
+/// Only an object that is given a name to roll under rolls the same later too, as the things that creatures throw do
+/// (<see cref="RollByName"/>): each roll of each of its actions comes from the name and how many times that action
+/// rolled under it before, whatever the frame rate. A part that a controller of a fight sends off is given one by the
+/// word that tells the other game, for as long as it goes.
 /// </summary>
 internal static class SharedDice {
     /// <summary>
