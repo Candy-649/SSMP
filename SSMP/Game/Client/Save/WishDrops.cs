@@ -28,7 +28,8 @@ internal static class WishDrops {
     private static readonly List<Hook> Hooks = [];
 
     /// <summary>
-    /// The items that bodies dropped here, each with what dropped it, until taken.
+    /// The items that bodies dropped here, each with what dropped it, until taken: one switched off untaken may be
+    /// switched on again, and is said again each time it is switched off.
     /// </summary>
     private static readonly ConditionalWeakTable<CollectableItemPickup, string> Dropped = new();
 
@@ -187,7 +188,6 @@ internal static class WishDrops {
     private static void OnPickupDisable(Action<CollectableItemPickup> orig, CollectableItemPickup self) {
         try {
             if (Dropped.TryGetValue(self, out var where)) {
-                Dropped.Remove(self);
                 var parent = self.transform.parent;
                 Logger.Info(
                     $"[Wish drops] The item that {where} dropped went away untaken at {Place(self.transform)}, under " +
@@ -202,13 +202,18 @@ internal static class WishDrops {
     }
 
     /// <summary>
-    /// The calls that led here, without the hooks themselves.
+    /// The calls that led to the hook that asks, from the one that called the hooked method on (after MonoMod's frame
+    /// for the hook, which comes first).
     /// </summary>
     private static string Frames() {
         var text = new StringBuilder();
         var written = 0;
         foreach (var frame in new StackTrace(2, false).GetFrames() ?? []) {
-            if (frame.GetMethod() is not { } method || written >= MostFrames) {
+            if (written >= MostFrames) {
+                break;
+            }
+
+            if (frame.GetMethod() is not { } method) {
                 continue;
             }
 

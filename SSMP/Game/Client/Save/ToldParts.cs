@@ -359,7 +359,9 @@ internal static class ToldParts {
         try {
             var here = FindTold(fsm, eventTarget);
             if (told.Word == Word.NotTaken) {
-                if (here != null && (told.Takers == null || !CatchUp(here.Target, told.Takers, eventName))) {
+                // A tell that waits goes all the same, so only one that goes now catches parts up
+                if (here != null && atOnce &&
+                    (told.Takers == null || !CatchUp(fsm, here.Target, told.Takers, eventName))) {
                     SayOnce(here.Target, $"is not told '{eventName}', as it let that go by in the scene host's game");
                 }
 
@@ -588,17 +590,26 @@ internal static class ToldParts {
     private const int MostStepsToRest = 10;
 
     /// <summary>
+    /// The fields that hold events of each type of action, for <see cref="LeavesByItself"/>.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> EventFields = new();
+
+    /// <summary>
     /// Tells the parts here an event that nothing took in the scene host's game, each part on its own, where it has yet
     /// to come to rest where the host's part did: where the event takes this part, and the states it goes on to by
     /// itself from there, lead to the state the host's part waits in. That part took an event like it earlier, which
     /// never came here, and a gate the host's player saw close stayed open here for good. A part that the host's game
-    /// still had busy, or that came to rest anywhere else, lets it go by as the host's did.
+    /// still had busy, or that came to rest anywhere else, lets it go by as the host's did, and so does a machine that
+    /// goes by the host's rounds, which its rounds bring along (see <see cref="IsPaced"/>). The event goes as one that
+    /// the host's creature sent, so a gate it closes waits for this game's player to walk into the room (see
+    /// BossRoomCoop.RunAsNetworkSender).
     /// </summary>
+    /// <param name="sender">The state machine of the copy of the creature that tells the parts.</param>
     /// <param name="target">What the event went to.</param>
     /// <param name="resting">Where each part was in the scene host's game as it let the event go by.</param>
     /// <param name="eventName">The event.</param>
     /// <returns>Whether any part here was told.</returns>
-    private static bool CatchUp(Transform target, List<Taker> resting, string eventName) {
+    private static bool CatchUp(Fsm sender, Transform target, List<Taker> resting, string eventName) {
         var told = false;
         foreach (var host in resting) {
             var part = host.Path.Length == 0 ? target : target.Find(host.Path);
@@ -608,7 +619,8 @@ internal static class ToldParts {
 
             foreach (var machine in part.GetComponents<PlayMakerFSM>()) {
                 if (machine == null || machine.FsmName != host.FsmName || machine.Fsm is not { } fsm ||
-                    !Takes(fsm, eventName) || !ComesToRestIn(fsm, eventName, host.StateName) ||
+                    IsPacedMachine(machine) || !Takes(fsm, eventName) ||
+                    !ComesToRestIn(fsm, eventName, host.StateName) ||
                     FsmEvent.FindEvent(eventName) is not { } fsmEvent) {
                     continue;
                 }
@@ -617,7 +629,7 @@ internal static class ToldParts {
                     $"The part '{ScenePath.Get(part)}' is told '{eventName}' from '{fsm.ActiveState?.Name}' all the " +
                     $"same, as the scene host's already waits in '{host.StateName}', where it takes this one"
                 );
-                fsm.Event(fsmEvent);
+                BossRoomCoop.RunAsNetworkSender(sender, () => fsm.Event(fsmEvent));
                 told = true;
             }
         }
@@ -627,13 +639,15 @@ internal static class ToldParts {
 
     /// <summary>
     /// Whether an event takes a state machine, from where it is, to a state that waits to be told something, through
-    /// only the states it goes on to by itself (FINISHED).
+    /// only the states it goes on to by itself (FINISHED). A state waits to be told only where no way out of it goes on
+    /// FINISHED or on an event that one of its own actions sends.
     /// </summary>
     /// <param name="fsm">The state machine.</param>
     /// <param name="eventName">The event.</param>
     /// <param name="stateName">The state.</param>
     private static bool ComesToRestIn(Fsm fsm, string eventName, string stateName) {
-        if (fsm.GetState(stateName) is not { } rest || WayOut(rest.Transitions, FsmEvent.Finished.Name) != null) {
+        if (fsm.GetState(stateName) is not { } rest || WayOut(rest.Transitions, FsmEvent.Finished.Name) != null ||
+            LeavesByItself(rest)) {
             return false;
         }
 
@@ -647,6 +661,60 @@ internal static class ToldParts {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether an action of a state holds an event that a way out of the state goes on, which it may send itself: a
+    /// wait, a check or a trigger that leaves the state without being told.
+    /// </summary>
+    private static bool LeavesByItself(FsmState state) {
+        if (state.Transitions is not { Length: > 0 } transitions || state.Actions is not { } actions) {
+            return false;
+        }
+
+        foreach (var action in actions) {
+            if (action == null || !action.Enabled) {
+                continue;
+            }
+
+            foreach (var field in EventFieldsOf(action.GetType())) {
+                switch (field.GetValue(action)) {
+                    case FsmEvent fsmEvent when WayOut(transitions, fsmEvent.Name) != null:
+                        return true;
+                    case FsmEvent[] fsmEvents:
+                        foreach (var each in fsmEvents) {
+                            if (each != null && WayOut(transitions, each.Name) != null) {
+                                return true;
+                            }
+                        }
+
+                        break;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The fields of a type of action that hold an event or a list of events, found once for each type.
+    /// </summary>
+    private static FieldInfo[] EventFieldsOf(Type actionType) {
+        if (EventFields.TryGetValue(actionType, out var fields)) {
+            return fields;
+        }
+
+        var found = new List<FieldInfo>();
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        for (var type = actionType; type != null && type != typeof(FsmStateAction); type = type.BaseType) {
+            foreach (var field in type.GetFields(flags | BindingFlags.DeclaredOnly)) {
+                if (field.FieldType == typeof(FsmEvent) || field.FieldType == typeof(FsmEvent[])) {
+                    found.Add(field);
+                }
+            }
+        }
+
+        return EventFields[actionType] = found.ToArray();
     }
 
     /// <summary>
