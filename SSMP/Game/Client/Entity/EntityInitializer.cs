@@ -208,9 +208,8 @@ internal static class EntityInitializer {
         // destroying one here leaves callbacks such as ActiveCorpse.Update and SetParticleScale.OnUpdate with a
         // Unity-null reference. Remote controller bodies are still made kinematic so they cannot simulate locally.
         if (entityType != EntityType.GrassBall) {
-            var swinging = FindPodSwingBodies(gameObject);
             foreach (var rigidbody in gameObject.GetComponentsInChildren<Rigidbody2D>(true)) {
-                if (rigidbody != null && !swinging.Contains(rigidbody)) {
+                if (rigidbody != null) {
                     ConfigureClientRigidbody(rigidbody);
                 }
             }
@@ -235,72 +234,6 @@ internal static class EntityInitializer {
         // triggers call back into it
         foreach (var flyer in gameObject.GetComponentsInChildren<FlockFlyer>(true)) {
             flyer.enabled = false;
-        }
-    }
-
-    /// <summary>
-    /// The bodies of a copy that its bounce pods hang and swing on, which keep the kind of body the game gave them:
-    /// each pod's own body and those joined to it link by link, like the rope it hangs from, as far as bodies that the
-    /// physics moves go, and never the copy's own. They swing by the physics here as they do in the game that runs the
-    /// creature, apart from it like any rope of the room. Kept still like the rest of the copy, a pod hung stiff, and
-    /// the swing that a bounce gives it carried it off for good, since nothing slows a body kept still (USER 10-13,
-    /// "不能球正常走物理吗").
-    /// </summary>
-    /// <param name="gameObject">The copy.</param>
-    private static HashSet<Rigidbody2D> FindPodSwingBodies(GameObject gameObject) {
-        var swinging = new HashSet<Rigidbody2D>();
-        var pods = gameObject.GetComponentsInChildren<BouncePod>(true);
-        if (pods.Length == 0) {
-            return swinging;
-        }
-
-        // Which bodies are joined, both ways, among those under the copy that the physics moves
-        var own = gameObject.GetComponent<Rigidbody2D>();
-        var joined = new Dictionary<Rigidbody2D, List<Rigidbody2D>>();
-        foreach (var joint in gameObject.GetComponentsInChildren<Joint2D>(true)) {
-            var body = joint.attachedRigidbody;
-            var other = joint.connectedBody;
-            if (!IsSwingable(body) || !IsSwingable(other)) {
-                continue;
-            }
-
-            Join(body!, other!);
-            Join(other!, body!);
-        }
-
-        var open = new Stack<Rigidbody2D>();
-        foreach (var pod in pods) {
-            var body = pod.bounceReactBody != null ? pod.bounceReactBody : pod.GetComponent<Rigidbody2D>();
-            if (IsSwingable(body) && swinging.Add(body!)) {
-                open.Push(body!);
-            }
-        }
-
-        while (open.Count > 0) {
-            if (!joined.TryGetValue(open.Pop(), out var others)) {
-                continue;
-            }
-
-            foreach (var other in others) {
-                if (swinging.Add(other)) {
-                    open.Push(other);
-                }
-            }
-        }
-
-        return swinging;
-
-        bool IsSwingable(Rigidbody2D? body) {
-            return body != null && body != own && body.bodyType == RigidbodyType2D.Dynamic &&
-                   body.transform.IsChildOf(gameObject.transform);
-        }
-
-        void Join(Rigidbody2D body, Rigidbody2D other) {
-            if (!joined.TryGetValue(body, out var others)) {
-                joined[body] = others = [];
-            }
-
-            others.Add(other);
         }
     }
 

@@ -71,57 +71,6 @@ internal static class ScenePath {
     }
 
     /// <summary>
-    /// Gets the path of an object under another one that it is under, numbered the same way, which finds the same part
-    /// under another object built alike (see <see cref="FindUnder"/>), like the copy of a creature. Empty for the
-    /// object itself.
-    /// </summary>
-    /// <param name="part">The object.</param>
-    /// <param name="root">The object it is under.</param>
-    public static string GetUnder(Transform part, Transform root) {
-        var names = new List<string>();
-        for (var current = part; current != null && current != root; current = current.parent) {
-            names.Add(GetIndexedName(current));
-        }
-
-        names.Reverse();
-        return string.Join("/", names);
-    }
-
-    /// <summary>
-    /// Finds the object with the given path under another one (see <see cref="GetUnder"/>), including inactive ones.
-    /// </summary>
-    /// <param name="root">The object to look under.</param>
-    /// <param name="path">The path under it.</param>
-    /// <returns>The object, or null if there is none there.</returns>
-    public static GameObject? FindUnder(Transform root, string path) {
-        if (path.Length == 0) {
-            return root.gameObject;
-        }
-
-        var current = root;
-        foreach (var segment in path.Split('/')) {
-            ParseSegment(segment, out var childName, out var childIndex);
-
-            Transform? next = null;
-            for (var j = 0; j < current.childCount; j++) {
-                var child = current.GetChild(j);
-                if (child.name == childName && childIndex-- == 0) {
-                    next = child;
-                    break;
-                }
-            }
-
-            if (next == null) {
-                return null;
-            }
-
-            current = next;
-        }
-
-        return current.gameObject;
-    }
-
-    /// <summary>
     /// Gets the name of an object, followed by the number of earlier siblings with the same name if there are any.
     /// </summary>
     private static string GetIndexedName(Transform transform) {
