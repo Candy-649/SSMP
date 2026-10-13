@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using GlobalEnums;
+using SSMP.Game.Settings;
 using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -21,8 +22,11 @@ namespace SSMP.Ui;
 ///
 /// A boss is full at the health its room gives it as the room starts, and a fight that puts its boss out of reach
 /// between its parts and then gives it health for the next part starts that part full.
+///
+/// A player can switch them off on the settings page of the multiplayer menu (ModSettings.ShowEnemyHealthBars). While
+/// off, no bar is drawn and none follows its creature; switched on again, they take up the health creatures have then.
 /// </summary>
-internal class EnemyHealthBars {
+internal class EnemyHealthBars(ModSettings modSettings) {
     /// <summary>
     /// The width of the bar above a creature, in units of the canvas, which is 1080 units high.
     /// </summary>
@@ -245,7 +249,7 @@ internal class EnemyHealthBars {
         }
 
         var camera = GameCameras.SilentInstance?.mainCamera;
-        var isShown = camera != null && IsPlaying();
+        var isShown = camera != null && modSettings.ShowEnemyHealthBars && IsPlaying();
         if (_canvas.enabled != isShown) {
             _canvas.enabled = isShown;
         }

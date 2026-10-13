@@ -545,7 +545,7 @@ internal class UiManager : IUiManager {
         CreateUiComponents();
         RegisterInterfaceCallbacks();
 
-        _enemyHealthBars = new EnemyHealthBars();
+        _enemyHealthBars = new EnemyHealthBars(_modSettings);
         _enemyHealthBars.Start();
         
         TryAddMultiplayerScreen();

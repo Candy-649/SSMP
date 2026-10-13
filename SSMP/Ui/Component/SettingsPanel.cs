@@ -9,8 +9,8 @@ namespace SSMP.Ui.Component;
 
 /// <summary>
 /// The settings page of the multiplayer menu: choices that only change how this player's own game draws things, such
-/// as their own name and their own head on the map. None of it is sent anywhere, and the other players do not have to
-/// agree.
+/// as their own name, their own head on the map and the health bars of enemies. None of it is sent anywhere, and the
+/// other players do not have to agree.
 ///
 /// The choices about the name used to sit under the list in the waiting room, the one place in the menu where a
 /// player stands still. With more of them that room got crowded, so they have a page of their own, which can be opened
@@ -47,6 +47,12 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The label of the map outline button.</summary>
     private readonly Text _outlineText;
 
+    /// <summary>The background of the health bar button.</summary>
+    private readonly Image _healthBarsImage;
+
+    /// <summary>The label of the health bar button.</summary>
+    private readonly Text _healthBarsText;
+
     /// <summary>Tracks the panel's own active state.</summary>
     private bool _activeSelf;
 
@@ -68,11 +74,16 @@ internal class SettingsPanel : IRootedComponent {
     private const float MapSectionHeight = 74f;
 
     /// <summary>
+    /// How much room the choices about enemies take: a switch over a line or two saying what it does.
+    /// </summary>
+    private const float EnemySectionHeight = 74f;
+
+    /// <summary>
     /// Height of the panel. Less than that of the waiting room, so that it ends above the feedback text of the menu
     /// as well.
     /// </summary>
     public const float Height = HeaderHeight + NoteHeight + SectionGap + NameSectionHeight + SectionGap +
-                                MapSectionHeight;
+                                MapSectionHeight + SectionGap + EnemySectionHeight;
 
     private static readonly Color Muted = new(0.75f, 0.75f, 0.75f, 1f);
 
@@ -260,6 +271,61 @@ internal class SettingsPanel : IRootedComponent {
             TextAnchor.UpperLeft
         );
 
+        var enemyArea = CreateSection(
+            "EnemySettings",
+            HeaderHeight + NoteHeight + SectionGap + NameSectionHeight + SectionGap + MapSectionHeight + SectionGap,
+            EnemySectionHeight
+        );
+
+        WaitingRoomPanel.CreateLabel(
+            enemyArea,
+            "EnemySettingsLabel",
+            Lang.Pick("ENEMIES", "怪物"),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.30f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -1f),
+            14,
+            WaitingRoomPanel.Accent,
+            TextAnchor.MiddleLeft
+        );
+
+        // Laid out like the map's switch above it
+        var healthBarsButton = WaitingRoomPanel.CreateButton(
+            enemyArea,
+            "HealthBarsButton",
+            "",
+            new Vector2(0.32f, 1f),
+            new Vector2(0.97f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => {
+                _modSettings.ShowEnemyHealthBars = !_modSettings.ShowEnemyHealthBars;
+                _modSettings.Save();
+                Refresh();
+            },
+            out _healthBarsImage,
+            out _healthBarsText
+        );
+        var healthBarsRect = healthBarsButton.GetComponent<RectTransform>();
+        healthBarsRect.offsetMin = new Vector2(0f, -29f);
+        healthBarsRect.offsetMax = new Vector2(0f, -1f);
+
+        WaitingRoomPanel.CreateLabel(
+            enemyArea,
+            "HealthBarsNote",
+            Lang.Pick(
+                "A bar over each enemy that was hit, and a boss's bar along the bottom of the screen.",
+                "被打过的怪头上显示血条，首领的血条显示在屏幕底部。"
+            ),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.97f, 1f),
+            new Vector2(0f, EnemySectionHeight - 34f),
+            new Vector2(0f, -34f),
+            13,
+            Muted,
+            TextAnchor.UpperLeft
+        );
+
         Refresh();
 
         _componentGroup = parent;
@@ -311,6 +377,12 @@ internal class SettingsPanel : IRootedComponent {
         _outlineText.text = outlined
             ? Lang.Pick("OUTLINE MY HEAD: ON", "头像描边：开")
             : Lang.Pick("OUTLINE MY HEAD: OFF", "头像描边：关");
+
+        var healthBars = _modSettings.ShowEnemyHealthBars;
+        _healthBarsImage.color = healthBars ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+        _healthBarsText.text = healthBars
+            ? Lang.Pick("HEALTH BARS: ON", "血条：开")
+            : Lang.Pick("HEALTH BARS: OFF", "血条：关");
 
         foreach (var pair in _swatches) {
             if (!Game.Client.PlayerManager.OwnNameColours.TryGetValue(pair.Key, out var colour)) {

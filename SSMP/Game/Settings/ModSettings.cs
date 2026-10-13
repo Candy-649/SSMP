@@ -129,6 +129,20 @@ internal class ModSettings : IModSettings {
     } = true;
 
     /// <summary>
+    /// Whether to draw the health bars of creatures that were hurt: above their heads, and along the bottom of the
+    /// screen for a boss (see Ui.EnemyHealthBars). Only on this machine, like the name settings. Off unless a player
+    /// switches them on, as the game itself has none (USER 10-13: 血条最好默认关).
+    /// </summary>
+    public bool ShowEnemyHealthBars {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(ShowEnemyHealthBars));
+        }
+    }
+
+    /// <summary>
     /// Set of addon names for addons that are disabled by the user.
     /// </summary>
     // ReSharper disable once AutoPropertyCanBeMadeGetOnly.Global
