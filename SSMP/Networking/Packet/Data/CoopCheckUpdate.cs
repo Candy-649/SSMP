@@ -71,5 +71,12 @@ internal enum CoopCheckKind : byte {
     /// <summary>
     /// The values of the sender that differ from those in a request, with their names and how long they have been so.
     /// </summary>
-    Detail
+    Detail,
+
+    /// <summary>
+    /// What came up in the sender's game that can hurt a player since its last word, for the other game to compare
+    /// with what came up in its own (see CoopAttackCheck). Appended at the end, so that the kinds before keep their
+    /// numbers.
+    /// </summary>
+    Attacks
 }

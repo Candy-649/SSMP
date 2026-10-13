@@ -151,6 +151,11 @@ internal class ClientManager : IClientManager {
     private readonly CoopStateCheck _coopStateCheck;
 
     /// <summary>
+    /// The comparison of what can hurt a player as it comes up in the room, between the games of the members in it.
+    /// </summary>
+    private readonly CoopAttackCheck _coopAttackCheck;
+
+    /// <summary>
     /// Scores the hits on the fleas of the festival games for the player whose game doesn't control them.
     /// </summary>
     private readonly FleaGameCoop _fleaGameCoop;
@@ -405,6 +410,9 @@ internal class ClientManager : IClientManager {
         _coopStateCheck = new CoopStateCheck(
             netClient, _playerData, _entityManager, _coopSave, () => _coopSave.CheckedMemberIds
         );
+        _coopAttackCheck = new CoopAttackCheck(
+            netClient, _playerData, _entityManager, () => _coopSave.CheckedMemberIds
+        );
         _coopSave.OnFleaGameScore = _fleaGameCoop.OnPartnerScore;
         _coopSave.OnPartnerFlagSet = _arenaCoop.OnPartnerFlagSet;
         _coopSave.OnFleaGamesOutroReady = _fleaGameCoop.OnPartnerOutroReady;
@@ -489,6 +497,7 @@ internal class ClientManager : IClientManager {
         _bossRoomCoop.RegisterHooks();
         _coopHits.RegisterHooks();
         _coopStateCheck.RegisterHooks();
+        _coopAttackCheck.RegisterHooks();
         _fleaGameCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
@@ -526,6 +535,7 @@ internal class ClientManager : IClientManager {
         _bossRoomCoop.DeregisterHooks();
         _coopHits.DeregisterHooks();
         _coopStateCheck.DeregisterHooks();
+        _coopAttackCheck.DeregisterHooks();
         _fleaGameCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
@@ -644,7 +654,13 @@ internal class ClientManager : IClientManager {
         );
         _packetManager.RegisterClientUpdatePacketHandler<CoopCheckUpdate>(
             ClientUpdatePacketId.CoopCheckUpdate,
-            _coopStateCheck.OnCoopCheckUpdate
+            update => {
+                if (update.Kind == CoopCheckKind.Attacks) {
+                    _coopAttackCheck.OnAttacks(update);
+                } else {
+                    _coopStateCheck.OnCoopCheckUpdate(update);
+                }
+            }
         );
 
         // Register packet handlers related to full synchronisation

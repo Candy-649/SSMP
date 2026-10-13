@@ -145,6 +145,32 @@ internal class EntityProcessor {
     }
 
     /// <summary>
+    /// Finds the registered entity that an object is, or is a part of: the object of the entity that it is under,
+    /// which is the room's own object or its shown copy, and the room's own object.
+    /// </summary>
+    /// <param name="gameObject">The object to look for.</param>
+    /// <param name="root">The object of the entity that the object is, or is under.</param>
+    /// <param name="roomObject">The room's own object of that entity.</param>
+    /// <returns>Whether the object is, or is a part of, a registered entity whose room's own object is still there.
+    /// </returns>
+    public static bool TryGetEntityObject(GameObject gameObject, out GameObject root, out GameObject roomObject) {
+        for (var current = gameObject.transform; current != null; current = current.parent) {
+            foreach (var entity in _entities.Values) {
+                if ((ReferenceEquals(entity.Object.Host, current.gameObject) ||
+                     ReferenceEquals(entity.Object.Client, current.gameObject)) && entity.Object.Host != null) {
+                    root = current.gameObject;
+                    roomObject = entity.Object.Host;
+                    return true;
+                }
+            }
+        }
+
+        root = null!;
+        roomObject = null!;
+        return false;
+    }
+
+    /// <summary>
     /// Process the game object set in this instance with the parameter set in this instance.
     /// </summary>
     /// <returns>The instance of this class for convenience.</returns>
