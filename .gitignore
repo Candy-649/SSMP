@@ -435,3 +435,5 @@ dist-assets/
 # Where installer/pack-npm.ps1 assembles the package. It is rebuilt from scratch on every run and holds copies
 # of build output, so committing it would only ever add a second, staler copy of things already tracked.
 dist-npm/
+# Where installer/pack-nexus.ps1 writes the zip for a mod page, made from the stage above.
+dist-nexus/
