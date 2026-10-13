@@ -27,7 +27,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// states: the other game shows its parts the way they go up in the host's game (see CoopSave.ShownParts).
 ///
 /// The other game's controller now follows the host's in every state. The host's tells the other game each state it
-/// goes into, with the dice the state rolled, which pick the charges and their order too; the other game's goes into
+/// goes into, with the dice the state rolled, which pick the charges, and the order that the lists of charges were
+/// shuffled into (see SharedDice); the other game's goes into
 /// the same state as the word comes, with those dice, and holds back every step it would take by itself, for as long
 /// as it takes: every state of the host's is told, so a word that doesn't come means the host's is still where it
 /// was. One of a game that runs the room now goes on by itself and tells the partner, as the other machines do (see
