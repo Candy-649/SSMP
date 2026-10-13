@@ -854,5 +854,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// at there, and <see cref="CoopSaveUpdate.Values"/> 0 for each that does not lead on through the maze, else 1 more
     /// than its place among those that do. Appended at the end, like every kind.
     /// </summary>
-    RoomLayout
+    RoomLayout,
+
+    /// <summary>
+    /// Where a door of a room of the maze took the sender's player, or a player before them, who went through it first
+    /// while the room had someone in it (see CoopSave.RoomLayouts). <see cref="CoopSaveUpdate.Scene"/> is the room,
+    /// <see cref="CoopSaveUpdate.Records"/> holds the path of the door, the scene it took them to and the door they
+    /// came in at there, and <see cref="CoopSaveUpdate.PartnerKey"/> the save key of that player. Appended at the end,
+    /// like every kind.
+    /// </summary>
+    RoomDoorTaken
 }

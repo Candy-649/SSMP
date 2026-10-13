@@ -1085,6 +1085,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.RoomLayout:
                 OnRoomLayout(player, update);
                 break;
+            case CoopSaveUpdateKind.RoomDoorTaken:
+                OnRoomDoorTaken(player, update);
+                break;
             case CoopSaveUpdateKind.PutBack:
                 OnPutBack(player, update);
                 break;

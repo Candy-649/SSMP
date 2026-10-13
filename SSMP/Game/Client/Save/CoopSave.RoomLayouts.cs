@@ -40,6 +40,11 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// larger save key, as for other things that two games chose at once (MemberKeyWins). A room that two games laid out
 /// each by itself, when a word came too late, takes the doors of the larger key in both, which is what keeps the
 /// players together; the rest of it stays as each game built it.
+///
+/// A door of a room also decides, as a player goes through it, whether it sends them back to the way in after too many
+/// doors that did not lead on, by that player's own count; so two players whose counts differ could part at the same
+/// door. While a room has someone in it, a door that a player went through takes everyone after them where it took
+/// that player: the game of the first one through tells the others where it led (see <see cref="AfterMazeDoor"/>).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -110,6 +115,13 @@ internal partial class CoopSave {
     private int _layoutLinkDepth;
 
     /// <summary>
+    /// Where each door of a room of the maze took the player who went through it first, by the path of the door, for
+    /// each room that a player is in or on the way into, by its scene.
+    /// </summary>
+    private readonly Dictionary<string, Dictionary<string, TakenDoor>> _takenDoors =
+        new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// For each state machine of a room of the maze that picks, the states from which it still comes to a pick.
     /// </summary>
     private readonly Dictionary<Fsm, HashSet<string>> _layoutPickingStates = new();
@@ -162,6 +174,25 @@ internal partial class CoopSave {
                 OnLayoutLinkDoors
             )
         );
+
+        // What a door of the maze does as a player goes through it is a lambda of SubscribeDoorEntered, a method of a
+        // type that the compiler made, which holds the door and the controller
+        var doorEntered = typeof(MazeController).GetNestedTypes(BindingFlags.NonPublic)
+            .SelectMany(type => type.GetMethods(InstanceFlags | BindingFlags.DeclaredOnly))
+            .FirstOrDefault(method => method.Name.StartsWith("<SubscribeDoorEntered>", StringComparison.Ordinal));
+        var doorField = doorEntered?.DeclaringType?.GetField("door", InstanceFlags);
+        var controllerField = doorEntered?.DeclaringType?.GetField("<>4__this", InstanceFlags);
+        if (doorEntered == null || doorField == null || controllerField == null) {
+            Logger.Error("Could not find what a door of the maze does as a player goes through it");
+        } else {
+            try {
+                _layoutILHooks.Add(
+                    new ILHook(doorEntered, il => FollowFirstThroughDoor(il, doorField, controllerField))
+                );
+            } catch (Exception e) {
+                Logger.Error($"Could not hook what a door of the maze does as a player goes through it:\n{e}");
+            }
+        }
     }
 
     /// <summary>
@@ -187,6 +218,126 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Error($"Could not change where a scene load waits to switch its room on:\n{e}");
         }
+    }
+
+    /// <summary>
+    /// IL hook for what a door of the maze does as a player goes through it, which then lets
+    /// <see cref="AfterMazeDoor"/> say where the door takes the player.
+    /// </summary>
+    private void FollowFirstThroughDoor(ILContext il, FieldInfo doorField, FieldInfo controllerField) {
+        try {
+            var c = new ILCursor(il);
+            var found = false;
+            while (c.TryGotoNext(MoveType.Before, i => i.MatchRet())) {
+                c.MoveAfterLabels();
+                c.Emit(Mono.Cecil.Cil.OpCodes.Ldarg_0);
+                c.Emit(Mono.Cecil.Cil.OpCodes.Ldfld, doorField);
+                c.Emit(Mono.Cecil.Cil.OpCodes.Ldarg_0);
+                c.Emit(Mono.Cecil.Cil.OpCodes.Ldfld, controllerField);
+                c.EmitDelegate<Action<TransitionPoint, MazeController>>(AfterMazeDoor);
+                c.Index++;
+                found = true;
+            }
+
+            if (!found) {
+                Logger.Warn("Could not find where a door of the maze is done with a player going through it");
+            }
+        } catch (Exception e) {
+            Logger.Error($"Could not change what a door of the maze does as a player goes through it:\n{e}");
+        }
+    }
+
+    /// <summary>
+    /// Runs as a door of a room of the maze is done with a player going through it, before it takes them anywhere. A
+    /// door that a player went through earlier, while the room has had someone in it since, takes this player where it
+    /// took that one, rather than where this player's own count of doors would send them (USER 10-13: two players who
+    /// go through the same door come out in the same room). Otherwise where it takes this player is told to the
+    /// members that the room has, for when they go through it after them.
+    /// </summary>
+    private void AfterMazeDoor(TransitionPoint door, MazeController controller) {
+        try {
+            if (door == null || controller == null || controller.isCapScene) {
+                return;
+            }
+
+            var scene = controller.gameObject.scene.name;
+            if (!IsLayoutScene(scene)) {
+                return;
+            }
+
+            var path = ScenePath.Get(door.transform);
+            if (_takenDoors.TryGetValue(scene, out var doors) && doors.TryGetValue(path, out var taken)) {
+                if (taken.Scene != door.targetScene || taken.Entry != door.entryPoint) {
+                    door.SetTargetScene(taken.Scene);
+                    door.entryPoint = taken.Entry;
+
+                    // As the door sets it for the way back from the next room, which it set before this
+                    PlayerData.instance.PreviousMazeTargetDoor = taken.Entry;
+                    Logger.Info(
+                        $"'{door.name}' of '{scene}' takes this player to '{taken.Scene}', where it took the player " +
+                        "who went through it first"
+                    );
+                }
+
+                return;
+            }
+
+            // Only while a member has the room: a room that the local player leaves alone is forgotten
+            if (!_memberLayoutPlaces.Values.Any(place => IsSameScene(place.Scene, scene)) &&
+                !GetCheckedMembers().Any(member => IsSameScene(PlaceOf(member).Scene, scene))) {
+                return;
+            }
+
+            if (doors == null) {
+                _takenDoors[scene] = doors = new Dictionary<string, TakenDoor>(StringComparer.Ordinal);
+            }
+
+            var record = new TakenDoor(door.targetScene ?? "", door.entryPoint ?? "", LocalKey);
+            doors[path] = record;
+            SendToMembers(WriteTakenDoor(scene, path, record));
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+    }
+
+    /// <summary>
+    /// Takes where a door of a room of the maze took a member who went through it first. Of two who went through it
+    /// at once, each before hearing of the other, the one with the larger key counts in every game.
+    /// </summary>
+    private void OnRoomDoorTaken(ClientPlayerData player, CoopSaveUpdate update) {
+        if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) || !IsFromMemberInSave(player) ||
+            !IsLayoutScene(update.Scene) || update.Records.Count != 3 || update.PartnerKey.Length == 0 ||
+            !IsLayoutHeld(update.Scene)) {
+            return;
+        }
+
+        if (!_takenDoors.TryGetValue(update.Scene, out var doors)) {
+            _takenDoors[update.Scene] = doors = new Dictionary<string, TakenDoor>(StringComparer.Ordinal);
+        }
+
+        var path = update.Records[0];
+        if (doors.TryGetValue(path, out var known) && string.CompareOrdinal(known.Key, update.PartnerKey) >= 0) {
+            return;
+        }
+
+        doors[path] = new TakenDoor(update.Records[1], update.Records[2], update.PartnerKey);
+    }
+
+    /// <summary>
+    /// Writes where a door of a room of the maze took the player who went through it first into an update:
+    /// <see cref="CoopSaveUpdate.Records"/> holds the path of the door, the scene it took them to and the door they
+    /// came in at there, and <see cref="CoopSaveUpdate.PartnerKey"/> the save key of that player.
+    /// </summary>
+    private static CoopSaveUpdate WriteTakenDoor(string scene, string path, TakenDoor door) {
+        var update = new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.RoomDoorTaken,
+            Scene = scene,
+            PartnerKey = door.Key
+        };
+        update.Records.Add(path);
+        update.Records.Add(door.Scene);
+        update.Records.Add(door.Entry);
+        return update;
     }
 
     /// <summary>
@@ -363,6 +514,12 @@ internal partial class CoopSave {
             _layouts.Remove(scene);
             Logger.Info($"Forgot the layout of '{scene}', which nobody is in any more");
         }
+
+        foreach (var scene in _takenDoors.Keys.ToList()) {
+            if (!IsLayoutHeld(scene)) {
+                _takenDoors.Remove(scene);
+            }
+        }
     }
 
     /// <summary>
@@ -479,6 +636,12 @@ internal partial class CoopSave {
                 _layouts.Remove(scene);
             }
         }
+
+        foreach (var scene in _takenDoors.Keys.ToList()) {
+            if (!IsSameScene(_localLayoutPlace.Scene, scene)) {
+                _takenDoors.Remove(scene);
+            }
+        }
     }
 
     /// <summary>
@@ -486,6 +649,7 @@ internal partial class CoopSave {
     /// </summary>
     private void ForgetLocalLayout() {
         _layouts.Clear();
+        _takenDoors.Clear();
         _localLayoutPlace = LayoutPlace.None;
         _layoutLoad = null;
         _recordingLayout = null;
@@ -534,12 +698,20 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Sends the layout of a room to one member.
+    /// Sends the layout of a room to one member, with where its doors took the players who went through them first.
     /// </summary>
     private void SendLayout(LayoutRecord layout, ushort targetId) {
         var update = WriteLayout(layout);
         update.TargetId = targetId;
         Send(update);
+
+        if (_takenDoors.TryGetValue(layout.Scene, out var doors)) {
+            foreach (var pair in doors) {
+                var taken = WriteTakenDoor(layout.Scene, pair.Key, pair.Value);
+                taken.TargetId = targetId;
+                Send(taken);
+            }
+        }
     }
 
     /// <summary>
@@ -924,6 +1096,14 @@ internal partial class CoopSave {
     /// <param name="Entry">The door of that scene it comes in at.</param>
     /// <param name="LeadsOn">Its place among the doors that lead on through the maze, or -1 if it does not.</param>
     private readonly record struct LayoutDoor(string Scene, string Entry, int LeadsOn);
+
+    /// <summary>
+    /// Where a door of a room of the maze took the player who went through it first.
+    /// </summary>
+    /// <param name="Scene">The scene it took them to.</param>
+    /// <param name="Entry">The door of that scene they came in at.</param>
+    /// <param name="Key">The save key of that player.</param>
+    private readonly record struct TakenDoor(string Scene, string Entry, string Key);
 
     /// <summary>
     /// How a room of the maze is laid out, as the game that came into it first wrote it down.
