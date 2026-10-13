@@ -43,6 +43,10 @@ namespace SSMP.Game.Client.Save;
 /// in the same moment. A list that doesn't hold the same things over there is shuffled there by itself, with a line in
 /// the log.
 ///
+/// An object of the room can also be given a name to roll under, the same in every game, as the things that creatures
+/// throw have (<see cref="RollByName"/>): a part that a controller of a fight sends off rolls so from the word that
+/// tells the other game, for as long as it goes, rather than for only one moment.
+///
 /// It covers only what happens at once, in the same call: what the thing rolls later, after a wait, each game rolls
 /// again. This is no seed shared by the room. That was turned down, since each game rolls at its own frame rate and for
 /// its own player, so the same seed soon gives different numbers. Here the dice are lent for the one thing and handed
@@ -122,6 +126,12 @@ internal static class SharedDice {
     /// Which of <see cref="_records"/> an action here has taken, so that each is taken once.
     /// </summary>
     private static bool[]? _taken;
+
+    /// <summary>
+    /// The objects of the room that roll under a name rather than with the game's own dice, the same in every game,
+    /// with how many times each of their actions rolled under it (see <see cref="RollByName"/>).
+    /// </summary>
+    private static readonly Dictionary<GameObject, (string Name, Dictionary<int, int> Times)> NamedRollers = new();
 
     /// <summary>
     /// The state machine of an entity that rolls with the dice of what is being set off, or null for none. Otherwise
@@ -251,6 +261,27 @@ internal static class SharedDice {
     }
 
     /// <summary>
+    /// Has the state machines of an object of the room roll under a name from now on, rather than with the game's own
+    /// dice: each roll of each action from the name and how many times that action rolled under it before, so that
+    /// every game that gives the object the same name rolls the same, at whatever time and in whatever order its
+    /// actions come, as the things that creatures throw do (see ThrownThings). A part that a controller of a fight
+    /// sends off is given one by the word that tells the other game (see CoopSave.ShownParts), and keeps it until it is
+    /// given another or the room is left.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    /// <param name="name">The name, the same in every game.</param>
+    public static void RollByName(GameObject gameObject, string name) {
+        NamedRollers[gameObject] = (name, new Dictionary<int, int>());
+    }
+
+    /// <summary>
+    /// Has every object that rolls under a name roll with the game's own dice again, as the room is left.
+    /// </summary>
+    public static void ForgetRollNames() {
+        NamedRollers.Clear();
+    }
+
+    /// <summary>
     /// Adds dice to the end of what an update carries.
     /// </summary>
     /// <param name="data">What the update carries.</param>
@@ -316,6 +347,16 @@ internal static class SharedDice {
         if (ThrownThings.Count > 0 && self.Fsm?.FsmComponent is { } thrownFsm &&
             ThrownThings.TryGetMark(thrownFsm.gameObject, out var mark)) {
             ThrownThings.Rolling(mark.NextRoll(Identify(self, thrownFsm)), () => orig(self));
+            return;
+        }
+
+        // So does an object of the room that was given a name to roll under
+        if (NamedRollers.Count > 0 && self.Fsm?.FsmComponent is { } namedFsm && namedFsm != null &&
+            NamedRollers.TryGetValue(namedFsm.gameObject, out var named)) {
+            var roller = Identify(self, namedFsm);
+            named.Times.TryGetValue(roller, out var times);
+            named.Times[roller] = times + 1;
+            ThrownThings.Rolling(ThrownThings.Seed(named.Name, roller, times), () => orig(self));
             return;
         }
 

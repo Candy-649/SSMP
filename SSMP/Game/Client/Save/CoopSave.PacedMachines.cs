@@ -166,6 +166,14 @@ internal partial class CoopSave {
         new(
             ["Trapdoor Bursts"], "Control", [], sceneName: "Library_13", ownStateNames: ["Init"], wholeNames: true,
             showsParts: true
+        ),
+
+        // The controllers of another fight that send spiked balls flying, one for each part of the fight, which tell
+        // the balls of their pick which way to fly; the other game shows which ball was told what, and holds its own
+        // past the state where each finds the creature (see CoopSave.ShownParts)
+        new(
+            ["Spike Balls", "Spike Balls P1"], "Control", [], sceneName: "Shellwood_11b_Memory",
+            ownStateNames: ["Init"], wholeNames: true, showsParts: true
         )
     ];
 

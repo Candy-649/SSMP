@@ -6,6 +6,7 @@ using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
 
@@ -50,6 +51,16 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// The parts are the objects under the controller that its variables hold, since those are what its actions switch on
 /// and move, and those it plays the sparkle on. A part that was up already when the partner came in is not told, nor
 /// one that went up before this game ran the room.
+///
+/// In another fight a controller that the creature sets going sends its parts off by telling them: it shuffles its
+/// list of spiked balls, tells the first few which way to fly, and each ball then rolls how high it goes, how long it
+/// waits, how far to one side it starts, and as it flies how it turns and how large it is. Each game ran its own, and
+/// the balls flew from other places to other heights for each player (USER 10-13: 另一场boss战那个也看一下吧). The
+/// host's controller tells the other game each part it told something, with what it told it and where the part stood
+/// (the list never leaves the host's game, only which ball was told what), and the other game tells its own part the
+/// same, standing there, at the host's spacing. A part told something goes by itself from then on, the way it does in
+/// the host's game, so its moves aren't told. What it rolls - in answer and later as it flies - both games roll under
+/// a name made from the word, the same in both (see SharedDice), until it is told something again.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -99,7 +110,14 @@ internal partial class CoopSave {
         /// <summary>
         /// It went out. The word also holds how long it was up.
         /// </summary>
-        WentOut = 3
+        WentOut = 3,
+
+        /// <summary>
+        /// The controller told it something. The word holds where it stood as it was told, and 1 if the event went to
+        /// the state machines under it as well; <see cref="CoopSaveUpdate.Names"/> holds the event and the name of the
+        /// state machine it went to, or nothing for all of them.
+        /// </summary>
+        Told = 4
     }
 
     /// <summary>
@@ -124,13 +142,22 @@ internal partial class CoopSave {
     private Hook? _particlePlayHook;
 
     /// <summary>
-    /// Registers the hook on a state machine playing particles, which a controller whose parts the other game shows
-    /// tells.
+    /// The hook on a state machine sending an event to others.
+    /// </summary>
+    private Hook? _partEventHook;
+
+    /// <summary>
+    /// Registers the hooks on a state machine playing particles and sending an event, which a controller whose parts
+    /// the other game shows tells.
     /// </summary>
     private void RegisterShownPartHooks() {
         _particlePlayHook = CreateHook(
             typeof(PlayParticleEmitter).GetMethod("OnEnter", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<PlayParticleEmitter>, PlayParticleEmitter>(OnParticlePlay)
+        );
+        _partEventHook = CreateHook(
+            typeof(Fsm).GetMethod("Event", InstanceFlags, null, [typeof(FsmEventTarget), typeof(FsmEvent)], null),
+            new Action<Action<Fsm, FsmEventTarget?, FsmEvent?>, Fsm, FsmEventTarget?, FsmEvent?>(OnControllerEvent)
         );
     }
 
@@ -224,7 +251,9 @@ internal partial class CoopSave {
             if (tells && isUp && isKnown) {
                 if (!was.IsUp) {
                     TellPart(fsm, controller, shown, part, PartChange.WentUp);
-                } else if ((part.position - was.Place).sqrMagnitude > ShownPartMoveSqr || flags != was.Flags) {
+                } else if (!shown.RunsItself.Contains(part) &&
+                           ((part.position - was.Place).sqrMagnitude > ShownPartMoveSqr || flags != was.Flags)) {
+                    // A part that was told something goes by itself, in both games
                     TellPart(fsm, controller, shown, part, PartChange.Moved);
                 }
             }
@@ -264,6 +293,146 @@ internal partial class CoopSave {
 
         PartMachines.Clear();
         return flags;
+    }
+
+    /// <summary>
+    /// Hook on a state machine sending an event to others: a controller here whose parts the other game shows tells it
+    /// when it goes to one of its parts. The part rolls under the name of the word from then on, here too, so what it
+    /// rolls as it takes the event already comes out the same in the other game.
+    /// </summary>
+    private void OnControllerEvent(
+        Action<Fsm, FsmEventTarget?, FsmEvent?> orig,
+        Fsm self,
+        FsmEventTarget? eventTarget,
+        FsmEvent? fsmEvent
+    ) {
+        if (_shownControllers.Count == 0 || !_shownControllers.TryGetValue(self, out var shown)) {
+            orig(self, eventTarget, fsmEvent);
+            return;
+        }
+
+        CoopSaveUpdate? word = null;
+        Transform? part = null;
+        try {
+            if (fsmEvent?.Name is { Length: > 0 } eventName && eventTarget != null && TellsShownParts() &&
+                self.GameObject is { } controller && controller != null &&
+                FindToldPart(self, eventTarget, controller.transform, out var fsmName) is { } told &&
+                !EntityProcessor.IsRegistered(told.gameObject) &&
+                TakesEvent(told, eventName, fsmName, eventTarget.sendToChildren?.Value == true)) {
+                part = told;
+                var place = part.position;
+                word = new CoopSaveUpdate {
+                    TargetId = CoopTargets.Everyone,
+                    Kind = CoopSaveUpdateKind.MachinePart,
+                    Scene = controller.scene.name,
+                    ObjectPath = ScenePath.Get(controller.transform),
+                    FsmName = self.Name,
+                    StateName = PathUnder(part, controller.transform),
+                    Part = (ushort) PartChange.Told,
+                    Sequence = ++_machineRoundCount,
+                    Values = [Time.time, place.x, place.y, eventTarget.sendToChildren?.Value == true ? 1f : 0f],
+                    Names = [eventName, fsmName]
+                };
+                SharedDice.RollByName(part.gameObject, PartRollName(word));
+            }
+        } catch (Exception e) {
+            LogInteractionError(e);
+            word = null;
+        }
+
+        orig(self, eventTarget, fsmEvent);
+        if (word == null || part == null) {
+            return;
+        }
+
+        shown.RunsItself.Add(part);
+        shown.LastTold = Time.time;
+        try {
+            Send(word);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+    }
+
+    /// <summary>
+    /// The part of a controller that an event goes to, if it goes to one object under the controller, with the name of
+    /// the state machine that it goes to there, or nothing for all of them.
+    /// </summary>
+    private static Transform? FindToldPart(
+        Fsm sender,
+        FsmEventTarget eventTarget,
+        Transform controller,
+        out string fsmName
+    ) {
+        fsmName = "";
+        GameObject? target;
+        switch (eventTarget.target) {
+            case FsmEventTarget.EventTarget.GameObject:
+                target = sender.GetOwnerDefaultTarget(eventTarget.gameObject);
+                break;
+            case FsmEventTarget.EventTarget.GameObjectFSM:
+                target = sender.GetOwnerDefaultTarget(eventTarget.gameObject);
+                fsmName = eventTarget.fsmName?.Value ?? "";
+                break;
+            case FsmEventTarget.EventTarget.FSMComponent when eventTarget.fsmComponent != null:
+                target = eventTarget.fsmComponent.gameObject;
+                fsmName = eventTarget.fsmComponent.FsmName;
+                break;
+            default:
+                return null;
+        }
+
+        if (target == null) {
+            return null;
+        }
+
+        var part = target.transform;
+        return part != controller && part.IsChildOf(controller) ? part : null;
+    }
+
+    /// <summary>
+    /// Whether a state machine of a part, or under it, takes an event where it is: one that is busy with something
+    /// else, like a ball still in flight that the controller picks again, lets it go by, in the host's game as in the
+    /// other, and isn't told.
+    /// </summary>
+    private static bool TakesEvent(Transform part, string eventName, string fsmName, bool children) {
+        var machines = children ? part.GetComponentsInChildren<PlayMakerFSM>() : part.GetComponents<PlayMakerFSM>();
+        foreach (var machine in machines) {
+            if (machine == null || fsmName.Length > 0 && machine.FsmName != fsmName || machine.Fsm is not { } fsm) {
+                continue;
+            }
+
+            if (HasWayOut(fsm.ActiveState?.Transitions, eventName) || HasWayOut(fsm.GlobalTransitions, eventName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether one of the given ways out goes on the given event.
+    /// </summary>
+    private static bool HasWayOut(FsmTransition[]? transitions, string eventName) {
+        if (transitions == null) {
+            return false;
+        }
+
+        foreach (var transition in transitions) {
+            if (transition?.EventName == eventName) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The name that a part told something rolls under from then on, the same in both games: from the controller, the
+    /// part and the number of the word.
+    /// </summary>
+    private static string PartRollName(CoopSaveUpdate word) {
+        return word.Scene + "|" + word.ObjectPath + "|" + word.StateName + "#" + word.Sequence;
     }
 
     /// <summary>
@@ -526,6 +695,37 @@ internal partial class CoopSave {
 
                 shown.OffAt[part] = since + values[3];
                 return;
+            case PartChange.Told:
+                TellPartHere(part, word);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// Tells a part of a controller here what the scene host's controller told the host's: standing where the host's
+    /// stood, with its rolls from then on under the name of the word, as the host's are. A part that is still busy
+    /// here with what it was told before, which the host's had finished, lets it go by and stays where it is.
+    /// </summary>
+    private static void TellPartHere(Transform part, CoopSaveUpdate word) {
+        var values = word.Values;
+        if (values.Count < 4 || word.Names.Count < 2 || word.Names[0] is not { Length: > 0 } eventName) {
+            return;
+        }
+
+        SharedDice.RollByName(part.gameObject, PartRollName(word));
+        var fsmName = word.Names[1];
+        var children = values[3] > 0.5f;
+        if (!TakesEvent(part, eventName, fsmName, children)) {
+            Logger.Info($"The part '{part.name}' is still busy and lets '{eventName}' of the scene host go by");
+            return;
+        }
+
+        part.position = new Vector3(values[1], values[2], part.position.z);
+        var machines = children ? part.GetComponentsInChildren<PlayMakerFSM>() : part.GetComponents<PlayMakerFSM>();
+        foreach (var machine in machines) {
+            if (machine != null && (fsmName.Length == 0 || machine.FsmName == fsmName)) {
+                machine.Fsm?.Event(eventName);
+            }
         }
     }
 
@@ -635,6 +835,7 @@ internal partial class CoopSave {
     private void ResetShownParts() {
         _shownControllers.Clear();
         _shownControllerList.Clear();
+        SharedDice.ForgetRollNames();
     }
 
     /// <summary>
@@ -671,6 +872,12 @@ internal partial class CoopSave {
         /// In the other game, the parts that go out once they were up here as long as the host's, with when.
         /// </summary>
         public readonly Dictionary<Transform, float> OffAt = new();
+
+        /// <summary>
+        /// In the game that runs the room, the parts that the controller told something, which go by themselves from
+        /// then on, so that their moves aren't told.
+        /// </summary>
+        public readonly HashSet<Transform> RunsItself = [];
 
         /// <summary>
         /// The player whose words these are.
