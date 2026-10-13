@@ -109,6 +109,15 @@ internal partial class CoopSave {
         new(["Collapser Small"], "Control", "BREAK", "Antic Type", ["Idle"], ["Idle"]),
         new(["Abyss_Weaver_Hanging_Plat"], "Break Control", "ENTER", "Tendrils Up", ["Idle"], ["Idle"]),
 
+        // A platform hung on a chain that gives way under a player who lands on it and crushes whoever is below, and a
+        // chunk of a pillar that breaks off and falls as a player touches or strikes it (FsmScan --hazards). Struck,
+        // the platform breaks another way, which goes to the partner as any struck part of the room does (CoopHits).
+        new(["Chain Drop Platform"], "Control", "LAND", "Break Antic", ["Idle"], ["Idle"]),
+        new(["drop pillar_chunk"], "Control", "TOUCH", "Break Antic 1", ["Idle"], ["Idle"]),
+
+        // A roof that bursts open as a player walks under it, letting in the creatures that wait above, once
+        new(["Dock Bomber Ambush"], "Control", "ENTER", "Explode", ["Idle"], ["Idle"]),
+
         // A bench that gives way under whoever sits on it and drops them down with it. It is written into the save as
         // well; this is the floor going here as it goes over there. The copy here only falls: taking the sitter off
         // the bench, carrying them down, the camera on them and handing them back their controls are about them.
