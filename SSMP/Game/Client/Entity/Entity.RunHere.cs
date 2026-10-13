@@ -806,6 +806,10 @@ internal partial class Entity {
             return false;
         }
 
+        // Drawn sliding from here to where it is put and carried on, but not along any way the event takes it itself
+        // (see ShownSlide)
+        var hostTransform = Object.Host.transform;
+        var shownFrom = (Vector2) hostTransform.position;
         Rigidbody2D? body = null;
         if (start.Motion is { } motion && Object.Host.TryGetComponent<Rigidbody2D>(out var hostBody)) {
             body = hostBody;
@@ -813,9 +817,10 @@ internal partial class Entity {
             hostBody.linearVelocity = motion.Velocity;
             hostBody.angularVelocity = motion.Spin;
         } else {
-            var transform = Object.Host.transform;
-            transform.position = new Vector3(start.Position.x, start.Position.y, transform.position.z);
+            hostTransform.position = new Vector3(start.Position.x, start.Position.y, hostTransform.position.z);
         }
+
+        var putAt = (Vector2) hostTransform.position;
 
         // What the part that caught set on the copy's FSM along with the catch, which the part here never did
         var isCatch = start.Caught != null || CatchEvents.Contains(eventName);
@@ -858,11 +863,20 @@ internal partial class Entity {
             reached = fsm.ActiveState;
         }
 
+        var carried = Vector2.zero;
         if (sameWay) {
             CarryEasesOn(reached!, elapsed);
             if (body != null) {
+                var beforeCarrying = body.position;
                 CarryOn(body, elapsed);
+                carried = body.position - beforeCarrying;
             }
+        }
+
+        if (hostTransform != null) {
+            ShownSlide.Start(
+                hostTransform, shownFrom - putAt - carried, $"where the partner's copy took '{eventName}'"
+            );
         }
 
         // How it moves now is sent whatever the input did to it: nothing else may be left to send
