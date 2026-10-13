@@ -366,6 +366,9 @@ internal class EntityManager {
         SceneHostEpoch = sceneHostEpoch;
         Logger.Info($"Becoming scene host (epoch {sceneHostEpoch})");
         IsSceneHost = true;
+
+        // What holds creatures first, so that each creature in it is switched on as it is taken over
+        ForEachEntity("let go of the creatures it holds", entity => entity.LetGoOfTheCreaturesItHolds());
         ForEachEntity("take over", entity => entity.MakeHost(sceneHostEpoch));
 
         // Immediately refresh targeting fields for all active enemies

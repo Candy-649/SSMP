@@ -709,7 +709,7 @@ internal static partial class EntityFsmActions {
     /// What a creature's own FSMs let go of into the room by giving it no parent, as their variables hold it now:
     /// neither the creature itself nor a player.
     /// </summary>
-    private static List<GameObject> PartsLetGoBy(GameObject creature) {
+    internal static List<GameObject> PartsLetGoBy(GameObject creature) {
         var parts = new List<GameObject>();
         foreach (var fsm in creature.GetComponents<PlayMakerFSM>()) {
             foreach (var state in fsm.FsmStates) {

@@ -165,6 +165,16 @@ internal static class EntityInitializer {
             return true;
         }
 
+        // What holds other creatures is left as it is, each of them being switched on or off by its own takeover as
+        // the other game had it: a knot of thread switches the group of creatures it lets out into the room off as it
+        // starts, and doing that again hid every creature of the group still about (Entity.LetGoOfTheCreaturesItHolds)
+        if (action is ActivateGameObject activate) {
+            var target = action.Fsm.GetOwnerDefaultTarget(activate.gameObject);
+            if (target != null && Entity.HoldsOtherCreatures(target, action.Fsm.GameObject)) {
+                return false;
+            }
+        }
+
         if (leftBehind) {
             return false;
         }

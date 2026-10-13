@@ -2495,6 +2495,50 @@ internal partial class Entity {
     private readonly Transform[] _madeWithCopy;
 
     /// <summary>
+    /// Lets the parts of the room's own creature that hold other creatures, and that its FSMs let go of into the room,
+    /// go into the room switched on, as this game is about to take the room over: before any creature is taken over
+    /// (EntityManager.BecomeSceneHost), since one whose part is switched on only after it would start over. A knot of
+    /// thread lets the group of creatures that wait in it out into the room as it starts, in the game that runs the
+    /// room. In this game it never ran, so the group was still under it and switched off: taken over, the creatures
+    /// of the group went on switched off, gone for both players, and breaking the knot would have switched them off
+    /// with it. Each of those creatures is switched on or off by its own takeover, as the other game had it (see also
+    /// EntityInitializer.IsWantedWhenTakingOver).
+    /// </summary>
+    internal void LetGoOfTheCreaturesItHolds() {
+        if (!_isControlled || Object.Host == null) {
+            return;
+        }
+
+        foreach (var part in EntityFsmActions.PartsLetGoBy(Object.Host)) {
+            if (!part.transform.IsChildOf(Object.Host.transform) || !HoldsOtherCreatures(part, Object.Host)) {
+                continue;
+            }
+
+            part.transform.SetParent(null, true);
+            part.SetActive(true);
+            SSMP.Logging.Logger.Info(
+                $"Let '{part.name}' of '{Object.Host.name}' ({Id}, {Type}) go with the creatures in it, as the " +
+                "game that ran the room did, before taking them over"
+            );
+        }
+    }
+
+    /// <summary>
+    /// Whether an object is, or holds, the room's own object of an entity other than the given one.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    /// <param name="self">The room's own object of the entity it belongs to, or null.</param>
+    internal static bool HoldsOtherCreatures(GameObject gameObject, GameObject? self) {
+        foreach (var transform in gameObject.GetComponentsInChildren<Transform>(true)) {
+            if (transform.gameObject != self && EntitiesByRoomObject.ContainsKey(transform.gameObject)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
