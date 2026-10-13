@@ -161,6 +161,16 @@ internal partial class CoopSave {
     private bool _replayingWorldTrigger;
 
     /// <summary>
+    /// What the names that the traps set off here roll under start with, so that the names of two games never meet.
+    /// </summary>
+    private static readonly string TrapNamePrefix = "trap." + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+    /// <summary>
+    /// The number of the last name that a trap set off here was given.
+    /// </summary>
+    private static int _lastTrapName;
+
+    /// <summary>
     /// What an update of a plate says in place of the state a trap went into when the player got off it again before it
     /// went down. An update of a plate that says nothing there is the player stepping onto it.
     /// </summary>
@@ -223,12 +233,18 @@ internal partial class CoopSave {
             return null;
         }
 
+        // From here on the trap rolls under a name that goes with it, as the partner's does: the dice of its going off
+        // only cover what rolls as it goes off, and some roll later or tell parts that do, like the spikes that a wire
+        // tells to come up once it has snapped, which then roll under a name made from it (see ToldParts.PassOn)
+        var name = $"{TrapNamePrefix}.{++_lastTrapName}";
+        SharedDice.RollByName(gameObject, name);
         return new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.WorldTrigger,
             Scene = gameObject.scene.name,
             ObjectPath = ScenePath.Get(gameObject.transform),
             FsmName = fsm.Name,
-            StateName = toState.Name
+            StateName = toState.Name,
+            Names = [name]
         };
     }
 
@@ -396,7 +412,8 @@ internal partial class CoopSave {
         }
 
         MonoBehaviourUtil.Instance.StartCoroutine(SpringWorldTrigger(
-            player.Username, update.Scene, update.ObjectPath, update.FsmName, update.StateName, update.Amounts
+            player.Username, update.Scene, update.ObjectPath, update.FsmName, update.StateName, update.Amounts,
+            update.Names.Count > 0 ? update.Names[0] : null
         ));
     }
 
@@ -409,13 +426,15 @@ internal partial class CoopSave {
     /// <param name="fsmName">The name of the FSM that runs it.</param>
     /// <param name="goneOffStateName">The state it went into over there, which says which trap this is.</param>
     /// <param name="dice">The dice of the partner's game as it went off there.</param>
+    /// <param name="rollName">The name it rolls under from then on in the partner's game, or null for none.</param>
     private IEnumerator SpringWorldTrigger(
         string username,
         string scene,
         string path,
         string fsmName,
         string goneOffStateName,
-        List<int> dice
+        List<int> dice,
+        string? rollName
     ) {
         var until = Time.unscaledTime + WorldTriggerRetryTime;
 
@@ -438,7 +457,7 @@ internal partial class CoopSave {
                 }
 
                 if (IsWaitingWorldTrigger(fsm, kind)) {
-                    ReplayWorldTrigger(fsm, kind, target.name, username, dice);
+                    ReplayWorldTrigger(fsm, kind, target.name, username, dice, rollName);
 
                     yield break;
                 }
@@ -467,15 +486,21 @@ internal partial class CoopSave {
     /// <param name="name">The name of the trap, for the log.</param>
     /// <param name="username">The name of the partner, for the log.</param>
     /// <param name="dice">The dice of the partner's game.</param>
+    /// <param name="rollName">The name the trap rolls under from then on in the partner's game, or null.</param>
     private void ReplayWorldTrigger(
         PlayMakerFSM fsm,
         WorldTriggerKind kind,
         string name,
         string username,
-        List<int> dice
+        List<int> dice,
+        string? rollName
     ) {
         _replayingWorldTrigger = true;
         try {
+            if (rollName is { Length: > 0 }) {
+                SharedDice.RollByName(fsm.gameObject, rollName);
+            }
+
             var keptOff = kind.KeepOffThePlayer ? KeepTrapOffThePlayer(fsm) : 0;
             SharedDice.Throw(dice, () => {
                 if (kind.EventName.Length == 0) {
