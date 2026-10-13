@@ -143,15 +143,15 @@ internal partial class CoopSave {
         // Chutes that pour debris, by themselves or when a controller says. Only the pitch of their sound is rolled.
         new(["junk_chute_"], "Control", ["Flow"]),
 
-        // Vents that puff steam that hurts, over and over from the moment their room loads, some telling the vent
-        // beside them to puff along. A player walked through steam that had stopped for the other, or was scalded
-        // where the other saw nothing (USER 10-13). The short ones, a few of which close a fight in with steam, start
-        // their rounds with the warning itself, and come first since their name starts like the others'.
+        // Vents that puff steam that hurts, over and over from the moment they are on, which for most is as their room
+        // loads. A player walked through steam that had stopped for the other, or was scalded where the other saw
+        // nothing (USER 10-13). The short ones start their rounds with the warning itself, and come first since their
+        // name starts like the others'.
         new(["steam_vent_short"], "Control", ["Antic"]),
         new(["steam_vent"], "Control", ["Antic SFX?"]),
 
-        // Timers that send columns of exhaust down and up in turn, and one that sends up columns of steam while a
-        // player is near. The columns only answer their timer.
+        // Timers that send columns of exhaust down and up in turn, one of them only while a player is near, and one
+        // that sends up columns of steam while a player is near. The columns only answer their timer.
         new(["Exhaust Column Timer"], "Control", ["Down Antic"]),
         new(["Steam Column Timer"], "Control", ["Start Pause"]),
 
@@ -779,10 +779,15 @@ internal partial class CoopSave {
                 continue;
             }
 
-            if (FindMachineKind(fsm.GameObject, fsm.Name) is { } kind &&
-                (GoesStraightTo(fsm.ActiveState, update.StateName) || IsInDirectedPart(kind, fsm))) {
+            if (FindMachineKind(fsm.GameObject, fsm.Name) is not { } kind) {
+                continue;
+            }
+
+            if (GoesStraightTo(fsm.ActiveState, update.StateName) || IsInDirectedPart(kind, fsm)) {
                 _pendingMachineRounds.Remove(fsm);
                 StartMachineRound(kind, fsm, update, () => fsm.SetState(update.StateName));
+            } else if (!kind.IsDirector && !kind.IsGrinder) {
+                HurryWaits(fsm.ActiveState);
             }
         }
 
@@ -817,6 +822,14 @@ internal partial class CoopSave {
 
             // One that something else took on in the meantime, like a grinder stopped by a catch, waits no more
             if (fsm.GameObject == null || from != fsm.ActiveState) {
+                continue;
+            }
+
+            // One whose state still checks by itself whether to start, like whether a player is near, asks again as
+            // soon as it wants to, and then waits for the word afresh. Sent on now, it went off with no one near, a
+            // player having stepped in and out again before the host's started (review of the steam columns, 10-13).
+            if (FindDirector(fsm) == null && StillAsks(from)) {
+                Logger.Info($"The machine '{fsm.GameObject.name}' waits no more, and starts when it asks again");
                 continue;
             }
 
@@ -855,6 +868,47 @@ internal partial class CoopSave {
                 _startingMachineRound = lastStarting;
             }
         }
+    }
+
+    /// <summary>
+    /// Has a machine here that is behind the scene host's - the host's word for its next round came while it was still
+    /// in the middle of its own - go through the rest of its round without waiting: what the state it is in waits for
+    /// ends at once, so that it does every step of its round as the game has it, only sooner, and starts the host's
+    /// round as it gets there. Before, it only caught up within the wait of the state that leads into its round, and a
+    /// timer that comes to its round through a check of whether a player is near has no wait there: it fell further
+    /// behind with every stall of its game and never caught up (review of the steam columns, 10-13).
+    /// </summary>
+    private static void HurryWaits(FsmState? state) {
+        if (state == null) {
+            return;
+        }
+
+        foreach (var action in state.Actions) {
+            switch (action) {
+                case Wait { Enabled: true, Finished: false } wait:
+                    wait.timer = wait.time.Value;
+                    wait.startTime = FsmTime.RealtimeSinceStartup - wait.time.Value;
+                    break;
+                case WaitRandom { Enabled: true, Finished: false } waitRandom:
+                    waitRandom.timer = waitRandom.time;
+                    waitRandom.startTime = FsmTime.RealtimeSinceStartup - waitRandom.time;
+                    break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a state of a machine still has an action going that can send it on by itself later, like a check every
+    /// frame of whether a player is near. A state whose wait ran out has none.
+    /// </summary>
+    private static bool StillAsks(FsmState state) {
+        foreach (var action in state.Actions) {
+            if (action is { Enabled: true, Finished: false }) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
