@@ -305,6 +305,7 @@ internal partial class CoopSave {
         ToldParts.RegisterHooks();
         ToldParts.IsFollowedInEveryState = machine =>
             FindMachineKind(machine.gameObject, machine.FsmName) is { IsDirector: true };
+        ToldParts.IsPaced = machine => FindMachineKind(machine.gameObject, machine.FsmName) != null;
         RegisterHostSyncHooks();
 
         EventHooks.LanguageHas += OnLanguageHas;

@@ -37,7 +37,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// isn't told here either; one that took it there but is still busy here goes back to where the other was as it took it
 /// (as a part of a controller does, see CoopSave.ShownParts). For an event sent after a delay that isn't known as the
 /// creature tells it, so such a part is only named. What a creature broadcasts to the room names the parts that roll
-/// among those that take it, each by its place in the room.
+/// among those that take it, each by its place in the room. A machine that goes by the scene host's rounds is only
+/// aimed: its rounds roll under names of their own, and the host's word brings one that is behind through the rest of
+/// its round (see CoopSave.PacedMachines).
 /// </summary>
 internal static class ToldParts {
     /// <summary>
@@ -72,7 +74,7 @@ internal static class ToldParts {
     private static readonly List<Hook> Hooks = [];
 
     /// <summary>
-    /// Whether something went wrong here already and was said in the log, which is said once.
+    /// Whether something went wrong here already and was said in the log, which is said once in each room.
     /// </summary>
     private static bool _failed;
 
@@ -87,6 +89,14 @@ internal static class ToldParts {
     /// nothing to follow (set by CoopSave).
     /// </summary>
     public static Func<PlayMakerFSM, bool>? IsFollowedInEveryState { get; set; }
+
+    /// <summary>
+    /// Whether a state machine of the room goes by the rounds of the scene host's (see CoopSave.PacedMachines): each of
+    /// its rounds rolls under a name of its own and waits for the host's word, which also brings one that is behind
+    /// through the rest of its round. What a creature tells it is left to that: it is not named here, and not put back
+    /// to take the event, which would cut its round short and leave what it had up as it was (set by CoopSave).
+    /// </summary>
+    public static Func<PlayMakerFSM, bool>? IsPaced { get; set; }
 
     /// <summary>
     /// What goes with an action of a creature that tells something.
@@ -196,7 +206,7 @@ internal static class ToldParts {
             }
 
             foreach (var machine in told.Machines) {
-                if (machine.Fsm is not { } partFsm || !Takes(partFsm, eventName) ||
+                if (machine.Fsm is not { } partFsm || !Takes(partFsm, eventName) || IsPacedMachine(machine) ||
                     !SharedDice.Rolls(machine) && !SharedDice.Aims(machine) || (takers ??= []).Count >= MaxTakers) {
                     continue;
                 }
@@ -222,7 +232,9 @@ internal static class ToldParts {
     /// Names the parts of the room that roll among those registered for what a creature that this game runs broadcasts.
     /// </summary>
     private static void NameBroadcast(FsmStateAction action, GameObject creature, string? eventName) {
-        if (eventName is not { Length: > 0 } || FindListeners(eventName) is not { Count: > 0 } listeners) {
+        // An event about this game's player is not broadcast again in the other game, so nothing there is named
+        if (eventName is not { Length: > 0 } || Entity.Action.EntityFsmActions.IsPlayerEvent(eventName) ||
+            FindListeners(eventName) is not { Count: > 0 } listeners) {
             return;
         }
 
@@ -334,12 +346,15 @@ internal static class ToldParts {
                 return true;
             }
 
+            // Named after a part is put back, so that what the state it goes back to rolls again is not taken from the
+            // name, which the host's part rolls from only after it took the event
             SayOnce(here.Target, "rolls under the name and goes after the player of the scene host's creature");
-            NameMachines(here, told.Key);
             AimAt(here, told);
             if (atOnce && told.Takers != null) {
                 PutBackToTake(here.Target, told.Takers, eventName);
             }
+
+            NameMachines(here, told.Key);
         } catch (Exception e) {
             SayFailed(e);
         }
@@ -361,6 +376,7 @@ internal static class ToldParts {
     /// </summary>
     public static void Forget() {
         SaidParts.Clear();
+        _failed = false;
     }
 
     /// <summary>
@@ -459,11 +475,12 @@ internal static class ToldParts {
     }
 
     /// <summary>
-    /// Whether any of the state machines rolls or looks at a player, so that a name goes with telling them.
+    /// Whether any of the state machines rolls by a name it is given here or looks at a player, so that a name goes
+    /// with telling them.
     /// </summary>
     private static bool NamesAny(List<PlayMakerFSM> machines) {
         foreach (var machine in machines) {
-            if (SharedDice.Rolls(machine) || SharedDice.Aims(machine)) {
+            if (SharedDice.Rolls(machine) && !IsPacedMachine(machine) || SharedDice.Aims(machine)) {
                 return true;
             }
         }
@@ -472,14 +489,19 @@ internal static class ToldParts {
     }
 
     /// <summary>
+    /// Whether a state machine of the room goes by the rounds of the scene host's (see <see cref="IsPaced"/>).
+    /// </summary>
+    private static bool IsPacedMachine(PlayMakerFSM machine) => IsPaced?.Invoke(machine) == true;
+
+    /// <summary>
     /// Has the objects of the state machines that were told something roll under names made from a name and where each
-    /// is under what was told.
+    /// is under what was told, but for those that go by the scene host's rounds.
     /// </summary>
     private static void NameMachines(ToldMachines told, string name) {
         GameObject? last = null;
         foreach (var machine in told.Machines) {
             var gameObject = machine.gameObject;
-            if (gameObject == last || !SharedDice.Rolls(machine)) {
+            if (gameObject == last || !SharedDice.Rolls(machine) || IsPacedMachine(machine)) {
                 continue;
             }
 
@@ -521,7 +543,8 @@ internal static class ToldParts {
 
             foreach (var machine in part.GetComponents<PlayMakerFSM>()) {
                 if (machine == null || machine.FsmName != taker.FsmName || machine.Fsm is not { } fsm ||
-                    Takes(fsm, eventName) || taker.StateName.Length == 0 || fsm.GetState(taker.StateName) == null) {
+                    Takes(fsm, eventName) || taker.StateName.Length == 0 || fsm.GetState(taker.StateName) == null ||
+                    IsPacedMachine(machine)) {
                     continue;
                 }
 
@@ -620,7 +643,7 @@ internal static class ToldParts {
     }
 
     /// <summary>
-    /// Says in the log, once, that naming what a creature told went wrong.
+    /// Says in the log, once in each room, that naming what a creature told went wrong.
     /// </summary>
     private static void SayFailed(Exception e) {
         if (_failed) {

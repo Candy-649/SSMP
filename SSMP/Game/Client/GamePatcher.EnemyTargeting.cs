@@ -691,11 +691,14 @@ internal partial class GamePatcher {
             return;
         }
 
-        // The enemy behind the event: the sender itself, or the enemy that set the sender off
-        GameObject? enemy;
+        // The enemy behind the event: the sender itself, or the enemy that set the sender off. Or the player that the
+        // game which runs the creature said the sender was set off for, which what it sets off goes after as well.
+        GameObject? enemy = null;
+        GameObject? player = null;
         if (senderOwner.GetComponent<HealthManager>() != null) {
             enemy = senderOwner;
-        } else if (!SetOffByEnemy.TryGetValue(senderOwner.GetInstanceID(), out enemy) || enemy == null) {
+        } else if ((!SetOffForPlayer.TryGetValue(senderOwner.GetInstanceID(), out player) || player == null) &&
+                   (!SetOffByEnemy.TryGetValue(senderOwner.GetInstanceID(), out enemy) || enemy == null)) {
             return;
         }
 
@@ -714,8 +717,18 @@ internal partial class GamePatcher {
         }
 
         var setOff = GetEnemyTargetOwner(target);
-        if (setOff != null && setOff != senderOwner) {
-            SetOffByEnemy[setOff.GetInstanceID()] = enemy;
+        if (setOff == null || setOff == senderOwner) {
+            return;
+        }
+
+        // A player the other game named before is forgotten once an enemy of this game sets it off: that game ran the
+        // creature then, and this one may run it now
+        var id = setOff.GetInstanceID();
+        if (player != null) {
+            SetOffForPlayer[id] = player;
+        } else {
+            SetOffByEnemy[id] = enemy!;
+            SetOffForPlayer.Remove(id);
         }
     }
 
