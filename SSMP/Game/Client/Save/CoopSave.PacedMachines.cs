@@ -435,6 +435,7 @@ internal partial class CoopSave {
     /// </summary>
     private void TellMachineRound(MachineKind kind, Fsm fsm, FsmState toState, Action<Fsm, FsmState> orig) {
         CoopSaveUpdate? word = null;
+        List<(Transform Part, bool WasOn, Vector3 Was)>? partsBefore = null;
         try {
             var gameObject = fsm.GameObject;
             word = new CoopSaveUpdate {
@@ -455,6 +456,10 @@ internal partial class CoopSave {
                     word.PartCount = (ushort) (nextWay.resetFlag is { Value: true } ? 1 : 0);
                 }
             }
+
+            if (kind.IsDirector) {
+                partsBefore = TakeParts(fsm);
+            }
         } catch (Exception e) {
             LogInteractionError(e);
             word = null;
@@ -474,6 +479,16 @@ internal partial class CoopSave {
                     }
                 })
             ];
+
+            // Where the parts are that the state switched on or moved, which also hangs on where earlier states left
+            // them: states that the partner's game may not have gone through
+            if (partsBefore != null) {
+                try {
+                    TellPartsMoved(word, partsBefore);
+                } catch (Exception e) {
+                    LogInteractionError(e);
+                }
+            }
         } finally {
             Send(word);
             if (kind.IsDirector) {
@@ -593,7 +608,7 @@ internal partial class CoopSave {
 
         if (kind.IsDirector) {
             if (fsm.GetState(update.StateName) is { } state) {
-                EnterDirectedState(fsm, state, update.Amounts, start);
+                EnterDirectedState(fsm, state, update.Amounts, start, update);
                 CountDirectedState(fsm, DirectedStep.Followed);
             }
 

@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
+using SSMP.Game.Client.Entity;
+using SSMP.Networking.Packet.Data;
+using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
@@ -32,6 +35,13 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// was. One of a game that runs the room now goes on by itself and tells the partner, as the other machines do (see
 /// CoopSave.PacedMachines).
 ///
+/// Where a part goes up hangs on more than the dice of the state, though: on where an earlier state left it, and on
+/// which of its list the state picks. Each game came to those by itself, through the states that the host's went
+/// through before the partner was in the room or while the partner's was still in its start. So the word also says
+/// where the parts right under the controller stand that the state switched on or moved, like each flare as it goes
+/// up, and the other game puts its own there (USER 10-13: 每次出这招就发一次烟花的位置). Which part of a list the state
+/// picks is the host's from the first list the two shuffle with the same dice on (see SharedDice).
+///
 /// The start of the fight before the first beat each game still has by itself, since what it does there is for its
 /// own player: the gates, the lights and the beat setting off. A word that comes while the controller here is still in
 /// that start is kept, and the controller takes it where its start ends. Anything else that would send it into the
@@ -48,8 +58,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// the steps that the state's actions set going wait until it is in, rather than running in the middle of it. The
 /// event that led into the state is from no one, as in a replay, so the state that notes who sent it, the one that
 /// notes which dancer was struck down, notes no one rather than whatever sent an event last anywhere in the game. The
-/// debris of a dancer that dies is then put nowhere in particular and flies from where it lies in the room, which is
-/// left as it is.
+/// debris of a dancer that dies is then put nowhere in particular by the state, but goes where the host's was put as
+/// the word says, before it flies.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -84,6 +94,17 @@ internal partial class CoopSave {
     /// <see cref="DirectedStep"/>.
     /// </summary>
     private readonly Dictionary<Fsm, (string Name, int[] Counts)> _directedStates = new();
+
+    /// <summary>
+    /// The list that the state machines under a controller of a fight are gathered in to be started, kept to be used
+    /// again for each state.
+    /// </summary>
+    private static readonly List<PlayMakerFSM> StartingParts = [];
+
+    /// <summary>
+    /// Whether <see cref="StartingParts"/> is being gone through.
+    /// </summary>
+    private static bool _startingParts;
 
     /// <summary>
     /// The kind of controller of a fight that an FSM is, if it is one.
@@ -154,7 +175,15 @@ internal partial class CoopSave {
     /// goes through the hook as any other.</param>
     /// <param name="dice">The dice that the state rolled in the scene host's game, or null for none.</param>
     /// <param name="enter">What goes into the state.</param>
-    private void EnterDirectedState(Fsm fsm, FsmState? letThrough, IReadOnlyList<int>? dice, Action enter) {
+    /// <param name="word">The scene host's word of the state, with where the host's parts stand after it, or null.
+    /// </param>
+    private void EnterDirectedState(
+        Fsm fsm,
+        FsmState? letThrough,
+        IReadOnlyList<int>? dice,
+        Action enter,
+        CoopSaveUpdate? word = null
+    ) {
         // The event that led there is from no one, rather than from whatever sent one last
         var eventData = Fsm.EventData;
         Fsm.EventData = new FsmEventData();
@@ -174,6 +203,14 @@ internal partial class CoopSave {
                 (_startingMachineRound, _startingMachineState) = lastStarting;
             }
 
+            if (word != null) {
+                try {
+                    PutPartsWhereTheHostsAre(fsm, word);
+                } catch (Exception e) {
+                    LogInteractionError(e);
+                }
+            }
+
             fsm.UpdateStateChanges();
         } finally {
             FsmExecutionStack.PopFsm();
@@ -182,21 +219,95 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Starts the state machines of the parts of a controller of a fight here that the state it went into switched on
-    /// for the first time, which the game would start a moment later, before they first update. One that was switched
-    /// on before starts again as it is switched on, in the middle of the state, so what it rolls as it starts goes
-    /// with the dice of the state; started a moment later, it rolled by itself in each game. Started at once, it is the
-    /// same in both games from the first time on.
+    /// Starts the state machines of the parts of a controller of a fight here that are on but haven't started yet,
+    /// which are those that the state it went into switched on for the first time: the game would start them a moment
+    /// later, before they first update. One that was switched on before starts again as it is switched on, in the
+    /// middle of the state, so what it rolls as it starts goes with the dice of the state; started a moment later, it
+    /// rolled by itself in each game. Started at once, it is the same in both games from the first time on. A part that
+    /// throws as it starts is written in the log and left, as the game leaves a part that throws as it starts.
     /// </summary>
-    private static void StartSwitchedOnParts(Fsm fsm) {
+    private void StartSwitchedOnParts(Fsm fsm) {
         if (fsm.GameObject is not { } gameObject || gameObject == null) {
             return;
         }
 
-        foreach (var part in gameObject.GetComponentsInChildren<PlayMakerFSM>()) {
-            if (part != null && part.isActiveAndEnabled && part.Fsm is { Started: false } partFsm) {
-                partFsm.Start();
+        // A part that starts can set off a state of another controller, which starts its own parts with a list of its
+        // own
+        var parts = _startingParts ? [] : StartingParts;
+        var wasStarting = _startingParts;
+        _startingParts = true;
+        try {
+            gameObject.GetComponentsInChildren(false, parts);
+            foreach (var part in parts) {
+                if (part == null || !part.isActiveAndEnabled || part.Fsm is not { Started: false } partFsm) {
+                    continue;
+                }
+
+                try {
+                    partFsm.Start();
+                } catch (Exception e) {
+                    LogInteractionError(e);
+                }
             }
+        } finally {
+            parts.Clear();
+            _startingParts = wasStarting;
+        }
+    }
+
+    /// <summary>
+    /// Takes the parts right under a controller of a fight of the scene host's, with whether each is on and where it
+    /// is, before a state of it, to tell after the state which of them it switched on or moved.
+    /// </summary>
+    private static List<(Transform Part, bool WasOn, Vector3 Was)> TakeParts(Fsm fsm) {
+        var parts = new List<(Transform, bool, Vector3)>();
+        if (fsm.GameObject is { } gameObject && gameObject != null) {
+            foreach (Transform part in gameObject.transform) {
+                parts.Add((part, part.gameObject.activeSelf, part.position));
+            }
+        }
+
+        return parts;
+    }
+
+    /// <summary>
+    /// Writes in the scene host's word of a state of a controller of a fight where the parts right under it stand that
+    /// the state switched on or moved: their names in <see cref="CoopSaveUpdate.Names"/>, and the x and y of each in
+    /// <see cref="CoopSaveUpdate.Values"/>. A creature among them is left out, since its own sync puts it where it is.
+    /// </summary>
+    private static void TellPartsMoved(CoopSaveUpdate word, List<(Transform Part, bool WasOn, Vector3 Was)> before) {
+        foreach (var (part, wasOn, was) in before) {
+            if (part == null || !part.gameObject.activeSelf || (wasOn && part.position == was) ||
+                EntityProcessor.IsRegistered(part.gameObject)) {
+                continue;
+            }
+
+            var position = part.position;
+            word.Names.Add(part.name);
+            word.Values.Add(position.x);
+            word.Values.Add(position.y);
+        }
+    }
+
+    /// <summary>
+    /// Puts the parts of a controller of a fight here that the scene host's word names where the host's stand after
+    /// the state, which the state here also put somewhere, from where it went there: a part that an earlier state left
+    /// somewhere, or that a state that this game did not go through would have put somewhere, goes up where the host's
+    /// does all the same (USER 10-13).
+    /// </summary>
+    private static void PutPartsWhereTheHostsAre(Fsm fsm, CoopSaveUpdate word) {
+        if (word.Names.Count == 0 || word.Values.Count < 2 * word.Names.Count ||
+            fsm.GameObject is not { } gameObject || gameObject == null) {
+            return;
+        }
+
+        var controller = gameObject.transform;
+        for (var i = 0; i < word.Names.Count; i++) {
+            if (controller.Find(word.Names[i]) is not { } part || EntityProcessor.IsRegistered(part.gameObject)) {
+                continue;
+            }
+
+            part.position = new Vector3(word.Values[2 * i], word.Values[2 * i + 1], part.position.z);
         }
     }
 

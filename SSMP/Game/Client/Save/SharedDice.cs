@@ -1,9 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
 using HutongGames.PlayMaker;
+using HutongGames.PlayMaker.Actions;
+using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 using Random = UnityEngine.Random;
 
@@ -23,9 +26,19 @@ namespace SSMP.Game.Client.Save;
 /// not played again, and the pitch it would have rolled is not rolled.
 ///
 /// Each roll is written down under the action that made it: its object, state machine, state and place in the state.
-/// The other game gives an action the roll written down under the same action, wherever that is, and lets an action
-/// with none roll its own. So a trap that another thing set off does not take the rolls of that thing when it went off
-/// over there already by itself, and a state machine that goes another way over there does not shift every roll after.
+/// The other game gives an action the first roll written down under the same action that no action took yet, wherever
+/// that is, and lets an action with none roll its own. So a trap that another thing set off does not take the rolls of
+/// that thing when it went off over there already by itself, a state machine that goes another way over there does not
+/// shift every roll after, and the same actions started in another order there still take their own rolls: a part that
+/// one game started in the middle of a state, as it was switched on again, and the other after it, as it was switched
+/// on for the first time.
+///
+/// A shuffle shuffles a list as it stands, and each game came to its list by itself, so the same dice put two lists
+/// that stood in other orders into other orders: the flares that a controller of a fight sets off from its list went
+/// up at other places in each game for good once one game had shuffled the list once more than the other. Before a
+/// shuffle with dice that go to the partner or come from them, the part of the list that it shuffles is put in an
+/// order that is the same in every game: by where each thing is in the room, or by its value. The game shuffles
+/// evenly, so the order that it starts from changes nothing about how likely each order is.
 ///
 /// It covers only what happens at once, in the same call: what the thing rolls later, after a wait, each game rolls
 /// again. This is no seed shared by the room. That was turned down, since each game rolls at its own frame rate and for
@@ -79,10 +92,9 @@ internal static class SharedDice {
     private static IReadOnlyList<int>? _thrown;
 
     /// <summary>
-    /// Where the first roll starts in <see cref="_thrown"/> that no action here has taken, which is where the next
-    /// action looks for its own.
+    /// Which rolls of <see cref="_thrown"/> an action here has taken, by their place in it, so that each is taken once.
     /// </summary>
-    private static int _nextRoll;
+    private static bool[]? _taken;
 
     /// <summary>
     /// The state machine of an entity that rolls with the dice of what is being set off, or null for none. Otherwise
@@ -144,13 +156,15 @@ internal static class SharedDice {
         }
 
         var own = Random.state;
-        var (lastThrown, lastNextRoll, lastEntityFsm) = (_thrown, _nextRoll, _entityFsm);
+        var (lastThrown, lastTaken, lastEntityFsm) = (_thrown, _taken, _entityFsm);
         Random.state = ToState(dice, 0);
-        (_thrown, _nextRoll, _entityFsm) = (dice, StateSize, entityFsm ?? lastEntityFsm);
+        (_thrown, _taken, _entityFsm) = (
+            dice, new bool[(dice.Count - StateSize) / RollSize], entityFsm ?? lastEntityFsm
+        );
         try {
             action();
         } finally {
-            (_thrown, _nextRoll, _entityFsm) = (lastThrown, lastNextRoll, lastEntityFsm);
+            (_thrown, _taken, _entityFsm) = (lastThrown, lastTaken, lastEntityFsm);
             Random.state = own;
         }
     }
@@ -220,6 +234,7 @@ internal static class SharedDice {
         // A thing that a creature threw rolls by its name, the same in every game (ThrownThings), whatever set it off
         if (ThrownThings.Count > 0 && self.Fsm?.FsmComponent is { } thrownFsm &&
             ThrownThings.TryGetMark(thrownFsm.gameObject, out var mark)) {
+            PutInOrderToShuffle(self);
             ThrownThings.Rolling(mark.NextRoll(Identify(self, thrownFsm)), () => orig(self));
             return;
         }
@@ -230,17 +245,18 @@ internal static class SharedDice {
             return;
         }
 
+        PutInOrderToShuffle(self);
         var action = Identify(self, fsm);
 
-        if (_thrown is { } thrown) {
-            for (var roll = _nextRoll; roll + RollSize <= thrown.Count; roll += RollSize) {
-                if (thrown[roll] != action) {
+        if (_thrown is { } thrown && _taken is { } taken) {
+            for (var index = 0; index < taken.Length; index++) {
+                var roll = StateSize + index * RollSize;
+                if (taken[index] || thrown[roll] != action) {
                     continue;
                 }
 
-                // The rolls in between were of actions that did not start here, which leaves them to nothing
                 Random.state = ToState(thrown, roll + 1);
-                _nextRoll = roll + RollSize;
+                taken[index] = true;
                 break;
             }
         }
@@ -253,6 +269,95 @@ internal static class SharedDice {
         }
 
         orig(self);
+    }
+
+    /// <summary>
+    /// Puts the part of a list that a shuffle that starts here goes through in an order that is the same in every game,
+    /// if the action is a shuffle and every thing in that part has an order (see <see cref="OrderKey"/>). The part is
+    /// the one that the game's shuffle reckons.
+    /// </summary>
+    private static void PutInOrderToShuffle(FsmStateAction action) {
+        if (action is not ArrayShuffle { array: { } array } shuffle || array.Values is not { Length: > 1 } values) {
+            return;
+        }
+
+        var start = 0;
+        var end = values.Length - 1;
+        if (shuffle.startIndex is { Value: > 0 } startIndex) {
+            start = Mathf.Min(startIndex.Value, end);
+        }
+
+        if (shuffle.shufflingRange is { Value: > 0 } range) {
+            end = Mathf.Min(values.Length - 1, start + range.Value);
+        }
+
+        var count = end - start + 1;
+        if (count < 2) {
+            return;
+        }
+
+        var keys = new string[count];
+        for (var i = 0; i < count; i++) {
+            if (OrderKey(values[start + i]) is not { } key) {
+                return;
+            }
+
+            keys[i] = key;
+        }
+
+        var part = new object[count];
+        Array.Copy(values, start, part, 0, count);
+        Array.Sort(keys, part, StringComparer.Ordinal);
+
+        var ordered = (object[]) values.Clone();
+        Array.Copy(part, 0, ordered, start, count);
+        array.Values = ordered;
+    }
+
+    /// <summary>
+    /// What a thing in a list is put in order by, the same in every game: an object by the names of it and its parents
+    /// down from the top of the scene, and by their places among their siblings where two have the same names; a
+    /// component by its object and its kind; anything else of the game by its name; a value by its text. Null for a
+    /// thing with none, like a point, which leaves the list as it is.
+    /// </summary>
+    private static string? OrderKey(object? thing) {
+        switch (thing) {
+            case null:
+                return "";
+            case GameObject gameObject:
+                return gameObject == null ? "" : PlaceKey(gameObject.transform);
+            case Component component:
+                return component == null ? "" : PlaceKey(component.transform) + "|" + component.GetType().FullName;
+            case UnityEngine.Object unityObject:
+                return unityObject == null ? "" : unityObject.name;
+            case string text:
+                return text;
+            case float number:
+                return number.ToString("R", CultureInfo.InvariantCulture);
+            case double number:
+                return number.ToString("R", CultureInfo.InvariantCulture);
+            case IConvertible value:
+                return value.ToString(CultureInfo.InvariantCulture);
+            default:
+                return null;
+        }
+    }
+
+    /// <summary>
+    /// Where an object is in its scene, for <see cref="OrderKey"/>: the names of it and its parents down from the top,
+    /// then their places among their siblings.
+    /// </summary>
+    private static string PlaceKey(Transform transform) {
+        var names = new List<string>();
+        var places = new List<string>();
+        for (var current = transform; current != null; current = current.parent) {
+            names.Add(current.name);
+            places.Add(current.GetSiblingIndex().ToString(CultureInfo.InvariantCulture));
+        }
+
+        names.Reverse();
+        places.Reverse();
+        return string.Join("/", names) + "\u0001" + string.Join("/", places);
     }
 
     /// <summary>
