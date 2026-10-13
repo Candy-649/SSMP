@@ -46,12 +46,8 @@ internal partial class CoopSave {
     private const string BossSceneNamePrefix = "Boss Scene";
 
     /// <summary>
-    /// The state a trap is in while the room it is in is still starting up, which takes no events at all.
-    /// </summary>
-    private const string WorldTriggerStartingStateName = "Init";
-
-    /// <summary>
-    /// How long a trap is tried for, in seconds, while its copy here is still starting up.
+    /// How long a trap is tried for, in seconds, while its copy here is still starting up (see
+    /// <see cref="IsStartingWorldTrigger"/>).
     /// </summary>
     private const float WorldTriggerRetryTime = 2f;
 
@@ -235,8 +231,11 @@ internal partial class CoopSave {
 
         // From here on the trap rolls under a name that goes with it, as the partner's does: the dice of its going off
         // only cover what rolls as it goes off, and some roll later or tell parts that do, like the spikes that a wire
-        // tells to come up once it has snapped, which then roll under a name made from it (see ToldParts.PassOn)
-        var name = $"{TrapNamePrefix}.{++_lastTrapName}";
+        // tells to come up once it has snapped, which then roll under a name made from it (see ToldParts.PassOn). One
+        // that was just given a name for this, which nothing rolled under yet, keeps it: the partner's game gives it
+        // the same one, as another trap here told it to go off, or as the partner's trap went off here and only came
+        // to this state a frame later (review of the traps that roll under names, 10-13)
+        var name = SharedDice.FreshName(gameObject) ?? $"{TrapNamePrefix}.{++_lastTrapName}";
         SharedDice.RollByName(gameObject, name);
         return new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.WorldTrigger,
@@ -462,13 +461,14 @@ internal partial class CoopSave {
                     yield break;
                 }
 
-                starting |= fsm.ActiveStateName == WorldTriggerStartingStateName;
+                starting |= IsStartingWorldTrigger(fsm, kind);
             }
 
             // Both players walking into the same room at once is how this is met: the one who got there first walks
             // into the trap while the room of the other is still starting up, and a trap that is still starting up
             // takes no events at all. Giving up on it is not a small loss - most of these are saved nowhere, so one
-            // dropped here never happens here, and the two of them walk out onto different ground.
+            // dropped here never happens here, and the two of them walk out onto different ground. Some wait a while
+            // before they wait for a player, like a roof that waits a second first (review of the traps, 10-13).
             if (!starting || Time.unscaledTime > until) {
                 yield break;
             }
@@ -638,6 +638,42 @@ internal partial class CoopSave {
     private static bool IsWaitingWorldTrigger(PlayMakerFSM fsm, WorldTriggerKind kind) {
         return Array.IndexOf(kind.WaitingStateNames, fsm.ActiveStateName) >= 0 &&
                fsm.GetStateOrNull(kind.GoneOffStateName) != null;
+    }
+
+    /// <summary>
+    /// Whether a trap is still on its way to the states it waits in, as its room starts up: not started yet, or in a
+    /// state that its start leads to without going through one where it waits or goes off.
+    /// </summary>
+    private static bool IsStartingWorldTrigger(PlayMakerFSM machine, WorldTriggerKind kind) {
+        if (machine.Fsm is not { } fsm) {
+            return false;
+        }
+
+        if (!fsm.Started || fsm.ActiveState is not { } active) {
+            return true;
+        }
+
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+        var next = new Queue<string>();
+        next.Enqueue(fsm.StartState);
+        while (next.Count > 0) {
+            var name = next.Dequeue();
+            if (!seen.Add(name) || name == kind.GoneOffStateName || Array.IndexOf(kind.WaitingStateNames, name) >= 0) {
+                continue;
+            }
+
+            if (name == active.Name) {
+                return true;
+            }
+
+            foreach (var transition in fsm.GetState(name)?.Transitions ?? []) {
+                if (transition.ToState is { Length: > 0 } to) {
+                    next.Enqueue(to);
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

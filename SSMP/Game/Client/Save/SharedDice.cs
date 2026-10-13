@@ -284,8 +284,14 @@ internal static class SharedDice {
     /// given another or the room is left.
     /// </summary>
     /// <param name="gameObject">The object.</param>
-    /// <param name="name">The name, the same in every game.</param>
+    /// <param name="name">The name, the same in every game. The name the object has already keeps what rolled under
+    /// it: one game can be given it twice, by the partner's trap and then by the partner's tell that set it off, where
+    /// the other gave it once.</param>
     public static void RollByName(GameObject gameObject, string name) {
+        if (NamedRollers.TryGetValue(gameObject, out var named) && named.Name == name) {
+            return;
+        }
+
         NamedRollers[gameObject] = new NamedRoller(name);
     }
 
@@ -294,6 +300,24 @@ internal static class SharedDice {
     /// </summary>
     public static bool RollsByName(GameObject gameObject) {
         return NamedRollers.Count > 0 && NamedRollers.ContainsKey(gameObject);
+    }
+
+    /// <summary>
+    /// The name an object of the room rolls under now, or null if it rolls with the game's own dice.
+    /// </summary>
+    public static string? NameOf(GameObject gameObject) {
+        return NamedRollers.Count > 0 && NamedRollers.TryGetValue(gameObject, out var named) ? named.Name : null;
+    }
+
+    /// <summary>
+    /// The name an object of the room rolls under now if nothing rolled or was told under it yet, or null: a name
+    /// that the object was just given for what it is about to do, like a trap that another one tells to go off.
+    /// </summary>
+    public static string? FreshName(GameObject gameObject) {
+        return NamedRollers.Count > 0 && NamedRollers.TryGetValue(gameObject, out var named) &&
+               named.Times.Count == 0 && named.Tells == 0
+            ? named.Name
+            : null;
     }
 
     /// <summary>

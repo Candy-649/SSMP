@@ -17,8 +17,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// Machines of a room that run by themselves on a clock of their own, in a checked two-player save: boxes that drop to
 /// be stood on and are ground away, chutes that pour debris, grinders that smash back and forth, vents and columns
 /// that puff steam and exhaust that hurt, bolts of lightning that zap over and over while a player is near, spiked
-/// pendulums, crystals that grow back, drifting snowflakes, and lava falls, spiking floors and rubble of fights
-/// (found by FsmScan --hazards, USER 10-13). Each game ran its own from the moment it was on, so the two players saw
+/// pendulums, drifting snowflakes, and lava falls, spiking floors and rubble of fights (found by FsmScan --hazards,
+/// USER 10-13). Each game ran its own from the moment it was on, so the two players saw
 /// them at different points of their rounds and stood on boxes that weren't there for the other. A player that a
 /// grinder caught had their own grinders go back to where they began as they were put back at the last safe place,
 /// and only theirs. The user decided (10-06) that both games show these machines the way the scene host's game has
@@ -178,13 +178,13 @@ internal partial class CoopSave {
         new(["Zap Worm Lightning"], "Control", ["Antic"]),
 
         // Hazards that move by themselves with dice of their own (FsmScan --hazards): spiked pendulums that swing by
-        // an angle and for a time they roll, a round from each swing to the left; crystals that break when struck and
-        // grow back after a pause they roll, hurting whoever stands where they grow; and a spawner that sends a
-        // snowflake it picks at random drifting down every so often. What the spawner tells its snowflake rolls under
-        // a name made from the round (see ToldParts.PassOn).
+        // an angle and for a time they roll, a round from each swing to the left; and snowflakes that drift down with
+        // a look, speeds and a side they roll, break on the ground and drift down again a moment later, a round from
+        // each start. A spawner also sends one it picks every so often, which only brings that one's start forward,
+        // so the spawner itself is left to each game. Crystals that grow back after being struck are not here: the
+        // strike sets their round going in both games, and what they roll after it goes by the strike (CoopHits).
         new(["Spike Pendulum Hanging"], "Control", ["Left"]),
-        new(["Snowflake Chunk"], "Control", ["Reform Antic"]),
-        new(["Snowflake Spawner"], "Control", ["Spawn"]),
+        new(["Drifting Snowflake"], "Control", ["Spawn"]),
 
         // The controller of the fight with the two dancers, which the other game follows in every state from the first
         // beat on (see CoopSave.DirectedFights). The start of the fight before that, with the gates, the lights and the
@@ -883,7 +883,7 @@ internal partial class CoopSave {
             // One whose state still checks by itself whether to start, like whether a player is near, asks again as
             // soon as it wants to, and then waits for the word afresh. Sent on now, it went off with no one near, a
             // player having stepped in and out again before the host's started (review of the steam columns, 10-13).
-            if (FindDirector(fsm) == null && StillAsks(from)) {
+            if (FindDirector(fsm) == null && StillAsks(from, state)) {
                 Logger.Info($"The machine '{fsm.GameObject.name}' waits no more, and starts when it asks again");
                 continue;
             }
@@ -963,13 +963,70 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a state of a machine still has an action going that can send it on by itself later, like a check every
-    /// frame of whether a player is near. A state whose wait ran out has none.
+    /// Whether a machine held on its way into a round still has an action going, in the state it was held in, that can
+    /// send it into that round by itself later, like a check every frame of whether a player is near. A state whose
+    /// wait ran out has none. Neither has one whose actions still going only keep something in place every frame, like
+    /// a pendulum held at the end of its swing, or only watch for what takes it elsewhere, like a player going: sent on
+    /// by none of them, such a machine stood still for good (review of the pendulums, 10-13).
     /// </summary>
-    private static bool StillAsks(FsmState state) {
-        foreach (var action in state.Actions) {
-            if (action is { Enabled: true, Finished: false }) {
-                return true;
+    /// <param name="from">The state the machine was held in.</param>
+    /// <param name="state">The state its round starts with.</param>
+    private static bool StillAsks(FsmState from, FsmState state) {
+        foreach (var action in from.Actions) {
+            if (action is not { Enabled: true, Finished: false }) {
+                continue;
+            }
+
+            foreach (var field in EventFieldsOf(action.GetType())) {
+                switch (field.GetValue(action)) {
+                    case FsmEvent fsmEvent when LeadsInto(from, fsmEvent, state):
+                        return true;
+                    case FsmEvent[] fsmEvents when fsmEvents.Any(fsmEvent => LeadsInto(from, fsmEvent, state)):
+                        return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The fields of each kind of action that hold an event it can send, found once for each kind.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> ActionEventFields = new();
+
+    /// <summary>
+    /// The fields of a kind of action that hold an event it can send.
+    /// </summary>
+    private static FieldInfo[] EventFieldsOf(Type type) {
+        if (!ActionEventFields.TryGetValue(type, out var fields)) {
+            ActionEventFields[type] = fields = type
+                .GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .Where(field => field.FieldType == typeof(FsmEvent) || field.FieldType == typeof(FsmEvent[]))
+                .ToArray();
+        }
+
+        return fields;
+    }
+
+    /// <summary>
+    /// Whether an event sent to a machine in a state takes it into another state, by the state's own ways out first
+    /// and then by those of the whole machine, as PlayMaker goes.
+    /// </summary>
+    private static bool LeadsInto(FsmState from, FsmEvent? fsmEvent, FsmState state) {
+        if (fsmEvent == null || string.IsNullOrEmpty(fsmEvent.Name)) {
+            return false;
+        }
+
+        foreach (var transition in from.Transitions) {
+            if (transition.EventName == fsmEvent.Name) {
+                return transition.ToState == state.Name;
+            }
+        }
+
+        foreach (var transition in from.Fsm?.GlobalTransitions ?? []) {
+            if (transition.EventName == fsmEvent.Name) {
+                return transition.ToState == state.Name;
             }
         }
 

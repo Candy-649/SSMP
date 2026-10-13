@@ -645,7 +645,7 @@ internal partial class CoopHits {
             SetReplayedRanges(target, source.Ranges);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
                 () => SharedDice.Throw(source.Dice, () => response = responder.Hit(hit))
-            ));
+            ), source.HitName);
         } catch (Exception e) {
             Logger.Warn($"Could not replay a hit of the partner on {update.Path}:\n{e}");
             NoteTraffic(update.Scene, update.Path, $"got a hit on {update.Responder}, whose replay failed");
@@ -908,10 +908,12 @@ internal partial class CoopHits {
             var turned = update != null ? TurnThrownToLocalPlayer(component.gameObject, out before) : null;
             var response = default(IHitResponder.HitResponse);
             int[] dice = [];
-            var answered = AnswersAttack(() => dice = SharedDice.Record(() => response = responder.Hit(hit))) ||
-                           response.response != IHitResponder.Response.None;
+            var hitName = update != null ? NextHitName() : null;
+            var answered = AnswersAttack(
+                () => dice = SharedDice.Record(() => response = responder.Hit(hit)), hitName
+            ) || response.response != IHitResponder.Response.None;
             if (update != null && answered && _netClient.IsConnected) {
-                update.Hit = SharedDice.Append(update.Hit, dice);
+                update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
                 SendToRoomMembers(update);
                 NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder}");
             } else if (update != null && !answered) {
@@ -1085,10 +1087,11 @@ internal partial class CoopHits {
         GameObject? before = null;
         var turned = update != null ? TurnThrownToLocalPlayer(receiver.gameObject, out before) : null;
         int[] dice = [];
-        if (!AnswersAttack(() => dice = SharedDice.Record(touch))) {
+        var hitName = update != null ? NextHitName() : null;
+        if (!AnswersAttack(() => dice = SharedDice.Record(touch), hitName)) {
             TurnThrownBack(turned, before);
         } else if (update != null && _netClient.IsConnected) {
-            update.Hit = SharedDice.Append(update.Hit, dice);
+            update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
             SendToRoomMembers(update);
             NoteTraffic(update.Scene, update.Path, $"sent a touch of {attack.name} through {update.Responder}");
         }
@@ -1131,7 +1134,10 @@ internal partial class CoopHits {
     /// goes by something of the partner's game, like where their player stands, could let it through. A replay of the
     /// partner's that is not answered is written down (see <see cref="NoteReplayed"/>).
     /// </summary>
-    private bool AnswersAttack(Action attack) {
+    /// <param name="attack">Makes the hit or touch.</param>
+    /// <param name="hitName">The name of a hit or touch that goes between the games, which what it set going rolls
+    /// under from then on (see <see cref="RollByHitName"/>), or null for none.</param>
+    private bool AnswersAttack(Action attack, string? hitName = null) {
         _statesBefore.Clear();
         _watchingStates = true;
         try {
@@ -1142,14 +1148,89 @@ internal partial class CoopHits {
 
         var answered = false;
         foreach (var pair in _statesBefore) {
-            if (pair.Key.ActiveState != pair.Value) {
-                answered = true;
+            if (pair.Key.ActiveState == pair.Value) {
+                continue;
+            }
+
+            answered = true;
+            if (hitName == null) {
                 break;
+            }
+
+            if (pair.Key.FsmComponent is { } machine && machine != null && IsRoomObject(machine)) {
+                RollByHitName(machine.gameObject, hitName);
             }
         }
 
         _statesBefore.Clear();
         return answered;
+    }
+
+    /// <summary>
+    /// What the names start with that the state machines of the room roll under after a hit or touch of a player's
+    /// (see <see cref="RollByHitName"/>), in any game.
+    /// </summary>
+    private const string HitNameStart = "hit.";
+
+    /// <summary>
+    /// What the names of the hits and touches of this game's player start with, so that the names of two games never
+    /// meet.
+    /// </summary>
+    private static readonly string HitNamePrefix = HitNameStart + Guid.NewGuid().ToString("N").Substring(0, 8);
+
+    /// <summary>
+    /// The number of the last name that a hit or touch of this game's player was given.
+    /// </summary>
+    private static int _lastHitName;
+
+    /// <summary>
+    /// The name of the next hit or touch of this game's player that goes between the games.
+    /// </summary>
+    private static string NextHitName() {
+        return $"{HitNamePrefix}.{++_lastHitName}";
+    }
+
+    /// <summary>
+    /// Has an object of the room whose state machine a hit or touch of a player took to another state roll under a
+    /// name made from the hit's from then on: in the game of the player who struck, and in the partner's as it replays
+    /// the hit. The dice of the moment only cover what rolls as the hit lands. What the object rolled later, after a
+    /// wait, and what the parts it told rolled (see ToldParts.PassOn), each game rolled by itself: a crystal broken by
+    /// a strike grew back after a pause of its own in each, and the spikes that a wire cut by a strike told to come up
+    /// paused by their own dice (review of the hazards, 10-13). One that rolls under a name for something else, like
+    /// the round of a machine that the scene host paces or a trap that went off, keeps that one; one that an earlier
+    /// hit named takes the new name.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    /// <param name="hitName">The name of the hit or touch.</param>
+    private static void RollByHitName(GameObject gameObject, string hitName) {
+        if (ThrownThings.Count > 0 && ThrownThings.IsThrown(gameObject) ||
+            SharedDice.NameOf(gameObject) is { } name && !name.StartsWith(HitNameStart, StringComparison.Ordinal)) {
+            return;
+        }
+
+        SharedDice.RollByName(gameObject, hitName + "|" + ScenePath.Get(gameObject.transform));
+    }
+
+    /// <summary>
+    /// Adds to the end of what an update of a hit or touch on an object of the room carries what it rolled: the dice
+    /// of the moment, and the name that what it set going rolls under from then on.
+    /// </summary>
+    private static byte[] AppendRolls(byte[] data, int[] dice, string hitName) {
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write(data);
+        SharedDice.Write(writer, dice);
+        writer.Write(hitName);
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    /// <summary>
+    /// Reads the name that what a hit or touch set going rolls under, after its dice, or null if there is none.
+    /// </summary>
+    private static string? ReadHitName(BinaryReader reader) {
+        var stream = reader.BaseStream;
+        return stream.Length - stream.Position > 0 && reader.ReadString() is { Length: > 0 } name ? name : null;
     }
 
     /// <summary>
@@ -2628,7 +2709,7 @@ internal partial class CoopHits {
             SetReplayedRanges(target, touch.Ranges);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
                 () => SharedDice.Throw(touch.Dice, () => TellOfTouch(receiver, attack))
-            ));
+            ), touch.HitName);
         } catch (Exception e) {
             Logger.Warn($"Could not replay a touch of the partner on {update.Path}:\n{e}");
             NoteTraffic(update.Scene, update.Path, $"got a touch through {update.Responder}, whose replay failed");
@@ -2777,8 +2858,10 @@ internal partial class CoopHits {
             touch.Layer = reader.ReadInt32();
             touch.Ranges = ReadRanges(reader);
 
-            // What the touch rolled in the game of the player who struck, after the touch
+            // What the touch rolled in the game of the player who struck, after the touch, and the name that what it
+            // set going rolls under from then on
             touch.Dice = SharedDice.Read(reader);
+            touch.HitName = ReadHitName(reader);
             return true;
         } catch (IOException) {
             return false;
@@ -3155,8 +3238,10 @@ internal partial class CoopHits {
             source.EnemyPosition = hasEnemyPosition ? enemyPosition : null;
             source.Ranges = ReadRanges(reader);
 
-            // What a hit on an object of the room rolled in the game of the player who struck, after the hit
+            // What a hit on an object of the room rolled in the game of the player who struck, after the hit, and the
+            // name that what it set going rolls under from then on
             source.Dice = SharedDice.Read(reader);
+            source.HitName = ReadHitName(reader);
 
             hit.SilkGeneration = HitSilkGeneration.None;
             return true;
@@ -3230,6 +3315,11 @@ internal partial class CoopHits {
         /// null.
         /// </summary>
         public int[]? Dice;
+
+        /// <summary>
+        /// For a hit on an object of the room, the name that what it set going rolls under from then on, or null.
+        /// </summary>
+        public string? HitName;
     }
 
     /// <summary>
@@ -3280,5 +3370,10 @@ internal partial class CoopHits {
         /// The dice that the touch rolled in the game of the player who struck, or null.
         /// </summary>
         public int[]? Dice;
+
+        /// <summary>
+        /// The name that what the touch set going rolls under from then on, or null.
+        /// </summary>
+        public string? HitName;
     }
 }
