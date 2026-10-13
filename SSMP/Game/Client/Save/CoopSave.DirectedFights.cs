@@ -23,10 +23,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// run the room saw the ring with no joined move after it, and later the joined move with no ring before it (USER
 /// 10-07), and charges crossed the room for them at other times than for the host.
 ///
-/// In the fight on the stage, the creature only sets going what two controllers of the room do, which their own clocks
-/// set going again too: one sets off flares over the stage that burst in rings that hurt, the other bursts the floor
-/// open in a row. Each rolls which go off, where and when, so the rings and the bursts came at other places and times
-/// for each player (USER 10-13).
+/// A controller whose only work is to put up parts, like the two of the fight on the stage, isn't followed in its
+/// states: the other game shows its parts the way they go up in the host's game (see CoopSave.ShownParts).
 ///
 /// The other game's controller now follows the host's in every state. The host's tells the other game each state it
 /// goes into, with the dice the state rolled, which pick the charges and their order too; the other game's goes into
@@ -35,12 +33,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// was. One of a game that runs the room now goes on by itself and tells the partner, as the other machines do (see
 /// CoopSave.PacedMachines).
 ///
-/// Where a part goes up hangs on more than the dice of the state, though: on where an earlier state left it, and on
-/// which of its list the state picks. Each game came to those by itself, through the states that the host's went
-/// through before the partner was in the room or while the partner's was still in its start. So the word also says
-/// where the parts right under the controller stand that the state switched on or moved, like each flare as it goes
-/// up, and the other game puts its own there (USER 10-13: 每次出这招就发一次烟花的位置). Which part of a list the state
-/// picks is the host's from the first list the two shuffle with the same dice on (see SharedDice).
+/// Where a part goes up hangs on more than the dice of the state, though: on where an earlier state left it, or on
+/// what the state puts it next to, which each game came to by itself. So the word also says where the parts right under
+/// the controller stand that the state switched on or moved, and the other game puts its own there (USER 10-13:
+/// 每次出这招就发一次烟花的位置).
 ///
 /// The start of the fight before the first beat each game still has by itself, since what it does there is for its
 /// own player: the gates, the lights and the beat setting off. A word that comes while the controller here is still in
@@ -48,11 +44,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// fight before that, like a dancer's word of a fight that is further on in the host's game, is turned away, so that
 /// the start is played to the end.
 ///
-/// The parts that a state of a controller switches on, like the flares, start their own state machines, which roll
-/// where a flare bursts and how large. One switched on again starts again at once, in the middle of the state, so its
-/// rolls go with the dice of the state; but the game starts one that was never on a moment later, after the state, so
-/// the first time each flare went off, each game rolled its own. Both games now start the parts that a state switched
-/// on as the state is gone into.
+/// The parts that a state of a controller switches on start their own state machines, which may roll as they start.
+/// One switched on again starts again at once, in the middle of the state, so its rolls go with the dice of the state;
+/// but the game starts one that was never on a moment later, after the state, so the first time, each game rolled its
+/// own. Both games now start the parts that a state switched on as the state is gone into.
 ///
 /// The controller goes into a state of the host's word the way the game goes into a state in an update of its own:
 /// the steps that the state's actions set going wait until it is in, rather than running in the middle of it. The
@@ -145,8 +140,9 @@ internal partial class CoopSave {
             return MachineStep.None;
         }
 
+        // A controller whose parts the other game shows goes on by itself here, and only its parts are told
         if (IsSceneHost?.Invoke() == true) {
-            return MachineStep.Tell;
+            return director.ShowsParts ? MachineStep.None : MachineStep.Tell;
         }
 
         if (fsm.ActiveState is { } from && ownStateNames.Contains(from.Name) && !GoesStraightTo(from, toState.Name)) {
@@ -227,17 +223,24 @@ internal partial class CoopSave {
     /// throws as it starts is written in the log and left, as the game leaves a part that throws as it starts.
     /// </summary>
     private void StartSwitchedOnParts(Fsm fsm) {
-        if (fsm.GameObject is not { } gameObject || gameObject == null) {
-            return;
+        if (fsm.GameObject is { } gameObject && gameObject != null) {
+            StartMachinesUnder(gameObject.transform);
         }
+    }
 
+    /// <summary>
+    /// Starts the state machines on an object and under it that are on but haven't started yet, as the game would a
+    /// moment later, before they first update. One that throws as it starts is written in the log and left, as the
+    /// game leaves one that throws as it starts.
+    /// </summary>
+    private void StartMachinesUnder(Transform top) {
         // A part that starts can set off a state of another controller, which starts its own parts with a list of its
         // own
         var parts = _startingParts ? [] : StartingParts;
         var wasStarting = _startingParts;
         _startingParts = true;
         try {
-            gameObject.GetComponentsInChildren(false, parts);
+            top.GetComponentsInChildren(false, parts);
             foreach (var part in parts) {
                 if (part == null || !part.isActiveAndEnabled || part.Fsm is not { Started: false } partFsm) {
                     continue;

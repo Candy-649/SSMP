@@ -34,11 +34,11 @@ namespace SSMP.Game.Client.Save;
 /// on for the first time.
 ///
 /// A shuffle shuffles a list as it stands, and each game came to its list by itself, so the same dice put two lists
-/// that stood in other orders into other orders: the flares that a controller of a fight sets off from its list went
-/// up at other places in each game for good once one game had shuffled the list once more than the other. Before a
-/// shuffle with dice that go to the partner or come from them, the part of the list that it shuffles is put in an
-/// order that is the same in every game: by where each thing is in the room, or by its value. The game shuffles
-/// evenly, so the order that it starts from changes nothing about how likely each order is.
+/// that stood in other orders into other orders: what a controller picks from such a list in turn came out otherwise
+/// in each game for good once one game had shuffled the list once more than the other. Before a shuffle with dice that
+/// go to the partner or come from them, the part of the list that it shuffles is put in an order that is the same in
+/// every game: by where each thing is in the room, or by its value. The game shuffles evenly, so the order that it
+/// starts from changes nothing about how likely each order is.
 ///
 /// It covers only what happens at once, in the same call: what the thing rolls later, after a wait, each game rolls
 /// again. This is no seed shared by the room. That was turned down, since each game rolls at its own frame rate and for

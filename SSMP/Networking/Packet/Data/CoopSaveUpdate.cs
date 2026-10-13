@@ -814,5 +814,20 @@ internal enum CoopSaveUpdateKind : byte {
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
     /// </summary>
-    PodProgress
+    PodProgress,
+
+    /// <summary>
+    /// A part of a controller of a fight went up or moved in the game of the sender, which runs the room, for the
+    /// other games to show it as it is there (see CoopSave.ShownParts). <see cref="CoopSaveUpdate.Scene"/>,
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> and <see cref="CoopSaveUpdate.FsmName"/> name the controller, and
+    /// <see cref="CoopSaveUpdate.StateName"/> the path of the part under it. <see cref="CoopSaveUpdate.Part"/> is 1 for
+    /// a part that went up, 0 for one that moved. <see cref="CoopSaveUpdate.Values"/> holds the time since the last
+    /// word of the controller, the x and y of the part, and for one that went up with a state machine of its own its
+    /// size and the place and size of each of its pieces; <see cref="CoopSaveUpdate.Names"/> and
+    /// <see cref="CoopSaveUpdate.Amounts"/> its flags.
+    ///
+    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
+    /// change what every later kind means to a game running an older build.
+    /// </summary>
+    MachinePart
 }

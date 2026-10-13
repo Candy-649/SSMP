@@ -155,15 +155,18 @@ internal partial class CoopSave {
             ]
         ),
 
-        // The controllers of the fight on the stage, which the other game follows in every state but those where each
-        // finds its parts (see CoopSave.DirectedFights): the one that sets off flares over the stage, in an order it
-        // shuffles, each at a height and after a wait that it rolls, and the one that bursts the floor open in a row
-        // that it picks. Only the objects of these names, since the flares under the first are named after it.
+        // The controllers of the fight on the stage, whose parts the other game shows as they go up in the scene host's
+        // game, and which it holds past the states where each finds its parts (see CoopSave.ShownParts): the one that
+        // sets off flares over the stage and the one that bursts the floor open in a row. Only the objects of these
+        // names, since the flares under the first are named after it.
         new(
             ["Flare Glitter"], "Control", [], sceneName: "Library_13", ownStateNames: ["Init", "Build Array"],
-            wholeNames: true
+            wholeNames: true, showsParts: true
         ),
-        new(["Trapdoor Bursts"], "Control", [], sceneName: "Library_13", ownStateNames: ["Init"], wholeNames: true)
+        new(
+            ["Trapdoor Bursts"], "Control", [], sceneName: "Library_13", ownStateNames: ["Init"], wholeNames: true,
+            showsParts: true
+        )
     ];
 
     /// <summary>
@@ -298,9 +301,14 @@ internal partial class CoopSave {
             return MachineStep.None;
         }
 
-        // The controller of a fight, which is paced in every state rather than at the starts of rounds
+        // The controller of a fight, which is paced in every state rather than at the starts of rounds, or whose parts
+        // the other game shows (see CoopSave.ShownParts)
         if (FindDirector(fsm) is { } director) {
             kind = director;
+            if (director.ShowsParts) {
+                NoteShownController(fsm);
+            }
+
             return DecideDirectorSwitch(fsm, toState, director);
         }
 
@@ -724,6 +732,7 @@ internal partial class CoopSave {
     /// </summary>
     private void UpdateMachines() {
         UpdateGrinderStops();
+        UpdateShownParts();
         if (_heldMachines.Count == 0 && _pendingMachineRounds.Count == 0) {
             return;
         }
@@ -833,6 +842,7 @@ internal partial class CoopSave {
         _caughtGrinders.Clear();
         _grindersStoppedForPartner.Clear();
         _directors.Clear();
+        ResetShownParts();
         LogDirectedStates();
     }
 
@@ -1084,7 +1094,8 @@ internal partial class CoopSave {
             bool isGrinder = false,
             string? sceneName = null,
             string[]? ownStateNames = null,
-            bool wholeNames = false
+            bool wholeNames = false,
+            bool showsParts = false
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -1093,7 +1104,15 @@ internal partial class CoopSave {
             SceneName = sceneName;
             OwnStateNames = ownStateNames == null ? null : new HashSet<string>(ownStateNames, StringComparer.Ordinal);
             WholeNames = wholeNames;
+            ShowsParts = showsParts;
         }
+
+        /// <summary>
+        /// For a controller of a fight, whether the other game doesn't follow its states but shows its parts the way
+        /// they go up in the scene host's game, and holds it in every state but <see cref="OwnStateNames"/> (see
+        /// CoopSave.ShownParts).
+        /// </summary>
+        public bool ShowsParts { get; }
 
         /// <summary>
         /// What the objects of this kind are called, of which the name of one starts with any of them, or is one of
