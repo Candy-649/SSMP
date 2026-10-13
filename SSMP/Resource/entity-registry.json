@@ -3545,5 +3545,42 @@
       "Control"
     ],
     "local_first": true
+  },
+  {
+    "base_object_name": "Black_Thread_Core",
+    "type": "BlackThreadCore",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Black Thread Core",
+    "fsm_names": [
+      "FSM"
+    ]
+  },
+  {
+    "base_object_name": "Slab Alarm Prisoner",
+    "type": "SlabAlarmPrisoner",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "Slab Alarm Prisoner",
+    "fsm_names": [
+      "Control",
+      "Chain In Place"
+    ]
+  },
+  {
+    "base_object_name": "MossBone Cocoon",
+    "type": "MossBoneCocoon",
+    "parent_name": null,
+    "components": [
+      "Rotation"
+    ],
+    "internal_name": "MossBone Cocoon",
+    "fsm_names": [
+      "Control"
+    ]
   }
 ]

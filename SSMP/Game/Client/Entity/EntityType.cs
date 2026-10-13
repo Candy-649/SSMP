@@ -327,5 +327,35 @@ internal enum EntityType {
     /// nest when its health runs out. Each game had a nest of its own that took the hits of that game, so one player's
     /// nest broke while the other's went on letting out flyers. It is the scene host's to run now, like a creature.
     /// </summary>
-    ShellwoodHive
+    ShellwoodHive,
+
+    /// <summary>
+    /// Not a creature: a knot of black thread grown into the world that can be struck, which lashes or fires at a
+    /// player near it and breaks when its health runs out. It has health but was no entity, so each game had a knot
+    /// of its own: hits on it are left to entities (CoopHits.IsRoomObject), so each took only the hits of its own
+    /// player, lashed out at that player alone, and broke for one player while it went on for the other. It is the
+    /// scene host's to run now, like a creature.
+    /// </summary>
+    BlackThreadCore,
+
+    /// <summary>
+    /// A prisoner chained in place who shakes their cage at a player near, which hurts, and calls out when struck or
+    /// sung at. It has health but was no entity, so each game had its own, struck only by its own player and shaking
+    /// at them alone.
+    /// </summary>
+    SlabAlarmPrisoner,
+
+    /// <summary>
+    /// A character that a player can spar with, called to its spot by striking a pole. Its entry was in the registry
+    /// from the start, but under a type that was not here, so it was never taken (EntityRegistry.GetValidEntries):
+    /// each game had its own, which fought only its own player, and the rules of spars passed it by - both players say
+    /// yes (CoopSave.Offers), and the spar is lost only when both are down (USER 10-10).
+    /// </summary>
+    MapperSparNPC,
+
+    /// <summary>
+    /// Not a creature: a cocoon hanging in the moss that breaks when struck. It has health but was no entity, so each
+    /// game had its own, struck only by its own player, and it broke for one player while it hung on for the other.
+    /// </summary>
+    MossBoneCocoon
 }
