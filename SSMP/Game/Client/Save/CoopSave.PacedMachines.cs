@@ -15,7 +15,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
 /// Machines of a room that run by themselves on a clock of their own, in a checked two-player save: boxes that drop to
-/// be stood on and are ground away, chutes that pour debris, and grinders that smash back and forth. Each game ran its
+/// be stood on and are ground away, chutes that pour debris, grinders that smash back and forth, and vents and columns
+/// that puff steam and exhaust that hurt (found by FsmScan --hazards, USER 10-13). Each game ran its
 /// own from the moment its room loaded, so the two players saw them at different points of their rounds and stood on
 /// boxes that weren't there for the other. A player that a grinder caught had their own grinders go back to where they
 /// began as they were put back at the last safe place, and only theirs. The user decided (10-06) that both games show
@@ -141,6 +142,18 @@ internal partial class CoopSave {
 
         // Chutes that pour debris, by themselves or when a controller says. Only the pitch of their sound is rolled.
         new(["junk_chute_"], "Control", ["Flow"]),
+
+        // Vents that puff steam that hurts, over and over from the moment their room loads, some telling the vent
+        // beside them to puff along. A player walked through steam that had stopped for the other, or was scalded
+        // where the other saw nothing (USER 10-13). The short ones, a few of which close a fight in with steam, start
+        // their rounds with the warning itself, and come first since their name starts like the others'.
+        new(["steam_vent_short"], "Control", ["Antic"]),
+        new(["steam_vent"], "Control", ["Antic SFX?"]),
+
+        // Timers that send columns of exhaust down and up in turn, and one that sends up columns of steam while a
+        // player is near. The columns only answer their timer.
+        new(["Exhaust Column Timer"], "Control", ["Down Antic"]),
+        new(["Steam Column Timer"], "Control", ["Start Pause"]),
 
         // Grinders, in groups that go together, which go through their list of ways without rolling anything
         new(["Understore_Grinder"], "Control", [GrinderNextWayStateName], isGrinder: true),
