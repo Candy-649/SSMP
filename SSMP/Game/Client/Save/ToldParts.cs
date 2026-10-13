@@ -113,7 +113,8 @@ internal static class ToldParts {
         Named = 1,
 
         /// <summary>
-        /// Nothing that it told took the event in the game that runs the creature.
+        /// Nothing that it told took the event in the game that runs the creature: with where the parts of the room it
+        /// went to were (see <see cref="CatchUp"/>).
         /// </summary>
         NotTaken = 2
     }
@@ -217,7 +218,21 @@ internal static class ToldParts {
             }
 
             if (!anyTakes) {
-                HostTells.Add(action, new HostTell(Time.frameCount, Word.NotTaken, "", ThrownThings.NoPlayer, null));
+                // Where each of them is, for a part of the other game that has yet to come to rest where this one did
+                List<Taker>? resting = null;
+                foreach (var machine in told.Machines) {
+                    if (machine.Fsm is not { } partFsm || (resting ??= []).Count >= MaxTakers) {
+                        continue;
+                    }
+
+                    resting.Add(new Taker(
+                        PathUnder(machine.transform, told.Target), machine.FsmName, partFsm.ActiveState?.Name ?? ""
+                    ));
+                }
+
+                HostTells.Add(
+                    action, new HostTell(Time.frameCount, Word.NotTaken, "", ThrownThings.NoPlayer, resting)
+                );
                 return;
             }
         }
@@ -267,12 +282,16 @@ internal static class ToldParts {
         }
 
         data.Packet.Write((byte) tell.Word);
-        if (tell.Word != Word.Named) {
+        if (tell.Word == Word.None) {
             return;
         }
 
-        data.Packet.Write(tell.Key);
-        data.Packet.Write(tell.Target);
+        // A tell that nothing took goes with where the parts were instead of a name, which they never rolled under
+        if (tell.Word == Word.Named) {
+            data.Packet.Write(tell.Key);
+            data.Packet.Write(tell.Target);
+        }
+
         var takers = tell.Takers;
         data.Packet.Write((byte) (takers?.Count ?? 0));
         if (takers == null) {
@@ -297,12 +316,17 @@ internal static class ToldParts {
         }
 
         var word = (Word) data.Packet.ReadByte();
-        if (word != Word.Named) {
+        if (word == Word.None) {
             return new Told(word, "", ThrownThings.NoPlayer, null, data.SenderId);
         }
 
-        var key = data.Packet.ReadString();
-        var target = data.Packet.ReadUShort();
+        var key = "";
+        var target = ThrownThings.NoPlayer;
+        if (word == Word.Named) {
+            key = data.Packet.ReadString();
+            target = data.Packet.ReadUShort();
+        }
+
         var count = data.Packet.ReadByte();
         List<Taker>? takers = null;
         for (var i = 0; i < count; i++) {
@@ -335,7 +359,7 @@ internal static class ToldParts {
         try {
             var here = FindTold(fsm, eventTarget);
             if (told.Word == Word.NotTaken) {
-                if (here != null) {
+                if (here != null && (told.Takers == null || !CatchUp(here.Target, told.Takers, eventName))) {
                     SayOnce(here.Target, $"is not told '{eventName}', as it let that go by in the scene host's game");
                 }
 
@@ -558,6 +582,91 @@ internal static class ToldParts {
     }
 
     /// <summary>
+    /// The most states a part is followed through, on from the state an event takes it to, to find where it comes to
+    /// rest (see <see cref="CatchUp"/>).
+    /// </summary>
+    private const int MostStepsToRest = 10;
+
+    /// <summary>
+    /// Tells the parts here an event that nothing took in the scene host's game, each part on its own, where it has yet
+    /// to come to rest where the host's part did: where the event takes this part, and the states it goes on to by
+    /// itself from there, lead to the state the host's part waits in. That part took an event like it earlier, which
+    /// never came here, and a gate the host's player saw close stayed open here for good. A part that the host's game
+    /// still had busy, or that came to rest anywhere else, lets it go by as the host's did.
+    /// </summary>
+    /// <param name="target">What the event went to.</param>
+    /// <param name="resting">Where each part was in the scene host's game as it let the event go by.</param>
+    /// <param name="eventName">The event.</param>
+    /// <returns>Whether any part here was told.</returns>
+    private static bool CatchUp(Transform target, List<Taker> resting, string eventName) {
+        var told = false;
+        foreach (var host in resting) {
+            var part = host.Path.Length == 0 ? target : target.Find(host.Path);
+            if (part == null || host.StateName.Length == 0) {
+                continue;
+            }
+
+            foreach (var machine in part.GetComponents<PlayMakerFSM>()) {
+                if (machine == null || machine.FsmName != host.FsmName || machine.Fsm is not { } fsm ||
+                    !Takes(fsm, eventName) || !ComesToRestIn(fsm, eventName, host.StateName) ||
+                    FsmEvent.FindEvent(eventName) is not { } fsmEvent) {
+                    continue;
+                }
+
+                Logger.Info(
+                    $"The part '{ScenePath.Get(part)}' is told '{eventName}' from '{fsm.ActiveState?.Name}' all the " +
+                    $"same, as the scene host's already waits in '{host.StateName}', where it takes this one"
+                );
+                fsm.Event(fsmEvent);
+                told = true;
+            }
+        }
+
+        return told;
+    }
+
+    /// <summary>
+    /// Whether an event takes a state machine, from where it is, to a state that waits to be told something, through
+    /// only the states it goes on to by itself (FINISHED).
+    /// </summary>
+    /// <param name="fsm">The state machine.</param>
+    /// <param name="eventName">The event.</param>
+    /// <param name="stateName">The state.</param>
+    private static bool ComesToRestIn(Fsm fsm, string eventName, string stateName) {
+        if (fsm.GetState(stateName) is not { } rest || WayOut(rest.Transitions, FsmEvent.Finished.Name) != null) {
+            return false;
+        }
+
+        var next = WayOut(fsm.ActiveState?.Transitions, eventName) ?? WayOut(fsm.GlobalTransitions, eventName);
+        for (var step = 0; next != null && step < MostStepsToRest; step++) {
+            if (next == stateName) {
+                return true;
+            }
+
+            next = WayOut(fsm.GetState(next)?.Transitions, FsmEvent.Finished.Name);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The state that one of the given ways out goes to on the given event, or null for none.
+    /// </summary>
+    private static string? WayOut(FsmTransition[]? transitions, string eventName) {
+        if (transitions == null) {
+            return null;
+        }
+
+        foreach (var transition in transitions) {
+            if (transition?.EventName == eventName) {
+                return transition.ToState;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Whether a state machine takes an event where it is: its state, or the machine as a whole, has a way out on it.
     /// </summary>
     private static bool Takes(Fsm fsm, string eventName) {
@@ -662,7 +771,7 @@ internal static class ToldParts {
 
     /// <summary>
     /// What an action of a creature told, as it came with the action: what it says, the name, the player, the parts
-    /// that took the event in the scene host's game, and who sent it.
+    /// that took the event in the scene host's game (where none took it: where the parts were), and who sent it.
     /// </summary>
     public readonly struct Told(Word word, string key, ushort target, List<Taker>? takers, ushort senderId) {
         public Word Word { get; } = word;
@@ -673,8 +782,8 @@ internal static class ToldParts {
     }
 
     /// <summary>
-    /// A part that took an event in the scene host's game: where it is under what was told, the state machine that
-    /// took it and the state it was in.
+    /// A part that took an event in the scene host's game, or one that let it go by where nothing took it: where it is
+    /// under what was told, its state machine and the state that was in.
     /// </summary>
     public sealed class Taker(string path, string fsmName, string stateName) {
         public string Path { get; } = path;
