@@ -97,9 +97,20 @@ function ConvertTo-AsciiJson($value) {
     return [regex]::Replace($json, '[^\x00-\x7F]', { param($m) '\u{0:x4}' -f [int][char]$m.Value })
 }
 
+# Set when a request got no answer at all (no connection, a broken one, a timeout), as against an error answer
+$NoAnswer = $false
+
 function Send-Request([System.Net.Http.HttpRequestMessage] $request) {
-    $response = $Http.SendAsync($request).GetAwaiter().GetResult()
-    $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    try {
+        $response = $Http.SendAsync($request).GetAwaiter().GetResult()
+        $text = $response.Content.ReadAsStringAsync().GetAwaiter().GetResult()
+    } catch {
+        $script:NoAnswer = $true
+        # The path only: a storage URL's query is its signature. The base exception names the real cause, which
+        # Windows PowerShell 5.1 hides behind "An error occurred while sending the request".
+        $what = "$($request.Method) $($request.RequestUri.AbsolutePath)"
+        throw "No answer to $($what): $($_.Exception.GetBaseException().Message)"
+    }
     return @{ Response = $response; Text = $text }
 }
 
@@ -328,7 +339,9 @@ function Find-Target([string] $key) {
         }
         if ($files.Count -eq 1) { $file = $files[0] }
         else {
-            $file = Select-One 'file' $files { param($f) "$($f.name) ($($f.versions_count) versions)" }
+            $file = Select-One 'file' $files {
+                param($f) "$($f.name) ($($f.versions_count) versions, last upload $($f.last_file_uploaded_at))"
+            }
             $picked = $true
         }
     }
@@ -395,12 +408,10 @@ function Wait-Checked([string] $uploadId, [string] $key) {
     $started = Get-Date
     $delay = 2.0
     while ($true) {
+        # The API names two states, created and available. Like Nexus Mods' own action, anything short of available
+        # is waited through, in case the beta reports a step in between.
         $state = [string](Invoke-Nexus GET "/uploads/$uploadId" $null $key).data.state
         if ($state -eq 'available') { return }
-        # The API names only these two states; anything else is not an upload on its way to being usable
-        if ($state -ne 'created') {
-            throw "Nexus Mods put the upload in the state '$state'. Nothing was added to the page."
-        }
         $waited = [int]((Get-Date) - $started).TotalSeconds
         if ((Get-Date) - $started -gt $CheckTimeout) {
             throw ("Nexus Mods was still checking the upload after $waited s (state '$state'). Nothing was added" +
@@ -417,6 +428,7 @@ function Wait-Checked([string] $uploadId, [string] $key) {
 # Dot-sourcing loads the functions only, for testing them one at a time
 if ($MyInvocation.InvocationName -eq '.') { return }
 
+$sending = $false
 $added = $false
 try {
     Write-Step 'Checking the zip'
@@ -457,10 +469,15 @@ try {
         }
     }
 
-    # The name the page already shows for this file, if Nexus Mods accepts it for a new version
-    $names = @()
-    if ($newest) { $names += [string]$newest.name }
-    $names += [string]$target.File.name
+    # The name the page already shows for this file, with a version number in it moved on to this one, if Nexus Mods
+    # accepts it for a new version
+    $names = @([string]$target.File.name)
+    if ($newest) {
+        $names = @([string]$newest.name) + $names
+        if ($newest.version) {
+            $names = @($names | ForEach-Object { $_.Replace([string]$newest.version, $release.Version) })
+        }
+    }
     $name = $names | Where-Object { $_ -match $NamePattern } | Select-Object -First 1
     if (-not $name) { $name = $PackageName }
 
@@ -490,6 +507,7 @@ try {
         update_mod_version = $true
     }
     if ($description) { $body.description = $description }
+    $sending = $true
     Invoke-Nexus POST "/mod-files/$($target.File.id)/versions" $body $key | Out-Null
     $added = $true
     Write-Ok "Version $($release.Version) is on the page; the previous one is archived"
@@ -513,6 +531,10 @@ try {
         Write-Host "  The new version is on the page; only its changelog failed. Add that on the website if it" `
             -ForegroundColor Yellow
         Write-Host "  matters: running this again stops at the version that is already there." -ForegroundColor Yellow
+    } elseif ($sending -and $NoAnswer) {
+        Write-Host "  No answer came to adding the version, so it may be on the page anyway. Run this again: it" `
+            -ForegroundColor Yellow
+        Write-Host "  stops at the version if it is there, and adds it if it is not." -ForegroundColor Yellow
     } else {
         Write-Host "  Nothing was added to the page." -ForegroundColor Yellow
     }
