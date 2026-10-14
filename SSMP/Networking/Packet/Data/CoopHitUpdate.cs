@@ -210,5 +210,13 @@ internal enum CoopHitKind : byte {
     /// struck the same way without flinging or shutting anything there. <see cref="CoopHitUpdate.Hit"/> holds how it
     /// was struck, the way a pod swings and where the player was across. Appended at the end, like the ones before.
     /// </summary>
-    BounceLook
+    BounceLook,
+
+    /// <summary>
+    /// Like <see cref="EntityTouch"/>, for something with which the sender's player set the creature off themselves -
+    /// woke it, or hooked it with the harpoon - which the sender's copy could not
+    /// play at once: the scene host's game plays it all the same, and the creature goes after the sender there, as it
+    /// would after the one player there is who set it off. Appended at the end, like the ones before.
+    /// </summary>
+    EntitySetOff
 }

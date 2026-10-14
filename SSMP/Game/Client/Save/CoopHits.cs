@@ -552,7 +552,7 @@ internal partial class CoopHits {
             return;
         }
 
-        if (update.Kind == CoopHitKind.EntityTouch) {
+        if (update.Kind is CoopHitKind.EntityTouch or CoopHitKind.EntitySetOff) {
             ApplyEntityTouch(update);
             return;
         }
@@ -2093,8 +2093,9 @@ internal partial class CoopHits {
             told = stream.ToArray();
         }
 
+        // One that the local player set off goes after them over there all the same
         SendToRoomMembers(new CoopHitUpdate {
-            Kind = CoopHitKind.EntityTouch,
+            Kind = setOff ? CoopHitKind.EntitySetOff : CoopHitKind.EntityTouch,
             EntityId = copied.Id,
             Index = fsmIndex,
             Responder = eventName,
@@ -2214,15 +2215,8 @@ internal partial class CoopHits {
             return;
         }
 
-        // A creature that the partner set off - woke by coming near, or hooked with the harpoon - goes after the
-        // partner, as it would have gone after the one player there is who set it off. Only when it takes the event:
-        // one that is up already keeps whom it chose.
-        if (setOff && update.Index < entity.HostFsms.Count && entity.HostFsms[update.Index] is { } setOffFsm &&
-            setOffFsm != null && setOffFsm.Fsm?.ActiveState is { } setOffState &&
-            Entity.Action.EntityFsmActions.FindTransition(setOffFsm.Fsm, setOffState, update.Responder) != null &&
-            _playerData.TryGetValue(update.PlayerId, out var setter) && setter.PlayerObject != null &&
-            entity.Object.Host != null) {
-            GamePatcher.SetTargetOf(entity.Object.Host, setter.PlayerObject);
+        if (setOff) {
+            GoAfterSetter(entity, update);
         }
 
         var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);
@@ -2234,6 +2228,23 @@ internal partial class CoopHits {
                 : $"The partner played '{update.Responder}' on the copy of entity {update.EntityId}, which went to " +
                   $"'{input.State}' there, but not here"
         );
+    }
+
+    /// <summary>
+    /// Has a creature that the partner set off - woke by coming near, or hooked with the harpoon - go after the
+    /// partner, as it would have gone after the one player there is who set it off. Only when it takes the event: one
+    /// that is up already keeps whom it chose.
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="update">The update, from the partner, with the index of the FSM and the event.</param>
+    private void GoAfterSetter(Entity.Entity entity, CoopHitUpdate update) {
+        if (update.Index < entity.HostFsms.Count && entity.HostFsms[update.Index] is { } fsm && fsm != null &&
+            fsm.Fsm?.ActiveState is { } state &&
+            Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) != null &&
+            _playerData.TryGetValue(update.PlayerId, out var setter) && setter.PlayerObject != null &&
+            entity.Object.Host != null) {
+            GamePatcher.SetTargetOf(entity.Object.Host, setter.PlayerObject);
+        }
     }
 
     /// <summary>
@@ -2348,6 +2359,10 @@ internal partial class CoopHits {
         if (fsm.Fsm.ActiveState is not { } state ||
             Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) == null) {
             return;
+        }
+
+        if (update.Kind == CoopHitKind.EntitySetOff) {
+            GoAfterSetter(entity, update);
         }
 
         // A catch comes with what the part that caught set on the FSM along with it

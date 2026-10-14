@@ -717,12 +717,17 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         var death = BlowDeathOf(self, hitInstance, fromTakeDamage);
+
+        // Only a blow that kills the creature in the game counts as leaving it no health: one that takes the last of
+        // its health, or any blow on one that dies at none. A creature that lives on at none after a death of its own
+        // (hasSpecialDeath) is only hit again by the next blow, and goes on as it was, hurting as it did
+        var blowCanKill = self.hp > 0 || !self.hasSpecialDeath;
         var (takingOwnBlow, askedToDie) = (_takingOwnBlowOnCopy, _ownBlowAskedToDie);
         (_takingOwnBlowOnCopy, _ownBlowAskedToDie) = (true, false);
         try {
             orig(self, hitInstance);
         } finally {
-            var leftNoHealth = _ownBlowAskedToDie;
+            var leftNoHealth = _ownBlowAskedToDie && blowCanKill;
             (_takingOwnBlowOnCopy, _ownBlowAskedToDie) = (takingOwnBlow, askedToDie);
             AfterOwnBlow(death, leftNoHealth);
         }

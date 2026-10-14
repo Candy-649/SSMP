@@ -827,14 +827,17 @@ internal partial class CoopSave {
         ResetWishConfirm();
         _checkedMembers.Remove(id);
         _memberChecks.Remove(id);
+
+        // What they held down here lets go, also as the last of them leaves: the end of the check forgets who stands
+        // on a plate or hangs on a ring, but lets go of neither, which then stayed held for good
+        ForgetPlatesOf(id);
+        ForgetRingHoldsOf(id, name ?? "?");
         if (_checkedMembers.Count == 0) {
             ResetCheck();
         } else {
             // The others are still in the save: only what this member held in the world lets go
             ForgetTrapdoorsOf(id);
             ForgetTollBenchesOf(id);
-            ForgetPlatesOf(id);
-            ForgetRingHoldsOf(id, name ?? "?");
         }
 
         // Also for the last of them: the rooms of the maze they were in lay themselves out anew without them

@@ -440,6 +440,8 @@ internal partial class CoopSave {
     /// session.
     /// </summary>
     private void ResetInteractionSession() {
+        // The room stays as the session ends: what members held down in it lets go first
+        LetGoOfMemberHolds();
         ResetInteractions();
         _capturedMechanisms.Clear();
         _interactionFlags.Clear();

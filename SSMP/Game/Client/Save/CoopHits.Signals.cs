@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Entity.Component;
@@ -72,9 +73,29 @@ internal partial class CoopHits {
         }
 
         var target = self.Fsm.GetOwnerDefaultTarget(self.Target);
-        for (var transform = target == null ? null : target.transform; transform != null;
-             transform = transform.parent) {
-            TellCopy(self.Fsm, transform.gameObject, self.EventName.Value, null, false);
+        if (target != null) {
+            TellCopyUpwards(self.Fsm, target.transform, self.EventName.Value, []);
+        }
+    }
+
+    /// <summary>
+    /// Tells the copies an event that goes to an object and on up, the way the game passes it (SendUpRecursive): to the
+    /// object, on up through what holds it, and from a part that follows another object by its body
+    /// (Rb2dFollowWithVelocity) on to that object and up through what holds it too.
+    /// </summary>
+    /// <param name="sender">The local player's state machine.</param>
+    /// <param name="transform">The object.</param>
+    /// <param name="eventName">The event.</param>
+    /// <param name="told">The objects told already, each of which is told once.</param>
+    private void TellCopyUpwards(Fsm sender, Transform? transform, string? eventName, HashSet<Transform> told) {
+        if (transform == null || !told.Add(transform)) {
+            return;
+        }
+
+        TellCopy(sender, transform.gameObject, eventName, null, false);
+        TellCopyUpwards(sender, transform.parent, eventName, told);
+        if (transform.TryGetComponent<Rb2dFollowWithVelocity>(out var follow)) {
+            TellCopyUpwards(sender, follow.Target, eventName, told);
         }
     }
 
