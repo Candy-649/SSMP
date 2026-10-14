@@ -600,6 +600,11 @@ internal partial class CoopHits {
             return;
         }
 
+        if (update.Kind == CoopHitKind.ObjectSignWalk) {
+            WalkSignHere(update);
+            return;
+        }
+
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
         if (type == null || !typeof(IHitResponder).IsAssignableFrom(type)) {
             NotReplayed(update, "hit", "that kind of object is unknown here");
@@ -1132,7 +1137,12 @@ internal partial class CoopHits {
             _statesBefore[self] = self.ActiveState;
         }
 
+        // A step of the way that the partner's sign took it there, or that the local player's sign takes it, which
+        // goes to the others (see WalkSignHere and WalkOwnSign)
+        StepSignWalk(self, toState);
+        var way = NoteSignStep(self, toState);
         orig(self, toState);
+        UnnoteSignStep(way, toState);
     }
 
     /// <summary>

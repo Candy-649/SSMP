@@ -218,5 +218,15 @@ internal enum CoopHitKind : byte {
     /// play at once: the scene host's game plays it all the same, and the creature goes after the sender there, as it
     /// would after the one player there is who set it off. Appended at the end, like the ones before.
     /// </summary>
-    EntitySetOff
+    EntitySetOff,
+
+    /// <summary>
+    /// The state machines of the room that a sign of the sender's player moved in their game in the same breath as it
+    /// was given - a taunt, a sprint into something - each found by its path, its name and its place among those of
+    /// that name, with the state it waited in and the states it went to in turn. <see cref="CoopHitUpdate.Responder"/>
+    /// names the sign, and <see cref="CoopHitUpdate.Hit"/> holds them all and then the dice of the sender's game; the
+    /// other game takes each of its own that waits in the same state the same way (see CoopHits.WalkSignHere).
+    /// Appended at the end, like the ones before.
+    /// </summary>
+    ObjectSignWalk
 }

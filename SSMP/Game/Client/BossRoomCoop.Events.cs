@@ -666,7 +666,7 @@ internal partial class BossRoomCoop {
     /// <summary>
     /// Finds the outermost boss scene that an object is in.
     /// </summary>
-    private static Transform? FindBossRoot(Transform transform) {
+    internal static Transform? FindBossRoot(Transform transform) {
         Transform? root = null;
         for (var current = transform; current != null; current = current.parent) {
             if (current.name.StartsWith(BossSceneNamePrefix, StringComparison.Ordinal)) {

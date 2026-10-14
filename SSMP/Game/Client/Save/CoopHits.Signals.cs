@@ -27,7 +27,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// "那个躲飞针的怪"). Each game runs those by itself now (EntityRegistryEntry.EachGameFsms), and what one tells the copy
 /// plays the same way (see <see cref="OnCopyHeardOwnSign"/>), as does a sign that the creature's own state machine
 /// listens for, like a taunt that wakes a resting boss - but not before every player is in its room (see
-/// Entity.HearOwnSign).
+/// Entity.HearOwnSign). What a sign moves of the room's own objects goes the same way in every game (see
+/// <see cref="WalkOwnSign"/>).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>
@@ -52,20 +53,25 @@ internal partial class CoopHits {
             ),
             new Action<Action<SendEventToRegister>, SendEventToRegister>(OnSendEventToRegister)
         );
+        AddHook(
+            typeof(Fsm).GetMethod("ProcessEvent", InstanceFlags, null, [typeof(FsmEvent), typeof(FsmEventData)], null),
+            new Action<Action<Fsm, FsmEvent, FsmEventData>, Fsm, FsmEvent, FsmEventData>(OnProcessEventInSignWalk)
+        );
     }
 
     /// <summary>
     /// An event told to everything in the game that listens for it (SendEventToRegister): one of the signs of a player
-    /// that a state machine of the local player tells is heard of them (see <see cref="Entity.Entity.HearOwnSign"/>).
+    /// that a state machine of the local player tells is heard of them (see <see cref="Entity.Entity.HearOwnSign"/>),
+    /// and what it moves of the room goes the same way in the others' games (see <see cref="WalkOwnSign"/>).
     /// </summary>
-    private static void OnSendEventToRegister(Action<SendEventToRegister> orig, SendEventToRegister self) {
+    private void OnSendEventToRegister(Action<SendEventToRegister> orig, SendEventToRegister self) {
         if (!IsLocalPlayers(self.Fsm) || self.eventName.Value is not { } eventName ||
             !Entity.Entity.PlayerSigns.Contains(eventName)) {
             orig(self);
             return;
         }
 
-        Entity.Entity.HearOwnSign(eventName, () => orig(self));
+        Entity.Entity.HearOwnSign(eventName, () => WalkOwnSign(eventName, () => orig(self)));
     }
 
     /// <summary>
@@ -92,12 +98,18 @@ internal partial class CoopHits {
 
     /// <summary>
     /// An event told to an object and everything above it (SendEventByNameUpwards): one that a state machine of the
-    /// local player tells the copy of a creature, or a part of it, goes on to it (see <see cref="TellCopy"/>).
+    /// local player tells the copy of a creature, or a part of it, goes on to it (see <see cref="TellCopy"/>), and a
+    /// bump of the player moves the room in the others' games as it does here (see <see cref="BumpSigns"/>).
     /// </summary>
     private void OnSendEventByNameUpwards(Action<SendEventByNameUpwards> orig, SendEventByNameUpwards self) {
-        orig(self);
+        var isLocal = IsLocalPlayers(self.Fsm);
+        if (isLocal && self.EventName.Value is { } bump && BumpSigns.Contains(bump)) {
+            WalkOwnSign(bump, () => orig(self));
+        } else {
+            orig(self);
+        }
 
-        if (!IsLocalPlayers(self.Fsm)) {
+        if (!isLocal) {
             return;
         }
 
