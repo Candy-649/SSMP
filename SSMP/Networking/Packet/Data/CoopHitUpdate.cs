@@ -214,7 +214,7 @@ internal enum CoopHitKind : byte {
 
     /// <summary>
     /// Like <see cref="EntityTouch"/>, for something with which the sender's player set the creature off themselves -
-    /// woke it, or hooked it with the harpoon - which the sender's copy could not
+    /// woke it, hooked it with the harpoon, gave a sign of theirs that it heard - which the sender's copy could not
     /// play at once: the scene host's game plays it all the same, and the creature goes after the sender there, as it
     /// would after the one player there is who set it off. Appended at the end, like the ones before.
     /// </summary>

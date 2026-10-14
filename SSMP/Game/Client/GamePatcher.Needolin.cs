@@ -282,11 +282,21 @@ internal partial class GamePatcher {
         }
 
         var owner = GetEnemyTargetOwner(requester);
-        if (owner != null && TryGetSongTarget(owner.GetInstanceID(), out var songTarget)) {
-            return songTarget;
+        var target = owner != null && TryGetSongTarget(owner.GetInstanceID(), out var songTarget)
+            ? songTarget
+            : GetApprovedEnemyTarget(requester);
+
+        // What hears a sign of the local player in the same breath - the harpoon they throw, their taunt - hears it of
+        // them, whichever player the creature goes after otherwise: one that leaps out of the harpoon's way measures
+        // how far the one who threw it is, and turns from them. Over there the partner's sign is played for the
+        // partner, whom the creature goes after by then. Only in place of a player: what looks at no player here is
+        // left looking where it does.
+        if (target != null && Entity.Entity.OwnSign != null && PlayerTargetRegistry.IsHeroLikeObject(target) &&
+            HeroController.SilentInstance is { } hero && hero != null) {
+            return hero.gameObject;
         }
 
-        return GetApprovedEnemyTarget(requester);
+        return target;
     }
 
     /// <summary>

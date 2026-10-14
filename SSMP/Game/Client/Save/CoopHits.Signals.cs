@@ -19,6 +19,13 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// at once lived (USER 10-14, "飞针了之后一直到不了合适的高度"). Now the copy takes what leads it anywhere at once, as
 /// the creature would in a game of one, and the scene host's game plays the same from where the copy was and has the
 /// creature go after this player (see <see cref="PlayOrSend"/>).
+///
+/// Other signs of the player go to everything in the game that listens for them - the harpoon thrown, a taunt, a bind -
+/// and some creatures listen for them with a state machine of their own, which tells the creature what to make of it
+/// from where the player is: one leaps out of the harpoon's way. The copy's was switched off and the scene host's heard
+/// only the scene host's player, so the creature never leapt out of the way of the other player's harpoon (USER 10-14,
+/// "那个躲飞针的怪"). Each game runs those by itself now (EntityRegistryEntry.EachGameFsms), and what one tells the copy
+/// plays the same way (see <see cref="OnCopyHeardOwnSign"/>).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>
@@ -37,6 +44,32 @@ internal partial class CoopHits {
             ),
             new Action<Action<SendEventByNameUpwards>, SendEventByNameUpwards>(OnSendEventByNameUpwards)
         );
+        AddHook(
+            typeof(SendEventToRegister).GetMethod(
+                nameof(SendEventToRegister.OnEnter), InstanceFlags, null, Type.EmptyTypes, null
+            ),
+            new Action<Action<SendEventToRegister>, SendEventToRegister>(OnSendEventToRegister)
+        );
+    }
+
+    /// <summary>
+    /// An event told to everything in the game that listens for it (SendEventToRegister): one that a state machine of
+    /// the local player tells is a sign of theirs, which all that hears it in the same breath hears of them (see
+    /// <see cref="Entity.Entity.OwnSign"/>).
+    /// </summary>
+    private static void OnSendEventToRegister(Action<SendEventToRegister> orig, SendEventToRegister self) {
+        if (!IsLocalPlayers(self.Fsm)) {
+            orig(self);
+            return;
+        }
+
+        var outer = Entity.Entity.OwnSign;
+        Entity.Entity.OwnSign = self.eventName.Value;
+        try {
+            orig(self);
+        } finally {
+            Entity.Entity.OwnSign = outer;
+        }
     }
 
     /// <summary>

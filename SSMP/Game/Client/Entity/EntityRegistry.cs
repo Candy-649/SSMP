@@ -337,6 +337,11 @@ internal class EntityRegistryEntry {
     /// carries them off: each game's notices its own player, and the game of the player it caught leads what the
     /// creature does with them (Entity.HearCopyTold). Run by the scene host alone, it never noticed the other player,
     /// and the creature went through them.
+    /// And some listen for a sign that only the player's own game gives - the harpoon thrown, a taunt, a bind - and
+    /// tell the creature what to make of it from where that player is: to leap out of the harpoon's way, to turn on the
+    /// one who taunted it, an ally to get up when the player binds beside it. Each game's hears its own player, and
+    /// what it tells the creature plays at once in that game and in the scene host's (Entity.OwnSign). Run by the scene
+    /// host alone, it heard only the scene host's player, and the creature never dodged the other player's harpoon.
     /// </summary>
     [JsonProperty("each_game_fsms")]
     public List<string>? EachGameFsms { get; set; }

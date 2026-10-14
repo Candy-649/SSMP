@@ -194,6 +194,9 @@
     "fsm_names": [
       "Control",
       "Harpoon Evade (inactive for now)"
+    ],
+    "each_game_fsms": [
+      "Harpoon Evade (inactive for now)"
     ]
   },
   {
@@ -210,6 +213,9 @@
       "Cast Timer",
       "Harpoon Evade",
       "Protect from underneath nail"
+    ],
+    "each_game_fsms": [
+      "Harpoon Evade"
     ]
   },
   {
@@ -888,6 +894,9 @@
       "FSM",
       "detect_taunt",
       "lowpass"
+    ],
+    "each_game_fsms": [
+      "detect_taunt"
     ]
   },
   {
@@ -1667,6 +1676,9 @@
       "Gnat Battle End",
       "Stun Control",
       "Water Detect"
+    ],
+    "each_game_fsms": [
+      "Bind Response"
     ]
   },
   {
@@ -2236,6 +2248,9 @@
     "internal_name": "Coral Hunter",
     "fsm_names": [
       "Control",
+      "Harpoon Evade"
+    ],
+    "each_game_fsms": [
       "Harpoon Evade"
     ]
   },

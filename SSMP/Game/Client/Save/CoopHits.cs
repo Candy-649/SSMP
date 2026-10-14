@@ -367,6 +367,7 @@ internal partial class CoopHits {
         Entity.Entity.CopyTouchedLocalPlayer += OnCopyTouchedLocalPlayer;
         Entity.Entity.CopyToldByLocalTalk += OnCopyToldByLocalTalk;
         Entity.Entity.CopyWokenByLocalPlayer += OnCopyWokenByLocalPlayer;
+        Entity.Entity.CopyHeardOwnSign += OnCopyHeardOwnSign;
         Entity.Entity.TalkLedTo += OnTalkLedTo;
         Entity.Entity.CatchWentOn += OnCatchWentOn;
 
@@ -484,6 +485,7 @@ internal partial class CoopHits {
         Entity.Entity.CopyTouchedLocalPlayer -= OnCopyTouchedLocalPlayer;
         Entity.Entity.CopyToldByLocalTalk -= OnCopyToldByLocalTalk;
         Entity.Entity.CopyWokenByLocalPlayer -= OnCopyWokenByLocalPlayer;
+        Entity.Entity.CopyHeardOwnSign -= OnCopyHeardOwnSign;
         GamePatcher.HitInDirectionDetour = null;
         Entity.Entity.TalkLedTo -= OnTalkLedTo;
         Entity.Entity.CatchWentOn -= OnCatchWentOn;
@@ -2018,6 +2020,22 @@ internal partial class CoopHits {
     }
 
     /// <summary>
+    /// Says that a sign of the local player reached the copy of an entity, whose FSM that each game runs by itself and
+    /// that listens for it told the creature what to make of it (see Entity.OnCopyHeardOwnSign): the copy plays it
+    /// here at once, and the creature in the scene host's game the same way. A creature that can be hurt goes after the
+    /// local player there, as one that the player set off; one that cannot, like an ally that fights beside them,
+    /// keeps to what it goes after, which may be the creature it fights rather than a player.
+    /// </summary>
+    /// <param name="copied">The entity.</param>
+    /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
+    /// <param name="eventName">The event that the listening FSM told the creature.</param>
+    /// <param name="sign">The sign of the local player that it heard.</param>
+    private void OnCopyHeardOwnSign(Entity.Entity copied, byte fsmIndex, string eventName, string sign) {
+        var canBeHurt = copied.Object.Client != null && copied.Object.Client.GetComponent<HealthManager>() != null;
+        PlayOrSend(copied, fsmIndex, eventName, $"gave the sign '{sign}' to", setOff: true, goAfter: canBeHurt);
+    }
+
+    /// <summary>
     /// Plays at once what the local player's strike or touch told an FSM of the copy of an entity, where the entity
     /// says so (see <see cref="Entity.Entity.PlayHere"/>), and sends the scene host all that it needs to play the same;
     /// otherwise sends it only the event, and the copy shows what the scene host's game then does. Only while the scene
@@ -2031,10 +2049,12 @@ internal partial class CoopHits {
     /// <param name="caught">For a catch, what the part that caught set on the FSM along with the event; null for a
     /// strike or a touch.</param>
     /// <param name="grabbedThePlayer">Whether the part that told it grabbed the player themselves.</param>
-    /// <param name="setOff">Whether the local player set the creature off themselves - woke it by coming near, or
-    /// told it something with a state machine of their own, like the harpoon that hooks it (see
-    /// <see cref="TellCopy"/>) - which plays here whatever the creature, and has the creature go after them in the
-    /// scene host's game.</param>
+    /// <param name="setOff">Whether the local player set the creature off themselves - woke it by coming near, told it
+    /// something with a state machine of their own, like the harpoon that hooks it (see <see cref="TellCopy"/>), or
+    /// gave a sign of their own that it heard (see <see cref="OnCopyHeardOwnSign"/>) - which plays here whatever the
+    /// creature, and has the creature go after them in the scene host's game.</param>
+    /// <param name="goAfter">Whether the creature goes after them in the scene host's game, where that is not what
+    /// <paramref name="setOff"/> says.</param>
     private void PlayOrSend(
         Entity.Entity copied,
         byte fsmIndex,
@@ -2042,7 +2062,8 @@ internal partial class CoopHits {
         string what,
         Entity.ToldValues? caught = null,
         bool grabbedThePlayer = false,
-        bool setOff = false
+        bool setOff = false,
+        bool? goAfter = null
     ) {
         if (!CanSendEntityTouch()) {
             // Alone in the room nothing goes on with the catch, which the part may have started on the player already
@@ -2055,12 +2076,13 @@ internal partial class CoopHits {
             return;
         }
 
+        var wentAfter = goAfter ?? setOff;
         if (copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } input) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                 $"went to '{input.State}', and the scene host is sent it with where the copy was"
             );
-            SendEntityInput(copied.Id, fsmIndex, eventName, input, setOff);
+            SendEntityInput(copied.Id, fsmIndex, eventName, input, wentAfter);
             return;
         }
 
@@ -2095,7 +2117,7 @@ internal partial class CoopHits {
 
         // One that the local player set off goes after them over there all the same
         SendToRoomMembers(new CoopHitUpdate {
-            Kind = setOff ? CoopHitKind.EntitySetOff : CoopHitKind.EntityTouch,
+            Kind = wentAfter ? CoopHitKind.EntitySetOff : CoopHitKind.EntityTouch,
             EntityId = copied.Id,
             Index = fsmIndex,
             Responder = eventName,
@@ -2231,9 +2253,9 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Has a creature that the partner set off - woke by coming near, or hooked with the harpoon - go after the
-    /// partner, as it would have gone after the one player there is who set it off. Only when it takes the event: one
-    /// that is up already keeps whom it chose.
+    /// Has a creature that the partner set off - woke by coming near, hooked with the harpoon, or that heard a sign of
+    /// theirs - go after the partner, as it would have gone after the one player there is who set it off. Only when it
+    /// takes the event: one that is up already keeps whom it chose.
     /// </summary>
     /// <param name="entity">The entity.</param>
     /// <param name="update">The update, from the partner, with the index of the FSM and the event.</param>
