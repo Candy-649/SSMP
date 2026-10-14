@@ -46,8 +46,9 @@ internal partial class Entity {
 
     /// <summary>
     /// Raised when a catch that the creature watched for itself, which the copy played here for this game, was cut
-    /// short and what it took from the local player given back (see <see cref="PlayerBeforeTheCatch"/>): it let go of
-    /// them without taking them where it would have. CoopSave tells the other players, whom the catch held too.
+    /// short (see <see cref="GiveBackWhatTheCatchTook"/>): it let go of the local player without taking them where it
+    /// would have, whether or not anything had to be given back to them. CoopSave tells the other players, whom the
+    /// catch held too.
     /// </summary>
     public static event System.Action? CatchGivenBack;
 
@@ -304,8 +305,9 @@ internal partial class Entity {
 
     /// <summary>
     /// Gives the local player back what the catch that the copy played here for this game took from them, if it was
-    /// cut short (see <see cref="PlayerBeforeTheCatch"/>), and says so (see <see cref="CatchGivenBack"/>). One that
-    /// came to its end gave it back itself, or took the player to another room, where the game gives it back.
+    /// cut short (see <see cref="PlayerBeforeTheCatch"/>), unless another copy holds them or the game has them in a
+    /// way that gives it back itself, and says that it was cut short either way (see <see cref="CatchGivenBack"/>).
+    /// One that came to its end gave it back itself, or took the player to another room, where the game gives it back.
     /// </summary>
     /// <param name="cut">Whether the copy stopped before the catch came to its end: the scene host did not take the
     /// catch, never answered, or the copy went away while it held the player.</param>
@@ -445,8 +447,10 @@ internal partial class Entity {
                 }
             }
 
-            if (_taken.Screen && ScreenFaderUtils.GetColour() is var screen && screen.a > _screen.a) {
-                ScreenFaderUtils.Fade(screen, _screen, ScreenBackTime);
+            // Clear unless it was black already: taken while it still faded in from a change of rooms, it stayed dimmed
+            var screenBack = _screen.a >= 1f ? _screen : new Color(_screen.r, _screen.g, _screen.b, 0f);
+            if (_taken.Screen && ScreenFaderUtils.GetColour() is var screen && screen.a > screenBack.a) {
+                ScreenFaderUtils.Fade(screen, screenBack, ScreenBackTime);
                 given.Add("screen");
             }
 

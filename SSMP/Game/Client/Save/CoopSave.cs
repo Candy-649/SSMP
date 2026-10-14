@@ -465,13 +465,23 @@ internal partial class CoopSave {
             }
         }
 
+        // First and in its own try: one of the others throwing must not keep a hold for the partner's catch from
+        // letting go of the player, who would stand still until they changed rooms
+        try {
+            UpdatePrisonCapture(hero);
+        } catch (Exception e) {
+            if (!_prisonCaptureFailed) {
+                _prisonCaptureFailed = true;
+                Logger.Error($"Could not update the capture of the two-player save:\n{e}");
+            }
+        }
+
         UpdateWishTalk();
         UpdateDeliverySummon(hero);
         UpdateRescue(hero);
         UpdateLavaChase(hero);
         UpdateChaseStandUp(hero);
         UpdateRaces();
-        UpdatePrisonCapture(hero);
         UpdateClothesGrab(hero);
 
         // Also once the partner is gone, so that a bench they kept up flips back

@@ -52,8 +52,16 @@ internal partial class CoopSave {
     private const float PartnerCatchTimeout = 30f;
 
     /// <summary>
+    /// How long a catch of the partner's still holds the local player after the capture came while they can't be moved,
+    /// in seconds: something that keeps them from being moved, like water they stand in, would otherwise hold them for
+    /// good, as the hold keeps them from getting out of it. They are taken along once they can be moved all the same.
+    /// </summary>
+    private const float PendingHoldTimeout = 10f;
+
+    /// <summary>
     /// How long a cage that has the local player is followed at the most before the others are told that it let go of
-    /// them, in seconds. The capture comes well within it.
+    /// them, in seconds. The capture comes well within it, also with the pause menu open, which in a session does not
+    /// stop the game.
     /// </summary>
     private const float OwnCatchTimeout = 40f;
 
@@ -107,6 +115,11 @@ internal partial class CoopSave {
     /// The cage that has the local player now, which the others are told about, or null.
     /// </summary>
     private OwnCatch? _ownCatch;
+
+    /// <summary>
+    /// Whether updating the capture threw already, which is logged once.
+    /// </summary>
+    private bool _prisonCaptureFailed;
 
     /// <summary>
     /// Watches for the local player being caught.
@@ -295,6 +308,12 @@ internal partial class CoopSave {
 
         switch (stage) {
             case 0:
+                // Caught again by the time a word of the last catch would have come, it holds on
+                if (_partnerCatch is { } again && again.Id == player.Id) {
+                    again.Heard = Time.unscaledTime;
+                    return;
+                }
+
                 if (_partnerCatch != null || IsInPrisonClothes()) {
                     return;
                 }
@@ -352,8 +371,11 @@ internal partial class CoopSave {
         _pendingCaptureBy = player.Username;
 
         // Held since the catch, they were told then
-        if (_partnerCatch is { Told: true } held && held.Id == player.Id) {
-            return;
+        if (_partnerCatch is { } held && held.Id == player.Id) {
+            held.CaptureCame = Time.unscaledTime;
+            if (held.Told) {
+                return;
+            }
         }
 
         Chat(Lang.Pick(
@@ -426,7 +448,7 @@ internal partial class CoopSave {
 
             Logger.Info($"The game didn't start the move to the prison after {username}");
             if (held is { Darkened: true }) {
-                ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), held.ScreenBefore, PrisonUnfadeTime);
+                ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), ScreenBack(held.ScreenBefore), PrisonUnfadeTime);
             }
         } catch (Exception e) {
             _pendingCaptureBy = null;
@@ -445,13 +467,26 @@ internal partial class CoopSave {
             return;
         }
 
-        if (_pendingCaptureBy == null && Time.unscaledTime - held.Heard > PartnerCatchTimeout) {
+        var now = Time.unscaledTime;
+        if (_pendingCaptureBy == null && now - held.Heard > PartnerCatchTimeout) {
             ReleasePartnerCatch(
                 hero,
                 $"nothing more was heard of it for {PartnerCatchTimeout} s",
                 Lang.Pick(
                     $"Nothing more came from {held.Name}, so you can move again.",
                     $"{held.Name} 那边一直没有消息，你可以动了。"
+                )
+            );
+            return;
+        }
+
+        if (_pendingCaptureBy != null && held.CaptureCame is { } came && now - came > PendingHoldTimeout) {
+            ReleasePartnerCatch(
+                hero,
+                $"the capture came {PendingHoldTimeout} s ago, and they still can't be moved",
+                Lang.Pick(
+                    $"{held.Name} is in the prison, and you are taken there as soon as you can be moved.",
+                    $"{held.Name} 已经被关进去了，你一能动就会被带进去。"
                 )
             );
             return;
@@ -483,16 +518,17 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the local player can be held for a partner's catch right now: nothing else holds them, like a bench, a
-    /// death, a hazard, their cocoon, a scene change, a lift, the pause menu, dialogue or a cage of their own, and they
-    /// are not in the prison already.
+    /// Whether the local player can be held for a partner's catch right now: they stand on the ground, nothing else
+    /// holds them, like a bench, a death, a hazard, their cocoon, a scene change, a lift, the pause menu, dialogue or a
+    /// cage of their own, and they are not in the prison already. Held in the air, they fell where they could not get
+    /// out of again, like water, which nothing could move them out of either.
     /// </summary>
     private bool CanHoldForPartner(HeroController hero) {
         var gameManager = global::GameManager.instance;
         return gameManager != null && _ownCatch == null && !IsInPrisonClothes() && !PlayerData.instance.atBench &&
-               !hero.cState.dead && !hero.cState.hazardDeath && !hero.cState.hazardRespawning &&
-               !PlayerTargetRegistry.IsPlayerDown(hero.gameObject) && CanMoveHeroNow(gameManager, hero) &&
-               IsReadingSharedDialogue?.Invoke() != true;
+               hero.cState.onGround && !hero.cState.dead && !hero.cState.hazardDeath &&
+               !hero.cState.hazardRespawning && !PlayerTargetRegistry.IsPlayerDown(hero.gameObject) &&
+               CanMoveHeroNow(gameManager, hero) && IsReadingSharedDialogue?.Invoke() != true;
     }
 
     /// <summary>
@@ -509,13 +545,24 @@ internal partial class CoopSave {
 
         ForgetPartnerCatch(hero);
         if (held.Darkened) {
-            ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), held.ScreenBefore, PrisonUnfadeTime);
+            ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), ScreenBack(held.ScreenBefore), PrisonUnfadeTime);
         }
 
         Logger.Info($"The catch of {held.Name} no longer holds the local player: {why}");
-        if (message != null && held.Told) {
+
+        // Not to a player in a cage of their own, whom it doesn't free
+        if (message != null && held.Told && _ownCatch == null) {
             Chat(message);
         }
+    }
+
+    /// <summary>
+    /// What the screen goes back to after it went black with the partner's: as it was then, but clear unless it was
+    /// black already. Taken while it still faded in from a change of rooms, it stayed dimmed.
+    /// </summary>
+    /// <param name="before">The colour of the screen before it went black.</param>
+    private static Color ScreenBack(Color before) {
+        return before.a >= 1f ? before : new Color(before.r, before.g, before.b, 0f);
     }
 
     /// <summary>
@@ -593,6 +640,11 @@ internal partial class CoopSave {
         /// The colour of the screen of the local player before it went black.
         /// </summary>
         public Color ScreenBefore { get; set; }
+
+        /// <summary>
+        /// When the capture of the partner came, while the local player still waits to be moved, or null.
+        /// </summary>
+        public float? CaptureCame { get; set; }
     }
 
     /// <summary>

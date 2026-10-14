@@ -920,10 +920,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // Nor out of a cage that has them, which gives them their control back for a while: its black screen is the
+        // others' to follow (CoopSave.PrisonCapture), not the fade of this move
         var gameManager = global::GameManager.instance;
         if (gameManager == null || SceneUtil.GetCurrentSceneName() != summon.Scene ||
             !gameManager.HasFinishedEnteringScene || hero.cState.dead || hero.cState.hazardDeath ||
-            hero.cState.hazardRespawning || !CanMoveHeroNow(gameManager, hero)) {
+            hero.cState.hazardRespawning || !CanMoveHeroNow(gameManager, hero) || _ownCatch != null) {
             return;
         }
 
