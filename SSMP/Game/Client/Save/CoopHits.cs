@@ -2259,9 +2259,15 @@ internal partial class CoopHits {
             GoAfterSetter(entity, update);
         }
 
+        // What it checks of the player who did it is checked of the partner (SharedDice.JudgeFor)
         var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);
-        Logger.Info(
+        var hostFsm = update.Index < entity.HostFsms.Count ? entity.HostFsms[update.Index] : null;
+        var sameWay = false;
+        SharedDice.JudgeFor(hostFsm != null ? hostFsm.Fsm : null, CrestOf(update.PlayerId), () => sameWay =
             entity.TakeInput(update.Index, update.Responder, input, elapsed, update.PlayerId, FigureOf(update.PlayerId))
+        );
+        Logger.Info(
+            sameWay
                 ? $"The partner played '{update.Responder}' on the copy of entity {update.EntityId}, so it is played " +
                   $"here from where their copy was with their dice, and went to '{input.State}' too, " +
                   $"{elapsed:0.00} s on"
@@ -2419,11 +2425,28 @@ internal partial class CoopHits {
         }
 
         caught?.ApplyTo(fsm.Fsm);
-        entity.PlayForPartner(
+        SharedDice.JudgeFor(fsm.Fsm, CrestOf(update.PlayerId), () => entity.PlayForPartner(
             fsm,
             caught != null || Entity.Entity.CatchEvents.Contains(update.Responder),
             () => fsm.SendEvent(update.Responder)
-        );
+        ));
+    }
+
+    /// <summary>
+    /// The game's name for the crest that a player of another game wears, which every game is told, or null if it is
+    /// not known: what a creature checks of the player who set it off is checked of them (see SharedDice.JudgeFor).
+    /// </summary>
+    /// <param name="playerId">The ID of the player.</param>
+    private string? CrestOf(ushort playerId) {
+        if (!_playerData.TryGetValue(playerId, out var player)) {
+            return null;
+        }
+
+        try {
+            return SSMP.Internals.CrestTypeExt.ToInternal(player.CrestType);
+        } catch (InvalidOperationException) {
+            return null;
+        }
     }
 
     /// <summary>

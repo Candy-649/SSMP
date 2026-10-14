@@ -81,7 +81,13 @@ internal static class SharedDice {
         /// list, the state of <see cref="Random"/> after the shuffle, then the number of each thing in it in turn (see
         /// <see cref="KeyOf"/>).
         /// </summary>
-        Order = 1
+        Order = 1,
+
+        /// <summary>
+        /// What a check of the player of the game that set the thing off came to (see
+        /// <see cref="JudgingActionTypes"/>): 1 for yes and 0 for no.
+        /// </summary>
+        Judgment = 2
     }
 
     /// <summary>
@@ -142,6 +148,23 @@ internal static class SharedDice {
     private static readonly HashSet<string> RollingActionSet = new(RollingActionNames, StringComparer.Ordinal);
 
     /// <summary>
+    /// The actions of state machines that check something that only the player of their own game has: the crest they
+    /// wear, a tool they have on them. What the partner set off is about the partner, and only their game knows these
+    /// of them: a creature that turns on a player who binds, unless they wear a crest that binds another way, judged a
+    /// bind of the partner by the crest of the player of the game that runs it (USER 10-15, "改成有人治疗就改吧"). So
+    /// what the check came to in the game that set the thing off goes with its dice, and the other game takes that
+    /// rather than ask its own player, as the player who throws the dice decides what they roll (see
+    /// <see cref="OnJudge"/>).
+    /// </summary>
+    private static readonly Type[] JudgingActionTypes = [typeof(CheckIfCrestEquipped), typeof(CheckIfToolEquipped)];
+
+    /// <summary>
+    /// The state machine that plays here what a player of another game set off, with the game's name for the crest
+    /// that player wears, or null (see <see cref="JudgeFor"/>).
+    /// </summary>
+    private static (HutongGames.PlayMaker.Fsm Fsm, string Crest)? _setter;
+
+    /// <summary>
     /// The state machines found to have an action that rolls or that aims at a player (see <see cref="Rolls"/> and
     /// <see cref="Aims"/>), each with which of the two, kept until the room is left. Only what was found is kept: the
     /// actions of a state machine that hasn't woken yet may not be there to look at.
@@ -171,6 +194,16 @@ internal static class SharedDice {
             }
 
             yield return (onEnter, new Action<Action<FsmStateAction>, FsmStateAction>(OnRollingActionEnter));
+        }
+
+        foreach (var type in JudgingActionTypes) {
+            var isTrue = type.GetMethod("get_IsTrue", flags);
+            if (isTrue == null || isTrue.DeclaringType != type) {
+                Logger.Debug($"No check of {type.Name} of its own, so what it comes to is not shared");
+                continue;
+            }
+
+            yield return (isTrue, new Func<Func<FsmStateAction, bool>, FsmStateAction, bool>(OnJudge));
         }
     }
 
@@ -222,6 +255,30 @@ internal static class SharedDice {
     }
 
     /// <summary>
+    /// Plays here what a player of another game set off on a state machine, where a check of the crest that player
+    /// wears that came with no answer of their game (see <see cref="RecordKind.Judgment"/>) is answered by the crest
+    /// that every game is told they wear: what their game sent without dice, because its copy could not play it there
+    /// at once, or what their copy did not come to there.
+    /// </summary>
+    /// <param name="fsm">The state machine, or null for none.</param>
+    /// <param name="crest">The game's name for the crest that the player wears, or null if it is not known.</param>
+    /// <param name="action">What the player set off.</param>
+    public static void JudgeFor(HutongGames.PlayMaker.Fsm? fsm, string? crest, Action action) {
+        if (fsm == null || crest == null) {
+            action();
+            return;
+        }
+
+        var last = _setter;
+        _setter = (fsm, crest);
+        try {
+            action();
+        } finally {
+            _setter = last;
+        }
+    }
+
+    /// <summary>
     /// Reads the records of dice: after the state as the thing was set off, each record says what it holds, for which
     /// action and how many numbers, and then holds them.
     /// </summary>
@@ -240,7 +297,7 @@ internal static class SharedDice {
             // Dice of another kind of build are left whole, rather than read in part
             var kind = (RecordKind) dice[at];
             var length = dice[at + 2];
-            if (kind != RecordKind.Roll && kind != RecordKind.Order || length < 0 ||
+            if (kind is not (RecordKind.Roll or RecordKind.Order or RecordKind.Judgment) || length < 0 ||
                 length > dice.Count - at - RecordHeadSize) {
                 return null;
             }
@@ -513,6 +570,47 @@ internal static class SharedDice {
         }
 
         orig(self);
+    }
+
+    /// <summary>
+    /// Hook for an action that checks something that only the player of its own game has (see
+    /// <see cref="JudgingActionTypes"/>). While something set off here is written down, what the check came to is
+    /// written down with the dice; while something that the partner set off is done here, the check takes what the
+    /// same action came to in their game, of their player, rather than asking this game's player. A check of the crest
+    /// that came with no answer is answered by the crest they wear (see <see cref="JudgeFor"/>). Only the actions that
+    /// take dice count (see <see cref="OnRollingActionEnter"/>).
+    /// </summary>
+    private static bool OnJudge(Func<FsmStateAction, bool> orig, FsmStateAction self) {
+        if (Recordings.Count == 0 && _thrown == null && _setter == null || self.Fsm is not { } fsm ||
+            fsm.FsmComponent is not { } machine || machine == null) {
+            return orig(self);
+        }
+
+        var counts = fsm == _entityFsm || CoopHits.IsRoomObject(machine);
+        var action = counts ? Identify(self, machine) : 0;
+        bool answer;
+        if (counts && _thrown is { } thrown && TakeRecord(RecordKind.Judgment, action) is { Length: 1 } judged) {
+            answer = thrown[judged.Start] != 0;
+        } else if (_setter is { } setter && setter.Fsm == fsm && self is CheckIfCrestEquipped crestCheck) {
+            answer = crestCheck.Crest?.Value is ToolCrest crest && crest != null && crest.name == setter.Crest;
+        } else {
+            answer = orig(self);
+        }
+
+        if (!counts) {
+            return answer;
+        }
+
+        foreach (var recording in Recordings) {
+            if (recording.Count + RecordHeadSize + 1 <= MaxNumbers) {
+                recording.Add((int) RecordKind.Judgment);
+                recording.Add(action);
+                recording.Add(1);
+                recording.Add(answer ? 1 : 0);
+            }
+        }
+
+        return answer;
     }
 
     /// <summary>

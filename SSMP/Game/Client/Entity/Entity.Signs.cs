@@ -22,13 +22,15 @@ namespace SSMP.Game.Client.Entity;
 /// </summary>
 internal partial class Entity {
     /// <summary>
-    /// The signs of a player that creatures listen for: the harpoon thrown, a taunt, a taunt with the ring, a bind.
-    /// What else the player's own state machines tell everything - that they were hurt, came into a room, opened the
-    /// map - says how the player is rather than tells anyone something, and is heard as it was. The start of a bind,
-    /// which a few bosses read to fight a player who binds another way, waits for a rule of its own.
+    /// The signs of a player that creatures listen for: the harpoon thrown, a taunt, a taunt with the ring, the start
+    /// of a bind and a bind done. What else the player's own state machines tell everything - that they were hurt, came
+    /// into a room, opened the map - says how the player is rather than tells anyone something, and is heard as it
+    /// was. A few bosses turn on a player who starts to bind, unless the crest they wear binds another way: any
+    /// player's bind counts, judged by the crest of the player who binds (USER 10-15, "改成有人治疗就改吧"; see
+    /// SharedDice.JudgingActionTypes).
     /// </summary>
     internal static readonly HashSet<string> PlayerSigns =
-        ["THROWING HARPOON", "DID TAUNT", "DID TAUNT POSHANKA", "DID BIND"];
+        ["THROWING HARPOON", "DID TAUNT", "DID TAUNT POSHANKA", "STARTED BIND", "DID BIND"];
 
     /// <summary>
     /// The sign that the local player gives right now, or null (see <see cref="HearOwnSign"/>). What hears it in the
