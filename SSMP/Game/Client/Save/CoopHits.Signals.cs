@@ -53,23 +53,17 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// An event told to everything in the game that listens for it (SendEventToRegister): one that a state machine of
-    /// the local player tells is a sign of theirs, which all that hears it in the same breath hears of them (see
-    /// <see cref="Entity.Entity.OwnSign"/>).
+    /// An event told to everything in the game that listens for it (SendEventToRegister): one of the signs of a player
+    /// that a state machine of the local player tells is heard of them (see <see cref="Entity.Entity.HearOwnSign"/>).
     /// </summary>
     private static void OnSendEventToRegister(Action<SendEventToRegister> orig, SendEventToRegister self) {
-        if (!IsLocalPlayers(self.Fsm)) {
+        if (!IsLocalPlayers(self.Fsm) || self.eventName.Value is not { } eventName ||
+            !Entity.Entity.PlayerSigns.Contains(eventName)) {
             orig(self);
             return;
         }
 
-        var outer = Entity.Entity.OwnSign;
-        Entity.Entity.OwnSign = self.eventName.Value;
-        try {
-            orig(self);
-        } finally {
-            Entity.Entity.OwnSign = outer;
-        }
+        Entity.Entity.HearOwnSign(eventName, () => orig(self));
     }
 
     /// <summary>

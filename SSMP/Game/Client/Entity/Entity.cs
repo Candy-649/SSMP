@@ -2799,23 +2799,6 @@ internal partial class Entity {
     public static readonly HashSet<string> CatchEvents = ["MULTI HIT CONNECT"];
 
     /// <summary>
-    /// The sign that the local player gives right now, or null: an event that one of their own state machines tells
-    /// everything in the game that listens for it (SendEventToRegister) - the harpoon thrown, a taunt, a bind. What
-    /// hears it in the same breath hears it of them: the FSMs of a copy that each game runs by itself and that listen
-    /// for it tell the creature what to make of it (see <see cref="HearCopyTold"/>), and whatever looks at a player
-    /// for it looks at them (GamePatcher.GetFsmActionTarget).
-    /// </summary>
-    internal static string? OwnSign;
-
-    /// <summary>
-    /// Raised on a scene client when an FSM of the copy of an entity that each game runs by itself heard a sign of the
-    /// local player (see <see cref="OwnSign"/>) and told the creature an event for it: the entity, the index of the FSM
-    /// that takes the event, the event and the sign. What the event leads to is played on the copy at once and sent to
-    /// the scene host, where the creature goes after the local player (see <see cref="PlayHere"/>).
-    /// </summary>
-    public static event Action<Entity, byte, string, string>? CopyHeardOwnSign;
-
-    /// <summary>
     /// The entities, by the object of their copy (see <see cref="OnBroadcastToObject"/>).
     /// </summary>
     private static readonly Dictionary<GameObject, Entity> EntitiesByCopy = new();
@@ -3202,58 +3185,6 @@ internal partial class Entity {
             // A part may grab the player itself before it tells the creature, and nothing goes on with a catch that
             // no FSM of the copy can take from where it is: the player is let go at once
             EntityFsmActions.LetGoOfTheHeldLocalPlayer($"no FSM of the copy of entity {entity.Id} takes '{eventName}'");
-        }
-    }
-
-    /// <summary>
-    /// Whether an FSM leaves a state anywhere on an event, which one that listens for a sign of the player does.
-    /// </summary>
-    private static bool ListensFor(HutongGames.PlayMaker.Fsm fsm, string eventName) {
-        foreach (var transition in fsm.GlobalTransitions) {
-            if (transition.EventName == eventName) {
-                return true;
-            }
-        }
-
-        foreach (var state in fsm.States) {
-            foreach (var transition in state.Transitions) {
-                if (transition.EventName == eventName) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Takes it that an FSM of the copy that each game runs by itself heard a sign of the local player and told the
-    /// creature an event for it: the harpoon thrown its way, which it leaps out of; a taunt, which it turns on; a bind
-    /// beside an ally that is down, who gets up. In the game that runs the creature, its FSM goes on from there at
-    /// once; the copy's FSMs are switched off and did not hear it, and the scene host's game never heard the sign at
-    /// all, so the creature let the other player's harpoon hook it. Each FSM of the copy that goes anywhere on the
-    /// event from the state it is in is played at once here, and in the scene host's game, where the creature goes
-    /// after the local player (see <see cref="CopyHeardOwnSign"/>).
-    /// </summary>
-    /// <param name="fsmName">The name of the FSM that the listening one told, or null for all of them.</param>
-    /// <param name="eventName">The event.</param>
-    /// <param name="sign">The sign of the local player that it heard.</param>
-    private void OnCopyHeardOwnSign(string? fsmName, string eventName, string sign) {
-        if (!_isControlled || Object.Client == null || CopyHeardOwnSign == null) {
-            return;
-        }
-
-        for (var fsmIndex = 0; fsmIndex < _fsms.Client.Count && fsmIndex <= byte.MaxValue; fsmIndex++) {
-            var fsm = _fsms.Client[fsmIndex];
-
-            // One that runs by itself on the copy heard the event
-            if (fsm == null || fsm.enabled || !string.IsNullOrEmpty(fsmName) && fsm.FsmName != fsmName ||
-                StateOfCopy(fsm) is not { } state ||
-                EntityFsmActions.FindTransition(fsm.Fsm, state, eventName) == null) {
-                continue;
-            }
-
-            CopyHeardOwnSign(this, (byte) fsmIndex, eventName, sign);
         }
     }
 

@@ -194,9 +194,6 @@
     "fsm_names": [
       "Control",
       "Harpoon Evade (inactive for now)"
-    ],
-    "each_game_fsms": [
-      "Harpoon Evade (inactive for now)"
     ]
   },
   {
@@ -213,9 +210,6 @@
       "Cast Timer",
       "Harpoon Evade",
       "Protect from underneath nail"
-    ],
-    "each_game_fsms": [
-      "Harpoon Evade"
     ]
   },
   {
