@@ -25,7 +25,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// from where the player is: one leaps out of the harpoon's way. The copy's was switched off and the scene host's heard
 /// only the scene host's player, so the creature never leapt out of the way of the other player's harpoon (USER 10-14,
 /// "那个躲飞针的怪"). Each game runs those by itself now (EntityRegistryEntry.EachGameFsms), and what one tells the copy
-/// plays the same way (see <see cref="OnCopyHeardOwnSign"/>).
+/// plays the same way (see <see cref="OnCopyHeardOwnSign"/>), as does a sign that the creature's own state machine
+/// listens for, like a taunt that wakes a resting boss - but not before every player is in its room (see
+/// Entity.HearOwnSign).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>

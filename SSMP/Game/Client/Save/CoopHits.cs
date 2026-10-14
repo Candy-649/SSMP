@@ -286,6 +286,12 @@ internal partial class CoopHits {
     /// </summary>
     private GameObject? _directionSource, _directionSourceRoot;
 
+    /// <summary>
+    /// Whether an FSM of a boss room hears no sign of a player in a state, because not every player is in the room yet
+    /// (BossRoomCoop.ShutsOutSign).
+    /// </summary>
+    public Func<Fsm, string?, bool>? ShutsOutSign { get; set; }
+
     public CoopHits(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
@@ -2020,17 +2026,29 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Says that a sign of the local player reached the copy of an entity, whose FSM that each game runs by itself and
-    /// that listens for it told the creature what to make of it (see Entity.OnCopyHeardOwnSign): the copy plays it
-    /// here at once, and the creature in the scene host's game the same way. A creature that can be hurt goes after the
-    /// local player there, as one that the player set off; one that cannot, like an ally that fights beside them,
-    /// keeps to what it goes after, which may be the creature it fights rather than a player.
+    /// Says that a sign of the local player reached the copy of an entity, whose own FSM listens for it or whose FSM
+    /// that each game runs by itself and that listens for it told the creature what to make of it (see
+    /// Entity.CopyHeardOwnSign): the copy plays it here at once, and the creature in the scene host's game the same
+    /// way. A creature that can be hurt goes after the local player there, as one that the player set off; one that
+    /// cannot, like an ally that fights beside them, keeps to what it goes after, which may be the creature it fights
+    /// rather than a player. The boss of a room that not every player is in yet hears nothing of it (see
+    /// <see cref="ShutsOutSign"/>), which is asked of the room's own creature in the state the scene host says.
     /// </summary>
     /// <param name="copied">The entity.</param>
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
-    /// <param name="eventName">The event that the listening FSM told the creature.</param>
+    /// <param name="eventName">The event: the sign itself, or what the listening FSM told the creature.</param>
     /// <param name="sign">The sign of the local player that it heard.</param>
     private void OnCopyHeardOwnSign(Entity.Entity copied, byte fsmIndex, string eventName, string sign) {
+        if (fsmIndex < copied.HostFsms.Count && copied.HostFsms[fsmIndex] is { } roomFsm && roomFsm != null &&
+            fsmIndex < copied.ClientFsms.Count && copied.ClientFsms[fsmIndex] is { } copyFsm && copyFsm != null &&
+            ShutsOutSign?.Invoke(roomFsm.Fsm, Entity.Action.EntityFsmActions.HostStateOf(copyFsm.Fsm)) == true) {
+            Logger.Info(
+                $"The local player's sign '{sign}' does not reach the copy of entity {copied.Id}: not every player " +
+                "is in its boss room yet"
+            );
+            return;
+        }
+
         var canBeHurt = copied.Object.Client != null && copied.Object.Client.GetComponent<HealthManager>() != null;
         PlayOrSend(copied, fsmIndex, eventName, $"gave the sign '{sign}' to", setOff: true, goAfter: canBeHurt);
     }

@@ -287,6 +287,27 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Whether an FSM of a boss room hears no sign of a player in a state (see Entity.PlayerSigns), because not every
+    /// player is in the room yet: one of the fight's own - one that begins it, or that an event starts it from - while
+    /// it waits for the fight. A sign is not held back for later like an event that starts a fight, which would start
+    /// it once everybody is there from a taunt that came before: it never reaches the boss (USER 10-14, "我觉得先过两人
+    /// 到齐这一关再考虑有没有挑衅"; see Entity.HearOwnSign).
+    /// </summary>
+    /// <param name="fsm">The FSM; for a creature that the scene host runs, that of the room's own object.</param>
+    /// <param name="stateName">The state it is in; for such a creature, the one the scene host says.</param>
+    internal bool ShutsOutSign(Fsm fsm, string? stateName) {
+        if (stateName == null || !IsHoldActive() ||
+            GetBossRoom(fsm) is not { Started: false, FightBegan: false } room ||
+            !room.PreFightStates.TryGetValue(fsm, out var waits) || !waits.Contains(stateName) ||
+            (!room.BaseFightStates.TryGetValue(fsm, out var began) || began.Count == 0) &&
+            (!room.EventStarts.TryGetValue(fsm, out var starts) || starts.Count == 0)) {
+            return false;
+        }
+
+        return !AreAllInRoom(room.Wait?.Shape ?? GetRoomShape(room, GetLocalAnchor(room, fsm)));
+    }
+
+    /// <summary>
     /// Continues the events that start fights once every player is in the room.
     /// </summary>
     private void UpdateEventStarts() {

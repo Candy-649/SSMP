@@ -487,6 +487,16 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        // A boss hears no sign of a player, nor what one sets off, before every player is in its room
+        if ((Entity.Entity.OwnSign != null || Entity.Entity.PlayerSigns.Contains(eventName)) &&
+            self.ActiveState is { } signState && ShutsOutSign(self, signState.Name)) {
+            Logger.Info(
+                $"'{GetPath(self)}' does not hear '{eventName}' in '{signState.Name}': not every player is in its " +
+                "room yet"
+            );
+            return;
+        }
+
         // A room doesn't shut its gate on the local player while they are still in its doorway
         if (IsWalkInAtDoorway(self, eventName)) {
             return;
