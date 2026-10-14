@@ -1477,6 +1477,7 @@ internal class ClientManager : IClientManager {
 
         // Tell the animation manager that the player left the scene
         _animationManager.OnPlayerLeaveScene(playerData);
+        _coopSave.OnPlayerLeaveScene(playerData);
 
         // Recycle corresponding player
         _playerManager.RecyclePlayer(id);

@@ -262,6 +262,9 @@ internal partial class CoopSave {
             );
         }
 
+        // The rings that a player hangs on to pull something down (see CoopSave.PullRings)
+        RegisterRingHooks();
+
         // The partner's weight on a plate here is theirs to feel, not this player's hands
         AddInteractionHook(
             typeof(PressurePlateBase).GetMethod(
@@ -428,6 +431,7 @@ internal partial class CoopSave {
         _remoteInteractions.Clear();
         _pendingReceptacles.Clear();
         _platesStoodOn.Clear();
+        ResetRingHolds();
         DropPromptInteraction();
     }
 
@@ -448,6 +452,17 @@ internal partial class CoopSave {
         if (toState == null || (!_everChecked && _replays.Count == 0)) {
             orig(self, toState!);
             return;
+        }
+
+        // The chain of a pull switch whose ring the local player let go of while a member still holds it here stays
+        // held (see CoopSave.PullRings)
+        try {
+            if (OnRingProxySwitch(self, toState)) {
+                MachineSwitchToStateField?.SetValue(self, null);
+                return;
+            }
+        } catch (Exception e) {
+            LogInteractionError(e);
         }
 
         // A living creature that a put-back of a player would send back to where it started or switch off, while

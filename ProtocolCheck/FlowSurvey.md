@@ -767,6 +767,15 @@ whose save is not paired.
 re-announces what it holds for the partner (by design, avoids mutual hold). Low risk; a lost 0 is impossible on the
 reliable channel, and PartnerLeft clears the lease.
 
+### 7l. Pull rings (S/CoopSave.PullRings.cs) — lease, not a wait
+`RingHold{Scene, ObjectPath = what the ring hangs from, StateName "" taken hold | "Left" let go}`, sent by the game
+whose own hero took hold or let go (HarpoonRingSlideLock.HeroOnRing/HeroOffRing hooks; a pull switch's chain "Proxy"
+FSM entering CONNECT/DISCONNECT in the state-switch hook). Handler `OnRingHold` keeps `_ringHolders[holder]` per
+member and holds the ring here (HeroOnRing / Proxy CONNECT, under `_replayingRingHold`, never echoed) when the first
+holder appears, lets go when the last one goes and the local hero does not hold it; the local hero letting go while a
+member holds is swallowed. Cleared by the member leaving the room (`OnPlayerLeaveScene`) or the save
+(`ForgetRingHoldsOf`), and on a room change. Nothing waits for an answer.
+
 ---------------------------------------------------------------------------------------------------------------------
 ## 8. Not coordination waits (checked and excluded)
 - `Interaction`, `WorldChange`, `WishChange`, `WishTurnIn`, `WishProgress`, `StoryItem`, `WorldTrigger`: one-way

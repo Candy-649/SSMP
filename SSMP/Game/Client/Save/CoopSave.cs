@@ -834,6 +834,7 @@ internal partial class CoopSave {
             ForgetTrapdoorsOf(id);
             ForgetTollBenchesOf(id);
             ForgetPlatesOf(id);
+            ForgetRingHoldsOf(id, name ?? "?");
         }
 
         // Also for the last of them: the rooms of the maze they were in lay themselves out anew without them
@@ -1016,6 +1017,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WorldTrigger:
                 OnWorldTrigger(player, update);
+                break;
+            case CoopSaveUpdateKind.RingHold:
+                OnRingHold(player, update);
                 break;
             case CoopSaveUpdateKind.CageSprung:
                 OnCageSprung(player, update);

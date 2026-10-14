@@ -880,5 +880,12 @@ internal enum CoopSaveUpdateKind : byte {
     /// save a normal save in this session. The game that said hello tells its player why the save waits for the sender,
     /// and that it waits until the sender loads their save again. Appended at the end, like every kind.
     /// </summary>
-    HelloDeclined
+    HelloDeclined,
+
+    /// <summary>
+    /// The player took hold of a ring that pulls something down, or let go of it (see CoopSave.PullRings): ObjectPath
+    /// names what the ring hangs from in Scene, and StateName says "Left" for letting go. The other games hold it for
+    /// them until the last player who holds it there let go.
+    /// </summary>
+    RingHold
 }
