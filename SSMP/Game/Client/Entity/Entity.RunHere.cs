@@ -261,6 +261,13 @@ internal partial class Entity {
     private float _aftermathExpiry;
 
     /// <summary>
+    /// Whether the catch that this game led came to its end as <see cref="_runHere"/> stops (see
+    /// <see cref="UpdateRunHere"/>): it is over then, like one that went out into what follows it, rather than cut
+    /// short.
+    /// </summary>
+    private bool _runHereEnded;
+
+    /// <summary>
     /// How long the FSM of a copy goes through what follows a catch that this game led by itself at the most, in
     /// seconds (see <see cref="_aftermath"/>): what the scene host sends of the rest is held that long.
     /// </summary>
@@ -468,10 +475,11 @@ internal partial class Entity {
             HookMoods();
         }
 
-        // So is what any catch takes from the player themselves, from before the first input of it (see
-        // PlayerBeforeTheCatch)
-        if (caught != null && _beforeTheCatch == null) {
-            NoteThePlayerBeforeTheCatch(fsm);
+        // So is what a catch that the creature watches for itself takes from the player themselves, from before the
+        // first input of it (see PlayerBeforeTheCatch)
+        if (caught != null && _beforeTheCatch == null && _catchEvents?.Contains(eventName) == true &&
+            EntityFsmActions.FindTransition(fsm, from, eventName) is { } into) {
+            NoteThePlayerBeforeTheCatch(fsm, into);
         }
 
         HeldFsms.Remove(fsm);
@@ -489,6 +497,10 @@ internal partial class Entity {
             _recordedEntity = null;
             _recordedPath = null;
             HeldFsms[fsm] = this;
+        }
+
+        foreach (var state in path) {
+            _beforeTheCatch?.Entered(state);
         }
 
         _runHereIndex = fsmIndex;
@@ -807,6 +819,9 @@ internal partial class Entity {
                 $"The '{fsm.Name}' of entity {Id} is in '{state.Name}' as the partner's '{eventName}' comes, which " +
                 $"it watched for in '{watchedFrom.Name}', so it takes it from there"
             );
+
+            // A catch of the partner's that it followed before would keep it from going back there (LetsLedFsmGo)
+            EndLeadOf(fsm);
             PutInWithoutDoing(fsm, watchedFrom);
             state = watchedFrom;
             into = EntityFsmActions.FindTransition(fsm, state, eventName);
@@ -1036,6 +1051,24 @@ internal partial class Entity {
 
         _runHere.Fsm.Update();
         UpdateAftermath();
+
+        // A catch that the creature watches for itself which came to a state of its own that leads nowhere, and has
+        // done all it does there, is over as the creature has it, and the scene host's FSM went there too. Left
+        // running, the copy counted as holding the local player for as long as they stayed in the room, which kept
+        // every other creature's let-go from them (AnyLeadsACatch). One that takes the player to another room ends
+        // there, with the room. Not for catches of other kinds, whose states may wait for what the whole FSM listens
+        // for to let go of the player.
+        var gameManager = global::GameManager.instance;
+        if (_runHere != null && _catchEvents != null && LeadsACatch && !WaitsForEcho &&
+            _runHere.Fsm.ActiveState is { } end && end.Transitions.Length == 0 &&
+            StateFinishedField?.GetValue(end) is true && gameManager != null && !gameManager.IsInSceneTransition) {
+            Logger.Info(
+                $"The copy of entity {Id} came to the end of the catch this game led in '{end.Name}', and follows " +
+                "the scene host again"
+            );
+            _runHereEnded = true;
+            FollowSceneHost();
+        }
     }
 
     /// <summary>
@@ -1597,8 +1630,9 @@ internal partial class Entity {
         }
 
         var led = _runHereLed;
-        var over = _aftermath != null;
+        var over = _aftermath != null || _runHereEnded;
         var (ledIndex, ledCatch, ledStep) = (_runHereIndex, _runHereCatch, _runHereStep);
+        _runHereEnded = false;
         _runHere = null;
         _runHereFsm = null;
         _runHereCombo = null;
@@ -1663,7 +1697,8 @@ internal partial class Entity {
         }
 
         var led = _runHereLed;
-        var over = _aftermath != null;
+        var over = _aftermath != null || _runHereEnded;
+        _runHereEnded = false;
         HeldFsms.Remove(fsm);
         ForgetTalkHere(fsm);
         _runHere = null;
@@ -1854,6 +1889,7 @@ internal partial class Entity {
             if (entity._runHereCombo?.Contains(toState) == true) {
                 // Said before it goes there, since going there may take it on further at once
                 entity.TellCatchWentOn(toState);
+                entity._beforeTheCatch?.Entered(toState);
                 orig(self, toState);
                 return;
             }
@@ -2166,6 +2202,7 @@ internal partial class Entity {
 
         if (outside == null) {
             Logger.Info($"The '{fsm.Name}' of entity {Id} {why}, and has no way out of '{from.Name}'");
+            GoAwayWithTheCatch(fsm);
             return;
         }
 
