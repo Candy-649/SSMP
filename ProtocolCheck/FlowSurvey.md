@@ -78,7 +78,10 @@ the room.
   (`_declinedSlot`); a save that is not a co-op save yet, like the host's in the moment someone joins, answers
   nothing. The receiver keeps the sender in `_declinedBy` (one chat line, and the hold prompt names them) until a hello
   of theirs passes the member and key checks, they disconnect, or ResetSession. The hold has no leave key any more
-  (`UpdateHoldPrompt`): it ends when the check finishes, or the held player pauses and goes to the menu.
+  (`UpdateHoldPrompt`): it ends when the check finishes, or the held player pauses and goes to the menu; off the
+  server nothing holds (UpdateSession releases before Hold), and a session that starts with an empty roster waits
+  for later joiners only at a bench (`StartRoster` sets `_holdOnlyAtBench`). `_declinedSlot` is reset on the menu,
+  `_declinedBy` on a local disconnect.
 - `CoopSave.Send` S/CoopSave.cs:1951-1965: stamps `Sequence` for WorldChange/WishChange/Interaction/WishTurnIn and
   DeliveryBreak reports; sends only if connected. No retransmission layer above the reliable channel anywhere.
 

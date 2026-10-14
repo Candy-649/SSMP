@@ -524,6 +524,13 @@ internal partial class CoopSave {
             return;
         }
 
+        // Off the server nobody can come into the session, so a hold would freeze the player for good.
+        // OnLocalDisconnect lets go of them for that reason, and this keeps the hold from coming straight back.
+        if (!_netClient.IsConnected) {
+            ReleaseHold(hero);
+            return;
+        }
+
         if (_held || (!_everChecked && !_holdOnlyAtBench) || PlayerData.instance.atBench) {
             Hold(hero, marker, members);
         }
@@ -692,6 +699,10 @@ internal partial class CoopSave {
         ResetSession(true);
         ForgetLocalLayout();
         _sessionSlot = -1;
+
+        // Here rather than on the first frame of the next session: a hello that comes in between would be answered as
+        // though the save loaded again were still a normal save (Check.cs, OnHello)
+        _declinedSlot = -1;
     }
 
     /// <summary>
@@ -869,6 +880,9 @@ internal partial class CoopSave {
         // left that could ever free them: the hold only lifts when a partner checks in, and there is no partner any
         // more. Reloading the save does not help either, since a save whose partner is missing holds them again.
         ReleaseHold(HeroController.instance);
+
+        // The IDs are handed out again on the next connection, to whoever comes
+        _declinedBy.Clear();
 
         _hostSaveRequests.Clear();
         _hostSaveSends.Clear();
@@ -1260,6 +1274,13 @@ internal partial class CoopSave {
 
         _freshMarkerSlot = -1;
         UpdateRoster(marker);
+
+        // Nobody to take, like when the player who was joining left while the save loaded: the save is played alone
+        // until someone joins, and like a host who was playing when someone joined, it waits for them at a bench
+        // rather than where the player stands
+        if (marker.Members.Count == 0) {
+            _holdOnlyAtBench = true;
+        }
         Logger.Info(
             $"The co-op save in slot {slot} is played with " +
             (marker.Members.Count == 0 ? "nobody yet" : string.Join(", ", marker.Members.Select(member => member.Name)))
@@ -1327,14 +1348,17 @@ internal partial class CoopSave {
         if (declined.Count > 0) {
             var names = JoinNames(declined);
             prompt.Show(Lang.Pick(
-                $"{names} made their save a normal save. Waiting for them to load it again from the menu",
-                $"{names} 把存档变回了普通存档。等对方回主菜单再进一次存档"
+                $"{names} made their save a normal save. Wait for them to load it again, or pause and go to the menu",
+                $"{names} 把存档变回了普通存档。等对方回主菜单重进存档，或者你暂停回主菜单"
             ));
             return;
         }
 
         var waitingFor = GetMissingNames(heldMarker);
-        prompt.Show(Lang.Pick($"Waiting for {waitingFor}", $"正在等 {waitingFor}"));
+        prompt.Show(Lang.Pick(
+            $"Waiting for {waitingFor}. To stop waiting, pause and go to the menu",
+            $"正在等 {waitingFor}。不想等了就暂停，回主菜单"
+        ));
     }
 
     /// <summary>
