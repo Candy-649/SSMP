@@ -358,7 +358,7 @@ internal partial class CoopSave {
         }
 
         // Its own try, because a line of text failing must not stop the save from keeping step with the partner, and
-        // a session that fails must still leave a held player the key that lets them go
+        // a session that fails must still tell a held player what they wait for
         try {
             UpdateHoldPrompt();
         } catch (Exception e) {
@@ -658,7 +658,7 @@ internal partial class CoopSave {
         _everChecked = false;
         _holdOnlyAtBench = false;
         _rosterStarted = false;
-        _droppedMembers.Clear();
+        _declinedBy.Clear();
         _updatesOutOfRoom.Clear();
 
         // A step of dialogue that waits for the partner doesn't go on: its scene is going, and going on would run what
@@ -758,10 +758,6 @@ internal partial class CoopSave {
             _highestCheckKey = 0;
         }
 
-        if (player.SaveKey.Length > 0 && _droppedMembers.Contains(player.SaveKey)) {
-            return;
-        }
-
         Chat(Lang.Pick(
             $"{player.Username} is here. Your {SaveWord(marker)} continues once they have loaded a save.",
             $"{player.Username} 来了。等对方也进了存档，你们的{SaveWord(marker)}就能继续。"
@@ -773,6 +769,7 @@ internal partial class CoopSave {
     /// </summary>
     public void OnPlayerDisconnect(ushort id, string username) {
         _hostSaveRequests.Remove(id);
+        _declinedBy.Remove(id);
 
         // What they sent while this game was out of the rooms belongs to the session they just left. A player who
         // comes back with the same number would have their old round started again from it, and the next round
@@ -985,6 +982,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.Hello:
                 OnHello(player, update);
                 break;
+            case CoopSaveUpdateKind.HelloDeclined:
+                OnHelloDeclined(player);
+                break;
             case CoopSaveUpdateKind.WorldState:
                 OnWorldState(player, update);
                 break;
@@ -1149,9 +1149,9 @@ internal partial class CoopSave {
     #region Roster
 
     /// <summary>
-    /// The name of the key or button that stops waiting for a member who isn't coming, and that gives up on waiting to
-    /// be pulled back up after a death. Taken from the binding that is actually in force rather than written out, so
-    /// that rebinding it no longer leaves every prompt naming a key that does nothing.
+    /// The name of the key or button that gives up on waiting to be pulled back up after a death. Taken from the
+    /// binding that is actually in force rather than written out, so that rebinding it no longer leaves every prompt
+    /// naming a key that does nothing.
     /// </summary>
     private string LeaveKeyName => PromptKeyName(_modSettings.Keybinds.CoopLeave);
 
@@ -1212,12 +1212,6 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the key that stops waiting was already down last frame, so that holding it acts once rather than every
-    /// frame.
-    /// </summary>
-    private bool _leaveKeyHeld;
-
-    /// <summary>
     /// Whether showing the line of a held player failed, so it is only logged once.
     /// </summary>
     private bool _holdPromptFailed;
@@ -1247,10 +1241,10 @@ internal partial class CoopSave {
     private bool _holdOnlyAtBench;
 
     /// <summary>
-    /// The save keys of the players that the local player stopped waiting for in this session. They aren't waited for
-    /// again until their game says hello from a co-op save on this server again.
+    /// The players of the session, by ID, whose game turned down the check of this one because they made their save a
+    /// normal save (<see cref="OnHelloDeclined"/>), until they say hello from a co-op save again or leave.
     /// </summary>
-    private readonly HashSet<string> _droppedMembers = [];
+    private readonly HashSet<ushort> _declinedBy = [];
 
     /// <summary>
     /// Takes the players of a session of the loaded co-op save: those it was aligned with if it was joined with just
@@ -1258,7 +1252,6 @@ internal partial class CoopSave {
     /// decided on 2026-10-11 ("下次联机重新记"): the next session takes whoever is in it.
     /// </summary>
     private void StartRoster(CoopSaveMarker marker, int slot) {
-        _droppedMembers.Clear();
         if (_freshMarkerSlot != slot) {
             marker.Members.Clear();
             marker.PartnerKey = "";
@@ -1274,13 +1267,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Adds the players who came onto the server to the players of the session, but those the local player stopped
-    /// waiting for.
+    /// Adds the players who came onto the server to the players of the session.
     /// </summary>
     private void UpdateRoster(CoopSaveMarker marker) {
         var changed = false;
         foreach (var player in GetOthersOnServer()) {
-            if (player.SaveKey.Length == 0 || _droppedMembers.Contains(player.SaveKey) || IsMember(player, marker)) {
+            if (player.SaveKey.Length == 0 || IsMember(player, marker)) {
                 continue;
             }
 
@@ -1303,49 +1295,12 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Stops waiting for the players of the session who aren't in the save, so that the others play on without them.
-    /// They come back into the session once their game says hello from a co-op save here again.
-    /// </summary>
-    private void DropMissingMembers(CoopSaveMarker marker) {
-        var dropped = new List<string>();
-        foreach (var (member, player) in MatchMembers(marker)) {
-            if (player != null && _checkedMembers.Contains(player.Id)) {
-                continue;
-            }
-
-            if (member.Key.Length > 0) {
-                _droppedMembers.Add(member.Key);
-            }
-
-            marker.Members.Remove(member);
-            dropped.Add(member.Name);
-        }
-
-        marker.TakeOverPartner();
-        Logger.Info($"Stopped waiting for {string.Join(", ", dropped)}");
-        Chat(Lang.Pick(
-            $"Not waiting for {JoinNames(dropped)} any more. They join in again when they come back into the game.",
-            $"不等 {JoinNames(dropped)} 了。对方回来进存档后会自动重新加入。"
-        ));
-    }
-
-    /// <summary>
-    /// A player that the local player stopped waiting for is in a co-op save on this server again, so they are one of
-    /// the players of the session again.
-    /// </summary>
-    private void TakeBackDropped(ClientPlayerData player, CoopSaveMarker marker) {
-        if (player.SaveKey.Length == 0 || !_droppedMembers.Remove(player.SaveKey)) {
-            return;
-        }
-
-        UpdateRoster(marker);
-        Logger.Info($"{player.Username} is back in the co-op save");
-    }
-
-    /// <summary>
-    /// The line of a held player, and the key that stops waiting: with other players of the session in the save it
-    /// stops waiting for the missing ones, and alone it makes the save a normal save again, which the user decided for
-    /// a player left on their own (2026-10-11).
+    /// The line of a held player, which says who they wait for. No key stops waiting any more. The players of a session
+    /// are whoever is in it this time (2026-10-11), so a held player waits for players who are loading or who come
+    /// back, and the key that made the save a normal save was pressed by accident: a host clicked the left stick in
+    /// while their partner loaded into the save, and the partner could not move from then on (2026-10-14, the user:
+    /// "把不等了删掉"). A player who wants to stop waiting pauses and goes to the menu, where a co-op save chosen with
+    /// nobody else on the server becomes a normal save on a second choice.
     /// </summary>
     private void UpdateHoldPrompt() {
         var prompt = _uiManager.CoopPrompt;
@@ -1354,46 +1309,54 @@ internal partial class CoopSave {
         // can do to someone. The chat line that the hold writes is invisible to anyone playing with chat closed.
         if (!_held || !IsInGame()) {
             prompt.Hide();
-            _leaveKeyHeld = false;
             return;
         }
 
-        var slot = global::GameManager.instance.profileID;
-        var heldMarker = GetMarker(slot);
-        var playingOn = GetCheckedMembers().Count > 0;
-        if (heldMarker != null) {
-            var waitingFor = GetMissingNames(heldMarker);
-            prompt.Show(
-                playingOn
-                    ? Lang.Pick(
-                        $"Waiting for {waitingFor}. Press {LeaveKeyName} to play on without them",
-                        $"正在等 {waitingFor}。按 {LeaveKeyName} 就不等了，和其他人继续玩"
-                    )
-                    : Lang.Pick(
-                        $"Waiting for {waitingFor}. Press {LeaveKeyName} to play this save alone as a normal save",
-                        $"正在等 {waitingFor}。按 {LeaveKeyName} 就把它变回普通存档，一个人玩"
-                    )
-            );
-        } else {
+        var heldMarker = GetMarker(global::GameManager.instance.profileID);
+        if (heldMarker == null) {
             prompt.Show(Lang.Pick("Waiting for your teammate", "正在等你的队友"));
+            return;
         }
 
-        // A key rather than the chat command, which a held player cannot type
-        var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
-        if (leaveHeld && !_leaveKeyHeld) {
-            if (heldMarker != null && playingOn) {
-                DropMissingMembers(heldMarker);
-            } else {
-                RemoveLocalPairing(slot);
-                ReleaseHold(HeroController.instance);
-                Chat(Lang.Pick(
-                    "Your save is a normal save again. Joining someone's game with it makes it a co-op save again.",
-                    "你的存档变回普通存档了。以后用它加入别人的游戏时，会重新变成联机存档。"
-                ));
-            }
+        // A player whose game turned the check down, because they made their save a normal save, comes into this one
+        // only once they load theirs again
+        var declined = MatchMembers(heldMarker)
+            .Where(match => match.Player != null && _declinedBy.Contains(match.Player.Id))
+            .Select(match => match.Player!.Username)
+            .ToList();
+        if (declined.Count > 0) {
+            var names = JoinNames(declined);
+            prompt.Show(Lang.Pick(
+                $"{names} made their save a normal save. Waiting for them to load it again from the menu",
+                $"{names} 把存档变回了普通存档。等对方回主菜单再进一次存档"
+            ));
+            return;
         }
 
-        _leaveKeyHeld = leaveHeld;
+        var waitingFor = GetMissingNames(heldMarker);
+        prompt.Show(Lang.Pick($"Waiting for {waitingFor}", $"正在等 {waitingFor}"));
+    }
+
+    /// <summary>
+    /// The game of a player turned down the hello of this one, because its player made their loaded save a normal save
+    /// in this session (<see cref="CoopSaveUpdateKind.HelloDeclined"/>). Without being told, the local player would
+    /// wait for them with nothing saying why, which is how a host's key pressed by accident left their partner
+    /// standing still (2026-10-14).
+    /// </summary>
+    private void OnHelloDeclined(ClientPlayerData player) {
+        var marker = GetCurrentMarker();
+        if (marker == null || !IsMember(player, marker) || _checkedMembers.Contains(player.Id) ||
+            !_declinedBy.Add(player.Id)) {
+            return;
+        }
+
+        Logger.Info($"{player.Username} made their save a normal save, so their game turns down the check");
+        Chat(Lang.Pick(
+            $"{player.Username} made their save a normal save, so you are not in one co-op save now. It becomes one " +
+            $"again when {player.Username} goes to the menu and loads it again.",
+            $"{player.Username} 把存档变回了普通存档，所以你们现在不在同一个联机存档里。" +
+            $"{player.Username} 回主菜单再进一次这个存档，就会重新变成联机存档。"
+        ));
     }
 
     /// <summary>

@@ -873,5 +873,12 @@ internal enum CoopSaveUpdateKind : byte {
     /// (<see cref="PrisonCapture"/>) or the catch lets go (see CoopSave.PrisonCapture). Appended at the end, like every
     /// kind.
     /// </summary>
-    PrisonCatch
+    PrisonCatch,
+
+    /// <summary>
+    /// The answer to a <see cref="Hello"/> that the game of the sender turned down because its player made their loaded
+    /// save a normal save in this session. The game that said hello tells its player why the save waits for the sender,
+    /// and that it waits until the sender loads their save again. Appended at the end, like every kind.
+    /// </summary>
+    HelloDeclined
 }

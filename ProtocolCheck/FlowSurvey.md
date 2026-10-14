@@ -73,6 +73,12 @@ the room.
     OnWishTalkSceneChanged (→ ResetWishConfirm, which **does** send answers/Gone), OnLiftSceneChanged,
     OnDeliverySceneChanged, OnRescueSceneChanged, OnLavaChaseSceneChanged, OnCageSceneChanged,
     OnClothesGrabSceneChanged, ResetRaces.
+- Turned-down hello (2026-10-14): `OnHello` (S/CoopSave.Check.cs) answers a hello it turns down with
+  `HelloDeclined` only while the loaded save is the slot that the local player made a normal save in this session
+  (`_declinedSlot`); a save that is not a co-op save yet, like the host's in the moment someone joins, answers
+  nothing. The receiver keeps the sender in `_declinedBy` (one chat line, and the hold prompt names them) until a hello
+  of theirs passes the member and key checks, they disconnect, or ResetSession. The hold has no leave key any more
+  (`UpdateHoldPrompt`): it ends when the check finishes, or the held player pauses and goes to the menu.
 - `CoopSave.Send` S/CoopSave.cs:1951-1965: stamps `Sequence` for WorldChange/WishChange/Interaction/WishTurnIn and
   DeliveryBreak reports; sends only if connected. No retransmission layer above the reliable channel anywhere.
 

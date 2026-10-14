@@ -336,18 +336,19 @@ internal partial class CoopSave {
     /// </summary>
     private void OnHello(ClientPlayerData player, CoopSaveUpdate update) {
         var marker = GetCurrentMarker();
-
-        // A player that the local player stopped waiting for is back in a co-op save here
-        if (marker != null) {
-            TakeBackDropped(player, marker);
-        }
-
         if (marker == null || !IsMember(player, marker)) {
             if (_strangerHellosTold.Add(player.Id)) {
                 Logger.Warn(
                     $"Turned down a hello from {player.Username}: " +
                     (marker == null ? "the loaded save isn't a co-op save" : "they aren't a player of this session")
                 );
+            }
+
+            // Their game waits for this one, and without an answer it waits with nothing saying why (OnHelloDeclined).
+            // Only for a save that the local player made a normal save in this session: a save that is not a co-op
+            // save yet turns hellos down too, like the host's for the moment in which someone joins.
+            if (marker == null && IsInGame() && global::GameManager.instance.profileID == _declinedSlot) {
+                Send(new CoopSaveUpdate { TargetId = player.Id, Kind = CoopSaveUpdateKind.HelloDeclined });
             }
 
             return;
@@ -382,6 +383,9 @@ internal partial class CoopSave {
             ));
             return;
         }
+
+        // From a co-op save again, after they made their save a normal save
+        _declinedBy.Remove(player.Id);
 
         _highestCheckKey = System.Math.Max(_highestCheckKey, update.Key);
         _memberChecks.TryGetValue(player.Id, out var check);
