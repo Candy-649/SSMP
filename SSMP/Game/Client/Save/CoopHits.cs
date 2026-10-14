@@ -474,6 +474,7 @@ internal partial class CoopHits {
 
         RegisterThrownHooks();
         RegisterBounceHooks();
+        RegisterSignalHooks();
     }
 
     /// <summary>
@@ -2013,7 +2014,7 @@ internal partial class CoopHits {
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
     /// <param name="eventName">The event that the range sends.</param>
     private void OnCopyWokenByLocalPlayer(Entity.Entity copied, byte fsmIndex, string eventName) {
-        PlayOrSend(copied, fsmIndex, eventName, "came near", woken: true);
+        PlayOrSend(copied, fsmIndex, eventName, "came near", setOff: true);
     }
 
     /// <summary>
@@ -2030,8 +2031,10 @@ internal partial class CoopHits {
     /// <param name="caught">For a catch, what the part that caught set on the FSM along with the event; null for a
     /// strike or a touch.</param>
     /// <param name="grabbedThePlayer">Whether the part that told it grabbed the player themselves.</param>
-    /// <param name="woken">Whether the local player woke the creature by coming near, which plays here whatever the
-    /// creature, and has the creature go after them in the scene host's game.</param>
+    /// <param name="setOff">Whether the local player set the creature off themselves - woke it by coming near, or
+    /// told it something with a state machine of their own, like the harpoon that hooks it (see
+    /// <see cref="TellCopy"/>) - which plays here whatever the creature, and has the creature go after them in the
+    /// scene host's game.</param>
     private void PlayOrSend(
         Entity.Entity copied,
         byte fsmIndex,
@@ -2039,7 +2042,7 @@ internal partial class CoopHits {
         string what,
         Entity.ToldValues? caught = null,
         bool grabbedThePlayer = false,
-        bool woken = false
+        bool setOff = false
     ) {
         if (!CanSendEntityTouch()) {
             // Alone in the room nothing goes on with the catch, which the part may have started on the player already
@@ -2052,12 +2055,12 @@ internal partial class CoopHits {
             return;
         }
 
-        if (copied.PlayHere(fsmIndex, eventName, caught, woken) is { } input) {
+        if (copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } input) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                 $"went to '{input.State}', and the scene host is sent it with where the copy was"
             );
-            SendEntityInput(copied.Id, fsmIndex, eventName, input, woken);
+            SendEntityInput(copied.Id, fsmIndex, eventName, input, setOff);
             return;
         }
 
@@ -2108,13 +2111,14 @@ internal partial class CoopHits {
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
     /// <param name="eventName">The event.</param>
     /// <param name="input">What the copy's FSM played.</param>
-    /// <param name="woken">Whether the local player woke the creature by coming near, so that it goes after them.</param>
+    /// <param name="setOff">Whether the local player set the creature off themselves, so that it goes after
+    /// them.</param>
     private void SendEntityInput(
         ushort entityId,
         byte fsmIndex,
         string eventName,
         Entity.InputStart input,
-        bool woken = false
+        bool setOff = false
     ) {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
@@ -2145,8 +2149,8 @@ internal partial class CoopHits {
             }
         }
 
-        // Whether the local player woke the creature by coming near
-        writer.Write(woken);
+        // Whether the local player set the creature off themselves, by coming near or with the harpoon
+        writer.Write(setOff);
 
         // The tag that the scene host's answer goes under
         writer.Write(Entity.Entity.RequestTag);
@@ -2174,7 +2178,7 @@ internal partial class CoopHits {
 
         Entity.InputStart input;
         int partnerRtt;
-        bool woken;
+        bool setOff;
         try {
             using var reader = new BinaryReader(new MemoryStream(update.Hit));
             var state = reader.ReadString();
@@ -2202,7 +2206,7 @@ internal partial class CoopHits {
                 }
             }
 
-            woken = reader.ReadBoolean();
+            setOff = reader.ReadBoolean();
             var tag = reader.ReadUInt16();
             input = new Entity.InputStart(state, position, motion, dice, anticipation, caught, path, tag);
         } catch (IOException e) {
@@ -2210,14 +2214,15 @@ internal partial class CoopHits {
             return;
         }
 
-        // A creature that the partner woke by coming near goes after the partner, as it would have gone after the one
-        // player there is who woke it. Only when it takes the wake: one that is up already keeps whom it chose.
-        if (woken && update.Index < entity.HostFsms.Count && entity.HostFsms[update.Index] is { } wokenFsm &&
-            wokenFsm != null && wokenFsm.Fsm?.ActiveState is { } wokenState &&
-            Entity.Action.EntityFsmActions.FindTransition(wokenFsm.Fsm, wokenState, update.Responder) != null &&
-            _playerData.TryGetValue(update.PlayerId, out var waker) && waker.PlayerObject != null &&
+        // A creature that the partner set off - woke by coming near, or hooked with the harpoon - goes after the
+        // partner, as it would have gone after the one player there is who set it off. Only when it takes the event:
+        // one that is up already keeps whom it chose.
+        if (setOff && update.Index < entity.HostFsms.Count && entity.HostFsms[update.Index] is { } setOffFsm &&
+            setOffFsm != null && setOffFsm.Fsm?.ActiveState is { } setOffState &&
+            Entity.Action.EntityFsmActions.FindTransition(setOffFsm.Fsm, setOffState, update.Responder) != null &&
+            _playerData.TryGetValue(update.PlayerId, out var setter) && setter.PlayerObject != null &&
             entity.Object.Host != null) {
-            GamePatcher.SetTargetOf(entity.Object.Host, waker.PlayerObject);
+            GamePatcher.SetTargetOf(entity.Object.Host, setter.PlayerObject);
         }
 
         var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);

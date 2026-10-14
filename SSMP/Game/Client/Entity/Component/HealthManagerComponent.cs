@@ -105,6 +105,13 @@ internal class HealthManagerComponent : EntityComponent {
     private const float OwnKillAnswerTime = 5f;
 
     /// <summary>
+    /// Whether a copy plays something that a state machine of this game's player told it (CoopHits.TellCopy), like the
+    /// harpoon's blow that some creatures die of at once: a copy that asks to die of it is kept from hurting the player
+    /// (see <see cref="KeepFromHurting"/>).
+    /// </summary>
+    internal static bool OwnSignalPlaying;
+
+    /// <summary>
     /// The components whose copies are kept from hurting this game's player now (see <see cref="KeepFromHurting"/>).
     /// </summary>
     private static readonly HashSet<HealthManagerComponent> KeptFromHurting = new();
@@ -792,7 +799,7 @@ internal class HealthManagerComponent : EntityComponent {
         CountOwnBlows(death: death);
         PutBackToldHealth();
         if (leftNoHealth) {
-            KeepFromHurting();
+            KeepFromHurting(_ownDamage);
         }
     }
 
@@ -805,11 +812,15 @@ internal class HealthManagerComponent : EntityComponent {
     /// Only what belongs to the copy is kept off - its body and the parts under it (see
     /// <see cref="IsKeptFromHurting"/>); what it threw before, and what its death puts out, hurt as they do. It can
     /// hurt them again as soon as that game tells its health with the blow in it and the creature alive, as its death
-    /// is played here, as the room changes hands, or after <see cref="OwnKillAnswerTime"/> without an answer.
+    /// is played here, as the room changes hands, or after <see cref="OwnKillAnswerTime"/> without an answer. A copy
+    /// that asks to die of something that a state machine of the player told it, like the harpoon's blow that some
+    /// creatures die of at once, is kept from hurting them the same way (see <see cref="OwnSignalPlaying"/>).
     /// </summary>
-    private void KeepFromHurting() {
+    /// <param name="damage">How far the copy's damage has to come in the health told for the creature to have lived
+    /// through it, or <see cref="int.MaxValue"/> for something that no damage goes with.</param>
+    private void KeepFromHurting(int damage) {
         _ownKillAt = Time.unscaledTime;
-        _ownKillDamage = _ownDamage;
+        _ownKillDamage = damage;
         KeptFromHurting.Add(this);
     }
 
@@ -1185,6 +1196,9 @@ internal class HealthManagerComponent : EntityComponent {
             if (!_allowDeath) {
                 if (_takingOwnBlowOnCopy) {
                     _ownBlowAskedToDie = true;
+                } else if (OwnSignalPlaying) {
+                    // No damage of this game's player goes with it: only the death, or no answer, lets it hurt again
+                    KeepFromHurting(int.MaxValue);
                 }
 
                 // Said once: a copy with no health left asks to die every frame for as long as the room lasts

@@ -420,6 +420,23 @@ internal partial class Entity {
     private readonly Dictionary<FsmStateAction, (FieldInfo Field, object? Before)> _pointedAtPartner = new();
 
     /// <summary>
+    /// Whether an FSM of the copy takes an event from the state it is in: its own, if it runs here, and otherwise the
+    /// one the scene host says it is in.
+    /// </summary>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="eventName">The event.</param>
+    public bool CopyTakes(byte fsmIndex, string eventName) {
+        if (fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null) {
+            return false;
+        }
+
+        var fsm = copyFsm.Fsm;
+        var fromName = _runHere == copyFsm ? fsm.ActiveStateName : EntityFsmActions.HostStateOf(fsm);
+        return fromName != null && fsm.GetState(fromName) is { } from &&
+               EntityFsmActions.FindTransition(fsm, from, eventName) != null;
+    }
+
+    /// <summary>
     /// Plays at once what the local player's strike or touch makes the FSM at the given index of the copy do, for an
     /// entity whose registry entry says so, or what one of the copy's parts catching the local player makes it do: the
     /// copy's own FSM takes the event in the state the scene host says it is in - or where it is, if it runs here
@@ -431,15 +448,16 @@ internal partial class Entity {
     /// scene host sets on its FSM too; null for a strike or a touch. A catch other than one of the
     /// <see cref="CatchEvents"/> is one that a part felt for itself, which this game leads (see
     /// <see cref="_runHereLed"/>).</param>
-    /// <param name="woken">Whether the local player woke the creature by coming near (CheckWokenByLocalPlayer), which
-    /// is played here whatever the creature's registry entry says.</param>
+    /// <param name="setOff">Whether the local player set the creature off themselves - woke it by coming near
+    /// (CheckWokenByLocalPlayer), or told it something with a state machine of their own, like the harpoon that hooks
+    /// it (CoopHits.TellCopy) - which is played here whatever the creature's registry entry says.</param>
     /// <returns>What the scene host is sent to play the same, or null if it was not played here.</returns>
-    public InputStart? PlayHere(byte fsmIndex, string eventName, ToldValues? caught = null, bool woken = false) {
+    public InputStart? PlayHere(byte fsmIndex, string eventName, ToldValues? caught = null, bool setOff = false) {
         if (CatchEvents.Contains(eventName)) {
             caught ??= ToldValues.None;
         }
 
-        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && caught == null && !woken ||
+        if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && caught == null && !setOff ||
             SwitchToStateField == null ||
             fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null ||
             Object.Client == null || _runHere != null && _runHere != copyFsm || _runHereTalk) {
