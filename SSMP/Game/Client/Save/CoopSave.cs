@@ -418,6 +418,7 @@ internal partial class CoopSave {
         if (marker == null) {
             FinishSummon(hero);
             ReleaseHold(hero);
+            ReleasePartnerCatch(hero, "the save is no longer a co-op save", null);
 
             // A board that waited for the partner's answer when the save stopped being paired still has to open, or
             // the hero would stand in its dialogue for good
@@ -706,6 +707,7 @@ internal partial class CoopSave {
         OnRescueSceneChanged();
         OnLavaChaseSceneChanged(newScene);
         OnCageSceneChanged();
+        OnPrisonCatchSceneChanged();
         OnClothesGrabSceneChanged();
         OnTollBenchSceneChanged();
         ResetRaces();
@@ -830,6 +832,7 @@ internal partial class CoopSave {
         }
 
         OnClothesGrabMemberLeft(id);
+        OnPrisonCatchMemberLeft(id);
 
         if (wasChecked) {
             // The play time that the players played together is kept for the next check
@@ -879,6 +882,9 @@ internal partial class CoopSave {
         // waiting would be left behind, this time by leaving the server rather than by them leaving it
         ResetRescue();
         ForgetClothesGrabMembers();
+
+        // Nobody is left to say how a catch that holds the local player ends
+        ReleasePartnerCatch(HeroController.SilentInstance, "the connection to the server was lost", null);
 
         _highestCheckKey = 0;
 
@@ -995,6 +1001,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.PrisonCapture:
                 OnPrisonCapture(player);
+                break;
+            case CoopSaveUpdateKind.PrisonCatch:
+                OnPrisonCatch(player, update.PartCount);
                 break;
             case CoopSaveUpdateKind.ClothesGrab:
                 OnClothesGrab(player, update);

@@ -863,5 +863,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// in at there and the key of the layout of the room it was made under, and <see cref="CoopSaveUpdate.PartnerKey"/>
     /// the save key of that player. Appended at the end, like every kind.
     /// </summary>
-    RoomDoorTaken
+    RoomDoorTaken,
+
+    /// <summary>
+    /// A creature has the sender in its cage to take them to the prison, and how far it got, in
+    /// <see cref="CoopSaveUpdate.PartCount"/>: 0 when it caught them, 1 when it blacked out their screen and 2 when it
+    /// let go of them without taking them there. The game of the other player holds its own player from the catch on
+    /// and blacks out their screen along with the sender's, until the capture takes them there too
+    /// (<see cref="PrisonCapture"/>) or the catch lets go (see CoopSave.PrisonCapture). Appended at the end, like every
+    /// kind.
+    /// </summary>
+    PrisonCatch
 }

@@ -618,14 +618,22 @@ Suspects
   (only jump frees them).
 
 ### 7c. Prison capture (S/CoopSave.PrisonCapture.cs)
-Purpose: if one player is captured, the other is taken to the prison too.
-Send `PrisonCapture` in `OnApplyCaptured` 64-73 after the game's own capture, unless replaying (`_capturingForPartner`)
-or unchecked. Handler `OnPrisonCapture` 79-90: drop unless marker/partner/checked, drop if already in prison clothes;
-set `_pendingCaptureBy`. `UpdatePrisonCapture` 95-137 moves the hero when movable (no timeout; cleared by
-ResetPrisonCapture 142-144 on ResetSession only).
-Suspects: S7c.1 drop when the receiver is not checked with the sender at that moment (80) — no resend → one player
+Purpose: if one player is captured, the others go through the capture with them and are taken to the prison too.
+Send `PrisonCatch` with PartCount 0 when the game marks the local player as held in a cage (`OnMarkSet`, mark
+`HeroInCage`), 1 when that cage blacks out the screen (`OnPrisonScreenFade`), 2 when it lets go without the capture
+(a catch the local game led was cut, `Entity.CatchGivenBack`; control back after the black screen; a change of room;
+40 s). Handler `OnPrisonCatch`: drop unless marker/partner/checked; 0 starts a hold (one at a time, not in prison
+clothes), 1 blacks it out, 2 releases it. `UpdatePartnerCatch` holds the hero (input blocker and invulnerability,
+added again every frame) once nothing else holds them, blacks out the screen once the partner's is black, and lets go
+after 30 s without a word unless the capture came. Send `PrisonCapture` in `OnApplyCaptured` after the game's own
+capture, unless replaying (`_capturingForPartner`) or unchecked. Handler `OnPrisonCapture`: drop unless
+marker/partner/checked, drop if already in prison clothes; set `_pendingCaptureBy`. `UpdatePrisonCapture` moves the
+hero when movable (no timeout; cleared by ResetPrisonCapture on ResetSession only), letting go of the hold first. A
+member who leaves, a lost connection and a save that stops being paired release the hold.
+Suspects: S7c.1 drop when the receiver is not checked with the sender at that moment — no resend → one player
 captured, the other free. S7c.2 both captured at once → each sends; each receiver sees prison clothes already → drop
-(fine).
+(fine). S7c.3 a receiver in a cage of their own when PrisonCatch 0 comes keeps the hold quietly and is held (and told)
+only if their own cage lets go of them.
 
 ### 7d. Cage trap (S/CoopSave.CageTrap.cs)
 Purpose: the bait cage only springs when the other player stands in the cage; then it springs in both games.
