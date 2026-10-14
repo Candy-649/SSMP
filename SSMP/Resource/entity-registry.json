@@ -1838,6 +1838,9 @@
       "Place Key Item On Death",
       "Take Silk",
       "Taunt Detect"
+    ],
+    "catch_events": [
+      "CATCH"
     ]
   },
   {

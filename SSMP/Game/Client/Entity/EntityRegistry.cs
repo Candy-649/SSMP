@@ -300,6 +300,17 @@ internal class EntityRegistryEntry {
     public List<string>? TouchEvents { get; set; }
 
     /// <summary>
+    /// Events with which an FSM of the entity catches the player who touches what the FSM itself watches for them,
+    /// and carries them off, like the cage that a creature drops on the player to take them away. The copy on a scene
+    /// client runs none of its FSMs and never caught its own player: with these listed, the local player touching
+    /// what the copy's FSM watches in the state the scene host says it is in is a catch that their game leads, and
+    /// the scene host takes it from that state even when its creature has gone on since (see
+    /// <see cref="Entity.ListenForCatches"/>).
+    /// </summary>
+    [JsonProperty("catch_events")]
+    public List<string>? CatchEvents { get; set; }
+
+    /// <summary>
     /// Whether what the player of a scene client does to the copy of the entity - a strike that tells its FSM
     /// something, or a touch (see <see cref="TouchEvents"/>) - is played at once in that player's game by the copy's
     /// own FSM, and the scene host plays the same from there (see <see cref="Entity.PlayHere"/>). For something whose

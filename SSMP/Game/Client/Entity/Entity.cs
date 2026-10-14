@@ -1495,6 +1495,7 @@ internal partial class Entity {
             SayWhyTheCopyIsOff();
             UpdateRunHere();
             CheckWokenByLocalPlayer();
+            CheckCaughtByCopy();
 
             if (Object.Client != null &&
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
@@ -3312,7 +3313,10 @@ internal partial class Entity {
     /// <summary>
     /// Whether a collider of a part is touching the body or the hit box of the local player right now.
     /// </summary>
-    private static bool TouchesTheLocalPlayer(GameObject part) {
+    /// <param name="part">The part.</param>
+    /// <param name="hitBoxOnly">Whether only the hit box counts, for a part that waits for the hit box by its tag, the
+    /// way the game's own trigger of it does: the body of the player does not set it off.</param>
+    private static bool TouchesTheLocalPlayer(GameObject part, bool hitBoxOnly = false) {
         var hero = HeroController.SilentInstance;
         if (hero == null) {
             return false;
@@ -3323,7 +3327,7 @@ internal partial class Entity {
             _heroBox = known = (hero, box != null ? box.GetComponent<Collider2D>() : null);
         }
 
-        var body = hero.GetComponent<Collider2D>();
+        var body = hitBoxOnly ? null : hero.GetComponent<Collider2D>();
         foreach (var collider in part.GetComponents<Collider2D>()) {
             if (collider.isActiveAndEnabled && (Touches(collider, body) || Touches(collider, known.Box))) {
                 return true;

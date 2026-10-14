@@ -686,6 +686,26 @@ internal static partial class EntityFsmActions {
     private static readonly HashSet<string> PlayerMoodNames = ["TransitionToAudioSnapshot"];
 
     /// <summary>
+    /// The kinds of action that act on the game of the player as a whole: they fade or blur its screen, take its player
+    /// to another room, save it, set where its player comes back after a death, or call into the game's own code, like
+    /// the capture that takes away what the prison takes and breaks what the player carries for a delivery. In a state
+    /// that deals with the player they are that player's, the way a shake there is: played for the partner's catch,
+    /// the creature that drops its cage on the partner and takes them to the prison would take this game's player there
+    /// too, darken their screen first and give them a new place to come back to.
+    /// </summary>
+    private static readonly HashSet<string> PlayerGameNames = [
+        "ScreenFader", "CameraBlurPlaneFade", "CameraBlurPlaneFadeTo", "CameraBlurPlaneFadeToV2",
+        "CameraBlurPlaneFadeToV3", "BeginSceneTransition", "BeginSceneTransitionV2", "SaveGame", "SaveGameV2",
+        "QueueSaveGame", "QueueSaveGameV2", "SetDeathRespawnMarker", "CallStaticMethod", "SetStaticVariable"
+    ];
+
+    /// <summary>
+    /// The kinds of action that do nothing but wait, which a state that does nothing else but act on the player has
+    /// besides (see <see cref="StartsSomethingOnThePlayer"/>).
+    /// </summary>
+    private static readonly HashSet<string> WaitNames = ["Wait", "WaitRandom", "NextFrameEvent"];
+
+    /// <summary>
     /// The field of an action that runs a template of an FSM which holds the FSM it runs.
     /// </summary>
     private static readonly FieldInfo? RunFsmField = typeof(RunFSMAction).GetField(
@@ -737,20 +757,108 @@ internal static partial class EntityFsmActions {
     /// A copy that plays what the local player did, or what caught them, runs these on the local player, whose own
     /// they are (see Entity.IsLeftToSceneHost). The scene host, playing the same for its partner, leaves them out: its
     /// own player was not the one caught (see Entity.PlayForPartner).
+    ///
+    /// So is, in a state that deals with the player, what acts on their game as a whole (see
+    /// <see cref="PlayerGameNames"/>), and what the creature writes of their state into the player data - whether they
+    /// can pause, open the inventory, use their skills or be hurt (see <see cref="HeroStateWrittenBy"/>) - and so is
+    /// telling another FSM of the creature something that only acts on the player (see
+    /// <see cref="StartsSomethingOnThePlayer"/>). Played for the partner's catch, the scene host's game would otherwise
+    /// keep its own player from the pause menu and from harm, drain their silk, darken their screen and take them to
+    /// the prison the moment the partner's catch did, wherever they were and whatever they did.
     /// </summary>
     internal static bool IsThePlayersOwn(FsmStateAction action) {
+        return CountsAsThePlayersOwn(action, true);
+    }
+
+    /// <summary>
+    /// Whether an action of a creature's FSM is this game's player's own (see <see cref="IsThePlayersOwn"/>).
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="followTells">Whether telling another FSM of the creature something counts by what that FSM does
+    /// with it, which is not followed any further from there.</param>
+    private static bool CountsAsThePlayersOwn(FsmStateAction action, bool followTells) {
         var name = action.GetType().Name;
         if (name.StartsWith("ListenFor", StringComparison.Ordinal)) {
             return true;
         }
 
         // A festival flea being tinked is not the player's: only the game that runs the fleas counts it
-        var own = ShakeAndFlashNames.Contains(name) || PlayerMoodNames.Contains(name)
+        var own = ShakeAndFlashNames.Contains(name) || PlayerMoodNames.Contains(name) ||
+                  PlayerGameNames.Contains(name) || HeroStateWrittenBy(action) != null
             ? action.State != null && IsAboutThePlayer(action.State)
             : PlayerActionNames.Contains(name) || NamesThePlayer(action) ||
               TellsTheRoomAboutThePlayer(action) && BroadcastOf(action) != "FLEA TINKED" ||
-              RunsSomethingOnThePlayer(action);
+              RunsSomethingOnThePlayer(action) || followTells && StartsSomethingOnThePlayer(action);
         return own && !DecidesWhereItGoes(action);
+    }
+
+    /// <summary>
+    /// The field of the player data that an action writes, if it is one that holds the state of the player rather than
+    /// progress - whether they can pause, open the inventory, use their skills or be hurt (see
+    /// BossRoomCoop.IsHeroStateName) - as a creature writes for the player it holds; null for any other action.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    internal static string? HeroStateWrittenBy(FsmStateAction action) {
+        var name = action switch {
+            HutongGames.PlayMaker.Actions.SetPlayerDataBool set => set.boolName?.Value,
+            HutongGames.PlayMaker.Actions.SetPlayerDataVariable set => set.VariableName?.Value,
+            HutongGames.PlayMaker.Actions.SetPlayerDataInt set => set.intName?.Value,
+            HutongGames.PlayMaker.Actions.SetPlayerDataFloat set => set.floatName?.Value,
+            _ => null
+        };
+        return !string.IsNullOrEmpty(name) && BossRoomCoop.IsHeroStateName(name!) ? name : null;
+    }
+
+    /// <summary>
+    /// Whether an action tells another FSM of the creature's own object something that takes it into a state that does
+    /// nothing but act on the player and wait, like the rune of a creature that has caged the player telling the FSM
+    /// that drains their silk to start.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    private static bool StartsSomethingOnThePlayer(FsmStateAction action) {
+        var (target, eventName) = action switch {
+            SendEventByName send => (send.eventTarget, send.sendEvent?.Value),
+            SendEventByNameV2 send => (send.eventTarget, send.sendEvent?.Value),
+            _ => (null, null)
+        };
+        var fsm = action.Fsm;
+        if (target == null || string.IsNullOrEmpty(eventName) || fsm?.GameObject is not { } owner ||
+            target.target is not (FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM) ||
+            fsm.GetOwnerDefaultTarget(target.gameObject) != owner) {
+            return false;
+        }
+
+        foreach (var other in owner.GetComponents<PlayMakerFSM>()) {
+            if (other.Fsm == fsm || target.target == FsmEventTarget.EventTarget.GameObjectFSM &&
+                other.FsmName != target.fsmName?.Value) {
+                continue;
+            }
+
+            foreach (var state in other.FsmStates) {
+                if (FindTransition(other.Fsm, state, eventName!) is { } to && DoesNothingButActOnThePlayer(to)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+
+        static bool DoesNothingButActOnThePlayer(FsmState state) {
+            var acts = false;
+            foreach (var inner in state.Actions) {
+                if (!inner.Enabled || WaitNames.Contains(inner.GetType().Name)) {
+                    continue;
+                }
+
+                if (!CountsAsThePlayersOwn(inner, false)) {
+                    return false;
+                }
+
+                acts = true;
+            }
+
+            return acts;
+        }
     }
 
     /// <summary>

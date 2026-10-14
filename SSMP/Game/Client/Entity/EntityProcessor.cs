@@ -327,6 +327,10 @@ internal class EntityProcessor {
             entity.ListenForTouches(touchEvents);
         }
 
+        if (foundEntry.CatchEvents is { Count: > 0 } catchEvents) {
+            entity.ListenForCatches(catchEvents);
+        }
+
         // If this entry has child entries, the parts of the object are checked for them, however deep they sit
         if (foundEntry.Children != null) {
             foreach (var part in gameObject.GetComponentsInChildren<Transform>(true)) {

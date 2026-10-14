@@ -11,11 +11,13 @@ namespace SSMP.Game.Client.Save;
 /// Being caught and taken to the prison, in a checked two-player save: it happens to both players. The user chose this
 /// on 2026-09-24, so that the escape and all that comes after it is something the two of them go through together.
 ///
-/// Only one of them can ever be caught. What catches a player is a creature, and creatures only act in the game of the
-/// player who runs the room, where they look for that game's own player and never see the other one. So the game of
-/// the player who was caught tells the other game, and that game does to its own player what the capture did: it takes
-/// away what the prison takes away, and sends them in through the same door. The capture itself is one call of the
-/// game's own, made both where it happens and here, which is why the hook sits on that call and not on the creature.
+/// Only one of them is caught. What catches a player is a creature, which acts in the game of the player who runs the
+/// room; a player who came into the room later is caught by its copy in their own game, which plays the whole catch
+/// for them (Entity.CheckCaughtByCopy, USER 10-14 "可以吧"). Either way the game of the player who was caught tells the
+/// other game, and that game does to its own player what the capture did: it takes away what the prison takes away,
+/// and sends them in through the same door. The capture itself is one call of the game's own, made both where it
+/// happens and here, which is why the hook sits on that call and not on the creature; the game that follows the
+/// partner's catch leaves that call to the partner's game (EntityFsmActions.IsThePlayersOwn).
 ///
 /// A player who can't be moved right away - dead, on a bench, being moved already, riding a lift, in the pause menu, or
 /// held by something the game is doing to them - is taken as soon as they can be. A player who is in the prison

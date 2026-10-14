@@ -468,6 +468,12 @@ internal partial class Entity {
             HookMoods();
         }
 
+        // So is what any catch takes from the player themselves, from before the first input of it (see
+        // PlayerBeforeTheCatch)
+        if (caught != null && _beforeTheCatch == null) {
+            NoteThePlayerBeforeTheCatch(fsm);
+        }
+
         HeldFsms.Remove(fsm);
         int[] dice;
         try {
@@ -786,8 +792,27 @@ internal partial class Entity {
         NoteAnticipation(start.Tag, start.Anticipation);
 
         var fsm = hostFsm.Fsm;
-        if (fsm.ActiveState is not { } state ||
-            EntityFsmActions.FindTransition(fsm, state, eventName) is not { } into) {
+        if (fsm.ActiveState is not { } state) {
+            SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
+            return false;
+        }
+
+        // A catch that the creature made of the partner where they are, by what it watches for them, is taken from
+        // where it watched for it: its own FSM has mostly gone on by the time the catch comes (see
+        // StateTheCatchWasWatchedFrom)
+        var into = EntityFsmActions.FindTransition(fsm, state, eventName);
+        if (into == null && start.Path is { Length: > 0 } caughtPath &&
+            StateTheCatchWasWatchedFrom(fsm, state, eventName, caughtPath) is { } watchedFrom) {
+            Logger.Info(
+                $"The '{fsm.Name}' of entity {Id} is in '{state.Name}' as the partner's '{eventName}' comes, which " +
+                $"it watched for in '{watchedFrom.Name}', so it takes it from there"
+            );
+            PutInWithoutDoing(fsm, watchedFrom);
+            state = watchedFrom;
+            into = EntityFsmActions.FindTransition(fsm, state, eventName);
+        }
+
+        if (into == null) {
             SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
             return false;
         }
@@ -1603,8 +1628,16 @@ internal partial class Entity {
         ForgetTalkHere(fsm);
         TakeTheCopysBodyBack();
 
-        if (!led || !letGoOfThePlayer) {
+        if (!letGoOfThePlayer) {
             _moods.Clear();
+            _beforeTheCatch = null;
+            return;
+        }
+
+        // The combo of a catch that the scene host plays by itself is over here, however far the copy got with it
+        if (!led) {
+            _moods.Clear();
+            GiveBackWhatTheCatchTook(true);
             return;
         }
 
@@ -1614,7 +1647,7 @@ internal partial class Entity {
             CatchWentOn?.Invoke(this, ledIndex, ledCatch, (byte) (ledStep + 1), "");
         }
 
-        FreeTheLocalPlayer(fsm);
+        FreeTheLocalPlayer(fsm, !over);
     }
 
     /// <summary>
@@ -1630,6 +1663,7 @@ internal partial class Entity {
         }
 
         var led = _runHereLed;
+        var over = _aftermath != null;
         HeldFsms.Remove(fsm);
         ForgetTalkHere(fsm);
         _runHere = null;
@@ -1640,24 +1674,28 @@ internal partial class Entity {
         TakeTheCopysBodyBack();
 
         if (led) {
-            FreeTheLocalPlayer(fsm);
+            FreeTheLocalPlayer(fsm, !over);
         } else {
             _moods.Clear();
+            GiveBackWhatTheCatchTook(true);
         }
     }
 
     /// <summary>
     /// Undoes what the FSM of a copy that played a catch this game led did to the local player and would have undone
-    /// itself, once it no longer plays it: the player it holds is let go, unless another copy holds them, and the sound
-    /// of the game is given back (see <see cref="GiveTheSoundBack"/>).
+    /// itself, once it no longer plays it: the player it holds is let go, unless another copy holds them, the sound
+    /// of the game is given back (see <see cref="GiveTheSoundBack"/>), and so is what it took from the player, if it
+    /// did not play the catch through to what follows it (see <see cref="GiveBackWhatTheCatchTook"/>).
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
-    private void FreeTheLocalPlayer(HutongGames.PlayMaker.Fsm fsm) {
+    /// <param name="cut">Whether it stopped before it was through with the catch.</param>
+    private void FreeTheLocalPlayer(HutongGames.PlayMaker.Fsm fsm, bool cut) {
         if (!AnyLeadsACatch(this)) {
             EntityFsmActions.LetGoOfTheHeldLocalPlayer($"the copy of entity {Id} no longer plays the catch");
         }
 
         GiveTheSoundBack(fsm);
+        GiveBackWhatTheCatchTook(cut);
     }
 
     /// <summary>
