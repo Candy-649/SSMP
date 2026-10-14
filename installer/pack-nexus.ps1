@@ -1,10 +1,13 @@
 # Zips the package that installer/pack-npm.ps1 staged, for a mod page such as Nexus Mods, where a player downloads
 # one archive by hand.
 #
-# It packs exactly the staged files, so the zip and the npm package of one version are the same build: run
-# pack-npm.ps1 first. It builds nothing and adds nothing. It only checks that the stage is the build of the current
-# commit and version, and leaves out package.json, which only npm reads. The files sit in one folder named after the
-# version inside the zip, so unpacking it never scatters them among other files.
+# It packs the staged files, so the zip and the npm package of one version are the same build: run pack-npm.ps1
+# first. It builds nothing and adds nothing. It only checks that the stage is the build of the current commit and
+# version, and leaves out package.json, which only npm reads, and the updater (UPDATE.bat, update.ps1). Nexus Mods'
+# File Submission Guidelines prohibit files that connect to the internet to download files unless that is crucial
+# for the mod to work, and say that "auto update" functionality does not qualify; a player of the mod page updates by
+# downloading the new zip from it instead. The files sit in one folder named after the version inside the zip, so
+# unpacking it never scatters them among other files.
 #
 # Console output is English for the same reason install.ps1's is: Windows PowerShell 5.1 reads a UTF-8 file without
 # a BOM as ANSI and turns anything else into mojibake.
@@ -21,6 +24,9 @@ param(
 $ErrorActionPreference = 'Stop'
 
 $PackageName = 'silksong-coop-mod'
+
+# What the stage has that the zip leaves out (see the top of this file)
+$LeftOut = @('package.json', 'UPDATE.bat', 'update.ps1')
 
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Csproj = Join-Path $RepoRoot 'SSMP\SSMP.csproj'
@@ -64,7 +70,7 @@ try {
     New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
     $zip = Join-Path (Resolve-Path $OutDir).Path "$name.zip"
     try {
-        Get-ChildItem $StageDir -Force | Where-Object { $_.Name -ne 'package.json' } |
+        Get-ChildItem $StageDir -Force | Where-Object { $LeftOut -notcontains $_.Name } |
             Copy-Item -Destination $root -Recurse
         if (Test-Path $zip) { Remove-Item $zip }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -81,13 +87,15 @@ try {
     $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
     try {
         $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
-        foreach ($required in @('INSTALL.bat', 'INSTALL.txt', 'install.ps1', 'UPDATE.bat', 'update.ps1',
+        foreach ($required in @('INSTALL.bat', 'INSTALL.txt', 'install.ps1',
                                 'LICENSE', 'LICENSE-BouncyCastle.md', 'README.md',
                                 'BepInEx_win_x64_5.4.23.4.zip', 'SSMP/SSMP.dll',
                                 'SSMP/BouncyCastle.Cryptography.dll')) {
             if ($entries -notcontains "$name/$required") { throw "Missing from the zip: $name/$required" }
         }
-        if ($entries -contains "$name/package.json") { throw 'package.json ended up in the zip.' }
+        foreach ($left in $LeftOut) {
+            if ($entries -contains "$name/$left") { throw "$left ended up in the zip." }
+        }
     } finally {
         $archive.Dispose()
     }
