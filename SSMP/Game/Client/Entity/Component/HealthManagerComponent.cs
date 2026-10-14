@@ -84,6 +84,38 @@ internal class HealthManagerComponent : EntityComponent {
     private bool _toldRefusedDeath;
 
     /// <summary>
+    /// Whether a blow of this game's player on the copy is being taken, and whether the copy asked to die of it, which
+    /// it does when the blow leaves it no health (see <see cref="AfterOwnBlow"/>).
+    /// </summary>
+    private bool _takingOwnBlowOnCopy, _ownBlowAskedToDie;
+
+    /// <summary>
+    /// For a copy kept from hurting this game's player (see <see cref="KeepFromHurting"/>): when the blow of theirs
+    /// that left it no health landed, and how far the copy's damage had come with it; otherwise a negative time.
+    /// </summary>
+    private float _ownKillAt = -1f;
+
+    /// <inheritdoc cref="_ownKillAt" />
+    private int _ownKillDamage;
+
+    /// <summary>
+    /// How long a copy is kept from hurting this game's player without an answer from the game that runs the creature,
+    /// in seconds (see <see cref="KeepFromHurting"/>).
+    /// </summary>
+    private const float OwnKillAnswerTime = 5f;
+
+    /// <summary>
+    /// The components whose copies are kept from hurting this game's player now (see <see cref="KeepFromHurting"/>).
+    /// </summary>
+    private static readonly HashSet<HealthManagerComponent> KeptFromHurting = new();
+
+    /// <summary>
+    /// The hook on the player's hit box touching something that may hurt them (see
+    /// <see cref="HeroBoxOnCheckForDamage"/>). Made once, for every creature.
+    /// </summary>
+    private static Hook? _heroBoxDamageHook;
+
+    /// <summary>
     /// MonoMod hook for HealthManager.Die.
     /// </summary>
     private Hook? _healthManagerDieHook;
@@ -396,6 +428,15 @@ internal class HealthManagerComponent : EntityComponent {
         _extraDamageHook = new Hook(extraDamage, HealthManagerOnExtraDamage);
         _dieDropFlingHook = new Hook(dieDropFling, HealthManagerOnDieDropFling);
 
+        var checkForDamage = typeof(HeroBox).GetMethod(
+            "CheckForDamage", HookBindingFlags, Type.DefaultBinder, [typeof(GameObject)], null
+        );
+        if (checkForDamage == null) {
+            Logger.Error("Could not find HeroBox.CheckForDamage; a copy the player killed can hurt them until it dies");
+        } else {
+            _heroBoxDamageHook = new Hook(checkForDamage, HeroBoxOnCheckForDamage);
+        }
+
         // Without these, a tick of tag damage is judged by its kind of tag, as the game marks it
         var tagDamagerEnter = typeof(TagDamager).GetMethod(
             "OnTriggerEnter2D", HookBindingFlags, Type.DefaultBinder, [typeof(Collider2D)], null
@@ -669,10 +710,14 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         var death = BlowDeathOf(self, hitInstance, fromTakeDamage);
+        var (takingOwnBlow, askedToDie) = (_takingOwnBlowOnCopy, _ownBlowAskedToDie);
+        (_takingOwnBlowOnCopy, _ownBlowAskedToDie) = (true, false);
         try {
             orig(self, hitInstance);
         } finally {
-            AfterOwnBlow(death);
+            var leftNoHealth = _ownBlowAskedToDie;
+            (_takingOwnBlowOnCopy, _ownBlowAskedToDie) = (takingOwnBlow, askedToDie);
+            AfterOwnBlow(death, leftNoHealth);
         }
     }
 
@@ -738,12 +783,73 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// Just after a blow of this game's player on the copy: counted and sent with what it kills with, and the copy back
-    /// at the health last told.
+    /// at the health last told. One that left the copy no health keeps it from hurting the player until the game that
+    /// runs the creature answers it (see <see cref="KeepFromHurting"/>).
     /// </summary>
     /// <param name="death">What the blow kills with.</param>
-    private void AfterOwnBlow(BlowDeath death) {
+    /// <param name="leftNoHealth">Whether the copy asked to die of the blow.</param>
+    private void AfterOwnBlow(BlowDeath death, bool leftNoHealth) {
         CountOwnBlows(death: death);
         PutBackToldHealth();
+        if (leftNoHealth) {
+            KeepFromHurting();
+        }
+    }
+
+    /// <summary>
+    /// Keeps the copy from hurting the player of this game after a blow of theirs left it no health, until the game
+    /// that runs the creature answers the blow. In the game, a creature dies of such a blow at once, and nothing of it
+    /// touches the player after; the copy dies only once that game has taken the blow in and told the death, and
+    /// touched in between, it hurt them. The player's harpoon puts them just above what it struck, where the hurt broke
+    /// off the bounce that follows, and they fell (USER 10-14, "哪怕飞针到了也会有碰撞伤", "受击打断了飞针到怪之后的高度攀升").
+    /// Only what belongs to the copy is kept off - its body and the parts under it (see
+    /// <see cref="IsKeptFromHurting"/>); what it threw before, and what its death puts out, hurt as they do. It can
+    /// hurt them again as soon as that game tells its health with the blow in it and the creature alive, as its death
+    /// is played here, as the room changes hands, or after <see cref="OwnKillAnswerTime"/> without an answer.
+    /// </summary>
+    private void KeepFromHurting() {
+        _ownKillAt = Time.unscaledTime;
+        _ownKillDamage = _ownDamage;
+        KeptFromHurting.Add(this);
+    }
+
+    /// <summary>
+    /// Lets the copy hurt the player of this game again (see <see cref="KeepFromHurting"/>).
+    /// </summary>
+    private void LetHurt() {
+        _ownKillAt = -1f;
+        KeptFromHurting.Remove(this);
+    }
+
+    /// <summary>
+    /// The player's hit box touching something that may hurt them, as it starts to and for as long as it does
+    /// (HeroBox.CheckForDamage): nothing of a copy kept from hurting them hurts them (see
+    /// <see cref="KeepFromHurting"/>).
+    /// </summary>
+    private static void HeroBoxOnCheckForDamage(Action<HeroBox, GameObject> orig, HeroBox self, GameObject other) {
+        if (KeptFromHurting.Count == 0 || !IsKeptFromHurting(other)) {
+            orig(self, other);
+        }
+    }
+
+    /// <summary>
+    /// Whether something that touches the player belongs to a copy kept from hurting them: the copy is the creature
+    /// that the thing's DamageHero found above it as it woke up, or else the one above it now.
+    /// </summary>
+    /// <param name="source">What touches the player.</param>
+    private static bool IsKeptFromHurting(GameObject source) {
+        if (source == null) {
+            return false;
+        }
+
+        var healthManager = source.TryGetComponent<DamageHero>(out var damageHero) ? damageHero.healthManager : null;
+        if (healthManager == null) {
+            healthManager = source.GetComponentInParent<HealthManager>();
+        }
+
+        return healthManager != null && ComponentOf.TryGetValue(healthManager, out var component) &&
+               healthManager == component._healthManager.Client && KeptFromHurting.Contains(component) &&
+               Time.unscaledTime - component._ownKillAt < OwnKillAnswerTime;
     }
 
     /// <summary>
@@ -1077,6 +1183,10 @@ internal class HealthManagerComponent : EntityComponent {
 
         if (self == _healthManager.Client) {
             if (!_allowDeath) {
+                if (_takingOwnBlowOnCopy) {
+                    _ownBlowAskedToDie = true;
+                }
+
                 // Said once: a copy with no health left asks to die every frame for as long as the room lasts
                 if (!_toldRefusedDeath) {
                     _toldRefusedDeath = true;
@@ -1089,6 +1199,7 @@ internal class HealthManagerComponent : EntityComponent {
 
                 _allowDeath = false;
                 _toldRefusedDeath = false;
+                LetHurt();
             }
 
             return;
@@ -1194,6 +1305,14 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     /// <inheritdoc />
     public override void OnUpdate() {
+        if (_ownKillAt >= 0f && Time.unscaledTime - _ownKillAt >= OwnKillAnswerTime) {
+            Logger.Info(
+                $"No answer to this player's blow that left '{GameObject.Client?.name}' no health in " +
+                $"{OwnKillAnswerTime} s: it can hurt them again"
+            );
+            LetHurt();
+        }
+
         var observedHealthManager = IsControlled ? _healthManager.Client : _healthManager.Host;
         if (observedHealthManager == null) {
             return;
@@ -1310,6 +1429,9 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void InitializeHost(uint sceneHostEpoch) {
+        // The creature is this game's now, and dies here of a blow that left it no health (see below)
+        LetHurt();
+
         // The blows of this game's player on the copy that the game that ran the creature had not taken in yet, a blow
         // of this very frame among them. The copy only ever showed the health that game told, so they are in no health
         // here, and taking the room over would lose them: the creature goes on with them. Not for a creature that is
@@ -1624,6 +1746,9 @@ internal class HealthManagerComponent : EntityComponent {
             _ownBlows.Clear();
             _damageTaken.Clear();
             _tellNumber = 0;
+
+            // The damage that the copy was kept from hurting the player for is not counted any more
+            LetHurt();
         }
 
         _currentHealthEpoch = sceneHostEpoch;
@@ -1778,6 +1903,13 @@ internal class HealthManagerComponent : EntityComponent {
             _toldNumber = number;
             _toldDead = dead;
             _ownDamageTaken = ownDamageTaken;
+
+            // The creature lived through the blow of this game's player that left the copy no health: the health it
+            // was told with had more in it, or the blow killed nothing there
+            if (_ownKillAt >= 0f && ownDamageTaken >= _ownKillDamage && !dead && (hp > 0 || !_hadHealth)) {
+                Logger.Info($"'{client?.name}' lived through this player's blow in the scene host's game");
+                LetHurt();
+            }
 
             // The game that runs the creature is heard from: what of this game's damage is not in it yet goes again
             // soon, however long it went unheard before
@@ -1962,6 +2094,7 @@ internal class HealthManagerComponent : EntityComponent {
         _healthManagerDieHook?.Dispose();
         _healthManagerDieHook = null;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
+        LetHurt();
 
         foreach (var healthManager in new[] { _creatureHealthManager, _copyHealthManager }) {
             if (healthManager is not null && ComponentOf.TryGetValue(healthManager, out var component) &&
