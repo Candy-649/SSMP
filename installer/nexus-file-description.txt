@@ -1,0 +1,2 @@
+Windows 一键安装包，已含 BepInEx。解压后双击 INSTALL.bat，说明见 INSTALL.txt。一起玩的人要装同一个版本。
+One-click installer for Windows, BepInEx included. Unzip, double-click INSTALL.bat, see INSTALL.txt. Everyone playing together needs the same version.

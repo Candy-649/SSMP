@@ -41,6 +41,26 @@ explanation instead, and is Chinese on purpose.
 **`INSTALL.txt` is the only place that describes how to play.** The script used to print a short version of it too,
 which went stale twice while the flow changed. If the flow changes again, change `INSTALL.txt` and nothing else.
 
+## Putting a release on the mod page
+
+`pack-npm.ps1` stages a version in `dist-npm/`, and `pack-nexus.ps1` zips that stage into `dist-nexus/` for Nexus
+Mods. After `npm publish`, `upload-nexus.ps1` adds the zip to the mod page as the newest version of the file already
+there, through the Nexus Mods API, so nobody uploads it by hand:
+
+```
+pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-nexus.ps1
+```
+
+| File | What it is |
+| --- | --- |
+| `upload-nexus.ps1` | Checks that the zip holds the same `SSMP.dll` as the npm stage, finds the page's file, uploads, adds the version (main category, previous one archived, mod version updated) and a changelog made of the titles of the `INSTALL.txt` entries marked with that version. Stops without uploading when the file already has the version or a newer one. `-DryRun` shows what it would do. |
+| `nexus-file-description.txt` | The description each new version gets under it on the Files tab. |
+
+It needs the page owner's personal API key from https://www.nexusmods.com/settings/api-keys. The script asks for it
+once and keeps it encrypted for that Windows user in `%APPDATA%\silksong-coop-mod`; it never goes into the
+repository. The page's first file is uploaded on the website; the API only adds versions to a file that exists.
+None of these files is shipped to players.
+
 ## What it touches
 
 The game folder, plus one backup of the save folder into `save-backups/` beside the script (the newest `$KeepBackups`

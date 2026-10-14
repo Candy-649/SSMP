@@ -107,7 +107,8 @@ try {
     Write-Host "  Zipped $name for a mod page:" -ForegroundColor Green
     Write-Host "      $zip" -ForegroundColor Green
     Write-Host ""
-    Write-Host "  Nothing has been uploaded. Upload it by hand, with the same version as the npm package." -ForegroundColor Yellow
+    Write-Host "  Nothing has been uploaded. After npm publish, upload-nexus.ps1 puts it on the mod page." `
+        -ForegroundColor Yellow
 } catch {
     Write-Host ""
     Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
