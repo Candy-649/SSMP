@@ -251,6 +251,19 @@ internal partial class BossRoomCoop {
             return false;
         }
 
+        // A sign of a player, or what one sets off, is never held for later, and leaves what waits as it is: one that
+        // comes before every player is in the room never reached the boss (see ShutsOutSign)
+        if (Entity.Entity.OwnSign != null || Entity.Entity.PlayerSigns.Contains(eventName)) {
+            if (!AreAllInRoom(SignShape(room, fsm))) {
+                Logger.Info($"'{GetPath(fsm)}' does not hear '{eventName}': not every player is in the room yet");
+                return true;
+            }
+
+            room.Started = true;
+            OnBossFightStarting(room);
+            return false;
+        }
+
         _heldEventStarts.TryGetValue(fsm, out var held);
         if (held != null && (held.StateName != state.Name || held.EventName != eventName)) {
             _heldEventStarts.Remove(fsm);
@@ -304,7 +317,15 @@ internal partial class BossRoomCoop {
             return false;
         }
 
-        return !AreAllInRoom(room.Wait?.Shape ?? GetRoomShape(room, GetLocalAnchor(room, fsm)));
+        return !AreAllInRoom(SignShape(room, fsm));
+    }
+
+    /// <summary>
+    /// The part of a boss room that every player must be in for an FSM of it to hear a sign: that of the wait of the
+    /// room if it waits, or else the one around the local player or the FSM.
+    /// </summary>
+    private static RoomShape SignShape(BossRoom room, Fsm fsm) {
+        return room.Wait?.Shape ?? GetRoomShape(room, GetLocalAnchor(room, fsm));
     }
 
     /// <summary>

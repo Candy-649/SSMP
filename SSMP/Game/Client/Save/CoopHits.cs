@@ -2273,7 +2273,8 @@ internal partial class CoopHits {
     /// <summary>
     /// Has a creature that the partner set off - woke by coming near, hooked with the harpoon, or that heard a sign of
     /// theirs - go after the partner, as it would have gone after the one player there is who set it off. Only when it
-    /// takes the event: one that is up already keeps whom it chose.
+    /// takes the event: one that is up already keeps whom it chose, and the boss of a room that not every player is in
+    /// yet never hears the sign (see <see cref="ShutsOutSign"/>).
     /// </summary>
     /// <param name="entity">The entity.</param>
     /// <param name="update">The update, from the partner, with the index of the FSM and the event.</param>
@@ -2282,7 +2283,8 @@ internal partial class CoopHits {
             fsm.Fsm?.ActiveState is { } state &&
             Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) != null &&
             _playerData.TryGetValue(update.PlayerId, out var setter) && setter.PlayerObject != null &&
-            entity.Object.Host != null) {
+            entity.Object.Host != null && (!Entity.Entity.PlayerSigns.Contains(update.Responder) ||
+                                           ShutsOutSign?.Invoke(fsm.Fsm, state.Name) != true)) {
             GamePatcher.SetTargetOf(entity.Object.Host, setter.PlayerObject);
         }
     }

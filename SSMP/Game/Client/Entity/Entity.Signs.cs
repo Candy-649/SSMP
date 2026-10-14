@@ -145,21 +145,59 @@ internal partial class Entity {
             return;
         }
 
+        // Each FSM that a register passes the sign on to, once, with the name it passes it on under
+        var heard = new HashSet<(int Index, string EventName)>();
         foreach (var register in Object.Client.GetComponents<EventRegister>()) {
             if (register.SubscribedEvent != sign) {
                 continue;
             }
 
-            // A register may pass the event on under another name
             var eventName = (int) register.aliasEventMode == 1 && !string.IsNullOrEmpty(register.aliasEvent)
                 ? register.aliasEvent
                 : sign;
             for (var index = 0; index < _fsms.Client.Count && index <= byte.MaxValue; index++) {
                 if (register.targetFsm == null || register.targetFsm == _fsms.Client[index]) {
-                    TellCopyOwnSign(index, eventName, sign);
+                    heard.Add((index, eventName));
                 }
             }
         }
+
+        // A register that an FSM of the creature adds as it runs passes the sign on to all of them, but it is on the
+        // creature in the scene host's game only: the copy was made before its FSMs started, and those that do not
+        // run here never add it
+        if (RegistersItselfFor(sign)) {
+            for (var index = 0; index < _fsms.Client.Count && index <= byte.MaxValue; index++) {
+                heard.Add((index, sign));
+            }
+        }
+
+        foreach (var (index, eventName) in heard) {
+            TellCopyOwnSign(index, eventName, sign);
+        }
+    }
+
+    /// <summary>
+    /// Whether an FSM of the creature registers its own object for a sign as it runs (AddEventRegister), like one that
+    /// notes that the player challenged the creature.
+    /// </summary>
+    /// <param name="sign">The sign.</param>
+    private bool RegistersItselfFor(string sign) {
+        foreach (var fsm in _fsms.Client) {
+            if (fsm == null || fsm.Fsm?.States is not { } states) {
+                continue;
+            }
+
+            foreach (var state in states) {
+                foreach (var action in state.Actions) {
+                    if (action is HutongGames.PlayMaker.Actions.AddEventRegister add && add.eventName.Value == sign &&
+                        add.target.OwnerOption == HutongGames.PlayMaker.OwnerDefaultOption.UseOwner) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
