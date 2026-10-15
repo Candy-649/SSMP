@@ -22,9 +22,16 @@ namespace SSMP.Util;
 /// memory cleanups, the memory the computer had free, and the mod's share: its handlers of Unity's scene events by
 /// name, which run inside the load, its per-frame handlers, and its taking of the room's state from the server. The
 /// mod's hooks into the game's own methods, which run as the objects of the room wake up, aren't timed: they are part
-/// of the waking.
+/// of the waking. A change that the game ends without fading the room in, like coming back to life on a bench, ends
+/// when the player character finished coming in; one that ends neither way, like a scene a cutscene loads, is dropped.
 /// </summary>
 internal static class LoadWatch {
+    /// <summary>
+    /// How long, in seconds, a change of room is watched at most without one of its ends coming, after which it is
+    /// dropped without a line.
+    /// </summary>
+    private const float MaxChangeTime = 60;
+
     /// <summary>
     /// The length of a tick of <see cref="Stopwatch"/>, in milliseconds.
     /// </summary>
@@ -65,11 +72,6 @@ internal static class LoadWatch {
         public SceneLoad? Load;
 
         /// <summary>
-        /// When the player character had finished coming into the room, if it has, for a change without a fade in.
-        /// </summary>
-        public float? Entered;
-
-        /// <summary>
         /// The frames drawn since it began, and the time the slowest of them took, in milliseconds.
         /// </summary>
         public int Frames;
@@ -83,7 +85,8 @@ internal static class LoadWatch {
         public long ModFrameTicks;
 
         /// <summary>
-        /// The time the handlers of Unity's scene events took that aren't the mod's, in ticks.
+        /// The time the handlers of Unity's scene events took that aren't the mod's, the game's and other mods', in
+        /// ticks.
         /// </summary>
         public long OtherEventTicks;
 
@@ -192,21 +195,28 @@ internal static class LoadWatch {
     }
 
     /// <summary>
-    /// Counts a frame in the change of room that is watched, if any. Called at the start of each frame with the time
-    /// that the mod's per-frame handlers took in the frame before.
+    /// Counts a frame in the change of room that is watched, if any, with the time that the mod's per-frame handlers
+    /// took in it, and drops a change that has gone on for too long. Called at the start of each frame.
     /// </summary>
     /// <param name="now">When the frame began, in ticks of <see cref="Stopwatch"/>.</param>
-    /// <param name="modTicks">The time the mod's per-frame handlers took in the frame before, in ticks.</param>
-    public static void OnFrame(long now, long modTicks) {
+    /// <param name="update">The handlers of each frame.</param>
+    /// <param name="lateUpdate">The handlers of the last step of each frame.</param>
+    /// <param name="fixedUpdate">The handlers of each step of physics.</param>
+    public static void OnFrame(long now, TimedEvent update, TimedEvent lateUpdate, TimedEvent fixedUpdate) {
         var last = _lastFrame;
         _lastFrame = now;
         if (_change is not { } change || last == 0) {
             return;
         }
 
+        if (Time.realtimeSinceStartup - change.Start > MaxChangeTime) {
+            _change = null;
+            return;
+        }
+
         change.Frames++;
         change.Slowest = System.Math.Max(change.Slowest, (now - last) * TickMs);
-        change.ModFrameTicks += modTicks;
+        change.ModFrameTicks += FrameWatch.ModTicks(update, lateUpdate, fixedUpdate);
     }
 
     /// <summary>
@@ -246,11 +256,7 @@ internal static class LoadWatch {
         }
 
         try {
-            // One that never faded in but saw the player character come in, like a room that fades itself in
-            if (_change is { Entered: { } entered } unfinished) {
-                Write(unfinished, entered, "the player character came in, with no fade in by the game");
-            }
-
+            // One that is still watched came to neither end, like a scene that a cutscene loaded, and is dropped
             var gameManager = global::GameManager.SilentInstance;
             _lastFadeIn = null;
             _change = new Change {
@@ -268,10 +274,13 @@ internal static class LoadWatch {
     /// The game fades the new room in, which ends the change of room that is watched.
     /// </summary>
     private static void OnFadeSceneIn(Action<global::GameManager> orig, global::GameManager self) {
+        // While the game waits for the room to be ready, a fade in is only noted down, for when it is
+        // (GameManager.OnNextLevelReady fades in then)
+        var deferred = global::GameManager.IsWaitingForSceneReady;
         var now = Time.realtimeSinceStartup;
         orig(self);
 
-        if (_change is not { } change || _failed) {
+        if (deferred || _change is not { } change || _failed) {
             return;
         }
 
@@ -283,60 +292,85 @@ internal static class LoadWatch {
     }
 
     /// <summary>
-    /// The player character finished coming into the new room, which ends the change of room if the game fades the room
-    /// in some other way: it is written down when the next change begins.
+    /// The player character finished coming into the new room. A change of room that is still watched ended without
+    /// the game fading the room in, like coming back to life on a bench or after a hazard, which fade in some other
+    /// way; on the way through a door the fade in comes first.
     /// </summary>
     private static void OnFinishedEnteringScene(Action<global::GameManager> orig, global::GameManager self) {
+        var now = Time.realtimeSinceStartup;
         orig(self);
-        if (_change is { Entered: null } change) {
-            change.Entered = Time.realtimeSinceStartup;
-        }
-    }
 
-    /// <inheritdoc cref="OnSceneEvent"/>
-    private static void OnSceneLoaded(Action<Scene, LoadSceneMode> orig, Scene scene, LoadSceneMode mode) {
-        OnSceneEvent(
-            _sceneLoaded, () => orig(scene, mode), handler => ((UnityAction<Scene, LoadSceneMode>) handler)(scene, mode)
-        );
-    }
-
-    /// <inheritdoc cref="OnSceneEvent"/>
-    private static void OnSceneUnloaded(Action<Scene> orig, Scene scene) {
-        OnSceneEvent(_sceneUnloaded, () => orig(scene), handler => ((UnityAction<Scene>) handler)(scene));
-    }
-
-    /// <inheritdoc cref="OnSceneEvent"/>
-    private static void OnActiveSceneChanged(Action<Scene, Scene> orig, Scene previous, Scene next) {
-        OnSceneEvent(
-            _activeSceneChanged,
-            () => orig(previous, next),
-            handler => ((UnityAction<Scene, Scene>) handler)(previous, next)
-        );
-    }
-
-    /// <summary>
-    /// Calls the handlers of one of Unity's scene events. While a change of room is watched they are called one at a
-    /// time, in the same order as Unity does, with each one's time counted; one that throws stops the rest, as it does
-    /// in Unity. Otherwise Unity calls them itself.
-    /// </summary>
-    /// <param name="field">The field behind the event.</param>
-    /// <param name="orig">Unity's own calling of them.</param>
-    /// <param name="call">Calls one handler.</param>
-    private static void OnSceneEvent(FieldInfo? field, Action orig, Action<Delegate> call) {
-        Delegate[] handlers;
-        try {
-            if (_failed || _change == null || field?.GetValue(null) is not Delegate all) {
-                orig();
-                return;
-            }
-
-            handlers = all.GetInvocationList();
-        } catch (Exception e) {
-            Fail(e);
-            orig();
+        if (_change is not { } change || _failed) {
             return;
         }
 
+        try {
+            Write(change, now, "the player character came in, with no fade in by the game manager");
+        } catch (Exception e) {
+            Fail(e);
+        }
+    }
+
+    /// <summary>
+    /// Unity calls the handlers of its event of a scene that loaded.
+    /// </summary>
+    private static void OnSceneLoaded(Action<Scene, LoadSceneMode> orig, Scene scene, LoadSceneMode mode) {
+        if (HandlersToTime(_sceneLoaded) is { } handlers) {
+            CallTimed(handlers, handler => ((UnityAction<Scene, LoadSceneMode>) handler)(scene, mode));
+        } else {
+            orig(scene, mode);
+        }
+    }
+
+    /// <summary>
+    /// Unity calls the handlers of its event of a scene that unloaded.
+    /// </summary>
+    private static void OnSceneUnloaded(Action<Scene> orig, Scene scene) {
+        if (HandlersToTime(_sceneUnloaded) is { } handlers) {
+            CallTimed(handlers, handler => ((UnityAction<Scene>) handler)(scene));
+        } else {
+            orig(scene);
+        }
+    }
+
+    /// <summary>
+    /// Unity calls the handlers of its event of another scene becoming the active one.
+    /// </summary>
+    private static void OnActiveSceneChanged(Action<Scene, Scene> orig, Scene previous, Scene next) {
+        if (HandlersToTime(_activeSceneChanged) is { } handlers) {
+            CallTimed(handlers, handler => ((UnityAction<Scene, Scene>) handler)(previous, next));
+        } else {
+            orig(previous, next);
+        }
+    }
+
+    /// <summary>
+    /// The handlers of one of Unity's scene events, to be called one at a time while a change of room is watched, in
+    /// the same order as Unity calls them, so that each one's time is known; or null, and Unity calls them itself.
+    /// Another mod's hook or patch on Unity's methods that call them, put in place before SSMP's, is passed over while
+    /// a change is watched; none is known.
+    /// </summary>
+    /// <param name="field">The field behind the event.</param>
+    private static Delegate[]? HandlersToTime(FieldInfo? field) {
+        if (_failed || _change == null || field == null) {
+            return null;
+        }
+
+        try {
+            return (field.GetValue(null) as Delegate)?.GetInvocationList();
+        } catch (Exception e) {
+            Fail(e);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Calls the handlers of a scene event one at a time, counting each one's time. One that throws stops the rest and
+    /// goes on to Unity, as it does when Unity calls them.
+    /// </summary>
+    /// <param name="handlers">The handlers.</param>
+    /// <param name="call">Calls one handler.</param>
+    private static void CallTimed(Delegate[] handlers, Action<Delegate> call) {
         foreach (var handler in handlers) {
             var start = Stopwatch.GetTimestamp();
             try {
@@ -412,16 +446,20 @@ internal static class LoadWatch {
             .Select(pair => $"{pair.Key} {pair.Value * TickMs:0.0}");
         var freeAfter = GetFreeMemory();
 
+        // No frame was counted only if the frames aren't watched (FrameWatch stopped after it threw)
+        var frames = change.Frames > 0
+            ? $"{change.Frames} frame(s), the slowest {change.Slowest:0} ms"
+            : "frames not counted";
         Logger.Info(
             $"[Load] {DateTime.Now:HH:mm:ss} '{change.From}' -> '{change.To}' ({change.Gate}): " +
-            $"{end - change.Start:0.00} s from the start to {endName}; {load}; {change.Frames} frame(s), the slowest " +
-            $"{change.Slowest:0} ms, {GC.CollectionCount(0) - change.Collections} memory cleanup(s), " +
+            $"{end - change.Start:0.00} s from the start to {endName}; {load}; {frames}, " +
+            $"{GC.CollectionCount(0) - change.Collections} memory cleanup(s), " +
             $"{change.FreeMemory} -> {freeAfter} MB of the computer's memory free, the game using " +
             $"{GetGameMemory()} MB; the mod: scene events {modEvents:0.0} ms" +
             $"{(modEvents >= 0.5 ? $" ({string.Join(", ", slowestEvents)})" : "")}, per-frame handlers " +
             $"{change.ModFrameTicks * TickMs:0.0} ms, the room's state from the server " +
             (change.RoomStates > 0 ? $"{change.RoomStateTicks * TickMs:0.0} ms" : "not come yet") +
-            $"; the game's own handlers of scene events {change.OtherEventTicks * TickMs:0.0} ms"
+            $"; other handlers of scene events (the game's, other mods') {change.OtherEventTicks * TickMs:0.0} ms"
         );
     }
 

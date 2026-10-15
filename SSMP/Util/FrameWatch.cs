@@ -205,7 +205,7 @@ internal static class FrameWatch {
             CountFrame(now, (now - lastFrame) * TickTime, collections - _lastCollections, update, lateUpdate, fixedUpdate);
         }
 
-        LoadWatch.OnFrame(now, ModTicks(update, lateUpdate, fixedUpdate));
+        LoadWatch.OnFrame(now, update, lateUpdate, fixedUpdate);
 
         update.EndFrame(counts);
         lateUpdate.EndFrame(counts);
@@ -275,7 +275,7 @@ internal static class FrameWatch {
     /// <summary>
     /// The time the mod's per-frame handlers took in the frame that just ended, in ticks of <see cref="Stopwatch"/>.
     /// </summary>
-    private static long ModTicks(TimedEvent update, TimedEvent lateUpdate, TimedEvent fixedUpdate) {
+    public static long ModTicks(TimedEvent update, TimedEvent lateUpdate, TimedEvent fixedUpdate) {
         var modTicks = update.FrameTicks + lateUpdate.FrameTicks + fixedUpdate.FrameTicks;
         foreach (var part in _parts) {
             modTicks += part.FrameTicks;
