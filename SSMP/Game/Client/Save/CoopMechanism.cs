@@ -51,7 +51,17 @@ internal sealed class CoopMechanism {
     /// </summary>
     private static readonly string[] GivePrefixes = [
         "SavedItemGet", "CollectableItemCollect", "AddCurrency", "SpawnPowerUpGetMsg", "SpawnSkillGetMsg",
-        "SetShopItemPurchased", "OpenSimpleShopMenu"
+        "SetShopItemPurchased", "OpenSimpleShopMenu", "SilkRationMachineGetRation"
+    ];
+
+    /// <summary>
+    /// Actions that only test, switch or set the FSM's own variables. A state made of them alone changes nothing, so on
+    /// the way from a prompt to the payment, like a lock working out which key the hero has, it belongs to the prompt.
+    /// </summary>
+    private static readonly HashSet<string> SilentActions = [
+        "StringSwitch", "IntSwitch", "BoolTest", "BoolAllTrue", "BoolAnyTrue", "BoolNoneTrue", "IntCompare",
+        "FloatCompare", "StringCompare", "PlayerDataBoolTest", "PlayerDataVariableTest", "SetStringValue",
+        "SetObjectValue", "SetBoolValue", "SetIntValue", "SetFloatValue", "BuildString", "NextFrameEvent"
     ];
 
     private CoopMechanism(
@@ -139,23 +149,38 @@ internal sealed class CoopMechanism {
                     if (prompt.Add(to)) {
                         queue.Enqueue(to);
                     }
-                } else if (!CancelEvents.Contains(transition.EventName ?? "")) {
+                } else if (CancelEvents.Contains(transition.EventName ?? "")) {
+                    continue;
+                } else if (LeadsToPrompt(states, to, idle, [])) {
+                    // Only works things out on the way to another prompt, which the payment may be in
+                    if (prompt.Add(to)) {
+                        queue.Enqueue(to);
+                    }
+                } else {
                     starts.Add(to);
                 }
             }
         }
 
-        // Wishes, rewards, conversations and travel belong to each player or to other rules
+        // Wishes, rewards and travel belong to each player or to other rules, and so does an item lying in the world
         var actions = Reach(states, targets, idle).SelectMany(name => GetActions(states[name]));
         if (actions.Any(action => action.GetType().Namespace == "QuestPlaymakerActions" ||
                                   HasPrefix(action, GivePrefixes) ||
-                                  action.GetType().Name.StartsWith("RunDialogue", StringComparison.Ordinal) ||
-                                  action.GetType().Name.StartsWith("BeginSceneTransition", StringComparison.Ordinal))) {
+                                  action.GetType().Name.StartsWith("BeginSceneTransition", StringComparison.Ordinal)) ||
+            (fsm.GameObject != null && fsm.GameObject.GetComponent<CollectableItemPickup>() != null)) {
             return null;
         }
 
         if (starts.Count == 0 ||
             !prompt.SelectMany(name => GetActions(states[name])).Any(action => HasPrefix(action, PaymentPrefixes))) {
+            return null;
+        }
+
+        // A text that the prompt shows before the payment, like what a lock says, belongs to the prompt; talk after it
+        // makes the interaction a conversation, which belongs to each player
+        if (Reach(states, starts, idle).Where(name => !prompt.Contains(name))
+            .SelectMany(name => GetActions(states[name]))
+            .Any(action => action.GetType().Name.StartsWith("RunDialogue", StringComparison.Ordinal))) {
             return null;
         }
 
@@ -196,6 +221,33 @@ internal sealed class CoopMechanism {
     private static bool IsPrompt(FsmState state) {
         return GetActions(state).Any(action => HasPrefix(action, PromptPrefixes)) ||
                GetTransitions(state).Any(transition => WaitEvents.Contains(transition.EventName ?? ""));
+    }
+
+    /// <summary>
+    /// Whether a state only tests, switches or sets variables, and leads through more such states to a prompt.
+    /// </summary>
+    private static bool LeadsToPrompt(
+        Dictionary<string, FsmState> states,
+        string name,
+        HashSet<string> idle,
+        HashSet<string> seen
+    ) {
+        if (!seen.Add(name) || !states.TryGetValue(name, out var state) ||
+            !GetActions(state).All(action => SilentActions.Contains(action.GetType().Name))) {
+            return false;
+        }
+
+        foreach (var transition in GetTransitions(state)) {
+            if (transition.ToState is not { } to || !states.TryGetValue(to, out var next) || idle.Contains(to)) {
+                continue;
+            }
+
+            if (IsPrompt(next) || LeadsToPrompt(states, to, idle, seen)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
