@@ -173,6 +173,27 @@ internal partial class CoopSave {
     private const string PlateLeftName = "Left";
 
     /// <summary>
+    /// What an update of a trap plate says in place of a state when the player stepped onto it while it was down
+    /// already, so the step set nothing off. It keeps the plate down for them, but doesn't press one that is up: a
+    /// plate that was still coming up in their game, or that something else of their game holds down, set nothing off
+    /// there.
+    /// </summary>
+    private const string TrapPlateStoodName = "Stood";
+
+    /// <summary>
+    /// The members who stand on each trap plate here in their own games, for whom it stays down until the last of them
+    /// got off (see <see cref="OnTrapPlateStep"/>). A plate pressed for a partner came up again on its own while the
+    /// partner still stood on it, and a step onto it then set the trap off in one game only (review of fd8e3fd, 10-15).
+    /// </summary>
+    private readonly Dictionary<TrapPressurePlate, HashSet<ushort>> _trapPlatesStoodOn = new();
+
+    /// <summary>
+    /// The trap plates that the local player stands on and that the members were told of, who are told again once the
+    /// player got off.
+    /// </summary>
+    private readonly HashSet<TrapPressurePlate> _trapPlatesStoodOnHere = [];
+
+    /// <summary>
     /// The members who stand on each plate here in their own games, for whom the plate stands on itself once, until the
     /// last of them got off (<see cref="OnWorldTrigger"/>). Two members on one plate, of whom the first stepped off,
     /// would otherwise let it up under the other.
@@ -183,6 +204,7 @@ internal partial class CoopSave {
     /// Takes a member who left the save off every plate they stood on, letting a plate up that nobody else stands on.
     /// </summary>
     private void ForgetPlatesOf(ushort id) {
+        ForgetTrapPlatesOf(id);
         foreach (var pair in _platesStoodOn.ToList()) {
             if (!pair.Value.Remove(id) || pair.Value.Count > 0) {
                 continue;
@@ -307,39 +329,90 @@ internal partial class CoopSave {
     private bool _pressingTrapPlateForPartner;
 
     /// <summary>
-    /// The local player stepped onto a trap plate of the prison, which is no <see cref="PressurePlateBase"/>: it
-    /// watches who is on it with a <see cref="TrackTriggerObjects"/> and, once down, sets off its trap - a blade that
-    /// runs along its rail, or spikes. It counts only the hero of its own game, so the trap went off only for the
-    /// player who stepped on it. The partner's plate is pressed in turn (see <see cref="PressTrapPlateForPartner"/>),
-    /// and each game runs its own trap, which hurts whoever is in its way there.
+    /// Something stepped onto a trap plate of the prison or the last thing on it got off. The plate is no
+    /// <see cref="PressurePlateBase"/>: it watches who is on it with a <see cref="TrackTriggerObjects"/>, goes down and
+    /// sets off its trap - a blade that runs along its rail, or spikes - and comes up again a while after the last
+    /// thing got off. It counts only the hero of its own game, so the trap went off only for the player who stepped on
+    /// it. The local player's step and getting off are sent, and the partner's plate is stood on in turn (see
+    /// <see cref="OnTrapPlateStep"/>): it goes down with the step that pressed this one and stays down until the player
+    /// got off again. Each game runs its own trap, which hurts whoever is in its way there.
     /// </summary>
     private void OnTrapPlateInside(Action<TrapPressurePlate, bool> orig, TrapPressurePlate self, bool isInside) {
-        // Only a step that starts the plate going down sets its trap off
         var wasUp = self.dropRoutine == null;
         orig(self, isInside);
-
-        if (!isInside || !wasUp || self.dropRoutine == null || _pressingTrapPlateForPartner ||
-            _checkedMembers.Count == 0 || !IsLocalHeroIn(self.tracker)) {
+        if (_pressingTrapPlateForPartner) {
             return;
         }
 
-        var path = ScenePath.Get(self.transform);
-        SendToMembers(new CoopSaveUpdate {
-            Kind = CoopSaveUpdateKind.WorldTrigger,
-            Scene = self.gameObject.scene.name,
-            ObjectPath = path,
-            StateName = ""
-        });
-        Logger.Info($"Sent the trap plate '{path}' to the partner");
+        if (!isInside) {
+            // Down for a member who still stands on it in their game, after the last thing here got off
+            if (_trapPlatesStoodOn.TryGetValue(self, out var standers) && standers.Count > 0) {
+                self.canReturn = false;
+            }
+
+            if (_trapPlatesStoodOnHere.Remove(self) && _checkedMembers.Count > 0) {
+                SendTrapPlateStep(self, PlateLeftName);
+            }
+
+            return;
+        }
+
+        if (_checkedMembers.Count == 0 || !IsLocalHeroIn(self.tracker) || !_trapPlatesStoodOnHere.Add(self)) {
+            return;
+        }
+
+        // Only a step that starts the plate going down sets its trap off
+        SendTrapPlateStep(self, wasUp && self.dropRoutine != null ? "" : TrapPlateStoodName);
     }
 
     /// <summary>
-    /// Presses a trap plate here for a partner who stepped on it in their game, so it goes down and sets its trap off
-    /// here too, and comes up again once it has, unless something here stands on it. A plate that is down already goes
-    /// on as it is, as it would under a second player.
+    /// Sends the local player stepping onto a trap plate, with whether the step pressed it, or getting off it.
     /// </summary>
-    private void PressTrapPlateForPartner(TrapPressurePlate plate, string username) {
-        if (plate.dropRoutine != null || plate.plate == null) {
+    private void SendTrapPlateStep(TrapPressurePlate plate, string step) {
+        var path = ScenePath.Get(plate.transform);
+        SendToMembers(new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.WorldTrigger,
+            Scene = plate.gameObject.scene.name,
+            ObjectPath = path,
+            StateName = step
+        });
+        Logger.Info(
+            step == PlateLeftName
+                ? $"Sent getting off the trap plate '{path}' to the partner"
+                : $"Sent the trap plate '{path}' to the partner{(step.Length == 0 ? "" : ", which was down already")}"
+        );
+    }
+
+    /// <summary>
+    /// A partner stepped onto a trap plate in their game or got off it. A step that pressed it there presses it here,
+    /// so it goes down and sets its trap off here too, unless it is down already, as it would be under a second player.
+    /// Either step keeps it down for as long as they stand on it, and it comes up once the last member got off and
+    /// nothing here stands on it.
+    /// </summary>
+    private void OnTrapPlateStep(TrapPressurePlate plate, ClientPlayerData player, string step) {
+        if (!_trapPlatesStoodOn.TryGetValue(plate, out var standers)) {
+            standers = _trapPlatesStoodOn[plate] = [];
+        }
+
+        if (step == PlateLeftName) {
+            if (standers.Remove(player.Id) && standers.Count == 0) {
+                LetTrapPlateUp(plate);
+            }
+
+            return;
+        }
+
+        if (!standers.Add(player.Id) || plate.plate == null) {
+            return;
+        }
+
+        if (plate.dropRoutine != null) {
+            plate.canReturn = false;
+            Logger.Info($"{player.Username} stands on the trap plate '{plate.name}', which is down here already");
+            return;
+        }
+
+        if (step == TrapPlateStoodName) {
             return;
         }
 
@@ -350,11 +423,40 @@ internal partial class CoopSave {
             _pressingTrapPlateForPartner = false;
         }
 
-        if (plate.tracker == null || !plate.tracker.IsInside) {
-            plate.OnInsideStateChanged(false);
+        Logger.Info($"{player.Username} stepped on the trap plate '{plate.name}'");
+    }
+
+    /// <summary>
+    /// Lets a trap plate that no member stands on any more come up, unless something here stands on it.
+    /// </summary>
+    private void LetTrapPlateUp(TrapPressurePlate? plate) {
+        if (plate == null || plate.tracker != null && plate.tracker.IsInside) {
+            return;
         }
 
-        Logger.Info($"{username} stepped on the trap plate '{plate.name}'");
+        _pressingTrapPlateForPartner = true;
+        try {
+            plate.OnInsideStateChanged(false);
+        } finally {
+            _pressingTrapPlateForPartner = false;
+        }
+    }
+
+    /// <summary>
+    /// Takes a member off every trap plate here that they stood on, for a member who left the room or the save.
+    /// </summary>
+    private void ForgetTrapPlatesOf(ushort id) {
+        foreach (var pair in _trapPlatesStoodOn.ToList()) {
+            if (!pair.Value.Remove(id) || pair.Value.Count > 0) {
+                continue;
+            }
+
+            try {
+                LetTrapPlateUp(pair.Key);
+            } catch (Exception e) {
+                Logger.Warn($"Could not let the trap plate up that a member who left stood on: {e.Message}");
+            }
+        }
     }
 
     /// <summary>
@@ -464,7 +566,7 @@ internal partial class CoopSave {
             }
 
             if (target.GetComponent<TrapPressurePlate>() is { } trapPlate) {
-                PressTrapPlateForPartner(trapPlate, player.Username);
+                OnTrapPlateStep(trapPlate, player, update.StateName);
                 return;
             }
 

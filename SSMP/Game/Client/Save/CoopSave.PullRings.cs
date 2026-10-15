@@ -238,6 +238,9 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Warn($"Could not let go of the rings that {player.Username} held: {e.Message}");
         }
+
+        // Nobody stands on a trap plate of a room they left, should their getting off it never have come
+        ForgetTrapPlatesOf(player.Id);
     }
 
     /// <summary>
@@ -247,6 +250,7 @@ internal partial class CoopSave {
     private void LetGoOfMemberHolds() {
         try {
             var holders = _platesStoodOn.Values.SelectMany(ids => ids)
+                .Concat(_trapPlatesStoodOn.Values.SelectMany(ids => ids))
                 .Concat(_ringHolders.Values.SelectMany(ids => ids))
                 .Distinct()
                 .ToList();

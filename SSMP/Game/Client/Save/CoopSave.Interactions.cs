@@ -437,6 +437,8 @@ internal partial class CoopSave {
         _remoteInteractions.Clear();
         _pendingReceptacles.Clear();
         _platesStoodOn.Clear();
+        _trapPlatesStoodOn.Clear();
+        _trapPlatesStoodOnHere.Clear();
         ResetRingHolds();
         DropPromptInteraction();
     }

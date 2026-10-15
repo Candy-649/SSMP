@@ -1721,6 +1721,11 @@
    "Remasker New",
    "Remasker New Sharp Ultra",
    "Secret Mask New",
+   "Slab Lock",
+   "Slab Lock (1)",
+   "Slab Lock (2)",
+   "Slab Lock (3)",
+   "Slab Lock (4)",
    "slab_jail_lever",
    "slab_jail_lever (1)"
   ],
@@ -1729,7 +1734,8 @@
   ],
   "slab_05": [
    "Remasker New",
-   "Remasker New Sharp"
+   "Remasker New Sharp",
+   "Slab Lock (2)"
   ],
   "slab_06": [
    "Remasker New Sharp",
@@ -1776,18 +1782,24 @@
   ],
   "slab_14": [
    "Grouped Remasker_Large",
+   "Slab Lock L",
+   "Slab Lock R",
    "slab_item_chain"
   ],
   "slab_15": [
    "Breakable Wall Waterways",
    "Remasker New Sharp",
    "Secret Mask New",
+   "Slab Lock (1)",
+   "Slab Lock (2)",
    "Slab_vent_mask"
   ],
   "slab_16": [
    "Remasker New",
    "Remasker New (1)",
    "Remasker New Sharp",
+   "Slab Lock (1)",
+   "Slab Lock (2)",
    "Slab_vent_mask",
    "slab_item_chain (1)"
   ],
@@ -1804,7 +1816,8 @@
    "Remasker New Sharp Ultra"
   ],
   "slab_21": [
-   "Breakable Wall"
+   "Breakable Wall",
+   "Slab Lock"
   ],
   "slab_22": [
    "Collapser Small (1)",
@@ -1816,7 +1829,8 @@
   "slab_23": [
    "Battle Scene",
    "One Way Wall",
-   "Remasker New"
+   "Remasker New",
+   "Slab Lock L"
   ],
   "slab_cell_quiet": [
    "Breakable Wall",
@@ -2524,9 +2538,27 @@
     "shellwoodTwigShortcut"
    ]
   },
+  "slab_03": {
+   "Slab Lock (1)": [
+    "slab_17_openedGateLeft"
+   ],
+   "Slab Lock (2)": [
+    "slab_05_gateOpen"
+   ]
+  },
+  "slab_05": {
+   "Slab Lock (2)": [
+    "slab_05_gateOpen"
+   ]
+  },
   "slab_18": {
    "One Way Wall": [
     "slab_03_rubbishCleared"
+   ]
+  },
+  "slab_21": {
+   "Slab Lock": [
+    "slab_17_openedGateRight"
    ]
   },
   "slab_cell_quiet": {
