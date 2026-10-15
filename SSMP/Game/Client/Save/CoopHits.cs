@@ -1139,10 +1139,11 @@ internal partial class CoopHits {
 
         // A step of the way that the partner's sign took it there, or that the local player's sign takes it, which
         // goes to the others (see WalkSignHere and WalkOwnSign)
-        StepSignWalk(self, toState);
+        var step = StepSignWalk(self, toState);
         var way = NoteSignStep(self, toState);
         orig(self, toState);
         UnnoteSignStep(way, toState);
+        UnstepSignWalk(step, self, toState);
     }
 
     /// <summary>
@@ -2265,17 +2266,22 @@ internal partial class CoopHits {
             return;
         }
 
-        if (setOff) {
-            GoAfterSetter(entity, update);
-        }
-
         // What it checks of the player who did it is checked of the partner (SharedDice.JudgeFor)
         var elapsed = Mathf.Min((partnerRtt + _netClient.UpdateManager.AverageRtt) / 1000f, MaxStrikeCatchUp);
         var hostFsm = update.Index < entity.HostFsms.Count ? entity.HostFsms[update.Index] : null;
         var sameWay = false;
-        SharedDice.JudgeFor(hostFsm != null ? hostFsm.Fsm : null, CrestOf(update.PlayerId), () => sameWay =
-            entity.TakeInput(update.Index, update.Responder, input, elapsed, update.PlayerId, FigureOf(update.PlayerId))
+        void Take() => SharedDice.JudgeFor(hostFsm != null ? hostFsm.Fsm : null, CrestOf(update.PlayerId), () =>
+            sameWay = entity.TakeInput(
+                update.Index, update.Responder, input, elapsed, update.PlayerId, FigureOf(update.PlayerId)
+            )
         );
+
+        if (setOff) {
+            PlaySetOff(entity, update, hostFsm, Take);
+        } else {
+            Take();
+        }
+
         Logger.Info(
             sameWay
                 ? $"The partner played '{update.Responder}' on the copy of entity {update.EntityId}, so it is played " +
@@ -2419,10 +2425,6 @@ internal partial class CoopHits {
             return;
         }
 
-        if (update.Kind == CoopHitKind.EntitySetOff) {
-            GoAfterSetter(entity, update);
-        }
-
         // A catch comes with what the part that caught set on the FSM along with it
         Entity.ToldValues? caught = null;
         if (update.Hit.Length > 0) {
@@ -2434,12 +2436,50 @@ internal partial class CoopHits {
             }
         }
 
-        caught?.ApplyTo(fsm.Fsm);
-        SharedDice.JudgeFor(fsm.Fsm, CrestOf(update.PlayerId), () => entity.PlayForPartner(
-            fsm,
-            caught != null || Entity.Entity.CatchEvents.Contains(update.Responder),
-            () => fsm.SendEvent(update.Responder)
-        ));
+        void Play() {
+            caught?.ApplyTo(fsm.Fsm);
+            SharedDice.JudgeFor(fsm.Fsm, CrestOf(update.PlayerId), () => entity.PlayForPartner(
+                fsm,
+                caught != null || Entity.Entity.CatchEvents.Contains(update.Responder),
+                () => fsm.SendEvent(update.Responder)
+            ));
+        }
+
+        if (update.Kind == CoopHitKind.EntitySetOff) {
+            PlaySetOff(entity, update, fsm, Play);
+        } else {
+            Play();
+        }
+    }
+
+    /// <summary>
+    /// Plays what the partner set off on a creature here, which goes after the partner as it takes it (see
+    /// <see cref="GoAfterSetter"/>), so that what it measures of a player as it does is the partner. A sign of theirs
+    /// that comes to nothing - the FSM that hears it is back where it heard it, like a creature that lets a player in
+    /// one crest bind in peace - leaves it going after whom it went after before, as a sign of this game's player that
+    /// comes to nothing does (Entity.GoAfterOwnSign).
+    /// </summary>
+    /// <param name="entity">The entity.</param>
+    /// <param name="update">The update, from the partner, with the index of the FSM and the event.</param>
+    /// <param name="fsm">The FSM of the creature that takes it, or null.</param>
+    /// <param name="play">What plays it.</param>
+    private void PlaySetOff(Entity.Entity entity, CoopHitUpdate update, PlayMakerFSM? fsm, Action play) {
+        var creature = entity.Object.Host;
+        var isSign = Entity.Entity.PlayerSigns.Contains(update.Responder);
+        var heardIn = fsm != null ? fsm.Fsm?.ActiveState : null;
+        var hold = isSign && creature != null ? GamePatcher.TargetHoldOf(creature) : null;
+        GoAfterSetter(entity, update);
+        play();
+
+        if (!isSign || creature == null || heardIn == null || fsm == null || fsm.Fsm?.ActiveState != heardIn) {
+            return;
+        }
+
+        GamePatcher.GiveBackTarget(creature, hold);
+        Logger.Info(
+            $"The partner's '{update.Responder}' came to nothing on entity {update.EntityId}, which goes after whom " +
+            "it went after before"
+        );
     }
 
     /// <summary>

@@ -547,7 +547,7 @@ internal partial class CoopSave {
                     if (kind.IsDirector) {
                         StartSwitchedOnParts(fsm);
                     }
-                })
+                }, byPlayer: false)
             ];
 
             // Where the parts are that the state switched on or moved, which also hangs on where earlier states left

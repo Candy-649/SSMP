@@ -1019,9 +1019,12 @@ internal partial class Entity {
         _heldScale = null;
 
         // The scene host's FSM may have gone on already, which it said before this came, and the copy then plays what
-        // the scene host last played - unless it has only gone on through the combo of a catch
+        // the scene host last played - unless it has only gone on through the combo of a catch. An input that came
+        // back to where it found the FSM, like a sign that a creature looked at and let go, left nothing to play here:
+        // held here, the copy would keep every other input of the local player on it from playing at once until the
+        // scene host's FSM went somewhere else, which one that waits for the next sign may never do
         var hostState = EntityFsmActions.HostStateOf(fsm);
-        if (hostState != _runHereReached && !IsInCombo(hostState)) {
+        if (hostState != _runHereReached && !IsInCombo(hostState) || CameBackToWhereItWasFound(_runHereReached)) {
             StopRunningHere();
             if (heldAnimation is { } animation) {
                 UpdateAnimation(animation.Id, animation.WrapMode, false);
@@ -1225,10 +1228,24 @@ internal partial class Entity {
             }
         }
 
+        // Back where the input found it, the scene host's FSM is through with it, even where the copy is there already
+        // and saw nothing new: it follows the scene host again (see HearEcho)
         if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
-            stateName != fsm.ActiveStateName && !IsInCombo(stateName) && !FollowIntoTheAftermath(stateName)) {
+            (stateName != fsm.ActiveStateName || CameBackToWhereItWasFound(stateName)) && !IsInCombo(stateName) &&
+            !FollowIntoTheAftermath(stateName)) {
             CatchUpWithSceneHost();
         }
+    }
+
+    /// <summary>
+    /// Whether a state that the scene host's FSM is in is where the last input of the local player found the FSM that
+    /// runs here, for an input that is no catch: it played all of that input, and nothing is left for the copy to
+    /// run by itself.
+    /// </summary>
+    /// <param name="stateName">The state, or null.</param>
+    private bool CameBackToWhereItWasFound(string? stateName) {
+        return stateName != null && _runHereCombo == null && !_runHereForGood && !_runHereTalk &&
+               stateName == _runHereFrom?.Name;
     }
 
     /// <summary>

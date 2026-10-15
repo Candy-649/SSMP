@@ -263,6 +263,52 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Whom a creature or a thing goes after now, and until when it holds to them if it does, to give back with
+    /// <see cref="GiveBackTarget"/>; null when it goes after no one in particular.
+    /// </summary>
+    /// <param name="thing">The creature or thing, or one of its parts.</param>
+    public static (GameObject Target, float? LockedUntil)? TargetHoldOf(GameObject thing) {
+        var owner = GetEnemyTargetOwner(thing);
+        if (owner == null || !EnemyApprovedTargets.TryGetValue(owner.GetInstanceID(), out var target) ||
+            target == null) {
+            return null;
+        }
+
+        return (target, EnemyTargetLocks.TryGetValue(owner.GetInstanceID(), out var lockedUntil) ? lockedUntil : null);
+    }
+
+    /// <summary>
+    /// Gives a creature or a thing back whom it went after before something turned it to another player for nothing
+    /// (see <see cref="TargetHoldOf"/>). One that went after no one in particular goes after this game's player, as it
+    /// did: what its actions aim at was pointed at the other player meanwhile, and only someone it goes after points
+    /// them back.
+    /// </summary>
+    /// <param name="thing">The creature or thing, or one of its parts.</param>
+    /// <param name="hold">Whom it went after before, from <see cref="TargetHoldOf"/>.</param>
+    public static void GiveBackTarget(GameObject thing, (GameObject Target, float? LockedUntil)? hold) {
+        var owner = GetEnemyTargetOwner(thing);
+        if (owner == null) {
+            return;
+        }
+
+        var id = owner.GetInstanceID();
+        var hero = HeroController.SilentInstance;
+        var target = hold is { } held && held.Target != null ? held.Target : hero != null ? hero.gameObject : null;
+        if (target == null) {
+            EnemyApprovedTargets.Remove(id);
+            EnemyTargetLocks.Remove(id);
+            return;
+        }
+
+        EnemyApprovedTargets[id] = target;
+        if (hold is { LockedUntil: { } lockedUntil }) {
+            EnemyTargetLocks[id] = lockedUntil;
+        } else {
+            EnemyTargetLocks.Remove(id);
+        }
+    }
+
+    /// <summary>
     /// Has something of the room that the scene host's creature set off go after the player the creature went after
     /// in the host's game, wherever it looks at a player, as it does in that game where the creature set it off itself
     /// (<see cref="NoteWhatAnEnemySetsOff"/>): the copy of the creature here only passes on what the host's did, which

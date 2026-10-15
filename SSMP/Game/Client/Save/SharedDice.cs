@@ -121,6 +121,13 @@ internal static class SharedDice {
     private static readonly List<List<int>> Recordings = [];
 
     /// <summary>
+    /// What is being written down of something that no player set off - a machine of the room going round as the
+    /// scene host paces it, a game of the festival that its director runs - which takes no answers of checks of the
+    /// player (see <see cref="RecordKind.Judgment"/>): each game's own player meets it.
+    /// </summary>
+    private static readonly HashSet<List<int>> Unjudged = [];
+
+    /// <summary>
     /// The dice of the thing that the partner set off and this game is doing now, or null.
     /// </summary>
     private static IReadOnlyList<int>? _thrown;
@@ -212,16 +219,23 @@ internal static class SharedDice {
     /// </summary>
     /// <param name="action">What is set off.</param>
     /// <param name="entityFsm">The state machine of an entity that rolls with these dice too, or null for none.</param>
+    /// <param name="byPlayer">Whether the local player set it off, so that what it checks of a player goes with the
+    /// dice (see <see cref="RecordKind.Judgment"/>).</param>
     /// <returns>The dice, for <see cref="Throw"/> in the partner's game.</returns>
-    public static int[] Record(Action action, HutongGames.PlayMaker.Fsm? entityFsm = null) {
+    public static int[] Record(Action action, HutongGames.PlayMaker.Fsm? entityFsm = null, bool byPlayer = true) {
         var recording = new List<int>(TakeState());
         var lastEntityFsm = _entityFsm;
         Recordings.Add(recording);
+        if (!byPlayer) {
+            Unjudged.Add(recording);
+        }
+
         _entityFsm = entityFsm ?? lastEntityFsm;
         try {
             action();
         } finally {
             Recordings.Remove(recording);
+            Unjudged.Remove(recording);
             _entityFsm = lastEntityFsm;
         }
 
@@ -602,7 +616,7 @@ internal static class SharedDice {
         }
 
         foreach (var recording in Recordings) {
-            if (recording.Count + RecordHeadSize + 1 <= MaxNumbers) {
+            if (!Unjudged.Contains(recording) && recording.Count + RecordHeadSize + 1 <= MaxNumbers) {
                 recording.Add((int) RecordKind.Judgment);
                 recording.Add(action);
                 recording.Add(1);

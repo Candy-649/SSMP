@@ -537,7 +537,7 @@ internal class FleaGameCoop {
         }
 
         var eventName = self.sendEvent.Value;
-        var dice = SharedDice.Record(() => orig(self));
+        var dice = SharedDice.Record(() => orig(self), byPlayer: false);
         _sendObjectEvent(told, eventName, dice);
     }
 
