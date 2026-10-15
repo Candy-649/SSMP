@@ -269,32 +269,38 @@ internal static class SharedDice {
     }
 
     /// <summary>
-    /// Whether what another game set off is being played here with the dice it had (see <see cref="Throw"/>): what it
-    /// does plays out as it did there, and nothing of this game's own should be decided in the middle of it.
+    /// How many plays of what a player of another game set off are going on here (see <see cref="JudgeFor"/>).
     /// </summary>
-    public static bool Throwing => _thrown != null;
+    private static int _playsForOthers;
+
+    /// <summary>
+    /// Whether what a player of another game set off is being played here, with the dice their game had (see
+    /// <see cref="Throw"/>) or as it is told (see <see cref="JudgeFor"/>): what it does plays out as it did there, and
+    /// nothing of this game's own should be decided in the middle of it.
+    /// </summary>
+    public static bool PlaysAnotherGame => _thrown != null || _playsForOthers > 0;
 
     /// <summary>
     /// Plays here what a player of another game set off on a state machine, where a check of the crest that player
     /// wears that came with no answer of their game (see <see cref="RecordKind.Judgment"/>) is answered by the crest
     /// that every game is told they wear: what their game sent without dice, because its copy could not play it there
-    /// at once, or what their copy did not come to there.
+    /// at once, or what their copy did not come to there. While it plays, <see cref="PlaysAnotherGame"/> says so.
     /// </summary>
     /// <param name="fsm">The state machine, or null for none.</param>
     /// <param name="crest">The game's name for the crest that the player wears, or null if it is not known.</param>
     /// <param name="action">What the player set off.</param>
     public static void JudgeFor(HutongGames.PlayMaker.Fsm? fsm, string? crest, Action action) {
-        if (fsm == null || crest == null) {
-            action();
-            return;
+        _playsForOthers++;
+        var last = _setter;
+        if (fsm != null && crest != null) {
+            _setter = (fsm, crest);
         }
 
-        var last = _setter;
-        _setter = (fsm, crest);
         try {
             action();
         } finally {
             _setter = last;
+            _playsForOthers--;
         }
     }
 

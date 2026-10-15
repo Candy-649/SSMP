@@ -254,18 +254,22 @@ internal partial class GamePatcher {
         }
 
         var approvedTarget = GetApprovedEnemyTarget(owner);
+        var turns = TurnsOf(owner);
 
         if (!CanAcquireMultiplayerTarget(self)) {
-            return IsValidTargetForAlertRange(self, approvedTarget);
+            var inside = IsValidTargetForAlertRange(self, approvedTarget);
+            NoteRangeAnswer(turns, inside);
+            return inside;
         }
 
         var approvedTargetIsValid = IsValidTargetForAlertRange(self, approvedTarget);
+        NoteRangeAnswer(turns, approvedTargetIsValid);
 
-        // A creature that picks its moves turns from the player it goes after only as it starts one (TurnAtMoveStart),
-        // while they are still within its reach. A range with which it chooses a move asks about them alone, with the
-        // other player standing nearer or not; a range with which it notices players still notices the other one when
-        // its own is not in it, and only then.
-        if (approvedTarget != null && HoldsTargetBetweenMoves(owner, approvedTarget) &&
+        // A creature that picks its moves and fights the player it goes after turns from them only as it starts a move
+        // (TurnAtMoveStart), while they are still within its reach. A range with which it chooses a move asks about
+        // them alone, with the other player standing nearer or not; a range with which it notices players still
+        // notices the other one when its own is not in it, and only then.
+        if (approvedTarget != null && turns != null && HoldsTargetBetweenMoves(owner, turns, approvedTarget) &&
             (approvedTargetIsValid || !IsAwarenessRange(self))) {
             return approvedTargetIsValid;
         }
@@ -424,7 +428,10 @@ internal partial class GamePatcher {
             return approvedTarget;
         }
 
+        // What its sight finds is what its ranges would (see IsFighting)
         var owner = GetEnemyTargetOwner(detector.gameObject);
+        var turns = TurnsOf(owner);
+        NoteRangeAnswer(turns, false);
         if (approvedTarget == null) {
             GameObject? candidateTarget = null;
             var candidateDistance = float.PositiveInfinity;
@@ -462,6 +469,7 @@ internal partial class GamePatcher {
             }
 
             if (IsValidTargetForAlertRange(alertRange, approvedTarget)) {
+                NoteRangeAnswer(turns, true);
                 return approvedTarget;
             }
         }

@@ -269,37 +269,68 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whom a creature or a thing goes after now, and until when it holds to them if it does, to give back with
-    /// <see cref="GiveBackTarget"/>; null when it goes after no one in particular.
+    /// Whom a creature or a thing went after, until when it held to them and how it had turned (see TargetTurns), to
+    /// give back with <see cref="GiveBackTarget"/>.
+    /// </summary>
+    internal sealed class TargetHold {
+        /// <summary>
+        /// Whom it went after, or null for no one in particular.
+        /// </summary>
+        public GameObject? Target;
+
+        /// <summary>
+        /// Until when it held to them, if it did.
+        /// </summary>
+        public float? LockedUntil;
+
+        /// <summary>
+        /// A copy of how it had turned, if it picks its moves.
+        /// </summary>
+        public TargetTurns? Turns;
+    }
+
+    /// <summary>
+    /// Whom a creature or a thing goes after now, until when it holds to them if it does, and how it has turned, to
+    /// give back with <see cref="GiveBackTarget"/>; null for nothing that goes after anyone.
     /// </summary>
     /// <param name="thing">The creature or thing, or one of its parts.</param>
-    public static (GameObject Target, float? LockedUntil)? TargetHoldOf(GameObject thing) {
+    public static TargetHold? TargetHoldOf(GameObject thing) {
         var owner = GetEnemyTargetOwner(thing);
-        if (owner == null || !EnemyApprovedTargets.TryGetValue(owner.GetInstanceID(), out var target) ||
-            target == null) {
+        if (owner == null) {
             return null;
         }
 
-        return (target, EnemyTargetLocks.TryGetValue(owner.GetInstanceID(), out var lockedUntil) ? lockedUntil : null);
+        var id = owner.GetInstanceID();
+        var target = EnemyApprovedTargets.TryGetValue(id, out var approved) && approved != null ? approved : null;
+        return new TargetHold {
+            Target = target,
+            LockedUntil = target != null && EnemyTargetLocks.TryGetValue(id, out var lockedUntil) ? lockedUntil : null,
+            Turns = Turns.TryGetValue(id, out var turns) ? turns.Copy() : null
+        };
     }
 
     /// <summary>
     /// Gives a creature or a thing back whom it went after before something turned it to another player for nothing
-    /// (see <see cref="TargetHoldOf"/>). One that went after no one in particular goes after this game's player, as it
-    /// did: what its actions aim at was pointed at the other player meanwhile, and only someone it goes after points
-    /// them back.
+    /// (see <see cref="TargetHoldOf"/>), and puts back how it had turned, so that a turn that came to nothing does not
+    /// hold it to that player or start its chance over (see TurnAtMoveStart). One that went after no one in particular
+    /// goes after this game's player, as it did: what its actions aim at was pointed at the other player meanwhile,
+    /// and only someone it goes after points them back.
     /// </summary>
     /// <param name="thing">The creature or thing, or one of its parts.</param>
     /// <param name="hold">Whom it went after before, from <see cref="TargetHoldOf"/>.</param>
-    public static void GiveBackTarget(GameObject thing, (GameObject Target, float? LockedUntil)? hold) {
+    public static void GiveBackTarget(GameObject thing, TargetHold? hold) {
         var owner = GetEnemyTargetOwner(thing);
         if (owner == null) {
             return;
         }
 
         var id = owner.GetInstanceID();
+        if (hold?.Turns is { } before && Turns.TryGetValue(id, out var turns)) {
+            turns.PutBack(before);
+        }
+
         var hero = HeroController.SilentInstance;
-        var target = hold is { } held && held.Target != null ? held.Target : hero != null ? hero.gameObject : null;
+        var target = hold?.Target is { } held && held != null ? held : hero != null ? hero.gameObject : null;
         if (target == null) {
             EnemyApprovedTargets.Remove(id);
             EnemyTargetLocks.Remove(id);

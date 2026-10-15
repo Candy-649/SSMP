@@ -22,7 +22,8 @@ namespace SSMP.Game.Client;
 /// whole fight.
 /// Now the game that runs a creature rolls, each time the creature starts a move, whether it turns to another player
 /// within its reach - the way the games that share one monster between players do it, on a growing chance that is
-/// reset by a turn - and between two moves nothing turns it to the nearer one.
+/// reset by a turn - and while it fights the player it goes after, nothing between two moves turns it to the nearer
+/// one.
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
@@ -52,8 +53,8 @@ internal partial class GamePatcher {
     private const float TurnRollSpacing = 1f;
 
     /// <summary>
-    /// The chance that a creature turns, as it starts the first move on which it may, and how much more it is for
-    /// every move it started since without turning, up to <see cref="TurnChanceMost"/>. A turn resets it.
+    /// The chance that a creature turns, as it rolls for the first time after it turned, and how much more it is for
+    /// every roll since that kept it where it was, up to <see cref="TurnChanceMost"/>. A turn resets it.
     ///
     /// The way of the games that share one monster between several players: one that rolls the same chance every
     /// time can hold to one player for a long time by chance alone, and one whose chance grows cannot.
@@ -77,6 +78,13 @@ internal partial class GamePatcher {
     /// it watches with now (see <see cref="IsNoticedBy"/>): one it woke by and never asks again is left out.
     /// </summary>
     private const float AwarenessAskedTime = 2f;
+
+    /// <summary>
+    /// How long a creature that asks its ranges about the player it goes after still counts as fighting them after
+    /// one of its ranges last found them inside, in seconds (see <see cref="IsFighting"/>). Long enough to last from
+    /// one choice of a move to the next, which a creature may make a few seconds apart and only then ask its ranges.
+    /// </summary>
+    private const float FightMemory = 4f;
 
     /// <summary>
     /// How long after it last started a move a creature still counts as one that picks its moves, in seconds, and so
@@ -104,9 +112,10 @@ internal partial class GamePatcher {
     ];
 
     /// <summary>
-    /// Whether each state that has been gone into starts a move, written down the first time.
+    /// What each state that has been gone into has to do with the start of a move (see <see cref="NoteOfState"/>),
+    /// written down the first time.
     /// </summary>
-    private static readonly Dictionary<FsmState, bool> MoveStartStates = new();
+    private static readonly ConditionalWeakTable<FsmState, MoveStartNote> MoveStartStates = [];
 
     /// <summary>
     /// Whether each FSM looks at a player anywhere, written down the first time: one that only picks a voice at random
@@ -155,16 +164,32 @@ internal partial class GamePatcher {
     private Hook? _stateEnterHook;
 
     /// <summary>
+    /// What a state has to do with the start of a move.
+    /// </summary>
+    private sealed class MoveStartNote {
+        /// <summary>
+        /// Whether a move starts as the state is gone into.
+        /// </summary>
+        public bool Starts;
+
+        /// <summary>
+        /// Whether one of the ways out of it leads straight into a state where a move is picked at random.
+        /// </summary>
+        public bool Leads;
+    }
+
+    /// <summary>
     /// How a creature that picks its moves has turned from one player to another.
     /// </summary>
-    private sealed class TargetTurns {
+    internal sealed class TargetTurns {
         /// <summary>
         /// When it last turned, or was first seen to start a move.
         /// </summary>
         public float TurnedAt;
 
         /// <summary>
-        /// How many moves it started since.
+        /// How many moves it started since: -1 while it has not started the first one with the player it turned to
+        /// between two moves.
         /// </summary>
         public int MovesSince;
 
@@ -187,6 +212,15 @@ internal partial class GamePatcher {
         public float MoveAt;
 
         /// <summary>
+        /// When it last asked one of its ranges about a player, and when one of them last found the player it goes
+        /// after inside (see <see cref="IsFighting"/>).
+        /// </summary>
+        public float AskedAt = float.NegativeInfinity;
+
+        /// <inheritdoc cref="AskedAt"/>
+        public float FoundAt = float.NegativeInfinity;
+
+        /// <summary>
         /// When it last stopped going after each player.
         /// </summary>
         public readonly Dictionary<GameObject, float> LeftAt = new();
@@ -202,6 +236,32 @@ internal partial class GamePatcher {
 
         /// <inheritdoc cref="TargetInReach"/>
         public int ReachFrame = -1;
+
+        /// <summary>
+        /// A copy of how it has turned, to put back with <see cref="PutBack"/>.
+        /// </summary>
+        public TargetTurns Copy() {
+            var copy = new TargetTurns {
+                TurnedAt = TurnedAt, MovesSince = MovesSince, Misses = Misses, RolledAt = RolledAt
+            };
+            foreach (var pair in LeftAt) {
+                copy.LeftAt[pair.Key] = pair.Value;
+            }
+
+            return copy;
+        }
+
+        /// <summary>
+        /// Puts back how it had turned, from a copy (<see cref="Copy"/>): a turn that came to nothing is forgotten.
+        /// </summary>
+        /// <param name="copy">The copy.</param>
+        public void PutBack(TargetTurns copy) {
+            (TurnedAt, MovesSince, Misses, RolledAt) = (copy.TurnedAt, copy.MovesSince, copy.Misses, copy.RolledAt);
+            LeftAt.Clear();
+            foreach (var pair in copy.LeftAt) {
+                LeftAt[pair.Key] = pair.Value;
+            }
+        }
     }
 
     /// <summary>
@@ -226,7 +286,6 @@ internal partial class GamePatcher {
     /// Forgets how the creatures of the room turned, with the room.
     /// </summary>
     private static void ClearMoveStartTargets() {
-        MoveStartStates.Clear();
         AwarenessRanges.Clear();
         Turns.Clear();
         KeptTargets.Clear();
@@ -243,15 +302,16 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Has a creature that is going into a state where it picks its next move roll whether it turns to another player
-    /// first (see <see cref="TurnAtMoveStart"/>): before the actions of the state, which measure the player it goes
-    /// after to choose the move, so that the move is chosen for the one it goes after now. In 76 of the 171 FSMs of
-    /// creatures that pick a move at random, the state that picks it measures a player too (reports/fsm-usage.tsv).
+    /// Has a creature that is going into a state where it starts a move roll whether it turns to another player first
+    /// (see <see cref="TurnAtMoveStart"/>): before the actions of the state, so that what they measure of the player it
+    /// goes after, and the move picked from that, is of the one it goes after now. A move starts where one is picked
+    /// at random, or, for a creature that first measures the player - asks its ranges whether they are near or far -
+    /// and goes from there straight into the pick, where it measures them (see <see cref="NoteOfState"/>).
     /// </summary>
     /// <param name="orig">The original method.</param>
     /// <param name="self">The state.</param>
     private static void OnStateEnter(Action<FsmState> orig, FsmState self) {
-        if (StartsAMove(self) && self.Fsm?.FsmComponent is { } machine && machine != null) {
+        if (self.Fsm?.FsmComponent is { } machine && machine != null && NoteOfState(self).Starts) {
             try {
                 TurnAtMoveStart(machine, self);
             } catch (Exception e) {
@@ -265,48 +325,80 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whether a state is one where a creature picks its next move at random.
+    /// What a state has to do with the start of a move, worked out the first time it is gone into: a move starts in a
+    /// state where one is picked at random, and in one that measures a player and has a way straight into such a state.
     /// </summary>
     /// <param name="state">The state.</param>
-    private static bool StartsAMove(FsmState state) {
-        if (MoveStartStates.TryGetValue(state, out var starts)) {
-            return starts;
+    private static MoveStartNote NoteOfState(FsmState state) {
+        if (MoveStartStates.TryGetValue(state, out var note)) {
+            return note;
         }
 
-        starts = false;
-        if (state.Actions != null) {
-            foreach (var action in state.Actions) {
-                if (action != null && MovePickActionNames.Contains(action.GetType().Name)) {
-                    starts = true;
-                    break;
-                }
+        var leads = false;
+        foreach (var transition in state.Transitions ?? []) {
+            if (transition != null && state.Fsm?.GetState(transition.ToState) is { } to && PicksAMove(to)) {
+                leads = true;
+                break;
             }
         }
 
-        MoveStartStates[state] = starts;
-        return starts;
+        note = new MoveStartNote { Starts = PicksAMove(state) || leads && MeasuresAPlayer(state), Leads = leads };
+        MoveStartStates.Add(state, note);
+        return note;
+    }
+
+    /// <summary>
+    /// Whether a state picks a creature's next move at random.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private static bool PicksAMove(FsmState state) {
+        foreach (var action in state.Actions ?? []) {
+            if (action != null && MovePickActionNames.Contains(action.GetType().Name)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a state measures a player: asks where one is, faces one, aims at one or asks a range about one.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private static bool MeasuresAPlayer(FsmState state) {
+        foreach (var action in state.Actions ?? []) {
+            if (action is GetHero or CheckAlertRange or CheckAlertRangeByName ||
+                action != null && ActionRegistry.TargetedFsmActionTypes.Contains(action.GetType().Name)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// As a creature that this game runs for everyone starts a move, rolls whether it turns to another player within
     /// its reach, and turns it if so.
     ///
-    /// A creature turns only after it has gone after the player it turned to for a few seconds and a couple of moves,
-    /// and then each move it starts may turn it: first on a small chance that grows with every move it does not, and
-    /// reset by a turn. Who it turns to is rolled among the players within its reach, the nearer one and the one it
-    /// has left alone the longer counting more, and the one it goes after counting half (see
-    /// <see cref="PickTarget"/>). A creature whose player has gone out of its reach - too far, behind a wall, down -
-    /// turns at once to one who is within it.
+    /// A creature turns only while it fights (see <see cref="IsFighting"/>), and only after it has gone after the
+    /// player it turned to for a few seconds and a couple of moves; then each move it starts may turn it, at most once
+    /// a second: first on a small chance that grows with every roll that keeps it where it is, and reset by a turn.
+    /// Who it turns to is rolled among the players within its reach, the nearer one and the one it has left alone the
+    /// longer counting more, and the one it goes after counting half (see <see cref="PickTarget"/>). A creature whose
+    /// player went down or left turns at once to one within its reach, and one whose player went out of its reach -
+    /// too far, behind a wall - as soon as it may turn again: a sign from afar has it go after the one who gave it for
+    /// that long.
     ///
     /// Only the game that runs the creature rolls, and the other games see it turn as they see it do anything. What
-    /// another game set off with its dice plays here as it played there (SharedDice), so nothing rolls while it does,
-    /// and nothing rolls while the local player gives a sign, which the creature hears of them alone (Entity.Signs).
+    /// another player set off plays here as it played in their game (SharedDice.PlaysAnotherGame), so nothing rolls
+    /// while it does, and nothing rolls while the local player gives a sign, which the creature hears of them alone
+    /// (Entity.Signs).
     /// </summary>
     /// <param name="machine">The FSM of the creature.</param>
-    /// <param name="state">The state where it picks its next move.</param>
+    /// <param name="state">The state where the move starts.</param>
     private static void TurnAtMoveStart(PlayMakerFSM machine, FsmState state) {
-        if (Save.SharedDice.Throwing || Entity.Entity.OwnSign != null || !Entity.Entity.RunsHere(machine) ||
-            !AimsAtPlayers(machine)) {
+        if (Save.SharedDice.PlaysAnotherGame || Entity.Entity.OwnSign != null || !AimsAtPlayers(machine) ||
+            !Entity.Entity.RunsHere(machine)) {
             return;
         }
 
@@ -328,14 +420,20 @@ internal partial class GamePatcher {
             return;
         }
 
-        // Two of its FSMs that start a move in the same frame start one move
-        if (turns.MoveFrame == Time.frameCount) {
+        // Two of its FSMs that start a move in the same frame start one move, and a pick that the state where the move
+        // started leads straight into is a part of that move (the game notes the state it left as it leaves it)
+        if (turns.MoveFrame == Time.frameCount || state.Fsm?.PreviousActiveState is { } previous &&
+            previous != state && NoteOfState(previous) is { Starts: true, Leads: true } && LeadsInto(previous, state)) {
             return;
         }
 
         turns.MoveFrame = Time.frameCount;
         turns.MoveAt = now;
         turns.MovesSince++;
+
+        if (!IsFighting(turns, now)) {
+            return;
+        }
 
         // A creature that has noticed nobody yet turns to nobody; one that notices no one by itself - a boss that only
         // ever looks at the player - goes after this game's player while it goes after no one in particular
@@ -349,11 +447,15 @@ internal partial class GamePatcher {
             return;
         }
 
+        var holding = IsHolding(turns, now);
         var forced = !candidates.Contains(held);
         var chance = 1f;
-        if (!forced) {
-            if (candidates.Count < 2 || turns.MovesSince < TurnHoldMoves || now - turns.TurnedAt < TurnHoldTime ||
-                now - turns.RolledAt < TurnRollSpacing) {
+        if (forced) {
+            if (holding && PlayerTargetRegistry.GetTrackedPlayers().Contains(held)) {
+                return;
+            }
+        } else {
+            if (candidates.Count < 2 || holding || now - turns.RolledAt < TurnRollSpacing) {
                 return;
             }
 
@@ -372,7 +474,7 @@ internal partial class GamePatcher {
         }
 
         var why = forced
-            ? $"{DescribePlayer(held)}, whom it went after, was out of its reach"
+            ? $"{DescribePlayer(held)}, whom it went after, was down or out of its reach"
             : $"it rolled under {chance:P0} after {turns.Misses} roll(s) that kept it where it was";
         Logger.Info(
             $"{owner.name} turned to {DescribePlayer(pick)} as it started a move in '{state.Name}' of " +
@@ -381,11 +483,29 @@ internal partial class GamePatcher {
 
         turns.LeftAt[held] = now;
         ApproveEnemyTarget(owner, pick);
+
+        // Turned as the move starts, this move is the first with the one it turned to
+        turns.MovesSince = 0;
+    }
+
+    /// <summary>
+    /// Whether one of the ways out of a state leads straight into another.
+    /// </summary>
+    /// <param name="from">The state the way leads out of.</param>
+    /// <param name="to">The state it would lead into.</param>
+    private static bool LeadsInto(FsmState from, FsmState to) {
+        foreach (var transition in from.Transitions ?? []) {
+            if (transition != null && transition.ToState == to.Name) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
     /// Notes that a creature turned from one player to another, whatever turned it - its own roll, a range, a sign - so
-    /// that it holds to the one it turned to before it rolls again.
+    /// that it holds to the one it turned to before it rolls again: for the move it starts next and the one after.
     /// </summary>
     /// <param name="instanceId">The instance ID of the creature.</param>
     /// <param name="from">The player it went after before, or null for none.</param>
@@ -395,7 +515,7 @@ internal partial class GamePatcher {
         }
 
         turns.TurnedAt = Time.unscaledTime;
-        turns.MovesSince = 0;
+        turns.MovesSince = -1;
         turns.Misses = 0;
         if (from != null) {
             turns.LeftAt[from] = Time.unscaledTime;
@@ -403,15 +523,64 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// How a creature that picks its moves has turned, or null for one that does not.
+    /// </summary>
+    /// <param name="owner">The creature, or null.</param>
+    private static TargetTurns? TurnsOf(GameObject? owner) {
+        return owner != null && Turns.TryGetValue(owner.GetInstanceID(), out var turns) ? turns : null;
+    }
+
+    /// <summary>
+    /// Notes that a creature asked one of its ranges about a player, and whether the range found the player it goes
+    /// after inside (see <see cref="IsFighting"/>).
+    /// </summary>
+    /// <param name="turns">How the creature has turned, or null for one that does not pick its moves.</param>
+    /// <param name="foundTarget">Whether the range found the player it goes after inside.</param>
+    private static void NoteRangeAnswer(TargetTurns? turns, bool foundTarget) {
+        if (turns == null) {
+            return;
+        }
+
+        turns.AskedAt = Time.unscaledTime;
+        if (foundTarget) {
+            turns.FoundAt = Time.unscaledTime;
+        }
+    }
+
+    /// <summary>
+    /// Whether a creature still holds to the player it last turned to whatever else: for the next two moves it starts
+    /// and <see cref="TurnHoldTime"/>.
+    /// </summary>
+    /// <param name="turns">How it has turned.</param>
+    /// <param name="now">The time now.</param>
+    private static bool IsHolding(TargetTurns turns, float now) {
+        return turns.MovesSince < TurnHoldMoves || now - turns.TurnedAt < TurnHoldTime;
+    }
+
+    /// <summary>
+    /// Whether a creature fights the player it goes after: it turned to them lately (<see cref="IsHolding"/>), one of
+    /// its ranges found them inside within <see cref="FightMemory"/>, or it asks none of its ranges at all, like a boss
+    /// that only ever looks at the player. A creature that does none of it - back in its corner after the player it
+    /// went after has gone, watching for whoever comes - neither rolls nor holds to them.
+    /// </summary>
+    /// <param name="turns">How it has turned.</param>
+    /// <param name="now">The time now.</param>
+    private static bool IsFighting(TargetTurns turns, float now) {
+        return IsHolding(turns, now) || now - turns.FoundAt <= FightMemory || now - turns.AskedAt > FightMemory;
+    }
+
+    /// <summary>
     /// Whether a creature that picks its moves holds to the player it goes after until it starts its next move (see
-    /// AnswerWhetherAPlayerIsInAlertRange): it does while it started one lately and the player is still within its
-    /// reach. Worked out once a frame, since its ranges ask many times.
+    /// AnswerWhetherAPlayerIsInAlertRange): it does while it started one lately, fights the player (see
+    /// <see cref="IsFighting"/>) and the player is still within its reach. The reach is worked out once a frame, since
+    /// its ranges ask many times.
     /// </summary>
     /// <param name="owner">The creature.</param>
+    /// <param name="turns">How it has turned.</param>
     /// <param name="target">The player it goes after.</param>
-    private static bool HoldsTargetBetweenMoves(GameObject owner, GameObject target) {
-        if (!Turns.TryGetValue(owner.GetInstanceID(), out var turns) ||
-            Time.unscaledTime - turns.MoveAt > MovePickerMemory) {
+    private static bool HoldsTargetBetweenMoves(GameObject owner, TargetTurns turns, GameObject target) {
+        var now = Time.unscaledTime;
+        if (now - turns.MoveAt > MovePickerMemory || !IsHolding(turns, now) && now - turns.FoundAt > FightMemory) {
             return false;
         }
 
@@ -447,7 +616,8 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whether a player stands within <see cref="TargetReach"/> of a place, with no wall in between.
+    /// Whether a player stands within <see cref="TargetReach"/> of a place, with no wall in between. A creature whose
+    /// own place is inside a wall, like one that burrows, has no one within its reach, and turns as it did before.
     /// </summary>
     /// <param name="origin">Where the creature is.</param>
     /// <param name="player">The player.</param>
@@ -514,7 +684,8 @@ internal partial class GamePatcher {
     /// Whether a range is one with which a creature notices a player - it wakes, comes out of hiding or keeps watch by
     /// it - by the game's own word for it in its name, rather than one with which it chooses what to do to the player
     /// it goes after. A player who comes into one is noticed whomever the creature goes after, as before; one who
-    /// comes into another does not turn it until it starts a move (see AnswerWhetherAPlayerIsInAlertRange).
+    /// comes into another does not turn a creature that fights until it starts a move (see
+    /// AnswerWhetherAPlayerIsInAlertRange).
     /// </summary>
     /// <param name="range">The range.</param>
     private static bool IsAwarenessRange(AlertRange range) {
@@ -544,15 +715,8 @@ internal partial class GamePatcher {
 
         var aims = false;
         foreach (var state in machine.FsmStates ?? []) {
-            foreach (var action in state?.Actions ?? []) {
-                if (action is GetHero or CheckAlertRange or CheckAlertRangeByName ||
-                    action != null && ActionRegistry.TargetedFsmActionTypes.Contains(action.GetType().Name)) {
-                    aims = true;
-                    break;
-                }
-            }
-
-            if (aims) {
+            if (state != null && MeasuresAPlayer(state)) {
+                aims = true;
                 break;
             }
         }
