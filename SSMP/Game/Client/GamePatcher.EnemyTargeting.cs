@@ -246,6 +246,7 @@ internal partial class GamePatcher {
             // Only on a change. Set every time it is approved, and an enemy that is asked about the same player five
             // times a second would hold a lock that never runs out and could never turn to the other one at all.
             EnemyTargetLocks[id] = Time.unscaledTime + TargetLockTime;
+            NoteTurn(id, last);
 
             SayWhoAnEnemyGoesAfter(owner, target);
         }
@@ -258,8 +259,13 @@ internal partial class GamePatcher {
     /// </summary>
     /// <param name="thing">The thing, or one of its parts.</param>
     /// <param name="player">The player.</param>
-    public static void SetTargetOf(GameObject thing, GameObject player) {
+    /// <param name="kept">Whether a rule of its own sets whom it goes after, so that it never turns to another player
+    /// by itself as it starts a move (see TurnAtMoveStart).</param>
+    public static void SetTargetOf(GameObject thing, GameObject player, bool kept = false) {
         ApproveEnemyTarget(thing, player);
+        if (kept && GetEnemyTargetOwner(thing) is { } owner && owner != null) {
+            KeptTargets.Add(owner.GetInstanceID());
+        }
     }
 
     /// <summary>
@@ -415,6 +421,7 @@ internal partial class GamePatcher {
         );
 
         RegisterTargetedFsmActionEnterHooks();
+        RegisterMoveStartHook();
 
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdateRetargetEnemyTransforms;
         UnityEngine.SceneManagement.SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -431,6 +438,7 @@ internal partial class GamePatcher {
         _walkerUpdateWaitingForConditionsHook = null;
 
         DisposeTargetedFsmActionEnterHooks();
+        DisposeMoveStartHook();
 
         if (MonoBehaviourUtil.Instance != null) {
             MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdateRetargetEnemyTransforms;
@@ -462,6 +470,7 @@ internal partial class GamePatcher {
         SetOffByEnemy.Clear();
         SetOffForPlayer.Clear();
         ClearNeedolinTargets();
+        ClearMoveStartTargets();
     }
 
     /// <summary>
@@ -1516,5 +1525,6 @@ internal partial class GamePatcher {
         TargetOwnerCache.Remove(instanceId);
         SongTargets.Remove(instanceId);
         PendingSongTargets.Remove(instanceId);
+        ForgetMoveStartTargets(instanceId);
     }
 }

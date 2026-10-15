@@ -2898,6 +2898,18 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether an FSM is one of a creature's own that this game runs for every game: an FSM of the room's own object of
+    /// an entity whose scene host this game is, that is not run by each game (see <see cref="IsRunByEachGame"/>). What
+    /// such an FSM decides, the other games see the creature do.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    internal static bool RunsHere(PlayMakerFSM? fsm) {
+        return fsm != null &&
+               FindByPart(fsm.gameObject) is { _isSceneHostDetermined: true, _isControlled: false } entity &&
+               entity._fsms.Host.Contains(fsm) && !entity.IsRunByEachGame(fsm);
+    }
+
+    /// <summary>
     /// Whether an FSM is one of those of this entity that only the game of the scene host runs: an FSM of the creature
     /// itself, on the room's own object or on the copy, that is not run by each game (see
     /// <see cref="IsRunByEachGame"/>). What such an FSM opens - a line, a prompt - opens in that game alone.

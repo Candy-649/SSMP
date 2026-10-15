@@ -523,7 +523,7 @@ internal class FleaGameCoop {
             : null;
         if (target != null && target.name == ThrowerName && _entityManager.IsSceneHost &&
             HeroController.instance != null) {
-            GamePatcher.SetTargetOf(target, PickThrowTarget(game));
+            GamePatcher.SetTargetOf(target, PickThrowTarget(game), kept: true);
         }
 
         if (GetRoomFsm(self, target) is not { } told) {

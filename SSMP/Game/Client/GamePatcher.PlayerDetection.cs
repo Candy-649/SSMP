@@ -94,6 +94,11 @@ internal partial class GamePatcher {
         /// Whether something that could be fought was above it then.
         /// </summary>
         public bool BelongsToAnEnemy;
+
+        /// <summary>
+        /// When the creature last asked it whether a player was in it (see IsNoticedBy).
+        /// </summary>
+        public float AskedAt = float.NegativeInfinity;
     }
 
     /// <summary>
@@ -239,6 +244,10 @@ internal partial class GamePatcher {
             return IsAnyPlayerInsideAlertRange(self);
         }
 
+        if (EnemyAlertRanges.TryGetValue(self, out var note)) {
+            note.AskedAt = Time.unscaledTime;
+        }
+
         var owner = GetEnemyTargetOwner(self.gameObject);
         if (owner == null) {
             return false;
@@ -250,8 +259,18 @@ internal partial class GamePatcher {
             return IsValidTargetForAlertRange(self, approvedTarget);
         }
 
-        var candidateTarget = GetNearestPlayerInsideAlertRange(self);
         var approvedTargetIsValid = IsValidTargetForAlertRange(self, approvedTarget);
+
+        // A creature that picks its moves turns from the player it goes after only as it starts one (TurnAtMoveStart),
+        // while they are still within its reach. A range with which it chooses a move asks about them alone, with the
+        // other player standing nearer or not; a range with which it notices players still notices the other one when
+        // its own is not in it, and only then.
+        if (approvedTarget != null && HoldsTargetBetweenMoves(owner, approvedTarget) &&
+            (approvedTargetIsValid || !IsAwarenessRange(self))) {
+            return approvedTargetIsValid;
+        }
+
+        var candidateTarget = GetNearestPlayerInsideAlertRange(self);
         if (candidateTarget != null &&
             HasLineOfSightToAlertRangeTarget(self, candidateTarget) &&
             (approvedTarget == null || !approvedTargetIsValid ||

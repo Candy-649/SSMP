@@ -269,6 +269,12 @@ internal static class SharedDice {
     }
 
     /// <summary>
+    /// Whether what another game set off is being played here with the dice it had (see <see cref="Throw"/>): what it
+    /// does plays out as it did there, and nothing of this game's own should be decided in the middle of it.
+    /// </summary>
+    public static bool Throwing => _thrown != null;
+
+    /// <summary>
     /// Plays here what a player of another game set off on a state machine, where a check of the crest that player
     /// wears that came with no answer of their game (see <see cref="RecordKind.Judgment"/>) is answered by the crest
     /// that every game is told they wear: what their game sent without dice, because its copy could not play it there
