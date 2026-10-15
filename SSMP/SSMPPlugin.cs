@@ -48,6 +48,7 @@ public partial class SSMPPlugin : BaseUnityPlugin {
 
         // Add the MonoBehaviourUtil to the game object associated with this plugin
         gameObject.AddComponent<MonoBehaviourUtil>();
+        LoadWatch.Initialize();
 
         _gameManager = new Game.GameManager();
         _gameManager.Initialize();

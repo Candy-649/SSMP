@@ -16,7 +16,8 @@ namespace SSMP.Util;
 /// says how much of it went to the mod's per-frame handlers and to which of them, and whether memory was cleaned up
 /// meanwhile, so that a freeze or a stutter can be put down to its cause. The mod's coroutines and its hooks into the
 /// game's own methods aren't timed, so a small share of the handlers doesn't clear the mod. Normal play writes nothing,
-/// and neither loading a room nor the game window being behind is counted.
+/// and neither loading a room nor the game window being behind is counted: <see cref="LoadWatch"/> writes down each
+/// change of room, with the frames of it.
 /// </summary>
 internal static class FrameWatch {
     /// <summary>
@@ -204,6 +205,8 @@ internal static class FrameWatch {
             CountFrame(now, (now - lastFrame) * TickTime, collections - _lastCollections, update, lateUpdate, fixedUpdate);
         }
 
+        LoadWatch.OnFrame(now, ModTicks(update, lateUpdate, fixedUpdate));
+
         update.EndFrame(counts);
         lateUpdate.EndFrame(counts);
         fixedUpdate.EndFrame(counts);
@@ -240,11 +243,7 @@ internal static class FrameWatch {
         TimedEvent lateUpdate,
         TimedEvent fixedUpdate
     ) {
-        var modTicks = update.FrameTicks + lateUpdate.FrameTicks + fixedUpdate.FrameTicks;
-        foreach (var part in _parts) {
-            modTicks += part.FrameTicks;
-        }
-
+        var modTicks = ModTicks(update, lateUpdate, fixedUpdate);
         _stretchFrames++;
         _stretchTime += frameTime;
         _stretchSlowest = System.Math.Max(_stretchSlowest, frameTime);
@@ -271,6 +270,18 @@ internal static class FrameWatch {
             $"{modTicks * TickTime * 1000:0.0} ms of it" +
             $"{DescribeSlowest(part => part.FrameTicks, 1, update, lateUpdate, fixedUpdate)}; {DescribeState()}"
         );
+    }
+
+    /// <summary>
+    /// The time the mod's per-frame handlers took in the frame that just ended, in ticks of <see cref="Stopwatch"/>.
+    /// </summary>
+    private static long ModTicks(TimedEvent update, TimedEvent lateUpdate, TimedEvent fixedUpdate) {
+        var modTicks = update.FrameTicks + lateUpdate.FrameTicks + fixedUpdate.FrameTicks;
+        foreach (var part in _parts) {
+            modTicks += part.FrameTicks;
+        }
+
+        return modTicks;
     }
 
     /// <summary>

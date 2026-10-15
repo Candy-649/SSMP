@@ -1152,10 +1152,29 @@ internal class ClientManager : IClientManager {
     }
 
     /// <summary>
-    /// Callback method for when we receive that a player is already in the scene we are entering.
+    /// Callback method for when we receive that a player is already in the scene we are entering. Its time goes into
+    /// the line about the change of room, as taking the state of the room is part of coming in (see
+    /// <see cref="LoadWatch"/>).
     /// </summary>
     /// <param name="alreadyInScene">The ClientPlayerAlreadyInScene packet data.</param>
     private void OnPlayerAlreadyInScene(ClientPlayerAlreadyInScene alreadyInScene) {
+        var start = Stopwatch.GetTimestamp();
+        if (TakePlayerAlreadyInScene(alreadyInScene)) {
+            LoadWatch.OnRoomState(
+                Stopwatch.GetTimestamp() - start,
+                alreadyInScene.PlayerEnterSceneList.Count,
+                alreadyInScene.EntityUpdateList.Count
+            );
+        }
+    }
+
+    /// <summary>
+    /// Takes the state of the scene we are entering from the server: the players in it, whether this game runs it, and
+    /// its creatures.
+    /// </summary>
+    /// <param name="alreadyInScene">The ClientPlayerAlreadyInScene packet data.</param>
+    /// <returns>Whether it was taken, being the state of the scene this game is in.</returns>
+    private bool TakePlayerAlreadyInScene(ClientPlayerAlreadyInScene alreadyInScene) {
         // The answer to entering a scene that was left again before it came. Taken here, it put the players of that
         // scene into this one and gave this game the role it had there, and it stopped the question from being asked
         // again: the answer for this scene is still on its way, but until it came, this one counted as settled.
@@ -1165,7 +1184,7 @@ internal class ClientManager : IClientManager {
                 $"Received AlreadyInScene packet for '{alreadyInScene.SceneName}', but this game is in " +
                 $"'{sceneName}' now, ignoring"
             );
-            return;
+            return false;
         }
 
         Logger.Info("Received AlreadyInScene packet");
@@ -1210,6 +1229,8 @@ internal class ClientManager : IClientManager {
             _sceneHostDetermined = true;
             _sceneResyncDueAt = -1f;
         }
+
+        return true;
     }
 
     /// <summary>
