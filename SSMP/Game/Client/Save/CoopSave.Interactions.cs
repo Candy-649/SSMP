@@ -262,6 +262,12 @@ internal partial class CoopSave {
             );
         }
 
+        // The trap plates of the prison, which are no PressurePlateBase (see OnTrapPlateInside)
+        AddInteractionHook(
+            typeof(TrapPressurePlate).GetMethod("OnInsideStateChanged", InstanceFlags, null, [typeof(bool)], null),
+            new Action<Action<TrapPressurePlate, bool>, TrapPressurePlate, bool>(OnTrapPlateInside)
+        );
+
         // The rings that a player hangs on to pull something down (see CoopSave.PullRings)
         RegisterRingHooks();
 

@@ -302,6 +302,80 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Whether a trap plate here is being pressed for a partner, whose press must not go back to them.
+    /// </summary>
+    private bool _pressingTrapPlateForPartner;
+
+    /// <summary>
+    /// The local player stepped onto a trap plate of the prison, which is no <see cref="PressurePlateBase"/>: it
+    /// watches who is on it with a <see cref="TrackTriggerObjects"/> and, once down, sets off its trap - a blade that
+    /// runs along its rail, or spikes. It counts only the hero of its own game, so the trap went off only for the
+    /// player who stepped on it. The partner's plate is pressed in turn (see <see cref="PressTrapPlateForPartner"/>),
+    /// and each game runs its own trap, which hurts whoever is in its way there.
+    /// </summary>
+    private void OnTrapPlateInside(Action<TrapPressurePlate, bool> orig, TrapPressurePlate self, bool isInside) {
+        // Only a step that starts the plate going down sets its trap off
+        var wasUp = self.dropRoutine == null;
+        orig(self, isInside);
+
+        if (!isInside || !wasUp || self.dropRoutine == null || _pressingTrapPlateForPartner ||
+            _checkedMembers.Count == 0 || !IsLocalHeroIn(self.tracker)) {
+            return;
+        }
+
+        var path = ScenePath.Get(self.transform);
+        SendToMembers(new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.WorldTrigger,
+            Scene = self.gameObject.scene.name,
+            ObjectPath = path,
+            StateName = ""
+        });
+        Logger.Info($"Sent the trap plate '{path}' to the partner");
+    }
+
+    /// <summary>
+    /// Presses a trap plate here for a partner who stepped on it in their game, so it goes down and sets its trap off
+    /// here too, and comes up again once it has, unless something here stands on it. A plate that is down already goes
+    /// on as it is, as it would under a second player.
+    /// </summary>
+    private void PressTrapPlateForPartner(TrapPressurePlate plate, string username) {
+        if (plate.dropRoutine != null || plate.plate == null) {
+            return;
+        }
+
+        _pressingTrapPlateForPartner = true;
+        try {
+            plate.OnInsideStateChanged(true);
+        } finally {
+            _pressingTrapPlateForPartner = false;
+        }
+
+        if (plate.tracker == null || !plate.tracker.IsInside) {
+            plate.OnInsideStateChanged(false);
+        }
+
+        Logger.Info($"{username} stepped on the trap plate '{plate.name}'");
+    }
+
+    /// <summary>
+    /// Whether the local hero is among what a trigger counts as inside it.
+    /// </summary>
+    private static bool IsLocalHeroIn(TrackTriggerObjects? tracker) {
+        var hero = HeroController.instance != null ? HeroController.instance.transform : null;
+        if (tracker == null || hero == null) {
+            return false;
+        }
+
+        foreach (var inside in tracker.InsideGameObjects) {
+            if (inside != null && (inside.transform == hero || inside.transform.IsChildOf(hero))) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Sends a partner who has just walked into the room the ones of <see cref="WorldTriggerKinds"/> that went off here
     /// and stay that way until the room loads again (<see cref="WorldTriggerKind.Lasting"/>). Otherwise what goes off
     /// is only sent at the moment it does, which a partner who came in later never hears: the character that the room
@@ -385,8 +459,16 @@ internal partial class CoopSave {
         // and gives up if they get off in time. Not one that the player here is on already, or that went down already.
         // Nothing gets off a plate that has gone down, so one that came up again may still stand on itself
         if (update.FsmName.Length == 0) {
-            if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target ||
-                target.GetComponent<PressurePlateBase>() is not { } plate) {
+            if (ScenePath.Find(update.ObjectPath, update.Scene) is not { activeInHierarchy: true } target) {
+                return;
+            }
+
+            if (target.GetComponent<TrapPressurePlate>() is { } trapPlate) {
+                PressTrapPlateForPartner(trapPlate, player.Username);
+                return;
+            }
+
+            if (target.GetComponent<PressurePlateBase>() is not { } plate) {
                 return;
             }
 
