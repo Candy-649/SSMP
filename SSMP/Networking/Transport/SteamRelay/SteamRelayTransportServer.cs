@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Threading;
 using SSMP.Game;
@@ -164,7 +165,11 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
     }
 
     private void DisconnectClientInternal(SteamRelayTransportClient client) {
-        if (!_clients.TryRemove(client.SteamId, out _)) return;
+        // Only this entry of the player: one that a session of theirs opened since is not this one to end, as a player
+        // let go for silence while their next session already carried their messages lost those too (review of
+        // 54f7161)
+        var entry = new KeyValuePair<ulong, SteamRelayTransportClient>(client.SteamId, client);
+        if (!((ICollection<KeyValuePair<ulong, SteamRelayTransportClient>>) _clients).Remove(entry)) return;
 
         // Whichever way they leave: a player who heard nothing from here leaves by their own game's choice, which this
         // game is told as an ordinary leave, and this is all that is left to tell where its messages stopped
@@ -244,6 +249,19 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
 
         var info = failure.m_info;
         var steamId = info.m_identityRemote.GetSteamID64();
+
+        // A session the player closed is no failure of theirs: it is how either side opens a link that carries nothing
+        // anew (SteamRelayMessaging.RenewSession), and the next message opens the new one. Steam reports such a close
+        // as a failure when something was still on its way over the session (GameNetworkingSockets' CheckConnection),
+        // and letting the player go for it ended the game that the new session was about to carry on. A player who
+        // leaves says so in a message of their own, or is let go once nothing has arrived from them for long enough
+        if (info.m_eState == ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer) {
+            Logger.Info(
+                $"Steam relay: {steamId} closed their session, which is not taken as their leaving: " +
+                SteamRelayMessaging.DescribeFailure(info)
+            );
+            return;
+        }
 
         Logger.Warn($"Steam relay: the session with {steamId} failed: {SteamRelayMessaging.DescribeFailure(info)}");
 

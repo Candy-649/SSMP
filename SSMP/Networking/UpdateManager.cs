@@ -31,9 +31,18 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private const int ConnectionTimeoutCeiling = 30000;
 
     /// <summary>
+    /// How long, in milliseconds, nothing has to have arrived before the transport's link is opened anew, while it
+    /// still counts as connected (see <see cref="RenewStalledLink"/>). A shorter stretch is left to come back by
+    /// itself, as stretches of 13 to 19 s did in the players' logs (09-21, 09-22, 10-09): Steam keeps what was sent in
+    /// one and delivers it once the stretch is over, for 45 s (SteamRelayMessaging.SessionTimeout), where opening the
+    /// link anew loses it. The two stretches that never came back (10-12, 10-15) went on past
+    /// <see cref="ConnectionTimeoutCeiling"/>.
+    /// </summary>
+    private const int RenewLinkAfter = 15000;
+
+    /// <summary>
     /// How long, in milliseconds, nothing has arrived since the transport's link was last opened anew before it is
-    /// opened anew again, while the link still counts as connected (see <see cref="RenewStalledLink"/>). The first
-    /// time is at <see cref="ConnectionTimeout"/>.
+    /// opened anew again.
     /// </summary>
     private const int RenewLinkInterval = 8000;
 
@@ -43,6 +52,12 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// gets this long to carry the first things sent over it.
     /// </summary>
     private const int LinkSettleTime = 2000;
+
+    /// <summary>
+    /// How long, in milliseconds, nothing has to have arrived before the send loop watches whether the transport's
+    /// link counts as connected, for <see cref="LinkSettleTime"/>.
+    /// </summary>
+    private const int LinkWatchFrom = 1000;
 
     /// <summary>
     /// The MTU (maximum transfer unit) to use to send packets with. If the length of a packet exceeds this, we break
@@ -99,21 +114,27 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private Func<bool>? _transportSessionConnected;
 
     /// <summary>
+    /// The quiet stretch that the three fields below are about, by when the last thing before it arrived. Only the send
+    /// loop reads and writes these, and starts them over when it sees that something arrived since.
+    /// </summary>
+    private DateTime _linkStretch;
+
+    /// <summary>
     /// How long nothing had arrived, in milliseconds, when the link was last seen not to count as connected in this
     /// quiet stretch - still being built, or closed by the other side - or -1 if it was not.
     /// </summary>
-    private volatile int _linkUnsettledAtQuiet = -1;
+    private int _linkUnsettledAtQuiet = -1;
 
     /// <summary>
     /// How long nothing had arrived, in milliseconds, when the link was last opened anew in this quiet stretch, or -1
-    /// if it was not. Written by the send loop and cleared by whatever arrives.
+    /// if it was not.
     /// </summary>
-    private volatile int _renewedAtQuiet = -1;
+    private int _renewedAtQuiet = -1;
 
     /// <summary>
     /// How many times the link was opened anew in this quiet stretch.
     /// </summary>
-    private volatile int _renewals;
+    private int _renewals;
 
     /// <summary>
     /// How many seconds from before a quiet stretch began are written down with it, to show how the link stood as it
@@ -402,9 +423,6 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         var gap = (now - _lastReceiveTime).TotalSeconds;
         _lastReceiveTime = now;
         _timeoutGraceTold = false;
-        _renewedAtQuiet = -1;
-        _renewals = 0;
-        _linkUnsettledAtQuiet = -1;
         if (gap >= ReceiveGapTold) {
             Logger.Info($"Packets arrive again after {gap:F1}s in which none did");
             try {
@@ -700,7 +718,9 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
                 // Check for connection timeout
                 // We use DateTime.UtcNow which is consistent with _lastReceiveTime
-                var quietFor = (DateTime.UtcNow - _lastReceiveTime).TotalMilliseconds;
+                var lastReceive = _lastReceiveTime;
+                var quietFor = (DateTime.UtcNow - lastReceive).TotalMilliseconds;
+                WatchLink(lastReceive, quietFor);
                 if (quietFor > ConnectionTimeout) {
                     // Ask the transport before giving up on the other player. A relay between continents can stop
                     // delivering for seconds at a time without the session being gone: one player was dropped in
@@ -764,8 +784,37 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     }
 
     /// <summary>
+    /// Starts the watch of the link over when something arrived since the send loop last looked, and notes when the
+    /// link did not count as connected while nothing has arrived for a while: still being built, maybe after the other
+    /// side opened it anew, which it is then given <see cref="LinkSettleTime"/> to finish (see
+    /// <see cref="RenewStalledLink"/>).
+    /// </summary>
+    /// <param name="lastReceive">When the last thing arrived.</param>
+    /// <param name="quietFor">How long nothing has arrived since, in milliseconds.</param>
+    private void WatchLink(DateTime lastReceive, double quietFor) {
+        if (lastReceive != _linkStretch) {
+            _linkStretch = lastReceive;
+            _linkUnsettledAtQuiet = -1;
+            _renewedAtQuiet = -1;
+            _renewals = 0;
+        }
+
+        if (quietFor < LinkWatchFrom || _transportSessionConnected == null) {
+            return;
+        }
+
+        try {
+            if (!_transportSessionConnected()) {
+                _linkUnsettledAtQuiet = (int) quietFor;
+            }
+        } catch (Exception) {
+            // Nothing is known of the link this time round, which the next asks again
+        }
+    }
+
+    /// <summary>
     /// Has the transport open its link to the other side anew, when nothing has arrived over it for
-    /// <see cref="ConnectionTimeout"/> although it counts as connected, and again every <see cref="RenewLinkInterval"/>
+    /// <see cref="RenewLinkAfter"/> although it counts as connected, and again every <see cref="RenewLinkInterval"/>
     /// while still nothing arrives; the next send opens the new link. Giving up still comes at
     /// <see cref="ConnectionTimeoutCeiling"/>.
     ///
@@ -776,26 +825,19 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// </summary>
     /// <param name="quietFor">How long nothing has arrived, in milliseconds.</param>
     private void RenewStalledLink(double quietFor) {
-        var renewedAt = _renewedAtQuiet;
-        if (_transportRenewSession == null || _transportSessionConnected == null ||
-            renewedAt >= 0 && quietFor - renewedAt < RenewLinkInterval) {
+        if (_transportRenewSession == null || quietFor < RenewLinkAfter ||
+            _renewedAtQuiet >= 0 && quietFor - _renewedAtQuiet < RenewLinkInterval) {
+            return;
+        }
+
+        // A link that is still being built, or that the other side has just closed to open it anew, is left to finish,
+        // and to carry the first things over it once it has (WatchLink)
+        if (_linkUnsettledAtQuiet >= 0 && quietFor - _linkUnsettledAtQuiet < LinkSettleTime) {
             return;
         }
 
         bool renewed;
         try {
-            // A link that is still being built, or that the other side has just closed to open it anew, is left to
-            // finish, and to carry the first things over it once it has
-            if (!_transportSessionConnected()) {
-                _linkUnsettledAtQuiet = (int) quietFor;
-                return;
-            }
-
-            var unsettledAt = _linkUnsettledAtQuiet;
-            if (unsettledAt >= 0 && quietFor - unsettledAt < LinkSettleTime) {
-                return;
-            }
-
             renewed = _transportRenewSession();
         } catch (Exception e) {
             Logger.Warn($"Could not open the link anew: {e.Message}");
