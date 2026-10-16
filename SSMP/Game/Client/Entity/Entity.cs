@@ -749,8 +749,8 @@ internal partial class Entity {
                 };
 
                 if (action is SpawnObjectFromGlobalPool or FlingObjectsFromGlobalPool
-                    or FlingObjectsFromGlobalPoolVel or SendEventByName or SendEventByNameV2 or SendEventByNameOnExit
-                    or SendEventToRegister or SendEventToRegisterV2) {
+                    or FlingObjectsFromGlobalPoolVel or SpawnRandomObjectsRadialV2 or SendEventByName
+                    or SendEventByNameV2 or SendEventByNameOnExit or SendEventToRegister or SendEventToRegisterV2) {
                     ThrowingActions.AddOrUpdate(action, this);
                 }
                 //Logger.Info(

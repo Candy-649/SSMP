@@ -349,6 +349,81 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region SpawnRandomObjectsRadialV2
+
+    // A ring of things that a creature bursts into, such as the spikes of the flyers that shatter when they are struck.
+    // Left to the game that runs the creature, the copy in the other game only played the shattering and was gone,
+    // with no spikes: a flyer that the other player saw burst into spikes only vanished (USER 10-16 "为什么有的虫子被打
+    // 之后会爆出来刺有的虫子被打了就直接消失了"). What the action rolled goes as where each thing lies, and the things are
+    // named in both games like everything else creatures throw (ThrownThings).
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SpawnRandomObjectsRadialV2 action) {
+        // What the action rolled as it ran: how many it spawned, then how far the angle of each was off its share of
+        // the circle (see SpawnRandomObjectsRadialV2OnEnter)
+        if (!RandomActionValues.TryGetValue(action, out var queue) || queue.Count == 0) {
+            return false;
+        }
+
+        var count = (int) queue.Dequeue();
+        var spawnPoint = action.Fsm.GetOwnerDefaultTarget(action.SpawnPoint);
+        if (count <= 0 || count > byte.MaxValue || queue.Count < count || spawnPoint == null) {
+            queue.Clear();
+            ThrownThings.DropHostThrows(action);
+            return false;
+        }
+
+        var position = spawnPoint.transform.position;
+        data.Packet.Write(position.x);
+        data.Packet.Write(position.y);
+        data.Packet.Write(position.z);
+
+        data.Packet.Write((byte) count);
+        for (var i = 0; i < count; i++) {
+            var share = Mathf.Lerp(action.MinAngle.Value, action.MaxAngle.Value, i / (float) count);
+            data.Packet.Write(share + (float) queue.Dequeue());
+        }
+
+        queue.Clear();
+        ThrownThings.WriteThrows(data, action);
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SpawnRandomObjectsRadialV2 action) {
+        var position = new Vector3(
+            data.Packet.ReadFloat(),
+            data.Packet.ReadFloat(),
+            data.Packet.ReadFloat()
+        );
+
+        var angles = new float[data.Packet.ReadByte()];
+        for (var i = 0; i < angles.Length; i++) {
+            angles[i] = data.Packet.ReadFloat();
+        }
+
+        var throws = ThrownThings.ReadThrows(data);
+        if (action.Prefab == null || action.Prefab.Value is not { } prefab) {
+            return;
+        }
+
+        var spawnPoint = action.Fsm.GetOwnerDefaultTarget(action.SpawnPoint);
+        Transform? parent = action.SpawnAsChildren.Value && spawnPoint != null ? spawnPoint.transform : null;
+        var radius = action.SpawnRadius.Value;
+
+        // As the game does it: each comes out of the pool first, and is then turned and put at its place on the ring
+        using var named = ThrownThings.Expect(prefab, throws);
+        foreach (var angle in angles) {
+            var spawned = prefab.Spawn(parent);
+            spawned.transform.SetRotation2D(angle);
+
+            var radians = angle * Mathf.Deg2Rad;
+            spawned.transform.position = position + new Vector3(Mathf.Cos(radians), Mathf.Sin(radians), 0f) * radius;
+        }
+    }
+
+    #endregion
+
     #region FlingObjectsFromGlobalPoolVel
 
     /// <summary>Builds network data from the FSM action.</summary>

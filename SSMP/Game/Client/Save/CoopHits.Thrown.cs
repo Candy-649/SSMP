@@ -168,6 +168,7 @@ internal partial class CoopHits {
             SpawnObjectFromGlobalPool spawn => spawn.gameObject?.Value,
             FlingObjectsFromGlobalPool fling => fling.gameObject?.Value,
             FlingObjectsFromGlobalPoolVel flingVel => flingVel.gameObject?.Value,
+            SpawnRandomObjectsRadialV2 radial => radial.Prefab?.Value,
             _ => null
         };
         if (action == null || thrownPrefab == null || thrownPrefab != prefab || action.Finished ||

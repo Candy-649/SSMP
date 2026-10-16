@@ -125,6 +125,11 @@ internal static partial class EntityFsmActions {
     private static ILHook? _spawnBloodTimeNopHook;
 
     /// <summary>
+    /// ILHook for SpawnRandomObjectsRadialV2.OnEnter.
+    /// </summary>
+    private static ILHook? _radialSpawnHook;
+
+    /// <summary>
     /// Static constructor that initializes the set and dictionaries by checking all methods in the class.
     /// </summary>
     /// <exception cref="Exception"></exception>
@@ -182,6 +187,13 @@ internal static partial class EntityFsmActions {
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
             )!,
             GetRandomChildOnDoGetRandomChild
+        );
+        _radialSpawnHook = new ILHook(
+            typeof(SpawnRandomObjectsRadialV2).GetMethod(
+                nameof(SpawnRandomObjectsRadialV2.OnEnter),
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
+            )!,
+            SpawnRandomObjectsRadialV2OnEnter
         );
 
         // Register IL hooks for the OnEnter method of certain classes. These OnEnter methods do not
@@ -986,6 +998,21 @@ internal static partial class EntityFsmActions {
             );
         } catch (Exception e) {
             Logger.Error($"Could not change FlingObjectsFromGlobalPool#OnEnter IL:\n{e}");
+        }
+    }
+
+    /// <summary>
+    /// IL edit method for modifying the <see cref="SpawnRandomObjectsRadialV2"/>
+    /// <see cref="SpawnRandomObjectsRadialV2.OnEnter"/> method to store the results of the random calls: how many it
+    /// spawns, then how far the angle of each one is off its share of the circle, which is rolled once for each.
+    /// </summary>
+    private static void SpawnRandomObjectsRadialV2OnEnter(ILContext il) {
+        try {
+            var c = new ILCursor(il);
+            EmitRandomInterceptInstructions<int, SpawnRandomObjectsRadialV2>(c);
+            EmitRandomInterceptInstructions<float, SpawnRandomObjectsRadialV2>(c);
+        } catch (Exception e) {
+            Logger.Error($"Could not change SpawnRandomObjectsRadialV2#OnEnter IL:\n{e}");
         }
     }
 
