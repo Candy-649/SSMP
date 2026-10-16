@@ -46,6 +46,22 @@ internal class PlayerUpdate : GenericClientData {
     public List<AnimationInfo> AnimationInfos { get; }
 
     /// <summary>
+    /// How many clip changes of their character the player had sent when they sent this, counted round (see
+    /// <see cref="PlayerUpdateType.ClipState"/>).
+    /// </summary>
+    public ushort ClipChanges { get; private set; }
+
+    /// <summary>
+    /// The clip that the player's character plays: the one of the last of those changes.
+    /// </summary>
+    public ushort StateClipId { get; private set; }
+
+    /// <summary>
+    /// How long ago the player's character started that clip, in milliseconds.
+    /// </summary>
+    public ushort StateClipTime { get; private set; }
+
+    /// <summary>
     /// Construct the player update data.
     /// </summary>
     public PlayerUpdate() {
@@ -54,6 +70,33 @@ internal class PlayerUpdate : GenericClientData {
 
         IsReliable = false;
         DropReliableDataIfNewerExists = false;
+    }
+
+    /// <summary>
+    /// Says what the player's character plays now (see <see cref="PlayerUpdateType.ClipState"/>), unless this update
+    /// says something newer already: one that carries what two updates of the player said keeps the newer.
+    /// </summary>
+    /// <param name="clipChanges">How many clip changes the player had sent, counted round.</param>
+    /// <param name="clipId">The clip of the last of them.</param>
+    /// <param name="clipTime">How long ago the character started it, in milliseconds.</param>
+    public void SetClipState(ushort clipChanges, ushort clipId, ushort clipTime) {
+        if (UpdateTypes.Contains(PlayerUpdateType.ClipState) && (short) (clipChanges - ClipChanges) < 0) {
+            return;
+        }
+
+        UpdateTypes.Add(PlayerUpdateType.ClipState);
+        ClipChanges = clipChanges;
+        StateClipId = clipId;
+        StateClipTime = clipTime;
+    }
+
+    /// <summary>
+    /// Says in another update what this one says the player's character plays, if it says it.
+    /// </summary>
+    public void CopyClipStateTo(PlayerUpdate other) {
+        if (UpdateTypes.Contains(PlayerUpdateType.ClipState)) {
+            other.SetClipState(ClipChanges, StateClipId, StateClipTime);
+        }
     }
 
     /// <inheritdoc />
@@ -120,6 +163,12 @@ internal class PlayerUpdate : GenericClientData {
                 }
             }
         }
+
+        if (UpdateTypes.Contains(PlayerUpdateType.ClipState)) {
+            packet.Write(ClipChanges);
+            packet.Write(StateClipId);
+            packet.Write(StateClipTime);
+        }
     }
 
     /// <inheritdoc />
@@ -183,6 +232,12 @@ internal class PlayerUpdate : GenericClientData {
                 AnimationInfos.Add(animationInfo);
             }
         }
+
+        if (UpdateTypes.Contains(PlayerUpdateType.ClipState)) {
+            ClipChanges = packet.ReadUShort();
+            StateClipId = packet.ReadUShort();
+            StateClipTime = packet.ReadUShort();
+        }
     }
 }
 
@@ -194,6 +249,14 @@ internal enum PlayerUpdateType {
     Scale,
     MapPosition,
     Animation,
+
+    /// <summary>
+    /// What the player's character plays now, said with every update of theirs whether it changed or not. A clip
+    /// change is said once, in an update that is not sent again if it is lost on the way, which left the character
+    /// of another player on the clip before it - running on the spot, or frozen on the end of a slash - until their
+    /// next change (USER 10-16 "直接把动作放在包里传输不可以嘛"). The next update that arrives puts it right.
+    /// </summary>
+    ClipState,
 }
 
 /// <summary>

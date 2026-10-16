@@ -297,23 +297,30 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
-    /// Update a player's animation in the current packet.
+    /// Update a player's animations in the current packet, with what their character plays from then on if they said
+    /// it (see <see cref="PlayerUpdateType.ClipState"/>) in one go, so that the packet that carries a change also says
+    /// that it is the newest.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
-    /// <param name="clipId">The ID of the animation clip.</param>
-    /// <param name="frame">The frame of the animation.</param>
-    /// <param name="effectInfo">Byte array containing effect info.</param>
-    public void UpdatePlayerAnimation(ushort id, ushort clipId, byte frame, byte[]? effectInfo) {
+    /// <param name="animationInfos">Their animations, or null for none.</param>
+    /// <param name="clipState">The update of theirs that said what their character plays, or null if it did not.</param>
+    public void UpdatePlayerAnimations(ushort id, List<AnimationInfo>? animationInfos, PlayerUpdate? clipState) {
         lock (Lock) {
             var playerUpdate = FindOrCreatePacketData<PlayerUpdate>(id, ClientUpdatePacketId.PlayerUpdate);
-            playerUpdate.UpdateTypes.Add(PlayerUpdateType.Animation);
-            playerUpdate.AnimationInfos.Add(
-                new AnimationInfo {
-                    ClipId = clipId,
-                    Frame = frame,
-                    EffectInfo = effectInfo
+            if (animationInfos is { Count: > 0 }) {
+                playerUpdate.UpdateTypes.Add(PlayerUpdateType.Animation);
+                foreach (var animationInfo in animationInfos) {
+                    playerUpdate.AnimationInfos.Add(
+                        new AnimationInfo {
+                            ClipId = animationInfo.ClipId,
+                            Frame = animationInfo.Frame,
+                            EffectInfo = animationInfo.EffectInfo
+                        }
+                    );
                 }
-            );
+            }
+
+            clipState?.CopyClipStateTo(playerUpdate);
         }
     }
 

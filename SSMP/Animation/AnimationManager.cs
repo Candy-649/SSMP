@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using HutongGames.PlayMaker.Actions;
@@ -766,6 +767,67 @@ internal class AnimationManager {
     /// </summary>
     private string? _lastAnimationClip;
 
+    /// <summary>
+    /// How often the local player says again what their character plays (see <see cref="SendClipState"/>), in
+    /// seconds: as often as their position.
+    /// </summary>
+    private const float ClipStateEvery = 1f / 60f;
+
+    /// <summary>
+    /// How far a clip that plays once may be ahead on the figure of another player of where that player's character is
+    /// in it, in seconds, before it is taken to have been started again in their game. More than a figure falls behind
+    /// a character by its clip changes taking a different time over the network from one to the next.
+    /// </summary>
+    private const float ClipRestartedAfter = 0.15f;
+
+    /// <summary>
+    /// How far behind the newest word of another player a word that says how many clip changes they sent may be before
+    /// it is taken for a count started over rather than a late word: their game started anew. No word comes that late.
+    /// </summary>
+    private const short ClipChangesStartedOver = -1000;
+
+    /// <summary>
+    /// How often the clip changes of other players that were put right or left out are written down, in seconds.
+    /// </summary>
+    private const float ClipLogEvery = 60f;
+
+    /// <summary>
+    /// How many clip changes of its character the local player has sent, counted round (see
+    /// <see cref="SendClipState"/>).
+    /// </summary>
+    private ushort _clipChanges;
+
+    /// <summary>
+    /// The clip of the last clip change that the local player sent, or null before they sent one.
+    /// </summary>
+    private AnimationClip? _stateClip;
+
+    /// <summary>
+    /// When the local player sent it, in game time.
+    /// </summary>
+    private float _stateClipSentAt;
+
+    /// <summary>
+    /// When the local player next says what their character plays, in unscaled time.
+    /// </summary>
+    private float _nextClipStateAt;
+
+    /// <summary>
+    /// How many clip changes each other player had sent by the newest word heard of what their character plays, by ID.
+    /// </summary>
+    private readonly Dictionary<ushort, ushort> _clipChangesHeard = new();
+
+    /// <summary>
+    /// How many clip changes of each other player never arrived and were put right since they were last written down,
+    /// and how many came after newer ones and were left out, by ID.
+    /// </summary>
+    private readonly Dictionary<ushort, (int PutRight, int LeftOut)> _clipFixes = new();
+
+    /// <summary>
+    /// When the clip changes put right or left out are next written down, in unscaled time.
+    /// </summary>
+    private float _nextClipLogAt;
+
     // /// <summary>
     // /// Whether the animation controller was responsible for the last clip that was sent.
     // /// </summary>
@@ -942,10 +1004,16 @@ internal class AnimationManager {
     /// <param name="clipId">The ID of the animation clip.</param>
     /// <param name="frame">The frame that the animation should play from.</param>
     /// <param name="effectInfo">A byte array containing effect info for the animation.</param>
-    public void OnPlayerAnimationUpdate(ushort id, int clipId, int frame, byte[]? effectInfo) {
+    /// <param name="showClip">Whether the clip is played too, rather than only its effect: not for a clip change that
+    /// came after a newer one (see <see cref="ShowsClipChanges"/>).</param>
+    public void OnPlayerAnimationUpdate(ushort id, int clipId, int frame, byte[]? effectInfo, bool showClip = true) {
         var crestType = _playerManager.GetPlayerCrestType(id);
-        
-        UpdatePlayerAnimation(id, clipId, frame, crestType);
+
+        if (showClip) {
+            UpdatePlayerAnimation(id, clipId, frame, crestType);
+        } else if (ClipEnumNames.ContainsSecond((AnimationClip) clipId)) {
+            NoteClipFix(id, putRight: false);
+        }
 
         var animationClip = (AnimationClip) clipId;
 
@@ -990,7 +1058,8 @@ internal class AnimationManager {
     /// <param name="clipId">The ID of the animation clip.</param>
     /// <param name="frame">The frame that the animation should play from.</param>
     /// <param name="crestType">The type of crest the player is using.</param>
-    public void UpdatePlayerAnimation(ushort id, int clipId, int frame, CrestType crestType) {
+    /// <param name="startTime">How far into the clip to start it, in seconds, or 0 to start it at the frame.</param>
+    public void UpdatePlayerAnimation(ushort id, int clipId, int frame, CrestType crestType, float startTime = 0f) {
         var playerObject = _playerManager.GetPlayerObject(id);
         if (!playerObject) {
             // Logger.Get().Warn(this, $"Tried to update animation, but there was not matching player object for ID {id}");
@@ -1072,7 +1141,129 @@ internal class AnimationManager {
         }
 
         if (_debugLogAnimations) Logger.Info($"  playing clip: {clipName}");
-        spriteAnimator.PlayFromFrame(clip, frame);
+        if (startTime <= 0f) {
+            spriteAnimator.PlayFromFrame(clip, frame);
+            return;
+        }
+
+        // A clip that plays once stays on its last frame after its end, where a time past the end would show its first
+        // frame until the next update
+        if (clip.wrapMode == tk2dSpriteAnimationClip.WrapMode.Once && clip.fps > 0f && clip.frames.Length > 0) {
+            startTime = Mathf.Min(startTime, (clip.frames.Length - 0.01f) / clip.fps);
+        }
+
+        spriteAnimator.Play(clip, startTime, 0f);
+    }
+
+    /// <summary>
+    /// Says again in the packet that is being put together what the local player's character plays now: the clip of
+    /// the last clip change they sent, how many they sent, and how long ago that one started. A clip change is said
+    /// once, in a packet that is not sent again if it is lost on the way; said with every update, what the character
+    /// plays reaches the other players with the next one that arrives (see <see cref="OnPlayerClipState"/>).
+    /// </summary>
+    public void SendClipState() {
+        if (_stateClip is not { } clip || Time.unscaledTime < _nextClipStateAt) {
+            return;
+        }
+
+        _nextClipStateAt = Time.unscaledTime + ClipStateEvery;
+        var playedFor = Mathf.Clamp((Time.time - _stateClipSentAt) * 1000f, 0f, ushort.MaxValue);
+        _netClient.UpdateManager.UpdatePlayerClipState(_clipChanges, clip, (ushort) playedFor);
+    }
+
+    /// <summary>
+    /// Whether the clip changes in an update of another player are to be played, by how many clip changes the player
+    /// said they had sent in it: not when a newer word of what their character plays came already, as then these came
+    /// late, and their clips are over in the player's game.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="clipChanges">How many clip changes they said they had sent in the update.</param>
+    public bool ShowsClipChanges(ushort id, ushort clipChanges) {
+        if (!_clipChangesHeard.TryGetValue(id, out var heard)) {
+            return true;
+        }
+
+        var behind = (short) (clipChanges - heard);
+        return behind >= 0 || behind < ClipChangesStartedOver;
+    }
+
+    /// <summary>
+    /// Takes what another player said their character plays now, which puts right a clip change of theirs that never
+    /// arrived: when they sent a change since the last word of it, and their figure plays another clip than the one
+    /// they said, that clip is started on it from where their character is in it. Its effect, such as the flash of a
+    /// slash, stays lost. A clip that plays once and that they started again counts as another clip.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="clipChanges">How many clip changes they had sent.</param>
+    /// <param name="clipId">The clip of the last of them, which their character plays.</param>
+    /// <param name="clipTime">How long ago their character started it, in milliseconds.</param>
+    public void OnPlayerClipState(ushort id, ushort clipChanges, ushort clipId, ushort clipTime) {
+        WriteDownClipFixes();
+
+        if (_clipChangesHeard.TryGetValue(id, out var heard)) {
+            var ahead = (short) (clipChanges - heard);
+            if (ahead == 0 || ahead < 0 && ahead >= ClipChangesStartedOver) {
+                return;
+            }
+        }
+
+        _clipChangesHeard[id] = clipChanges;
+
+        var animationClip = (AnimationClip) clipId;
+        if (!ClipEnumNames.ContainsSecond(animationClip)) {
+            return;
+        }
+
+        var playerObject = _playerManager.GetPlayerObject(id);
+        if (!playerObject) {
+            return;
+        }
+
+        var spriteAnimator = playerObject.GetComponent<tk2dSpriteAnimator>();
+        var shown = spriteAnimator.CurrentClip;
+        var startTime = clipTime / 1000f;
+        if (shown != null && shown.name == ClipEnumNames[animationClip] &&
+            (shown.wrapMode != tk2dSpriteAnimationClip.WrapMode.Once ||
+             spriteAnimator.ClipTimeSeconds - startTime < ClipRestartedAfter)) {
+            return;
+        }
+
+        UpdatePlayerAnimation(id, clipId, 0, _playerManager.GetPlayerCrestType(id), startTime);
+        NoteClipFix(id, putRight: true);
+    }
+
+    /// <summary>
+    /// Counts a clip change of another player that was put right or left out, for the log.
+    /// </summary>
+    private void NoteClipFix(ushort id, bool putRight) {
+        _clipFixes.TryGetValue(id, out var fixes);
+        _clipFixes[id] = putRight ? (fixes.PutRight + 1, fixes.LeftOut) : (fixes.PutRight, fixes.LeftOut + 1);
+    }
+
+    /// <summary>
+    /// Writes down how many clip changes of other players were put right and left out, once a minute when any were.
+    /// </summary>
+    private void WriteDownClipFixes() {
+        if (Time.unscaledTime < _nextClipLogAt) {
+            return;
+        }
+
+        _nextClipLogAt = Time.unscaledTime + ClipLogEvery;
+        if (_clipFixes.Count == 0) {
+            return;
+        }
+
+        Logger.Info(
+            $"[Clips] {DateTime.Now:HH:mm:ss} In the last minute, of the clip changes of other players, " +
+            string.Join(
+                "; ",
+                _clipFixes.Select(pair =>
+                    $"player {pair.Key}: {pair.Value.PutRight} that never arrived were put right from what they " +
+                    $"play, {pair.Value.LeftOut} that came after newer ones were left out"
+                )
+            )
+        );
+        _clipFixes.Clear();
     }
 
     /// <summary>
@@ -1083,6 +1274,9 @@ internal class AnimationManager {
     private void OnSceneChange(Scene oldScene, Scene newScene) {
         // A scene change occurs, so we can send again
         _stopSendingAnimationUntilSceneChange = false;
+
+        // The figures of other players are made anew, and take what their players play from the next word of it
+        _clipChangesHeard.Clear();
     }
 
     /// <summary>
@@ -1091,6 +1285,9 @@ internal class AnimationManager {
     /// <param name="player">The player that left the scene.</param>
     public void OnPlayerLeaveScene(ClientPlayerData player) {
         Tacks.DestroyPlayerTacks(player.PlayerObject);
+
+        // A figure that comes back takes what its player plays from the next word of it
+        _clipChangesHeard.Remove(player.Id);
     }
 
     /// <summary>
@@ -1162,17 +1359,18 @@ internal class AnimationManager {
         var animationClip = ClipEnumNames[clip.name];
 
         // Check whether there is an effect that adds info to this packet
+        byte[]? effectInfo = null;
         if (AnimationEffects.TryGetValue(animationClip, out var effect)) {
-            var effectInfo = effect.GetEffectInfo();
-
-            _netClient.UpdateManager.UpdatePlayerAnimation(animationClip, 0, effectInfo);
+            effectInfo = effect.GetEffectInfo();
         } else if (SubAnimationEffects.TryGetValue(animationClip, out var subEffect)) {
-            var effectInfo = subEffect.GetEffectInfo();
-
-            _netClient.UpdateManager.UpdatePlayerAnimation(animationClip, 0, effectInfo);
-        } else {
-            _netClient.UpdateManager.UpdatePlayerAnimation(animationClip);
+            effectInfo = subEffect.GetEffectInfo();
         }
+
+        // Counted, and said again with every update from now on (see SendClipState)
+        _clipChanges = unchecked((ushort) (_clipChanges + 1));
+        _stateClip = animationClip;
+        _stateClipSentAt = Time.time;
+        _netClient.UpdateManager.UpdatePlayerClipChange(animationClip, effectInfo, _clipChanges);
 
         if (_debugLogAnimations) Logger.Info($"  Sending animation: {animationClip}");
 

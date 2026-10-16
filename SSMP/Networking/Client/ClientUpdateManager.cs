@@ -169,6 +169,41 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
+    /// Update the player animation in the current packet for a clip change of the local player's character, with what
+    /// the character plays from then on (see <see cref="PlayerUpdateType.ClipState"/>) in one go, so that the packet
+    /// that carries the change also says that it is the newest.
+    /// </summary>
+    /// <param name="clip">The animation clip.</param>
+    /// <param name="effectInfo">Byte array of effect info.</param>
+    /// <param name="clipChanges">How many clip changes were sent, this one included, counted round.</param>
+    public void UpdatePlayerClipChange(AnimationClip clip, byte[]? effectInfo, ushort clipChanges) {
+        lock (Lock) {
+            var playerUpdate = FindOrCreatePlayerUpdate();
+            playerUpdate.UpdateTypes.Add(PlayerUpdateType.Animation);
+            playerUpdate.AnimationInfos.Add(
+                new AnimationInfo {
+                    ClipId = (ushort) clip,
+                    EffectInfo = effectInfo
+                }
+            );
+            playerUpdate.SetClipState(clipChanges, (ushort) clip, 0);
+        }
+    }
+
+    /// <summary>
+    /// Says in the current packet what the local player's character plays now (see
+    /// <see cref="PlayerUpdateType.ClipState"/>).
+    /// </summary>
+    /// <param name="clipChanges">How many clip changes were sent, counted round.</param>
+    /// <param name="clip">The clip of the last of them.</param>
+    /// <param name="clipTime">How long ago the character started it, in milliseconds.</param>
+    public void UpdatePlayerClipState(ushort clipChanges, AnimationClip clip, ushort clipTime) {
+        lock (Lock) {
+            FindOrCreatePlayerUpdate().SetClipState(clipChanges, (ushort) clip, clipTime);
+        }
+    }
+
+    /// <summary>
     /// Set entity spawn data for an entity that spawned later in the scene.
     /// </summary>
     /// <param name="id">The ID of the entity.</param>

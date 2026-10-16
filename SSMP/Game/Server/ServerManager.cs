@@ -836,16 +836,14 @@ internal abstract class ServerManager : IServerManager {
             }
         }
 
+        // Not a return when there is no map icon to move, which dropped the player's animations that came with it
         if (playerUpdate.UpdateTypes.Contains(PlayerUpdateType.MapPosition)) {
             playerData.MapPosition = playerUpdate.MapPosition;
 
-            // If the player does not have an active map icon, we do not send the map position update
-            if (!playerData.HasMapIcon) {
-                return;
-            }
-
-            // If the map icons need to be broadcast, we add the data to the next packet
-            if (InternalServerSettings.AlwaysShowMapIcons || InternalServerSettings.OnlyBroadcastMapIconWithCompass) {
+            // If the player does not have an active map icon, we do not send the map position update. If the map
+            // icons need to be broadcast, we add the data to the next packet
+            if (playerData.HasMapIcon && (InternalServerSettings.AlwaysShowMapIcons ||
+                                          InternalServerSettings.OnlyBroadcastMapIconWithCompass)) {
                 foreach (var idPlayerDataPair in _playerData) {
                     if (idPlayerDataPair.Key == id) {
                         continue;
@@ -857,44 +855,39 @@ internal abstract class ServerManager : IServerManager {
             }
         }
 
-        if (playerUpdate.UpdateTypes.Contains(PlayerUpdateType.Animation)) {
-            var animationInfos = playerUpdate.AnimationInfos;
+        var animationInfos = playerUpdate.UpdateTypes.Contains(PlayerUpdateType.Animation)
+            ? playerUpdate.AnimationInfos
+            : null;
 
-            // Check whether there is any animation info to be stored
-            if (animationInfos.Count != 0) {
-                // Find the last animation clip that is not a custom clip to set as the players animation ID
-                // Since that is the last clip that the player updated
-                for (var i = animationInfos.Count - 1; i >= 0; i--) {
-                    var clipId = animationInfos[i].ClipId;
-                    if (clipId < (ushort) AnimationClip.DashEnd) {
-                        playerData.AnimationId = clipId;
-                        break;
-                    }
-                }
-
-                // Set the animation data for each player in the same scene
-                foreach (var (otherId, otherPd) in _playerData) {
-                    if (otherId == id) {
-                        continue;
-                    }
-
-                    if (!string.Equals(otherPd.CurrentScene, playerData.CurrentScene)) {
-                        continue;
-                    }
-
-                    var updateManager = _netServer.GetUpdateManagerForClient(otherId);
-                    if (updateManager != null) {
-                        foreach (var animationInfo in animationInfos) {
-                            updateManager.UpdatePlayerAnimation(
-                                id,
-                                animationInfo.ClipId,
-                                animationInfo.Frame,
-                                animationInfo.EffectInfo
-                            );
-                        }
-                    }
+        // Find the last animation clip that is not a custom clip to set as the players animation ID
+        // Since that is the last clip that the player updated
+        if (animationInfos != null) {
+            for (var i = animationInfos.Count - 1; i >= 0; i--) {
+                var clipId = animationInfos[i].ClipId;
+                if (clipId < (ushort) AnimationClip.DashEnd) {
+                    playerData.AnimationId = clipId;
+                    break;
                 }
             }
+        }
+
+        // What the player's character plays now goes with their animations (see PlayerUpdateType.ClipState)
+        var clipState = playerUpdate.UpdateTypes.Contains(PlayerUpdateType.ClipState) ? playerUpdate : null;
+        if (animationInfos is not { Count: > 0 } && clipState == null) {
+            return;
+        }
+
+        // Set the animation data for each player in the same scene
+        foreach (var (otherId, otherPd) in _playerData) {
+            if (otherId == id) {
+                continue;
+            }
+
+            if (!string.Equals(otherPd.CurrentScene, playerData.CurrentScene)) {
+                continue;
+            }
+
+            _netServer.GetUpdateManagerForClient(otherId)?.UpdatePlayerAnimations(id, animationInfos, clipState);
         }
     }
 

@@ -1596,15 +1596,30 @@ internal class ClientManager : IClientManager {
             _mapManager.UpdatePlayerIcon(playerUpdate.Id, playerUpdate.MapPosition);
         }
 
+        // The clip changes of an update that came after a newer one of the same player are left out, and only their
+        // effects are shown: the clip that they started is over in the player's game (see AnimationManager)
+        var clipState = playerUpdate.UpdateTypes.Contains(PlayerUpdateType.ClipState);
+        var clipsShown = !clipState || _animationManager.ShowsClipChanges(playerUpdate.Id, playerUpdate.ClipChanges);
+
         if (playerUpdate.UpdateTypes.Contains(PlayerUpdateType.Animation)) {
             foreach (var animationInfo in playerUpdate.AnimationInfos) {
                 _animationManager.OnPlayerAnimationUpdate(
                     playerUpdate.Id,
                     animationInfo.ClipId,
                     animationInfo.Frame,
-                    animationInfo.EffectInfo
+                    animationInfo.EffectInfo,
+                    clipsShown
                 );
             }
+        }
+
+        if (clipState) {
+            _animationManager.OnPlayerClipState(
+                playerUpdate.Id,
+                playerUpdate.ClipChanges,
+                playerUpdate.StateClipId,
+                playerUpdate.StateClipTime
+            );
         }
     }
 
@@ -1861,6 +1876,7 @@ internal class ClientManager : IClientManager {
         }
 
         SendChangedCrest();
+        _animationManager.SendClipState();
 
         var heroTransform = HeroController.instance.transform;
 
