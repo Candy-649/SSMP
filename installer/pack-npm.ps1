@@ -215,9 +215,11 @@ under the GNU LGPL 2.1 - see ``LICENSE``. Built from https://github.com/Candy-64
     Write-Host "      npm publish --access public" -ForegroundColor Yellow
     # The mainland mirror says it follows npm in real time, and usually does within seconds, but it missed 0.4.82
     # for 21 hours, until a sync was asked for by hand (2026-10-08). The other player's updater only reaches the
-    # mirror, so it said 0.4.81 was the newest all that time. Asking right after publishing costs nothing.
-    Write-Host "  then have the mainland mirror copy it at once, which the other player's updater reads:" -ForegroundColor Yellow
-    Write-Host "      curl.exe -X PUT https://registry-direct.npmmirror.com/-/package/$PackageName/syncs" -ForegroundColor Yellow
+    # mirror, so it said 0.4.81 was the newest all that time. A sync asked for straight after the publish can
+    # come before npm serves the new version and copy nothing (0.4.101), so sync-mirror.ps1 waits for npm first.
+    $syncScript = Join-Path $PSScriptRoot 'sync-mirror.ps1'
+    Write-Host "  then have the mainland mirror copy it for the other player's updater:" -ForegroundColor Yellow
+    Write-Host "      pwsh -NoProfile -ExecutionPolicy Bypass -File $syncScript" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Publishing is public and cannot be undone after 72 hours, and the name stays taken either way." -ForegroundColor Yellow
     Write-Host ""
