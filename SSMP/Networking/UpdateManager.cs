@@ -60,6 +60,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private const int LinkWatchFrom = 1000;
 
     /// <summary>
+    /// How often the send loop asks the transport for its round trip, in milliseconds (see <see cref="AverageRtt"/>).
+    /// </summary>
+    private const int TransportPingEvery = 500;
+
+    /// <summary>
     /// The MTU (maximum transfer unit) to use to send packets with. If the length of a packet exceeds this, we break
     /// it up into smaller packets before sending. This ensures that we control the breaking of packets in most
     /// cases and do not rely on smaller network devices for the breaking up as this could impact performance.
@@ -83,6 +88,16 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// call rather than the transport, because the two ends of this class are set through different interfaces.
     /// </summary>
     private Func<int?>? _transportPing;
+
+    /// <summary>
+    /// The round trip that the transport last reported, in milliseconds, or -1 while it has reported none. The send
+    /// loop asks for it every <see cref="TransportPingEvery"/> milliseconds, and everything else reads it here. On
+    /// Steam's relay the question waits for the lock of Steam's networking, which Steam's own threads hold for
+    /// milliseconds at a time, and for over a second while a link is being made. Asked every frame by every creature
+    /// copy, every other player and the ping display, as it used to be, it cost the joining player 2 to 10 ms a frame,
+    /// and froze their game for 0.1 to 0.17 s at a time (USER 10-16 "画面和网络都卡").
+    /// </summary>
+    private volatile int _transportPingMs = -1;
 
     /// <summary>
     /// Asks the transport whether it still has a link to the other side, or null for a transport that cannot answer.
@@ -261,6 +276,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             if (value == null) return;
 
             _transportPing = () => value.Ping;
+            _transportPingMs = -1;
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
@@ -285,6 +301,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             if (value == null) return;
 
             _transportPing = () => value.Ping;
+            _transportPingMs = -1;
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
@@ -325,14 +342,16 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// <summary>
     /// Round trip time to the other end in milliseconds.
     ///
-    /// A transport that measures the real time to the other player is believed over anything timed here. Steam's
-    /// relayed messaging is the case that matters: it carries no sequence numbers of its own, so the moving average
-    /// below has nothing to time against and used to report the send interval rather than the distance to the other
-    /// player - the same small number whether the two were in one room or on different continents.
+    /// A transport that measures the real time to the other player is believed over anything timed here, as the send
+    /// loop last heard it (see <see cref="_transportPingMs"/>). Steam's relayed messaging is the case that matters: it
+    /// carries no sequence numbers of its own, so the moving average below has nothing to time against and used to
+    /// report the send interval rather than the distance to the other player - the same small number whether the two
+    /// were in one room or on different continents.
     /// </summary>
     public int AverageRtt {
         get {
-            if (_transportPing?.Invoke() is { } ping and >= 0) {
+            var ping = _transportPingMs;
+            if (ping >= 0) {
                 return ping;
             }
 
@@ -687,6 +706,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private void SendLoop() {
         var stopwatch = Stopwatch.StartNew();
         var nextSendTime = stopwatch.ElapsedMilliseconds;
+        var nextPingTime = nextSendTime;
         using var waitHandle = new ManualResetEventSlim(false);
         var cts = _cancellationTokenSource;
         if (cts == null) {
@@ -714,6 +734,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                     } catch (OperationCanceledException) {
                         break;
                     }
+                }
+
+                if (currentTime >= nextPingTime) {
+                    nextPingTime = currentTime + TransportPingEvery;
+                    AskTransportPing();
                 }
 
                 // Check for connection timeout
@@ -780,6 +805,17 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                 // If an error occurs, we still advance the target time to maintain cadence.
                 nextSendTime += CurrentSendRate;
             }
+        }
+    }
+
+    /// <summary>
+    /// Asks the transport for its round trip, which <see cref="AverageRtt"/> gives everyone else from then on.
+    /// </summary>
+    private void AskTransportPing() {
+        try {
+            _transportPingMs = _transportPing?.Invoke() is { } ping and >= 0 ? ping : -1;
+        } catch (Exception) {
+            // Nothing is known of the round trip this time round, which the next asks again
         }
     }
 
