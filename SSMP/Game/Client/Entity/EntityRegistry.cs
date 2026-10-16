@@ -187,8 +187,13 @@ internal static class EntityRegistry {
         // of the loop. This avoids the allocation entirely when no entry uses FSM names.
         PlayMakerFSM[]? fsms = null;
 
+        // The name is asked of the game once rather than for each entry. Each asking goes into the engine and makes a
+        // new string, and a room change asked it of every object of the room for every entry; the mod's part of a
+        // room change took up to 1.7 s on a slow computer (USER 10-16 "我原版可没有这么长的黑屏时间")
+        var name = gameObject.name;
+
         foreach (var entry in entries) {
-            if (!gameObject.name.Contains(entry.BaseObjectName)) {
+            if (!name.Contains(entry.BaseObjectName)) {
                 continue;
             }
 

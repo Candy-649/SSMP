@@ -541,9 +541,20 @@ internal class EntityManager {
                 : $"Someone else may be in {newScene.name}: its creatures sleep until it is settled who runs it"
         );
 
+        // How long each part took, for the log of the room change (see Util.LoadWatch)
+        var watch = System.Diagnostics.Stopwatch.StartNew();
+        EntityProcessor.StartCounting();
         FindEntitiesInScene(newScene, lateLoad: false);
+        var found = watch.Elapsed.TotalMilliseconds;
+        var counted = EntityProcessor.DescribeCount();
         _roomCreatures.FindMakers(newScene);
+        var makers = watch.Elapsed.TotalMilliseconds - found;
         DrainPendingUpdates();
+        var rest = watch.Elapsed.TotalMilliseconds - found - makers;
+        Logger.Info(
+            $"[Load] Finding the creatures of '{newScene.name}' took {found:F1} ms ({counted}), finding what makes " +
+            $"creatures {makers:F1} ms, taking what came for them {rest:F1} ms"
+        );
     }
 
     /// <summary>

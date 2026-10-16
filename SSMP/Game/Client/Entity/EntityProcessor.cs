@@ -36,6 +36,21 @@ internal class EntityProcessor {
     private static ushort _lastId;
 
     /// <summary>
+    /// How many objects were looked at since <see cref="StartCounting"/>, as entities of their own or not.
+    /// </summary>
+    private static int _looked;
+
+    /// <summary>
+    /// How many entities were made since <see cref="StartCounting"/>.
+    /// </summary>
+    private static int _made;
+
+    /// <summary>
+    /// How long making them took.
+    /// </summary>
+    private static readonly System.Diagnostics.Stopwatch Making = new();
+
+    /// <summary>
     /// The game object to process.
     /// </summary>
     public GameObject GameObject { get; init; }
@@ -184,9 +199,26 @@ internal class EntityProcessor {
     /// </summary>
     /// <returns>The instance of this class for convenience.</returns>
     public EntityProcessor Process() {
+        _looked++;
         Process(GameObject);
         return this;
     }
+
+    /// <summary>
+    /// Starts counting the objects looked at and the entities made, for the log of a room change.
+    /// </summary>
+    public static void StartCounting() {
+        _looked = 0;
+        _made = 0;
+        Making.Reset();
+    }
+
+    /// <summary>
+    /// Says how many objects were looked at and entities made since <see cref="StartCounting"/>, and how long making
+    /// them took.
+    /// </summary>
+    public static string DescribeCount() =>
+        $"{_looked} object(s) looked at, {_made} entities made in {Making.Elapsed.TotalMilliseconds:F1} ms";
 
     /// <summary>
     /// Process the given game object to (potentially) become an entity. Check for child objects as well and will
@@ -282,6 +314,7 @@ internal class EntityProcessor {
         if (parentClientObject == null) {
             Logger.Info($"Registering entity ({foundEntry.Type}) '{gameObject.name}' with ID '{id}'");
 
+            Making.Start();
             entity = new Entity(
                 _netClient,
                 id,
@@ -290,6 +323,7 @@ internal class EntityProcessor {
                 KeepsRunning,
                 types: componentTypes
             );
+            Making.Stop();
         } else {
             Logger.Info(
                 $"Registering entity ({foundEntry.Type}) '{gameObject.name}' with ID '{id}' with parent: {parentClientObject.name}"
@@ -308,6 +342,7 @@ internal class EntityProcessor {
                 $"Found child of client object of parent entity: {clientObject.name}, {clientObject.GetInstanceID()}"
             );
 
+            Making.Start();
             entity = new Entity(
                 _netClient,
                 id,
@@ -317,8 +352,10 @@ internal class EntityProcessor {
                 clientObject,
                 componentTypes
             );
+            Making.Stop();
         }
 
+        _made++;
         _entities[id] = entity;
 
         Entities.Add(entity);
