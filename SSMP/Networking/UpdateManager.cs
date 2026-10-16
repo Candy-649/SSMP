@@ -31,6 +31,20 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private const int ConnectionTimeoutCeiling = 30000;
 
     /// <summary>
+    /// How long, in milliseconds, nothing has arrived since the transport's link was last opened anew before it is
+    /// opened anew again, while the link still counts as connected (see <see cref="RenewStalledLink"/>). The first
+    /// time is at <see cref="ConnectionTimeout"/>.
+    /// </summary>
+    private const int RenewLinkInterval = 8000;
+
+    /// <summary>
+    /// How long, in milliseconds, a link has to have counted as connected before it is opened anew for carrying
+    /// nothing. One that has only just been opened, maybe by the other side giving up on the old one at the same time,
+    /// gets this long to carry the first things sent over it.
+    /// </summary>
+    private const int LinkSettleTime = 2000;
+
+    /// <summary>
     /// The MTU (maximum transfer unit) to use to send packets with. If the length of a packet exceeds this, we break
     /// it up into smaller packets before sending. This ensures that we control the breaking of packets in most
     /// cases and do not rely on smaller network devices for the breaking up as this could impact performance.
@@ -72,6 +86,34 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// that keeps no record of it (see <see cref="RecordTransportSession"/>).
     /// </summary>
     private Action<string, int>? _transportRecordSession;
+
+    /// <summary>
+    /// Asks the transport to close a link that counts as connected so that the next send opens a new one, or null for
+    /// a transport that cannot (see <see cref="ISessionStateTransport.RenewStalledSession"/>).
+    /// </summary>
+    private Func<bool>? _transportRenewSession;
+
+    /// <summary>
+    /// Asks the transport whether its link counts as connected, or null for a transport that cannot say.
+    /// </summary>
+    private Func<bool>? _transportSessionConnected;
+
+    /// <summary>
+    /// How long nothing had arrived, in milliseconds, when the link was last seen not to count as connected in this
+    /// quiet stretch - still being built, or closed by the other side - or -1 if it was not.
+    /// </summary>
+    private volatile int _linkUnsettledAtQuiet = -1;
+
+    /// <summary>
+    /// How long nothing had arrived, in milliseconds, when the link was last opened anew in this quiet stretch, or -1
+    /// if it was not. Written by the send loop and cleared by whatever arrives.
+    /// </summary>
+    private volatile int _renewedAtQuiet = -1;
+
+    /// <summary>
+    /// How many times the link was opened anew in this quiet stretch.
+    /// </summary>
+    private volatile int _renewals;
 
     /// <summary>
     /// How many seconds from before a quiet stretch began are written down with it, to show how the link stood as it
@@ -201,6 +243,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
+            _transportRenewSession = value is ISessionStateTransport renewed ? renewed.RenewStalledSession : null;
+            _transportSessionConnected = value is ISessionStateTransport connected
+                ? () => connected.SessionConnected
+                : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
@@ -221,6 +267,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _transportSessionUp = value is ISessionStateTransport session ? () => session.SessionUp : null;
             _transportDescribeSession = value is ISessionStateTransport described ? described.DescribeSession : null;
             _transportRecordSession = value is ISessionStateTransport recorded ? recorded.RecordSession : null;
+            _transportRenewSession = value is ISessionStateTransport renewed ? renewed.RenewStalledSession : null;
+            _transportSessionConnected = value is ISessionStateTransport connected
+                ? () => connected.SessionConnected
+                : null;
             _requiresSequencing = value.RequiresSequencing;
             RequiresReliability = value.RequiresReliability;
             _transportMaxPacketSize = value.MaxPacketSize > 0 ? value.MaxPacketSize : PacketMtu;
@@ -352,6 +402,9 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         var gap = (now - _lastReceiveTime).TotalSeconds;
         _lastReceiveTime = now;
         _timeoutGraceTold = false;
+        _renewedAtQuiet = -1;
+        _renewals = 0;
+        _linkUnsettledAtQuiet = -1;
         if (gap >= ReceiveGapTold) {
             Logger.Info($"Packets arrive again after {gap:F1}s in which none did");
             try {
@@ -692,6 +745,8 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                         );
                         RecordQuietStretch(quietFor);
                     }
+
+                    RenewStalledLink(quietFor);
                 }
 
                 // Send Packet
@@ -706,6 +761,58 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                 nextSendTime += CurrentSendRate;
             }
         }
+    }
+
+    /// <summary>
+    /// Has the transport open its link to the other side anew, when nothing has arrived over it for
+    /// <see cref="ConnectionTimeout"/> although it counts as connected, and again every <see cref="RenewLinkInterval"/>
+    /// while still nothing arrives; the next send opens the new link. Giving up still comes at
+    /// <see cref="ConnectionTimeoutCeiling"/>.
+    ///
+    /// USER 10-15 "断线去做": nothing from the host reached the joining player for 30 s while what they sent reached the
+    /// host throughout, and Steam called the link connected the whole time; it ended the game, and a new lobby two
+    /// minutes later connected at once. What was still on its way over the old link is lost; for the room, the
+    /// catching up after a gap in what arrives (<see cref="ReceiveResumed"/>) makes it good.
+    /// </summary>
+    /// <param name="quietFor">How long nothing has arrived, in milliseconds.</param>
+    private void RenewStalledLink(double quietFor) {
+        var renewedAt = _renewedAtQuiet;
+        if (_transportRenewSession == null || _transportSessionConnected == null ||
+            renewedAt >= 0 && quietFor - renewedAt < RenewLinkInterval) {
+            return;
+        }
+
+        bool renewed;
+        try {
+            // A link that is still being built, or that the other side has just closed to open it anew, is left to
+            // finish, and to carry the first things over it once it has
+            if (!_transportSessionConnected()) {
+                _linkUnsettledAtQuiet = (int) quietFor;
+                return;
+            }
+
+            var unsettledAt = _linkUnsettledAtQuiet;
+            if (unsettledAt >= 0 && quietFor - unsettledAt < LinkSettleTime) {
+                return;
+            }
+
+            renewed = _transportRenewSession();
+        } catch (Exception e) {
+            Logger.Warn($"Could not open the link anew: {e.Message}");
+            renewed = false;
+        }
+
+        if (!renewed) {
+            return;
+        }
+
+        _renewedAtQuiet = (int) quietFor;
+        _renewals++;
+        Logger.Info(
+            $"Nothing has arrived for {quietFor / 1000:F1}s although the link counted as connected, so it was opened " +
+            $"anew (time {_renewals} in this quiet stretch); this is taken as a disconnect only after " +
+            $"{ConnectionTimeoutCeiling / 1000}s"
+        );
     }
 
     /// <summary>

@@ -155,9 +155,10 @@ internal static class SteamRelayMessaging {
     /// round trip to report. Reading that as "they are gone" is what ended a game that was seconds from carrying on.
     ///
     /// Having no session at all counts as up for the same reason: it means the relay has not started rebuilding
-    /// one yet, and the send loop is about to make it. What counts as down is the relay saying it is over - the
-    /// other side closed it, or this machine could not make it work - which is answered at once, so a player whose
-    /// game really has gone is still noticed in seconds rather than in half a minute.
+    /// one yet, and the send loop is about to make it. A session the other side closed counts as up too: that is how
+    /// the other side renews a link that carries nothing (<see cref="RenewSession"/>), and the next send here opens
+    /// the new one. A player whose game goes away closes it the same way, after saying so in a message of its own.
+    /// What counts as down is this machine giving up on the session or failing to make it.
     /// </summary>
     /// <param name="steamId">The player to ask about.</param>
     /// <returns>Whether there is a link, or the making of one.</returns>
@@ -177,7 +178,61 @@ internal static class SteamRelayMessaging {
         return state is ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_None
             or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connecting
             or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_FindingRoute
-            or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected;
+            or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected
+            or ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_ClosedByPeer;
+    }
+
+    /// <summary>
+    /// Whether Steam calls its session with a player connected: neither still being built nor ended. Never for this
+    /// player, whom nothing leaves the machine for.
+    /// </summary>
+    /// <param name="steamId">The player to ask about.</param>
+    public static bool SessionConnected(ulong steamId) {
+        if (steamId == 0 || steamId == SteamUser.GetSteamID().m_SteamID) {
+            return false;
+        }
+
+        var identity = IdentityOf(steamId);
+        return SteamNetworkingMessages.GetSessionConnectionInfo(ref identity, out _, out _) ==
+               ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected;
+    }
+
+    /// <summary>
+    /// Closes the session with a player that Steam still calls connected, so that the next message sent to them
+    /// (<c>AutoRestartBrokenSession</c>) opens a new one, which finds its way over the relay network anew. Steam
+    /// does not tell the other side of a close as a failure, and their next send opens the new session as well.
+    ///
+    /// On 10-15 nothing from the host reached the joining player for 30 s while what the joining player sent reached
+    /// the host throughout, and Steam called the session connected the whole time, counting dozens of end-to-end
+    /// timeouts; a new lobby two minutes later connected at once. What either side still had on its way over the old
+    /// session is lost, which the catching up on a room after a gap in what arrives makes good for the room.
+    /// </summary>
+    /// <param name="steamId">The player.</param>
+    /// <param name="who">Who the player is, for the log.</param>
+    /// <returns>Whether the session was closed: not one that Steam is still building or has ended.</returns>
+    public static bool RenewSession(ulong steamId, string who) {
+        if (steamId == 0 || steamId == SteamUser.GetSteamID().m_SteamID) {
+            return false;
+        }
+
+        var identity = IdentityOf(steamId);
+        var state = SteamNetworkingMessages.GetSessionConnectionInfo(ref identity, out _, out _);
+        if (state != ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected) {
+            return false;
+        }
+
+        // How it stood is said before closing it, after which there is nothing left to ask
+        var stood = DescribeSession(steamId);
+        if (!SteamNetworkingMessages.CloseSessionWithUser(ref identity)) {
+            Logger.Warn($"Steam relay: could not close the session with {who} ({steamId}) to open it anew");
+            return false;
+        }
+
+        Logger.Info(
+            $"Steam relay: closed the session with {who} ({steamId}), which carried nothing although Steam called it " +
+            $"connected, so that the next send opens a new one ({stood})"
+        );
+        return true;
     }
 
     /// <summary>

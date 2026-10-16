@@ -28,4 +28,18 @@ internal interface ISessionStateTransport {
     /// <param name="why">Why, as it ends a sentence of the log: "written down as ...".</param>
     /// <param name="secondsBack">How many seconds of the record to write down first.</param>
     void RecordSession(string why, int secondsBack);
+
+    /// <summary>
+    /// Whether the link to the other side counts as connected: neither still being built nor gone.
+    /// </summary>
+    bool SessionConnected { get; }
+
+    /// <summary>
+    /// Closes the link to the other side if it counts as connected, so that the next thing sent opens a new one, over
+    /// a way to the other side that is found anew. For a link that has carried nothing for a while although it counts
+    /// as connected: what was still on its way over it is lost.
+    /// </summary>
+    /// <returns>Whether it was closed: not a link that is still being built or is gone, nor one that never leaves the
+    /// machine.</returns>
+    bool RenewStalledSession();
 }

@@ -53,6 +53,12 @@ internal class SteamRelayTransportClient : IReliableTransportClient, ISessionSta
     public void RecordSession(string why, int secondsBack) => SteamRelayRecorder.Record(SteamId, why, secondsBack);
 
     /// <inheritdoc />
+    public bool SessionConnected => SteamRelayMessaging.SessionConnected(SteamId);
+
+    /// <inheritdoc />
+    public bool RenewStalledSession() => SteamRelayMessaging.RenewSession(SteamId, "a player");
+
+    /// <inheritdoc />
     public event Action<byte[], int>? DataReceivedEvent;
 
     public SteamRelayTransportClient(ulong steamId) {

@@ -54,6 +54,14 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     }
 
     /// <inheritdoc />
+    public bool SessionConnected =>
+        _isConnected && !_isLoopback && SteamRelayMessaging.SessionConnected(_remoteSteamId);
+
+    /// <inheritdoc />
+    public bool RenewStalledSession() =>
+        _isConnected && !_isLoopback && SteamRelayMessaging.RenewSession(_remoteSteamId, "the host");
+
+    /// <inheritdoc />
     public int MaxPacketSize => SteamRelayMessaging.MaxPacketSize;
 
     /// <summary>
