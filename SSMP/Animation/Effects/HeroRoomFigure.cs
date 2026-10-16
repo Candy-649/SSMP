@@ -516,8 +516,8 @@ internal class HeroRoomFigure : AnimationEffect {
     /// place in the room that the other game finds it at.
     /// </summary>
     /// <param name="figure">The figure.</param>
-    /// <param name="anyRoot">Whether a figure of anything counts, rather than only one made during play: in the files,
-    /// or kept switched off for later.</param>
+    /// <param name="anyRoot">Whether a figure of anything counts, rather than only one made during play, like the one
+    /// in the game's files.</param>
     internal static string? LooseKeyOf(Transform figure, bool anyRoot = false) {
         var root = figure.root;
         var rootName = root.name;
@@ -565,7 +565,9 @@ internal class HeroRoomFigure : AnimationEffect {
         }
 
         if (!playerObject.TryGetComponent<RoomFigureCopy>(out var copy)) {
-            if (effectInfo[0] != Shown) {
+            // Either word that shows the player, as a figure made during play may be the first thing the room shows
+            // them by
+            if (effectInfo[0] != Shown && effectInfo[0] != ShownLoose) {
                 return;
             }
 
@@ -631,10 +633,13 @@ internal class HeroRoomFigure : AnimationEffect {
             return;
         }
 
-        var made = copy.ShowLoose(
+        var shown = copy.ShowLoose(
             plays, key, clipName, clipTime, fps, offset + new Vector3(0f, 0f, CopyBehind), scale, angle, ShownFor
         );
-        if (made && thrown.Length > 0) {
+
+        // With every word rather than when the copy is made: the copy stays for a thing that shows the player right
+        // after another one did, if the word that the first one let them go was lost on the way
+        if (shown && thrown.Length > 0) {
             PutAwayTwin(thrown, key);
         }
     }
@@ -711,15 +716,24 @@ internal class HeroRoomFigure : AnimationEffect {
 
     /// <summary>
     /// Copies a figure made during play for another player, from any figure of the same thing in this game: one that
-    /// is out now, one that waits switched off to be used again, or the one in the game's files. It stands at the top
-    /// of the room, for <see cref="RoomFigureCopy"/> to put where the figure is from the other player's character.
+    /// is out now, or the one in the game's files. One that waits switched off to be used again is not taken, as the
+    /// pool keeps it under an object of its own (ObjectPool.RecycleProcess). The copy stands at the top of the room,
+    /// for <see cref="RoomFigureCopy"/> to put where the figure is from the other player's character.
     /// </summary>
     /// <param name="key">What names the figure in every game (see <see cref="LooseKeyOf"/>).</param>
     /// <returns>The copy, or null if this game has no figure of that thing.</returns>
     internal static GameObject? MakeLooseCopy(string key) {
+        // Every figure the game has loaded is looked through, so the whole key is worked out only for those with the
+        // figure's own name; a figure that is the thing itself has no name of its own in the key
+        var name = key.Substring(Mathf.Max(key.IndexOf(LooseKeySeparator), key.LastIndexOf('/')) + 1);
+
         GameObject? original = null;
         foreach (var animator in Resources.FindObjectsOfTypeAll<tk2dSpriteAnimator>()) {
-            if (animator != null && LooseKeyOf(animator.transform, anyRoot: true) == key) {
+            if (animator == null || name.Length > 0 && animator.name != name) {
+                continue;
+            }
+
+            if (LooseKeyOf(animator.transform, anyRoot: true) == key) {
                 original = animator.gameObject;
                 break;
             }
@@ -1038,6 +1052,24 @@ internal class RoomFigureCopy : MonoBehaviour {
     private float _angle;
 
     /// <summary>
+    /// What names the figure made during play that this game had no figure of when it was last looked for, or null.
+    /// </summary>
+    [NonSerialized]
+    private string? _missing;
+
+    /// <summary>
+    /// Until when <see cref="_missing"/> is not looked for again, in unscaled time: the player says what the figure
+    /// plays several times a second, and looking means going through every figure the game has loaded.
+    /// </summary>
+    [NonSerialized]
+    private float _missingUntil;
+
+    /// <summary>
+    /// How long a figure made during play that this game had no figure of is not looked for again, in seconds.
+    /// </summary>
+    private const float LookAgainAfter = 3f;
+
+    /// <summary>
     /// How fast the copy closes the distance to where the player's figure stood, as a share of it per second: a
     /// figure that moves is said every <see cref="HeroRoomFigure.SayMovesEvery"/> seconds, and the copy gets most of
     /// the way in that time.
@@ -1113,7 +1145,7 @@ internal class RoomFigureCopy : MonoBehaviour {
     /// <param name="scale">How big the figure is, and which way it faces.</param>
     /// <param name="angle">How far the figure is turned, in degrees.</param>
     /// <param name="shownFor">How long the copy stays unless the player says again that the room shows them.</param>
-    /// <returns>Whether the copy was made now.</returns>
+    /// <returns>Whether the copy shows.</returns>
     public bool ShowLoose(
         byte plays,
         string key,
@@ -1133,12 +1165,20 @@ internal class RoomFigureCopy : MonoBehaviour {
         if (_copy == null || _path != key || !_loose) {
             RemoveCopy();
 
-            _copy = HeroRoomFigure.MakeLooseCopy(key);
+            // A figure that this game had none of is looked for again only after a while
+            var look = key != _missing || Time.unscaledTime >= _missingUntil;
+            _copy = look ? HeroRoomFigure.MakeLooseCopy(key) : null;
             if (_copy == null) {
+                if (look) {
+                    _missing = key;
+                    _missingUntil = Time.unscaledTime + LookAgainAfter;
+                }
+
                 Hide();
                 return false;
             }
 
+            _missing = null;
             _animator = _copy.GetComponent<tk2dSpriteAnimator>();
             _path = key;
             _loose = true;
@@ -1152,7 +1192,7 @@ internal class RoomFigureCopy : MonoBehaviour {
         Play(made, plays, clipName, clipTime, fps);
         _shownUntil = Time.unscaledTime + shownFor;
         HeroChildEffects.ShowBodyUnlessHidden(gameObject);
-        return made;
+        return true;
     }
 
     /// <summary>
