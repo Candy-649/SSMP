@@ -20,6 +20,12 @@ internal class NeedolinEffect : AnimationEffect {
     }
 
     /// <inheritdoc/>
+    /// <remarks>Whether the charm is worn holds for the whole song. When the clip change that started a song was lost,
+    /// the clip was put right without it, and the performer had the smaller ranges until their next needolin clip.
+    /// </remarks>
+    public override bool HoldsWhileClipPlays => true;
+
+    /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         NeedolinCoop.SetRemoteMusicianCharm(playerObject, effectInfo is { Length: > 0 } && effectInfo[0] == 1);
     }

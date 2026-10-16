@@ -798,7 +798,7 @@ internal class AnimationManager {
     private ushort _clipChanges;
 
     /// <summary>
-    /// The clip of the last clip change that the local player sent, or null before they sent one.
+    /// The clip of the last clip change that the local player sent, or null before they sent one on this connection.
     /// </summary>
     private AnimationClip? _stateClip;
 
@@ -806,6 +806,12 @@ internal class AnimationManager {
     /// When the local player sent it, in game time.
     /// </summary>
     private float _stateClipSentAt;
+
+    /// <summary>
+    /// Its effect info when what its effect sets holds while it plays (see
+    /// <see cref="AnimationEffect.HoldsWhileClipPlays"/>), said with it; otherwise null.
+    /// </summary>
+    private byte[]? _stateEffectInfo;
 
     /// <summary>
     /// When the local player next says what their character plays, in unscaled time.
@@ -916,6 +922,8 @@ internal class AnimationManager {
     /// Register the game hooks for the animation manager.
     /// </summary>
     public void RegisterHooks() {
+        StartClipStatesOver();
+
         // Register scene change, which is where we update the animation event handler
         SceneManager.activeSceneChanged += OnSceneChange;
 
@@ -1059,11 +1067,12 @@ internal class AnimationManager {
     /// <param name="frame">The frame that the animation should play from.</param>
     /// <param name="crestType">The type of crest the player is using.</param>
     /// <param name="startTime">How far into the clip to start it, in seconds, or 0 to start it at the frame.</param>
-    public void UpdatePlayerAnimation(ushort id, int clipId, int frame, CrestType crestType, float startTime = 0f) {
+    /// <returns>Whether a clip was started on the player's figure.</returns>
+    public bool UpdatePlayerAnimation(ushort id, int clipId, int frame, CrestType crestType, float startTime = 0f) {
         var playerObject = _playerManager.GetPlayerObject(id);
         if (!playerObject) {
             // Logger.Get().Warn(this, $"Tried to update animation, but there was not matching player object for ID {id}");
-            return;
+            return false;
         }
 
         var animationClip = (AnimationClip) clipId;
@@ -1072,7 +1081,7 @@ internal class AnimationManager {
 
         if (SubAnimationEffects.ContainsKey(animationClip)) {
             if (_debugLogAnimations) Logger.Info($"PlayerAnimationUpdate was sub-effect: {animationClip}");
-            return;
+            return false;
         }
 
         // Track whether the player is playing the needolin, so needolin range checks count them
@@ -1084,20 +1093,20 @@ internal class AnimationManager {
             // sprite animator.
 
             if (_debugLogAnimations) Logger.Warn($"Tried to update animation, but there was no entry for clip ID: {clipId}, enum: {animationClip}");
-            return;
+            return false;
         }
 
         var clipName = ClipEnumNames[animationClip];
         if (clipName == null) {
             Logger.Warn($"Clip name was null after lookup in {nameof(ClipEnumNames)}");
-            return;
+            return false;
         }
 
         if (_debugLogAnimations) Logger.Info($"  clipName: {clipName}");
 
         // The body of a player lying in their cocoon is kept off the screen, which playing a clip on it would undo
         if (CoopSave.HoldsBackAnimation(id, clipName)) {
-            return;
+            return false;
         }
 
         // Get the sprite animator and check whether this clip can be played before playing it
@@ -1113,7 +1122,7 @@ internal class AnimationManager {
             out var overrideGroup
         )) {
             Logger.Warn($"Could not get configs from crest type: {crestType}");
-            return;
+            return false;
         }
 
         var clipInOverrideGroupLib = false;
@@ -1137,13 +1146,13 @@ internal class AnimationManager {
 
         if (clip == null) {
             Logger.Warn("Could not find clip in normal library, config group's override library, or override group's override library");
-            return;
+            return false;
         }
 
         if (_debugLogAnimations) Logger.Info($"  playing clip: {clipName}");
         if (startTime <= 0f) {
             spriteAnimator.PlayFromFrame(clip, frame);
-            return;
+            return true;
         }
 
         // A clip that plays once stays on its last frame after its end, where a time past the end would show its first
@@ -1153,6 +1162,7 @@ internal class AnimationManager {
         }
 
         spriteAnimator.Play(clip, startTime, 0f);
+        return true;
     }
 
     /// <summary>
@@ -1168,7 +1178,41 @@ internal class AnimationManager {
 
         _nextClipStateAt = Time.unscaledTime + ClipStateEvery;
         var playedFor = Mathf.Clamp((Time.time - _stateClipSentAt) * 1000f, 0f, ushort.MaxValue);
-        _netClient.UpdateManager.UpdatePlayerClipState(_clipChanges, clip, (ushort) playedFor);
+        _netClient.UpdateManager.UpdatePlayerClipState(_clipChanges, clip, (ushort) playedFor, _stateEffectInfo);
+    }
+
+    /// <summary>
+    /// Sends a clip change of the local player's character, counted, and from then on says with every update that the
+    /// character plays its clip (see <see cref="SendClipState"/>).
+    /// </summary>
+    /// <param name="animationClip">The clip.</param>
+    /// <param name="effectInfo">The effect info of the clip, if it has an effect.</param>
+    private void SendClipChange(AnimationClip animationClip, byte[]? effectInfo) {
+        _clipChanges = unchecked((ushort) (_clipChanges + 1));
+        _stateClip = animationClip;
+        _stateClipSentAt = Time.time;
+        _stateEffectInfo = AnimationEffects.TryGetValue(animationClip, out var effect) &&
+                           effect is AnimationEffect { HoldsWhileClipPlays: true }
+            ? effectInfo
+            : null;
+        _netClient.UpdateManager.UpdatePlayerClipChange(animationClip, effectInfo, _clipChanges, _stateEffectInfo);
+    }
+
+    /// <summary>
+    /// Starts over what the local player says and hears of the clips that characters play, for a new connection.
+    /// <list type="bullet">
+    /// <item>The counts of a player whose game started anew begin again: kept, they made the clip changes of that
+    /// player look late, and these were left out.</item>
+    /// <item>What the local character played before it is not what it plays now: said again, it put a new figure of
+    /// theirs on a clip they had left while not connected.</item>
+    /// <item>The last clip sent is forgotten, so that the next one is sent even when it is that clip.</item>
+    /// </list>
+    /// </summary>
+    private void StartClipStatesOver() {
+        _stateClip = null;
+        _stateEffectInfo = null;
+        _lastAnimationClip = null;
+        _clipChangesHeard.Clear();
     }
 
     /// <summary>
@@ -1191,13 +1235,16 @@ internal class AnimationManager {
     /// Takes what another player said their character plays now, which puts right a clip change of theirs that never
     /// arrived: when they sent a change since the last word of it, and their figure plays another clip than the one
     /// they said, that clip is started on it from where their character is in it. Its effect, such as the flash of a
-    /// slash, stays lost. A clip that plays once and that they started again counts as another clip.
+    /// slash, stays lost, unless what the effect sets holds while the clip plays (see
+    /// <see cref="AnimationEffect.HoldsWhileClipPlays"/>). A clip that plays once and that they started again counts
+    /// as another clip.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
     /// <param name="clipChanges">How many clip changes they had sent.</param>
     /// <param name="clipId">The clip of the last of them, which their character plays.</param>
     /// <param name="clipTime">How long ago their character started it, in milliseconds.</param>
-    public void OnPlayerClipState(ushort id, ushort clipChanges, ushort clipId, ushort clipTime) {
+    /// <param name="effectInfo">The effect info of that clip, when what its effect sets holds while it plays.</param>
+    public void OnPlayerClipState(ushort id, ushort clipChanges, ushort clipId, ushort clipTime, byte[]? effectInfo) {
         WriteDownClipFixes();
 
         if (_clipChangesHeard.TryGetValue(id, out var heard)) {
@@ -1207,15 +1254,18 @@ internal class AnimationManager {
             }
         }
 
+        // Heard only by a figure that is there. An update that came before it, such as one that overtook the word of
+        // its player coming in, was played on nothing; taken as heard, it kept the first word after it from putting
+        // the new figure right
+        var playerObject = _playerManager.GetPlayerObject(id);
+        if (!playerObject) {
+            return;
+        }
+
         _clipChangesHeard[id] = clipChanges;
 
         var animationClip = (AnimationClip) clipId;
         if (!ClipEnumNames.ContainsSecond(animationClip)) {
-            return;
-        }
-
-        var playerObject = _playerManager.GetPlayerObject(id);
-        if (!playerObject) {
             return;
         }
 
@@ -1228,8 +1278,16 @@ internal class AnimationManager {
             return;
         }
 
-        UpdatePlayerAnimation(id, clipId, 0, _playerManager.GetPlayerCrestType(id), startTime);
-        NoteClipFix(id, putRight: true);
+        // Counted only when a clip was started: not one held back on a body in its cocoon, or one missing for a crest
+        var crestType = _playerManager.GetPlayerCrestType(id);
+        if (UpdatePlayerAnimation(id, clipId, 0, crestType, startTime)) {
+            NoteClipFix(id, putRight: true);
+        }
+
+        if (effectInfo != null && AnimationEffects.TryGetValue(animationClip, out var effect) &&
+            effect is AnimationEffect { HoldsWhileClipPlays: true }) {
+            effect.Play(playerObject, crestType, effectInfo);
+        }
     }
 
     /// <summary>
@@ -1277,6 +1335,15 @@ internal class AnimationManager {
 
         // The figures of other players are made anew, and take what their players play from the next word of it
         _clipChangesHeard.Clear();
+    }
+
+    /// <summary>
+    /// Callback method when a player enters the scene. Their new figure takes what they play from the next word of it,
+    /// not from a count heard before it was there, or from a word that was on its way when they left.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    public void OnPlayerEnterScene(ushort id) {
+        _clipChangesHeard.Remove(id);
     }
 
     /// <summary>
@@ -1358,19 +1425,17 @@ internal class AnimationManager {
 
         var animationClip = ClipEnumNames[clip.name];
 
-        // Check whether there is an effect that adds info to this packet
-        byte[]? effectInfo = null;
-        if (AnimationEffects.TryGetValue(animationClip, out var effect)) {
-            effectInfo = effect.GetEffectInfo();
-        } else if (SubAnimationEffects.TryGetValue(animationClip, out var subEffect)) {
-            effectInfo = subEffect.GetEffectInfo();
+        // A stand-in for a part of a bind that has no clip of its own is only an effect, and the figure stays on the
+        // clip of the last change. It is sent uncounted, and what the character plays stays that clip: said instead, a
+        // clip change lost just before it could not be put right
+        if (SubAnimationEffects.TryGetValue(animationClip, out var subEffect)) {
+            _netClient.UpdateManager.UpdatePlayerAnimation(animationClip, 0, subEffect.GetEffectInfo());
+        } else {
+            SendClipChange(
+                animationClip,
+                AnimationEffects.TryGetValue(animationClip, out var effect) ? effect.GetEffectInfo() : null
+            );
         }
-
-        // Counted, and said again with every update from now on (see SendClipState)
-        _clipChanges = unchecked((ushort) (_clipChanges + 1));
-        _stateClip = animationClip;
-        _stateClipSentAt = Time.time;
-        _netClient.UpdateManager.UpdatePlayerClipChange(animationClip, effectInfo, _clipChanges);
 
         if (_debugLogAnimations) Logger.Info($"  Sending animation: {animationClip}");
 
@@ -2164,7 +2229,9 @@ internal class AnimationManager {
             (byte)(frostDeath ? 1 : 0),
             (byte)(nonLethal ? 1 : 0)
         ];
-        _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.Death, 0, effectInfo);
+        // Counted like the clip changes of the character. Uncounted, a word of what the character plays that came with
+        // it or after it put the clip from before the death back on the figure, over the death
+        SendClipChange(AnimationClip.Death, effectInfo);
     }
 
     // /// <summary>

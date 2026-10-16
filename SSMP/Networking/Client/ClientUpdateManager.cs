@@ -176,7 +176,14 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     /// <param name="clip">The animation clip.</param>
     /// <param name="effectInfo">Byte array of effect info.</param>
     /// <param name="clipChanges">How many clip changes were sent, this one included, counted round.</param>
-    public void UpdatePlayerClipChange(AnimationClip clip, byte[]? effectInfo, ushort clipChanges) {
+    /// <param name="stateEffectInfo">The effect info said with what the character plays (see
+    /// <see cref="PlayerUpdate.StateEffectInfo"/>).</param>
+    public void UpdatePlayerClipChange(
+        AnimationClip clip,
+        byte[]? effectInfo,
+        ushort clipChanges,
+        byte[]? stateEffectInfo
+    ) {
         lock (Lock) {
             var playerUpdate = FindOrCreatePlayerUpdate();
             playerUpdate.UpdateTypes.Add(PlayerUpdateType.Animation);
@@ -186,7 +193,7 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
                     EffectInfo = effectInfo
                 }
             );
-            playerUpdate.SetClipState(clipChanges, (ushort) clip, 0);
+            playerUpdate.SetClipState(clipChanges, (ushort) clip, 0, stateEffectInfo);
         }
     }
 
@@ -197,9 +204,10 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     /// <param name="clipChanges">How many clip changes were sent, counted round.</param>
     /// <param name="clip">The clip of the last of them.</param>
     /// <param name="clipTime">How long ago the character started it, in milliseconds.</param>
-    public void UpdatePlayerClipState(ushort clipChanges, AnimationClip clip, ushort clipTime) {
+    /// <param name="effectInfo">Its effect info, when what its effect sets holds while it plays.</param>
+    public void UpdatePlayerClipState(ushort clipChanges, AnimationClip clip, ushort clipTime, byte[]? effectInfo) {
         lock (Lock) {
-            FindOrCreatePlayerUpdate().SetClipState(clipChanges, (ushort) clip, clipTime);
+            FindOrCreatePlayerUpdate().SetClipState(clipChanges, (ushort) clip, clipTime, effectInfo);
         }
     }
 

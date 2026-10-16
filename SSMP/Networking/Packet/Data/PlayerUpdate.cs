@@ -62,6 +62,12 @@ internal class PlayerUpdate : GenericClientData {
     public ushort StateClipTime { get; private set; }
 
     /// <summary>
+    /// The effect info of that clip when what its effect sets holds while the clip plays, such as whether a player who
+    /// plays the needolin wears the charm that widens its ranges (AnimationEffect.HoldsWhileClipPlays); otherwise null.
+    /// </summary>
+    public byte[]? StateEffectInfo { get; private set; }
+
+    /// <summary>
     /// Construct the player update data.
     /// </summary>
     public PlayerUpdate() {
@@ -79,7 +85,8 @@ internal class PlayerUpdate : GenericClientData {
     /// <param name="clipChanges">How many clip changes the player had sent, counted round.</param>
     /// <param name="clipId">The clip of the last of them.</param>
     /// <param name="clipTime">How long ago the character started it, in milliseconds.</param>
-    public void SetClipState(ushort clipChanges, ushort clipId, ushort clipTime) {
+    /// <param name="effectInfo">Its effect info, when what its effect sets holds while it plays.</param>
+    public void SetClipState(ushort clipChanges, ushort clipId, ushort clipTime, byte[]? effectInfo) {
         if (UpdateTypes.Contains(PlayerUpdateType.ClipState) && (short) (clipChanges - ClipChanges) < 0) {
             return;
         }
@@ -88,6 +95,7 @@ internal class PlayerUpdate : GenericClientData {
         ClipChanges = clipChanges;
         StateClipId = clipId;
         StateClipTime = clipTime;
+        StateEffectInfo = effectInfo;
     }
 
     /// <summary>
@@ -95,7 +103,7 @@ internal class PlayerUpdate : GenericClientData {
     /// </summary>
     public void CopyClipStateTo(PlayerUpdate other) {
         if (UpdateTypes.Contains(PlayerUpdateType.ClipState)) {
-            other.SetClipState(ClipChanges, StateClipId, StateClipTime);
+            other.SetClipState(ClipChanges, StateClipId, StateClipTime, StateEffectInfo);
         }
     }
 
@@ -168,6 +176,13 @@ internal class PlayerUpdate : GenericClientData {
             packet.Write(ClipChanges);
             packet.Write(StateClipId);
             packet.Write(StateClipTime);
+
+            // Its length first, as with the effect info of a clip change
+            var numEffects = (byte) System.Math.Min(StateEffectInfo?.Length ?? 0, byte.MaxValue);
+            packet.Write(numEffects);
+            for (var i = 0; i < numEffects; i++) {
+                packet.Write(StateEffectInfo![i]);
+            }
         }
     }
 
@@ -237,6 +252,16 @@ internal class PlayerUpdate : GenericClientData {
             ClipChanges = packet.ReadUShort();
             StateClipId = packet.ReadUShort();
             StateClipTime = packet.ReadUShort();
+
+            var numEffects = packet.ReadByte();
+            if (numEffects != 0) {
+                var effectInfo = new byte[numEffects];
+                for (var i = 0; i < numEffects; i++) {
+                    effectInfo[i] = packet.ReadByte();
+                }
+
+                StateEffectInfo = effectInfo;
+            }
         }
     }
 }

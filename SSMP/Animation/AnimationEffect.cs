@@ -20,6 +20,13 @@ internal abstract class AnimationEffect : IAnimationEffect {
     /// <inheritdoc/>
     public abstract byte[]? GetEffectInfo();
 
+    /// <summary>
+    /// Whether what this effect sets holds for as long as its clip plays, rather than being a moment of it. Its info is
+    /// then said with what the player plays (see AnimationManager.SendClipState), and it is played again when a lost
+    /// clip change is put right from that. A moment is not, as it would show where the player no longer is.
+    /// </summary>
+    public virtual bool HoldsWhileClipPlays => false;
+
     /// <inheritdoc/>
     public void SetServerSettings(ServerSettings serverSettings) {
         ServerSettings = serverSettings;
