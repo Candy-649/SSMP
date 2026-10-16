@@ -218,8 +218,9 @@ internal class ClientManager : IClientManager {
     private string? _lastScene;
 
     /// <summary>
-    /// The crest that this client last told the server the local player wears, or null when it has told none since it
-    /// connected (see <see cref="SendChangedCrest"/>).
+    /// The crest that this client last told the server the local player wears, or last tried to and found no crest
+    /// type for, so that it is not tried again every frame; null when it has told none since it connected (see
+    /// <see cref="SendChangedCrest"/>).
     /// </summary>
     private string? _sentCrestId;
 
@@ -930,6 +931,10 @@ internal class ClientManager : IClientManager {
     /// <param name="serverInfo">The server info received from the server.</param>
     private void OnClientConnect(ServerInfo serverInfo) {
         Logger.Info("Received server info from server");
+
+        // Nothing sent before this connection counts for it: the first frame of play sends the crest if nothing else
+        // has by then
+        _sentCrestId = null;
 
         // Update the locally stored server settings
         _serverSettings.SetAllProperties(serverInfo.ServerSettingsUpdate.ServerSettings);
@@ -2063,9 +2068,10 @@ internal class ClientManager : IClientManager {
 
         try {
             var crestType = CrestTypeExt.FromInternal(crestId!);
-            Logger.Info(
-                $"Player's Crest is '{crestId}' rather than '{sentCrestId}', the one last sent, with no crest " +
-                "equipped to change it, networking to server"
+            Logger.Info(sentCrestId == null
+                ? $"Player's Crest is '{crestId}', the first sent since connecting, networking to server"
+                : $"Player's Crest is '{crestId}' rather than '{sentCrestId}', the one last sent, with no crest " +
+                  "equipped to change it, networking to server"
             );
             _netClient.UpdateManager.AddPlayerSettingUpdate(crestType: crestType);
         } catch (InvalidOperationException e) {
