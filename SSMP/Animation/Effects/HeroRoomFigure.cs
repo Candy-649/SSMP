@@ -6,6 +6,7 @@ using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client;
+using SSMP.Game.Client.Save;
 using SSMP.Internals;
 using TeamCherry.NestedFadeGroup;
 using UnityEngine;
@@ -26,6 +27,12 @@ namespace SSMP.Animation.Effects;
 /// its side would put one on top of the other. A room switches its figure on either by its sprite or by switching the
 /// whole figure on, like the shrines that give a crest, whose figure then leaps up to the shrine; the copy goes where
 /// the figure goes in the player's game.
+///
+/// A figure can also come with something made during play rather than with the room, like the glob that a spitting
+/// flyer traps the hero in, which plays the trapped hero on a figure of its own. Such a figure has no place in the room
+/// that the other game could find it at, so the other players were shown neither the player nor the figure: only their
+/// name (USER 10-16 "被困住的时候我看不到对方人，只能看到名字"). Its copy is made from any figure of the same thing in
+/// the other game, and goes where the figure is from the player's character there (see <see cref="LooseKeyOf"/>).
 /// </summary>
 internal class HeroRoomFigure : AnimationEffect {
     /// <summary>
@@ -87,6 +94,23 @@ internal class HeroRoomFigure : AnimationEffect {
     /// <see cref="WriteNotShown"/>).
     /// </summary>
     private const byte NotShown = 0;
+
+    /// <summary>
+    /// The first byte of the effect info that says what a figure made during play plays (see
+    /// <see cref="WriteLoose"/>).
+    /// </summary>
+    private const byte ShownLoose = 2;
+
+    /// <summary>
+    /// What Unity puts after the name of an object it makes from another during play.
+    /// </summary>
+    private const string CloneSuffix = "(Clone)";
+
+    /// <summary>
+    /// What stands between the name of the thing that a figure made during play is part of and the path of the figure
+    /// under it (see <see cref="LooseKeyOf"/>).
+    /// </summary>
+    private const char LooseKeySeparator = '|';
 
     /// <summary>
     /// What the name of an object that a room switches on whole has to have in it to be taken for a figure of the hero:
@@ -454,6 +478,65 @@ internal class HeroRoomFigure : AnimationEffect {
     }
 
     /// <summary>
+    /// Writes what a figure made during play plays to effect info, as <see cref="Write"/> does for one of the room, but
+    /// with what it is part of by name and where it is from the hero rather than within that (see
+    /// <see cref="LooseKeyOf"/>), its size, facing and turn, and the name of the thrown thing it is part of, if it is.
+    /// </summary>
+    /// <param name="plays">How many clips the figure started so far, counted round.</param>
+    /// <param name="key">What names the figure in every game.</param>
+    /// <param name="figure">The animator of the figure.</param>
+    /// <param name="offset">Where the figure is from the hero.</param>
+    internal static byte[] WriteLoose(byte plays, string key, tk2dSpriteAnimator figure, Vector3 offset) {
+        var clip = figure.CurrentClip;
+        var scale = figure.transform.lossyScale;
+        var thrown = ThrownThings.TryGetMark(figure.gameObject, out var mark) ? mark.Key ?? "" : "";
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        writer.Write(ShownLoose);
+        writer.Write(plays);
+        writer.Write(key);
+        writer.Write(clip != null ? clip.name : "");
+        writer.Write(clip != null ? figure.ClipTimeSeconds : 0f);
+        writer.Write(figure.ClipFps);
+        writer.Write(offset.x);
+        writer.Write(offset.y);
+        writer.Write(offset.z);
+        writer.Write(scale.x);
+        writer.Write(scale.y);
+        writer.Write(figure.transform.eulerAngles.z);
+        writer.Write(thrown);
+        writer.Flush();
+        return stream.ToArray();
+    }
+
+    /// <summary>
+    /// What names a figure made during play in every game: the name of the thing it is part of, as the thing came out
+    /// of the game's files, and the path of the figure under it. Null for a figure of the room itself, which has a
+    /// place in the room that the other game finds it at.
+    /// </summary>
+    /// <param name="figure">The figure.</param>
+    /// <param name="anyRoot">Whether a figure of anything counts, rather than only one made during play: in the files,
+    /// or kept switched off for later.</param>
+    internal static string? LooseKeyOf(Transform figure, bool anyRoot = false) {
+        var root = figure.root;
+        var rootName = root.name;
+        var clone = rootName.IndexOf(CloneSuffix, StringComparison.Ordinal);
+        if (clone < 0 && !anyRoot) {
+            return null;
+        }
+
+        var names = new System.Collections.Generic.List<string>();
+        for (var current = figure; current != null && current != root; current = current.parent) {
+            names.Add(current.name);
+        }
+
+        names.Reverse();
+        var thing = clone >= 0 ? rootName.Substring(0, clone).TrimEnd() : rootName;
+        return thing + LooseKeySeparator + string.Join("/", names);
+    }
+
+    /// <summary>
     /// Says often for a while what the room's figure of the local hero plays, once the local player or another one came
     /// into the room (see <see cref="HeroHidden.SayAgainSoon"/>).
     /// </summary>
@@ -489,6 +572,11 @@ internal class HeroRoomFigure : AnimationEffect {
             copy = playerObject.AddComponent<RoomFigureCopy>();
         }
 
+        if (effectInfo[0] == ShownLoose) {
+            PlayLoose(copy, effectInfo);
+            return;
+        }
+
         if (effectInfo[0] != Shown) {
             copy.End(effectInfo.Length > 1 ? effectInfo[1] : null, EndedFor);
             return;
@@ -513,6 +601,65 @@ internal class HeroRoomFigure : AnimationEffect {
         }
 
         copy.Show(plays, path, clipName, clipTime, fps, position + new Vector3(0f, 0f, CopyBehind), ShownFor);
+    }
+
+    /// <summary>
+    /// Shows the copy of a figure made during play, from effect info that <see cref="WriteLoose"/> wrote.
+    /// </summary>
+    private static void PlayLoose(RoomFigureCopy copy, byte[] effectInfo) {
+        byte plays;
+        string key;
+        string clipName;
+        float clipTime;
+        float fps;
+        Vector3 offset;
+        Vector3 scale;
+        float angle;
+        string thrown;
+        try {
+            using var reader = new BinaryReader(new MemoryStream(effectInfo, 1, effectInfo.Length - 1));
+            plays = reader.ReadByte();
+            key = reader.ReadString();
+            clipName = reader.ReadString();
+            clipTime = reader.ReadSingle();
+            fps = reader.ReadSingle();
+            offset = new Vector3(reader.ReadSingle(), reader.ReadSingle(), reader.ReadSingle());
+            scale = new Vector3(reader.ReadSingle(), reader.ReadSingle(), 1f);
+            angle = reader.ReadSingle();
+            thrown = reader.ReadString();
+        } catch (IOException) {
+            return;
+        }
+
+        var made = copy.ShowLoose(
+            plays, key, clipName, clipTime, fps, offset + new Vector3(0f, 0f, CopyBehind), scale, angle, ShownFor
+        );
+        if (made && thrown.Length > 0) {
+            PutAwayTwin(thrown, key);
+        }
+    }
+
+    /// <summary>
+    /// Puts away this game's twin of the thrown thing whose figure shows another player: the glob that trapped them
+    /// hides itself in their game and shows only its figure of them there, while its twin here, kept out of trapping
+    /// anyone but this game's own player (CoopHits), flew on as a glob of its own. Not one that shows this game's own
+    /// player in its figure.
+    /// </summary>
+    /// <param name="thrown">The name of the thrown thing.</param>
+    /// <param name="key">What names the figure under it (see <see cref="LooseKeyOf"/>).</param>
+    private static void PutAwayTwin(string thrown, string key) {
+        var twin = ThrownThings.Find($"#{thrown}|");
+        if (twin == null || !twin.activeInHierarchy) {
+            return;
+        }
+
+        foreach (var animator in twin.GetComponentsInChildren<tk2dSpriteAnimator>()) {
+            if (LooseKeyOf(animator.transform, anyRoot: true) == key) {
+                return;
+            }
+        }
+
+        twin.Recycle();
     }
 
     /// <summary>
@@ -552,9 +699,50 @@ internal class HeroRoomFigure : AnimationEffect {
             return null;
         }
 
-        // Made inside a holder that is switched off, so that nothing on the copy starts before what plays the figure
-        // for the local player is gone from it
-        var holder = new GameObject("Room Figure Holder");
+        var copy = MakeFigure(original, out var holder);
+        var place = copy.transform;
+        var originalPlace = original.transform;
+        place.SetParent(originalPlace.parent, false);
+        place.localPosition = originalPlace.localPosition + new Vector3(0f, 0f, CopyBehind);
+        place.localRotation = originalPlace.localRotation;
+        place.localScale = originalPlace.localScale;
+        return ShowFigure(copy, holder);
+    }
+
+    /// <summary>
+    /// Copies a figure made during play for another player, from any figure of the same thing in this game: one that
+    /// is out now, one that waits switched off to be used again, or the one in the game's files. It stands at the top
+    /// of the room, for <see cref="RoomFigureCopy"/> to put where the figure is from the other player's character.
+    /// </summary>
+    /// <param name="key">What names the figure in every game (see <see cref="LooseKeyOf"/>).</param>
+    /// <returns>The copy, or null if this game has no figure of that thing.</returns>
+    internal static GameObject? MakeLooseCopy(string key) {
+        GameObject? original = null;
+        foreach (var animator in Resources.FindObjectsOfTypeAll<tk2dSpriteAnimator>()) {
+            if (animator != null && LooseKeyOf(animator.transform, anyRoot: true) == key) {
+                original = animator.gameObject;
+                break;
+            }
+        }
+
+        if (original == null) {
+            return null;
+        }
+
+        var copy = MakeFigure(original, out var holder);
+        copy.transform.SetParent(null, false);
+        return ShowFigure(copy, holder);
+    }
+
+    /// <summary>
+    /// Makes a copy of a figure of the hero with nothing on it but what draws and plays it: not its FSM, and not what
+    /// tells it about the local hero. It is made inside a holder that is switched off, so that nothing on it starts
+    /// before that is gone from it.
+    /// </summary>
+    /// <param name="original">The figure.</param>
+    /// <param name="holder">The holder, which <see cref="ShowFigure"/> removes.</param>
+    private static GameObject MakeFigure(GameObject original, out GameObject holder) {
+        holder = new GameObject("Room Figure Holder");
         holder.SetActive(false);
 
         var copy = Object.Instantiate(original, holder.transform, false);
@@ -572,12 +760,13 @@ internal class HeroRoomFigure : AnimationEffect {
             }
         }
 
-        var place = copy.transform;
-        var originalPlace = original.transform;
-        place.SetParent(originalPlace.parent, false);
-        place.localPosition = originalPlace.localPosition + new Vector3(0f, 0f, CopyBehind);
-        place.localRotation = originalPlace.localRotation;
-        place.localScale = originalPlace.localScale;
+        return copy;
+    }
+
+    /// <summary>
+    /// Switches on a copy that <see cref="MakeFigure"/> made, once it is out of its holder, and removes the holder.
+    /// </summary>
+    private static GameObject ShowFigure(GameObject copy, GameObject holder) {
         Object.Destroy(holder);
 
         copy.SetActive(true);
@@ -619,10 +808,17 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
     private MeshRenderer? _figureBody;
 
     /// <summary>
-    /// The path of that figure in its room.
+    /// The path of that figure in its room, or what names it for one made during play (see
+    /// <see cref="HeroRoomFigure.LooseKeyOf"/>).
     /// </summary>
     [NonSerialized]
     private string _path = "";
+
+    /// <summary>
+    /// Whether the figure was made during play, and has no place in the room.
+    /// </summary>
+    [NonSerialized]
+    private bool _loose;
 
     /// <summary>
     /// How many clips the figure started, counted round, so that the other players start each once.
@@ -696,7 +892,9 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
 
         _figure = animator;
         _figureBody = body;
-        _path = ScenePath.Get(figure.transform);
+        var key = HeroRoomFigure.LooseKeyOf(figure.transform);
+        _loose = key != null;
+        _path = key ?? ScenePath.Get(figure.transform);
         _plays++;
         _changed = true;
     }
@@ -733,8 +931,9 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
             return;
         }
 
-        // A figure that moves, like one that leaps up to a shrine, is said again as it goes
-        var position = _figure!.transform.localPosition;
+        // A figure that moves, like one that leaps up to a shrine, is said again as it goes. One made during play is
+        // said where it is from the hero, which it may go along with
+        var position = _loose ? _figure!.transform.position - transform.position : _figure!.transform.localPosition;
         if (!_changed && Time.unscaledTime >= _sayMoveAt &&
             (position - _saidPosition).sqrMagnitude > HeroRoomFigure.MovedFar * HeroRoomFigure.MovedFar) {
             _changed = true;
@@ -744,7 +943,9 @@ internal class HeroRoomFigureWatcher : MonoBehaviour {
             return;
         }
 
-        var effectInfo = HeroRoomFigure.Write(_plays, _path, _figure);
+        var effectInfo = _loose
+            ? HeroRoomFigure.WriteLoose(_plays, _path, _figure, position)
+            : HeroRoomFigure.Write(_plays, _path, _figure);
         if (effectInfo.Length > HeroRoomFigure.MostEffectInfo) {
             Logger.Warn($"The figure '{_path}' has too long a path to show to other players");
             _figure = null;
@@ -818,6 +1019,25 @@ internal class RoomFigureCopy : MonoBehaviour {
     private Vector3 _position;
 
     /// <summary>
+    /// Whether the copy is of a figure made during play, which goes where the figure is from the player's character
+    /// rather than within what it is part of.
+    /// </summary>
+    [NonSerialized]
+    private bool _loose;
+
+    /// <summary>
+    /// How big the figure made during play is, and which way it faces, as the player said.
+    /// </summary>
+    [NonSerialized]
+    private Vector3 _scale = Vector3.one;
+
+    /// <summary>
+    /// How far the figure made during play is turned, in degrees, as the player said.
+    /// </summary>
+    [NonSerialized]
+    private float _angle;
+
+    /// <summary>
     /// How fast the copy closes the distance to where the player's figure stood, as a share of it per second: a
     /// figure that moves is said every <see cref="HeroRoomFigure.SayMovesEvery"/> seconds, and the copy gets most of
     /// the way in that time.
@@ -855,7 +1075,7 @@ internal class RoomFigureCopy : MonoBehaviour {
         }
 
         var made = false;
-        if (_copy == null || _path != path) {
+        if (_copy == null || _path != path || _loose) {
             RemoveCopy();
 
             _copy = HeroRoomFigure.MakeCopy(path);
@@ -866,6 +1086,7 @@ internal class RoomFigureCopy : MonoBehaviour {
 
             _animator = _copy.GetComponent<tk2dSpriteAnimator>();
             _path = path;
+            _loose = false;
             made = true;
 
             // A new copy starts where the figure is, rather than going there from where the room keeps it
@@ -873,7 +1094,72 @@ internal class RoomFigureCopy : MonoBehaviour {
         }
 
         _position = position;
+        Play(made, plays, clipName, clipTime, fps);
+        _shownUntil = Time.unscaledTime + shownFor;
+        HeroChildEffects.ShowBodyUnlessHidden(gameObject);
+    }
 
+    /// <summary>
+    /// Shows the copy of a figure made during play, as <see cref="Show"/> does for one of the room: made now from a
+    /// figure of the same thing in this game if there is none of it yet, and kept where the figure is from the
+    /// player's character (see <see cref="HeroRoomFigure.MakeLooseCopy"/>).
+    /// </summary>
+    /// <param name="plays">How many clips the player's figure started so far.</param>
+    /// <param name="key">What names the figure in every game.</param>
+    /// <param name="clipName">The name of the clip that it plays.</param>
+    /// <param name="clipTime">How far into the clip it is, in seconds.</param>
+    /// <param name="fps">How fast it plays the clip.</param>
+    /// <param name="offset">Where the figure is from the player's character.</param>
+    /// <param name="scale">How big the figure is, and which way it faces.</param>
+    /// <param name="angle">How far the figure is turned, in degrees.</param>
+    /// <param name="shownFor">How long the copy stays unless the player says again that the room shows them.</param>
+    /// <returns>Whether the copy was made now.</returns>
+    public bool ShowLoose(
+        byte plays,
+        string key,
+        string clipName,
+        float clipTime,
+        float fps,
+        Vector3 offset,
+        Vector3 scale,
+        float angle,
+        float shownFor
+    ) {
+        if (Time.unscaledTime < _endedUntil && (sbyte) (plays - _endedPlays) <= 0) {
+            return false;
+        }
+
+        var made = false;
+        if (_copy == null || _path != key || !_loose) {
+            RemoveCopy();
+
+            _copy = HeroRoomFigure.MakeLooseCopy(key);
+            if (_copy == null) {
+                Hide();
+                return false;
+            }
+
+            _animator = _copy.GetComponent<tk2dSpriteAnimator>();
+            _path = key;
+            _loose = true;
+            made = true;
+        }
+
+        _position = offset;
+        _scale = scale;
+        _angle = angle;
+        Follow();
+        Play(made, plays, clipName, clipTime, fps);
+        _shownUntil = Time.unscaledTime + shownFor;
+        HeroChildEffects.ShowBodyUnlessHidden(gameObject);
+        return made;
+    }
+
+    /// <summary>
+    /// Starts on the copy the clip that the player's figure plays, when the copy is new or the player's figure started
+    /// a clip since the copy last did.
+    /// </summary>
+    private void Play(bool made, byte plays, string clipName, float clipTime, float fps) {
         // Said again while the same clip goes on, it is not started again; a clip started since that was lost on the
         // way starts from where the player's figure is in it now
         if (made || (sbyte) (plays - _plays) > 0) {
@@ -891,9 +1177,21 @@ internal class RoomFigureCopy : MonoBehaviour {
                 _animator!.Play(clip, clipTime, fps);
             }
         }
+    }
 
-        _shownUntil = Time.unscaledTime + shownFor;
-        HeroChildEffects.ShowBodyUnlessHidden(gameObject);
+    /// <summary>
+    /// Keeps the copy of a figure made during play where the figure is from the player's character, at the size and
+    /// facing the player said.
+    /// </summary>
+    private void Follow() {
+        if (!_loose || _copy == null) {
+            return;
+        }
+
+        var place = _copy.transform;
+        place.position = transform.position + _position;
+        place.rotation = Quaternion.Euler(0f, 0f, _angle);
+        place.localScale = _scale;
     }
 
     /// <summary>
@@ -930,6 +1228,7 @@ internal class RoomFigureCopy : MonoBehaviour {
 
         _copy = null;
         _animator = null;
+        _loose = false;
     }
 
     private void Update() {
@@ -938,7 +1237,7 @@ internal class RoomFigureCopy : MonoBehaviour {
             return;
         }
 
-        if (_copy != null) {
+        if (_copy != null && !_loose) {
             var place = _copy.transform;
             place.localPosition = Vector3.Lerp(
                 place.localPosition,
@@ -946,6 +1245,11 @@ internal class RoomFigureCopy : MonoBehaviour {
                 1f - Mathf.Exp(-FollowRate * Time.unscaledDeltaTime)
             );
         }
+    }
+
+    private void LateUpdate() {
+        // After the player's character was moved this frame
+        Follow();
     }
 
     private void OnDestroy() {
