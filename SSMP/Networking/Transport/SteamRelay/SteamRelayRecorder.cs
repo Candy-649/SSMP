@@ -42,6 +42,11 @@ internal static class SteamRelayRecorder {
     private const int LiveAtMost = 120;
 
     /// <summary>
+    /// How many seconds each summary of a link covers (see <see cref="SumUp"/>).
+    /// </summary>
+    private const int SummaryEvery = 60;
+
+    /// <summary>
     /// For how many seconds in a row things must have arrived from a player for a link written down as it goes to be
     /// taken as working again.
     /// </summary>
@@ -435,6 +440,8 @@ internal static class SteamRelayRecorder {
             LookedAgoMs = looked == 0 ? -1 : Clock.ElapsedMilliseconds - looked
         };
 
+        SumUp(steamId, peer, sample);
+
         lock (peer) {
             sample.Number = ++peer.Numbered;
             peer.Ring[peer.Next] = sample;
@@ -458,6 +465,30 @@ internal static class SteamRelayRecorder {
                 Logger.Info($"[Link] Stopped writing down the link with {steamId} after {LiveAtMost} s");
             }
         }
+    }
+
+    /// <summary>
+    /// Adds a second to the summary of a link, and writes the summary down once it covers <see cref="SummaryEvery"/>
+    /// seconds, whether anything went wrong or not, with how long this side takes to reach the relay it goes through.
+    ///
+    /// USER 10-16 "不能记录她包到香港的到达率之类的吗，总得知道丢哪了吧": the seconds of a link were only written down
+    /// around a silence, so how much arrived on an ordinary evening, which way it was lost and whether it was worse
+    /// than other days could not be told. Steam says only how much arrived at each end, not on each part of the way;
+    /// each side's own time to its relay, written down by both games, is what says which part of the way changed.
+    /// Only the passes of the timer touch the sums, one pass at a time.
+    /// </summary>
+    private static void SumUp(ulong steamId, Peer peer, in Sample sample) {
+        var sums = peer.Sums;
+        sums.Add(sample);
+        if (sums.Seconds < SummaryEvery) {
+            return;
+        }
+
+        var ownPing = sample.Relay.m_SteamNetworkingPOPID == 0
+            ? -1
+            : SteamNetworkingUtils.GetPingToDataCenter(sample.Relay, out _);
+        Logger.Info(sums.Describe(steamId, sample, ownPing));
+        sums.Clear();
     }
 
     /// <summary>
@@ -672,9 +703,141 @@ internal static class SteamRelayRecorder {
         public int Took;
         public int TookBytes;
 
+        /// <summary>
+        /// The seconds kept since the last summary of the link was written down (see <see cref="SumUp"/>).
+        /// </summary>
+        public readonly Sums Sums = new();
+
         public Peer(int channel) {
             Channel = channel;
         }
+    }
+
+    /// <summary>
+    /// What the seconds of a link add up to, for its summary (see <see cref="SumUp"/>).
+    /// </summary>
+    private sealed class Sums {
+        public int Seconds;
+        private int _connected;
+        private int _pings;
+        private long _pingSum;
+        private int _pingLeast = int.MaxValue;
+        private int _pingMost = int.MinValue;
+        private int _heres;
+        private float _hereSum;
+        private float _hereLeast = float.MaxValue;
+        private int _theres;
+        private float _thereSum;
+        private float _thereLeast = float.MaxValue;
+        private long _took;
+        private long _gave;
+        private int _silent;
+        private int _routeChanges;
+        private ulong _route;
+
+        /// <summary>
+        /// Adds a second.
+        /// </summary>
+        public void Add(in Sample sample) {
+            Seconds++;
+            _took += sample.Took;
+            _gave += sample.Gave;
+            if (sample.State != ESteamNetworkingConnectionState.k_ESteamNetworkingConnectionState_Connected) {
+                return;
+            }
+
+            _connected++;
+            if (sample.Took == 0) {
+                _silent++;
+            }
+
+            var route = ((ulong) sample.Relay.m_SteamNetworkingPOPID << 32) | sample.OtherEnd.m_SteamNetworkingPOPID;
+            if (_route != 0 && route != _route) {
+                _routeChanges++;
+            }
+
+            _route = route;
+
+            if (sample.Ping >= 0) {
+                _pings++;
+                _pingSum += sample.Ping;
+                _pingLeast = System.Math.Min(_pingLeast, sample.Ping);
+                _pingMost = System.Math.Max(_pingMost, sample.Ping);
+            }
+
+            if (sample.QualityHere >= 0) {
+                _heres++;
+                _hereSum += sample.QualityHere;
+                _hereLeast = System.Math.Min(_hereLeast, sample.QualityHere);
+            }
+
+            if (sample.QualityThere >= 0) {
+                _theres++;
+                _thereSum += sample.QualityThere;
+                _thereLeast = System.Math.Min(_thereLeast, sample.QualityThere);
+            }
+        }
+
+        /// <summary>
+        /// Says the seconds added in one line of the log.
+        /// </summary>
+        /// <param name="steamId">The player the link goes to.</param>
+        /// <param name="last">The last second added.</param>
+        /// <param name="ownPing">How long this side takes to reach the relay it goes through, in ms, or -1.</param>
+        public string Describe(ulong steamId, in Sample last, int ownPing) {
+            var text = new StringBuilder($"[Link] {last.At:HH:mm:ss} The last {Seconds} s with {steamId}: ");
+            if (_connected == 0) {
+                return text.Append($"not connected; the mod gave Steam {_gave} and took {_took}").ToString();
+            }
+
+            text.Append($"connected {_connected} s, via relay {RelayName(last.Relay)}");
+            if (last.OtherEnd.m_SteamNetworkingPOPID != 0) {
+                text.Append($", the other end in {RelayName(last.OtherEnd)}");
+            }
+
+            if (_routeChanges > 0) {
+                text.Append($" (the relays changed {_routeChanges} time(s))");
+            }
+
+            text.Append(_pings > 0
+                ? $"; ping {_pingSum / _pings} ms ({_pingLeast} to {_pingMost})"
+                : "; no ping");
+            text.Append($"; arrived {Average(_hereSum, _heres)} here (least {Least(_hereLeast, _heres)}) and " +
+                        $"{Average(_thereSum, _theres)} there (least {Least(_thereLeast, _theres)})");
+            text.Append($"; the mod took {(double) _took / Seconds:F0} a second from them, with {_silent} s in which " +
+                        $"nothing came, and gave Steam {(double) _gave / Seconds:F0} a second");
+            text.Append(ownPing >= 0
+                ? $"; this side reaches {RelayName(last.Relay)} in {ownPing} ms"
+                : $"; this side's time to {RelayName(last.Relay)} is not known");
+            return text.ToString();
+        }
+
+        /// <summary>
+        /// Starts the sums over.
+        /// </summary>
+        public void Clear() {
+            Seconds = 0;
+            _connected = 0;
+            _pings = 0;
+            _pingSum = 0;
+            _pingLeast = int.MaxValue;
+            _pingMost = int.MinValue;
+            _heres = 0;
+            _hereSum = 0f;
+            _hereLeast = float.MaxValue;
+            _theres = 0;
+            _thereSum = 0f;
+            _thereLeast = float.MaxValue;
+            _took = 0;
+            _gave = 0;
+            _silent = 0;
+            _routeChanges = 0;
+            _route = 0;
+        }
+
+        private static string Average(float sum, int count) => count > 0 ? Share(sum / count) : "?";
+
+        private static string Least(float least, int count) => count > 0 ? Share(least) : "?";
     }
 
     /// <summary>
