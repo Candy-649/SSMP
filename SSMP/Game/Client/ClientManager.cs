@@ -218,6 +218,12 @@ internal class ClientManager : IClientManager {
     private string? _lastScene;
 
     /// <summary>
+    /// The crest that this client last told the server the local player wears, or null when it has told none since it
+    /// connected (see <see cref="SendChangedCrest"/>).
+    /// </summary>
+    private string? _sentCrestId;
+
+    /// <summary>
     /// Whether full synchronisation is enabled for the server we are connected to.
     /// </summary>
     private bool _fullSynchronisation;
@@ -807,6 +813,7 @@ internal class ClientManager : IClientManager {
         Logger.Info("Disconnecting from server");
 
         _autoConnect = false;
+        _sentCrestId = null;
 
         _netClient.Disconnect();
         _coopSave.OnLocalDisconnect();
@@ -954,9 +961,7 @@ internal class ClientManager : IClientManager {
                     // the save selection screen, we need to disconnect from the server again, because we are not
                     // entering the world
                     if (saveSelected) {
-                        _netClient.UpdateManager.AddPlayerSettingUpdate(
-                            crestType: CrestTypeExt.FromInternal(PlayerData.instance.CurrentCrestID)
-                        );
+                        SendCrest();
                         return;
                     }
 
@@ -1018,9 +1023,9 @@ internal class ClientManager : IClientManager {
     /// </summary>
     private void SendCrest() {
         try {
-            _netClient.UpdateManager.AddPlayerSettingUpdate(
-                crestType: CrestTypeExt.FromInternal(PlayerData.instance.CurrentCrestID)
-            );
+            var crestId = PlayerData.instance.CurrentCrestID;
+            _netClient.UpdateManager.AddPlayerSettingUpdate(crestType: CrestTypeExt.FromInternal(crestId));
+            _sentCrestId = crestId;
         } catch (Exception e) {
             Logger.Warn($"Could not send the crest of the loaded save: {e.Message}");
         }
@@ -1850,6 +1855,8 @@ internal class ClientManager : IClientManager {
             return;
         }
 
+        SendChangedCrest();
+
         var heroTransform = HeroController.instance.transform;
 
         // For position updating, we use a stopwatch to check whether the latest update wasn't too soon ago.
@@ -2034,6 +2041,36 @@ internal class ClientManager : IClientManager {
 
         var crestType = CrestTypeExt.FromInternal(crestId);
         _netClient.UpdateManager.AddPlayerSettingUpdate(crestType: crestType);
+        _sentCrestId = crestId;
+    }
+
+    /// <summary>
+    /// Sends the crest of the local player when it is not the one last sent, whatever changed it. Equipping a crest is
+    /// sent as it happens (<see cref="OnSetEquippedCrest"/>), but the game also changes the crest without equipping
+    /// one. A save in the room where the player takes their clothes back, before the fight there is won, puts them
+    /// back in what the prison left them (PlayerData.OnBeforeSave), and a death saves. So two players who died in that
+    /// fight came back to the bench without their clothes, each seeing the other still in theirs - and a grab of the
+    /// clothes waits only for the members it sees without theirs, so the next grabs did not wait for each other.
+    /// </summary>
+    private void SendChangedCrest() {
+        var crestId = PlayerData.instance?.CurrentCrestID;
+        if (string.IsNullOrEmpty(crestId) || crestId == _sentCrestId) {
+            return;
+        }
+
+        var sentCrestId = _sentCrestId;
+        _sentCrestId = crestId;
+
+        try {
+            var crestType = CrestTypeExt.FromInternal(crestId!);
+            Logger.Info(
+                $"Player's Crest is '{crestId}' rather than '{sentCrestId}', the one last sent, with no crest " +
+                "equipped to change it, networking to server"
+            );
+            _netClient.UpdateManager.AddPlayerSettingUpdate(crestType: crestType);
+        } catch (InvalidOperationException e) {
+            Logger.Warn($"Could not send the crest '{crestId}': {e.Message}");
+        }
     }
 
     #endregion
