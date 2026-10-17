@@ -1,2 +1,2 @@
-Windows 一键安装包，已含 BepInEx。解压后双击 INSTALL.bat，说明见 INSTALL.txt。一起玩的人要装同一个版本。
-One-click installer for Windows, BepInEx included. Unzip, double-click INSTALL.bat, see INSTALL.txt. Everyone playing together needs the same version.
+已含 BepInEx。先备份存档，再把压缩包里的东西全部解压到游戏目录（有 Hollow Knight Silksong.exe 的文件夹），说明见 INSTALL.txt。
+BepInEx included. Back up your saves, then unpack everything into the game folder. See INSTALL.txt.

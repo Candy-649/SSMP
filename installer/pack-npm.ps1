@@ -184,8 +184,8 @@ by ``npm install``.
 
 ## Install
 
-Unpack the npm tarball, or the zip from the mod page, then double-click ``INSTALL.bat``. ``INSTALL.txt`` explains
-the rest, in Chinese.
+Unpack the npm tarball, then double-click ``INSTALL.bat``. The zip from the mod page is laid out as the game folder
+instead and is unpacked into it. ``INSTALL.txt`` explains the rest, in Chinese.
 
 The BepInEx loader is included, so the install needs no network access at all.
 

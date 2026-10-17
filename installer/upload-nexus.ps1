@@ -223,9 +223,11 @@ function Get-Release {
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
     try {
-        $entry = $archive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq "$name/SSMP/SSMP.dll" } |
+        # Laid out as the game folder (see pack-nexus.ps1)
+        $entry = $archive.Entries |
+            Where-Object { $_.FullName.Replace('\', '/') -eq 'BepInEx/plugins/SSMP/SSMP.dll' } |
             Select-Object -First 1
-        if (-not $entry) { throw "$name.zip has no $name/SSMP/SSMP.dll." }
+        if (-not $entry) { throw "$name.zip has no BepInEx/plugins/SSMP/SSMP.dll." }
         $stream = $entry.Open()
         try { $zipDllHash = Get-Sha256Hex $stream } finally { $stream.Dispose() }
     } finally {

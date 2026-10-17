@@ -46,8 +46,11 @@ which went stale twice while the flow changed. If the flow changes again, change
 ## Putting a release on the mod page
 
 `pack-npm.ps1` stages a version in `dist-npm/`, and `pack-nexus.ps1` zips that stage into `dist-nexus/` for Nexus
-Mods. After `npm publish`, `upload-nexus.ps1` adds the zip to the mod page as the newest version of the file already
-there, through the Nexus Mods API, so nobody uploads it by hand:
+Mods, laid out as the game folder (the loader at the top, the plugin in `BepInEx/plugins/SSMP`) and without the
+installer or the updater: Nexus Mods quarantined every zip that held an archive or the scripts (see the top of
+`pack-nexus.ps1`), so a player of the mod page unpacks it into the game folder. After `npm publish`,
+`upload-nexus.ps1` adds the zip to the mod page as the newest version of the file already there, through the Nexus
+Mods API, so nobody uploads it by hand:
 
 ```
 pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-nexus.ps1
