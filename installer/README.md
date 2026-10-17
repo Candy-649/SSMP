@@ -64,7 +64,27 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-nexus.ps1
 It needs the page owner's personal API key from https://www.nexusmods.com/settings/api-keys. The script asks for it
 once and keeps it encrypted for that Windows user in `%APPDATA%\silksong-coop-mod`; it never goes into the
 repository. The page's first file is uploaded on the website; the API only adds versions to a file that exists.
-None of these files is shipped to players.
+
+## Putting a release on GitHub
+
+GitHub can carry what Nexus Mods refuses, so its release gets the npm package itself: `upload-github.ps1` zips the
+stage into `dist-github/` under one top folder, with the installer and the updater and without `package.json` and the
+npm `README.md`, and puts it on a GitHub Release of `Candy-649/SSMP`, tagged `v<version>` at the commit stamped into
+the staged `SSMP.dll`. Run it after `npm publish`:
+
+```
+pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-github.ps1
+```
+
+| File | What it is |
+| --- | --- |
+| `upload-github.ps1` | Zips the stage and checks the zip (installer, updater, loader, plugin, the staged `SSMP.dll`), checks the GitHub login belongs to the repository's owner, then makes the release as a draft, uploads the zip and only then publishes it, so a public release never lacks its zip. A draft left by a failed run is finished by the next one. Stops without uploading when the release already has the zip or a newer version is released. `-DryRun` makes the zip and shows the release without going online. |
+| `github-release-notes.md` | The release's description, with `{version}` and `{changes}` (the titles of the `INSTALL.txt` entries marked with that version) filled in. |
+
+It borrows the login git already has for github.com from git's credential helper (Git Credential Manager), the way
+git asks for it before a push, or takes `GITHUB_TOKEN` when that is set; the token is never printed or saved. The
+owner has a second GitHub account, so the script stops before changing anything when the login belongs to another
+account. None of these files is shipped to players.
 
 ## What it touches
 

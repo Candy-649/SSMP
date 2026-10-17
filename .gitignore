@@ -437,3 +437,5 @@ dist-assets/
 dist-npm/
 # Where installer/pack-nexus.ps1 writes the zip for a mod page, made from the stage above.
 dist-nexus/
+# Where installer/upload-github.ps1 writes the zip for a GitHub Release, made from the stage above.
+dist-github/
