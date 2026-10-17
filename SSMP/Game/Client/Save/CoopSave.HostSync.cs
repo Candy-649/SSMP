@@ -430,12 +430,12 @@ internal partial class CoopSave {
         _hostSaveParts.Clear();
         SendToMembers(new CoopSaveUpdate { Kind = CoopSaveUpdateKind.HostSaveRequest, Key = request });
         Logger.Info($"Asked for the host's save to join with save slot {slot} ({request})");
-        ShowMessage(
+        CoopMessageBox.ShowWait(
             Lang.Pick(
-                "Getting the host's save. If the host hasn't loaded theirs yet, this waits until they have. Closing " +
-                "this message stops waiting.",
-                "正在接收房主的存档。房主还没进存档的话，会等房主进了再继续。关掉这条消息就不等了。"
+                "Getting the host's save. If the host hasn't loaded theirs yet, this waits until they have.",
+                "正在接收房主的存档。房主还没进存档的话，会等房主进了再继续。"
             ),
+            Lang.Pick("Stop waiting", "不等了"),
             OnJoinMessageClosed
         );
 
@@ -465,7 +465,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The local player closed the message while the host's save was on its way, so the choice is dropped.
+    /// The local player chose to stop waiting while the host's save was on its way, so the choice is dropped.
     /// </summary>
     private void OnJoinMessageClosed() {
         if (_joinButton == null) {

@@ -51,17 +51,6 @@ internal partial class CoopSave {
     private const string MarkersFileName = "coop-saves.json";
 
     /// <summary>
-    /// The sheet of the texts of the game's message box.
-    /// </summary>
-    private const string MessageSheet = "Error";
-
-    /// <summary>
-    /// The key of the texts of the message box about two-player saves, without the "_TITLE" or "_DESC" that the message
-    /// box adds.
-    /// </summary>
-    private const string MessageKey = "SSMP_COOP_SAVE";
-
-    /// <summary>
     /// The value of SaveSlotButton.SaveFileStates for a slot with a save in it.
     /// </summary>
     private const int LoadedStatsState = 3;
@@ -145,11 +134,6 @@ internal partial class CoopSave {
     /// The field of a save slot button that says whether the slot has a save.
     /// </summary>
     private FieldInfo? _saveFileStateField;
-
-    /// <summary>
-    /// The text of the message box about two-player saves.
-    /// </summary>
-    private string _messageText = "";
 
     /// <summary>
     /// The save slot button of a two-player save that waits in the menu for its partner to join the host, or null.
@@ -310,8 +294,6 @@ internal partial class CoopSave {
         ToldParts.IsPaced = machine => FindMachineKind(machine.gameObject, machine.FsmName) != null;
         RegisterHostSyncHooks();
 
-        EventHooks.LanguageHas += OnLanguageHas;
-        EventHooks.LanguageGet += OnLanguageGet;
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
         EventHooks.UIManagerReturnToMainMenu += OnReturnToMainMenu;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -1558,12 +1540,12 @@ internal partial class CoopSave {
             _waitingEventData = eventData;
             _waitingMarker = marker;
             Logger.Info($"Hosting before co-op save in slot {slot} loads, waiting for someone to join");
-            ShowMessage(
+            CoopMessageBox.ShowWait(
                 Lang.Pick(
-                    "Your game is open. Your co-op save loads once someone has joined. Closing this message stops " +
-                    "hosting.",
-                    "你的游戏已经开好了，有人加入后这个联机存档就会进入。关掉这条消息就不开了。"
+                    "Your game is open. Your co-op save loads once someone has joined.",
+                    "你的游戏已经开好了，有人加入后这个联机存档就会进入。"
                 ),
+                Lang.Pick("Stop hosting", "不开了"),
                 OnWaitMessageClosed
             );
             return false;
@@ -1587,7 +1569,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The host closed the message while their save waited for the partner, so they stop hosting.
+    /// The host chose to stop waiting while their save waited for the partner, so they stop hosting.
     /// </summary>
     private void OnWaitMessageClosed() {
         if (_waitingButton == null) {
@@ -1714,31 +1696,18 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Shows the game's message box with a text about two-player saves.
+    /// Shows a message about two-player saves (see <see cref="CoopMessageBox"/>).
     /// </summary>
-    private void ShowMessage(string text, Action? onClose = null) {
-        _messageText = text;
-        GenericMessageCanvas.Show(MessageKey, onClose);
+    private static void ShowMessage(string text, Action? onClose = null) {
+        CoopMessageBox.Show(text, onClose);
     }
 
     /// <summary>
-    /// Closes the game's message box the way its button does, which also gives input back to the menu.
+    /// Closes the message about two-player saves, if one is up, which also gives input back to the menu. What it was
+    /// shown with doesn't run: every caller has let go of what that was about first.
     /// </summary>
     private static void CloseMessage() {
-        var canvas = typeof(GenericMessageCanvas).GetFields(StaticFlags)
-            .FirstOrDefault(field => field.FieldType == typeof(GenericMessageCanvas))?
-            .GetValue(null) as GenericMessageCanvas;
-        if (canvas == null) {
-            canvas = UnityEngine.Object.FindAnyObjectByType<GenericMessageCanvas>();
-        }
-
-        if (canvas == null) {
-            return;
-        }
-
-        var close = typeof(GenericMessageCanvas).GetMethod("OkButtonClicked", InstanceFlags, null, Type.EmptyTypes, null) ??
-                    typeof(GenericMessageCanvas).GetMethod("Hide", InstanceFlags, null, Type.EmptyTypes, null);
-        close?.Invoke(canvas, null);
+        CoopMessageBox.Close();
     }
 
     /// <summary>
@@ -1754,22 +1723,6 @@ internal partial class CoopSave {
         if (RemoveMarker(slot)) {
             Logger.Info($"Save slot {slot} was cleared, so it isn't a co-op save anymore");
         }
-    }
-
-    private bool? OnLanguageHas(string key, string sheet) {
-        return sheet == MessageSheet && key.StartsWith(MessageKey + "_", StringComparison.Ordinal) ? true : null;
-    }
-
-    private string? OnLanguageGet(string key, string sheet) {
-        if (sheet != MessageSheet) {
-            return null;
-        }
-
-        return key == MessageKey + "_TITLE"
-            ? Lang.Pick("Co-op save", "联机存档")
-            : key == MessageKey + "_DESC"
-                ? _messageText
-                : null;
     }
 
     #endregion
