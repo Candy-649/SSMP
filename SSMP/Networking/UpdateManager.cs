@@ -207,26 +207,42 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private const int MostKeptToSendAgain = 8192;
 
     /// <summary>
-    /// How long, in milliseconds, packets with reliable data that arrived before one sent earlier are held for it,
-    /// before they are taken in without it: longer than a link is kept while nothing arrives over it. Only a round
-    /// trip brings the missing ones, and while one way of the link stands still for longer than ten seconds the other
-    /// side never hears that they are missing, which is the stretch that a link is opened anew for. Taken in without
-    /// them sooner, they were lost after all in a simulation of such stretches; taken in this late, never.
+    /// How long, in milliseconds, packets with reliable data that arrived before one sent earlier are held for it while
+    /// things arrive, before they are taken in without it; a stretch in which nothing arrives counts for at most
+    /// <see cref="HeldWaitStepAtMost"/>, as the missing ones can only come over a link that carries something. While
+    /// things arrive, the other side hears the ask for them within a round trip, unless the other way of the link
+    /// stands still, which ends in opening the link anew or giving up on it within
+    /// <see cref="ConnectionTimeoutCeiling"/>. Counted in time alone, a link that went quiet for nearly that long just
+    /// after something went missing lost it after all in a simulation.
     /// </summary>
     private const int HoldForMissingAtMost = ConnectionTimeoutCeiling + 5000;
 
     /// <summary>
-    /// How long, in milliseconds, after the packets with reliable data that the other side has not taken in were sent
-    /// again, before another ask of the other side sends them again once more. It asks in every packet until they
-    /// arrive, which takes a round trip at least.
+    /// The most that one stretch between two packets that arrive counts towards <see cref="HoldForMissingAtMost"/>, in
+    /// milliseconds.
+    /// </summary>
+    private const int HeldWaitStepAtMost = 1000;
+
+    /// <summary>
+    /// How long, in milliseconds, after a packet with reliable data that the other side has not taken in last went,
+    /// before an ask of the other side sends it again: doubled each time it goes again, up to
+    /// <see cref="SendAgainDoublingsAtMost"/> times. The other side asks in every packet until it arrives, which takes
+    /// a round trip at least, and the transport goes on sending what it was given, so a link that only lets a little
+    /// through gets few copies of the same thing.
     /// </summary>
     private const int SendAgainAfter = 2000;
 
     /// <summary>
-    /// How long, in milliseconds, this side asks the other for what it sent with reliable data after what this side
-    /// took in, once this side opened the link anew (see <see cref="RenewStalledLink"/>).
+    /// How often, at most, the wait of <see cref="SendAgainAfter"/> is doubled for one packet: up to 16 s.
     /// </summary>
-    private const int AskAgainAfterRenewal = 3000;
+    private const int SendAgainDoublingsAtMost = 3;
+
+    /// <summary>
+    /// How long, in milliseconds, this side has to have taken in less than the other side says it sent before it asks
+    /// for the rest again. What was sent a moment ago may still be on its way, and the transport sends what it lost
+    /// again itself, which takes a round trip or a few.
+    /// </summary>
+    private const int AskWhenBehindFor = 1000;
 
     /// <summary>
     /// Guards the numbering of the packets with reliable data, which the send loop, the thread that receives and a
@@ -268,19 +284,22 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private string? _sendAgainNow;
 
     /// <summary>
-    /// When the packets that the other side has not taken in were last sent again.
-    /// </summary>
-    private DateTime _sentAgainAt = DateTime.MinValue;
-
-    /// <summary>
-    /// Whether any packet with reliable data was taken in from the other side.
-    /// </summary>
-    private bool _tookInReliable;
-
-    /// <summary>
-    /// The number of the last packet with reliable data taken in from the other side, in the order they were sent.
+    /// The number of the last packet with reliable data taken in from the other side, in the order they were sent: 0
+    /// before any, as the other side numbers them from 1.
     /// </summary>
     private ushort _lastReliableTaken;
+
+    /// <summary>
+    /// The number of the last packet with reliable data that the other side said it sent (see
+    /// <see cref="HearSentUpTo"/>).
+    /// </summary>
+    private ushort _otherSentUpTo;
+
+    /// <summary>
+    /// Since when this side has taken in less than the other side said it sent, or <see cref="DateTime.MinValue"/>
+    /// while it has not (see <see cref="WatchBehind"/>).
+    /// </summary>
+    private DateTime _behindSince = DateTime.MinValue;
 
     /// <summary>
     /// Packets with reliable data that arrived before one sent earlier, held for it, by their number. They are of the
@@ -294,20 +313,38 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private DateTime _heldSince;
 
     /// <summary>
+    /// How long the packets in <see cref="_heldForMissing"/> have waited, in milliseconds, as it counts towards
+    /// <see cref="HoldForMissingAtMost"/>.
+    /// </summary>
+    private double _heldWaited;
+
+    /// <summary>
+    /// When the last packet arrived that the numbering took in.
+    /// </summary>
+    private DateTime _lastArrival;
+
+    /// <summary>
     /// How many packets with reliable data that were taken in already arrived again, since it was last said.
     /// </summary>
     private int _arrivedAgain;
 
     /// <summary>
-    /// Until when this side asks the other for what it sent after what this side took in, after opening the link anew.
-    /// </summary>
-    private DateTime _askAgainUntil = DateTime.MinValue;
-
-    /// <summary>
     /// Whether the packets with reliable data are numbered: on a transport that keeps them reliable itself, where this
-    /// mod does no acknowledging and sending again of its own (see <see cref="ReliableNumbering"/>).
+    /// mod does no acknowledging and sending again of its own, which are Steam's relay and Steam's older peer-to-peer
+    /// transport (see <see cref="ReliableNumbering"/>).
     /// </summary>
     private bool NumbersReliable => !RequiresReliability;
+
+    /// <summary>
+    /// Whether a packet whose headers were read but not the rest of it is still taken in by its number, which it is
+    /// where the packets with reliable data are numbered: nothing of it is handled, but what came after it does not
+    /// wait for it (see <see cref="TakeInOrder{TIncoming,TOtherPacketId}"/>).
+    /// </summary>
+    /// <param name="packet">The packet that could not be read.</param>
+    /// <typeparam name="TOtherPacketId">The packet ID type of the packet.</typeparam>
+    /// <returns>Whether it is taken in by its number.</returns>
+    public bool TakesInUnreadable<TOtherPacketId>(UpdatePacket<TOtherPacketId> packet) where TOtherPacketId : Enum =>
+        NumbersReliable && packet.OnlyHeadersRead;
 
     /// <summary>
     /// The shortest stretch without anything arriving, in seconds, that is said to be over once something arrives
@@ -694,7 +731,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
             lock (_reliableLock) {
                 var flags = WhatWasTakenIn(out var ack);
-                ushort number = 0;
+
+                // One without reliable data says how far the numbering went, so that the other side still asks for
+                // the last ones if they were lost and nothing with reliable data follows them
+                var number = _lastReliableSent;
                 if (reliable) {
                     number = ++_lastReliableSent;
                     flags |= NumberingFlags.Numbered;
@@ -727,14 +767,16 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// <summary>
     /// What a packet sent now says of what this side took in from the other: the number of the last packet with
     /// reliable data that it took in, in order, and whether it asks for the ones after it again, which it does while
-    /// it holds packets that arrived before one of them, and for a moment after it opened the link anew.
+    /// it holds packets that arrived before one of them, and once it has taken in less than the other side said it
+    /// sent for <see cref="AskWhenBehindFor"/>.
     /// </summary>
     /// <param name="ack">The number of the last packet with reliable data taken in.</param>
     /// <returns>What the packet says.</returns>
     private NumberingFlags WhatWasTakenIn(out ushort ack) {
         ack = _lastReliableTaken;
-        var flags = _tookInReliable ? NumberingFlags.TookIn : NumberingFlags.None;
-        if (_heldForMissing.Count > 0 || DateTime.UtcNow < _askAgainUntil) {
+        var flags = NumberingFlags.TookIn;
+        if (_heldForMissing.Count > 0 || _behindSince != DateTime.MinValue &&
+            (DateTime.UtcNow - _behindSince).TotalMilliseconds >= AskWhenBehindFor) {
             flags |= NumberingFlags.AsksAgain;
         }
 
@@ -762,50 +804,122 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     }
 
     /// <summary>
-    /// Sends the packets with reliable data that the other side has not taken in again, in the order of their numbers,
-    /// when it asked for them and they did not go again a moment ago, or when the link was opened anew. They go as they
-    /// went the first time, saying what this side took in now.
+    /// Sends the packets with reliable data that the other side has not taken in again, in the order of their numbers:
+    /// all of them once the link was opened anew, which loses what was on its way over it, and when the other side asks
+    /// for them, the ones that went long enough ago to be lost rather than on their way (see
+    /// <see cref="KeptReliable.DueAgain"/>). They go as they went the first time, saying what this side took in now,
+    /// as many in one message as the transport carries: each message waits for the lock of Steam's networking, which
+    /// is slow while a link is being made.
     /// </summary>
     private void SendAgainIfAsked() {
-        List<KeptReliable> again;
+        List<KeptReliable>? again = null;
         string why;
         NumberingFlags flags;
         ushort ack;
         lock (_reliableLock) {
-            var now = DateTime.UtcNow;
-            if (_sendAgainNow != null) {
-                why = _sendAgainNow;
-            } else if (_sendAgainAsked && (now - _sentAgainAt).TotalMilliseconds >= SendAgainAfter) {
-                why = "the other side asked for them";
-            } else {
-                // Asked again while the ones sent again are still on their way: it asks in every packet until they
-                // arrive
-                _sendAgainAsked = false;
+            if (_sendAgainNow == null && !_sendAgainAsked) {
                 return;
             }
 
+            var all = _sendAgainNow != null;
+            why = _sendAgainNow ?? "the other side asked for them";
             _sendAgainNow = null;
             _sendAgainAsked = false;
-            _sentAgainAt = now;
-            if (_keptToSendAgain.Count == 0) {
+
+            var now = DateTime.UtcNow;
+            foreach (var kept in _keptToSendAgain) {
+                if (all || kept.DueAgain(now)) {
+                    kept.SentAgain(now);
+                    (again ??= []).Add(kept);
+                }
+            }
+
+            if (again == null) {
                 return;
             }
 
-            again = [.._keptToSendAgain];
             flags = WhatWasTakenIn(out ack) | NumberingFlags.Numbered;
         }
 
         var bytes = 0;
+        var messages = 0;
+        var together = new List<byte[]>();
+        var togetherLength = 0;
         foreach (var kept in again) {
             ReliableNumbering.Stamp(kept.Raw, kept.HeaderAt, flags, kept.Number, ack);
-            SendWhole(kept.Raw, true);
             bytes += kept.Raw.Length;
+            if (togetherLength + kept.Raw.Length > _transportMaxPacketSize) {
+                messages += SendTogether(together, togetherLength);
+                togetherLength = 0;
+            }
+
+            together.Add(kept.Raw);
+            togetherLength += kept.Raw.Length;
         }
 
+        messages += SendTogether(together, togetherLength);
+
+        // A packet goes again as soon as it is due while the other side asks, which can be one every send, so this is
+        // said at most every few seconds, with what went since
+        var toldAt = DateTime.UtcNow;
+        if ((toldAt - _sentAgainToldAt).TotalMilliseconds < SendAgainAfter) {
+            _sentAgainUntold += again.Count;
+            _sendingsAgainUntold++;
+            return;
+        }
+
+        var more = _sendingsAgainUntold > 0
+            ? $"; {_sentAgainUntold} more went again in {_sendingsAgainUntold} sending(s) since the last line"
+            : "";
+        _sentAgainToldAt = toldAt;
+        _sentAgainUntold = 0;
+        _sendingsAgainUntold = 0;
         Logger.Info(
             $"Sent the {again.Count} packet(s) with reliable data that the other side has not taken in again, " +
-            $"{again[0].Number} to {again[^1].Number} ({bytes / 1024f:F1} kB), as {why}"
+            $"{again[0].Number} to {again[^1].Number} ({bytes / 1024f:F1} kB in {messages} message(s)), as {why}" +
+            more
         );
+    }
+
+    /// <summary>
+    /// When sending packets with reliable data again was last said in the log.
+    /// </summary>
+    private DateTime _sentAgainToldAt = DateTime.MinValue;
+
+    /// <summary>
+    /// How many packets went again since it was last said, and in how many sendings.
+    /// </summary>
+    private int _sentAgainUntold, _sendingsAgainUntold;
+
+    /// <summary>
+    /// Sends whole packets with reliable data as one message, one after the other, which the other side takes apart
+    /// again (PacketManager.HandleReceivedData), and empties the list. A single packet that is longer than the
+    /// transport carries in one message goes in pieces.
+    /// </summary>
+    /// <param name="packets">The packets as they are sent.</param>
+    /// <param name="length">Their length together.</param>
+    /// <returns>How many messages were sent: none for no packets, else one.</returns>
+    private int SendTogether(List<byte[]> packets, int length) {
+        if (packets.Count == 0) {
+            return 0;
+        }
+
+        if (packets.Count == 1) {
+            SendWhole(packets[0], true);
+            packets.Clear();
+            return 1;
+        }
+
+        var joined = new byte[length];
+        var at = 0;
+        foreach (var raw in packets) {
+            Buffer.BlockCopy(raw, 0, joined, at, raw.Length);
+            at += raw.Length;
+        }
+
+        packets.Clear();
+        SendBytes(joined, true);
+        return 1;
     }
 
     /// <summary>
@@ -825,8 +939,20 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         where TIncoming : UpdatePacket<TOtherPacketId>
         where TOtherPacketId : Enum {
         var inOrder = new List<TIncoming>();
+        if (!NumbersReliable) {
+            inOrder.Add(packet);
+            return inOrder;
+        }
+
         var flags = packet.Numbering;
         lock (_reliableLock) {
+            var now = DateTime.UtcNow;
+            if (_heldForMissing.Count > 0) {
+                _heldWaited += System.Math.Min((now - _lastArrival).TotalMilliseconds, HeldWaitStepAtMost);
+            }
+
+            _lastArrival = now;
+
             if ((flags & NumberingFlags.TookIn) != 0) {
                 LetGoOfTakenIn(packet.ReliableAck);
                 if (_sendAgainOnNextAck) {
@@ -845,19 +971,53 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                 TakeNumbered(packet, packet.ReliableNumber, inOrder);
             }
 
-            if (_heldForMissing.Count > 0 &&
-                ((DateTime.UtcNow - _heldSince).TotalMilliseconds > HoldForMissingAtMost ||
-                 _heldForMissing.Count >= MostKeptToSendAgain)) {
+            if ((flags & NumberingFlags.TookIn) != 0) {
+                HearSentUpTo(packet.ReliableNumber);
+            }
+
+            if (_heldForMissing.Count > 0 && _heldWaited > HoldForMissingAtMost) {
                 Logger.Warn(
                     $"The packets with reliable data from {(ushort) (_lastReliableTaken + 1)} on did not arrive in " +
-                    $"{(DateTime.UtcNow - _heldSince).TotalSeconds:F1}s, so the {_heldForMissing.Count} that " +
-                    "waited for them are taken in without them"
+                    $"{(DateTime.UtcNow - _heldSince).TotalSeconds:F1}s ({_heldWaited / 1000:F1}s of it while " +
+                    $"things arrived), so the {_heldForMissing.Count} that waited for them are taken in without them"
                 );
                 TakeAllHeld(inOrder);
             }
+
+            WatchBehind();
         }
 
+        // Nothing of a packet that could not be read is handled; its number was taken in all the same
+        inOrder.RemoveAll(taken => taken.OnlyHeadersRead);
         return inOrder;
+    }
+
+    /// <summary>
+    /// Takes note of how far the other side says its numbering of packets with reliable data went: the number of a
+    /// packet with reliable data, or the one that a packet without reliable data names. A number before the furthest
+    /// one heard of, like that of a packet sent again, says nothing new.
+    /// </summary>
+    /// <param name="number">The number.</param>
+    private void HearSentUpTo(ushort number) {
+        var ahead = (ushort) (number - _otherSentUpTo);
+        if (ahead is > 0 and <= MostKeptToSendAgain) {
+            _otherSentUpTo = number;
+        }
+    }
+
+    /// <summary>
+    /// Notes since when this side has taken in less than the other side said it sent, which it asks for again after
+    /// <see cref="AskWhenBehindFor"/> (see <see cref="WhatWasTakenIn"/>): what a link opened anew lost on its way
+    /// here, which nothing else shows when nothing with reliable data comes after it, like the death of a player who
+    /// lies still in a cocoon.
+    /// </summary>
+    private void WatchBehind() {
+        var behind = (ushort) (_otherSentUpTo - _lastReliableTaken);
+        if (behind is 0 or > MostKeptToSendAgain) {
+            _behindSince = DateTime.MinValue;
+        } else if (_behindSince == DateTime.MinValue) {
+            _behindSince = DateTime.UtcNow;
+        }
     }
 
     /// <summary>
@@ -869,13 +1029,6 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// <param name="inOrder">The packets to take in now, which it adds to.</param>
     private void TakeNumbered<TIncoming>(TIncoming packet, ushort number, List<TIncoming> inOrder)
         where TIncoming : class {
-        if (!_tookInReliable) {
-            _tookInReliable = true;
-            _lastReliableTaken = number;
-            inOrder.Add(packet);
-            return;
-        }
-
         var ahead = (ushort) (number - _lastReliableTaken);
         if (ahead == 1) {
             _lastReliableTaken = number;
@@ -908,12 +1061,14 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             );
             TakeAllHeld(inOrder);
             _lastReliableTaken = number;
+            _otherSentUpTo = number;
             inOrder.Add(packet);
             return;
         }
 
         if (_heldForMissing.Count == 0) {
             _heldSince = DateTime.UtcNow;
+            _heldWaited = 0;
             Logger.Info(
                 $"The packet with reliable data numbered {number} arrived before {ahead - 1} sent before it, so it " +
                 "waits for them, and the other side is asked for them again"
@@ -945,6 +1100,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                 $"{(DateTime.UtcNow - _heldSince).TotalSeconds:F1}s, so the {taken} that waited for them are " +
                 "taken in now"
             );
+        } else if (taken > 0) {
+            // The ones still held wait for a later gap, which they are given the whole time for from now
+            _heldSince = DateTime.UtcNow;
+            _heldWaited = 0;
         }
     }
 
@@ -977,8 +1136,9 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// What follows opening the link anew, which loses what was on its way over the old one both ways: what this side
-    /// sent with reliable data goes again once the other side says over the new link what it took in, and the other
-    /// side is asked for what it sent after what this side took in.
+    /// sent with reliable data and the other side has not taken in goes again once the next packet that arrives says
+    /// what the other side took in. What the other side sent is asked for once this side hears how far it went (see
+    /// <see cref="WatchBehind"/>).
     /// </summary>
     private void SendAgainAfterRenewal() {
         if (!NumbersReliable) {
@@ -987,7 +1147,6 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
         lock (_reliableLock) {
             _sendAgainOnNextAck = true;
-            _askAgainUntil = DateTime.UtcNow.AddMilliseconds(AskAgainAfterRenewal);
         }
     }
 
@@ -1012,6 +1171,35 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         /// Where its numbering is.
         /// </summary>
         public int HeaderAt { get; } = headerAt;
+
+        /// <summary>
+        /// When it last went.
+        /// </summary>
+        private DateTime _sentAt = DateTime.UtcNow;
+
+        /// <summary>
+        /// How often it went again.
+        /// </summary>
+        private int _timesSentAgain;
+
+        /// <summary>
+        /// Whether it went long enough ago to go again when the other side asks for what it has not taken in (see
+        /// <see cref="SendAgainAfter"/>).
+        /// </summary>
+        /// <param name="now">The time now.</param>
+        /// <returns>Whether it goes again.</returns>
+        public bool DueAgain(DateTime now) =>
+            (now - _sentAt).TotalMilliseconds >=
+            SendAgainAfter << System.Math.Min(_timesSentAgain, SendAgainDoublingsAtMost);
+
+        /// <summary>
+        /// Notes that it goes again now.
+        /// </summary>
+        /// <param name="now">The time now.</param>
+        public void SentAgain(DateTime now) {
+            _sentAt = now;
+            _timesSentAgain++;
+        }
     }
 
     /// <summary>
@@ -1133,12 +1321,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _sendAgainAsked = false;
             _sendAgainOnNextAck = false;
             _sendAgainNow = null;
-            _sentAgainAt = DateTime.MinValue;
-            _tookInReliable = false;
             _lastReliableTaken = 0;
+            _otherSentUpTo = 0;
+            _behindSince = DateTime.MinValue;
             _heldForMissing.Clear();
             _arrivedAgain = 0;
-            _askAgainUntil = DateTime.MinValue;
         }
     }
 

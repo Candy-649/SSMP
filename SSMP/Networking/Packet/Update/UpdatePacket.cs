@@ -34,15 +34,23 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
 
     /// <summary>
     /// The number of this packet among the packets of its sender that carry reliable data, when
-    /// <see cref="Numbering"/> says it is one of them.
+    /// <see cref="Numbering"/> says it is one of them; in a packet without reliable data that went through the
+    /// numbering, the number of the last one that its sender sent.
     /// </summary>
     public ushort ReliableNumber { get; private set; }
 
     /// <summary>
     /// The number of the last packet with reliable data that the sender of this one took in from the other side, in
-    /// the order they were sent, when <see cref="Numbering"/> says it took any.
+    /// the order they were sent, when <see cref="Numbering"/> says the packet went through the numbering.
     /// </summary>
     public ushort ReliableAck { get; private set; }
+
+    /// <summary>
+    /// Whether <see cref="ReadPacket"/> read the headers of this packet, its numbering among them, but not the rest of
+    /// it. On a transport whose packets with reliable data are numbered, it is still taken in by its number, so that
+    /// what came after it does not wait for it, and nothing of it is handled (UpdateManager.TakeInOrder).
+    /// </summary>
+    public bool OnlyHeadersRead { get; private set; }
 
     /// <summary>
     /// Where the numbering of reliable data is in the packet that <see cref="CreatePacket"/> made last, counted from
@@ -196,6 +204,7 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
         }
 
         if (!base.ReadPacket(packet)) {
+            OnlyHeadersRead = true;
             return false;
         }
 
@@ -231,6 +240,7 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
             }
         } catch (Exception e) {
             WarnUnreadable("its resent data", e);
+            OnlyHeadersRead = true;
             return false;
         }
 
@@ -433,7 +443,7 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
 [Flags]
 internal enum NumberingFlags : byte {
     /// <summary>
-    /// Nothing: a packet without reliable data from a side that has taken none in, or a transport that this mod keeps
+    /// Nothing: a packet that did not go through the numbering, like a slice, or one on a transport that this mod keeps
     /// reliable itself.
     /// </summary>
     None = 0,
@@ -444,14 +454,17 @@ internal enum NumberingFlags : byte {
     Numbered = 1,
 
     /// <summary>
-    /// <see cref="UpdatePacket{TPacketId}.ReliableAck"/> names the last packet with reliable data that the sender took
-    /// in from the other side.
+    /// The packet went through the numbering: <see cref="UpdatePacket{TPacketId}.ReliableAck"/> names the last packet
+    /// with reliable data that the sender took in from the other side, in order (0 before any, as they are numbered
+    /// from 1), and in a packet without reliable data, <see cref="UpdatePacket{TPacketId}.ReliableNumber"/> names the
+    /// last one that the sender sent.
     /// </summary>
     TookIn = 2,
 
     /// <summary>
     /// The sender asks for the packets with reliable data after <see cref="UpdatePacket{TPacketId}.ReliableAck"/>
-    /// again: a later one arrived before them, or it opened the link anew, which loses what was on its way over it.
+    /// again: a later one arrived before them, or the other side said a while ago that it sent more than the sender
+    /// took in.
     /// </summary>
     AsksAgain = 4
 }
@@ -466,7 +479,8 @@ internal enum NumberingFlags : byte {
 /// never showed on the other player's screen (USER "三令五申死掉要走可靠通道了", "你该修的是走可靠通道那一整批，
 /// 断线重连该怎么办"). So each side numbers the packets it sends with reliable data, keeps them until the other side
 /// says it took them in, sends them again when they may be lost, and takes in what arrives in the order it was sent,
-/// each one once (UpdateManager.TakeInOrder).
+/// each one once (UpdateManager.TakeInOrder). Every packet says how far the numbering of its sender went, so that a
+/// side that lost the last ones before nothing more with reliable data came still asks for them.
 /// </summary>
 internal static class ReliableNumbering {
     /// <summary>

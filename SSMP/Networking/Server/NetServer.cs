@@ -298,11 +298,17 @@ internal class NetServer : INetServer {
             // That includes both ClientInfo and the deliberate reuse of connection packets for chunked addon payloads.
             // All packets here should therefore be ServerUpdatePackets.
             var serverUpdatePacket = new ServerUpdatePacket();
-            if (!serverUpdatePacket.ReadPacket(packet)) {
-                if (client.IsRegistered) {
+            if (serverUpdatePacket.ReadPacket(packet)) {
+                // Route all transports through UpdateManager for sequence/ACK tracking
+                // UpdateManager will skip UDP-specific logic for Steam transports
+                client.UpdateManager.OnReceivePacket<ServerUpdatePacket, ServerUpdatePacketId>(serverUpdatePacket);
+            } else if (client.IsRegistered) {
+                // Taken in by its number where packets with reliable data are numbered, so that what came after it
+                // does not wait for it
+                if (!client.UpdateManager.TakesInUnreadable(serverUpdatePacket)) {
                     continue;
                 }
-
+            } else {
                 Logger.Debug($"Received malformed packet from client: {client.TransportClient.ToDisplayString()}");
 
                 var throttleKey = client.TransportClient.EndPoint;
@@ -312,10 +318,6 @@ internal class NetServer : INetServer {
 
                 continue;
             }
-
-            // Route all transports through UpdateManager for sequence/ACK tracking
-            // UpdateManager will skip UDP-specific logic for Steam transports
-            client.UpdateManager.OnReceivePacket<ServerUpdatePacket, ServerUpdatePacketId>(serverUpdatePacket);
 
             // In the order the player sent them, each one once: a packet with reliable data that arrived before one
             // sent earlier waits for it (UpdateManager.TakeInOrder)

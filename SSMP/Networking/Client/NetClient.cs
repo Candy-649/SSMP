@@ -287,14 +287,14 @@ internal class NetClient : INetClient {
             List<ClientUpdatePacket> inOrder;
             try {
                 var clientUpdatePacket = new ClientUpdatePacket();
-                if (!clientUpdatePacket.ReadPacket(packet)) {
+                if (clientUpdatePacket.ReadPacket(packet)) {
+                    // Route all transports through UpdateManager for sequence/ACK tracking
+                    // UpdateManager will skip UDP-specific logic for Steam transports
+                    UpdateManager.OnReceivePacket<ClientUpdatePacket, ClientUpdatePacketId>(clientUpdatePacket);
+                } else if (!UpdateManager.TakesInUnreadable(clientUpdatePacket)) {
                     // If ReadPacket returns false, we received a malformed packet, which we simply ignore for now
                     continue;
                 }
-
-                // Route all transports through UpdateManager for sequence/ACK tracking
-                // UpdateManager will skip UDP-specific logic for Steam transports
-                UpdateManager.OnReceivePacket<ClientUpdatePacket, ClientUpdatePacketId>(clientUpdatePacket);
 
                 // In the order the server sent them, each one once: a packet with reliable data that arrived before
                 // one sent earlier waits for it (UpdateManager.TakeInOrder)
