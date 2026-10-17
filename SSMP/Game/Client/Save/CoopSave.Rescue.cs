@@ -605,12 +605,16 @@ internal partial class CoopSave {
         GlobalEnums.DamagePropertyFlags damagePropertyFlags
     ) {
         if (PlayerTargetRegistry.IsPlayerDown(self.gameObject)) {
-            // How the room's harm reached a player whose hit box is switched off is not known yet, so the first one of
-            // each wait says what it was
+            // How the room's harm reached a player whose hit box is switched off is known for one thing only: a spiked
+            // cog caught them by the collider of the hit box, which was on again while they lay there (USER 10-17;
+            // see CoopSave.SpikedCogs). What switched it on is not known, so the first one of each wait says what it
+            // was and whether the collider was on
             if (_hurtsKeptOffLyingPlayer++ == 0) {
+                var box = self.heroBox == null ? null : self.heroBox.box;
                 Logger.Info(
                     $"Kept a hurt off the player lying down: {damageAmount} from '{(go == null ? "?" : go.name)}' " +
-                    $"({hazardType}), with the hit box {(HeroBox.Inactive ? "off" : "ON")}"
+                    $"({hazardType}), with the hit box {(HeroBox.Inactive ? "off" : "ON")} and its collider " +
+                    $"{(box == null ? "missing" : box.enabled ? "ON" : "off")}"
                 );
             }
 
@@ -1224,6 +1228,7 @@ internal partial class CoopSave {
         hero.AddInvulnerabilitySource(RescueInvulnerability);
         hero.renderer.enabled = false;
         _hurtsKeptOffLyingPlayer = 0;
+        _cogTouchesOfLyingPlayer = 0;
 
         if (hero.vibrationCtrl != null) {
             hero.vibrationCtrl.PlayHeroDeath();

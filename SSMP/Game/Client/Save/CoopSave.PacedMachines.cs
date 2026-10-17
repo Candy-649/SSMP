@@ -809,6 +809,7 @@ internal partial class CoopSave {
     /// </summary>
     private void UpdateMachines() {
         UpdateGrinderStops();
+        UpdateCaughtCogs();
         UpdateShownParts();
         if (_heldMachines.Count == 0 && _pendingMachineRounds.Count == 0) {
             return;
@@ -1042,6 +1043,7 @@ internal partial class CoopSave {
         _takenMachineRounds.Clear();
         _machinesSaid.Clear();
         _caughtGrinders.Clear();
+        _caughtCogs.Clear();
         _grindersStoppedForPartner.Clear();
         _directors.Clear();
         ResetShownParts();

@@ -284,6 +284,7 @@ internal partial class CoopSave {
         RegisterPrisonCaptureHooks();
         RegisterCreatureDeathHooks();
         RegisterSlidePlatformHooks();
+        RegisterSpikedCogHooks();
         RegisterPodSequenceHooks();
         RegisterShownPartHooks();
         RegisterRoomLayoutHooks();
