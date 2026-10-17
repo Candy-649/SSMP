@@ -966,8 +966,10 @@ internal partial class CoopSave {
     /// <summary>
     /// Makes the saved objects of the loaded scenes that the partner changed keep that change. They still look the old
     /// way until the player enters the scene again, and without this they would save the old way when the player leaves.
+    /// A dial is put that way instead, since it turns both ways: an override would have it save as turned whichever way
+    /// it stood from then on (see CoopSave.DialDoors).
     /// </summary>
-    private static void OverrideLoadedItems(HashSet<string> keys) {
+    private void OverrideLoadedItems(HashSet<string> keys) {
         if (keys.Count == 0) {
             return;
         }
@@ -976,7 +978,14 @@ internal partial class CoopSave {
                      UnityEngine.FindObjectsInactive.Include, UnityEngine.FindObjectsSortMode.None
                  )) {
             GetItemSceneAndId(item, out var scene, out var id);
-            if (keys.Contains(GetItemKey(scene, id))) {
+            if (!keys.Contains(GetItemKey(scene, id))) {
+                continue;
+            }
+
+            var dial = item.GetComponent<DialDoorBridge>();
+            if (dial != null) {
+                PutDial(dial, true);
+            } else {
                 item.SetValueOverride(true);
             }
         }

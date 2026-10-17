@@ -316,7 +316,7 @@ internal partial class CoopSave {
                 _savedWorldItemsDirty = false;
                 foreach (var (scene, id) in GetWorldItems()) {
                     var key = GetItemKey(scene, id);
-                    if (!_knownWorldItems.Contains(key)) {
+                    if (!_knownWorldItems.Contains(key) && !_dialKeys.Contains(key)) {
                         AddWorldChange(ref update, scene, id, key);
                     }
                 }
@@ -371,11 +371,15 @@ internal partial class CoopSave {
             GetItemSceneAndId(item, out var scene, out var id);
             var key = GetItemKey(scene, id);
 
-            // A dial says how it stands each time it comes to rest (see CoopSave.DialDoors). Its item is set the moment
-            // a lever starts it turning, and this word would put the partner's dial, turning along with it, at its end
-            // at once, with the parts it has at the end switched on while it still turns
-            if (worldBools.Contains(key) && !item.GetIsSemiPersistent() &&
-                item.GetComponent<DialDoorBridge>() == null) {
+            // A dial turns both ways and says how it stands each time it comes to rest (see CoopSave.DialDoors). This
+            // word only goes from not set to set, and the partner's game would lock its loaded dial to save as turned
+            // whichever way it then stood
+            if (item.GetComponent<DialDoorBridge>() != null) {
+                _dialKeys.Add(key);
+                continue;
+            }
+
+            if (worldBools.Contains(key) && !item.GetIsSemiPersistent()) {
                 _loadedWorldItems.Add((item, scene, id, key));
             }
         }

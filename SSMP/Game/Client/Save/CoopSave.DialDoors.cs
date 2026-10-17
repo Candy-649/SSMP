@@ -16,7 +16,10 @@ namespace SSMP.Game.Client.Save;
 /// the other way, and from then on every lever turned both dials and kept them apart (USER 10-17,
 /// "应该是我进房间之前她转了一次，然后我们的状态就不一样了"). So, as for the platforms that slide along their rails (see
 /// CoopSave.SlidePlatforms), each time a dial comes to rest, the game that runs the room says how it stands, and with
-/// the partner in another room the game it turned in says so, for the partner's save.
+/// the partner in another room the game it turned in says so, for the partner's save. The changes of the world leave
+/// dials out: they only go from not set to set, and the partner's game locked a loaded dial to save as turned whichever
+/// way it then stood. When two saves are paired, a dial turned in either is still turned in both, and a loaded one is
+/// put that way (see <see cref="PutDial"/>).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -29,6 +32,12 @@ internal partial class CoopSave {
     /// to be put that way once it stops.
     /// </summary>
     private readonly Dictionary<DialDoorBridge, bool> _dialRestsHeld = new();
+
+    /// <summary>
+    /// The keys of the dials that were loaded here or that the partner said came to rest, which the changes of the
+    /// world that the save shows leave out.
+    /// </summary>
+    private readonly HashSet<string> _dialKeys = new(StringComparer.Ordinal);
 
     /// <summary>
     /// Whether telling the partner how a dial came to rest threw, which is only logged once.
@@ -104,6 +113,7 @@ internal partial class CoopSave {
         var scene = update.ItemScenes[0];
         var id = update.ItemIds[0];
         var rotated = update.Amounts[0] != 0;
+        _dialKeys.Add(GetItemKey(scene, id));
         if (player.IsInLocalScene && IsSceneHost?.Invoke() == true) {
             return;
         }
@@ -127,27 +137,39 @@ internal partial class CoopSave {
                 continue;
             }
 
-            if (dial.rotateRoutine != null) {
-                // Those of dials that went with their room while they turned are let go here
-                var gone = new List<DialDoorBridge>();
-                foreach (var held in _dialRestsHeld.Keys) {
-                    if (held == null) {
-                        gone.Add(held!);
-                    }
-                }
-
-                foreach (var held in gone) {
-                    _dialRestsHeld.Remove(held);
-                }
-
-                _dialRestsHeld[dial] = rotated;
-            } else if (dial.isRotated != rotated) {
-                dial.SetInitialRotation(rotated);
-            }
+            PutDial(dial, rotated);
         }
 
         Logger.Info(
             $"'{id}' in {scene} came to rest {(rotated ? "turned" : "not turned")} in the game of {player.Username}"
         );
+    }
+
+    /// <summary>
+    /// Puts a loaded dial the way the partner's game or the paired saves have it: at once if it stands still, or once
+    /// it comes to rest if it still turns. It then saves that way itself, as it would after a turn.
+    /// </summary>
+    private void PutDial(DialDoorBridge dial, bool rotated) {
+        if (dial.rotateRoutine == null) {
+            if (dial.isRotated != rotated) {
+                dial.SetInitialRotation(rotated);
+            }
+
+            return;
+        }
+
+        // Those of dials that went with their room while they turned are let go here
+        var gone = new List<DialDoorBridge>();
+        foreach (var held in _dialRestsHeld.Keys) {
+            if (held == null) {
+                gone.Add(held!);
+            }
+        }
+
+        foreach (var held in gone) {
+            _dialRestsHeld.Remove(held);
+        }
+
+        _dialRestsHeld[dial] = rotated;
     }
 }
