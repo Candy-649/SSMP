@@ -218,7 +218,7 @@ internal static class ToldParts {
             }
 
             if (!anyTakes) {
-                // Where each of them is, for a part of the other game that has yet to come to rest where this one did
+                // Where each of them is, for a part of the other game that has yet to come where this one is
                 List<Taker>? resting = null;
                 foreach (var machine in told.Machines) {
                     if (machine.Fsm is not { } partFsm || (resting ??= []).Count >= MaxTakers) {
@@ -596,13 +596,14 @@ internal static class ToldParts {
 
     /// <summary>
     /// Tells the parts here an event that nothing took in the scene host's game, each part on its own, where it has yet
-    /// to come to rest where the host's part did: where the event takes this part, and the states it goes on to by
-    /// itself from there, lead to the state the host's part waits in. That part took an event like it earlier, which
-    /// never came here, and a gate the host's player saw close stayed open here for good. A part that the host's game
-    /// still had busy, or that came to rest anywhere else, lets it go by as the host's did, and so does a machine that
-    /// goes by the host's rounds, which its rounds bring along (see <see cref="IsPaced"/>). The event goes as one that
-    /// the host's creature sent, so a gate it closes waits for this game's player to walk into the room (see
-    /// BossRoomCoop.RunAsNetworkSender).
+    /// to come where the host's part is: where the event takes this part, and the states it goes on to by itself from
+    /// there, lead through the state the host's part is in, or to it, and come to rest. That part took an event like it
+    /// earlier, which never came here, and a gate the host's player saw close stayed open here for good: one closed
+    /// already, and one still closing, as the gates that kept the host's player in the room while it waited for the
+    /// others were as the fight began. A part that the host's game had busy with anything else, or at rest anywhere
+    /// else, lets it go by as the host's did, and so does a machine that goes by the host's rounds, which its rounds
+    /// bring along (see <see cref="IsPaced"/>). The event goes as one that the host's creature sent, so a gate it
+    /// closes waits for this game's player to walk into the room (see BossRoomCoop.RunAsNetworkSender).
     /// </summary>
     /// <param name="sender">The state machine of the copy of the creature that tells the parts.</param>
     /// <param name="target">What the event went to.</param>
@@ -620,14 +621,14 @@ internal static class ToldParts {
             foreach (var machine in part.GetComponents<PlayMakerFSM>()) {
                 if (machine == null || machine.FsmName != host.FsmName || machine.Fsm is not { } fsm ||
                     IsPacedMachine(machine) || !Takes(fsm, eventName) ||
-                    !ComesToRestIn(fsm, eventName, host.StateName) ||
+                    !ComesToRestThrough(fsm, eventName, host.StateName) ||
                     FsmEvent.FindEvent(eventName) is not { } fsmEvent) {
                     continue;
                 }
 
                 Logger.Info(
                     $"The part '{ScenePath.Get(part)}' is told '{eventName}' from '{fsm.ActiveState?.Name}' all the " +
-                    $"same, as the scene host's already waits in '{host.StateName}', where it takes this one"
+                    $"same, as the scene host's is in '{host.StateName}' already, on the way that this one takes it"
                 );
                 BossRoomCoop.RunAsNetworkSender(sender, () => fsm.Event(fsmEvent));
                 told = true;
@@ -638,26 +639,28 @@ internal static class ToldParts {
     }
 
     /// <summary>
-    /// Whether an event takes a state machine, from where it is, to a state that waits to be told something, through
-    /// only the states it goes on to by itself (FINISHED). A state waits to be told only where no way out of it goes on
-    /// FINISHED or on an event that one of its own actions sends.
+    /// Whether an event takes a state machine, from where it is, through only the states it goes on to by itself
+    /// (FINISHED), to a state that waits to be told something, passing the given state on the way or coming to rest in
+    /// it. A state waits to be told only where no way out of it goes on FINISHED or on an event that one of its own
+    /// actions sends.
     /// </summary>
     /// <param name="fsm">The state machine.</param>
     /// <param name="eventName">The event.</param>
     /// <param name="stateName">The state.</param>
-    private static bool ComesToRestIn(Fsm fsm, string eventName, string stateName) {
-        if (fsm.GetState(stateName) is not { } rest || WayOut(rest.Transitions, FsmEvent.Finished.Name) != null ||
-            LeavesByItself(rest)) {
-            return false;
-        }
-
+    private static bool ComesToRestThrough(Fsm fsm, string eventName, string stateName) {
+        var passed = false;
         var next = WayOut(fsm.ActiveState?.Transitions, eventName) ?? WayOut(fsm.GlobalTransitions, eventName);
         for (var step = 0; next != null && step < MostStepsToRest; step++) {
-            if (next == stateName) {
-                return true;
+            if (fsm.GetState(next) is not { } state) {
+                return false;
             }
 
-            next = WayOut(fsm.GetState(next)?.Transitions, FsmEvent.Finished.Name);
+            passed |= next == stateName;
+            if (WayOut(state.Transitions, FsmEvent.Finished.Name) is not { } onward) {
+                return passed && !LeavesByItself(state);
+            }
+
+            next = onward;
         }
 
         return false;
