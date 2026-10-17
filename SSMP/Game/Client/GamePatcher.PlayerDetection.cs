@@ -105,6 +105,11 @@ internal partial class GamePatcher {
         /// worked out yet.
         /// </summary>
         public bool? AboutTheLocalPlayer;
+
+        /// <summary>
+        /// When that is next worked out, while a state machine there has not started yet.
+        /// </summary>
+        public float LocalPlayerRetryAt = float.NegativeInfinity;
     }
 
     /// <summary>
@@ -189,13 +194,14 @@ internal partial class GamePatcher {
     /// <summary>
     /// Replaces the hero-only alert-range check with tracked-player evaluation scoped to this alert range.
     /// </summary>
+    /// <param name="orig">The game's own check, which sees the player of this game alone.</param>
     /// <param name="self">The alert range being queried.</param>
     /// <returns>True when the relevant tracked player is inside this alert range and visible; otherwise false.</returns>
-    private static bool OnAlertRangeIsHeroInRange(AlertRange self) {
-        // A range about the player of this game alone answers for them, also while a hit or touch of the partner is
-        // replayed: what its state machine does next, it does to this game's player
+    private static bool OnAlertRangeIsHeroInRange(Func<AlertRange, bool> orig, AlertRange self) {
+        // A range about the player of this game alone answers as in a game with one player, also while a hit or touch
+        // of the partner is replayed: what its state machine does next, it does to this game's player
         if (IsAboutTheLocalPlayer(self)) {
-            return IsLocalPlayerInsideAlertRange(self);
+            return orig(self);
         }
 
         // A hit or touch of the partner that is being replayed goes by what the range said in their game when they
