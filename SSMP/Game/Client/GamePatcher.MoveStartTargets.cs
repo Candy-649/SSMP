@@ -531,6 +531,15 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Whether a creature fights a player already (see <see cref="IsFighting"/>): whom it goes after is then up to its
+    /// moves when another player wounds it, as it is when the scene host's player does (CoopHits.GoAfterSetter).
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    internal static bool FightsAPlayer(GameObject creature) {
+        return TurnsOf(GetEnemyTargetOwner(creature)) is { } turns && IsFighting(turns, Time.unscaledTime);
+    }
+
+    /// <summary>
     /// Notes that a creature asked one of its ranges about a player, and whether the range found the player it goes
     /// after inside (see <see cref="IsFighting"/>).
     /// </summary>

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using SSMP.Game.Client.Entity.Action;
 using SSMP.Game.Client.Save;
@@ -13,7 +14,10 @@ namespace SSMP.Game.Client.Entity;
 /// kind it was (USER 10-17, "我走到它的攻击范围了都不动，打它也不动", "这样的情况不止这个虫子会有…和虫子是什么反而关系不
 /// 大"). Telling the scene host's creature alone had it answer a round trip late in the striker's game (2c53ec5), so
 /// the copy plays it at once, as a strike is played (PlayHere), and the creature in the scene host's game the same
-/// way, going after the player who struck it (CoopHits.ApplyEntityInput).
+/// way where it is, going after the player who struck it unless it fights a player already (CoopHits.GoAfterSetter).
+/// A blow that the creature is immune to, that extracts from it, or that leaves it no health sets off nothing here
+/// (CoopHits): the game tells it nothing more of the first two, and the scene host's game tells it of the last along
+/// with its death.
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -21,6 +25,14 @@ internal partial class Entity {
     /// them: a state machine that goes somewhere on the first goes on from there.
     /// </summary>
     private static readonly string[] WoundEvents = ["HIT", "TOOK DAMAGE"];
+
+    /// <summary>
+    /// Whether an event is one of a wound (see <see cref="WoundEvents"/>).
+    /// </summary>
+    /// <param name="eventName">The event.</param>
+    internal static bool IsWoundEvent(string eventName) {
+        return Array.IndexOf(WoundEvents, eventName) >= 0;
+    }
 
     /// <summary>
     /// The state machines of the copy that a wound of the local player sets off, by their index, with the event each

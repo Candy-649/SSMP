@@ -944,8 +944,9 @@ internal partial class CoopHits {
         // health back afterwards, which left behind everything a hit does apart from health - the event it sends to
         // the enemy's own state machine, and the rounding that the co-op damage split carries to the next hit.
         Entity.Entity? enemyEntity = null;
+        HealthManager? enemyHealth = null;
         var isEnemyEntity = responder is Component enemyComponent &&
-                            enemyComponent.TryGetComponent<HealthManager>(out _) &&
+                            enemyComponent.TryGetComponent<HealthManager>(out enemyHealth) &&
                             TryGetEntity(enemyComponent.gameObject, out enemyEntity, out _);
         var enemyId = enemyEntity?.Id ?? 0;
 
@@ -981,8 +982,15 @@ internal partial class CoopHits {
             }
 
             // What a wound makes the creature do - turn, flinch, strike back - the copy does at once, and the creature
-            // in the scene host's game the same
-            if (enemyEntity != null && hit.IsHeroDamage && response.response == IHitResponder.Response.DamageEnemy) {
+            // in the scene host's game the same, for a blow of this game's player, of their attacks or their tools.
+            // The game tells a creature nothing of a blow that it is immune to, and only that it was extracted from of
+            // one that extracts (HealthManager.TakeDamage), and the scene host's game tells it of a blow that leaves it
+            // no health along with its death (HealthManagerComponent.ApplyHp)
+            if (enemyEntity != null && enemyHealth != null &&
+                response.response == IHitResponder.Response.DamageEnemy &&
+                (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source)) &&
+                !enemyHealth.IsImmuneTo(hit, false) && !HitCounters.Extracts(enemyHealth, hit) &&
+                !Entity.Component.HealthManagerComponent.DiesOfOwnBlow(enemyHealth)) {
                 SetOffByWound(enemyEntity);
             }
 
@@ -2045,7 +2053,7 @@ internal partial class CoopHits {
     /// <summary>
     /// Plays at once what a wound of the local player makes the copy of an entity do, in each FSM of it that goes
     /// somewhere on it (see Entity.FindWoundReactions), and sends the scene host the same, where the creature goes
-    /// after the local player as one that they set off: they struck it.
+    /// after the local player as one that they set off, unless it fights a player already (see GoAfterSetter).
     /// </summary>
     /// <param name="struck">The entity.</param>
     private void SetOffByWound(Entity.Entity struck) {
@@ -2321,10 +2329,12 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Has a creature that the partner set off - woke by coming near, hooked with the harpoon, or that heard a sign of
-    /// theirs - go after the partner, as it would have gone after the one player there is who set it off. Only when it
-    /// takes the event: one that is up already keeps whom it chose, and the boss of a room that not every player is in
-    /// yet never hears the sign (see <see cref="ShutsOutSign"/>).
+    /// Has a creature that the partner set off - woke by coming near, hooked with the harpoon, heard a sign of theirs,
+    /// or wounded - go after the partner, as it would have gone after the one player there is who set it off. Only when
+    /// it takes the event: one that is up already keeps whom it chose, and the boss of a room that not every player is
+    /// in yet never hears the sign (see <see cref="ShutsOutSign"/>). A wound turns only one that fights no player yet:
+    /// whom one that fights goes after is up to its moves, whoever wounds it, as it is for this game's player
+    /// (GamePatcher.FightsAPlayer).
     /// </summary>
     /// <param name="entity">The entity.</param>
     /// <param name="update">The update, from the partner, with the index of the FSM and the event.</param>
@@ -2334,7 +2344,8 @@ internal partial class CoopHits {
             Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) != null &&
             _playerData.TryGetValue(update.PlayerId, out var setter) && setter.PlayerObject != null &&
             entity.Object.Host != null && (!Entity.Entity.PlayerSigns.Contains(update.Responder) ||
-                                           ShutsOutSign?.Invoke(fsm.Fsm, state.Name) != true)) {
+                                           ShutsOutSign?.Invoke(fsm.Fsm, state.Name) != true) &&
+            !(Entity.Entity.IsWoundEvent(update.Responder) && GamePatcher.FightsAPlayer(entity.Object.Host))) {
             GamePatcher.SetTargetOf(entity.Object.Host, setter.PlayerObject);
         }
     }

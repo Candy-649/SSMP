@@ -838,6 +838,16 @@ internal class HealthManagerComponent : EntityComponent {
     }
 
     /// <summary>
+    /// Whether a blow of this game's player left the copy no health, and the game that runs the creature has not
+    /// answered it yet (see <see cref="KeepFromHurting"/>): the creature dies of it, and the scene host's game tells it
+    /// of the blow along with its death (see <see cref="ApplyHp"/>).
+    /// </summary>
+    /// <param name="copy">The health manager of the copy.</param>
+    internal static bool DiesOfOwnBlow(HealthManager copy) {
+        return ComponentOf.TryGetValue(copy, out var component) && KeptFromHurting.Contains(component);
+    }
+
+    /// <summary>
     /// The player's hit box touching something that may hurt them, as it starts to and for as long as it does
     /// (HeroBox.CheckForDamage): nothing of a copy kept from hurting them hurts them (see
     /// <see cref="KeepFromHurting"/>).

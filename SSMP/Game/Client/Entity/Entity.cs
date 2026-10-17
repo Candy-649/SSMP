@@ -4051,9 +4051,11 @@ internal partial class Entity {
                 continue;
             }
 
-            // How the entity moves by itself, and the colours its FSMs leave it in, are its own FSM's to say while that
-            // runs here, and held until the scene host has answered the input (PlayHere)
-            if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint) && WaitsForEcho) {
+            // How the entity moves by itself, the colours its FSMs leave it in, and whether the damage of its parts is
+            // on, are its own FSM's to say while that runs here, and held until the scene host has answered the input
+            // (PlayHere)
+            if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint or
+                    EntityComponentType.DamageHero) && WaitsForEcho) {
                 HoldForEcho(data);
                 continue;
             }

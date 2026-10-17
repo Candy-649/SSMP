@@ -43,8 +43,9 @@ A. 解压到游戏目录（N 网的包）
      弹出来的窗口就是游戏目录。
    - 装游戏时没改过位置的话，它在
        C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight Silksong
-     装在别的盘的话，一般在那个盘的 SteamLibrary\steamapps\common\Hollow Knight Silksong
-     （比如 D:\SteamLibrary\steamapps\common\Hollow Knight Silksong）。
+     游戏装在别的盘的话，一般在那个盘的 SteamLibrary\steamapps\common\Hollow Knight Silksong
+     （比如 D:\SteamLibrary\steamapps\common\Hollow Knight Silksong）；Steam 本身装在别处的话，
+     在那个 Steam 文件夹的 steamapps\common\Hollow Knight Silksong。
 
 3. 把压缩包里的东西【全部】解压到这个文件夹里：BepInEx 文件夹、
    winhttp.dll、doorstop_config.ini、.doorstop_version、changelog.txt
@@ -3239,9 +3240,10 @@ npm 的包会自动备份；N 网的包请按上面 A 的第 1 步自己备份�
     转身对着打它的人、停一下、还手、缩起来——mod 只转过去了会“记次数”的那几种（比如被打几下就翻倒），
     其他的反应两边都没有做，所以怪只掉血、不动，什么怪都可能这样。10 月 17 日你说“有怪不会对我响应”的那个
     房间，两边的日志里那 8 分钟一次怪的攻击都没有，跑房间那边也没有一只怪去追过谁。
-  - 现在：谁打到怪，谁自己的游戏里怪当场做出被打的反应，同时告诉跑房间那边，那边的怪做同样的反应，并且去
-    追打它的人。和“走近叫醒藏着的怪”（0.4.88）是同一个规则。会“记次数”的那几种照旧由跑房间那边记，
-    不会记两次。
+  - 现在：谁打到怪，谁自己的游戏里怪当场做出被打的反应，同时告诉跑房间那边，那边的怪就在原地做同样的反应。
+    怪原来没在跟人打的话，会去追打它的人；已经在跟人打的，追谁还是照原来的规则（每出一招前选人）。和“走近
+    叫醒藏着的怪”（0.4.88）是同一个规则。会“记次数”的那几种照旧由跑房间那边记，不会记两次。刀砍不动的怪
+    打了没反应、致命的那一下直接死，都和原版一样。
   - 注意：
     · 这条【没有实机测过】。
     · 两个人都装 0.4.107 才有这个改动。

@@ -821,6 +821,13 @@ internal partial class Entity {
 
         NoteAnticipation(start.Tag, start.Anticipation);
 
+        // One that died meanwhile takes nothing of the partner's any more: the death that a blow of this game's player
+        // brought can come before a wound of the partner's that was on its way (CoopHits.SetOffByWound)
+        if (Object.Host.TryGetComponent<HealthManager>(out var hostHealth) && hostHealth.GetIsDead()) {
+            SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
+            return false;
+        }
+
         var fsm = hostFsm.Fsm;
         if (fsm.ActiveState is not { } state) {
             SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
@@ -865,16 +872,19 @@ internal partial class Entity {
         }
 
         // Drawn sliding from here to where it is put and carried on, but not along any way the event takes it itself
-        // (see ShownSlide)
+        // (see ShownSlide). What a wound sets off is taken where the creature is, from now: the partner struck it
+        // where their game showed it, a little behind where it is here, and put back there at every blow, it jumped
+        // back under each of them
         var hostTransform = Object.Host.transform;
         var shownFrom = (Vector2) hostTransform.position;
+        var inPlace = IsWoundEvent(eventName) && start.Path is not { Length: > 0 } && start.Caught == null;
         Rigidbody2D? body = null;
-        if (start.Motion is { } motion && Object.Host.TryGetComponent<Rigidbody2D>(out var hostBody)) {
+        if (!inPlace && start.Motion is { } motion && Object.Host.TryGetComponent<Rigidbody2D>(out var hostBody)) {
             body = hostBody;
             PlaceBody(hostBody, start.Position, motion.Angle);
             hostBody.linearVelocity = motion.Velocity;
             hostBody.angularVelocity = motion.Spin;
-        } else {
+        } else if (!inPlace) {
             hostTransform.position = new Vector3(start.Position.x, start.Position.y, hostTransform.position.z);
         }
 
@@ -922,7 +932,7 @@ internal partial class Entity {
         }
 
         var carried = Vector2.zero;
-        if (sameWay) {
+        if (sameWay && !inPlace) {
             CarryEasesOn(reached!, elapsed);
             if (body != null) {
                 var beforeCarrying = body.position;
@@ -931,7 +941,7 @@ internal partial class Entity {
             }
         }
 
-        if (hostTransform != null) {
+        if (hostTransform != null && !inPlace) {
             ShownSlide.Start(
                 hostTransform, shownFrom - putAt - carried, $"where the partner's copy took '{eventName}'"
             );
