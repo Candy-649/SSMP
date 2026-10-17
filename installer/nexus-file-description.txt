@@ -1,2 +1,6 @@
-已含 BepInEx。先备份存档，再把压缩包里的东西全部解压到游戏目录。找游戏目录：Steam 库里右键游戏 → 管理 → 浏览本地文件；没改过安装位置的话，在 C:\Program Files (x86)\Steam\steamapps\common\Hollow Knight Silksong。一起玩的人要装同一版，详见 INSTALL.txt。
-BepInEx included. Back up your saves, then unpack everything into the game folder: in Steam, right-click the game > Manage > Browse local files. Everyone playing together needs the same version.
+已含 BepInEx。
+① 先备份存档（见 INSTALL.txt）
+② 打开游戏目录：Steam 库里右键游戏→管理→浏览本地文件（一般在 Steam 文件夹的 steamapps\common 里）
+③ 把压缩包里的东西全部解压进去，选覆盖
+④ 主菜单有 Start Multiplayer 就装好了
+Unpack all into the game folder (Steam: right-click the game > Manage > Browse local files).
