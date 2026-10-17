@@ -2402,7 +2402,18 @@
       "Control",
       "Fake Death",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Slash 1": [
+          "Slash 2",
+          "Slash 3",
+          "Slash 4",
+          "Slash 5",
+          "Slash 6"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Spinner Boss",
@@ -2419,6 +2430,14 @@
     ],
     "each_game_from": {
       "Control": "Death Stagger"
+    },
+    "runs_here": {
+      "Control": {
+        "DashCharge": [
+          "DashCharge End",
+          "Dash Audio End"
+        ]
+      }
     }
   },
   {
@@ -2432,7 +2451,15 @@
     "fsm_names": [
       "Control",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Dive": [
+          "Splash In",
+          "Underwater"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Bell Goomba",
@@ -2825,7 +2852,20 @@
       "Detect Lava Damage",
       "Escape CamLock Control",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Charge Break": [
+          "Charge",
+          "Charge Recover"
+        ],
+        "J Slash 1": [
+          "J Slash 2",
+          "J Slash 3",
+          "J Slash 4"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Mite Heavy",
@@ -2956,7 +2996,17 @@
       "Control",
       "Check Death",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Charge Antic 2": [
+          "Charge Flame",
+          "Charge Start",
+          "Charge",
+          "Charge End"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "song_golem",
@@ -3229,7 +3279,13 @@
       "Attack Control",
       "Phase Control",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Dash": [],
+        "Juke": []
+      }
+    }
   },
   {
     "base_object_name": "Bell Fly",
@@ -3352,7 +3408,15 @@
       "Set Cross Stitch Connected",
       "Stun Control",
       "hero_binding_check"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stab 1": [
+          "Stab 2",
+          "Stab 3"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Trobbio",
@@ -3366,7 +3430,19 @@
       "Control",
       "Stun Control",
       "Tornado Emission"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Tornado Antic 2": [
+          "Tornado Start",
+          "Tornado",
+          "Tornado Turn",
+          "Tornado Slow",
+          "Tornado Shoot",
+          "Tornado End"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Wraith",
@@ -3445,7 +3521,15 @@
       "Phase Control",
       "Shield Collider",
       "Stun"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stab Launch": [
+          "Stab",
+          "Stab Recover"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Grass Ball",

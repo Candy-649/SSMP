@@ -52,6 +52,13 @@ internal static class EntityRegistry {
     /// </summary>
     private static readonly Dictionary<EntityType, Dictionary<string, string>> EachGameFrom = new();
 
+    /// <summary>
+    /// For each type of entity whose entry names any, the moves that the copy plays by itself, by FSM and then by the
+    /// state each starts in, with every state of it, that one too (see <see cref="EntityRegistryEntry.RunsHere"/>).
+    /// </summary>
+    private static readonly Dictionary<EntityType, Dictionary<string, Dictionary<string, HashSet<string>>>> RunsHere =
+        new();
+
     static EntityRegistry() {
         var loadedEntries = FileUtil.LoadObjectFromEmbeddedJson<List<EntityRegistryEntry>>(EntityRegistryFilePath)
                             ?? throw new InvalidDataException("Could not deserialize entries from embedded JSON.");
@@ -99,6 +106,21 @@ internal static class EntityRegistry {
     }
 
     /// <summary>
+    /// Gets the states of a move that the copy of an entity of the given type plays by itself, if the state of the FSM
+    /// of the given name starts one, that state among them (see <see cref="EntityRegistryEntry.RunsHere"/>).
+    /// </summary>
+    public static bool TryGetRunHere(
+        EntityType type,
+        string fsmName,
+        string stateName,
+        [NotNullWhen(true)] out HashSet<string>? states
+    ) {
+        states = null;
+        return RunsHere.TryGetValue(type, out var fsms) && fsms.TryGetValue(fsmName, out var moves) &&
+               moves.TryGetValue(stateName, out states);
+    }
+
+    /// <summary>
     /// Filters out entries whose <see cref="EntityRegistryEntry.TypeName"/> has no mapping in
     /// <see cref="EntityType"/>, and recursively validates children.
     /// </summary>
@@ -141,6 +163,23 @@ internal static class EntityRegistry {
 
             if (entry.EachGameFrom is { Count: > 0 } eachGameFrom) {
                 EachGameFrom[entry.Type] = new Dictionary<string, string>(eachGameFrom, StringComparer.Ordinal);
+            }
+
+            if (entry.RunsHere is { Count: > 0 } runsHere) {
+                if (!RunsHere.TryGetValue(entry.Type, out var fsms)) {
+                    RunsHere[entry.Type] = fsms =
+                        new Dictionary<string, Dictionary<string, HashSet<string>>>(StringComparer.Ordinal);
+                }
+
+                foreach (var fsm in runsHere) {
+                    if (!fsms.TryGetValue(fsm.Key, out var moves)) {
+                        fsms[fsm.Key] = moves = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+                    }
+
+                    foreach (var move in fsm.Value) {
+                        moves[move.Key] = new HashSet<string>(move.Value, StringComparer.Ordinal) { move.Key };
+                    }
+                }
             }
 
             validEntries.Add(entry);
@@ -374,6 +413,23 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("each_game_from")]
     public Dictionary<string, string>? EachGameFrom { get; set; }
+
+    /// <summary>
+    /// Moves of the entity that the copy of a scene client plays by itself, by FSM name and then by the state each
+    /// starts in, with the states that follow it in the move: a spin across the room that turns at the walls, a charge
+    /// that ends where its time or a wall ends it. Once the scene host says its FSM went into the first state, the
+    /// copy's own FSM goes into it too and on through the rest, and the copy moves by its own body as the room's own
+    /// creature does; where the scene host's FSM goes out of the move, the copy follows it again (Entity.RunMoveHere).
+    /// Followed by its positions alone, the copy shook all through such a move, as the positions came in unevenly
+    /// over the relay (USER 10-17 "旋风那个动作轨迹一直在抖", "尽量不要用位置同步了").
+    ///
+    /// Only for a move that goes the same way from the same start in both games: no dice and nothing about a player
+    /// in any of its states, which a move that turns to face the player first starts only after it has turned, so
+    /// that the copy faces the way the scene host's creature does. The state it starts in has to last a moment, as
+    /// only the latest state of the scene host's FSM is sent, and the move never goes back to it.
+    /// </summary>
+    [JsonProperty("runs_here")]
+    public Dictionary<string, Dictionary<string, List<string>>>? RunsHere { get; set; }
 
     /// <summary>
     /// Child entries nested under this entry. Populated from the registry file and validated
