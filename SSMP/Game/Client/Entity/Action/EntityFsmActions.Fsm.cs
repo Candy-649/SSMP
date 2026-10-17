@@ -101,13 +101,21 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetFsmFloat action) {
-        // TODO: if action.setValue can be a reference, make sure to network it
         if (action.setValue == null) {
             return false;
         }
 
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
-        return gameObject != action.Fsm.GameObject;
+        if (gameObject == action.Fsm.GameObject) {
+            return false;
+        }
+
+        // The value itself, as SetFsmBool and SetFsmInt send theirs: it is often one of the FSM's own variables that
+        // only the game running the creature works out. A boss sets the speed it threw a ball with, from its own roll,
+        // into the ball for bouncing off walls, and the other game's copy set its own 0: the twin stopped dead at the
+        // first wall and hopped away, where the real one bounced back (USER 10-17, the theatre boss's balls)
+        data.Packet.Write(action.setValue.Value);
+        return true;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -115,6 +123,9 @@ internal static partial class EntityFsmActions {
         if (action.setValue == null) {
             return;
         }
+
+        // Done without data to set a creature up (see EntityInitializer), with its own value
+        var setValue = data == null ? action.setValue.Value : data.Packet.ReadFloat();
 
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
@@ -128,7 +139,7 @@ internal static partial class EntityFsmActions {
 
         var fsmFloat = fsm.FsmVariables.GetFsmFloat(action.variableName.Value);
 
-        fsmFloat?.Value = action.setValue.Value;
+        fsmFloat?.Value = setValue;
     }
 
     #endregion
@@ -137,13 +148,18 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SetFsmString action) {
-        // TODO: if action.setValue can be a reference, make sure to network it
         if (action.setValue == null) {
             return false;
         }
 
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
-        return gameObject != action.Fsm.GameObject;
+        if (gameObject == action.Fsm.GameObject) {
+            return false;
+        }
+
+        // The value itself, as for SetFsmFloat
+        data.Packet.Write(action.setValue.Value ?? "");
+        return true;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -151,6 +167,9 @@ internal static partial class EntityFsmActions {
         if (action.setValue == null) {
             return;
         }
+
+        // Done without data to set a creature up (see EntityInitializer), with its own value
+        var setValue = data == null ? action.setValue.Value : data.Packet.ReadString();
 
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
@@ -167,7 +186,7 @@ internal static partial class EntityFsmActions {
             return;
         }
 
-        fsmString.Value = action.setValue.Value;
+        fsmString.Value = setValue;
     }
 
     #endregion
