@@ -140,9 +140,9 @@ public static class SteamManager {
     private static readonly object PumpGate = new();
 
     /// <summary>
-    /// When the game last took Steam's messages, as a <see cref="Stopwatch"/> timestamp. Set as well when the hook on
-    /// its taking is made, so that the stand-in waits for its first; 0 without the hook, which leaves them all to the
-    /// stand-in.
+    /// When the game last took Steam's messages, as a <see cref="Stopwatch"/> timestamp. Set as well once the hook on
+    /// its taking is made, so that the stand-in waits for its first. 0 without the hook: the stand-in then takes them
+    /// at every look, alongside the game, as it used to.
     /// </summary>
     private static long _gamePumpedAt;
 
@@ -153,9 +153,9 @@ public static class SteamManager {
     private static long _standingInSince;
 
     /// <summary>
-    /// Whether the game's window was behind at its last frame when the stand-in began, for the log.
+    /// Where the game's window was at its last frame when the stand-in began, in words for the log.
     /// </summary>
-    private static volatile bool _standInWindowBehind;
+    private static volatile string _standInWindow = "";
 
     /// <summary>
     /// How long the game may take none of Steam's messages before the stand-in takes them: longer than any ordinary
@@ -210,8 +210,19 @@ public static class SteamManager {
             _lobbyMatchListCallback = CallResult<LobbyMatchList_t>.Create(OnLobbyMatchList);
             _lobbyEnterCallback = CallResult<LobbyEnter_t>.Create(OnLobbyEnter);
 
-            // The game takes Steam's messages every frame, and the mod only while the game takes none
-            HookGamePump();
+            // The game takes Steam's messages every frame, and the mod only while the game takes none. Not being able
+            // to hook the game's taking, as after an update of the game that changed it, is no reason to go without
+            // Steam: the mod then takes them alongside the game, as it used to. Caught here, as a type that the hook
+            // names and that is gone throws once the method naming it is compiled, before any of it runs (review of
+            // 33ef6a6)
+            try {
+                HookGamePump();
+            } catch (Exception e) {
+                Logger.Error(
+                    $"Steam: could not hook where the game takes Steam's messages, so the mod takes them as well:\n{e}"
+                );
+            }
+
             StartCallbackTimer();
 
             return true;
@@ -426,14 +437,16 @@ public static class SteamManager {
         );
 
         Logger.Info(
-            $"Steam: started looking every {CallbackIntervalMs} ms whether the game takes Steam's messages, to take " +
-            "them while it does not"
+            _gamePumpHook != null
+                ? $"Steam: the game takes Steam's messages, and the mod looks every {CallbackIntervalMs} ms to take " +
+                  "them while the game takes none"
+                : $"Steam: the mod takes Steam's messages every {CallbackIntervalMs} ms, alongside the game"
         );
     }
 
     /// <summary>
     /// Hooks the game's taking of Steam's messages (see <see cref="TakeMessagesForGame"/>). Without the hook the
-    /// stand-in takes them all the time alongside the game, as it used to.
+    /// stand-in takes them at every look alongside the game, as it used to.
     /// </summary>
     private static void HookGamePump() {
         if (_gamePumpHook != null) {
@@ -448,16 +461,8 @@ public static class SteamManager {
             return;
         }
 
-        // Not a reason to go without Steam: the stand-in then takes the messages alongside the game, as it used to
-        try {
-            Interlocked.Exchange(ref _gamePumpedAt, Stopwatch.GetTimestamp());
-            _gamePumpHook = new Hook(method, TakeMessagesForGame);
-        } catch (Exception e) {
-            Interlocked.Exchange(ref _gamePumpedAt, 0);
-            Logger.Error(
-                $"Steam: could not hook where the game takes Steam's messages, so the mod takes them as well:\n{e}"
-            );
-        }
+        _gamePumpHook = new Hook(method, TakeMessagesForGame);
+        Interlocked.Exchange(ref _gamePumpedAt, Stopwatch.GetTimestamp());
     }
 
     /// <summary>
@@ -496,6 +501,13 @@ public static class SteamManager {
         if (timer == null) return;
 
         timer.Dispose();
+
+        // Dispose waits for no look under way. One taking Steam's messages right now is waited for here, and one that
+        // comes after finds the timer gone and takes none, so that nothing the mod handles runs on the stand-in's
+        // thread once the mod is done with Steam (review of 33ef6a6)
+        lock (PumpGate) {
+        }
+
         Logger.Info("Steam: Stopped callback timer");
     }
 
@@ -515,8 +527,7 @@ public static class SteamManager {
                 Logger.Info(
                     "Steam: the game takes Steam's messages again; the mod took them for it for " +
                     $"{(double) (now - since) / Stopwatch.Frequency:F1} s, after it took none for " +
-                    $"{(double) StandInAfter / Stopwatch.Frequency:F0} s with its window " +
-                    $"{(_standInWindowBehind ? "behind" : "in front")}"
+                    $"{(double) StandInAfter / Stopwatch.Frequency:F0} s, {_standInWindow}"
                 );
             }
 
@@ -528,8 +539,17 @@ public static class SteamManager {
         }
 
         try {
+            // Not once the stand-in is stopped (see StopCallbackTimer)
+            if (Volatile.Read(ref _callbackTimer) == null) {
+                return;
+            }
+
             if (Interlocked.CompareExchange(ref _standingInSince, now, 0) == 0) {
-                _standInWindowBehind = !FrameWatch.Focused;
+                _standInWindow = FrameWatch.Focused switch {
+                    true => "with its window in front at its last frame",
+                    false => "with its window behind at its last frame",
+                    null => "with no frame of it watched to tell where its window was"
+                };
             }
 
             SteamAPI.RunCallbacks();

@@ -78,9 +78,15 @@ internal static class FrameWatch {
     private static volatile bool _focused;
 
     /// <summary>
-    /// Whether the game's window was in front at the last frame.
+    /// Whether <see cref="_focused"/> was set by a watched frame.
     /// </summary>
-    public static bool Focused => _focused;
+    private static volatile bool _focusSeen;
+
+    /// <summary>
+    /// Whether the game's window was in front at the last frame; null before a frame is watched, or once the frames are
+    /// no longer watched (review of 33ef6a6).
+    /// </summary>
+    public static bool? Focused => _focusSeen && !Volatile.Read(ref _failed) ? _focused : null;
 
     /// <summary>
     /// The scene that was active at the last frame.
@@ -229,6 +235,7 @@ internal static class FrameWatch {
         _lastScene = scene;
         _lastCollections = collections;
         _focused = focused;
+        _focusSeen = true;
         Interlocked.Exchange(ref _lastFrame, watched ? now : 0);
 
         if (_watcher == null) {
