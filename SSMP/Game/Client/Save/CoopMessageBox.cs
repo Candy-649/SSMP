@@ -12,34 +12,55 @@ using Object = UnityEngine.Object;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// The message box of the two-player save in the save menu. It looks like the game's own box for questions in the
-/// world (DialogueYesNoBox: a dark backboard between two fleurs) and uses the menu's own buttons. It is built on a copy
-/// of the game's error box, which darkens the screen behind it and takes the menu's input while it is up.
+/// The message box of the two-player save in the save menu. It looks like the game's text box for something with text
+/// that the player inspects (DialogueBox: a dark backboard between two fleurs) and uses the menu's own buttons. It is
+/// built on a copy of the game's error box, which darkens the screen behind it and takes the menu's input while it is
+/// up.
 ///
 /// It used to be the game's error box itself (GenericMessageCanvas): a plain black panel with one button, which the
 /// game selects as the box opens. For a message that waits, like the one for the host's save, that button stopped
 /// the waiting, so pressing the button that had just chosen the save once more stopped it at once (the user's report
-/// of 10-17, which also asked for the look of the game's boxes for text in the world). A message that waits now has a
+/// of 10-17, which also asked for the look of the game's box for text in the world). A message that waits now has a
 /// button that keeps waiting, selected as it opens, and one that stops; the back button stops as well.
 /// </summary>
 internal static class CoopMessageBox {
     /// <summary>
-    /// How wide the box is, in units of the game's message canvas, which is 1920 wide.
+    /// How many units of the game's message canvas one unit of the HUD camera is: the camera shows 17.42 of its units
+    /// over the height of the screen (orthographic size 8.71), which the canvas fills with 1080 of its own.
     /// </summary>
-    private const float BoxWidth = 1000f;
+    private const float CanvasUnitsPerWorldUnit = 1080f / (2f * 8.710664f);
+
+    // Where the parts of the game's text box are, in units of the HUD camera, from its prefab: its text is 17.85 wide,
+    // and its backboard reaches 2.98 past the text on each side, 1.19 above it and 0.91 below it. The middle of its top
+    // fleur is 0.2 below the top of the backboard, and the middle of its bottom fleur 0.39 above the bottom
+    private const float TextWidth = 17.85f;
+    private const float SideMargin = 2.98f;
+    private const float TopMargin = 1.19f;
+    private const float BottomMargin = 0.91f;
+    private const float TopFleurDrop = 0.2f;
+    private const float BottomFleurRise = 0.39f;
 
     /// <summary>
-    /// How wide a fleur is drawn, in the same units.
+    /// How wide the box is, in units of the message canvas: as wide as the backboard of the game's text box.
     /// </summary>
-    private const float FleurWidth = 760f;
+    private const float BoxWidth = (TextWidth + 2f * SideMargin) * CanvasUnitsPerWorldUnit;
 
     /// <summary>
-    /// Where the game's box for questions in the world is under the HUD camera, whose backboard and fleurs are used.
+    /// The space between the text and the buttons, in units of the message canvas.
     /// </summary>
-    private const string YesNoPanePath = "In-game/DialogueManager/DialogueYesNoBox/Pane";
+    private const float ButtonSpacing = 30f;
 
     /// <summary>
-    /// The colour of the backboard in the game's box for questions in the world.
+    /// Where the game's text box is under the HUD camera, whose backboard and fleurs are used.
+    /// </summary>
+    private const string DialogueBoxPath = "In-game/DialogueManager/DialogueBox";
+
+    // Where the fleurs of the text box are in it: the ones it shows for any text that isn't a line of the player's own
+    private const string TopFleurPath = "Fluers/Fluers/Fluers_Default/Dialogue_fleur_top_NPC0008";
+    private const string BottomFleurPath = "Fluers/Fluers/Fluers_Default/Dialogue_fleur_bottom_NPC0008";
+
+    /// <summary>
+    /// The colour of the backboard: the game's text box draws it at 0.8 of its fade.
     /// </summary>
     private static readonly Color BackboardColor = new(1f, 1f, 1f, 0.8f);
 
@@ -48,6 +69,13 @@ internal static class CoopMessageBox {
     /// </summary>
     private static readonly FieldInfo? HasCancelEventTriggerField = typeof(MenuSelectable).GetField(
         "hasCancelEventTrigger", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+    );
+
+    /// <summary>
+    /// The method of a menu button that finds the menu's sound player for it, which the button runs in its Start.
+    /// </summary>
+    private static readonly MethodInfo? HookUpAudioPlayerMethod = typeof(MenuSelectable).GetMethod(
+        "HookUpAudioPlayer", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
     );
 
     private static GameObject? _root;
@@ -59,9 +87,9 @@ internal static class CoopMessageBox {
     private static Text? _secondLabel;
 
     /// <summary>
-    /// The text of the game's own OK button, in the game's language.
+    /// The label of the game's own OK button, which the game keeps in its language.
     /// </summary>
-    private static string _okLabel = "";
+    private static Text? _gameOkLabel;
 
     private static Action? _onFirst;
     private static Action? _onSecond;
@@ -130,7 +158,7 @@ internal static class CoopMessageBox {
         }
 
         _text!.text = text;
-        _firstLabel!.text = firstLabel ?? _okLabel;
+        _firstLabel!.text = ButtonLabel(firstLabel ?? OkLabel());
         _firstKeepsOpen = firstKeepsOpen;
         _onFirst = onFirst;
         _onSecond = onSecond;
@@ -141,8 +169,8 @@ internal static class CoopMessageBox {
 
         var twoButtons = secondLabel != null;
         _second!.gameObject.SetActive(twoButtons);
-        if (twoButtons) {
-            _secondLabel!.text = secondLabel;
+        if (secondLabel != null) {
+            _secondLabel!.text = ButtonLabel(secondLabel);
         }
 
         _first.navigation = new Navigation {
@@ -238,9 +266,31 @@ internal static class CoopMessageBox {
     }
 
     /// <summary>
-    /// Makes the box the first time it is shown, from a copy of the game's error box, in the look of the game's box for
-    /// questions in the world when that box is found. The copy stays under the game's UI manager, as the error box
-    /// does, so it lasts as long as the menu.
+    /// The text of the game's OK button, in the language the game is in now.
+    /// </summary>
+    private static string OkLabel() {
+        return _gameOkLabel != null && _gameOkLabel.text is { Length: > 0 } ok ? ok : Lang.Pick("OK", "确认");
+    }
+
+    /// <summary>
+    /// A label as the game's menu buttons have theirs: ending in a line break, which the game adds to them
+    /// (FixVerticalAlign, with a line spacing of its own) to bring the text to the middle of the button.
+    /// </summary>
+    private static string ButtonLabel(string label) {
+        return label.EndsWith("\n") ? label : label + "\n";
+    }
+
+    /// <summary>
+    /// A length in units of the HUD camera, in whole units of the message canvas.
+    /// </summary>
+    private static int ToCanvas(float worldUnits) {
+        return Mathf.RoundToInt(worldUnits * CanvasUnitsPerWorldUnit);
+    }
+
+    /// <summary>
+    /// Makes the box the first time it is shown, from a copy of the game's error box, laid out as the game's text box
+    /// and in its look when that box is found. The copy stays under the game's UI manager, as the error box does, so
+    /// it lasts as long as the menu.
     /// </summary>
     /// <returns>Whether the box is there.</returns>
     private static bool Build() {
@@ -272,7 +322,7 @@ internal static class CoopMessageBox {
             return false;
         }
 
-        _okLabel = firstLabel.text is { Length: > 0 } ok ? ok : Lang.Pick("OK", "确认");
+        _gameOkLabel = source.transform.Find("Panel/Buttons/OkButton/Text")?.GetComponent<Text>();
 
         // Its own label would put the game's OK back each time the button is switched on. At once, so that the second
         // button, copied from this one, is made without it
@@ -294,12 +344,20 @@ internal static class CoopMessageBox {
         text.transform.SetSiblingIndex(0);
         buttons.SetSiblingIndex(1);
 
-        // The box is as wide as given and as tall as what it holds, in the middle of the screen
+        // The box is as wide as the game's text box, with the text as far inside it, and as tall as what it holds, in
+        // the middle of the screen
         var panelRect = (RectTransform) panel;
         panelRect.anchorMin = panelRect.anchorMax = new Vector2(0.5f, 0.5f);
         panelRect.pivot = new Vector2(0.5f, 0.5f);
         panelRect.anchoredPosition = Vector2.zero;
         panelRect.sizeDelta = new Vector2(BoxWidth, panelRect.sizeDelta.y);
+        if (panel.GetComponent<VerticalLayoutGroup>() is { } layout) {
+            layout.padding = new RectOffset(
+                ToCanvas(SideMargin), ToCanvas(SideMargin), ToCanvas(TopMargin), ToCanvas(BottomMargin)
+            );
+            layout.spacing = ButtonSpacing;
+            layout.childAlignment = TextAnchor.UpperCenter;
+        }
 
         Restyle(panel);
 
@@ -334,22 +392,26 @@ internal static class CoopMessageBox {
         // Not one of the menu's own ways back, which would leave the save menu behind the box
         button.cancelAction = CancelAction.DoNothing;
         HasCancelEventTriggerField?.SetValue(button, true);
+
+        // The button would find its sound player only in its Start, a frame after the box is made, but the box selects
+        // its first button at once, and a selection without one logs an error and plays no sound
+        HookUpAudioPlayerMethod?.Invoke(button, null);
     }
 
     /// <summary>
-    /// Gives the box the backboard and the fleurs of the game's box for questions in the world, with room inside for
-    /// the backboard's soft edges. The plain dark panel of the error box stays where that box is not found.
+    /// Gives the box the backboard and the fleurs of the game's text box. The plain dark panel of the error box stays
+    /// where that box is not found.
     /// </summary>
     private static void Restyle(Transform panel) {
         var cameras = GameCameras.instance;
         var hud = cameras != null ? cameras.hudCamera : null;
-        var pane = hud != null ? hud.transform.Find(YesNoPanePath) : null;
-        if (pane == null) {
-            Logger.Warn("Co-op save message: the game's box for questions was not found, so the message stays plain");
+        var dialogueBox = hud != null ? hud.transform.Find(DialogueBoxPath) : null;
+        if (dialogueBox == null) {
+            Logger.Warn("Co-op save message: the game's text box was not found, so the message stays plain");
             return;
         }
 
-        var backboard = pane.Find("Contents Layout/backboard")?.GetComponent<Image>();
+        var backboard = dialogueBox.Find("backboard")?.GetComponent<SpriteRenderer>();
         var image = panel.GetComponent<Image>();
         if (backboard != null && backboard.sprite != null && image != null) {
             image.sprite = backboard.sprite;
@@ -357,29 +419,17 @@ internal static class CoopMessageBox {
             image.color = BackboardColor;
         }
 
-        var topFleur = pane.Find("Top Fluer")?.GetComponent<SpriteRenderer>();
-        var bottomFleur = pane.Find("Contents Layout/Bottom Fluer")?.GetComponent<SpriteRenderer>();
-        var topHeight = AddFleur(panel, topFleur, true);
-        var bottomHeight = AddFleur(panel, bottomFleur, false);
-
-        // The fleurs sit on the edges, half inside the box, so the text keeps clear of the half that is
-        if (panel.GetComponent<VerticalLayoutGroup>() is { } layout) {
-            layout.padding = new RectOffset(
-                110, 110, Mathf.Max(70, Mathf.CeilToInt(topHeight / 2f) + 30),
-                Mathf.Max(55, Mathf.CeilToInt(bottomHeight / 2f) + 25)
-            );
-            layout.spacing = 30f;
-            layout.childAlignment = TextAnchor.UpperCenter;
-        }
+        AddFleur(panel, dialogueBox.Find(TopFleurPath)?.GetComponent<SpriteRenderer>(), true);
+        AddFleur(panel, dialogueBox.Find(BottomFleurPath)?.GetComponent<SpriteRenderer>(), false);
     }
 
     /// <summary>
-    /// Draws a fleur of the game's box for questions on the middle of the top or the bottom edge of the box.
+    /// Draws a fleur of the game's text box as large as it is there, where it sits on the top or the bottom of the
+    /// backboard.
     /// </summary>
-    /// <returns>How tall the fleur is drawn, or 0 without one.</returns>
-    private static float AddFleur(Transform panel, SpriteRenderer? renderer, bool top) {
-        if (renderer == null || renderer.sprite is not { } sprite || sprite.rect.width <= 0f) {
-            return 0f;
+    private static void AddFleur(Transform panel, SpriteRenderer? renderer, bool top) {
+        if (renderer == null || renderer.sprite is not { } sprite) {
+            return;
         }
 
         var fleur = new GameObject(top ? "Top Fleur" : "Bottom Fleur", typeof(RectTransform), typeof(Image));
@@ -390,13 +440,13 @@ internal static class CoopMessageBox {
         rect.SetParent(panel, false);
         rect.anchorMin = rect.anchorMax = new Vector2(0.5f, top ? 1f : 0f);
         rect.pivot = new Vector2(0.5f, 0.5f);
-        rect.anchoredPosition = Vector2.zero;
-        rect.sizeDelta = sprite.rect.size * (FleurWidth / sprite.rect.width);
+        rect.anchoredPosition = new Vector2(0f, (top ? -TopFleurDrop : BottomFleurRise) * CanvasUnitsPerWorldUnit);
+        var size = Vector2.Scale(sprite.rect.size / sprite.pixelsPerUnit, renderer.transform.localScale);
+        rect.sizeDelta = size * CanvasUnitsPerWorldUnit;
 
         var image = fleur.GetComponent<Image>();
         image.sprite = sprite;
         image.preserveAspect = true;
         image.raycastTarget = false;
-        return rect.sizeDelta.y;
     }
 }
