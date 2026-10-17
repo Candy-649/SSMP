@@ -511,6 +511,9 @@ internal class EntityManager {
         if (update.UpdateTypes.Contains(EntityUpdateType.Data) && !isPersonal)
             entity.UpdateData(update.GenericData, alreadyInSceneUpdate);
 
+        // A move that the scene host's FSM went into, which the copy plays by itself, starts once all of this is in
+        entity.StartMoveHeard();
+
         return true;
     }
 

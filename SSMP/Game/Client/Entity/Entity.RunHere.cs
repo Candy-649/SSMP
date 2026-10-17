@@ -379,10 +379,29 @@ internal partial class Entity {
     private (PlayMakerFSM Fsm, string From, HashSet<string> States)? _moveHeard;
 
     /// <summary>
-    /// In a move that the copy plays by itself, the state of the move that the scene host's FSM was last heard in, by
-    /// the state it went to or by what it sent of one (see <see cref="CatchUpInTheMove"/>).
+    /// What the scene host sent of the states of <see cref="_moveHeard"/> along with its start, taken in once the move
+    /// has started (see <see cref="StartMoveHeard"/>).
+    /// </summary>
+    private readonly List<EntityNetworkData> _moveHeldData = [];
+
+    /// <summary>
+    /// In a move that the copy plays by itself, the state of the move that the scene host's FSM was last said to have
+    /// gone to (see <see cref="CatchUpInTheMove"/>).
     /// </summary>
     private FsmState? _moveHostAt;
+
+    /// <summary>
+    /// The states of the move that the copy has gone into while it played the move by itself (see
+    /// <see cref="CatchUpInTheMove"/>).
+    /// </summary>
+    private readonly HashSet<FsmState> _moveEntered = [];
+
+    /// <summary>
+    /// Whether the scene host's writes of the variables of <see cref="_runHere"/> were kept off the copy for a move it
+    /// played by itself, which it is given all of once it no longer runs here, also when the move went on as what the
+    /// local player did to it (see <see cref="PlayHere"/>).
+    /// </summary>
+    private bool _moveVariablesHeld;
 
     /// <summary>
     /// The moves, by type of entity, FSM and first state, that an FSM was found to go through another way than its
@@ -507,6 +526,7 @@ internal partial class Entity {
             // The move that the copy played by itself goes on as what the local player did to it, played as any other
             _runHereMove = false;
             _moveHostAt = null;
+            _moveEntered.Clear();
             TakeTheCopysBodyBack();
         }
 
@@ -1221,12 +1241,6 @@ internal partial class Entity {
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="state">The state of the action.</param>
     private void HearFromSceneHost(PlayMakerFSM fsm, FsmState state) {
-        // How far the scene host's FSM went through a move that the copy plays by itself (see CatchUpInTheMove)
-        if (_runHereMove && fsm == _runHere && _runHereCombo?.Contains(state) == true) {
-            _moveHostAt = state;
-            return;
-        }
-
         if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
             _runHereCombo?.Contains(state) != true && !FollowIntoTheAftermath(state.Name)) {
             CatchUpWithSceneHost();
@@ -1294,7 +1308,7 @@ internal partial class Entity {
         // it goes into that state again while the copy is past it, which a move never does within itself - but not
         // from the state of a room asked for again after a gap, which says where the scene host's FSM is but not since
         // when. It starts once the rest of what came along is taken in too: what the scene host's FSM worked out on
-        // its way into the move (UpdateHostFsmData)
+        // its way into the move, and what it sent of the states it went through to get there (StartMoveHeard)
         if (!FromRoomState && _eachGamePartWaiting == null && !_runHereTalk &&
             (_runHere == null || _runHereMove && _runHere == fsm && fsm.ActiveStateName != stateName) &&
             EntityRegistry.TryGetRunHere(Type, fsm.FsmName, stateName, out var move)) {
@@ -1306,7 +1320,8 @@ internal partial class Entity {
             return;
         }
 
-        // How far the scene host's FSM went through a move that the copy plays by itself (see CatchUpInTheMove)
+        // How far the scene host's FSM went through a move that the copy plays by itself (see CatchUpInTheMove). By
+        // the states it is said to go to only: what it sent of a state can come after a later state, in one packet
         if (_runHereMove && fsm == _runHere && fsm.Fsm.GetState(stateName) is { } heard &&
             _runHereCombo?.Contains(heard) == true) {
             _moveHostAt = heard;
@@ -1314,17 +1329,45 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Starts the move that the scene host's FSM went into, heard of in what was just taken in, if it is one of the
-    /// given FSM (see <see cref="HearStateFromSceneHost"/>).
+    /// Starts the move that the scene host's FSM went into, heard of in what was just taken in, once all of that is
+    /// taken in (see <see cref="HearStateFromSceneHost"/>): what the scene host sent of the states before the move
+    /// along with it played on the copy first, as the copy followed it there, rather than after the move started,
+    /// which it then stopped. What it sent of the states of the move is taken in after the start, as anything sent of
+    /// them later is (see <see cref="HoldsForTheMoveHeard"/>), or as before if the move does not start.
     /// </summary>
-    /// <param name="copyFsm">The FSM of the copy whose part of it was taken in.</param>
-    private void StartMoveHeard(PlayMakerFSM copyFsm) {
-        if (_moveHeard is not { } heard || heard.Fsm != copyFsm) {
+    public void StartMoveHeard() {
+        if (_moveHeard is not { } heard) {
             return;
         }
 
         _moveHeard = null;
+        var held = new List<EntityNetworkData>(_moveHeldData);
+        _moveHeldData.Clear();
         RunMoveHere(heard.Fsm, heard.From, heard.States);
+        if (held.Count > 0) {
+            UpdateData(held, false);
+        }
+    }
+
+    /// <summary>
+    /// Holds what the scene host sent of a state of the move that it went into in what is being taken in now, until the
+    /// move has started (see <see cref="StartMoveHeard"/>).
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    /// <param name="state">The state of the action that the scene host sent.</param>
+    /// <param name="data">What it sent, whose packet is only lent for as long as it is being read.</param>
+    /// <returns>Whether it is held.</returns>
+    private bool HoldsForTheMoveHeard(PlayMakerFSM fsm, FsmState state, EntityNetworkData data) {
+        if (_moveHeard is not { } heard || heard.Fsm != fsm || !heard.States.Contains(state.Name)) {
+            return false;
+        }
+
+        _moveHeldData.Add(new EntityNetworkData {
+            Type = data.Type,
+            SenderId = data.SenderId,
+            Packet = new global::SSMP.Networking.Packet.Packet(data.Packet.ToArray())
+        });
+        return true;
     }
 
     /// <summary>
@@ -1384,6 +1427,9 @@ internal partial class Entity {
         _runHereIndex = (byte) fsmIndex;
         _runHereCombo = states;
         _moveHostAt = from;
+        _moveEntered.Clear();
+        _moveEntered.Add(from);
+        _moveVariablesHeld = true;
         GiveTheCopyItsBody();
         StartSteppingRunHere(copyFsm);
 
@@ -1570,11 +1616,12 @@ internal partial class Entity {
     /// a sound that goes round - it switches off again further on, and what the scene host sent of that while the copy
     /// played the move by itself is not played here (<see cref="_runHereCombo"/>). A copy that went round the room for
     /// longer than the scene host's creature kept them all on after the scene host's FSM was through with the move.
-    /// A copy that is past that state, or that never comes to it from where it is, stays where it is.
+    /// A copy that has been in that state already in this move, or that never comes to it from where it is, stays
+    /// where it is: it is not taken back, nor round a turn it has taken.
     /// </summary>
     private void CatchUpInTheMove() {
         if (!_runHereMove || _runHere is not { } copyFsm || copyFsm == null || _moveHostAt is not { } target ||
-            _runHereCombo is not { } move) {
+            _runHereCombo is not { } move || _moveEntered.Contains(target)) {
             return;
         }
 
@@ -1978,7 +2025,7 @@ internal partial class Entity {
         var led = _runHereLed;
         var over = _aftermath != null || _runHereEnded;
         var (ledIndex, ledCatch, ledStep) = (_runHereIndex, _runHereCatch, _runHereStep);
-        var wasMove = _runHereMove;
+        var takeVariables = _moveVariablesHeld;
         _runHereEnded = false;
         _runHere = null;
         _runHereFsm = null;
@@ -1990,6 +2037,8 @@ internal partial class Entity {
         _runHereForGood = false;
         _runHereMove = false;
         _moveHostAt = null;
+        _moveEntered.Clear();
+        _moveVariablesHeld = false;
         _runHereAwaited = 0;
         _heldData.Clear();
         _heldAnimation = null;
@@ -2013,7 +2062,7 @@ internal partial class Entity {
 
         // What the move worked out by itself gives way to what the scene host's FSM holds, which the copy is given
         // again from here (UpdateHostFsmData)
-        if (wasMove) {
+        if (takeVariables) {
             TakeVariablesOfSceneHost(ledIndex);
         }
 
@@ -2061,6 +2110,8 @@ internal partial class Entity {
         _runHereLed = false;
         _runHereMove = false;
         _moveHostAt = null;
+        _moveEntered.Clear();
+        _moveVariablesHeld = false;
         _aftermath = null;
         StopSteppingRunHere();
         TakeTheCopysBodyBack();
@@ -2247,6 +2298,10 @@ internal partial class Entity {
                 // Said before it goes there, since going there may take it on further at once
                 entity.TellCatchWentOn(toState);
                 entity._beforeTheCatch?.Entered(toState);
+                if (entity._runHereMove) {
+                    entity._moveEntered.Add(toState);
+                }
+
                 orig(self, toState);
                 return;
             }

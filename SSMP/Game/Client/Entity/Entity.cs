@@ -4015,6 +4015,11 @@ internal partial class Entity {
 
                 var action = state.Actions[actionIndex];
 
+                // Of a move that the copy is about to play by itself, from what came along (StartMoveHeard)
+                if (HoldsForTheMoveHeard(fsm, state, data)) {
+                    continue;
+                }
+
                 // Played here by the copy's own FSM until the scene host has answered its input, and held till then:
                 // all but what the copy leaves to the scene host, which only comes from there (PlayHere). The combo of
                 // a catch is played here all through, and not again from what the scene host sends of it, and so is
@@ -4213,9 +4218,6 @@ internal partial class Entity {
                     }
                 }
             }
-
-            // A move that the scene host's FSM went into starts with what that FSM held then, which came along
-            StartMoveHeard(clientFsm);
         }
     }
 
