@@ -520,7 +520,7 @@ internal partial class ArenaCoop {
                 orig(self);
             } else {
                 // Enemies can start a battle when they notice another player, so the gates stay open for the local
-                // player until they walk in
+                // player until they walk in, unless they stand in a boss arena (see LockInIfInBossArena)
                 StartForOtherPlayer(self, () => orig(self));
             }
 
