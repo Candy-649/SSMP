@@ -33,6 +33,11 @@ $PackageName = 'silksong-coop-mod'
 # loader is ever upgraded on purpose, change this hash in the same commit that changes the file.
 $BepInExSha256 = 'F881201B79DA03E513BF97CDF39607FFA7F9E0D31A519B1AEECA8EB60F8309E7'
 
+# The folder the loader archive is unpacked into, which install.ps1 looks for. The package carries it unpacked rather
+# than the archive itself: Nexus Mods quarantines an upload that holds another archive (its help page "Why has my mod
+# been quarantined?"), which kept every version of the mod page's file from being downloaded (2026-10-17).
+$LoaderFolder = 'BepInEx_win_x64_5.4.23.4'
+
 $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Csproj = Join-Path $RepoRoot 'SSMP\SSMP.csproj'
 $BuiltDir = Join-Path $RepoRoot 'bin\Release\netstandard2.1'
@@ -135,7 +140,10 @@ try {
     # being sent a file again. It is useless on its own, which is why it travels with the installer.
     Copy-Item (Join-Path $PSScriptRoot 'UPDATE.bat') $OutDir
     Copy-Item (Join-Path $PSScriptRoot 'update.ps1') $OutDir
-    Copy-Item $BepInExZip $OutDir
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    [System.IO.Compression.ZipFile]::ExtractToDirectory(
+        (Resolve-Path $BepInExZip).Path, (Join-Path (Resolve-Path $OutDir).Path $LoaderFolder)
+    )
     Copy-Item $dll $pluginDir
     Copy-Item (Join-Path $BuiltDir 'BouncyCastle.Cryptography.dll') $pluginDir
 
@@ -160,7 +168,7 @@ try {
         # from this list is silently left out of the tarball.
         files       = @('INSTALL.bat', 'INSTALL.txt', 'install.ps1', 'UPDATE.bat', 'update.ps1',
                         'LICENSE', 'LICENSE-BouncyCastle.md',
-                        'BepInEx_win_x64_5.4.23.4.zip', 'SSMP/', 'README.md')
+                        "$LoaderFolder/", 'SSMP/', 'README.md')
     }
     $pkgJson = $pkg | ConvertTo-Json -Depth 5
     Set-Content -Path (Join-Path $OutDir 'package.json') -Value $pkgJson -Encoding UTF8
@@ -197,7 +205,9 @@ under the GNU LGPL 2.1 - see ``LICENSE``. Built from https://github.com/Candy-64
 
     foreach ($required in @('INSTALL.bat', 'INSTALL.txt', 'install.ps1', 'UPDATE.bat', 'update.ps1',
                             'LICENSE', 'LICENSE-BouncyCastle.md',
-                            'package.json', 'README.md', 'BepInEx_win_x64_5.4.23.4.zip',
+                            'package.json', 'README.md', "$LoaderFolder\winhttp.dll",
+                            "$LoaderFolder\doorstop_config.ini", "$LoaderFolder\.doorstop_version",
+                            "$LoaderFolder\BepInEx\core\BepInEx.Preloader.dll",
                             'SSMP\SSMP.dll', 'SSMP\BouncyCastle.Cryptography.dll')) {
         if (-not (Test-Path (Join-Path $OutDir $required))) { throw "Missing from the stage: $required" }
     }

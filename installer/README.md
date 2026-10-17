@@ -19,14 +19,16 @@ two things below, and neither belongs in this repository:
     INSTALL.bat
     INSTALL.txt
     install.ps1
-    BepInEx_win_x64_<version>.zip     <- third-party binary, not in this repo
+    BepInEx_win_x64_<version>/        <- third-party binaries, not in this repo
     SSMP/
         SSMP.dll                      <- build output, not in this repo
         BouncyCastle.Cryptography.dll <- build output, not in this repo
 ```
 
-Everything sits flat beside `install.ps1`, which locates both by pattern: any `BepInEx*.zip` next to it is accepted,
-and every `*.dll` in `SSMP/` is copied into `BepInEx/plugins/SSMP`. Build the plugin with
+Everything sits flat beside `install.ps1`, which locates both by pattern: a `BepInEx*` folder holding the loader
+(BepInEx's release, unpacked) or a `BepInEx*.zip` next to it is accepted, and every `*.dll` in `SSMP/` is copied into
+`BepInEx/plugins/SSMP`. The loader travels unpacked because Nexus Mods quarantines an upload that holds another
+archive; `pack-npm.ps1` unpacks it from the release zip, whose hash it checks. Build the plugin with
 `dotnet build SSMP/SSMP.csproj -c Release -p:LangVersion=preview` and take the DLLs from `bin/Release/`.
 
 Verify the hash of `SSMP/SSMP.dll` inside the finished archive against the one you just built. A stale DLL in a
@@ -65,5 +67,5 @@ None of these files is shipped to players.
 
 The game folder, plus one backup of the save folder into `save-backups/` beside the script (the newest `$KeepBackups`
 are kept; only files matching the name this script writes, in the folder this script made, are ever removed). No
-registry writes, no system settings, no background services, and no network access at all when the loader archive is
-bundled — downloading is only a fallback for when it is missing.
+registry writes, no system settings, no background services, and no network access at all: the loader comes with the
+package, and the script stops if it is missing.

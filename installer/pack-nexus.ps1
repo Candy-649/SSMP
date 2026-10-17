@@ -7,7 +7,8 @@
 # File Submission Guidelines prohibit files that connect to the internet to download files unless that is crucial
 # for the mod to work, and say that "auto update" functionality does not qualify; a player of the mod page updates by
 # downloading the new zip from it instead. The files sit in one folder named after the version inside the zip, so
-# unpacking it never scatters them among other files.
+# unpacking it never scatters them among other files. No archive may sit inside it: Nexus Mods quarantines such an
+# upload until a moderator has looked at it, which is why the stage carries the loader unpacked (see pack-npm.ps1).
 #
 # Console output is English for the same reason install.ps1's is: Windows PowerShell 5.1 reads a UTF-8 file without
 # a BOM as ANSI and turns anything else into mojibake.
@@ -89,10 +90,13 @@ try {
         $entries = @($archive.Entries | ForEach-Object { $_.FullName.Replace('\', '/') })
         foreach ($required in @('INSTALL.bat', 'INSTALL.txt', 'install.ps1',
                                 'LICENSE', 'LICENSE-BouncyCastle.md', 'README.md',
-                                'BepInEx_win_x64_5.4.23.4.zip', 'SSMP/SSMP.dll',
-                                'SSMP/BouncyCastle.Cryptography.dll')) {
+                                'BepInEx_win_x64_5.4.23.4/winhttp.dll',
+                                'BepInEx_win_x64_5.4.23.4/BepInEx/core/BepInEx.Preloader.dll',
+                                'SSMP/SSMP.dll', 'SSMP/BouncyCastle.Cryptography.dll')) {
             if ($entries -notcontains "$name/$required") { throw "Missing from the zip: $name/$required" }
         }
+        $nested = @($entries | Where-Object { $_ -match '\.(zip|7z|rar|tar|gz|tgz)$' })
+        if ($nested) { throw "Archives inside the zip, which Nexus Mods quarantines: $($nested -join ', ')" }
         foreach ($left in $LeftOut) {
             if ($entries -contains "$name/$left") { throw "$left ended up in the zip." }
         }

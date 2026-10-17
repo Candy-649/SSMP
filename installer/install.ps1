@@ -1,7 +1,8 @@
 # Installs the BepInEx mod loader and the SSMP co-op plugin into Hollow Knight: Silksong.
 #
-# The loader ships inside this archive, so a normal install needs no network at all. Downloading is only a fallback
-# for when the bundled copy is missing, and the host that serves it is blocked on some networks.
+# The loader ships inside this archive, so the install needs no network at all. It comes as a folder, BepInEx's
+# official release unpacked, and not as the release's own zip: Nexus Mods quarantines an upload that holds another
+# archive, which kept every version of the mod page's file from being downloaded (2026-10-17).
 #
 # Console output is English on purpose: Windows PowerShell 5.1 reads a UTF-8 file without a BOM as ANSI, which turns
 # any other language into mojibake on a machine that has not been set up for it. The readable explanation lives in
@@ -18,12 +19,6 @@ $GameDirName = 'Hollow Knight Silksong'
 # How many save backups to keep. Older ones are removed after a new one is made, so reinstalling a few times does not
 # leave a pile behind. Only backups this script made, in the folder this script made, are ever touched.
 $KeepBackups = 3
-$ApiUrl = 'https://thunderstore.io/api/experimental/package/silksong_modding/BepInExPack_Silksong/'
-
-# Used only when the version cannot be looked up. The package that is merely a redirect stub, BepInEx/
-# BepInExPack_Silksong, must never be used here: it downloads successfully and contains nothing.
-$FallbackUrl = 'https://thunderstore.io/package/download/silksong_modding/BepInExPack_Silksong/1.0.3/'
-$FallbackVersion = '1.0.3'
 
 function Write-Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundColor Cyan }
 function Write-Ok($text) { Write-Host "    $text" -ForegroundColor Green }
@@ -107,51 +102,32 @@ function Backup-Saves {
     }
 }
 
-function Get-LoaderArchive($work) {
-    # The bundled copy first: it is the whole point of shipping one, and it works on networks where the download host
-    # is blocked. Any BepInEx archive placed next to this script is accepted, so a manually downloaded one works too.
-    $bundled = Get-ChildItem $PSScriptRoot -Filter 'BepInEx*.zip' -File -ErrorAction SilentlyContinue |
-        Select-Object -First 1
-    if ($bundled) {
-        Write-Ok "Using the copy that came with this installer: $($bundled.Name)"
-        return $bundled.FullName
-    }
-
-    Write-Warn2 'No BepInEx archive next to this script, downloading one instead.'
-
-    $url = $FallbackUrl
-    $version = "$FallbackVersion (fallback)"
-    try {
-        $info = Invoke-RestMethod -Uri $ApiUrl -UseBasicParsing -TimeoutSec 30
-        if ($info.latest.download_url) {
-            $url = $info.latest.download_url
-            $version = $info.latest.version_number
+function Get-Loader($work) {
+    # The folder that came with this installer, BepInEx's official release unpacked (see the top of this file)
+    foreach ($folder in (Get-ChildItem $PSScriptRoot -Directory -Filter 'BepInEx*' -ErrorAction SilentlyContinue)) {
+        $payload = Find-PayloadRoot $folder.FullName
+        if ($payload) {
+            Write-Ok "Using the copy that came with this installer: $($folder.Name)"
+            return $payload
         }
-    } catch {
-        Write-Warn2 "Could not ask for the newest version ($($_.Exception.Message))."
     }
 
-    Write-Ok "Version: $version"
-
-    $zipPath = Join-Path $work 'bepinex.zip'
-    $oldProgress = $ProgressPreference
-    $ProgressPreference = 'SilentlyContinue'
-    try {
-        Invoke-WebRequest -Uri $url -OutFile $zipPath -UseBasicParsing -TimeoutSec 300
-    } catch {
-        throw ("Could not download the mod loader: $($_.Exception.Message)`n" +
-               "      Your network may be blocking it. Ask for an installer with the loader included, or put a`n" +
-               "      BepInEx zip next to this script and run it again.")
-    } finally {
-        $ProgressPreference = $oldProgress
+    # Any BepInEx archive placed next to this script is accepted, so a manually downloaded one works too
+    $archive = Get-ChildItem $PSScriptRoot -Filter 'BepInEx*.zip' -File -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($archive) {
+        Write-Ok "Using the archive next to this installer: $($archive.Name)"
+        $extracted = Join-Path $work 'extracted'
+        Expand-Archive -Path $archive.FullName -DestinationPath $extracted -Force
+        $payload = Find-PayloadRoot $extracted
+        if (-not $payload) {
+            throw 'Could not find the loader inside the archive (no folder with both BepInEx and winhttp.dll).'
+        }
+        return $payload
     }
 
-    # A download that succeeds but is far too small is the empty redirect package, which would install nothing at all
-    if ((Get-Item $zipPath).Length -lt 500KB) {
-        throw 'That download is too small to be the mod loader. It is probably the empty redirect package.'
-    }
-
-    return $zipPath
+    throw ('The mod loader is not next to this script. Unzip the whole archive first, then run the installer' +
+           "`n      from inside it.")
 }
 
 function Find-PayloadRoot($extractedDir) {
@@ -192,17 +168,9 @@ try {
     New-Item -ItemType Directory -Path $work -Force | Out-Null
 
     Write-Step 'Getting the BepInEx mod loader'
-    $archive = Get-LoaderArchive $work
+    $payload = Get-Loader $work
 
     Write-Step 'Installing the mod loader into the game folder'
-    $extracted = Join-Path $work 'extracted'
-    Expand-Archive -Path $archive -DestinationPath $extracted -Force
-
-    $payload = Find-PayloadRoot $extracted
-    if (-not $payload) {
-        throw 'Could not find the loader inside the archive (no folder with both BepInEx and winhttp.dll).'
-    }
-
     foreach ($item in (Get-ChildItem $payload -Force)) {
         Copy-Item -Path $item.FullName -Destination $game -Recurse -Force
     }
