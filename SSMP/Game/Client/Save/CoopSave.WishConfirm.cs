@@ -70,6 +70,27 @@ internal partial class CoopSave {
     private const ushort WishConfirmGone = 3;
 
     /// <summary>
+    /// Why a no was given, sent with it: a player answered no. It is what every no meant before a no said why.
+    /// </summary>
+    private const ushort NoBecauseSaid = 0;
+
+    /// <summary>
+    /// Why a no was given: nobody gave it. The question could not be put to the player while it lasted, because they
+    /// were in dialogue, in a scene or a load, or not in the save.
+    /// </summary>
+    private const ushort NoBecauseNotAsked = 1;
+
+    /// <summary>
+    /// Why a no was given: nobody gave it. The player was being asked another question.
+    /// </summary>
+    private const ushort NoBecauseBusy = 2;
+
+    /// <summary>
+    /// Why a no was given: the question was in front of the player, who did not answer it in time.
+    /// </summary>
+    private const ushort NoBecauseNoAnswer = 3;
+
+    /// <summary>
     /// A prompt that accepts a wish, which the partner is shown as the wish box.
     /// </summary>
     private const string WishConfirmAccept = "wish";
@@ -360,6 +381,22 @@ internal partial class CoopSave {
             return;
         }
 
+        // A member said yes to the same thing at the same prompt first, and their question waits here for a moment
+        // to be shown. This yes is the answer to it: theirs goes through, and what it changes reaches this save
+        // through the syncs like any other, so this box answers no and nothing is paid twice. Held instead, each yes
+        // refused the other's question for being busy, and both players were told the other said no (USER 10-17,
+        // "她那里我根本没有拒绝却显示拒绝了").
+        if (TakeWaitingQuestionAsAnswered(ask) is { } asker) {
+            Chat(Lang.Pick(
+                $"{asker} said yes to the same thing first and was waiting for you, so your yes agrees to theirs: it " +
+                "goes through on their side, and what it changes comes here.",
+                $"{asker} 先对同一件事选了「是」在等你，你这一下就算同意了：由 {asker} 那边完成，结果会同步到你这边。"
+            ));
+            Logger.Info($"Agreed to the waiting question of {asker} about {what} with a yes at the same prompt");
+            self.SelectNo();
+            return;
+        }
+
         // The side a box was last answered on is never forgotten by the game, and closing a box runs the answer of
         // that side. Holding skips the real button, so that side would still say yes from some earlier prompt and any
         // close at all would pay. Cleared here, a box that is closed instead of answered says no and pays nothing.
@@ -368,7 +405,7 @@ internal partial class CoopSave {
         // Nothing has been taken: the box pays only once the real button runs, which is what every member agreeing does
         var held = new HeldConfirm(
             members.ConvertAll(member => (member.Id, member.Username)), ask.Key, GetLivePrompt(), self,
-            BoxCurrentYesField?.GetValue(self), () => orig(self), what, GetWishKey(meeting)
+            BoxCurrentYesField?.GetValue(self), () => orig(self), what, GetWishKey(meeting), GetItemsKey(ask)
         );
 
         // A member who said yes at their own box already said yes to this, and goes on once the rest of them have
@@ -583,6 +620,97 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// What a question about using up something the story keeps is matched on between the players: the room of its
+    /// prompt and what it takes, in the order the box lists them. An empty string for any other question.
+    /// </summary>
+    private static string GetItemsKey(CoopSaveUpdate? ask) {
+        return ask is { Records.Count: > 0 } && ask.Records[0] == WishConfirmItem
+            ? ask.Scene + "\t" + string.Join("\t", ask.Names)
+            : "";
+    }
+
+    /// <summary>
+    /// Answers yes to the question of a member that waits here for a moment to be shown, when it is about the same
+    /// thing that the local player just said yes to at their own prompt, and says whose it was. Null when no such
+    /// question waits, or when it is about to run out, since the member who asked may have given up on it already.
+    /// </summary>
+    /// <param name="ask">What the local player's own yes would ask.</param>
+    private string? TakeWaitingQuestionAsAnswered(CoopSaveUpdate ask) {
+        var items = GetItemsKey(ask);
+        if (items.Length == 0 || _pendingConfirmAsk is not { } pending || GetItemsKey(pending.Update) != items ||
+            Time.unscaledTime - pending.Started > WishConfirmTimeout - QuestionAnswerMargin) {
+            return null;
+        }
+
+        _pendingConfirmAsk = null;
+        SendConfirmAnswer(pending.PartnerId, pending.Update.Key, true);
+        return pending.PartnerName;
+    }
+
+    /// <summary>
+    /// How long before a question that waits here runs out it is no longer answered by a yes at the local player's own
+    /// prompt, in seconds: the member who asked counts their time from a little earlier and may stop waiting first.
+    /// </summary>
+    private const float QuestionAnswerMargin = 2f;
+
+    /// <summary>
+    /// Two members said yes to the same thing at their own prompts, each before hearing of the other, so the question
+    /// of each reached the other while their own yes waited. Everyone agreed, so one of the two goes through: the one
+    /// with the larger key, which both games pick alike. It pays and changes the world, which reaches the other save
+    /// through the syncs. The other answers it yes and lets go of its own, whose box answers no and pays nothing.
+    /// </summary>
+    /// <param name="player">The member whose question arrived.</param>
+    /// <param name="update">Their question.</param>
+    /// <param name="mine">The yes of the local player that waits.</param>
+    private void MeetCrossedYes(ClientPlayerData player, CoopSaveUpdate update, HeldConfirm mine) {
+        if (mine.Key > update.Key) {
+            Logger.Info($"{player.Username} said yes to {mine.What} at the same time, and this yes goes through");
+            mine.Yes.Add(player.Id);
+            if (!mine.IsAgreed) {
+                ChatStillWaiting(player.Username, mine.GetMissingNames());
+                return;
+            }
+
+            ProceedHeldConfirm(mine, player.Username, Lang.Pick(
+                $"{player.Username} said yes to the same thing too, so it goes through here.",
+                $"{player.Username} 也对同一件事选了「是」，在你这边完成。"
+            ));
+            return;
+        }
+
+        Logger.Info($"{player.Username} said yes to {mine.What} at the same time, and their yes goes through");
+        SendConfirmAnswer(player.Id, update.Key, true);
+        CancelHeldConfirm(Lang.Pick(
+            $"{player.Username} said yes to the same thing at the same time, so it goes through on their side, and " +
+            "what it changes comes here.",
+            $"{player.Username} 也同时对同一件事选了「是」，由 {player.Username} 那边完成，结果会同步到你这边。"
+        ), HeldEnd.PressNo);
+    }
+
+    /// <summary>
+    /// What to tell the local player about a no that nobody gave, or null for a no that a player gave.
+    /// </summary>
+    /// <param name="name">The member it came from.</param>
+    /// <param name="why">Why it was given.</param>
+    private static string? DescribeNoNobodyGave(string name, ushort why) {
+        return why switch {
+            NoBecauseNotAsked => Lang.Pick(
+                $"{name} couldn't be asked in time (in a scene, a load or dialogue), so it didn't go through.",
+                $"{name} 那边一直没能弹出这个确认（在过场、读图或对话里），所以没有成立。"
+            ),
+            NoBecauseBusy => Lang.Pick(
+                $"{name} was being asked something else, so it didn't go through. Try again in a moment.",
+                $"{name} 那边正在回答另一个确认，所以没有成立。等一下再试。"
+            ),
+            NoBecauseNoAnswer => Lang.Pick(
+                $"{name} didn't answer in time, so it didn't go through.",
+                $"{name} 没有及时回答，所以没有成立。"
+            ),
+            _ => null
+        };
+    }
+
+    /// <summary>
     /// How long a yes waits for the partner's, by what it is matched on (see <see cref="GetWishKey"/>).
     /// </summary>
     private static float GetConfirmTimeout(string wishKey) {
@@ -744,7 +872,14 @@ internal partial class CoopSave {
                 continue;
             }
 
-            update ??= CreateConfirm(WishConfirmItem);
+            if (update == null) {
+                update = CreateConfirm(WishConfirmItem);
+
+                // The room of the prompt, so that two players saying yes at the same prompt are told apart from two
+                // spending the same thing at different ones (see GetItemsKey)
+                update.Scene = SceneUtil.GetCurrentSceneName();
+            }
+
             update.Names.Add(items[i].GetType().FullName + "\n" + items[i].name);
             update.Amounts.Add(i < amounts.Count ? amounts[i] : 1);
         }
@@ -809,7 +944,7 @@ internal partial class CoopSave {
                 !_checkedMembers.Contains(player.Id)) {
                 // Never leave the other player standing in their dialogue waiting for an answer that can't come
                 if (update.PartCount == WishConfirmAsk) {
-                    SendConfirmAnswer(player.Id, update.Key, false);
+                    SendConfirmAnswer(player.Id, update.Key, false, NoBecauseNotAsked);
                 }
 
                 return;
@@ -843,8 +978,10 @@ internal partial class CoopSave {
                         : Lang.Pick($"{player.Username} agreed.", $"{player.Username} 同意了。"));
                     break;
                 case WishConfirmNo:
-                    // A turn-in that the partner's game refused because their copy is short says what they have
+                    // A turn-in that the partner's game refused because their copy is short says what they have, and
+                    // a no that nobody gave says why rather than that the partner said no
                     AnswerHeldConfirm(player, update.Key, false, GetShortCopyRefusal(player, update) ??
+                                                                 DescribeNoNobodyGave(player.Username, update.Part) ??
                                                                  (IsRaceHold(update.Key)
                         ? Lang.Pick(
                             $"{player.Username} didn't say yes, so the race didn't start.",
@@ -1180,11 +1317,20 @@ internal partial class CoopSave {
             return;
         }
 
+        // Both said yes to the same thing at the same prompt, each before hearing of the other: that is everyone
+        // agreeing, which refusing each other for being busy told both of them was a no (USER 10-17,
+        // "我一点是就跳出来你不同意")
+        if (_wishConfirm is { } mine && mine.ItemsKey.Length > 0 && mine.ItemsKey == GetItemsKey(update) &&
+            mine.IsAsked(player.Id)) {
+            MeetCrossedYes(player, update, mine);
+            return;
+        }
+
         // One at a time, so that a second prompt can't replace the one being read or the one waiting. A local
         // button that is itself waiting would keep the box for the whole timeout, so that is refused at once too
         // rather than left to make both players wait it out.
         if (_partnerConfirm != null || _pendingConfirmAsk != null || _wishConfirm != null) {
-            SendConfirmAnswer(player.Id, update.Key, false);
+            SendConfirmAnswer(player.Id, update.Key, false, NoBecauseBusy);
             return;
         }
 
@@ -1192,7 +1338,7 @@ internal partial class CoopSave {
         // free one, or to stop a closing box from answering itself, so the question is refused rather than guessed.
         if (PromptBoxType == null || BoxCurrentYesField == null || BoxCurrentNoField == null ||
             BoxSelectedStateField == null || BoxPaneField == null) {
-            SendConfirmAnswer(player.Id, update.Key, false);
+            SendConfirmAnswer(player.Id, update.Key, false, NoBecauseNotAsked);
             Logger.Warn("A prompt of the partner was refused, because this game's prompt boxes can't be read");
             return;
         }
@@ -1516,7 +1662,7 @@ internal partial class CoopSave {
         var kind = update.Records.Count > 0 ? update.Records[0] : "";
         var isWish = kind is WishConfirmAccept or WishConfirmTurnIn;
         if (GetPromptBox(isWish) == null) {
-            SendConfirmAnswer(partnerId, key, false);
+            SendConfirmAnswer(partnerId, key, false, NoBecauseNotAsked);
             return;
         }
 
@@ -1544,7 +1690,7 @@ internal partial class CoopSave {
 
         if (isWish) {
             if ((update.WishNames.Count > 0 ? FindQuest(update.WishNames[0]) : null) is not { } quest) {
-                SendConfirmAnswer(partnerId, key, false);
+                SendConfirmAnswer(partnerId, key, false, NoBecauseNotAsked);
                 return;
             }
 
@@ -1569,7 +1715,7 @@ internal partial class CoopSave {
         }
 
         if (names.Count == 0) {
-            SendConfirmAnswer(partnerId, key, false);
+            SendConfirmAnswer(partnerId, key, false, NoBecauseNotAsked);
             return;
         }
 
@@ -1638,14 +1784,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Tells the partner whether the local player agreed to their prompt.
+    /// Tells the partner whether the local player agreed to their prompt, and for a no, why it was given.
     /// </summary>
-    private void SendConfirmAnswer(ushort partnerId, ulong key, bool agreed) {
+    /// <param name="partnerId">Who asked.</param>
+    /// <param name="key">The key of their question.</param>
+    /// <param name="agreed">Whether the answer is yes.</param>
+    /// <param name="why">Why a no was given (see <see cref="NoBecauseSaid"/> and the reasons after it).</param>
+    private void SendConfirmAnswer(ushort partnerId, ulong key, bool agreed, ushort why = NoBecauseSaid) {
         Send(new CoopSaveUpdate {
             TargetId = partnerId,
             Kind = CoopSaveUpdateKind.WishConfirm,
             PartCount = agreed ? WishConfirmYes : WishConfirmNo,
-            Key = key
+            Key = key,
+            Part = agreed ? NoBecauseSaid : why
         });
     }
 
@@ -1701,7 +1852,7 @@ internal partial class CoopSave {
             _partnerConfirm = null;
             LetHeroGoAfterConfirm();
             CloseConfirmBox(shown.IsWish);
-            SendConfirmAnswer(shown.PartnerId, shown.Key, false);
+            SendConfirmAnswer(shown.PartnerId, shown.Key, false, NoBecauseNoAnswer);
         }
 
         foreach (var wishWait in _partnerWishWaits.Values.ToList()) {
@@ -1765,7 +1916,7 @@ internal partial class CoopSave {
         if (_pendingConfirmAsk is { } pending) {
             if (now - pending.Started > WishConfirmTimeout) {
                 _pendingConfirmAsk = null;
-                SendConfirmAnswer(pending.PartnerId, pending.Update.Key, false);
+                SendConfirmAnswer(pending.PartnerId, pending.Update.Key, false, NoBecauseNotAsked);
             } else if (_partnerConfirm == null) {
                 // A line of dialogue the partner shared holds the one box this question can be asked in, and between
                 // the two of them it is the question that costs something. Left alone the line waits out its own
@@ -1791,7 +1942,9 @@ internal partial class CoopSave {
     /// Forgets a prompt that waited, whose dialogue is over with the scene or the session, and closes a box that asked
     /// about one.
     /// </summary>
-    private void ResetWishConfirm() {
+    /// <param name="keepPartnerQuestion">Whether a question of a member that waits to be shown here stays: on the way
+    /// into another room, where it is still put in front of the local player once there is a moment for it.</param>
+    private void ResetWishConfirm(bool keepPartnerQuestion = false) {
         // Settled before anything below is cleared, or the clearing decides it by accident. It asks the box rather
         // than whichever prompt is on screen, which need not be the held one: while the box still holds the answer
         // that was held, the dialogue is still standing there to be ended, and pressing no really ends it. Silencing
@@ -1814,10 +1967,13 @@ internal partial class CoopSave {
         _partnerWishWaits.Clear();
 
         // A question that never got its turn is answered as well, or the one who asked sits out their whole timeout
-        // waiting on something that was dropped here without a word
-        if (_pendingConfirmAsk is { } queued) {
+        // waiting on something that was dropped here without a word. Not on the way into another room, though: the
+        // question belongs to the dialogue of whoever asked, which goes on whatever room this player walks into, and
+        // it waits for a moment to be shown as before. Answered no at every door, a player walking through rooms told
+        // the one who asked no over and over without ever seeing the question (USER 10-17, "我这里她还没有到都有拒绝的话").
+        if (!keepPartnerQuestion && _pendingConfirmAsk is { } queued) {
             _pendingConfirmAsk = null;
-            SendConfirmAnswer(queued.PartnerId, queued.Update.Key, false);
+            SendConfirmAnswer(queued.PartnerId, queued.Update.Key, false, NoBecauseNotAsked);
         }
 
         _openPrompt = null;
@@ -1827,7 +1983,7 @@ internal partial class CoopSave {
 
             // Answered to whoever asked, so they are not left waiting out their timeout for a question that is
             // already off the screen here
-            SendConfirmAnswer(shown.PartnerId, shown.Key, false);
+            SendConfirmAnswer(shown.PartnerId, shown.Key, false, NoBecauseNotAsked);
             CloseConfirmBox(shown.IsWish);
         }
 
@@ -1840,7 +1996,7 @@ internal partial class CoopSave {
     private sealed class HeldConfirm {
         public HeldConfirm(
             List<(ushort Id, string Name)> members, ulong key, YesNoAction? action, YesNoBox box, object? callback,
-            Action proceed, string what, string wish
+            Action proceed, string what, string wish, string items
         ) {
             Members = members;
             Key = key;
@@ -1850,7 +2006,14 @@ internal partial class CoopSave {
             Proceed = proceed;
             What = what;
             WishKey = wish;
+            ItemsKey = items;
         }
+
+        /// <summary>
+        /// What a yes about using up something the story keeps is matched on with the yes of another member at the
+        /// same prompt (see <see cref="GetItemsKey"/>), or an empty string for a yes about anything else.
+        /// </summary>
+        public string ItemsKey { get; }
 
         /// <summary>
         /// The wish this is about and what is being done with it, or an empty string when it is not about a wish at

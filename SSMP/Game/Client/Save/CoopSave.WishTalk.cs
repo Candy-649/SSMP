@@ -993,7 +993,8 @@ internal partial class CoopSave {
                 ), false);
         }
 
-        ResetWishConfirm();
+        // A question of a member waiting to be shown here stays: it is about their dialogue, not this room
+        ResetWishConfirm(keepPartnerQuestion: true);
         ResetWishCopyChecks();
     }
 
