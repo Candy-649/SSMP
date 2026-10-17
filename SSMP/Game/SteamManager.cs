@@ -158,8 +158,9 @@ public static class SteamManager {
             // uses the relay transport.
             SteamNetworkingUtils.InitRelayNetworkAccess();
 
-            // A session that a player asks for while no game is hosted or joined here is closed as it comes
-            SteamRelayMessaging.RefuseUntakenRequests();
+            // A session that a player asks for is answered from here on: taken by the game hosted or joined here that
+            // is with them, closed if there is none
+            SteamRelayMessaging.AnswerSessionRequests();
 
             // Register callbacks for joining via overlay/friends
             Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
@@ -341,8 +342,7 @@ public static class SteamManager {
     }
 
     /// <summary>
-    /// Shuts down the Steam API.
-    /// Should be called on application exit if Steam was initialized.
+    /// Lets go of Steam for the mod as the game quits, leaving shutting Steam down to the game.
     /// </summary>
     public static void Shutdown() {
         if (!IsInitialized) return;
@@ -356,13 +356,14 @@ public static class SteamManager {
 
             // Nothing may ask Steam anything or be called by it once it is let go
             SteamRelayRecorder.Halt();
-            SteamRelayMessaging.StopRefusingUntakenRequests();
+            SteamRelayMessaging.StopAnsweringSessionRequests();
 
             // Not shut down here: the game started Steam itself and shuts it down as it closes, after this
-            // (DesktopPlatform.OnDestroy, SteamOnlineSubsystem.Dispose). SteamAPI.Shutdown counts no starts, so the
-            // call here, in the mod's quitting, shut Steam down for the whole game while the game was still closing.
-            // On 10-17 the host's game crashed in Steam's own networking during that call (see
-            // SteamRelayMessaging.RefuseUntakenRequests)
+            // (DesktopPlatform.OnDestroy, SteamOnlineSubsystem.Dispose). Steam's own SteamAPI_Shutdown counts no
+            // starts, so the call here, in the mod's quitting, shut Steam down for the whole game while the game was
+            // still closing. On 10-17 the host's game crashed in Steam's own networking during that call (see
+            // SteamRelayMessaging.AnswerSessionRequests). Only Steamworks.NET counts starts, for its own dispatcher of
+            // Steam's messages, which is left set up now until the game is gone
             IsInitialized = false;
             Logger.Info("Steam: the mod is done with Steam, which the game shuts down itself as it closes");
         } catch (Exception e) {

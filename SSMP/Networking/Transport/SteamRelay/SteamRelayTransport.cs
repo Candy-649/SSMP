@@ -95,7 +95,6 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     /// </summary>
     private readonly IntPtr[] _messageBuffer = new IntPtr[SteamRelayMessaging.ReceiveBatchSize];
 
-    private Callback<SteamNetworkingMessagesSessionRequest_t>? _sessionRequestCallback;
     private Callback<SteamNetworkingMessagesSessionFailed_t>? _sessionFailedCallback;
 
     private CancellationTokenSource? _receiveTokenSource;
@@ -129,7 +128,7 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
         } else {
             // Both sides listen now. The host answers the first message with its own, and a session that fails is
             // reported here rather than only on the other machine.
-            _sessionRequestCallback = SteamRelayMessaging.TakeSessionRequests(OnSessionRequest);
+            SteamRelayMessaging.TakeSessionRequests(TakeSession);
             _sessionFailedCallback =
                 Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);
 
@@ -183,17 +182,14 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     }
 
     /// <summary>
-    /// Accepts the host's side of the session, so that what it sends back can arrive.
+    /// Accepts the host's side of the session, so that what it sends back can arrive (see
+    /// <see cref="SteamRelayMessaging.TakeSessionRequests"/>).
     /// </summary>
-    private void OnSessionRequest(SteamNetworkingMessagesSessionRequest_t request) {
-        var identity = request.m_identityRemote;
+    /// <returns>Whether this took the session: only the host's, and only while connected to them.</returns>
+    private bool TakeSession(SteamNetworkingIdentity identity) {
         var steamId = identity.GetSteamID64();
-
         if (!_isConnected || steamId != _remoteSteamId) {
-            SteamRelayMessaging.Refuse(
-                identity, _isConnected ? "which is not the host" : "as this player is leaving the host"
-            );
-            return;
+            return false;
         }
 
         if (SteamNetworkingMessages.AcceptSessionWithUser(ref identity)) {
@@ -201,6 +197,8 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
         } else {
             Logger.Warn($"Steam relay: could not accept the session with the host {steamId}");
         }
+
+        return true;
     }
 
     /// <summary>
@@ -332,7 +330,7 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
             SteamNetworkingMessages.CloseSessionWithUser(ref identity);
         }
 
-        SteamRelayMessaging.StopTakingSessionRequests(ref _sessionRequestCallback);
+        SteamRelayMessaging.StopTakingSessionRequests(TakeSession);
 
         _sessionFailedCallback?.Dispose();
         _sessionFailedCallback = null;

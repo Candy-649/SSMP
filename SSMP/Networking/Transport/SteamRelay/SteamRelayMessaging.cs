@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Threading;
 using SSMP.Game;
@@ -108,93 +110,216 @@ internal static class SteamRelayMessaging {
     }
 
     /// <summary>
-    /// How many transports have a handler of their own for players asking for a session (see
-    /// <see cref="TakeSessionRequests"/>), which answers them.
+    /// How long, in milliseconds, after a session that a player asked for is closed (see <see cref="Refuse"/>), the
+    /// next one they ask for is left open before it is closed too.
     /// </summary>
-    private static int _takers;
+    private const int RefuseEvery = 3000;
 
     /// <summary>
-    /// The handler of last resort for players asking for a session, while Steam is up for the mod (see
-    /// <see cref="RefuseUntakenRequests"/>).
+    /// What each transport that talks to players does with the sessions they ask for (see
+    /// <see cref="TakeSessionRequests"/>).
     /// </summary>
-    private static Callback<SteamNetworkingMessagesSessionRequest_t>? _untaken;
+    private static readonly HashSet<Func<SteamNetworkingIdentity, bool>> Takers = new();
 
     /// <summary>
-    /// Opens a transport's own handler for players asking for a session, counted so that the handler of last resort
-    /// leaves alone what the transport answers. Counted before the handler exists, so that no request finds the
-    /// handler there and the count not yet raised.
+    /// The one handler for players asking for a session, while the mod uses Steam (see
+    /// <see cref="AnswerSessionRequests"/>).
     /// </summary>
-    /// <param name="handler">What the transport does with a request.</param>
-    public static Callback<SteamNetworkingMessagesSessionRequest_t> TakeSessionRequests(
-        Callback<SteamNetworkingMessagesSessionRequest_t>.DispatchDelegate handler
-    ) {
-        Interlocked.Increment(ref _takers);
-        return Callback<SteamNetworkingMessagesSessionRequest_t>.Create(handler);
+    private static Callback<SteamNetworkingMessagesSessionRequest_t>? _requests;
+
+    /// <summary>
+    /// The sessions closed so far, by Steam ID, for each player who asked for one that nothing here took.
+    /// </summary>
+    private static readonly Dictionary<ulong, Refusals> Refused = new();
+
+    /// <summary>
+    /// The clock that <see cref="RefuseEvery"/> is kept by.
+    /// </summary>
+    private static readonly Stopwatch Clock = Stopwatch.StartNew();
+
+    /// <summary>
+    /// The sessions closed for one player who asked for them while nothing here took them.
+    /// </summary>
+    private sealed class Refusals {
+        /// <summary>
+        /// When the last one was closed, on <see cref="Clock"/>.
+        /// </summary>
+        public long LastMs;
+
+        /// <summary>
+        /// How many have been closed.
+        /// </summary>
+        public int Closed;
+
+        /// <summary>
+        /// What answers the one the player asked for after the last was closed, once <see cref="RefuseEvery"/> has
+        /// passed since; null while they have asked for none.
+        /// </summary>
+        public Timer? Later;
     }
 
     /// <summary>
-    /// Closes a transport's own handler for players asking for a session (see <see cref="TakeSessionRequests"/>), if
-    /// it has one, and lowers the count after it is gone.
+    /// Has a transport take the sessions that the players it talks to ask for: <paramref name="taker"/> is given every
+    /// request, accepts it if it comes from such a player, and says whether it did. Taking twice is taking once.
     /// </summary>
-    /// <param name="callback">The transport's handler, which is set to null.</param>
-    public static void StopTakingSessionRequests(ref Callback<SteamNetworkingMessagesSessionRequest_t>? callback) {
-        if (callback == null) {
-            return;
+    /// <param name="taker">What the transport does with a request, returning whether it took it.</param>
+    public static void TakeSessionRequests(Func<SteamNetworkingIdentity, bool> taker) {
+        lock (Takers) {
+            Takers.Add(taker);
         }
-
-        callback.Dispose();
-        callback = null;
-        Interlocked.Decrement(ref _takers);
     }
 
     /// <summary>
-    /// Closes, as it comes, every session that a player asks for while no transport here answers such requests: after
-    /// a game is left, or before one is hosted or joined.
+    /// Stops a transport taking the sessions that players ask for (see <see cref="TakeSessionRequests"/>), if it did.
+    /// </summary>
+    /// <param name="taker">What the transport gave <see cref="TakeSessionRequests"/>.</param>
+    public static void StopTakingSessionRequests(Func<SteamNetworkingIdentity, bool> taker) {
+        lock (Takers) {
+            Takers.Remove(taker);
+        }
+    }
+
+    /// <summary>
+    /// Answers every session that a player asks for, from now until the mod is done with Steam: the transport that
+    /// talks to the player takes it (see <see cref="TakeSessionRequests"/>), and one that no transport here takes is
+    /// closed (see <see cref="Refuse"/>), as after a game is left or before one is hosted or joined. Only this closes
+    /// them: a transport only takes, so that one left behind, which takes nothing, can never close what another would
+    /// take (review of 7812c04).
     ///
     /// Steam keeps a session that is never answered open for the player who asked, until it lets it go by itself or
     /// the game shuts Steam down. On 10-17 one came from the other player as they left, while the host's server was
     /// stopping, and nothing answered it. When the host quit 14 s later, Steam's own networking crashed the game as
-    /// Steam was shut down: it posted what had become of a connection on a part of Steam that was already gone
+    /// the mod shut Steam down: it posted what had become of a connection on a part of Steam that was already gone
     /// (PostConnectionStateMsgTask on CSteamNetworkingUtilsSDR, steamclient64 11.12.30.7). Which connection that was
-    /// could not be told from the crash; none is left waiting now.
+    /// could not be told from the crash. What players ask for once the mod is done with Steam, while the game is still
+    /// closing, is left unanswered as before.
     /// </summary>
-    public static void RefuseUntakenRequests() {
-        _untaken ??= Callback<SteamNetworkingMessagesSessionRequest_t>.Create(OnUntakenRequest);
+    public static void AnswerSessionRequests() {
+        _requests ??= Callback<SteamNetworkingMessagesSessionRequest_t>.Create(OnSessionRequest);
     }
 
     /// <summary>
-    /// Stops closing the sessions that players ask for (see <see cref="RefuseUntakenRequests"/>), for the mod letting
-    /// go of Steam.
+    /// Stops answering the sessions that players ask for (see <see cref="AnswerSessionRequests"/>), for the mod being
+    /// done with Steam.
     /// </summary>
-    public static void StopRefusingUntakenRequests() {
-        _untaken?.Dispose();
-        _untaken = null;
+    public static void StopAnsweringSessionRequests() {
+        _requests?.Dispose();
+        _requests = null;
+
+        lock (Refused) {
+            foreach (var refusals in Refused.Values) {
+                refusals.Later?.Dispose();
+            }
+
+            Refused.Clear();
+        }
     }
 
     /// <summary>
-    /// Closes the session that a player asked for if no transport here answers such requests.
+    /// Answers the session that a player asks for (see <see cref="AnswerSessionRequests"/>).
     /// </summary>
-    private static void OnUntakenRequest(SteamNetworkingMessagesSessionRequest_t request) {
-        if (Volatile.Read(ref _takers) > 0 || !SteamManager.IsInitialized) {
+    private static void OnSessionRequest(SteamNetworkingMessagesSessionRequest_t request) {
+        Answer(request.m_identityRemote, false);
+    }
+
+    /// <summary>
+    /// Has the transport that talks to a player take the session they asked for, or closes it if none does.
+    /// </summary>
+    /// <param name="identity">The player who asked.</param>
+    /// <param name="due">Whether the session was left open after the player's last one was closed and is due to be
+    /// closed now if nothing takes it (see <see cref="Refuse"/>).</param>
+    private static void Answer(SteamNetworkingIdentity identity, bool due) {
+        if (!SteamManager.IsInitialized) {
             return;
         }
 
-        Refuse(request.m_identityRemote, "as no game is hosted or joined here");
+        Func<SteamNetworkingIdentity, bool>[] takers;
+        lock (Takers) {
+            takers = new Func<SteamNetworkingIdentity, bool>[Takers.Count];
+            Takers.CopyTo(takers);
+        }
+
+        foreach (var taker in takers) {
+            if (taker(identity)) {
+                return;
+            }
+        }
+
+        var why = takers.Length == 0 ? "as no game is hosted or joined here" : "as no game here is with them";
+        Refuse(identity, why, due);
     }
 
     /// <summary>
     /// Closes the session that a player asked for and that nothing here takes, rather than leave it open until Steam
-    /// lets it go by itself (see <see cref="RefuseUntakenRequests"/>). The player's next message asks again.
+    /// lets it go by itself (see <see cref="AnswerSessionRequests"/>).
+    ///
+    /// A player who is still sending can ask again straight after, as what they send rebuilds a session that broke
+    /// (see <see cref="ReliableFlags"/>), and closing every one of those at once could open and close sessions in a
+    /// loop for as long as they send (review of 7812c04). So one asked for within <see cref="RefuseEvery"/> of the
+    /// last close for the same player is left open until then and answered after: at most one close every few
+    /// seconds, and none left open for longer.
     /// </summary>
     /// <param name="identity">The player who asked.</param>
     /// <param name="why">Why nothing here takes it, for the log.</param>
-    public static void Refuse(SteamNetworkingIdentity identity, string why) {
+    /// <param name="due">Whether to close it now whenever the last close was (see <see cref="AnswerLater"/>).</param>
+    private static void Refuse(SteamNetworkingIdentity identity, string why, bool due) {
         var steamId = identity.GetSteamID64();
+        int closed;
+        lock (Refused) {
+            var now = Clock.ElapsedMilliseconds;
+            if (!Refused.TryGetValue(steamId, out var refusals)) {
+                refusals = new Refusals { LastMs = now - RefuseEvery };
+                Refused[steamId] = refusals;
+            }
+
+            if (!due) {
+                // Already left open to be answered: whatever session the player has then is the one answered
+                if (refusals.Later != null) {
+                    return;
+                }
+
+                var wait = refusals.LastMs + RefuseEvery - now;
+                if (wait > 0) {
+                    refusals.Later = new Timer(_ => AnswerLater(identity), null, wait, Timeout.Infinite);
+                    return;
+                }
+            }
+
+            refusals.LastMs = now;
+            closed = ++refusals.Closed;
+        }
+
+        var count = closed > 1 ? $" (closed for them so far: {closed}, at most one every {RefuseEvery / 1000} s)" : "";
         try {
-            SteamNetworkingMessages.CloseSessionWithUser(ref identity);
-            Logger.Info($"Steam relay: closed the session that {steamId} asked for, {why}");
+            if (SteamNetworkingMessages.CloseSessionWithUser(ref identity)) {
+                Logger.Info($"Steam relay: closed the session that {steamId} asked for, {why}{count}");
+            } else {
+                Logger.Info($"Steam relay: found no session left to close that {steamId} asked for, {why}{count}");
+            }
         } catch (Exception e) {
             Logger.Warn($"Steam relay: could not close the session that {steamId} asked for: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Answers, once <see cref="RefuseEvery"/> has passed, the session that a player asked for just after their last
+    /// one was closed: taken if something here takes it by now, closed otherwise (see <see cref="Refuse"/>).
+    /// </summary>
+    private static void AnswerLater(SteamNetworkingIdentity identity) {
+        // Nothing may leave a timer's thread: an exception there would close the game
+        try {
+            lock (Refused) {
+                if (!Refused.TryGetValue(identity.GetSteamID64(), out var refusals) || refusals.Later == null) {
+                    return;
+                }
+
+                refusals.Later.Dispose();
+                refusals.Later = null;
+            }
+
+            Answer(identity, true);
+        } catch (Exception e) {
+            Logger.Warn($"Steam relay: could not answer a session asked for a moment ago: {e.Message}");
         }
     }
 
