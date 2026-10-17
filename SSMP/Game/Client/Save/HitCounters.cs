@@ -53,7 +53,8 @@ internal static class HitCounters {
     /// that a hit changes for good are told those wherever they go on them (see <see cref="OutcomeEvents"/>), its
     /// components that heed a blow hear of it if it lives, and the one that decides whether it loses its stance is
     /// given the beating. What else a hit makes a creature do - turn, flinch, strike back - it is not told of: here the
-    /// partner's hit is only seen.
+    /// partner's hit is only seen; the partner's game plays it, and has the creature here do the same
+    /// (Entity.FindWoundReactions).
     /// A blow that takes the last of its health is told of once more, before the creature dies
     /// (HealthManagerComponent). That usually comes in the same packet as this, and a thorn that counted it then waits
     /// a moment in which it hears nothing.
@@ -205,11 +206,15 @@ internal static class HitCounters {
     /// speed, and a state that only turns, flinches or strikes back is what the hit made the creature do.
     /// </summary>
     private static bool CountsOn(PlayMakerFSM fsm, string eventName) {
-        if (GoesOn(fsm, eventName) is not { } counting) {
-            return false;
-        }
+        return GoesOn(fsm, eventName) is { } counting && Counts(counting);
+    }
 
-        foreach (var action in counting.Actions) {
+    /// <summary>
+    /// Whether a state counts: it adds to a number once as it starts (see <see cref="CountsOn"/>). The game that runs
+    /// the creature tells it of the partner's hits, so the partner's game leaves it be (Entity.FindWoundReactions).
+    /// </summary>
+    internal static bool Counts(HutongGames.PlayMaker.FsmState state) {
+        foreach (var action in state.Actions) {
             if (action.Enabled &&
                 action is IntAdd { everyFrame: false } or FloatAdd { everyFrame: false, perSecond: false }) {
                 return true;

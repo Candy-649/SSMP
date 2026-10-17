@@ -980,6 +980,12 @@ internal partial class CoopHits {
                 SendHitEffect(enemyId, hit, response.response == IHitResponder.Response.Invincible, enemyPosition);
             }
 
+            // What a wound makes the creature do - turn, flinch, strike back - the copy does at once, and the creature
+            // in the scene host's game the same
+            if (enemyEntity != null && hit.IsHeroDamage && response.response == IHitResponder.Response.DamageEnemy) {
+                SetOffByWound(enemyEntity);
+            }
+
             return response;
         } finally {
             _hitContext = lastContext;
@@ -2034,6 +2040,28 @@ internal partial class CoopHits {
     /// <param name="eventName">The event that the range sends.</param>
     private void OnCopyWokenByLocalPlayer(Entity.Entity copied, byte fsmIndex, string eventName) {
         PlayOrSend(copied, fsmIndex, eventName, "came near", setOff: true);
+    }
+
+    /// <summary>
+    /// Plays at once what a wound of the local player makes the copy of an entity do, in each FSM of it that goes
+    /// somewhere on it (see Entity.FindWoundReactions), and sends the scene host the same, where the creature goes
+    /// after the local player as one that they set off: they struck it.
+    /// </summary>
+    /// <param name="struck">The entity.</param>
+    private void SetOffByWound(Entity.Entity struck) {
+        var reactions = struck.FindWoundReactions();
+        if (reactions.Count == 0) {
+            return;
+        }
+
+        // Struck by this game's player, so it is this game's player that the copy goes after
+        if (HeroController.instance != null && struck.Object.Client != null) {
+            GamePatcher.SetTargetOf(struck.Object.Client, HeroController.instance.gameObject);
+        }
+
+        foreach (var (fsmIndex, eventName) in reactions) {
+            PlayOrSend(struck, fsmIndex, eventName, "wounded", setOff: true);
+        }
     }
 
     /// <summary>
