@@ -113,7 +113,7 @@ try {
     if (-not (Test-Path $BepInExZip)) {
         throw ("No loader archive at: $BepInExZip`n" +
                "      It is a third-party binary kept out of the repository on purpose. Put a copy there, or pass`n" +
-               "      -BepInExZip <path>. The official one is BepInExPack_Silksong on Thunderstore.")
+               "      -BepInExZip <path>. The pinned one is BepInEx's own GitHub release 5.4.23.4.")
     }
     $loaderHash = (Get-FileHash $BepInExZip -Algorithm SHA256).Hash
     if ($loaderHash -ne $BepInExSha256) {

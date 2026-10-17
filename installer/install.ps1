@@ -89,7 +89,8 @@ function Backup-Saves {
 
             # Deliberately narrow: only this folder, only names this script writes, and only after the new backup
             # exists, so a failed backup never costs you the older ones
-            Get-ChildItem -Path $backupDir -Filter 'silksong-saves-backup-*.zip' -File -ErrorAction SilentlyContinue |
+            Get-ChildItem -LiteralPath $backupDir -Filter 'silksong-saves-backup-*.zip' -File `
+                -ErrorAction SilentlyContinue |
                 Sort-Object LastWriteTime -Descending |
                 Select-Object -Skip $KeepBackups |
                 ForEach-Object {
@@ -103,8 +104,10 @@ function Backup-Saves {
 }
 
 function Get-Loader($work) {
-    # The folder that came with this installer, BepInEx's official release unpacked (see the top of this file)
-    foreach ($folder in (Get-ChildItem $PSScriptRoot -Directory -Filter 'BepInEx*' -ErrorAction SilentlyContinue)) {
+    # The folder that came with this installer, BepInEx's official release unpacked (see the top of this file). The
+    # paths of the package are taken literally, as a folder it was unpacked into may have brackets in its name
+    $folders = @(Get-ChildItem -LiteralPath $PSScriptRoot -Directory -Filter 'BepInEx*' -ErrorAction SilentlyContinue)
+    foreach ($folder in $folders) {
         $payload = Find-PayloadRoot $folder.FullName
         if ($payload) {
             Write-Ok "Using the copy that came with this installer: $($folder.Name)"
@@ -113,17 +116,25 @@ function Get-Loader($work) {
     }
 
     # Any BepInEx archive placed next to this script is accepted, so a manually downloaded one works too
-    $archive = Get-ChildItem $PSScriptRoot -Filter 'BepInEx*.zip' -File -ErrorAction SilentlyContinue |
+    $archive = Get-ChildItem -LiteralPath $PSScriptRoot -Filter 'BepInEx*.zip' -File -ErrorAction SilentlyContinue |
         Select-Object -First 1
     if ($archive) {
         Write-Ok "Using the archive next to this installer: $($archive.Name)"
         $extracted = Join-Path $work 'extracted'
-        Expand-Archive -Path $archive.FullName -DestinationPath $extracted -Force
+        Expand-Archive -LiteralPath $archive.FullName -DestinationPath $extracted -Force
         $payload = Find-PayloadRoot $extracted
         if (-not $payload) {
             throw 'Could not find the loader inside the archive (no folder with both BepInEx and winhttp.dll).'
         }
         return $payload
+    }
+
+    # INSTALL.txt warns that antivirus software may take the loader for something worse, and it may remove the part
+    # that the game loads; unzipping again would not bring that back
+    if ($folders.Count -gt 0) {
+        throw ("$($folders[0].Name) next to this script lacks part of the loader, such as winhttp.dll, which" +
+               "`n      antivirus software sometimes removes. Restore it from the antivirus quarantine or allow it," +
+               "`n      then unzip the whole archive again.")
     }
 
     throw ('The mod loader is not next to this script. Unzip the whole archive first, then run the installer' +
@@ -133,11 +144,11 @@ function Get-Loader($work) {
 function Find-PayloadRoot($extractedDir) {
     # The layer to copy is the one holding the loader itself, whatever the archive wraps it in. Matching on the
     # contents rather than on a folder name means a repackaged archive still installs correctly.
-    $all = @(Get-Item $extractedDir) + @(Get-ChildItem $extractedDir -Recurse -Directory)
+    $all = @(Get-Item -LiteralPath $extractedDir) + @(Get-ChildItem -LiteralPath $extractedDir -Recurse -Directory)
     foreach ($dir in $all) {
-        $hasBepInEx = Test-Path (Join-Path $dir.FullName 'BepInEx')
-        $hasProxy = (Test-Path (Join-Path $dir.FullName 'winhttp.dll')) -or
-                    (Test-Path (Join-Path $dir.FullName 'version.dll'))
+        $hasBepInEx = Test-Path -LiteralPath (Join-Path $dir.FullName 'BepInEx')
+        $hasProxy = (Test-Path -LiteralPath (Join-Path $dir.FullName 'winhttp.dll')) -or
+                    (Test-Path -LiteralPath (Join-Path $dir.FullName 'version.dll'))
         if ($hasBepInEx -and $hasProxy) { return $dir.FullName }
     }
 
@@ -171,21 +182,21 @@ try {
     $payload = Get-Loader $work
 
     Write-Step 'Installing the mod loader into the game folder'
-    foreach ($item in (Get-ChildItem $payload -Force)) {
-        Copy-Item -Path $item.FullName -Destination $game -Recurse -Force
+    foreach ($item in (Get-ChildItem -LiteralPath $payload -Force)) {
+        Copy-Item -LiteralPath $item.FullName -Destination $game -Recurse -Force
     }
     Write-Ok 'Mod loader copied'
 
     Write-Step 'Installing the co-op plugin'
     $pluginSource = Join-Path $PSScriptRoot 'SSMP'
-    if (-not (Test-Path $pluginSource)) {
+    if (-not (Test-Path -LiteralPath $pluginSource)) {
         throw 'No SSMP folder next to this script. Unzip the whole archive first, then run the installer from inside it.'
     }
 
     $pluginTarget = Join-Path $game 'BepInEx\plugins\SSMP'
     New-Item -ItemType Directory -Path $pluginTarget -Force | Out-Null
-    foreach ($dll in (Get-ChildItem $pluginSource -Filter '*.dll')) {
-        Copy-Item -Path $dll.FullName -Destination $pluginTarget -Force
+    foreach ($dll in (Get-ChildItem -LiteralPath $pluginSource -Filter '*.dll')) {
+        Copy-Item -LiteralPath $dll.FullName -Destination $pluginTarget -Force
         Write-Ok "Installed $($dll.Name)"
     }
 

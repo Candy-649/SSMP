@@ -91,11 +91,13 @@ try {
         foreach ($required in @('INSTALL.bat', 'INSTALL.txt', 'install.ps1',
                                 'LICENSE', 'LICENSE-BouncyCastle.md', 'README.md',
                                 'BepInEx_win_x64_5.4.23.4/winhttp.dll',
+                                'BepInEx_win_x64_5.4.23.4/doorstop_config.ini',
+                                'BepInEx_win_x64_5.4.23.4/.doorstop_version',
                                 'BepInEx_win_x64_5.4.23.4/BepInEx/core/BepInEx.Preloader.dll',
                                 'SSMP/SSMP.dll', 'SSMP/BouncyCastle.Cryptography.dll')) {
             if ($entries -notcontains "$name/$required") { throw "Missing from the zip: $name/$required" }
         }
-        $nested = @($entries | Where-Object { $_ -match '\.(zip|7z|rar|tar|gz|tgz)$' })
+        $nested = @($entries | Where-Object { $_ -match '\.(zip|7z|rar|tar|gz|tgz|bz2|xz|zst|cab|jar|nupkg)$' })
         if ($nested) { throw "Archives inside the zip, which Nexus Mods quarantines: $($nested -join ', ')" }
         foreach ($left in $LeftOut) {
             if ($entries -contains "$name/$left") { throw "$left ended up in the zip." }
