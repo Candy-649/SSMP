@@ -27,6 +27,30 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
     public bool[] AckField { get; private set; } = new bool[ConnectionManager.AckSize];
 
     /// <summary>
+    /// What the numbering of the packets with reliable data says in this packet, on a transport that keeps them
+    /// reliable itself rather than this mod (see <see cref="ReliableNumbering"/>).
+    /// </summary>
+    public NumberingFlags Numbering { get; private set; }
+
+    /// <summary>
+    /// The number of this packet among the packets of its sender that carry reliable data, when
+    /// <see cref="Numbering"/> says it is one of them.
+    /// </summary>
+    public ushort ReliableNumber { get; private set; }
+
+    /// <summary>
+    /// The number of the last packet with reliable data that the sender of this one took in from the other side, in
+    /// the order they were sent, when <see cref="Numbering"/> says it took any.
+    /// </summary>
+    public ushort ReliableAck { get; private set; }
+
+    /// <summary>
+    /// Where the numbering of reliable data is in the packet that <see cref="CreatePacket"/> made last, counted from
+    /// its start, so that it can be written there once it is known (see <see cref="ReliableNumbering.Stamp"/>).
+    /// </summary>
+    public int ReliableHeaderAt { get; private set; }
+
+    /// <summary>
     /// Resend packet data indexed by sequence number it originates from.
     /// </summary>
     private readonly Dictionary<ushort, Dictionary<TPacketId, IPacketData>> _resendPacketData = new();
@@ -55,6 +79,13 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
         }
 
         packet.Write(ackFieldInt);
+
+        // Written as nothing here and filled in once the packet is made, when it is known whether it carries reliable
+        // data at all (UpdateManager.CreateAndSendPacket)
+        ReliableHeaderAt = packet.Length;
+        packet.Write((byte) NumberingFlags.None);
+        packet.Write((ushort) 0);
+        packet.Write((ushort) 0);
     }
 
     /// <summary>
@@ -78,6 +109,10 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
 
             currentFieldValue *= 2;
         }
+
+        Numbering = (NumberingFlags) packet.ReadByte();
+        ReliableNumber = packet.ReadUShort();
+        ReliableAck = packet.ReadUShort();
     }
 
     /// <inheritdoc />
@@ -143,7 +178,10 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
             ContainsReliableData = true;
         }
 
+        // The length goes in front of everything, which moves the numbering of reliable data along with the rest
+        var unprefixed = packet.Length;
         packet.WriteLength();
+        ReliableHeaderAt += packet.Length - unprefixed;
     }
 
     /// <inheritdoc />
@@ -385,5 +423,66 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
                 _resendAddonPacketData.Remove(seq);
             }
         }
+    }
+}
+
+/// <summary>
+/// What the numbering of the packets with reliable data says in an update packet (see
+/// <see cref="ReliableNumbering"/>).
+/// </summary>
+[Flags]
+internal enum NumberingFlags : byte {
+    /// <summary>
+    /// Nothing: a packet without reliable data from a side that has taken none in, or a transport that this mod keeps
+    /// reliable itself.
+    /// </summary>
+    None = 0,
+
+    /// <summary>
+    /// The packet carries reliable data, and <see cref="UpdatePacket{TPacketId}.ReliableNumber"/> numbers it.
+    /// </summary>
+    Numbered = 1,
+
+    /// <summary>
+    /// <see cref="UpdatePacket{TPacketId}.ReliableAck"/> names the last packet with reliable data that the sender took
+    /// in from the other side.
+    /// </summary>
+    TookIn = 2,
+
+    /// <summary>
+    /// The sender asks for the packets with reliable data after <see cref="UpdatePacket{TPacketId}.ReliableAck"/>
+    /// again: a later one arrived before them, or it opened the link anew, which loses what was on its way over it.
+    /// </summary>
+    AsksAgain = 4
+}
+
+/// <summary>
+/// The numbering of the packets that carry reliable data, on a transport that keeps what it carries reliable itself,
+/// like Steam's relay, where this mod does no acknowledging and sending again of its own.
+///
+/// Such a transport still loses what it had not delivered when its link is opened anew
+/// (UpdateManager.RenewStalledLink): on 10-17 the link went quiet for 21 s and was opened anew, and about 30 kB of
+/// reliable data that the host had sent in that time never arrived, the death of the host's player among it, which
+/// never showed on the other player's screen (USER "三令五申死掉要走可靠通道了", "你该修的是走可靠通道那一整批，
+/// 断线重连该怎么办"). So each side numbers the packets it sends with reliable data, keeps them until the other side
+/// says it took them in, sends them again when they may be lost, and takes in what arrives in the order it was sent,
+/// each one once (UpdateManager.TakeInOrder).
+/// </summary>
+internal static class ReliableNumbering {
+    /// <summary>
+    /// Writes the numbering of reliable data into a packet as it is sent, where
+    /// <see cref="UpdatePacket{TPacketId}.ReliableHeaderAt"/> says it goes.
+    /// </summary>
+    /// <param name="raw">The packet as it is sent.</param>
+    /// <param name="at">Where the numbering goes in it.</param>
+    /// <param name="flags">What the numbering says.</param>
+    /// <param name="number">The number of the packet among those with reliable data.</param>
+    /// <param name="ack">The number of the last packet with reliable data taken in from the other side.</param>
+    public static void Stamp(byte[] raw, int at, NumberingFlags flags, ushort number, ushort ack) {
+        raw[at] = (byte) flags;
+        raw[at + 1] = (byte) number;
+        raw[at + 2] = (byte) (number >> 8);
+        raw[at + 3] = (byte) ack;
+        raw[at + 4] = (byte) (ack >> 8);
     }
 }

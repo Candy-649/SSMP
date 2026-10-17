@@ -317,17 +317,23 @@ internal class NetServer : INetServer {
             // UpdateManager will skip UDP-specific logic for Steam transports
             client.UpdateManager.OnReceivePacket<ServerUpdatePacket, ServerUpdatePacketId>(serverUpdatePacket);
 
-            var packetData = serverUpdatePacket.GetPacketData();
-            if (packetData.Remove(ServerUpdatePacketId.Slice, out var sliceDataRaw)) {
-                client.ChunkReceiver.ProcessReceivedData((SliceData) sliceDataRaw);
-            }
+            // In the order the player sent them, each one once: a packet with reliable data that arrived before one
+            // sent earlier waits for it (UpdateManager.TakeInOrder)
+            foreach (var inOrder in client.UpdateManager.TakeInOrder<ServerUpdatePacket, ServerUpdatePacketId>(
+                         serverUpdatePacket
+                     )) {
+                var packetData = inOrder.GetPacketData();
+                if (packetData.Remove(ServerUpdatePacketId.Slice, out var sliceDataRaw)) {
+                    client.ChunkReceiver.ProcessReceivedData((SliceData) sliceDataRaw);
+                }
 
-            if (packetData.Remove(ServerUpdatePacketId.SliceAck, out var sliceAckData)) {
-                client.ChunkSender.ProcessReceivedData((SliceAckData) sliceAckData);
-            }
+                if (packetData.Remove(ServerUpdatePacketId.SliceAck, out var sliceAckData)) {
+                    client.ChunkSender.ProcessReceivedData((SliceAckData) sliceAckData);
+                }
 
-            if (client.IsRegistered) {
-                _packetManager.HandleServerUpdatePacket(id, serverUpdatePacket);
+                if (client.IsRegistered) {
+                    _packetManager.HandleServerUpdatePacket(id, inOrder);
+                }
             }
         }
     }

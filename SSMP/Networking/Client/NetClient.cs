@@ -284,6 +284,7 @@ internal class NetClient : INetClient {
         var packets = PacketManager.HandleReceivedData(buffer, length, ref _leftoverData);
 
         foreach (var packet in packets) {
+            List<ClientUpdatePacket> inOrder;
             try {
                 var clientUpdatePacket = new ClientUpdatePacket();
                 if (!clientUpdatePacket.ReadPacket(packet)) {
@@ -295,26 +296,45 @@ internal class NetClient : INetClient {
                 // UpdateManager will skip UDP-specific logic for Steam transports
                 UpdateManager.OnReceivePacket<ClientUpdatePacket, ClientUpdatePacketId>(clientUpdatePacket);
 
-                // First check for slice or slice ack data and handle it separately by passing it onto either the chunk 
-                // sender or chunk receiver
-                var packetData = clientUpdatePacket.GetPacketData();
-
-                if (packetData.Remove(ClientUpdatePacketId.Slice, out var sliceData)) {
-                    _chunkReceiver.ProcessReceivedData((SliceData) sliceData);
-                }
-
-                if (packetData.Remove(ClientUpdatePacketId.SliceAck, out var sliceAckData)) {
-                    _chunkSender.ProcessReceivedData((SliceAckData) sliceAckData);
-                }
-
-                // Then, if we are already connected to a server,
-                // we let the packet manager handle the rest of the packet data
-                if (ConnectionStatus == ClientConnectionStatus.Connected) {
-                    _packetManager.HandleClientUpdatePacket(clientUpdatePacket);
-                }
+                // In the order the server sent them, each one once: a packet with reliable data that arrived before
+                // one sent earlier waits for it (UpdateManager.TakeInOrder)
+                inOrder = UpdateManager.TakeInOrder<ClientUpdatePacket, ClientUpdatePacketId>(clientUpdatePacket);
             } catch (Exception e) {
                 Logger.Error($"Error processing incoming packet: {e}");
+                continue;
             }
+
+            foreach (var clientUpdatePacket in inOrder) {
+                try {
+                    HandleUpdatePacket(clientUpdatePacket);
+                } catch (Exception e) {
+                    Logger.Error($"Error processing incoming packet: {e}");
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Takes in an update packet from the server, in its turn.
+    /// </summary>
+    /// <param name="clientUpdatePacket">The packet.</param>
+    private void HandleUpdatePacket(ClientUpdatePacket clientUpdatePacket) {
+        // First check for slice or slice ack data and handle it separately by passing it onto either the chunk
+        // sender or chunk receiver
+        var packetData = clientUpdatePacket.GetPacketData();
+
+        if (packetData.Remove(ClientUpdatePacketId.Slice, out var sliceData)) {
+            _chunkReceiver.ProcessReceivedData((SliceData) sliceData);
+        }
+
+        if (packetData.Remove(ClientUpdatePacketId.SliceAck, out var sliceAckData)) {
+            _chunkSender.ProcessReceivedData((SliceAckData) sliceAckData);
+        }
+
+        // Then, if we are already connected to a server,
+        // we let the packet manager handle the rest of the packet data
+        if (ConnectionStatus == ClientConnectionStatus.Connected) {
+            _packetManager.HandleClientUpdatePacket(clientUpdatePacket);
         }
     }
 
