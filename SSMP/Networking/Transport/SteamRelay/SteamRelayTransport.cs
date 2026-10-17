@@ -129,8 +129,7 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
         } else {
             // Both sides listen now. The host answers the first message with its own, and a session that fails is
             // reported here rather than only on the other machine.
-            _sessionRequestCallback =
-                Callback<SteamNetworkingMessagesSessionRequest_t>.Create(OnSessionRequest);
+            _sessionRequestCallback = SteamRelayMessaging.TakeSessionRequests(OnSessionRequest);
             _sessionFailedCallback =
                 Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);
 
@@ -191,7 +190,9 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
         var steamId = identity.GetSteamID64();
 
         if (!_isConnected || steamId != _remoteSteamId) {
-            Logger.Info($"Steam relay: ignoring a session request from {steamId}, which is not the host");
+            SteamRelayMessaging.Refuse(
+                identity, _isConnected ? "which is not the host" : "as this player is leaving the host"
+            );
             return;
         }
 
@@ -331,8 +332,7 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
             SteamNetworkingMessages.CloseSessionWithUser(ref identity);
         }
 
-        _sessionRequestCallback?.Dispose();
-        _sessionRequestCallback = null;
+        SteamRelayMessaging.StopTakingSessionRequests(ref _sessionRequestCallback);
 
         _sessionFailedCallback?.Dispose();
         _sessionFailedCallback = null;

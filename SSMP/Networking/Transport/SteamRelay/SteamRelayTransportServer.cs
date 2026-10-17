@@ -91,7 +91,7 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         SteamRelayMessaging.WaitLongerThanTheMod();
         SteamRelayRecorder.Start();
 
-        _sessionRequestCallback = Callback<SteamNetworkingMessagesSessionRequest_t>.Create(OnSessionRequest);
+        _sessionRequestCallback = SteamRelayMessaging.TakeSessionRequests(OnSessionRequest);
         _sessionFailedCallback = Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);
 
         _loopbackChannel = SteamRelayLoopbackChannel.GetOrCreate();
@@ -146,8 +146,7 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
             _loopbackChannel = null;
         }
 
-        _sessionRequestCallback?.Dispose();
-        _sessionRequestCallback = null;
+        SteamRelayMessaging.StopTakingSessionRequests(ref _sessionRequestCallback);
 
         _sessionFailedCallback?.Dispose();
         _sessionFailedCallback = null;
@@ -187,9 +186,13 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
     /// Accepts a player who wants to talk to this server.
     /// </summary>
     private void OnSessionRequest(SteamNetworkingMessagesSessionRequest_t request) {
-        if (!_isRunning) return;
-
         var identity = request.m_identityRemote;
+        if (!_isRunning) {
+            // Not left open: a player who left asks again with what they still send while the server stops
+            SteamRelayMessaging.Refuse(identity, "as this server is stopping");
+            return;
+        }
+
         var steamId = identity.GetSteamID64();
 
         Logger.Info($"Steam relay: session request from {steamId}");

@@ -158,6 +158,9 @@ public static class SteamManager {
             // uses the relay transport.
             SteamNetworkingUtils.InitRelayNetworkAccess();
 
+            // A session that a player asks for while no game is hosted or joined here is closed as it comes
+            SteamRelayMessaging.RefuseUntakenRequests();
+
             // Register callbacks for joining via overlay/friends
             Callback<GameLobbyJoinRequested_t>.Create(OnGameLobbyJoinRequested);
             Callback<GameRichPresenceJoinRequested_t>.Create(OnGameRichPresenceJoinRequested);
@@ -353,10 +356,15 @@ public static class SteamManager {
 
             // Nothing may ask Steam anything or be called by it once it is let go
             SteamRelayRecorder.Halt();
+            SteamRelayMessaging.StopRefusingUntakenRequests();
 
-            SteamAPI.Shutdown();
+            // Not shut down here: the game started Steam itself and shuts it down as it closes, after this
+            // (DesktopPlatform.OnDestroy, SteamOnlineSubsystem.Dispose). SteamAPI.Shutdown counts no starts, so the
+            // call here, in the mod's quitting, shut Steam down for the whole game while the game was still closing.
+            // On 10-17 the host's game crashed in Steam's own networking during that call (see
+            // SteamRelayMessaging.RefuseUntakenRequests)
             IsInitialized = false;
-            Logger.Info("Steam: Shut down successfully");
+            Logger.Info("Steam: the mod is done with Steam, which the game shuts down itself as it closes");
         } catch (Exception e) {
             Logger.Error($"Steam: Exception during shutdown: {e}");
         }
