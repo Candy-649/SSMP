@@ -78,6 +78,11 @@ internal static class FrameWatch {
     private static volatile bool _focused;
 
     /// <summary>
+    /// Whether the game's window was in front at the last frame.
+    /// </summary>
+    public static bool Focused => _focused;
+
+    /// <summary>
     /// The scene that was active at the last frame.
     /// </summary>
     private static int _lastScene;

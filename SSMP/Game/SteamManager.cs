@@ -1,9 +1,12 @@
 using System;
+using System.Diagnostics;
 using System.Reflection;
 using System.Threading;
+using MonoMod.RuntimeDetour;
 using Steamworks;
 using SSMP.Logging;
 using SSMP.Networking.Transport.SteamRelay;
+using SSMP.Util;
 
 namespace SSMP.Game;
 
@@ -120,14 +123,50 @@ public static class SteamManager {
     private static CallResult<LobbyEnter_t>? _lobbyEnterCallback;
 
     /// <summary>
-    /// Thread-safe timer using Threading.Timer instead of System.Timers.Timer for better performance.
+    /// What stands in for the game in taking Steam's messages while the game takes none (see
+    /// <see cref="OnCallbackTimerElapsed"/>).
     /// </summary>
     private static Timer? _callbackTimer;
 
     /// <summary>
-    /// Cancellation flag for callback timer (int for atomic operations).
+    /// Held by whatever takes Steam's messages, the game or the stand-in, so that never both take them at once.
+    ///
+    /// Steam's messages are taken one at a time: each is fetched, handled and let go, and Steam's own header says the
+    /// next may only be fetched once the last is let go (SteamAPI_ManualDispatch_GetNextCallback). Steamworks.NET
+    /// fetches them into one buffer that every caller shares, without a lock (CallbackDispatcher.RunFrame). The game
+    /// takes them every frame on the main thread (SteamOnlineSubsystem.Update), and the mod took them as well, every
+    /// 17 ms on a thread of its own, so the two could fetch at once (review of 7812c04).
     /// </summary>
-    private static int _isRunningCallbacks;
+    private static readonly object PumpGate = new();
+
+    /// <summary>
+    /// When the game last took Steam's messages, as a <see cref="Stopwatch"/> timestamp. Set as well when the hook on
+    /// its taking is made, so that the stand-in waits for its first; 0 without the hook, which leaves them all to the
+    /// stand-in.
+    /// </summary>
+    private static long _gamePumpedAt;
+
+    /// <summary>
+    /// When the stand-in began taking Steam's messages for the game, as a <see cref="Stopwatch"/> timestamp, or 0
+    /// while it does not.
+    /// </summary>
+    private static long _standingInSince;
+
+    /// <summary>
+    /// Whether the game's window was behind at its last frame when the stand-in began, for the log.
+    /// </summary>
+    private static volatile bool _standInWindowBehind;
+
+    /// <summary>
+    /// How long the game may take none of Steam's messages before the stand-in takes them: longer than any ordinary
+    /// frame, so that it only does while the game is stuck on one, or stopped.
+    /// </summary>
+    private static readonly long StandInAfter = Stopwatch.Frequency;
+
+    /// <summary>
+    /// The hook on the game's taking of Steam's messages (see <see cref="TakeMessagesForGame"/>).
+    /// </summary>
+    private static Hook? _gamePumpHook;
 
     /// <summary>
     /// Initializes the Steam API if available.
@@ -171,7 +210,8 @@ public static class SteamManager {
             _lobbyMatchListCallback = CallResult<LobbyMatchList_t>.Create(OnLobbyMatchList);
             _lobbyEnterCallback = CallResult<LobbyEnter_t>.Create(OnLobbyEnter);
 
-            // Start a timer-based callback loop that runs independently of frame rate
+            // The game takes Steam's messages every frame, and the mod only while the game takes none
+            HookGamePump();
             StartCallbackTimer();
 
             return true;
@@ -351,7 +391,7 @@ public static class SteamManager {
             // Leave any active lobby
             LeaveLobby();
 
-            // Stop the callback timer
+            // Stop standing in for the game, which goes on taking Steam's messages by itself
             StopCallbackTimer();
 
             // Nothing may ask Steam anything or be called by it once it is let go
@@ -385,7 +425,67 @@ public static class SteamManager {
             CallbackIntervalMs
         );
 
-        Logger.Info($"Steam: Started callback timer at {1000 / CallbackIntervalMs:F0}Hz");
+        Logger.Info(
+            $"Steam: started looking every {CallbackIntervalMs} ms whether the game takes Steam's messages, to take " +
+            "them while it does not"
+        );
+    }
+
+    /// <summary>
+    /// Hooks the game's taking of Steam's messages (see <see cref="TakeMessagesForGame"/>). Without the hook the
+    /// stand-in takes them all the time alongside the game, as it used to.
+    /// </summary>
+    private static void HookGamePump() {
+        if (_gamePumpHook != null) {
+            return;
+        }
+
+        var method = typeof(SteamOnlineSubsystem).GetMethod(
+            nameof(SteamOnlineSubsystem.Update), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly
+        );
+        if (method == null) {
+            Logger.Error("Steam: could not find where the game takes Steam's messages, so the mod takes them as well");
+            return;
+        }
+
+        // Not a reason to go without Steam: the stand-in then takes the messages alongside the game, as it used to
+        try {
+            Interlocked.Exchange(ref _gamePumpedAt, Stopwatch.GetTimestamp());
+            _gamePumpHook = new Hook(method, TakeMessagesForGame);
+        } catch (Exception e) {
+            Interlocked.Exchange(ref _gamePumpedAt, 0);
+            Logger.Error(
+                $"Steam: could not hook where the game takes Steam's messages, so the mod takes them as well:\n{e}"
+            );
+        }
+    }
+
+    /// <summary>
+    /// The game's taking of Steam's messages, which it does every frame.
+    /// </summary>
+    private delegate void GamePump(SteamOnlineSubsystem self);
+
+    /// <summary>
+    /// Takes Steam's messages for the game, as it does every frame on the main thread, unless the stand-in is taking
+    /// them that moment, in which case the next frame takes them. Marks the game as taking them, which keeps the
+    /// stand-in from doing so. A game whose Steam did not start takes none, and leaves them all to the stand-in.
+    /// </summary>
+    private static void TakeMessagesForGame(GamePump orig, SteamOnlineSubsystem self) {
+        if (!self.DidInitialize) {
+            orig(self);
+            return;
+        }
+
+        Interlocked.Exchange(ref _gamePumpedAt, Stopwatch.GetTimestamp());
+        if (!Monitor.TryEnter(PumpGate)) {
+            return;
+        }
+
+        try {
+            orig(self);
+        } finally {
+            Monitor.Exit(PumpGate);
+        }
     }
 
     /// <summary>
@@ -400,23 +500,43 @@ public static class SteamManager {
     }
 
     /// <summary>
-    /// Timer callback that runs Steam API callbacks.
+    /// Takes Steam's messages in the game's stead while the game has taken none for <see cref="StandInAfter"/>, as
+    /// while it is stuck on a long frame, or stopped. Otherwise the game takes them every frame on the main thread,
+    /// where what handles them may change what is shown, which only the main thread may do.
     /// </summary>
     private static void OnCallbackTimerElapsed(object? state) {
         if (!IsInitialized) return;
 
-        // Prevent concurrent callback execution (lock-free)
-        if (Interlocked.CompareExchange(ref _isRunningCallbacks, 1, 0) != 0) {
-            // Already running, skip this tick
+        var now = Stopwatch.GetTimestamp();
+        var gamePumpedAt = Interlocked.Read(ref _gamePumpedAt);
+        if (gamePumpedAt != 0 && now - gamePumpedAt < StandInAfter) {
+            var since = Interlocked.Exchange(ref _standingInSince, 0);
+            if (since != 0) {
+                Logger.Info(
+                    "Steam: the game takes Steam's messages again; the mod took them for it for " +
+                    $"{(double) (now - since) / Stopwatch.Frequency:F1} s, after it took none for " +
+                    $"{(double) StandInAfter / Stopwatch.Frequency:F0} s with its window " +
+                    $"{(_standInWindowBehind ? "behind" : "in front")}"
+                );
+            }
+
+            return;
+        }
+
+        if (!Monitor.TryEnter(PumpGate)) {
             return;
         }
 
         try {
+            if (Interlocked.CompareExchange(ref _standingInSince, now, 0) == 0) {
+                _standInWindowBehind = !FrameWatch.Focused;
+            }
+
             SteamAPI.RunCallbacks();
         } catch (Exception ex) {
             Logger.Error($"Steam: Exception in timer RunCallbacks:\n{ex}");
         } finally {
-            Volatile.Write(ref _isRunningCallbacks, 0);
+            Monitor.Exit(PumpGate);
         }
     }
 
