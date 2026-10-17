@@ -907,7 +907,6 @@ internal partial class ArenaCoop {
 
                 if (!state.Started) {
                     StartForOtherPlayer(battleScene);
-                    LockInIfInBossArena(battleScene, state);
                 }
 
                 if (update.Wave > state.Wave) {
@@ -976,7 +975,8 @@ internal partial class ArenaCoop {
     }
 
     /// <summary>
-    /// Starts the battle of an arena for another player, leaving the gates of the local player open.
+    /// Starts the battle of an arena for another player, leaving the gates of the local player open, unless the local
+    /// player stands in a boss arena (see <see cref="LockInIfInBossArena"/>).
     /// </summary>
     /// <param name="battleScene">The arena.</param>
     /// <param name="start">The action that starts the battle, or null to call <c>StartBattle</c>.</param>
@@ -999,6 +999,7 @@ internal partial class ArenaCoop {
         }
 
         ApplyStarterDarkness(battleScene);
+        LockInIfInBossArena(battleScene, GetState(battleScene));
     }
 
     /// <summary>

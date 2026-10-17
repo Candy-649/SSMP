@@ -674,8 +674,15 @@ internal partial class ArenaCoop {
     }
 
     /// <summary>
-    /// Locks in a player who follows the scene host and stands in a boss arena whose fight just started, since in most
-    /// of them the fight starts without the arena's own trigger, which locks in the players who walk in.
+    /// Locks in the local player when they stand in a boss arena whose fight just started for another player, the
+    /// scene host as well as a player who follows it. A boss arena starts once every player is in it, which the arena's
+    /// own trigger doesn't see: a player can be in the arena without having gone through the trigger, which locks in
+    /// those who walk in, and some of the fights start without it.
+    ///
+    /// It used to be done for a player who follows the scene host only. The scene host stood between the gates of a
+    /// boss arena, short of its trigger, when their partner walked in and the fight started for the partner; their own
+    /// gates stayed open for the whole fight, and the creatures followed them out through gates that were shut in the
+    /// partner's game (the user's report of 10-17).
     /// </summary>
     private void LockInIfInBossArena(BattleScene battleScene, ArenaState state) {
         var heroController = HeroController.instance;
