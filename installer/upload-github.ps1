@@ -10,14 +10,17 @@
 # In order, it:
 #   1. reads the version from the stage's package.json and the commit from its SSMP.dll, which pack-npm.ps1 stamps
 #      with the commit it was built from, so the release's tag points at the very build npm carries;
-#   2. zips the stage into dist-github, under one top folder, without package.json and the npm README (INSTALL.txt is
-#      the guide), and checks the zip itself: the installer, the updater, the loader and the plugin are in it, and its
-#      SSMP.dll is the staged one;
+#   2. zips what npm puts in the package - the files that package.json lists - into dist-github, under one top folder,
+#      without package.json and the npm README (INSTALL.txt is the guide), stopping at anything else in the stage, and
+#      checks the zip itself: the installer, the updater, the loader and the plugin are in it, and its SSMP.dll is the
+#      staged one;
 #   3. checks that the login belongs to the repository's owner: the owner has a second GitHub account, and Git
 #      Credential Manager has handed out the wrong one before;
 #   4. stops without uploading when the release of this version already has the zip, or when a newer version is
 #      already released, so running it again is safe;
-#   5. makes the release as a draft first, uploads the zip to it and only then publishes it, so a public release never
+#   5. stops without uploading when GitHub does not have the commit, which has to be pushed first, or when the tag is
+#      there already at another commit, which GitHub would release instead;
+#   6. makes the release as a draft first, uploads the zip to it and only then publishes it, so a public release never
 #      exists without its zip. A draft left by a failed run is picked up and finished by the next run.
 #
 # Releasing is public, so it is run by the repository's owner, after npm publish, never by a build.
@@ -55,8 +58,9 @@ if (-not $OutDir) { $OutDir = Join-Path $PSScriptRoot '..\dist-github' }
 if (-not $NotesFile) { $NotesFile = Join-Path $PSScriptRoot 'github-release-notes.md' }
 
 $PackageName = 'silksong-coop-mod'
-# GITHUB_API_URL is the name GitHub's own runners give the API's address; it exists for testing against a stand-in.
-$ApiBase = if ($env:GITHUB_API_URL) { $env:GITHUB_API_URL.TrimEnd('/') } else { 'https://api.github.com' }
+# SSMP_GITHUB_API_URL points the script at a stand-in of the API, for testing. Not GITHUB_API_URL, which other tools
+# set for their own GitHub: the login would go there.
+$ApiBase = if ($env:SSMP_GITHUB_API_URL) { $env:SSMP_GITHUB_API_URL.TrimEnd('/') } else { 'https://api.github.com' }
 $UserAgent = "$PackageName-upload"
 
 # The folder of the stage that holds the loader, BepInEx's release unpacked (see pack-npm.ps1)
@@ -92,6 +96,9 @@ function ConvertTo-AsciiJson($value) {
 
 # Set when a request got no answer at all (no connection, a broken one, a timeout), as against an error answer
 $NoAnswer = $false
+
+# Set once a request that changes something on GitHub has been sent, answered or not
+$Wrote = $false
 
 # The token, once the login is checked, and what to call it when GitHub refuses it
 $Token = $null
@@ -149,6 +156,7 @@ function Invoke-GitHub([string] $Method, [string] $Url, $Body, [int[]] $Allow = 
             New-Object System.Net.Http.Headers.MediaTypeHeaderValue 'application/json'
     }
     $path = $request.RequestUri.AbsolutePath
+    if ($Method -ne 'GET') { $script:Wrote = $true }
     $answer = Send-Request $request
     $code = [int]$answer.Response.StatusCode
     if (-not $answer.Response.IsSuccessStatusCode -and $Allow -notcontains $code) {
@@ -168,6 +176,13 @@ function Invoke-GitHub([string] $Method, [string] $Url, $Body, [int[]] $Allow = 
 # --- The login ----------------------------------------------------------------------------------------------------
 
 function Get-Owner { return $Repo.Split('/')[0] }
+
+# Whether the login may be sent to an address: GitHub's own host for it, or this machine when the API is a stand-in
+# on it (SSMP_GITHUB_API_URL)
+function Test-LoginHost([Uri] $uri, [string] $gitHubHost) {
+    if (([Uri]$ApiBase).IsLoopback) { return $uri.IsLoopback }
+    return $uri.Scheme -eq 'https' -and $uri.Host -eq $gitHubHost
+}
 
 function Get-SignInHint {
     if ($env:GITHUB_TOKEN) {
@@ -191,15 +206,22 @@ function Invoke-GitCredential([string] $action, [string[]] $fields) {
     $start.RedirectStandardOutput = $true
     $start.RedirectStandardError = $true
     # Never ask for a user name or password in this terminal: a typed password is not a token the API takes. Git
-    # Credential Manager's own sign-in window still opens when it has no login.
+    # Credential Manager's own sign-in window still opens when it has no login. Nor through an askpass program, like
+    # the one a VS Code terminal sets, which hands over whatever login that program has.
     $start.EnvironmentVariables['GIT_TERMINAL_PROMPT'] = '0'
+    $start.EnvironmentVariables['GIT_ASKPASS'] = ''
     $process = [System.Diagnostics.Process]::Start($start)
     try {
         $out = $process.StandardOutput.ReadToEndAsync()
         $err = $process.StandardError.ReadToEndAsync()
         try {
-            $process.StandardInput.Write((($fields + '') -join "`n") + "`n")
-            $process.StandardInput.Close()
+            # Windows PowerShell 5.1 starts the input with a byte order mark when the console reads UTF-8 (code page
+            # 65001), as soon as the process starts. git takes it for part of the first line's name, drops that line
+            # and stops at the missing protocol, so the first line is given twice and the second one counts.
+            $lines = @($fields[0]) + $fields + ''
+            $bytes = [System.Text.Encoding]::ASCII.GetBytes(($lines -join "`n") + "`n")
+            $process.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
+            $process.StandardInput.BaseStream.Close()
         } catch { }
         $process.WaitForExit()
         return @{ Code = $process.ExitCode; Out = $out.Result; Err = $err.Result }
@@ -214,8 +236,13 @@ function Get-Token {
         return @{ Token = $env:GITHUB_TOKEN.Trim(); FromGit = $false }
     }
     $owner = Get-Owner
+    if (-not (Test-LoginHost ([Uri]$ApiBase) 'api.github.com')) {
+        throw ("SSMP_GITHUB_API_URL points at $(([Uri]$ApiBase).Host), which git's GitHub login is not sent to. " +
+               "Set GITHUB_TOKEN for it, or clear SSMP_GITHUB_API_URL.")
+    }
     $script:TokenSource = "that git has for $owner"
     $fields = @('protocol=https', 'host=github.com', "username=$owner")
+    Write-Note "Asking git for its GitHub login; a GitHub sign-in window may open."
     $answer = Invoke-GitCredential 'fill' $fields
     $token = $null
     if ($answer.Code -eq 0) {
@@ -240,8 +267,14 @@ function Confirm-Account($login) {
     $name = [string]$user.login
     if ($name -ne $owner) {
         if (-not $name) { $name = '(no name)' }
-        throw ("The login $TokenSource belongs to GitHub account '$name', not $owner. Nothing was done." +
-               "`n      Sign git in to github.com as $owner, then run this again.")
+        # git keeps a login that GitHub refuses with 403 on a push, so pushing again does not change it
+        $fix = if ($login.FromGit) {
+            "`n      Make git forget it, then push once and sign in as $($owner):`n      " +
+            '"protocol=https`nhost=github.com`nusername=' + $owner + '`n" | git credential reject'
+        } else {
+            "`n      Set GITHUB_TOKEN to a token of $owner, or clear it to use the login git has."
+        }
+        throw "The login $TokenSource belongs to GitHub account '$name', not $owner. Nothing was done.$fix"
     }
     # A login that works is kept, as git does after a push, so a sign-in made just now is not asked for again
     if ($login.FromGit) {
@@ -282,13 +315,31 @@ function Get-Stage {
     return @{ Version = $version; Sha = $matches[1]; Product = $product; DllHash = Get-FileSha256 $dll }
 }
 
-# Every file of the stage but the npm-only ones, as paths relative to the stage with forward slashes
+# The files of the stage that npm puts in the package - those that package.json's "files" names, and those in a folder
+# it names - but the npm-only ones, as paths relative to the stage with forward slashes. Anything else in the stage
+# stops it: npm leaves it out, and the zip would publish it, like a tarball that "npm pack" left there or an .npmrc.
 function Get-StagedFiles {
+    $listed = @((Get-Content (Join-Path $StageDir 'package.json') -Raw | ConvertFrom-Json).files |
+        Where-Object { $_ } | ForEach-Object { ([string]$_).Replace('\', '/').TrimEnd('/') })
+    if (-not $listed) { throw "The staged package.json lists no files. Run pack-npm.ps1 again." }
     $files = @()
+    $stray = @()
     foreach ($file in (Get-ChildItem -LiteralPath $StageDir -Recurse -Force -File)) {
         $relative = $file.FullName.Substring($StageDir.TrimEnd('\').Length + 1).Replace('\', '/')
         if ($NpmOnly -contains $relative) { continue }
-        $files += $relative
+        $inPackage = $false
+        foreach ($entry in $listed) {
+            if ($relative -eq $entry -or
+                $relative.StartsWith("$entry/", [System.StringComparison]::OrdinalIgnoreCase)) {
+                $inPackage = $true
+                break
+            }
+        }
+        if ($inPackage) { $files += $relative } else { $stray += $relative }
+    }
+    if ($stray) {
+        throw ("The stage holds files that npm leaves out of the package: $($stray -join ', ')." +
+               "`n      Remove them, or run pack-npm.ps1 again.")
     }
     return , $files
 }
@@ -311,13 +362,13 @@ function New-ReleaseZip($stage) {
             New-Item -ItemType Directory -Force -Path (Split-Path $target) | Out-Null
             Copy-Item -LiteralPath (Join-Path $StageDir $relative) -Destination $target
         }
-        if (Test-Path $zip) { Remove-Item $zip }
+        if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip }
         Add-Type -AssemblyName System.IO.Compression.FileSystem
         [System.IO.Compression.ZipFile]::CreateFromDirectory(
             $base, $zip, [System.IO.Compression.CompressionLevel]::Optimal, $true
         )
     } finally {
-        Remove-Item $root -Recurse -Force
+        Remove-Item -LiteralPath $root -Recurse -Force
     }
 
     # Check the zip itself, not the folder it was made from
@@ -375,6 +426,11 @@ function Get-ChangelogLines([string] $version) {
     return , $lines
 }
 
+# A title as plain text in Markdown, which GitHub renders the notes in: a * or _ in it would set text in italics
+function ConvertTo-MarkdownText([string] $text) {
+    return [regex]::Replace($text, '[\\`*_\[\]<>|~#]', { param($m) '\' + $m.Value })
+}
+
 # The release's description from the template. The fallback for a version without marked notes lives in the template,
 # on a line that starts with {no-changes}, so the Chinese text stays out of this file.
 function Get-Notes([string] $version, $changelog) {
@@ -382,7 +438,7 @@ function Get-Notes([string] $version, $changelog) {
     $path = (Resolve-Path $NotesFile).Path
     $text = [System.IO.File]::ReadAllText($path, [System.Text.Encoding]::UTF8).Replace("`r`n", "`n")
     $text = $text.Replace('{version}', $version)
-    $lines = @($changelog | ForEach-Object { "- $_" })
+    $lines = @($changelog | ForEach-Object { "- $(ConvertTo-MarkdownText $_)" })
     if ($lines.Count) {
         $text = [regex]::Replace($text, '(?m)^\{no-changes\}.*(\n|$)', '')
         $text = $text.Replace('{changes}', ($lines -join "`n"))
@@ -405,6 +461,16 @@ function Get-TagVersion([string] $tag) {
     return $null
 }
 
+# The commit that a tag of the repository points at, through annotated tags, or $null for anything else
+function Get-TaggedCommit($ref) {
+    $object = $ref.object
+    for ($hop = 0; $hop -lt 5 -and $object -and [string]$object.type -eq 'tag'; $hop++) {
+        $object = (Invoke-GitHub GET "/repos/$Repo/git/tags/$($object.sha)").Data.object
+    }
+    if (-not $object -or [string]$object.type -ne 'commit') { return $null }
+    return [string]$object.sha
+}
+
 # The asset an earlier run uploaded completely: GitHub leaves a failed upload behind in the state "starter". Newer
 # answers also carry the file's SHA256 as "digest", which then has to be this zip's.
 function Test-GoodAsset($asset, $zip) {
@@ -418,6 +484,10 @@ function Send-Zip($release, $zip) {
     # stand-in name its own
     $url = ([string]$release.upload_url) -replace '\{[^}]*\}$', ''
     $url = "$($url)?name=$([Uri]::EscapeDataString($zip.Name))"
+    $target = New-Object Uri $url
+    if (-not (Test-LoginHost $target 'uploads.github.com')) {
+        throw "GitHub named $($target.Host) to upload to, which the login is not sent to."
+    }
     $answer = Invoke-GitHub POST $url $null @() $zip.Bytes 'application/zip'
     $asset = $answer.Data
     if ($answer.Code -ne 201 -or -not $asset) { throw "Uploading the zip answered $($answer.Code), not 201." }
@@ -476,11 +546,17 @@ try {
     Write-Step "Looking for release $tag on $Repo"
     $published = (Invoke-GitHub GET "/repos/$Repo/releases/tags/$tag" $null @(404)).Data
     if ($published) {
-        if (@($published.assets) | Where-Object { [string]$_.name -eq $zip.Name }) {
+        $there = @(@($published.assets) | Where-Object { [string]$_.name -eq $zip.Name }) | Select-Object -First 1
+        if ($there -and (Test-GoodAsset $there $zip)) {
             Write-Host ""
             Write-Host "  Release $tag already has $($zip.Name); nothing was uploaded." -ForegroundColor Green
             Write-Host "  $($published.html_url)" -ForegroundColor Green
             exit 0
+        }
+        if ($there) {
+            throw ("Release $tag is published with a $($zip.Name) that is not this zip ($($there.state), " +
+                   "$($there.size) bytes, this one $($zip.Bytes.Length)). Replace it on the website, or delete" +
+                   "`n      that release and run this again.`n      $($published.html_url)")
         }
         throw ("Release $tag is published without $($zip.Name). Add the zip on the website, or delete that" +
                "`n      release and run this again.`n      $($published.html_url)")
@@ -494,6 +570,27 @@ try {
         }
     } else {
         Write-Note 'No release yet'
+    }
+
+    # GitHub makes the tag as the release is published, at the commit given, so a commit it does not have would fail
+    # only then, after the draft and the upload. A tag of that name that is there already wins over the commit given,
+    # and the release would be of whatever that points at.
+    Write-Step "Checking the commit and the tag on $Repo"
+    $commit = Invoke-GitHub GET "/repos/$Repo/commits/$($stage.Sha)" $null @(404, 422)
+    if ($commit.Code -ne 200) {
+        throw "Commit $($stage.Sha) is not on $Repo. Push it first, then run this again. Nothing was uploaded."
+    }
+    $ref = Invoke-GitHub GET "/repos/$Repo/git/ref/tags/$tag" $null @(404)
+    if ($ref.Code -eq 200) {
+        $tagged = Get-TaggedCommit $ref.Data
+        if ($tagged -ne $stage.Sha) {
+            if (-not $tagged) { $tagged = 'something that is not a commit' }
+            throw ("Tag $tag is on $Repo already, at $tagged, not at $($stage.Sha), and GitHub would release" +
+                   "`n      that. Move or delete the tag, then run this again. Nothing was uploaded.")
+        }
+        Write-Ok "Commit $($stage.Sha.Substring(0, 7)) is on GitHub, and tag $tag is there already at it"
+    } else {
+        Write-Ok "Commit $($stage.Sha.Substring(0, 7)) is on GitHub; tag $tag will be made at it"
     }
 
     # Drafts are listed only to a login that can push, which the account check made sure of
@@ -510,12 +607,7 @@ try {
         Write-Step 'Making the draft'
         $fields.tag_name = $tag
         $fields.prerelease = $false
-        try {
-            $release = (Invoke-GitHub POST "/repos/$Repo/releases" $fields).Data
-        } catch {
-            # GitHub cannot point a new tag at a commit it does not have
-            throw "$($_.Exception.Message)`n      Is commit $($stage.Sha) pushed to $($Repo)?"
-        }
+        $release = (Invoke-GitHub POST "/repos/$Repo/releases" $fields).Data
         $draftId = $release.id
         $assets = @()
         Write-Ok "Draft $($release.id) made, tag $tag at $($stage.Sha)"
@@ -557,6 +649,10 @@ try {
         Write-Host "  A draft release of $tag is on GitHub, which only the owner can see. Running this again" `
             -ForegroundColor Yellow
         Write-Host "  finishes it." -ForegroundColor Yellow
+    } elseif ($Wrote -and $NoAnswer) {
+        Write-Host "  No answer came to the draft, so it may have been made all the same, which only the owner can" `
+            -ForegroundColor Yellow
+        Write-Host "  see. Running this again finishes it." -ForegroundColor Yellow
     } else {
         Write-Host "  Nothing was put on GitHub." -ForegroundColor Yellow
     }

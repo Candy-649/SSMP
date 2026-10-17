@@ -6,7 +6,7 @@
 
 一起玩的人要装同一版。详细说明在包里的 INSTALL.txt。
 
-在中国大陆从 GitHub 下载很慢的话，npmmirror 上有同一个包（.tgz 格式，用 7-Zip 或 Windows 11 自带的解压都能打开，里面的 package 文件夹就是这些东西）：
+在中国大陆从 GitHub 下载很慢的话，npmmirror 上有同一个包（.tgz 格式，用 7-Zip 或较新的 Windows 11 自带的解压都能打开，里面的 package 文件夹就是这些东西，另外多一个 package.json 和 README.md，不用管）：
 https://registry.npmmirror.com/silksong-coop-mod/-/silksong-coop-mod-{version}.tgz
 
 ### 这一版的改动
