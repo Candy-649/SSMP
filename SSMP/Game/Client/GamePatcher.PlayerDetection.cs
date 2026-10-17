@@ -99,6 +99,12 @@ internal partial class GamePatcher {
         /// When the creature last asked it whether a player was in it (see IsNoticedBy).
         /// </summary>
         public float AskedAt = float.NegativeInfinity;
+
+        /// <summary>
+        /// Whether it is about the player of this game alone (see IsAboutTheLocalPlayer), or null while that is not
+        /// worked out yet.
+        /// </summary>
+        public bool? AboutTheLocalPlayer;
     }
 
     /// <summary>
@@ -186,6 +192,12 @@ internal partial class GamePatcher {
     /// <param name="self">The alert range being queried.</param>
     /// <returns>True when the relevant tracked player is inside this alert range and visible; otherwise false.</returns>
     private static bool OnAlertRangeIsHeroInRange(AlertRange self) {
+        // A range about the player of this game alone answers for them, also while a hit or touch of the partner is
+        // replayed: what its state machine does next, it does to this game's player
+        if (IsAboutTheLocalPlayer(self)) {
+            return IsLocalPlayerInsideAlertRange(self);
+        }
+
         // A hit or touch of the partner that is being replayed goes by what the range said in their game when they
         // struck
         if (Save.CoopHits.TryGetReplayedInRange(self, out var replayed)) {
@@ -340,6 +352,7 @@ internal partial class GamePatcher {
         } else {
             note.Parent = parent;
             note.BelongsToAnEnemy = belongs;
+            note.AboutTheLocalPlayer = null;
         }
 
         return belongs;
