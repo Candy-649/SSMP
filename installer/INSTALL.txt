@@ -46,7 +46,7 @@ A. 解压到游戏目录（N 网的包）
      Hollow Knight Silksong.exe
      winhttp.dll
      BepInEx\plugins\SSMP\SSMP.dll
-   如果解压时多出了一层文件夹（比如 silksong-coop-mod-0.4.106\BepInEx），
+   如果解压时多出了一层文件夹（比如 silksong-coop-mod-版本号\BepInEx），
    要把里面的东西挪出来，直接放在游戏目录下。
 
 5. 从 Steam 启动游戏，主菜单里有 Start Multiplayer 就装好了。
@@ -82,7 +82,7 @@ B. 双击安装（npm 的包）
 - 不需要管理员权限（除非你的游戏装在 C:\Program Files 里）。
 - 想卸载：把游戏目录里的 BepInEx 文件夹、winhttp.dll、
   doorstop_config.ini、.doorstop_version、changelog.txt
-  删掉就完全干净了。
+  删掉就完全干净了（N 网的包还会在那里放一份 INSTALL.txt，也一起删掉）。
 
 包里的 BepInEx 文件（N 网的包里是 BepInEx 文件夹和 winhttp.dll 这些，npm 的包里
 是 BepInEx_win_x64_5.4.23.4 文件夹），是 BepInEx 官方在 GitHub 上发布的原版压缩包
@@ -172,7 +172,8 @@ npm 的包会自动备份；N 网的包请按上面 A 的第 1 步自己备份�
   【这个修复已经实机验证通过】，两个人已经正常连上并一起玩过了。
   万一还卡：暂停回主菜单，然后把两边的日志都发回来。
 
-  备份脚本会自动做，位置见上面第一节。
+* 装模组之前的存档备份：npm 的包，安装脚本会自动做（位置见第一节 B）；N 网的包要自己做，
+  见第一节 A 的第 1 步。
 
 * 【从这一版开始，敌人和 Boss 才是真正同步的】
   在这之前，控制这件事的开关默认是关的，而且没有任何界面能打开它，
@@ -3302,6 +3303,8 @@ npm 的包会自动备份；N 网的包请按上面 A 的第 1 步自己备份�
 包里还有两个别人的东西：
   BouncyCastle.Cryptography.dll —— 第三方加密库，MIT 许可证，
     版权归 The Legion of the Bouncy Castle Inc.，
-    完整条款见同目录下的 LICENSE-BouncyCastle.md。
-  BepInEx_win_x64_5.4.23.4 文件夹 —— BepInEx 官方发布的原包
+    完整条款见 LICENSE-BouncyCastle.md（N 网的包里在 BepInEx\plugins\SSMP 下，
+    npm 的包里就在这份说明旁边）。
+  BepInEx 的文件（N 网的包里是 winhttp.dll 这些，和 BepInEx 文件夹里除了 plugins\SSMP
+    以外的东西；npm 的包里是 BepInEx_win_x64_5.4.23.4 文件夹）—— BepInEx 官方发布的原包
     原样解压出来的，一个字节都没有改过。
