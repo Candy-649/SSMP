@@ -285,6 +285,7 @@ internal partial class CoopSave {
         RegisterCreatureDeathHooks();
         RegisterSlidePlatformHooks();
         RegisterSpikedCogHooks();
+        RegisterDialDoorHooks();
         RegisterPodSequenceHooks();
         RegisterShownPartHooks();
         RegisterRoomLayoutHooks();
@@ -1135,6 +1136,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.SlidePlatform:
                 OnSlidePlatform(player, update);
+                break;
+            case CoopSaveUpdateKind.DialRest:
+                OnDialRest(player, update);
                 break;
             case CoopSaveUpdateKind.PodStrike:
                 OnPodStrike(player, update);

@@ -887,5 +887,13 @@ internal enum CoopSaveUpdateKind : byte {
     /// names what the ring hangs from in Scene, and StateName says "Left" for letting go. The other games hold it for
     /// them until the last player who holds it there let go.
     /// </summary>
-    RingHold
+    RingHold,
+
+    /// <summary>
+    /// A dial that levers turn a way through a room with came to rest in the sender's game (see CoopSave.DialDoors).
+    /// <see cref="CoopSaveUpdate.ItemScenes"/> and <see cref="CoopSaveUpdate.ItemIds"/> name it the way its item saves
+    /// it, and <see cref="CoopSaveUpdate.Amounts"/> holds 1 if it came to rest turned. Appended at the end, like every
+    /// kind.
+    /// </summary>
+    DialRest
 }
