@@ -77,7 +77,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     /// of that client's game, sent only while there is something to be waiting on. See
     /// <see cref="EntityUpdateType.Anticipation"/>.
     /// </summary>
-    public List<(ushort Tag, byte Number)> Anticipations { get; } = [];
+    public List<AnticipationReport> Anticipations { get; } = [];
 
     /// <summary>
     /// The scale data of the entity.
@@ -170,8 +170,12 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
             var count = System.Math.Min(Anticipations.Count, byte.MaxValue);
             packet.Write((byte) count);
             for (var i = 0; i < count; i++) {
-                packet.Write(Anticipations[i].Tag);
-                packet.Write(Anticipations[i].Number);
+                var report = Anticipations[i];
+                packet.Write(report.Tag);
+                packet.Write(report.Number);
+                packet.Write(report.Since);
+                packet.Write(report.PushedX);
+                packet.Write(report.PushedY);
             }
         }
     }
@@ -214,7 +218,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
             var count = packet.ReadByte();
             for (var i = 0; i < count; i++) {
                 var tag = packet.ReadUShort();
-                Anticipations.Add((tag, packet.ReadByte()));
+                var number = packet.ReadByte();
+                var since = packet.ReadByte();
+                var pushedX = packet.ReadFloat();
+                Anticipations.Add(new AnticipationReport(tag, number, since, pushedX, packet.ReadFloat()));
             }
         }
     }
@@ -1204,6 +1211,31 @@ internal enum EntityUpdateType {
     ///
     /// Only sent for a while after the scene host has been told something, since the rest of the time there is
     /// nothing for anyone to be waiting on.
+    ///
+    /// Each also says how far the knockbacks of that client have pushed the entity in the scene host's game, which is
+    /// what lets the client's copy go on moving the way the entity moves by itself while it waits, rather than stand
+    /// still (see <see cref="AnticipationReport"/>).
     /// </summary>
     Anticipation
 }
+
+/// <summary>
+/// What the scene host says beside a position of an entity of the things one scene client did to it
+/// (<see cref="EntityUpdateType.Anticipation"/>).
+///
+/// The push is there because a creature does not stop walking while it is knocked back. The client plays its own
+/// knockback at once and waits for the scene host's, and the scene host's positions meanwhile have the creature
+/// walking on, and from some moment on the knockback of the scene host's own game in them too. Taking the push away
+/// leaves what the creature did by itself, which the copy goes on doing while it waits; standing still instead, it
+/// slid the whole distance at the end, and a creature that had walked on away from the player looked knocked back
+/// much further than the game ever does (USER 10-18, "看起来就像击退了很多一样").
+/// </summary>
+/// <param name="Tag">The tag of that client's game.</param>
+/// <param name="Number">The number of the last thing it did which the position has the whole of in it, or zero.</param>
+/// <param name="Since">
+/// The number that the scene host started counting the push from, which tells one count from the next: the count
+/// starts again from nothing when the scene host has had nothing of that client's to answer for a while.
+/// </param>
+/// <param name="PushedX">How far the knockbacks of that client have pushed the entity across since then.</param>
+/// <param name="PushedY">How far they have pushed it up since then.</param>
+internal readonly record struct AnticipationReport(ushort Tag, byte Number, byte Since, float PushedX, float PushedY);

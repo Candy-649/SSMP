@@ -391,6 +391,64 @@ internal class PredictiveInterpolation : MonoBehaviour {
     }
 
     /// <summary>
+    /// Works out how fast an object goes from one more step of it, read as a step between two positions of the sender
+    /// is (SetNewState): one too small to be moving at all stops it, and any other blends into how fast it went.
+    /// </summary>
+    /// <param name="velocity">How fast it went before the step.</param>
+    /// <param name="step">The step.</param>
+    /// <param name="ticks">How many ticks of the sender the step took.</param>
+    public Vector3 ReadVelocity(Vector3 velocity, Vector3 step, int ticks) {
+        if (step.sqrMagnitude < minPredictionSpeedSq) {
+            return Vector3.zero;
+        }
+
+        var instant = step / (Mathf.Max(1, ticks) * serverDeltaTime);
+        if (instant.sqrMagnitude > maxProjectedSpeed * maxProjectedSpeed) {
+            instant = instant.normalized * maxProjectedSpeed;
+        }
+
+        return Vector3.Lerp(velocity, instant, velocityBlendFactor);
+    }
+
+    /// <summary>
+    /// Takes a position of the sender as where the object is now, going on at the given velocity, and keeps where the
+    /// object is standing as what it looks like, so that the distance between the two is smoothed away.
+    ///
+    /// For the end of the wait on a knockback that the local game played first (Entity.UpdatePosition). The copy went
+    /// on moving by itself meanwhile, the way the sender's positions showed the creature going without the knockback,
+    /// and that is the velocity it goes on at. Worked out the usual way instead, from the last position taken before
+    /// the wait, it would have the whole of the knockback in it and slide the copy on past where it stops.
+    /// </summary>
+    /// <param name="position">The position.</param>
+    /// <param name="velocity">How fast and which way the object goes on from it.</param>
+    public void Rebase(Vector3 position, Vector3 velocity) {
+        EnsureTransformCached();
+
+        _hasNewServerData = true;
+
+        // Further from where the copy stands than smoothing can carry it in time is a jump either way
+        if (!_isInitialized || _predictionDisabled ||
+            (position - _cachedTransform.position).sqrMagnitude > snapThresholdSq) {
+            _isInitialized = true;
+            ForceSnap(position);
+            return;
+        }
+
+        if (velocity.sqrMagnitude > maxProjectedSpeed * maxProjectedSpeed) {
+            velocity = velocity.normalized * maxProjectedSpeed;
+        }
+
+        _visualOffset = _cachedTransform.position - position;
+        _visualOffsetVelocity = Vector3.zero;
+        _velocity = velocity;
+
+        _lastServerPosition = position;
+        _logicalPosition = position;
+        _timeSinceLastPacket = 0f;
+        _lastUpdateTime = Time.time;
+    }
+
+    /// <summary>
     /// How far something may be moved in one go before it is worth writing down, in units.
     ///
     /// About the width of a player. Below that nobody can see a jump at all; above it, it is the thing being

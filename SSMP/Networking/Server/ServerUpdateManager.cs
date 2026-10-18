@@ -385,9 +385,9 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// Update how far the scene host has got through what the scene clients did to an entity before telling it.
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>
-    /// <param name="stamps">The number of the last thing the scene host has taken in of each scene client, by the tag
-    /// of that client's game.</param>
-    public void UpdateEntityAnticipation(ushort entityId, IReadOnlyList<(ushort Tag, byte Number)> stamps) {
+    /// <param name="stamps">The number of the last thing the scene host has taken in of each scene client, and how far
+    /// that client's knockbacks have pushed the entity, by the tag of that client's game.</param>
+    public void UpdateEntityAnticipation(ushort entityId, IReadOnlyList<AnticipationReport> stamps) {
         lock (Lock) {
             var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ClientUpdatePacketId.EntityUpdate);
             entityUpdate!.UpdateTypes.Add(EntityUpdateType.Anticipation);

@@ -146,6 +146,12 @@ internal partial class Entity {
     private float _outstandingExpiry;
 
     /// <summary>
+    /// How the copy goes on while the wait for <see cref="_outstandingAnticipation"/> is for a knockback that the local
+    /// game played first, or null while it is for nothing like that (see <see cref="BeginKnockbackAnticipation"/>).
+    /// </summary>
+    private KnockbackWait? _knockbackWait;
+
+    /// <summary>
     /// What the scene host has been told of the things scene clients did to this entity, one for each game that told
     /// it, by the tag that game puts on what it asks (see <see cref="RequestTag"/>). Every position goes to everyone in
     /// the room, and each game takes only what is under its own tag: with more than one other player there, one game
@@ -1633,17 +1639,17 @@ internal partial class Entity {
 
                 // Beside every position for a while rather than only the once, for the same reason as above, and
                 // then not at all: nobody can still be waiting on it by then, since waiting gives up long before.
+                // Also while this game is still at it, without a number, for how far it has pushed the entity so far:
+                // the player waiting on it takes that out of the position, which leaves what the entity did by itself
                 if (_stamps.Count > 0) {
-                    var stamps = new List<(ushort Tag, byte Number)>();
+                    var reports = new List<AnticipationReport>(_stamps.Count);
                     foreach (var stamp in _stamps) {
-                        if (stamp.Incorporated != 0 && Time.unscaledTime < stamp.StampUntil) {
-                            stamps.Add((stamp.Tag, stamp.Incorporated));
-                        }
+                        var number = Time.unscaledTime < stamp.StampUntil ? stamp.Incorporated : (byte) 0;
+                        var pushed = stamp.Pushed;
+                        reports.Add(new AnticipationReport(stamp.Tag, number, stamp.Since, pushed.x, pushed.y));
                     }
 
-                    if (stamps.Count > 0) {
-                        _netClient.UpdateManager.UpdateEntityAnticipation(Id, stamps);
-                    }
+                    _netClient.UpdateManager.UpdateEntityAnticipation(Id, reports);
                 }
             }
 
@@ -3474,7 +3480,29 @@ internal partial class Entity {
         _outstandingAnticipation = _nextAnticipation;
         _outstandingExpiry = Time.unscaledTime + AnticipationHoldTime;
 
+        // What is waited for now is this, which moves the copy some other way if it moves it at all
+        _knockbackWait = null;
+
         return _outstandingAnticipation;
+    }
+
+    /// <summary>
+    /// Takes the number for a knockback of the local player's that the local game has just played on the copy, as
+    /// <see cref="BeginAnticipation"/> does, and has the copy go on moving by itself while it waits for the scene host
+    /// to say it has it. The creature does not stop walking while it is knocked back: the scene host's positions show
+    /// it walking on, and from some moment on knocked back by the scene host's own game as well, which says how far
+    /// it has pushed it. What is left once that push is taken away is what the copy goes on doing
+    /// (<see cref="GoOnWhileKnockedBack"/>); standing still instead, it slid the whole way at the end of the wait, and
+    /// a creature that had walked on away from the player looked knocked back much further than the game ever does.
+    /// </summary>
+    /// <returns>The number to send with it.</returns>
+    public byte BeginKnockbackAnticipation() {
+        // A knockback in the middle of the wait on another goes on from where that one has got to
+        var wait = IsAnticipating() ? _knockbackWait : null;
+        var anticipation = BeginAnticipation();
+        _knockbackWait = wait ?? new KnockbackWait();
+
+        return anticipation;
     }
 
     /// <summary>
@@ -3482,6 +3510,7 @@ internal partial class Entity {
     /// </summary>
     public void EndAnticipation() {
         _outstandingAnticipation = 0;
+        _knockbackWait = null;
     }
 
     /// <summary>
@@ -3515,13 +3544,39 @@ internal partial class Entity {
 
         var stamp = _stamps.Find(other => other.Tag == tag);
         if (stamp == null) {
-            stamp = new AnticipationStamp(tag);
+            stamp = new AnticipationStamp(tag, anticipation);
             _stamps.Add(stamp);
         }
 
         stamp.Pending = anticipation;
         stamp.PendingSinceStep = MonoBehaviourUtil.FixedStep;
         stamp.PendingSettledAt = Time.unscaledTime + Mathf.Min(settleTime, AnticipationSettleCap);
+    }
+
+    /// <summary>
+    /// Notes that a knockback of a scene client's, which this game plays for it as the scene host, pushed the entity
+    /// this far on a step of physics, for the player of that client to tell the push apart from what the entity did by
+    /// itself (see <see cref="AnticipationReport"/>).
+    /// </summary>
+    /// <param name="tag">The tag of that client's game.</param>
+    /// <param name="push">How far it pushed the entity.</param>
+    /// <returns>
+    /// Whether it was noted: not once this game no longer runs the entity, or has nothing of that client's left to
+    /// answer for.
+    /// </returns>
+    public bool NotePushed(ushort tag, Vector2 push) {
+        if (_isControlled) {
+            return false;
+        }
+
+        foreach (var stamp in _stamps) {
+            if (stamp.Tag == tag) {
+                stamp.Pushed += push;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -3537,8 +3592,20 @@ internal partial class Entity {
     /// <see cref="NoteAnticipation"/>).
     /// </summary>
     /// <param name="tag">The tag of that client's game.</param>
-    private sealed class AnticipationStamp(ushort tag) {
+    /// <param name="since">The number of the first thing of that client's it was told of.</param>
+    private sealed class AnticipationStamp(ushort tag, byte since) {
         public ushort Tag { get; } = tag;
+
+        /// <summary>
+        /// The number of the first thing of that client's this was told of, which <see cref="Pushed"/> counts from.
+        /// </summary>
+        public byte Since { get; } = since;
+
+        /// <summary>
+        /// How far the knockbacks of that client, which this game played for it, have pushed the entity since this was
+        /// started (see <see cref="NotePushed"/>).
+        /// </summary>
+        public Vector2 Pushed { get; set; }
 
         /// <summary>
         /// The number of the last thing it did that the scene host has been told about but which nothing it has sent
@@ -3576,11 +3643,51 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// How the copy goes on while the local game waits on a knockback that it played first (see
+    /// <see cref="BeginKnockbackAnticipation"/>).
+    /// </summary>
+    private sealed class KnockbackWait {
+        /// <summary>
+        /// Whether a position of the scene host has been heard since the wait began.
+        /// </summary>
+        public bool Heard { get; set; }
+
+        /// <summary>
+        /// How far the knockbacks of the local player have pushed the creature in the scene host's game since the wait
+        /// began, by the positions heard.
+        /// </summary>
+        public Vector2 Pushed { get; set; }
+
+        /// <summary>
+        /// The number the scene host's count of the push that came with the last position heard is counted from, or
+        /// zero when that position came with none (see <see cref="AnticipationReport.Since"/>).
+        /// </summary>
+        public byte PushedSince { get; set; }
+
+        /// <summary>
+        /// What that count said.
+        /// </summary>
+        public Vector2 PushedCount { get; set; }
+
+        /// <summary>
+        /// Where the creature was in the scene host's game without the local player's knockbacks, by the last position
+        /// heard, or null when the copy has nothing to go on from: no position heard yet, or something else moved it.
+        /// </summary>
+        public Vector2? OwnFrom { get; set; }
+
+        /// <summary>
+        /// How fast the creature went by itself, by those positions.
+        /// </summary>
+        public Vector3 OwnVelocity { get; set; }
+    }
+
+    /// <summary>
     /// Forgets both sides of this, for an entity that is changing hands or starting again. A number from before the
     /// change means nothing after it: the game that would have answered it is not the one answering now.
     /// </summary>
     private void ResetAnticipation() {
         _outstandingAnticipation = 0;
+        _knockbackWait = null;
         _stamps.Clear();
         _wasMovedHere = false;
     }
@@ -3637,7 +3744,7 @@ internal partial class Entity {
     /// </summary>
     /// <param name="stamps">What the scene host said it had taken in of what each game did, by the tag of that game,
     /// or null if it said nothing.</param>
-    private bool AcceptsWhileAnticipating(IReadOnlyList<(ushort Tag, byte Number)>? stamps) {
+    private bool AcceptsWhileAnticipating(IReadOnlyList<AnticipationReport>? stamps) {
         if (!IsAnticipating()) {
             return true;
         }
@@ -3649,8 +3756,9 @@ internal partial class Entity {
         // Only what is under this game's own tag says anything of what this game did. Compared by the sign of the
         // difference in the size the numbers are kept in, so that the step from the largest back round to one reads
         // as one forward rather than as the whole way back
-        foreach (var (tag, stamp) in stamps) {
-            if (tag == RequestTag && stamp != 0 && (sbyte) (stamp - _outstandingAnticipation) >= 0) {
+        foreach (var stamp in stamps) {
+            if (stamp.Tag == RequestTag && stamp.Number != 0 &&
+                (sbyte) (stamp.Number - _outstandingAnticipation) >= 0) {
                 _outstandingAnticipation = 0;
 
                 return true;
@@ -3672,7 +3780,7 @@ internal partial class Entity {
     public void UpdatePosition(
         Math_Vector3 position,
         ushort sequence,
-        IReadOnlyList<(ushort Tag, byte Number)>? anticipation
+        IReadOnlyList<AnticipationReport>? anticipation
     ) {
         // Newer when heard just before the state of the room (see YieldsToNewer)
         if (YieldsToNewer(HeardPosition)) {
@@ -3716,14 +3824,108 @@ internal partial class Entity {
         // hurts. They are counted and dropped until the scene host says it has taken that in, and the count goes
         // with the first position taken afterwards so that the speed read out of it covers the right stretch of
         // time rather than a single tick.
+        //
+        // For a knockback that the local game played first, they still say what the creature did by itself meanwhile,
+        // which the copy goes on doing (GoOnWhileKnockedBack), and the first position taken is taken from where the
+        // copy stands, going on at the speed the creature went by itself: the speed read out of the stretch of the
+        // wait would have the whole of the knockback in it, and slid the copy on past where it stops.
+        var knockbackWait = _knockbackWait;
         if (!AcceptsWhileAnticipating(anticipation)) {
             _positionsHeldBack += packetsCovered;
+            if (knockbackWait != null) {
+                GoOnWhileKnockedBack(knockbackWait, unityPos, anticipation, packetsCovered, positionInterpolation);
+            }
+
+            return;
+        }
+
+        if (knockbackWait != null) {
+            _knockbackWait = null;
+            GoOnWhileKnockedBack(knockbackWait, unityPos, anticipation, packetsCovered, positionInterpolation);
+            positionInterpolation.Rebase(unityPos, knockbackWait.OwnVelocity);
+            _positionsHeldBack = 0;
 
             return;
         }
 
         positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + packetsCovered);
         _positionsHeldBack = 0;
+    }
+
+    /// <summary>
+    /// Moves the copy on by what the creature did by itself, as a position of the scene host's shows it that arrived
+    /// while the local game waits on a knockback it played first (see <see cref="BeginKnockbackAnticipation"/>).
+    /// </summary>
+    /// <param name="wait">The wait.</param>
+    /// <param name="position">The position.</param>
+    /// <param name="reports">What the scene host said beside it of what each game did, or null if nothing.</param>
+    /// <param name="packetsCovered">How many packets of the scene host's the step since the last position took.</param>
+    /// <param name="interpolation">What moves the copy otherwise, which reads how fast it goes.</param>
+    private void GoOnWhileKnockedBack(
+        KnockbackWait wait,
+        Vector3 position,
+        IReadOnlyList<AnticipationReport>? reports,
+        int packetsCovered,
+        PredictiveInterpolation interpolation
+    ) {
+        AnticipationReport? report = null;
+        if (reports != null) {
+            foreach (var other in reports) {
+                if (other.Tag == RequestTag) {
+                    report = other;
+                    break;
+                }
+            }
+        }
+
+        // How far the local player's knockbacks have pushed the creature over there since the wait began. A count
+        // that is new since the last position started from nothing, and a position with none was sent while nothing of
+        // the local player's was going on there, so that nothing of theirs moved it since the last one
+        if (report is { } told) {
+            var count = new Vector2(told.PushedX, told.PushedY);
+            if (told.Since == wait.PushedSince) {
+                wait.Pushed += count - wait.PushedCount;
+            } else if (wait.Heard) {
+                wait.Pushed += count;
+            }
+
+            wait.PushedSince = told.Since;
+            wait.PushedCount = count;
+        } else {
+            wait.PushedSince = 0;
+        }
+
+        wait.Heard = true;
+
+        // What is left is what the creature did by itself, which the copy does too, unless something else moves it
+        // here: its own FSM run for the local player, how it set off, or a pull of the local player's
+        var own = new Vector2(position.x, position.y) - wait.Pushed;
+        if (_runHere != null || MovesByItself() || Time.time < _pulledHereUntil) {
+            wait.OwnFrom = null;
+            return;
+        }
+
+        if (wait.OwnFrom is { } from) {
+            var step = own - from;
+            MoveCopyBy(step);
+            wait.OwnVelocity = interpolation.ReadVelocity(wait.OwnVelocity, step, packetsCovered);
+        }
+
+        wait.OwnFrom = own;
+    }
+
+    /// <summary>
+    /// Moves the copy by a step the way its knockback moves it (Recoil): its body if it has one in the physics, which
+    /// carries the object along on the next step of physics, and the object itself if not.
+    /// </summary>
+    private void MoveCopyBy(Vector2 step) {
+        var copy = Object.Client;
+        if (copy.activeInHierarchy && copy.TryGetComponent<Rigidbody2D>(out var body) && body.simulated) {
+            body.position += step;
+            return;
+        }
+
+        copy.transform.position += new Vector3(step.x, step.y, 0f);
     }
 
     /// <summary>
