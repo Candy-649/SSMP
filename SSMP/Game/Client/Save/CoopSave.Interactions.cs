@@ -1389,6 +1389,18 @@ internal partial class CoopSave {
                 continue;
             }
 
+            // Where the beast that carries the player between the stations is: the local player's own ride put it at
+            // the station they go to, and the beast comes out to them there only if it is there, which it looks at as
+            // they arrive. A partner who rode somewhere else at the same time had put it at theirs, and the local
+            // player arrived to no beast, nor was thrown off its back. Their change waits for the local ride to be over
+            if (name == BeastLocationName && playerData.GetBool(TravellingName)) {
+                _heldBeastLocation = (value, _flagSequences.TryGetValue(name, out var stamp) ? stamp : null);
+                Logger.Info(
+                    "Holding where the partner's ride took the beast between the stations until the local ride is over"
+                );
+                continue;
+            }
+
             applied.Add(name);
             var field = GetPlayerDataField(name);
             if (field?.FieldType == typeof(bool)) {
@@ -1419,6 +1431,52 @@ internal partial class CoopSave {
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// The flag of the player data that says at which station the beast that carries the player between the stations
+    /// is, which both saves share.
+    /// </summary>
+    private const string BeastLocationName = "FastTravelNPCLocation";
+
+    /// <summary>
+    /// The flag of the player data that says that the local player rides the beast between the stations, from the
+    /// station they leave until the beast has let them off at the other.
+    /// </summary>
+    private const string TravellingName = "travelling";
+
+    /// <summary>
+    /// A partner's change of where the beast between the stations is, with its stamp, held while the local player rides
+    /// it (see <see cref="TakeHeldBeastLocation"/>), or null.
+    /// </summary>
+    private (int Value, ChangeStamp? Stamp)? _heldBeastLocation;
+
+    /// <summary>
+    /// Takes a partner's change of where the beast between the stations is, held while the local player rode it (see
+    /// <see cref="ApplyInteractionFlags"/>), once the ride is over and the beast has let them off - unless the local
+    /// game moved the beast again since, which every game keeps then.
+    /// </summary>
+    private void TakeHeldBeastLocation() {
+        if (_heldBeastLocation is not { } held || PlayerData.instance is not { } playerData ||
+            playerData.GetBool(TravellingName)) {
+            return;
+        }
+
+        _heldBeastLocation = null;
+        if (held.Stamp is { } stamp && (!_flagSequences.TryGetValue(BeastLocationName, out var now) ||
+                                        now.Count != stamp.Count || now.Key != stamp.Key)) {
+            return;
+        }
+
+        if (GetPlayerDataField(BeastLocationName) is { FieldType.IsEnum: true } field &&
+            Convert.ToInt32(field.GetValue(playerData)) != held.Value) {
+            field.SetValue(playerData, Enum.ToObject(field.FieldType, held.Value));
+        }
+
+        RememberStoryValues([BeastLocationName]);
+        Logger.Info(
+            "Took where the partner's ride took the beast between the stations, now that the local ride is over"
+        );
     }
 
     /// <summary>

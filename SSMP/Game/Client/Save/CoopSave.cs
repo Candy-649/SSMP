@@ -333,6 +333,7 @@ internal partial class CoopSave {
             // First, so that what the partner did before the local game came back to a room is in the save before
             // anything of the local save is looked at or sent
             TakeUpdatesOutOfRoom();
+            TakeHeldBeastLocation();
             UpdateSession(hero);
         } catch (Exception e) {
             if (!_updateFailed) {

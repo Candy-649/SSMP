@@ -246,6 +246,7 @@ internal partial class CoopSave {
         _checkPlayTime = null;
         _flagSequences.Clear();
         _wishSequences.Clear();
+        _heldBeastLocation = null;
         ResetTrapdoors();
         ResetTollBenches();
     }
