@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.Cil;
@@ -406,6 +407,19 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// What each field of an FSM action that is pointed at a player held before, and the object of its own that it was
+    /// pointed with, by action and field: what it held is the FSM's own variable, or the object put in the field in the
+    /// editor. Each time the action is pointed, the field is decided again from what it held (see
+    /// <see cref="RetargetFsmActionGameObjectFields"/>): pointed at the player while that holds a player or nothing,
+    /// and given back while it holds anything else. Pointed for good the first time, the field of a variable that
+    /// holds the player at one time and something else at another - the creature's opponent, a place it flies to -
+    /// went on aiming at the player after.
+    /// </summary>
+    private static readonly
+        ConditionalWeakTable<FsmStateAction, Dictionary<FieldInfo, (FsmGameObject Held, FsmGameObject Pointed)>>
+        PointedAims = new();
+
+    /// <summary>
     /// How many times an action of a state machine has had the object it aims at written into it.
     ///
     /// Said in the same line as the target, because the two failures look identical from outside the game and this is
@@ -619,8 +633,8 @@ internal partial class GamePatcher {
 
                 foreach (var field in GetFsmGameObjectFields(action.GetType())) {
                     if (field.GetValue(action) is FsmGameObject aim && aim.Value == player &&
-                        CanRetargetFsmGameObjectField(action, field, aim)) {
-                        field.SetValue(action, new FsmGameObject { Value = standing });
+                        CanRetargetFsmGameObjectField(action, field, HeldAim(action, field, aim))) {
+                        PointAim(action, field, null, aim, standing);
                         turned++;
                     }
                 }
@@ -628,8 +642,9 @@ internal partial class GamePatcher {
                 foreach (var field in GetFsmOwnerDefaultFields(action.GetType())) {
                     if (field.GetValue(action) is FsmOwnerDefault {
                             OwnerOption: OwnerDefaultOption.SpecifyGameObject, GameObject: { } aim
-                        } pair && aim.Value == player && CanRetargetFsmGameObjectField(action, field, aim)) {
-                        pair.GameObject = new FsmGameObject { Value = standing };
+                        } pair && aim.Value == player &&
+                        CanRetargetFsmGameObjectField(action, field, HeldAim(action, field, aim))) {
+                        PointAim(action, field, pair, aim, standing);
                         turned++;
                     }
                 }
@@ -1142,7 +1157,8 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Rewrites target-specific <see cref="FsmGameObject"/> fields on a target-consuming FSM action to direct
-    /// approved-target references, detached from shared FSM variables such as <c>Hero</c>.
+    /// approved-target references, detached from shared FSM variables such as <c>Hero</c>, or gives a field back what
+    /// it held, decided from that each time (see <see cref="PointedAims"/>).
     /// </summary>
     /// <param name="action">The active FSM action to retarget.</param>
     /// <param name="approvedTarget">The approved multiplayer target for the owning enemy.</param>
@@ -1152,19 +1168,15 @@ internal partial class GamePatcher {
         GameObject approvedTarget,
         bool onlyWherePlayer = false
     ) {
-        var fields = GetFsmGameObjectFields(action.GetType());
-
-        foreach (var field in fields) {
-            var fsmGameObject = field.GetValue(action) as FsmGameObject;
-            if (fsmGameObject == null) {
+        foreach (var field in GetFsmGameObjectFields(action.GetType())) {
+            if (field.GetValue(action) is not FsmGameObject current) {
                 continue;
             }
 
-            if (!CanRetargetFsmGameObjectField(action, field, fsmGameObject)) {
-                continue;
-            }
-
-            ReplaceFsmGameObjectFieldWithDirectTarget(action, field, fsmGameObject, approvedTarget, onlyWherePlayer);
+            var held = HeldAim(action, field, current);
+            var aims = CanRetargetFsmGameObjectField(action, field, held) &&
+                       ShouldWriteDirectTarget(action, held, approvedTarget, onlyWherePlayer);
+            PointAim(action, field, null, current, aims ? approvedTarget : null);
         }
 
         // Some actions do not keep the object they are about in a plain variable at all. They keep it in the pair
@@ -1179,72 +1191,86 @@ internal partial class GamePatcher {
 
             // Left alone when it means the owner: that is the enemy talking about itself, and pointing it at a
             // player would have it read its own position as the player position.
-            if (owner.OwnerOption == OwnerDefaultOption.UseOwner) {
+            if (owner.OwnerOption == OwnerDefaultOption.UseOwner || owner.GameObject is not { } current) {
                 continue;
             }
 
-            var ownerGameObject = owner.GameObject;
-            if (ownerGameObject == null || !CanRetargetFsmGameObjectField(action, field, ownerGameObject)) {
-                continue;
-            }
-
-            ReplaceOwnerDefaultWithDirectTarget(action, owner, ownerGameObject, approvedTarget, onlyWherePlayer);
+            var held = HeldAim(action, field, current);
+            var aims = CanRetargetFsmGameObjectField(action, field, held) &&
+                       ShouldWriteDirectTarget(action, held, approvedTarget, onlyWherePlayer);
+            PointAim(action, field, owner, current, aims ? approvedTarget : null);
         }
     }
 
     /// <summary>
-    /// Replaces a target-specific FSM action field with a direct approved-target reference.
-    /// This prevents vanilla PlayMaker variables such as <c>Hero</c> from fighting the multiplayer retargeter.
+    /// What a field of an action held before it was pointed at a player (see <see cref="PointedAims"/>), or what it
+    /// holds now if it is not pointed.
     /// </summary>
-    /// <param name="action">The action that owns the target field.</param>
-    /// <param name="field">The reflected target field.</param>
-    /// <param name="fsmGameObject">The current field value.</param>
-    /// <param name="approvedTarget">The approved multiplayer target.</param>
-    /// <param name="onlyWherePlayer">Whether it is rewritten only when it points at a player.</param>
-    private static void ReplaceFsmGameObjectFieldWithDirectTarget(
+    /// <param name="action">The action.</param>
+    /// <param name="field">The field, of its own object or of an owner-or-this-one pair.</param>
+    /// <param name="current">What the field holds now.</param>
+    private static FsmGameObject HeldAim(FsmStateAction action, FieldInfo field, FsmGameObject current) {
+        return PointedAims.TryGetValue(action, out var aims) && aims.TryGetValue(field, out var aim) &&
+               ReferenceEquals(aim.Pointed, current)
+            ? aim.Held
+            : current;
+    }
+
+    /// <summary>
+    /// Points a field of an action at a player with an object of its own, kept for the field from then on, and keeps
+    /// what the field held; or, for no player, gives the field back what it held (see <see cref="PointedAims"/>).
+    /// This prevents vanilla PlayMaker variables such as <c>Hero</c> from fighting the multiplayer retargeter. A field
+    /// that holds something else than the object it was pointed with, put there since, is taken as it is now.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="field">The field.</param>
+    /// <param name="owner">The owner-or-this-one pair that the field holds, or null for a field of its own
+    /// object.</param>
+    /// <param name="current">What the field holds now.</param>
+    /// <param name="player">The player, or null.</param>
+    private static void PointAim(
         FsmStateAction action,
         FieldInfo field,
-        FsmGameObject fsmGameObject,
-        GameObject approvedTarget,
-        bool onlyWherePlayer
+        FsmOwnerDefault? owner,
+        FsmGameObject current,
+        GameObject? player
     ) {
-        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget, onlyWherePlayer)) {
-            return;
+        // What the field held, while it holds what it was pointed with
+        PointedAims.TryGetValue(action, out var aims);
+        FsmGameObject? held = null;
+        if (aims != null && aims.TryGetValue(field, out var aim) && ReferenceEquals(aim.Pointed, current)) {
+            held = aim.Held;
         }
 
-        field.SetValue(
-            action, new FsmGameObject {
-                Value = approvedTarget
+        if (player == null) {
+            if (aims != null && aims.Remove(field) && held != null) {
+                Set(held);
             }
-        );
 
-        _targetsWrittenIntoActions++;
-    }
-
-    /// <summary>
-    /// Points the second half of an owner-or-this-one pair at the approved target.
-    /// </summary>
-    /// <param name="action">The action that owns the pair.</param>
-    /// <param name="owner">The pair to write into.</param>
-    /// <param name="fsmGameObject">What the pair currently points at.</param>
-    /// <param name="approvedTarget">The approved multiplayer target.</param>
-    /// <param name="onlyWherePlayer">Whether it is rewritten only when it points at a player.</param>
-    private static void ReplaceOwnerDefaultWithDirectTarget(
-        FsmStateAction action,
-        FsmOwnerDefault owner,
-        FsmGameObject fsmGameObject,
-        GameObject approvedTarget,
-        bool onlyWherePlayer
-    ) {
-        if (!ShouldWriteDirectTarget(action, fsmGameObject, approvedTarget, onlyWherePlayer)) {
             return;
         }
 
-        owner.GameObject = new FsmGameObject {
-            Value = approvedTarget
-        };
+        if (held != null) {
+            if (current.Value != player) {
+                current.Value = player;
+                _targetsWrittenIntoActions++;
+            }
 
+            return;
+        }
+
+        var own = new FsmGameObject { Value = player };
+        PointedAims.GetOrCreateValue(action)[field] = (current, own);
+        Set(own);
         _targetsWrittenIntoActions++;
+
+        void Set(FsmGameObject value) {
+            if (owner != null) {
+                owner.GameObject = value;
+            } else {
+                field.SetValue(action, value);
+            }
+        }
     }
 
     /// <summary>
@@ -1285,12 +1311,10 @@ internal partial class GamePatcher {
             return false;
         }
 
-        var isTargetVariable = !string.IsNullOrEmpty(variableName) && IsTargetVariableName(variableName);
-        var isHeroLikeValue =
-            currentTarget == null || currentTarget == approvedTarget ||
-            PlayerTargetRegistry.IsHeroLikeObject(currentTarget);
-
-        return isTargetVariable || isHeroLikeValue;
+        // A player, or nothing yet. A variable named like a target that holds anything else is about that: the
+        // creature an ally fights, the one a pilgrim goes for, the marker a boss aims by
+        return currentTarget == null || currentTarget == approvedTarget ||
+               PlayerTargetRegistry.IsHeroLikeObject(currentTarget);
     }
 
     /// <summary>

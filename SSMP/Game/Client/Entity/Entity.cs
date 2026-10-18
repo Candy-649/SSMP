@@ -2588,6 +2588,10 @@ internal partial class Entity {
     /// through, was empty, and all that read it went after no one - a flyer taken over in the air flew off for good
     /// rather than come down on a player. What aims at the player is turned to whom the creature goes after
     /// (GamePatcher.EnemyTargeting), from there as from anywhere.
+    ///
+    /// Only a variable that the FSM itself puts the player in somewhere (GetHero, or SetGameObject from Hero), and
+    /// never asks whether it holds anything: some keep in a variable named like that the creature an ally fights or the
+    /// place a worker flies to, found as they go, and go one way or another by its being empty.
     /// </summary>
     /// <param name="fsm">The FSM of the room's own creature.</param>
     private void FillEmptyPlayerVariables(PlayMakerFSM fsm) {
@@ -2596,9 +2600,39 @@ internal partial class Entity {
             return;
         }
 
-        List<string>? filled = null;
+        HashSet<string>? empty = null;
         foreach (var variable in fsm.FsmVariables.GameObjectVariables) {
             if (variable.Value == null && GamePatcher.IsTargetVariableName(variable.Name)) {
+                (empty ??= []).Add(variable.Name);
+            }
+        }
+
+        if (empty == null) {
+            return;
+        }
+
+        var fromPlayer = new HashSet<string>();
+        var asked = new HashSet<string>();
+        foreach (var state in fsm.FsmStates) {
+            foreach (var action in state.Actions) {
+                switch (action) {
+                    case GetHero { storeResult: { } stored } when empty.Contains(stored.Name):
+                        fromPlayer.Add(stored.Name);
+                        break;
+                    case SetGameObject { variable: { } set, gameObject: { UseVariable: true, Name: "Hero" } }
+                        when empty.Contains(set.Name):
+                        fromPlayer.Add(set.Name);
+                        break;
+                    default:
+                        NoteAskedAbout(action, empty, asked);
+                        break;
+                }
+            }
+        }
+
+        List<string>? filled = null;
+        foreach (var variable in fsm.FsmVariables.GameObjectVariables) {
+            if (variable.Value == null && fromPlayer.Contains(variable.Name) && !asked.Contains(variable.Name)) {
                 variable.Value = hero.gameObject;
                 (filled ??= []).Add(variable.Name);
             }
@@ -2609,6 +2643,32 @@ internal partial class Entity {
                 $"'{fsm.FsmName}' of entity {Id}, taken over, kept no player in {string.Join(", ", filled)}, and " +
                 "now keeps this game's player there"
             );
+        }
+    }
+
+    /// <summary>
+    /// Notes which of the given variables an action asks about: whether one holds anything, or the same as another
+    /// (GameObjectIsNull, GameObjectCompare, SetGameObjectIfNull and their kind), by the variables of its fields.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="names">The names of the variables.</param>
+    /// <param name="asked">Where the names it asks about go.</param>
+    private static void NoteAskedAbout(FsmStateAction? action, HashSet<string> names, HashSet<string> asked) {
+        var type = action?.GetType();
+        if (type == null || !type.Name.Contains("IsNull") && !type.Name.Contains("Compare") &&
+            !type.Name.Contains("IfNull")) {
+            return;
+        }
+
+        foreach (var field in type.GetFields(BindingFlags.Instance | BindingFlags.Public)) {
+            var aim = field.GetValue(action) switch {
+                FsmGameObject value => value,
+                FsmOwnerDefault { OwnerOption: OwnerDefaultOption.SpecifyGameObject } pair => pair.GameObject,
+                _ => null
+            };
+            if (aim is { UseVariable: true } && names.Contains(aim.Name)) {
+                asked.Add(aim.Name);
+            }
         }
     }
 
