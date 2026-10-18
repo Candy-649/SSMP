@@ -16,7 +16,13 @@ internal class ThreadUtil : MonoBehaviour {
     /// <summary>
     /// List of actions that need to be run on the Unity main thread.
     /// </summary>
-    private static readonly List<Action> ActionsToRun = new List<Action>();
+    private static List<Action> _actionsToRun = new List<Action>();
+
+    /// <summary>
+    /// The actions that run in this frame: a list that takes turns with <see cref="_actionsToRun"/>, rather than one
+    /// made anew each frame.
+    /// </summary>
+    private static List<Action> _actionsRunning = new List<Action>();
 
     /// <summary>
     /// Instantiate this static class.
@@ -33,20 +39,22 @@ internal class ThreadUtil : MonoBehaviour {
     /// <param name="action">The action to run.</param>
     public static void RunActionOnMainThread(Action action) {
         lock (Lock) {
-            ActionsToRun.Add(action);
+            _actionsToRun.Add(action);
         }
     }
 
     public void Update() {
-        List<Action> actions;
-
         lock (Lock) {
-            actions = new List<Action>(ActionsToRun);
-            ActionsToRun.Clear();
+            (_actionsToRun, _actionsRunning) = (_actionsRunning, _actionsToRun);
         }
 
-        foreach (var action in actions) {
-            action.Invoke();
+        // What hasn't run when one throws is dropped, as it was with a copy of the list made each frame
+        try {
+            foreach (var action in _actionsRunning) {
+                action.Invoke();
+            }
+        } finally {
+            _actionsRunning.Clear();
         }
     }
 }

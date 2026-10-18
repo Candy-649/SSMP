@@ -1019,6 +1019,18 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// <see cref="IsNotInLocalScene"/>, made once, as it is asked every frame of a room with a fight to get to.
+    /// </summary>
+    private Predicate<ushort>? _isNotInLocalScene;
+
+    /// <summary>
+    /// Whether the player with the given ID is gone from the server or not in the local scene.
+    /// </summary>
+    private bool IsNotInLocalScene(ushort id) {
+        return !_playerData.TryGetValue(id, out var playerData) || !playerData.IsInLocalScene;
+    }
+
+    /// <summary>
     /// Continues dialogue of bosses once the other players read it, shows shared dialogue to the local player, and
     /// starts fights of rooms with dialogue once every player got to them.
     /// </summary>
@@ -1088,9 +1100,7 @@ internal partial class BossRoomCoop {
         }
 
         foreach (var readiness in _fightReadiness.Values) {
-            readiness.Remote.RemoveWhere(id =>
-                !_playerData.TryGetValue(id, out var playerData) || !playerData.IsInLocalScene
-            );
+            readiness.Remote.RemoveWhere(_isNotInLocalScene ??= IsNotInLocalScene);
         }
 
         foreach (var pair in _heldFights.ToList()) {

@@ -214,6 +214,13 @@ internal partial class ArenaCoop {
     /// </summary>
     /// <returns>Whether the event is held back.</returns>
     private bool TryHoldBossEvent(Fsm fsm, string stateName, string eventName) {
+        // Every event of every FSM of these scenes comes here. The names of the FSM, the state and the event are looked
+        // at first, as they cost nothing, while those of the object and its scene are a new string each time
+        if (!MatchesBossStart(BossTalkEnds, fsm.Name, stateName, eventName) &&
+            !MatchesBossStart(BossStarts, fsm.Name, stateName, eventName)) {
+            return false;
+        }
+
         var gameObject = fsm.GameObject;
         if (gameObject == null) {
             return false;
@@ -266,6 +273,19 @@ internal partial class ArenaCoop {
 
         NotifyBossWait(battleScene, state, isTalkEnd);
         return true;
+    }
+
+    /// <summary>
+    /// Whether an FSM, its state and the event could be one of the given starts of boss arenas, by their names alone.
+    /// </summary>
+    private static bool MatchesBossStart(BossStart[] starts, string fsmName, string stateName, string eventName) {
+        foreach (var start in starts) {
+            if (start.StateName == stateName && start.FsmName == fsmName && start.EventNames.Contains(eventName)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

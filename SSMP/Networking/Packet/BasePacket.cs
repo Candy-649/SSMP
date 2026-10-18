@@ -16,6 +16,14 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
     /// </summary>
     public static Dictionary<byte, AddonPacketInfo> AddonPacketInfoDict { get; } = new();
 
+    // ReSharper disable once StaticMemberInGenericType
+    /// <summary>
+    /// Every packet ID, in the order of their values, which is the order of the bits of the flag in front of the data
+    /// and of the data after it. Asked of the enum once: each time costs a new array and every value boxed, and it was
+    /// asked for every packet that was read or written.
+    /// </summary>
+    private static readonly TPacketId[] PacketIds = (TPacketId[]) Enum.GetValues(typeof(TPacketId));
+
     // TODO: refactor these dictionaries into a class that contains them for readability
     /// <summary>
     /// Normal non-resend packet data.
@@ -65,14 +73,11 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
         Packet packet,
         Dictionary<TPacketId, IPacketData> packetData
     ) {
-        var enumValues = (TPacketId[]) Enum.GetValues(typeof(TPacketId));
-        var packetIdSize = (byte) enumValues.Length;
-
         return WritePacketData(
             packet,
             packetData,
-            enumValues,
-            packetIdSize
+            PacketIds,
+            (byte) PacketIds.Length
         );
     }
 
@@ -88,7 +93,7 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
     ) => WritePacketData(
         packet,
         addonPacketData.PacketData,
-        addonPacketData.PacketIdEnumerable,
+        addonPacketData.PacketIds,
         addonPacketData.PacketIdSize
     );
 
@@ -97,14 +102,14 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
     /// </summary>
     /// <param name="packet">The packet to write into.</param>
     /// <param name="packetData">The dictionary containing packet data to write in the packet.</param>
-    /// <param name="keyEnumerable">An enumerator that enumerates over all possible keys in the dictionary.</param>
+    /// <param name="keys">All possible keys in the dictionary, in the order of the bits of the flag.</param>
     /// <param name="keySpaceSize">The exact size of the key space.</param>
     /// <typeparam name="TKey">Dictionary key parameter and enumerator parameter.</typeparam>
     /// <returns>true if any of the data written was reliable; otherwise false.</returns>
     private bool WritePacketData<TKey>(
         Packet packet,
         Dictionary<TKey, IPacketData> packetData,
-        IEnumerable<TKey> keyEnumerable,
+        TKey[] keys,
         byte keySpaceSize
     ) {
         // Keep track of the bit flag in an unsigned long, which is the largest integer implicit type allowed
@@ -112,10 +117,7 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
         // Also keep track of the value of the current bit in an unsigned long
         ulong currentTypeValue = 1;
 
-        var keyEnumerator = keyEnumerable.GetEnumerator();
-        while (keyEnumerator.MoveNext()) {
-            var key = keyEnumerator.Current;
-
+        foreach (var key in keys) {
             // Update the bit in the flag if the current value is included in the dictionary
             if (key != null && packetData.ContainsKey(key)) {
                 idFlag |= currentTypeValue;
@@ -142,10 +144,7 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
         var containsReliableData = false;
         // We loop over the possible IDs in the order from the given array to make it
         // consistent between server and client
-        keyEnumerator.Reset();
-        while (keyEnumerator.MoveNext()) {
-            var key = keyEnumerator.Current;
-
+        foreach (var key in keys) {
             if (key != null && packetData.TryGetValue(key, out var iPacketData)) {
                 iPacketData.WriteData(packet);
 
@@ -154,8 +153,6 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
                 }
             }
         }
-        
-        keyEnumerator.Dispose();
 
         return containsReliableData;
     }
@@ -176,6 +173,13 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
         // an exception, so for now we hold off on writing anything yet, but keep track of how
         // many instances we are writing
         var addonPacketDataCount = (byte) addonDataDict.Count;
+
+        // Without addon data that is the count alone, which is what the rest writes then, without the packets made
+        // for it
+        if (addonDataDict.Count == 0) {
+            packet.Write(addonPacketDataCount);
+            return false;
+        }
 
         // We also construct a temporary packet that we use to write the progress of all
         // addon packet data into. This temp packet we can then later write into the original
@@ -238,8 +242,7 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
         Dictionary<TPacketId, IPacketData> packetData
     ) {
         // Figure out the size of the packet ID enum
-        var enumValues = (TPacketId[]) Enum.GetValues(typeof(TPacketId));
-        var packetIdSize = (byte) enumValues.Length;
+        var packetIdSize = (byte) PacketIds.Length;
 
         // Read the byte flag representing which packets are included in this update
         // The number of bytes we read is dependent on the size of the enum
@@ -257,8 +260,7 @@ internal abstract class BasePacket<TPacketId> where TPacketId : Enum {
         // Keep track of value of current bit
         ulong currentTypeValue = 1;
 
-        var packetIdValues = Enum.GetValues(typeof(TPacketId));
-        foreach (TPacketId packetId in packetIdValues) {
+        foreach (var packetId in PacketIds) {
             // If this bit was set in our flag, we add the type to the list
             if ((dataPacketIdFlag & currentTypeValue) != 0) {
                 var iPacketData = InstantiatePacketDataFromId(packetId);

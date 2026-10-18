@@ -36,11 +36,20 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// <typeparam name="T">The type of the generic client packet data.</typeparam>
     /// <returns>An instance of the packet data in the packet.</returns>
     private T FindOrCreatePacketData<T>(ushort id, ClientUpdatePacketId packetId) where T : GenericClientData, new() {
-        return FindOrCreatePacketData(
-            packetId,
-            packetData => packetData.Id == id,
-            () => new T { Id = id }
-        );
+        // A loop of its own rather than the general one with a closure for each, as the update of every player goes
+        // through here every time it is passed on
+        var packetDataCollection = GetOrCreateCollection<T>(packetId);
+        var dataInstances = packetDataCollection.DataInstances;
+        for (var i = 0; i < dataInstances.Count; i++) {
+            var existingData = (T) dataInstances[i];
+            if (existingData.Id == id) {
+                return existingData;
+            }
+        }
+
+        var packetData = new T { Id = id };
+        dataInstances.Add(packetData);
+        return packetData;
     }
 
     /// <summary>
@@ -355,11 +364,14 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
         where T : BaseEntityUpdate, new() {
         var entityUpdateCollection = GetOrCreateCollection<T>(packetId);
 
-        // Search for existing entity update
+        // Search for existing entity update, with a loop rather than a query: this runs for every creature that moves,
+        // every frame, and the query made a closure and two iterators each time
         var dataInstances = entityUpdateCollection.DataInstances;
-        foreach (var existingUpdate in
-                 dataInstances.Cast<T?>().Where(existingUpdate => existingUpdate!.Id == entityId)) {
-            return existingUpdate;
+        for (var i = 0; i < dataInstances.Count; i++) {
+            var existingUpdate = (T) dataInstances[i];
+            if (existingUpdate.Id == entityId) {
+                return existingUpdate;
+            }
         }
 
         // Create new entity update

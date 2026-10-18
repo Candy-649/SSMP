@@ -899,6 +899,18 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The field of an action type that holds the object it spawns, looked up once for each type rather than on every
+    /// roll of every such action of the game.
+    /// </summary>
+    /// <typeparam name="TObject">The type of the action.</typeparam>
+    private static class SpawnedObjectField<TObject> where TObject : FsmStateAction {
+        // ReSharper disable once StaticMemberInGenericType
+        public static readonly FieldInfo? Field = typeof(TObject).GetField(
+            "gameObject", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+        );
+    }
+
+    /// <summary>
     /// Emit intercept instruction on the next Unity Random Range() call for the given IL cursor.
     /// </summary>
     /// <param name="c">The cursor for the IL context of the method.</param>
@@ -921,10 +933,8 @@ internal static partial class EntityFsmActions {
                 // We need to check whether the game object that is being spawned with this action is not an object
                 // managed by the system. Because if so, we do not store the random values because the action for it
                 // is not being networked. Only the game object spawn is networked with an EntitySpawn packet directly.
-                if (typeof(TObject).GetField(
-                        "gameObject", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
-                    )?.GetValue(instance) is FsmGameObject fsmGameObject && fsmGameObject.Value != null &&
-                    IsObjectInRegistry(fsmGameObject.Value)) {
+                if (SpawnedObjectField<TObject>.Field?.GetValue(instance) is FsmGameObject fsmGameObject &&
+                    fsmGameObject.Value != null && IsObjectInRegistry(fsmGameObject.Value)) {
                     return value;
                 }
 

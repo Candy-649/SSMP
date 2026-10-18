@@ -108,21 +108,13 @@ internal class MapManager : IMapManager {
             return;
         }
     
-        // Check whether the player has a map position for an icon
-        var hasMapPosition = TryGetMapPosition(out var newPosition);
-    
-        // Whether we have a map icon active
-        var hasMapIcon = hasMapPosition;
-        if (!_serverSettings.AlwaysShowMapIcons) {
-            if (!_serverSettings.OnlyBroadcastMapIconWithCompass) {
-                hasMapIcon = false;
-            } else {
-                // OnlyBroadcastMapIconWithCompass: suppress unless the compass tool exists and is equipped.
-                if (!Gameplay.CompassTool || !Gameplay.CompassTool.IsEquipped) {
-                    hasMapIcon = false;
-                }
-            }
-        }
+        // Whether a map icon may be shown at all, looked at before the map position, which is only worked out when it
+        // is used. OnlyBroadcastMapIconWithCompass: suppressed unless the compass tool exists and is equipped.
+        var iconAllowed = _serverSettings.AlwaysShowMapIcons ||
+                          (_serverSettings.OnlyBroadcastMapIconWithCompass && Gameplay.CompassTool &&
+                           Gameplay.CompassTool.IsEquipped);
+        var newPosition = Vector2.zero;
+        var hasMapIcon = iconAllowed && TryGetMapPosition(out newPosition);
     
         if (hasMapIcon != _lastSentMapIcon) {
             _lastSentMapIcon = hasMapIcon;
@@ -191,13 +183,33 @@ internal class MapManager : IMapManager {
             mapZone = gameMap.currentSceneMapZone;
         }
 
-        gameMap.GetSceneInfo(
-            sceneName, 
-            mapZone, 
-            out var currentScene, 
-            out var currentSceneObj, 
-            out var currentScenePos
-        );
+        // The room on the map is looked up only when the map, the room or the area is another than last time:
+        // GameMap.GetSceneInfo reads the name of every room of the area on the map until it finds it, a new string
+        // each, and this is every frame. Where it is on the map is worked out each time, as GetSceneInfo does.
+        if (gameMap != _sceneInfoMap || sceneName != _sceneInfoName || mapZone != _sceneInfoZone ||
+            (_sceneInfoObject is not null && _sceneInfoObject == null)) {
+            gameMap.GetSceneInfo(sceneName, mapZone, out var scene, out var sceneObj, out _);
+            _sceneInfoMap = gameMap;
+            _sceneInfoName = sceneName;
+            _sceneInfoZone = mapZone;
+            _sceneInfoScene = scene;
+            _sceneInfoObject = sceneObj;
+        }
+
+        var currentScene = _sceneInfoScene;
+        var currentSceneObj = _sceneInfoObject;
+        var currentScenePos = Vector2.zero;
+        if (currentSceneObj != null) {
+            var sceneTransform = currentSceneObj.transform;
+            var parent = sceneTransform.parent;
+            if (parent == null) {
+                gameMap.GetSceneInfo(sceneName, mapZone, out currentScene, out currentSceneObj, out currentScenePos);
+            } else {
+                var local = sceneTransform.localPosition;
+                var parentLocal = parent.localPosition;
+                currentScenePos = new Vector2(local.x + parentLocal.x, local.y + parentLocal.y);
+            }
+        }
 
         var heroPos = (Vector2) hc.transform.position;
         mapPosition = gameMap.GetMapPosition(
@@ -209,6 +221,31 @@ internal class MapManager : IMapManager {
         );
         return true;
     }
+
+    /// <summary>
+    /// The game map that <see cref="_sceneInfoObject"/> was looked up in (see <see cref="TryGetMapPosition"/>).
+    /// </summary>
+    private GameMap? _sceneInfoMap;
+
+    /// <summary>
+    /// The name of the room that <see cref="_sceneInfoObject"/> was looked up for.
+    /// </summary>
+    private string? _sceneInfoName;
+
+    /// <summary>
+    /// The area that <see cref="_sceneInfoObject"/> was looked up in.
+    /// </summary>
+    private MapZone _sceneInfoZone;
+
+    /// <summary>
+    /// The room's part of the map that GameMap.GetSceneInfo found, or null.
+    /// </summary>
+    private GameMapScene? _sceneInfoScene;
+
+    /// <summary>
+    /// The object of the room on the map that GameMap.GetSceneInfo found, or null.
+    /// </summary>
+    private GameObject? _sceneInfoObject;
 
     /// <summary>
     /// Update whether the given player has an active map icon.

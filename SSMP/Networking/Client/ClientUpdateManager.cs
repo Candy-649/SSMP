@@ -242,11 +242,14 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
         where T : BaseEntityUpdate, new() {
         var entityUpdateCollection = GetOrCreateCollection<T>(packetId);
 
-        // Search for existing entity update
+        // Search for existing entity update, with a loop rather than a query: this runs for every creature that moves,
+        // every frame, and the query made a closure and two iterators each time
         var dataInstances = entityUpdateCollection.DataInstances;
-        foreach (var existingUpdate in
-                 dataInstances.Cast<T?>().Where(existingUpdate => existingUpdate!.Id == entityId)) {
-            return existingUpdate!;
+        for (var i = 0; i < dataInstances.Count; i++) {
+            var existingUpdate = (T) dataInstances[i];
+            if (existingUpdate.Id == entityId) {
+                return existingUpdate;
+            }
         }
 
         // Create new entity update

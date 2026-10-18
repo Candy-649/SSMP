@@ -18,9 +18,9 @@ internal class AddonPacketData {
     public byte PacketIdSize { get; }
 
     /// <summary>
-    /// Enumerator to go over each packet ID in the packet ID space of this addon. 
+    /// Each packet ID in the packet ID space of this addon, in order.
     /// </summary>
-    public IEnumerable<byte> PacketIdEnumerable {
+    public byte[] PacketIds {
         get {
             if (_packetIdArray == null) {
                 // Create an array containing all possible IDs for this addon
@@ -30,7 +30,6 @@ internal class AddonPacketData {
                 }
             }
 
-            // Return a fresh enumerator for the ID space
             return _packetIdArray;
         }
     }

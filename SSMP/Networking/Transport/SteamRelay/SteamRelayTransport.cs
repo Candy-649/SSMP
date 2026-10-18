@@ -95,6 +95,16 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
     /// </summary>
     private readonly IntPtr[] _messageBuffer = new IntPtr[SteamRelayMessaging.ReceiveBatchSize];
 
+    /// <summary>
+    /// Who takes the data of the messages drained now (see <see cref="OnMessage"/>).
+    /// </summary>
+    private Action<byte[], int>? _drainHandler;
+
+    /// <summary>
+    /// <see cref="OnMessage"/>, made once rather than a closure on every poll.
+    /// </summary>
+    private Action<ulong, byte[], int>? _onMessage;
+
     private Callback<SteamNetworkingMessagesSessionFailed_t>? _sessionFailedCallback;
 
     private CancellationTokenSource? _receiveTokenSource;
@@ -217,14 +227,20 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
         var handler = DataReceivedEvent;
         if (handler == null) return;
 
-        SteamRelayMessaging.Drain(SteamRelayMessaging.ServerToClientChannel, _messageBuffer, (sender, data, size) => {
-            if (sender != _remoteSteamId) {
-                Logger.Warn($"Steam relay: ignoring a message from {sender}, which is not the host");
-                return;
-            }
+        _drainHandler = handler;
+        SteamRelayMessaging.Drain(SteamRelayMessaging.ServerToClientChannel, _messageBuffer, _onMessage ??= OnMessage);
+    }
 
-            handler(data, size);
-        });
+    /// <summary>
+    /// Hands the data of a message drained from the host's channel to who takes it.
+    /// </summary>
+    private void OnMessage(ulong sender, byte[] data, int size) {
+        if (sender != _remoteSteamId) {
+            Logger.Warn($"Steam relay: ignoring a message from {sender}, which is not the host");
+            return;
+        }
+
+        _drainHandler!(data, size);
     }
 
     /// <summary>

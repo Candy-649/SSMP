@@ -2156,10 +2156,14 @@ internal partial class CoopSave {
                 return;
             }
 
-            foreach (var target in _rescueTargets.Values.ToList()) {
-                if (!_checkedMembers.Contains(target.PlayerId) || !_playerData.ContainsKey(target.PlayerId) ||
-                    !_waitingMembers.ContainsKey(target.PlayerId) || SceneUtil.GetCurrentSceneName() != target.Scene) {
-                    RemoveRescueTarget(target.PlayerId);
+            // Copied only when there is one, as this runs every frame
+            if (_rescueTargets.Count > 0) {
+                foreach (var target in _rescueTargets.Values.ToList()) {
+                    if (!_checkedMembers.Contains(target.PlayerId) || !_playerData.ContainsKey(target.PlayerId) ||
+                        !_waitingMembers.ContainsKey(target.PlayerId) ||
+                        SceneUtil.GetCurrentSceneName() != target.Scene) {
+                        RemoveRescueTarget(target.PlayerId);
+                    }
                 }
             }
         } catch (Exception e) {

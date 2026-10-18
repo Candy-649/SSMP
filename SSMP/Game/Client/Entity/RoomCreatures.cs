@@ -215,7 +215,7 @@ internal class RoomCreatures {
             return;
         }
 
-        MakeInTheSceneHostsGame(self, prefab, self.storeObject, () => orig(self));
+        MakeInTheSceneHostsGame(self, prefab, self.storeObject, EnterCall(orig, self));
     }
 
     /// <summary>
@@ -232,7 +232,15 @@ internal class RoomCreatures {
             return;
         }
 
-        MakeInTheSceneHostsGame(self, prefab, self.storeGameObject, () => orig(self));
+        MakeInTheSceneHostsGame(self, prefab, self.storeGameObject, EnterCall(orig, self));
+    }
+
+    /// <summary>
+    /// The start of an action as it would be, as an action. Made apart from the hooks, whose parameters a lambda in
+    /// them made into a closure on every start of such an action in the game.
+    /// </summary>
+    private static System.Action EnterCall<T>(Action<T> orig, T self) {
+        return () => orig(self);
     }
 
     /// <summary>

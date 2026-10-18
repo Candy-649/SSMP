@@ -1024,11 +1024,11 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
+            OnLocalTouchOfThrown(thrown, self, other, TouchCall(orig, self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
-            OnLocalAttackTouch(self, other, () => orig(self, other));
+            OnLocalAttackTouch(self, other, TouchCall(orig, self, other));
         }
     }
 
@@ -1042,11 +1042,11 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
+            OnLocalTouchOfThrown(thrown, self, other, TouchCall(orig, self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
-            OnLocalAttackTouch(self, other, () => orig(self, other));
+            OnLocalAttackTouch(self, other, TouchCall(orig, self, other));
         }
     }
 
@@ -1060,11 +1060,11 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
+            OnLocalTouchOfThrown(thrown, self, other, TouchCall(orig, self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
-            OnLocalAttackTouch(self, other, () => orig(self, other));
+            OnLocalAttackTouch(self, other, TouchCall(orig, self, other));
         }
     }
 
@@ -1078,12 +1078,20 @@ internal partial class CoopHits {
         Collider2D other
     ) {
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
-            OnLocalTouchOfThrown(thrown, self, other, () => orig(self, other));
+            OnLocalTouchOfThrown(thrown, self, other, TouchCall(orig, self, other));
         } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
-            OnLocalAttackTouch(self, other, () => orig(self, other));
+            OnLocalAttackTouch(self, other, TouchCall(orig, self, other));
         }
+    }
+
+    /// <summary>
+    /// A touch told to the component as it would be, as an action. Made apart from the hooks of touches, whose
+    /// parameters a lambda in them made into a closure on every touch of the game.
+    /// </summary>
+    private static Action TouchCall<T>(Action<T, Collider2D> orig, T self, Collider2D other) {
+        return () => orig(self, other);
     }
 
     /// <summary>
@@ -1675,7 +1683,7 @@ internal partial class CoopHits {
             var told = _toldByTink;
             _toldByTink = null;
             try {
-                _toldRoom.Add((eventName, SharedDice.Record(() => orig(self, eventName))));
+                _toldRoom.Add((eventName, SharedDice.Record(SendEventCall(orig, self, eventName))));
             } finally {
                 _toldByTink = told;
             }
@@ -1684,6 +1692,14 @@ internal partial class CoopHits {
         }
 
         orig(self, eventName);
+    }
+
+    /// <summary>
+    /// An event told to a state machine as an action. Made apart from <see cref="OnFsmSendEvent"/>, whose parameters a
+    /// lambda in it made into a closure on every event told to a state machine of the game.
+    /// </summary>
+    private static Action SendEventCall(Action<PlayMakerFSM, string> orig, PlayMakerFSM self, string eventName) {
+        return () => orig(self, eventName);
     }
 
     /// <summary>
@@ -1811,12 +1827,25 @@ internal partial class CoopHits {
             return;
         }
 
-        var dice = SharedDice.Record(() => orig(self, source, direction));
+        var dice = SharedDice.Record(HitCall(orig, self, source, direction));
         if (_netClient.IsConnected) {
             update.Hit = SharedDice.Append(update.Hit, dice);
             SendToRoomMembers(update);
             NoteTraffic(update.Scene, update.Path, $"sent a hit {direction} on {update.Responder}");
         }
+    }
+
+    /// <summary>
+    /// A hit sent on in a direction as it would be, as an action. Made apart from <see cref="OnSendHitInDirection"/>,
+    /// whose parameters a lambda in it made into a closure on every hit sent on in a direction.
+    /// </summary>
+    private static Action HitCall(
+        Action<HitResponseBase, GameObject, HitInstance.HitDirection> orig,
+        HitResponseBase self,
+        GameObject source,
+        HitInstance.HitDirection direction
+    ) {
+        return () => orig(self, source, direction);
     }
 
     /// <summary>

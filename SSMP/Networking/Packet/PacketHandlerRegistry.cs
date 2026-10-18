@@ -51,7 +51,17 @@ internal class PacketHandlerRegistry<TPacketId, THandler>
     private const int MaxWaitingPerId = 64;
 
     /// <summary>
-    /// Guards both dictionaries, which the network thread reads and the main thread writes.
+    /// How many calls of handlers are kept for reuse at most (see <see cref="HandlerCall"/>).
+    /// </summary>
+    private const int MaxKeptCalls = 256;
+
+    /// <summary>
+    /// Calls of handlers that ran, kept for the data that arrives next.
+    /// </summary>
+    private readonly Stack<HandlerCall> _keptCalls = new();
+
+    /// <summary>
+    /// Guards both dictionaries, which the network thread reads and the main thread writes, and the kept calls.
     /// </summary>
     private readonly object _lock = new();
 
@@ -126,26 +136,86 @@ internal class PacketHandlerRegistry<TPacketId, THandler>
         THandler? handler;
         lock (_lock) {
             if (!_handlers.TryGetValue(packetId, out handler)) {
-                // Kept rather than dropped, and handed over as soon as something registers for this ID
-                if (!_waiting.TryGetValue(packetId, out var waiting)) {
-                    waiting = [];
-                    _waiting[packetId] = waiting;
-                }
-
-                if (waiting.Count >= MaxWaitingPerId) {
-                    Logger.Warn(
-                        $"Nothing has registered for {_registryName} packet ID {packetId}, dropping the oldest of " +
-                        $"{waiting.Count} kept for it"
-                    );
-                    waiting.RemoveAt(0);
-                }
-
-                waiting.Add(invoker);
+                Wait(packetId, invoker);
                 return;
             }
         }
 
         _dispatcher.Dispatch(() => SafeInvoke(packetId, handler, invoker));
+    }
+
+    /// <summary>
+    /// Executes the handler for the given packet ID with a piece of data that arrived, as
+    /// <see cref="Execute(TPacketId, Action{THandler})"/> does, but with a call kept from earlier data rather than a
+    /// closure and two delegates made for each piece: the positions and such that arrive dozens of times a second each
+    /// made garbage, which the game then stopped to clean up.
+    /// </summary>
+    /// <param name="packetId">The packet ID.</param>
+    /// <param name="clientId">The ID of the client that sent the data, for the server's handlers.</param>
+    /// <param name="data">The data.</param>
+    /// <param name="invoke">Calls a handler with the client ID and the data, a delegate made once.</param>
+    public void Execute(
+        TPacketId packetId,
+        ushort clientId,
+        IPacketData data,
+        Action<THandler, ushort, IPacketData> invoke
+    ) {
+        HandlerCall call;
+        lock (_lock) {
+            if (!_handlers.TryGetValue(packetId, out var handler)) {
+                Wait(packetId, Invoker(invoke, clientId, data));
+                return;
+            }
+
+            call = _keptCalls.Count > 0 ? _keptCalls.Pop() : new HandlerCall(this);
+            call.Set(packetId, handler, invoke, clientId, data);
+        }
+
+        _dispatcher.Dispatch(call.Run);
+    }
+
+    /// <summary>
+    /// Keeps a call of a handler for data that arrived before anything registered to handle it, until something does.
+    /// Called with the registry locked.
+    /// </summary>
+    private void Wait(TPacketId packetId, Action<THandler> invoker) {
+        // Kept rather than dropped, and handed over as soon as something registers for this ID
+        if (!_waiting.TryGetValue(packetId, out var waiting)) {
+            waiting = [];
+            _waiting[packetId] = waiting;
+        }
+
+        if (waiting.Count >= MaxWaitingPerId) {
+            Logger.Warn(
+                $"Nothing has registered for {_registryName} packet ID {packetId}, dropping the oldest of " +
+                $"{waiting.Count} kept for it"
+            );
+            waiting.RemoveAt(0);
+        }
+
+        waiting.Add(invoker);
+    }
+
+    /// <summary>
+    /// The call of a handler with a piece of data, for data that waits for its handler. Made apart from
+    /// <see cref="Execute(TPacketId, ushort, IPacketData, Action{THandler, ushort, IPacketData})"/>, whose closure
+    /// would otherwise be made on every call.
+    /// </summary>
+    private static Action<THandler> Invoker(
+        Action<THandler, ushort, IPacketData> invoke,
+        ushort clientId,
+        IPacketData data
+    ) => handler => invoke(handler, clientId, data);
+
+    /// <summary>
+    /// Takes back a call that ran, for the next piece of data.
+    /// </summary>
+    private void Keep(HandlerCall call) {
+        lock (_lock) {
+            if (_keptCalls.Count < MaxKeptCalls) {
+                _keptCalls.Push(call);
+            }
+        }
     }
 
     /// <summary>
@@ -156,6 +226,94 @@ internal class PacketHandlerRegistry<TPacketId, THandler>
             invoker(handler);
         } catch (Exception e) {
             Logger.Error($"Exception occurred while executing {_registryName} packet handler for ID {packetId}:\n{e}");
+        }
+    }
+
+    /// <summary>
+    /// A call of a handler with a piece of data that arrived, which goes back to its registry once it ran, for the next
+    /// piece of data.
+    /// </summary>
+    private sealed class HandlerCall {
+        /// <summary>
+        /// The registry it belongs to.
+        /// </summary>
+        private readonly PacketHandlerRegistry<TPacketId, THandler> _registry;
+
+        /// <summary>
+        /// Makes the call; the dispatcher runs it.
+        /// </summary>
+        public readonly Action Run;
+
+        /// <summary>
+        /// The packet ID of the data.
+        /// </summary>
+        private TPacketId _packetId = default!;
+
+        /// <summary>
+        /// The handler.
+        /// </summary>
+        private THandler? _handler;
+
+        /// <summary>
+        /// Calls the handler with the client ID and the data.
+        /// </summary>
+        private Action<THandler, ushort, IPacketData>? _invoke;
+
+        /// <summary>
+        /// The ID of the client that sent the data, for the server's handlers.
+        /// </summary>
+        private ushort _clientId;
+
+        /// <summary>
+        /// The data.
+        /// </summary>
+        private IPacketData? _data;
+
+        public HandlerCall(PacketHandlerRegistry<TPacketId, THandler> registry) {
+            _registry = registry;
+            Run = RunOnce;
+        }
+
+        /// <summary>
+        /// Sets what to call with what.
+        /// </summary>
+        public void Set(
+            TPacketId packetId,
+            THandler handler,
+            Action<THandler, ushort, IPacketData> invoke,
+            ushort clientId,
+            IPacketData data
+        ) {
+            _packetId = packetId;
+            _handler = handler;
+            _invoke = invoke;
+            _clientId = clientId;
+            _data = data;
+        }
+
+        /// <summary>
+        /// Makes the call, having given itself back first: a handler that the server runs right away may hand on data
+        /// of its own, which can then take this call again.
+        /// </summary>
+        private void RunOnce() {
+            var packetId = _packetId;
+            var handler = _handler!;
+            var invoke = _invoke!;
+            var clientId = _clientId;
+            var data = _data!;
+            _handler = null;
+            _invoke = null;
+            _data = null;
+            _registry.Keep(this);
+
+            try {
+                invoke(handler, clientId, data);
+            } catch (Exception e) {
+                Logger.Error(
+                    $"Exception occurred while executing {_registry._registryName} packet handler for ID {packetId}:" +
+                    $"\n{e}"
+                );
+            }
         }
     }
 }

@@ -569,9 +569,9 @@ internal partial class CoopSave {
         _captureFsm = GetCaptureFsm(self, mechanism);
         try {
             if (trap != null) {
-                SetOffWorldTrigger(trap, () => orig(self, toState));
+                SetOffWorldTrigger(trap, SwitchCall(orig, self, toState));
             } else if (hiddenLandingFlag != null) {
-                WithoutFlag(hiddenLandingFlag, () => orig(self, toState));
+                WithoutFlag(hiddenLandingFlag, SwitchCall(orig, self, toState));
             } else {
                 orig(self, toState);
             }
@@ -588,6 +588,14 @@ internal partial class CoopSave {
         } catch (Exception e) {
             LogInteractionError(e);
         }
+    }
+
+    /// <summary>
+    /// The switch of a state machine to a state as an action. Made apart from <see cref="OnInteractionSwitchState"/>,
+    /// whose parameters a lambda in it made into a closure on every switch of every state machine of the game.
+    /// </summary>
+    private static Action SwitchCall(Action<Fsm, FsmState> orig, Fsm self, FsmState toState) {
+        return () => orig(self, toState);
     }
 
     /// <summary>

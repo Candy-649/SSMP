@@ -250,12 +250,25 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Whether a boss room waits for players. A loop rather than a query, as this is asked every frame.
+    /// </summary>
+    private bool HasRoomWait() {
+        foreach (var room in _bossRooms.Values) {
+            if (room.Wait != null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Keeps the local player free to move and inside the boss room they wait in, and stops waiting in rooms that don't
     /// wait anymore.
     /// </summary>
     private void UpdateRoomWaits() {
         OpenUnclaimedGates();
-        if (!_bossRooms.Values.Any(room => room.Wait != null)) {
+        if (!HasRoomWait()) {
             return;
         }
 

@@ -1014,12 +1014,8 @@ internal abstract class ServerManager : IServerManager {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
-                otherId => {
-                    _netServer.GetUpdateManagerForClient(otherId)?.UpdateEntityPosition(
-                        entityUpdate.Id,
-                        entityUpdate.Position
-                    );
-                }
+                entityUpdate,
+                static (updateManager, update) => updateManager.UpdateEntityPosition(update.Id, update.Position)
             );
 
             entityData.Position = entityUpdate.Position;
@@ -1036,12 +1032,9 @@ internal abstract class ServerManager : IServerManager {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
-                otherId => {
-                    _netServer.GetUpdateManagerForClient(otherId)?.UpdateEntityAnticipation(
-                        entityUpdate.Id,
-                        entityUpdate.Anticipations
-                    );
-                }
+                entityUpdate,
+                static (updateManager, update) =>
+                    updateManager.UpdateEntityAnticipation(update.Id, update.Anticipations)
             );
         }
 
@@ -1050,12 +1043,8 @@ internal abstract class ServerManager : IServerManager {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
-                otherId => {
-                    _netServer.GetUpdateManagerForClient(otherId)?.UpdateEntityScale(
-                        entityUpdate.Id,
-                        entityUpdate.Scale
-                    );
-                }
+                entityUpdate,
+                static (updateManager, update) => updateManager.UpdateEntityScale(update.Id, update.Scale)
             );
 
             // Taken in rather than put in place of what is kept, which a facing alone, riding with every position,
@@ -1073,13 +1062,9 @@ internal abstract class ServerManager : IServerManager {
             SendDataInSameScene(
                 id,
                 playerData.CurrentScene,
-                otherId => {
-                    _netServer.GetUpdateManagerForClient(otherId)?.UpdateEntityAnimation(
-                        entityUpdate.Id,
-                        entityUpdate.AnimationId,
-                        entityUpdate.AnimationWrapMode
-                    );
-                }
+                entityUpdate,
+                static (updateManager, update) =>
+                    updateManager.UpdateEntityAnimation(update.Id, update.AnimationId, update.AnimationWrapMode)
             );
 
             // Kept without the mark of a clip sent again (EntityUpdate.WrapModeSentAgain): to a player walking in
@@ -2246,6 +2231,34 @@ internal abstract class ServerManager : IServerManager {
             }
 
             dataAction(idPlayerDataPair.Key);
+        }
+    }
+
+    /// <summary>
+    /// Has the update managers of the other players in the given scene send what <paramref name="send"/> takes from
+    /// <paramref name="state"/>, as <see cref="SendDataInSameScene(ushort, string, Action{ushort})"/> does, but
+    /// without a closure: the updates of the creatures that pass through here dozens of times a second each made one,
+    /// and a delegate for each kind of thing they carried.
+    /// </summary>
+    /// <param name="sourceId">The ID of the player it came from, who is skipped.</param>
+    /// <param name="sceneName">The scene.</param>
+    /// <param name="state">What is sent.</param>
+    /// <param name="send">Puts it in the update of a player, a delegate that captures nothing.</param>
+    private void SendDataInSameScene<TState>(
+        ushort sourceId,
+        string sceneName,
+        TState state,
+        Action<ServerUpdateManager, TState> send
+    ) {
+        foreach (var idPlayerDataPair in _playerData) {
+            if (idPlayerDataPair.Key == sourceId || !string.Equals(idPlayerDataPair.Value.CurrentScene, sceneName)) {
+                continue;
+            }
+
+            var updateManager = _netServer.GetUpdateManagerForClient(idPlayerDataPair.Key);
+            if (updateManager != null) {
+                send(updateManager, state);
+            }
         }
     }
 

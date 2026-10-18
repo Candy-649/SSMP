@@ -41,6 +41,18 @@ public delegate void GenericServerPacketHandler<in TPacketData>(ushort id, TPack
 internal class PacketManager {
     #region Standard Packet Registries
 
+    /// <summary>
+    /// Calls a client's handler with the data that arrived, made once (see PacketHandlerRegistry.Execute).
+    /// </summary>
+    private static readonly Action<ClientPacketHandler, ushort, IPacketData> InvokeClientHandler =
+        (handler, _, data) => handler(data);
+
+    /// <summary>
+    /// Calls a server's handler with the ID of the client that sent the data and the data, made once.
+    /// </summary>
+    private static readonly Action<ServerPacketHandler, ushort, IPacketData> InvokeServerHandler =
+        (handler, clientId, data) => handler(clientId, data);
+
     private readonly PacketHandlerRegistry<ClientUpdatePacketId, ClientPacketHandler> _clientUpdateRegistry = new(
         "client update", ClientPacketHandlerRegistryDispatcher.Instance
     );
@@ -141,7 +153,7 @@ internal class PacketManager {
                         break;
                 }
 
-                _clientUpdateRegistry.Execute(id, handler => handler(data));
+                _clientUpdateRegistry.Execute(id, 0, data, InvokeClientHandler);
             }
         );
 
@@ -217,7 +229,7 @@ internal class PacketManager {
                     entityUpdate.ReceivedSequence = packet.Sequence;
                 }
 
-                _serverUpdateRegistry.Execute(packetId, handler => handler(id, data));
+                _serverUpdateRegistry.Execute(packetId, id, data, InvokeServerHandler);
             }
         );
 

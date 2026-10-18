@@ -890,11 +890,14 @@ internal partial class CoopSave {
                 }
             }
 
-            // A member's character is free again once they left the room or the server, or after a while
-            foreach (var pair in _partnerTalks.ToList()) {
-                if (!_playerData.TryGetValue(pair.Key, out var member) || !member.IsInLocalScene ||
-                    Time.unscaledTime - pair.Value.Started > PartnerTalkTimeout) {
-                    _partnerTalks.Remove(pair.Key);
+            // A member's character is free again once they left the room or the server, or after a while. Copied only
+            // when there is one, as this runs every frame
+            if (_partnerTalks.Count > 0) {
+                foreach (var pair in _partnerTalks.ToList()) {
+                    if (!_playerData.TryGetValue(pair.Key, out var member) || !member.IsInLocalScene ||
+                        Time.unscaledTime - pair.Value.Started > PartnerTalkTimeout) {
+                        _partnerTalks.Remove(pair.Key);
+                    }
                 }
             }
 

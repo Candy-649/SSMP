@@ -227,6 +227,33 @@ internal partial class BossRoomCoop {
     private Vector2? _lastHeroPosition;
 
     /// <summary>
+    /// The handle of the scene of what is kept from room to room, once <see cref="ScanScene"/> came across it, which
+    /// tells it apart without reading its name.
+    /// </summary>
+    private int? _keptObjectsScene;
+
+    /// <summary>
+    /// Where the local player was in the previous frame, for the steps of <see cref="OnHeroControllerUpdate"/>.
+    /// </summary>
+    private Vector2 _stepFrom;
+
+    /// <summary>
+    /// Where the local player is in this frame, for the steps of <see cref="OnHeroControllerUpdate"/>.
+    /// </summary>
+    private Vector2 _stepTo;
+
+    /// <summary>
+    /// The steps of <see cref="OnHeroControllerUpdate"/> while rooms wait for other players, each with its name. Made
+    /// once: made in every frame, they were a delegate each and a closure for the positions.
+    /// </summary>
+    private (Action Step, string Name)[]? _holdSteps;
+
+    /// <summary>
+    /// The steps of <see cref="OnHeroControllerUpdate"/> of every frame, each with its name, made once.
+    /// </summary>
+    private (Action Step, string Name)[]? _frameSteps;
+
+    /// <summary>
     /// When the scene is searched for FSMs that start rooms next, in unscaled seconds.
     /// </summary>
     private float _nextScanTime;
@@ -901,27 +928,52 @@ internal partial class BossRoomCoop {
     /// </summary>
     private void OnHeroControllerUpdate(HeroController heroController) {
         var position = (Vector2) heroController.transform.position;
-        var previousPosition = _lastHeroPosition ?? position;
+        _stepFrom = _lastHeroPosition ?? position;
+        _stepTo = position;
         _lastHeroPosition = position;
 
         // Every step is run on its own. This is the one place that ends a wait which has taken a player's control
         // away, and a player without control has no pause menu either - so a step that throws must not be allowed to
         // take the steps after it down with it. That is how a held death once became a game that could only be
         // killed, and the same shape was waiting here.
+        _holdSteps ??= [
+            (ScanScene, nameof(ScanScene)),
+            (() => UpdateArrivals(_stepFrom, _stepTo), nameof(UpdateArrivals))
+        ];
+        _frameSteps ??= [
+            (ReleaseHeldStarts, nameof(ReleaseHeldStarts)),
+            (ReleaseHeldStories, nameof(ReleaseHeldStories)),
+            (UpdateDialogues, nameof(UpdateDialogues)),
+            (UpdateEventStarts, nameof(UpdateEventStarts)),
+            (UpdateCatchUps, nameof(UpdateCatchUps)),
+            (UpdateRoomWaits, nameof(UpdateRoomWaits)),
+            (CheckStartedRooms, nameof(CheckStartedRooms)),
+            (() => ClosePendingGates(_stepFrom, _stepTo), nameof(ClosePendingGates))
+        ];
+
         if (IsHoldActive()) {
-            RunUpdateStep(ScanScene, nameof(ScanScene));
-            RunUpdateStep(() => UpdateArrivals(previousPosition, position), nameof(UpdateArrivals));
+            foreach (var (step, name) in _holdSteps) {
+                RunUpdateStep(step, name);
+            }
         }
 
-        RunUpdateStep(ReleaseHeldStarts, nameof(ReleaseHeldStarts));
-        RunUpdateStep(ReleaseHeldStories, nameof(ReleaseHeldStories));
-        RunUpdateStep(UpdateDialogues, nameof(UpdateDialogues));
-        RunUpdateStep(UpdateEventStarts, nameof(UpdateEventStarts));
-        RunUpdateStep(UpdateCatchUps, nameof(UpdateCatchUps));
-        RunUpdateStep(UpdateRoomWaits, nameof(UpdateRoomWaits));
-        RunUpdateStep(CheckStartedRooms, nameof(CheckStartedRooms));
-        RunUpdateStep(() => ClosePendingGates(previousPosition, position), nameof(ClosePendingGates));
+        foreach (var (step, name) in _frameSteps) {
+            RunUpdateStep(step, name);
+        }
     }
+
+    /// <summary>
+    /// How long, in seconds, one step of the per-frame update takes at least for it to be written down by its name.
+    /// The frame watch names only the update as a whole, which once took 86 ms in a frame right after the local player
+    /// was pulled back up in a boss fight, with no way to tell which step it was.
+    /// </summary>
+    private const double SlowStepTime = 0.05;
+
+    /// <summary>
+    /// When a slow step was last written down, in ticks of the stopwatch, so that one that stays slow writes a line a
+    /// second at most.
+    /// </summary>
+    private long _slowStepWrittenAt;
 
     /// <summary>
     /// Runs one step of the per-frame update, keeping what it throws to itself.
@@ -929,6 +981,8 @@ internal partial class BossRoomCoop {
     /// <param name="step">The step.</param>
     /// <param name="what">The name of the step, for the one line it writes if it throws.</param>
     private void RunUpdateStep(Action step, string what) {
+        var collections = GC.CollectionCount(0);
+        var start = System.Diagnostics.Stopwatch.GetTimestamp();
         try {
             step();
         } catch (Exception e) {
@@ -937,6 +991,19 @@ internal partial class BossRoomCoop {
             if (_failedUpdateSteps.Add(what)) {
                 Logger.Error($"'{what}' threw, and the rest of the update went on without it:\n{e}");
             }
+        }
+
+        var end = System.Diagnostics.Stopwatch.GetTimestamp();
+        var frequency = (double) System.Diagnostics.Stopwatch.Frequency;
+        if ((end - start) / frequency >= SlowStepTime && (end - _slowStepWrittenAt) / frequency >= 1) {
+            _slowStepWrittenAt = end;
+            // Memory cleaned up meanwhile stops the game whatever made the garbage, so it is said rather than put on
+            // the step
+            Logger.Info(
+                $"[Frames] {DateTime.Now:HH:mm:ss} The step '{what}' of the boss rooms took " +
+                $"{(end - start) * 1000 / frequency:0} ms of the frame" +
+                (GC.CollectionCount(0) != collections ? ", with memory cleaned up meanwhile" : "")
+            );
         }
     }
 
@@ -953,19 +1020,28 @@ internal partial class BossRoomCoop {
                      FindObjectsInactive.Include,
                      FindObjectsSortMode.None
                  )) {
+            // FSMs that never woke up haven't loaded their actions yet. Those already looked at are passed over first,
+            // before the name of their scene is read, which is a new string each time
+            var fsm = playMakerFsm.Fsm;
+            if (fsm == null || fsm.Owner == null || _scannedFsms.Contains(fsm)) {
+                continue;
+            }
+
             // Only rooms start fights. What is kept from room to room - the hero, the menus, the inventory - was looked
             // at again in every room, and much of it was never switched on: PlayMaker complains about every state of
             // such an FSM that it is asked for, so every room that loaded wrote a few hundred errors, each with an
             // exception, to the game's log
-            if (playMakerFsm.gameObject.scene.name == "DontDestroyOnLoad") {
+            var scene = playMakerFsm.gameObject.scene;
+            if (scene.handle == _keptObjectsScene) {
                 continue;
             }
 
-            // FSMs that never woke up haven't loaded their actions yet
-            var fsm = playMakerFsm.Fsm;
-            if (fsm == null || fsm.Owner == null || !_scannedFsms.Add(fsm)) {
+            if (scene.name == "DontDestroyOnLoad") {
+                _keptObjectsScene = scene.handle;
                 continue;
             }
+
+            _scannedFsms.Add(fsm);
 
             if (GetInfo(fsm).StartTriggers.Count > 0) {
                 _startFsms.Add(fsm);
@@ -1113,6 +1189,11 @@ internal partial class BossRoomCoop {
     /// Closes the gates that wait for the local player once they walk into the room that closed them.
     /// </summary>
     private void ClosePendingGates(Vector2 previousPosition, Vector2 position) {
+        // Not copied when empty, which it nearly always is, as this runs every frame
+        if (_pendingCloses.Count == 0) {
+            return;
+        }
+
         foreach (var pendingClose in _pendingCloses.ToList()) {
             if (pendingClose.Gate.GameObject == null) {
                 _pendingCloses.Remove(pendingClose);

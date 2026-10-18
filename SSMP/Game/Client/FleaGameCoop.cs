@@ -513,6 +513,8 @@ internal class FleaGameCoop {
     /// <param name="orig">The original method.</param>
     /// <param name="self">The action.</param>
     private void OnSendEventByNameEnter(Action<SendEventByName> orig, SendEventByName self) {
+        // The start of the action as it would be, an action made apart from this hook: a lambda in it made its
+        // parameters into a closure on every start of an action that tells an event by name, in the whole game
         if (SharedGameOf(self.Fsm) is not { } game) {
             orig(self);
             return;
@@ -537,8 +539,15 @@ internal class FleaGameCoop {
         }
 
         var eventName = self.sendEvent.Value;
-        var dice = SharedDice.Record(() => orig(self), byPlayer: false);
+        var dice = SharedDice.Record(EnterCall(orig, self), byPlayer: false);
         _sendObjectEvent(told, eventName, dice);
+    }
+
+    /// <summary>
+    /// The start of an action that tells an event by name, as an action (see <see cref="OnSendEventByNameEnter"/>).
+    /// </summary>
+    private static Action EnterCall(Action<SendEventByName> orig, SendEventByName self) {
+        return () => orig(self);
     }
 
     /// <summary>

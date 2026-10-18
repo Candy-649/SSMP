@@ -2087,6 +2087,30 @@ internal class AnimationManager {
     // }
 
     /// <summary>
+    /// The animator of the player character that <see cref="_heroAnimatorOf"/> is, kept for
+    /// <see cref="HeroAnimatorOf"/>.
+    /// </summary>
+    private tk2dSpriteAnimator? _heroAnimator;
+
+    /// <summary>
+    /// The player character whose animator <see cref="_heroAnimator"/> is.
+    /// </summary>
+    private HeroController? _heroAnimatorOf;
+
+    /// <summary>
+    /// The animator of the given player character, looked up again only for another one: the handlers below ask for it
+    /// for every animator of the game, every frame.
+    /// </summary>
+    private tk2dSpriteAnimator HeroAnimatorOf(HeroController hero) {
+        if (!ReferenceEquals(hero, _heroAnimatorOf) || _heroAnimator == null) {
+            _heroAnimatorOf = hero;
+            _heroAnimator = hero.GetComponent<tk2dSpriteAnimator>();
+        }
+
+        return _heroAnimator;
+    }
+
+    /// <summary>
     /// Callback method on the tk2dSpriteAnimator#WarpClipToLocalTime method. This method executes
     /// the animation event for clips, and we want to know when those clips start playing.
     /// </summary>
@@ -2103,7 +2127,7 @@ internal class AnimationManager {
             return;
         }
     
-        var spriteAnimator = localPlayer.GetComponent<tk2dSpriteAnimator>();
+        var spriteAnimator = HeroAnimatorOf(localPlayer);
         if (self != spriteAnimator) {
             return;
         }
@@ -2137,7 +2161,7 @@ internal class AnimationManager {
             return;
         }
 
-        var spriteAnimator = localPlayer.GetComponent<tk2dSpriteAnimator>();
+        var spriteAnimator = HeroAnimatorOf(localPlayer);
         if (self != spriteAnimator) {
             return;
         }

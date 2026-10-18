@@ -256,9 +256,20 @@ internal class CoopStateCheck {
     private int _findIndex;
 
     /// <summary>
-    /// The root objects of the loaded scenes that are still to be searched for objects that take hits.
+    /// The root objects of the loaded scenes that are still to be searched for state machines, saved objects and
+    /// objects that take hits.
     /// </summary>
     private readonly Queue<GameObject> _rootsToSearch = new();
+
+    /// <summary>
+    /// The state machines under one root object, while it is searched.
+    /// </summary>
+    private readonly List<PlayMakerFSM> _rootFsms = [];
+
+    /// <summary>
+    /// The saved objects under one root object, while it is searched.
+    /// </summary>
+    private readonly List<PersistentBoolItem> _rootItems = [];
 
     /// <summary>
     /// The objects that take hits under one root object, while it is searched.
@@ -600,20 +611,15 @@ internal class CoopStateCheck {
 
     /// <summary>
     /// Looks at the next components of the room for values to compare, for as long as a frame may spend on it. It
-    /// starts with the state machines and the saved objects, and then searches the root objects of the loaded scenes
-    /// one at a time for the objects that take hits.
+    /// searches the root objects of the loaded scenes one at a time for the state machines, the saved objects and the
+    /// objects that take hits. The state machines and the saved objects of the whole game were found in one go before,
+    /// which on a slow computer was a frame of 146 ms a few seconds into a room; the scene of what is kept from room to
+    /// room, which that also found, has no root here, and what is in it is not compared anyway (see Find).
     /// </summary>
     private void FindSome() {
         _stopwatch.Restart();
         if (!_findStarted) {
             _findStarted = true;
-            _toFind.AddRange(
-                Object.FindObjectsByType<PlayMakerFSM>(FindObjectsInactive.Include, FindObjectsSortMode.None)
-            );
-            _toFind.AddRange(
-                Object.FindObjectsByType<PersistentBoolItem>(FindObjectsInactive.Include, FindObjectsSortMode.None)
-            );
-
             for (var i = 0; i < SceneManager.sceneCount; i++) {
                 var scene = SceneManager.GetSceneAt(i);
                 if (scene.isLoaded) {
@@ -638,6 +644,10 @@ internal class CoopStateCheck {
             if (_rootsToSearch.Count > 0) {
                 var root = _rootsToSearch.Dequeue();
                 if (root != null) {
+                    root.GetComponentsInChildren(true, _rootFsms);
+                    _toFind.AddRange(_rootFsms);
+                    root.GetComponentsInChildren(true, _rootItems);
+                    _toFind.AddRange(_rootItems);
                     root.GetComponentsInChildren(true, _responders);
                     foreach (var responder in _responders) {
                         if (responder is MonoBehaviour behaviour) {

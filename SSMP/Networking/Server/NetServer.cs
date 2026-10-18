@@ -198,7 +198,15 @@ internal class NetServer : INetServer {
 
                 // Which connection these bytes belong to comes from the queue itself and decides which reassembly
                 // buffer they are added to, so it has to be settled before a single byte is parsed
-                var client = _clientsById.Values.FirstOrDefault(c => c.TransportClient == transportClient);
+                // Looked through rather than queried, as this is every message: the values of the dictionary are a copy
+                // of them each time, made with all its locks taken, and the query added a closure
+                NetServerClient? client = null;
+                foreach (var pair in _clientsById) {
+                    if (pair.Value.TransportClient == transportClient) {
+                        client = pair.Value;
+                        break;
+                    }
+                }
 
                 if (client == null) {
                     // Extract throttle key for throttling

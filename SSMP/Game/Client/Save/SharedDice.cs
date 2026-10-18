@@ -542,10 +542,12 @@ internal static class SharedDice {
     /// is that game's own, and the enemies roll where the scene host runs them.
     /// </summary>
     private static void OnRollingActionEnter(Action<FsmStateAction> orig, FsmStateAction self) {
+        // The start of the action as it would be is made into an action apart from this hook (EnterCall): a lambda in
+        // it made its parameters into a closure on every start of an action that rolls, in the whole game
         // A thing that a creature threw rolls by its name, the same in every game (ThrownThings), whatever set it off
         if (ThrownThings.Count > 0 && self.Fsm?.FsmComponent is { } thrownFsm &&
             ThrownThings.TryGetMark(thrownFsm.gameObject, out var mark)) {
-            ThrownThings.Rolling(mark.NextRoll(Identify(self, thrownFsm)), () => orig(self));
+            ThrownThings.Rolling(mark.NextRoll(Identify(self, thrownFsm)), EnterCall(orig, self));
             return;
         }
 
@@ -555,7 +557,7 @@ internal static class SharedDice {
             var roller = Identify(self, namedFsm);
             named.Times.TryGetValue(roller, out var times);
             named.Times[roller] = times + 1;
-            ThrownThings.Rolling(ThrownThings.Seed(named.Name, roller, times), () => orig(self));
+            ThrownThings.Rolling(ThrownThings.Seed(named.Name, roller, times), EnterCall(orig, self));
             return;
         }
 
@@ -596,6 +598,13 @@ internal static class SharedDice {
         }
 
         orig(self);
+    }
+
+    /// <summary>
+    /// The start of an action as it would be, as an action (see <see cref="OnRollingActionEnter"/>).
+    /// </summary>
+    private static Action EnterCall(Action<FsmStateAction> orig, FsmStateAction self) {
+        return () => orig(self);
     }
 
     /// <summary>

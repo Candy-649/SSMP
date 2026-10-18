@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
@@ -163,22 +164,14 @@ internal class BindCoop {
                  ]) {
             _hooks.Add(new Hook(
                 typeof(HeroController).GetMethod(name, InstanceFlags, null, Type.EmptyTypes, null)!,
-                new Action<Action<HeroController>, HeroController>((orig, self) => {
-                    if (!HoldWhileHealing(self, () => orig(self))) {
-                        orig(self);
-                    }
-                })
+                new Action<Action<HeroController>, HeroController>(OnHeroCall)
             ));
         }
 
         foreach (var name in (string[]) ["RegainControl", "AffectedByGravity"]) {
             _hooks.Add(new Hook(
                 typeof(HeroController).GetMethod(name, InstanceFlags, null, [typeof(bool)], null)!,
-                new Action<Action<HeroController, bool>, HeroController, bool>((orig, self, value) => {
-                    if (!HoldWhileHealing(self, () => orig(self, value))) {
-                        orig(self, value);
-                    }
-                })
+                new Action<Action<HeroController, bool>, HeroController, bool>(OnHeroCallWithFlag)
             ));
         }
 
@@ -192,11 +185,7 @@ internal class BindCoop {
                 null
             )!,
             new Action<Action<tk2dSpriteAnimator, tk2dSpriteAnimationClip, float, float>, tk2dSpriteAnimator,
-                tk2dSpriteAnimationClip, float, float>((orig, self, clip, startTime, fps) => {
-                if (!HoldWhileHealing(self, () => orig(self, clip, startTime, fps))) {
-                    orig(self, clip, startTime, fps);
-                }
-            })
+                tk2dSpriteAnimationClip, float, float>(OnPlay)
         ));
 
         _hooks.Add(new Hook(
@@ -223,22 +212,98 @@ internal class BindCoop {
     }
 
     /// <summary>
-    /// Holds back what an FSM other than the player character's own does to the local player while they heal, until
-    /// the heal has ended. What such FSMs do after that, before it is all done, is held back behind it, so that it is
-    /// done in the same order.
+    /// Whether what is done to the given part of the player character now is held back: what an FSM other than the
+    /// player character's own does to the local player while they heal waits until the heal has ended, and what such
+    /// FSMs do after that, before it is all done, is held back behind it, so that it is done in the same order. The
+    /// caller then keeps it in <see cref="_held"/>, made into an action only then: the hooks that ask run for every
+    /// clip of the game and every frame of the player character.
     /// </summary>
     /// <param name="target">The part of the player character it is done to.</param>
-    /// <param name="apply">Does it.</param>
-    /// <returns>Whether it was held back.</returns>
-    private bool HoldWhileHealing(Component target, Action apply) {
+    /// <param name="source">The object of the FSM that does it, when it is held back.</param>
+    /// <returns>Whether it is held back.</returns>
+    private bool IsHeldWhileHealing(Component target, [NotNullWhen(true)] out GameObject? source) {
+        source = null;
         var hero = HeroController.instance;
         if (hero == null || !hero.cState.isBinding && _held.Count == 0 || target.gameObject != hero.gameObject ||
-            FsmExecutionStack.ExecutingFsm?.GameObject is not { } source || source.transform.IsChildOf(hero.transform)) {
+            FsmExecutionStack.ExecutingFsm?.GameObject is not { } executing ||
+            executing.transform.IsChildOf(hero.transform)) {
             return false;
         }
 
-        _held.Add((source, apply));
+        source = executing;
         return true;
+    }
+
+    /// <summary>
+    /// Hook for the methods of the player character without a parameter that take control or give it back, or switch
+    /// the animation off and on, held back while the player heals (see <see cref="IsHeldWhileHealing"/>).
+    /// </summary>
+    private void OnHeroCall(Action<HeroController> orig, HeroController self) {
+        if (!IsHeldWhileHealing(self, out var source)) {
+            orig(self);
+            return;
+        }
+
+        _held.Add((source, HeroCall(orig, self)));
+    }
+
+    /// <summary>
+    /// Hook for the methods of the player character with a flag, held back like <see cref="OnHeroCall"/>. The game
+    /// calls AffectedByGravity from the player character's Update and FixedUpdate.
+    /// </summary>
+    private void OnHeroCallWithFlag(Action<HeroController, bool> orig, HeroController self, bool flag) {
+        if (!IsHeldWhileHealing(self, out var source)) {
+            orig(self, flag);
+            return;
+        }
+
+        _held.Add((source, HeroCall(orig, self, flag)));
+    }
+
+    /// <summary>
+    /// A method of the player character called as it would be, as an action (see <see cref="OnHeroCall"/>).
+    /// </summary>
+    private static Action HeroCall(Action<HeroController> orig, HeroController self) {
+        return () => orig(self);
+    }
+
+    /// <summary>
+    /// A method of the player character with a flag called as it would be, as an action.
+    /// </summary>
+    private static Action HeroCall(Action<HeroController, bool> orig, HeroController self, bool flag) {
+        return () => orig(self, flag);
+    }
+
+    /// <summary>
+    /// Hook for tk2dSpriteAnimator.Play: a pose, which would take the place of the heal's own clips, is held back like
+    /// the rest (see <see cref="IsHeldWhileHealing"/>).
+    /// </summary>
+    private void OnPlay(
+        Action<tk2dSpriteAnimator, tk2dSpriteAnimationClip, float, float> orig,
+        tk2dSpriteAnimator self,
+        tk2dSpriteAnimationClip clip,
+        float startTime,
+        float fps
+    ) {
+        if (!IsHeldWhileHealing(self, out var source)) {
+            orig(self, clip, startTime, fps);
+            return;
+        }
+
+        _held.Add((source, PlayCall(orig, self, clip, startTime, fps)));
+    }
+
+    /// <summary>
+    /// A clip played as it would be, as an action (see <see cref="OnPlay"/>).
+    /// </summary>
+    private static Action PlayCall(
+        Action<tk2dSpriteAnimator, tk2dSpriteAnimationClip, float, float> orig,
+        tk2dSpriteAnimator self,
+        tk2dSpriteAnimationClip clip,
+        float startTime,
+        float fps
+    ) {
+        return () => orig(self, clip, startTime, fps);
     }
 
     /// <summary>

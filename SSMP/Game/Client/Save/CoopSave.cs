@@ -424,7 +424,7 @@ internal partial class CoopSave {
         }
 
         var members = FindMembers(marker);
-        if (members.Any(member => !_checkedMembers.Contains(member.Id))) {
+        if (HasUncheckedMember(members)) {
             // A check that throws must not keep the hold below from working
             try {
                 UpdateCheck(marker, members);
@@ -438,7 +438,7 @@ internal partial class CoopSave {
 
         // The parts that keep in step with one partner at a time go by a checked member, and by any member on the
         // server where they went by an unchecked partner
-        var checkedPartner = members.FirstOrDefault(member => _checkedMembers.Contains(member.Id));
+        var checkedPartner = FirstCheckedMember(members);
 
         // A boss checkpoint that throws must not keep the hold below from working either
         try {
@@ -1289,6 +1289,11 @@ internal partial class CoopSave {
     /// Adds the players who came onto the server to the players of the session.
     /// </summary>
     private void UpdateRoster(CoopSaveMarker marker) {
+        // Looked for before the players are sorted, as this runs every frame and a newcomer is rare
+        if (!HasNewcomer(marker)) {
+            return;
+        }
+
         var changed = false;
         foreach (var player in GetOthersOnServer()) {
             if (player.SaveKey.Length == 0 || IsMember(player, marker)) {
@@ -1302,6 +1307,19 @@ internal partial class CoopSave {
         if (changed) {
             marker.TakeOverPartner();
         }
+    }
+
+    /// <summary>
+    /// Whether a player on the server with a save key isn't a member of a paired save yet.
+    /// </summary>
+    private bool HasNewcomer(CoopSaveMarker marker) {
+        foreach (var player in _playerData.Values) {
+            if (player.SaveKey.Length > 0 && !IsMember(player, marker)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1758,10 +1776,70 @@ internal partial class CoopSave {
     /// because a member who plays on another computer has another save key.
     /// </summary>
     private static bool IsMember(ClientPlayerData player, CoopSaveMarker marker) {
-        return marker.Members.Any(member =>
-            (player.SaveKey.Length > 0 && player.SaveKey == member.Key) ||
-            (member.Name.Length > 0 && player.Username == member.Name)
-        );
+        // A loop rather than a query with a closure, as this is asked for every player every frame
+        foreach (var member in marker.Members) {
+            if ((player.SaveKey.Length > 0 && player.SaveKey == member.Key) ||
+                (member.Name.Length > 0 && player.Username == member.Name)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The player on the server who is each member of a paired save, by the index of the member, from the last
+    /// <see cref="MatchPlayers"/>; kept rather than made anew, as the members are matched a few times every frame.
+    /// </summary>
+    private readonly List<ClientPlayerData?> _matchedPlayers = [];
+
+    /// <summary>
+    /// The IDs of the players that <see cref="MatchPlayers"/> matched to a member so far.
+    /// </summary>
+    private readonly HashSet<ushort> _matchTaken = [];
+
+    /// <summary>
+    /// Matches each member of a paired save with the player on the server who is them, or null: the player with their
+    /// save key, or else one with their name. No player stands for two members. The list is reused by the next call,
+    /// so it is read straight away.
+    /// </summary>
+    private List<ClientPlayerData?> MatchPlayers(CoopSaveMarker marker) {
+        var players = _matchedPlayers;
+        players.Clear();
+        _matchTaken.Clear();
+        for (var i = 0; i < marker.Members.Count; i++) {
+            players.Add(null);
+        }
+
+        for (var i = 0; i < players.Count; i++) {
+            var key = marker.Members[i].Key;
+            if (key.Length == 0) {
+                continue;
+            }
+
+            foreach (var player in _playerData.Values) {
+                if (player.SaveKey == key && _matchTaken.Add(player.Id)) {
+                    players[i] = player;
+                    break;
+                }
+            }
+        }
+
+        for (var i = 0; i < players.Count; i++) {
+            var name = marker.Members[i].Name;
+            if (players[i] != null || name.Length == 0) {
+                continue;
+            }
+
+            foreach (var player in _playerData.Values) {
+                if (player.Username == name && _matchTaken.Add(player.Id)) {
+                    players[i] = player;
+                    break;
+                }
+            }
+        }
+
+        return players;
     }
 
     /// <summary>
@@ -1769,38 +1847,9 @@ internal partial class CoopSave {
     /// or else one with their name. No player stands for two members.
     /// </summary>
     private List<(CoopSaveMember Member, ClientPlayerData? Player)> MatchMembers(CoopSaveMarker marker) {
-        var players = new ClientPlayerData?[marker.Members.Count];
-        var taken = new HashSet<ushort>();
-        for (var i = 0; i < players.Length; i++) {
-            var key = marker.Members[i].Key;
-            if (key.Length == 0) {
-                continue;
-            }
-
-            foreach (var player in _playerData.Values) {
-                if (player.SaveKey == key && taken.Add(player.Id)) {
-                    players[i] = player;
-                    break;
-                }
-            }
-        }
-
-        for (var i = 0; i < players.Length; i++) {
-            var name = marker.Members[i].Name;
-            if (players[i] != null || name.Length == 0) {
-                continue;
-            }
-
-            foreach (var player in _playerData.Values) {
-                if (player.Username == name && taken.Add(player.Id)) {
-                    players[i] = player;
-                    break;
-                }
-            }
-        }
-
-        var matches = new List<(CoopSaveMember Member, ClientPlayerData? Player)>(players.Length);
-        for (var i = 0; i < players.Length; i++) {
+        var players = MatchPlayers(marker);
+        var matches = new List<(CoopSaveMember Member, ClientPlayerData? Player)>(players.Count);
+        for (var i = 0; i < players.Count; i++) {
             matches.Add((marker.Members[i], players[i]));
         }
 
@@ -1812,7 +1861,7 @@ internal partial class CoopSave {
     /// </summary>
     private List<ClientPlayerData> FindMembers(CoopSaveMarker marker) {
         var members = new List<ClientPlayerData>();
-        foreach (var (_, player) in MatchMembers(marker)) {
+        foreach (var player in MatchPlayers(marker)) {
             if (player != null) {
                 members.Add(player);
             }
@@ -1824,13 +1873,48 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether every member of a paired save is on the server.
     /// </summary>
-    private bool HasAllMembers(CoopSaveMarker marker) => FindMembers(marker).Count == marker.Members.Count;
+    private bool HasAllMembers(CoopSaveMarker marker) {
+        foreach (var player in MatchPlayers(marker)) {
+            if (player == null) {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     /// <summary>
     /// Whether every member of a paired save is on the server and was checked with.
     /// </summary>
     private bool IsGroupComplete(CoopSaveMarker marker, List<ClientPlayerData> members) {
-        return members.Count == marker.Members.Count && members.All(member => _checkedMembers.Contains(member.Id));
+        return members.Count == marker.Members.Count && !HasUncheckedMember(members);
+    }
+
+    /// <summary>
+    /// Whether one of the given members on the server wasn't checked with yet. A loop rather than a query, as this is
+    /// asked a few times every frame.
+    /// </summary>
+    private bool HasUncheckedMember(List<ClientPlayerData> members) {
+        foreach (var member in members) {
+            if (!_checkedMembers.Contains(member.Id)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The first of the given members on the server who was checked with, or null.
+    /// </summary>
+    private ClientPlayerData? FirstCheckedMember(List<ClientPlayerData> members) {
+        foreach (var member in members) {
+            if (_checkedMembers.Contains(member.Id)) {
+                return member;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -1923,7 +2007,31 @@ internal partial class CoopSave {
     /// The key of a save slot in the markers: the folder of the game's save files, which is different for each account,
     /// and the slot.
     /// </summary>
-    private static string GetSlotKey(int slot) => $"{GetSaveFolderName()}/{slot}";
+    private static string GetSlotKey(int slot) {
+        // Kept, as the updates of every frame ask for it and each time made a new string with the slot boxed
+        var folder = GetSaveFolderName();
+        if (folder != _slotKeysFolder) {
+            _slotKeysFolder = folder;
+            SlotKeys.Clear();
+        }
+
+        if (!SlotKeys.TryGetValue(slot, out var key)) {
+            key = $"{folder}/{slot}";
+            SlotKeys[slot] = key;
+        }
+
+        return key;
+    }
+
+    /// <summary>
+    /// The keys of the save slots made so far, for the folder <see cref="_slotKeysFolder"/>.
+    /// </summary>
+    private static readonly Dictionary<int, string> SlotKeys = new();
+
+    /// <summary>
+    /// The folder of the save files that <see cref="SlotKeys"/> were made with.
+    /// </summary>
+    private static string? _slotKeysFolder;
 
     /// <summary>
     /// The name of the folder of the save files once it is known, because the updates of every frame need it.

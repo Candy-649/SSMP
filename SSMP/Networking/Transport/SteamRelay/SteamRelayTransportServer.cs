@@ -277,10 +277,20 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
     private void ProcessIncomingPackets() {
         if (!_isRunning) return;
 
-        SteamRelayMessaging.Drain(SteamRelayMessaging.ClientToServerChannel, _messageBuffer, (sender, data, size) => {
-            var client = GetOrAddClient(sender);
-            client?.RaiseDataReceived(data, size);
-        });
+        SteamRelayMessaging.Drain(SteamRelayMessaging.ClientToServerChannel, _messageBuffer, _onMessage ??= OnMessage);
+    }
+
+    /// <summary>
+    /// <see cref="OnMessage"/>, made once rather than a delegate on every poll.
+    /// </summary>
+    private Action<ulong, byte[], int>? _onMessage;
+
+    /// <summary>
+    /// Hands the data of a message drained from the players' channel to the player who sent it.
+    /// </summary>
+    private void OnMessage(ulong sender, byte[] data, int size) {
+        var client = GetOrAddClient(sender);
+        client?.RaiseDataReceived(data, size);
     }
 
     /// <summary>

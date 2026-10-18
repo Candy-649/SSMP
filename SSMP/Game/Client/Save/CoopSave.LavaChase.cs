@@ -1142,6 +1142,11 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     private void UpdateChaseStandUp(HeroController hero) {
+        // Without anyone to stand up, nothing to copy every frame
+        if (_chaseStandUps.Count == 0) {
+            return;
+        }
+
         try {
             foreach (var standUp in _chaseStandUps.Values.ToList()) {
                 if (Time.unscaledTime < standUp.At) {
