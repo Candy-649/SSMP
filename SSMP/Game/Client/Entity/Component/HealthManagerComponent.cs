@@ -123,9 +123,10 @@ internal class HealthManagerComponent : EntityComponent {
     private static Hook? _heroBoxDamageHook;
 
     /// <summary>
-    /// MonoMod hook for HealthManager.Die.
+    /// MonoMod hook for HealthManager.Die, one for all creatures (see <see cref="OnAnyDie"/>), as the hooks on blows
+    /// are. Each component used to put one of its own on and take it off as it went (see Entity.EntitiesByAnimator).
     /// </summary>
-    private Hook? _healthManagerDieHook;
+    private static Hook? _healthManagerDieHook;
 
     /// <summary>
     /// The last value for the "invincible" variable of the health manager.
@@ -380,6 +381,29 @@ internal class HealthManagerComponent : EntityComponent {
         _hadHealth = _lastHp > 0;
         _lastInvincibleFromDirection = healthManager.Host.InvincibleFromDirection;
 
+        HookDeaths();
+        MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
+
+        HookBlows();
+        if (healthManager.Host != null) {
+            _creatureHealthManager = healthManager.Host;
+            ComponentOf[healthManager.Host] = this;
+        }
+
+        if (healthManager.Client != null) {
+            _copyHealthManager = healthManager.Client;
+            ComponentOf[healthManager.Client] = this;
+        }
+    }
+
+    /// <summary>
+    /// Makes the hook on deaths, once for all creatures.
+    /// </summary>
+    private static void HookDeaths() {
+        if (_healthManagerDieHook != null) {
+            return;
+        }
+
         // Get the largest overload of Die from HealthManager, because that is the method that is getting called by
         // all other overloads regardless
         var dieMethod = typeof(HealthManager).GetMethod(
@@ -400,19 +424,7 @@ internal class HealthManagerComponent : EntityComponent {
             );
         }
 
-        _healthManagerDieHook = new Hook(dieMethod, HealthManagerOnDie);
-        MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
-
-        HookBlows();
-        if (healthManager.Host != null) {
-            _creatureHealthManager = healthManager.Host;
-            ComponentOf[healthManager.Host] = this;
-        }
-
-        if (healthManager.Client != null) {
-            _copyHealthManager = healthManager.Client;
-            ComponentOf[healthManager.Client] = this;
-        }
+        _healthManagerDieHook = new Hook(dieMethod, OnAnyDie);
     }
 
     /// <summary>
@@ -1194,6 +1206,35 @@ internal class HealthManagerComponent : EntityComponent {
         rigidbody.position = position;
         rigidbody.rotation = rotation;
         rigidbody.linearVelocity = velocity;
+    }
+
+    /// <summary>
+    /// The hook on HealthManager.Die that all creatures share: the death of a creature or of its copy goes to its
+    /// component (see <see cref="HealthManagerOnDie"/>), and any other comes as it would.
+    /// </summary>
+    private static void OnAnyDie(
+        Action<HealthManager, float?, AttackTypes, NailElements, GameObject, bool, float, bool, bool> orig,
+        HealthManager self,
+        float? attackDirection,
+        AttackTypes attackType,
+        NailElements nailElements,
+        GameObject gameObject,
+        bool ignoreEvasion,
+        float corpseFlingMultiplier,
+        bool overrideSpecialDeath,
+        bool disallowDropFlying
+    ) {
+        if (ComponentOf.TryGetValue(self, out var component)) {
+            component.HealthManagerOnDie(
+                orig, self, attackDirection, attackType, nailElements, gameObject, ignoreEvasion,
+                corpseFlingMultiplier, overrideSpecialDeath, disallowDropFlying
+            );
+        } else {
+            orig(
+                self, attackDirection, attackType, nailElements, gameObject, ignoreEvasion, corpseFlingMultiplier,
+                overrideSpecialDeath, disallowDropFlying
+            );
+        }
     }
 
     /// <summary>
@@ -2187,8 +2228,6 @@ internal class HealthManagerComponent : EntityComponent {
             _clientDeathEffects.CorpseEmitted -= OnClientCorpseEmitted;
         }
 
-        _healthManagerDieHook?.Dispose();
-        _healthManagerDieHook = null;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         LetHurt();
 

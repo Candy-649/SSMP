@@ -42,19 +42,34 @@ internal partial class Entity {
     private readonly NetClient _netClient;
 
     /// <summary>
-    /// MonoMod hook for tk2dSpriteAnimator.Play.
+    /// MonoMod hook for tk2dSpriteAnimator.Play, one for all entities (see <see cref="OnAnyAnimationPlayed"/>).
     /// </summary>
-    private Hook? _spriteAnimatorPlayHook;
+    private static Hook? _spriteAnimatorPlayHook;
 
     /// <summary>
-    /// MonoMod hook for ObjectPool.Recycle.
+    /// MonoMod hook for ObjectPool.Recycle, one for all entities (see <see cref="OnAnyObjectRecycled"/>).
     /// </summary>
-    private Hook? _objectPoolRecycleHook;
+    private static Hook? _objectPoolRecycleHook;
 
     /// <summary>
-    /// MonoMod hook for ActivateGameObject.OnEnter.
+    /// MonoMod hook for ActivateGameObject.OnEnter, one for all entities (see <see cref="OnAnyActivateGameObject"/>).
     /// </summary>
-    private Hook? _activateGameObjectHook;
+    private static Hook? _activateGameObjectHook;
+
+    /// <summary>
+    /// The entity of the animator of each creature and of its copy, for the hook on tk2dSpriteAnimator.Play that all
+    /// entities share. Each entity used to put hooks of its own on these three methods of the game and take them off as
+    /// it went. MonoMod builds and compiles a hook anew each time, and goes over every hook already on the method as
+    /// one is put on or taken off, so the time that the entities of a room took to make grew faster than their number;
+    /// and every clip that any animator played went through one hook of each creature.
+    /// </summary>
+    private static readonly Dictionary<tk2dSpriteAnimator, Entity> EntitiesByAnimator = new();
+
+    /// <summary>
+    /// Whether the room's switching of the room object on and off is still kept from it (see
+    /// <see cref="OnDoActivateGameObject"/>), as it is until the entity is initialized as the scene host's.
+    /// </summary>
+    private bool _watchesActivation = true;
 
     /// <summary>
     /// Whether the entity has a parent entity.
@@ -521,17 +536,22 @@ internal partial class Entity {
                 }
             }
 
-            _spriteAnimatorPlayHook = new Hook(
+            EntitiesByAnimator[_animator.Host] = this;
+            if (_animator.Client != null) {
+                EntitiesByAnimator[_animator.Client] = this;
+            }
+
+            _spriteAnimatorPlayHook ??= new Hook(
                 typeof(tk2dSpriteAnimator).GetMethod(
                     nameof(tk2dSpriteAnimator.Play),
                     [typeof(tk2dSpriteAnimationClip), typeof(float), typeof(float)]
                 ),
-                OnAnimationPlayed
+                OnAnyAnimationPlayed
             );
         }
 
         // Always disallow the client object from being recycled, because it will simply be destroyed
-        _objectPoolRecycleHook = new Hook(
+        _objectPoolRecycleHook ??= new Hook(
             typeof(ObjectPool).GetMethod(
                 nameof(ObjectPool.Recycle),
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static,
@@ -539,17 +559,17 @@ internal partial class Entity {
                 [typeof(GameObject)],
                 null
             ),
-            ObjectPoolOnRecycleGameObject
+            OnAnyObjectRecycled
         );
 
         // Register a hook for the ActivateGameObject action to update the active state of the host game object
         // before scene host is determined
-        _activateGameObjectHook = new Hook(
+        _activateGameObjectHook ??= new Hook(
             typeof(ActivateGameObject).GetMethod(
                 nameof(ActivateGameObject.OnEnter),
                 BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
             ),
-            OnDoActivateGameObject
+            OnAnyActivateGameObject
         );
 
         _fsms = new HostClientPair<List<PlayMakerFSM>> {
@@ -1889,6 +1909,29 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// The hook on tk2dSpriteAnimator.Play that all entities share: a clip that the animator of a creature or of its
+    /// copy plays goes to its entity (see <see cref="OnAnimationPlayed"/>), and any other plays as it would.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The sprite animator instance.</param>
+    /// <param name="clip">The animation clip that was played.</param>
+    /// <param name="clipStartTime">The start time of the animation clip.</param>
+    /// <param name="overrideFps">The FPS override for the clip.</param>
+    private static void OnAnyAnimationPlayed(
+        Action<tk2dSpriteAnimator, tk2dSpriteAnimationClip, float, float> orig,
+        tk2dSpriteAnimator self,
+        tk2dSpriteAnimationClip clip,
+        float clipStartTime,
+        float overrideFps
+    ) {
+        if (EntitiesByAnimator.TryGetValue(self, out var entity)) {
+            entity.OnAnimationPlayed(orig, self, clip, clipStartTime, overrideFps);
+        } else {
+            orig(self, clip, clipStartTime, overrideFps);
+        }
+    }
+
+    /// <summary>
     /// Callback method for when the sprite animator plays an animation.
     /// </summary>
     /// <param name="orig">The original method.</param>
@@ -2003,16 +2046,31 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Callback method for when a game object is recycled. Used to prevent client objects from being recycled, which
-    /// shouldn't happen because they are instantiated manually instead of from a pool.
+    /// The hook on ObjectPool.Recycle that all entities share. Used to prevent client objects from being recycled,
+    /// which shouldn't happen because they are instantiated manually instead of from a pool.
     /// </summary>
-    private void ObjectPoolOnRecycleGameObject(Action<GameObject> orig, GameObject obj) {
-        if (obj == Object.Client) {
+    private static void OnAnyObjectRecycled(Action<GameObject> orig, GameObject obj) {
+        if (obj is not null && EntitiesByCopy.ContainsKey(obj)) {
             //Logger.Debug($"Client object of entity: {Id}, {Type} tried to be recycled");
             return;
         }
 
         orig(obj);
+    }
+
+    /// <summary>
+    /// The hook on ActivateGameObject.OnEnter that all entities share: an action that switches the room object of an
+    /// entity on or off goes to it while it keeps that from it (see <see cref="OnDoActivateGameObject"/>), and any
+    /// other does what it does.
+    /// </summary>
+    private static void OnAnyActivateGameObject(Action<ActivateGameObject> orig, ActivateGameObject self) {
+        var target = self.Fsm.GetOwnerDefaultTarget(self.gameObject);
+        if (target is not null && EntitiesByRoomObject.TryGetValue(target, out var entity) &&
+            entity._watchesActivation) {
+            entity.OnDoActivateGameObject(orig, self);
+        } else {
+            orig(self);
+        }
     }
 
     /// <summary>
@@ -2101,9 +2159,8 @@ internal partial class Entity {
             component.InitializeHost(sceneHostEpoch);
         }
 
-        // Deregister the hook for updating the active value of the host object
-        _activateGameObjectHook?.Dispose();
-        _activateGameObjectHook = null;
+        // The room switches the host object on and off from now on (OnAnyActivateGameObject)
+        _watchesActivation = false;
     }
 
     /// <summary>
@@ -4560,8 +4617,8 @@ internal partial class Entity {
             EndAllLeads();
             LetThePlayerBackIn(true);
         } finally {
-            EntitiesByCopy.Remove(Object.Client);
-            EntitiesByRoomObject.Remove(Object.Host);
+            ForgetIn(EntitiesByCopy, Object.Client);
+            ForgetIn(EntitiesByRoomObject, Object.Host);
 
             // An FSM that was still to be made is no longer this entity's to hook
             foreach (var fsm in _fsms.Host) {
@@ -4570,14 +4627,8 @@ internal partial class Entity {
                 }
             }
 
-            _spriteAnimatorPlayHook?.Dispose();
-            _spriteAnimatorPlayHook = null;
-
-            _objectPoolRecycleHook?.Dispose();
-            _objectPoolRecycleHook = null;
-
-            _activateGameObjectHook?.Dispose();
-            _activateGameObjectHook = null;
+            ForgetIn(EntitiesByAnimator, _animator.Host);
+            ForgetIn(EntitiesByAnimator, _animator.Client);
 
             foreach (var component in _components.Values.Distinct()) {
                 component.Destroy();
@@ -4585,6 +4636,18 @@ internal partial class Entity {
 
             GamePatcher.OnEntityDestroyed(Object.Host);
             GamePatcher.OnEntityDestroyed(Object.Client);
+        }
+    }
+
+    /// <summary>
+    /// Takes the entry of an object out of one of the lookups of entities if it is this entity's: an entity made for
+    /// the same object since keeps its own.
+    /// </summary>
+    /// <param name="lookup">The lookup.</param>
+    /// <param name="key">The object, or null.</param>
+    private void ForgetIn<TKey>(Dictionary<TKey, Entity> lookup, TKey? key) where TKey : UnityEngine.Object {
+        if (key is not null && lookup.TryGetValue(key, out var entity) && entity == this) {
+            lookup.Remove(key);
         }
     }
 
