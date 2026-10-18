@@ -4059,9 +4059,10 @@ internal partial class Entity {
 
             // How the entity moves by itself, the colours its FSMs leave it in, and whether the damage of its parts is
             // on, are its own FSM's to say while that runs here, and held until the scene host has answered the input
-            // (PlayHere)
+            // (PlayHere), or until the copy is through a move that the scene host's FSM came out of first, which they
+            // come after (see _moveFinishBy)
             if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint or
-                    EntityComponentType.DamageHero) && WaitsForEcho) {
+                    EntityComponentType.DamageHero) && (WaitsForEcho || _moveFinishBy != null)) {
                 HoldForEcho(data);
                 continue;
             }

@@ -1400,9 +1400,11 @@ internal partial class Entity {
     /// goes into that state again while the copy is past it, which a move never does within itself; or as it goes into
     /// a state of the move that the first one goes on to, which it passed over between two sends: only the latest state
     /// of an FSM is sent, also again for one that was lost, and a stun starts in a state that it is out of the next
-    /// frame. Not from the state of a room asked for again after a gap, which says where the scene host's FSM is but
-    /// not since when, nor while the local player talks to the creature or the copy runs the part of the FSM that each
-    /// game runs by itself, nor while it runs another of the creature's FSMs here.
+    /// frame - but only one that nothing outside the move goes to. Not from the state of a room asked for again after a
+    /// gap, which says where the scene host's FSM is but not since when, nor while the local player talks to the
+    /// creature or the copy runs the part of the FSM that each game runs by itself, nor while it runs another of the
+    /// creature's FSMs here, nor for a move that the copy's FSM goes through another way (see
+    /// <see cref="StatesOfTheMove"/>), which it follows the scene host through.
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state the scene host's FSM went to.</param>
@@ -1422,7 +1424,8 @@ internal partial class Entity {
         }
 
         if (EntityRegistry.TryGetRunHere(Type, fsm.FsmName, stateName, out move)) {
-            return !IsInCombo(stateName) || _runHereMove && fsm.ActiveStateName != stateName;
+            return (!IsInCombo(stateName) || _runHereMove && fsm.ActiveStateName != stateName) &&
+                   StatesOfTheMove(fsm, stateName, move) != null;
         }
 
         if (!EntityRegistry.TryGetRunsHere(Type, fsm.FsmName, out var moves) || IsInCombo(stateName) ||
@@ -1430,9 +1433,16 @@ internal partial class Entity {
             return false;
         }
 
+        // A state that the first one goes on to, and that neither a state outside the move goes to nor a global
+        // transition: the scene host's FSM could have got there without going into the move. A creature knocked into
+        // the water by its stun goes into it the way its dive does
         foreach (var (from, states) in moves) {
             if (states.Contains(stateName) && fsm.Fsm.GetState(from) is { } fromState &&
-                Array.Exists(fromState.Transitions, transition => transition.ToFsmState == heard)) {
+                Array.Exists(fromState.Transitions, transition => transition.ToFsmState == heard) &&
+                !Array.Exists(fsm.Fsm.GlobalTransitions, transition => transition.ToFsmState == heard) &&
+                !Array.Exists(fsm.Fsm.States, state => !states.Contains(state.Name) &&
+                    Array.Exists(state.Transitions, transition => transition.ToFsmState == heard)) &&
+                StatesOfTheMove(fsm, from, states) != null) {
                 first = from;
                 move = states;
                 return true;
@@ -1443,24 +1453,100 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// The state of a move from which a transition of its own goes out of the move to the given state, or null: an FSM
-    /// that comes out of the move there came to its end, rather than being taken out of it by a global transition.
+    /// Every state of a move that the copy plays by itself, reached from the first one through the others, or null if
+    /// the copy's FSM does not go through all of them from there: an FSM of a creature of the same kind that goes
+    /// another way through states of the same names plays no such move - the same foe met again, whose charge looks for
+    /// the player as it goes. The copy follows the scene host through it.
+    /// </summary>
+    /// <param name="copyFsm">The FSM of the copy.</param>
+    /// <param name="fromName">The state the move starts in.</param>
+    /// <param name="stateNames">The states of the move, that one too.</param>
+    private HashSet<FsmState>? StatesOfTheMove(PlayMakerFSM copyFsm, string fromName, HashSet<string> stateNames) {
+        if (copyFsm.Fsm.GetState(fromName) is not { } from) {
+            return null;
+        }
+
+        var states = new HashSet<FsmState> { from };
+        var toGo = new Stack<FsmState>();
+        toGo.Push(from);
+        while (toGo.Count > 0) {
+            foreach (var transition in toGo.Pop().Transitions) {
+                if (transition.ToFsmState is { } to && stateNames.Contains(to.Name) && states.Add(to)) {
+                    toGo.Push(to);
+                }
+            }
+        }
+
+        if (states.Count == stateNames.Count) {
+            return states;
+        }
+
+        if (MovesThatDoNotFit.Add($"{Type}/{copyFsm.FsmName}/{fromName}")) {
+            Logger.Info(
+                $"The FSM '{copyFsm.FsmName}' of entity {Id} ({Type}) goes another way from '{fromName}' than " +
+                "the move that starts there, so its copy follows the scene host through it"
+            );
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The state of a move from which a transition of its own goes out of the move to the given state, on an event
+    /// that the state raises itself (see <see cref="GoesOutByItself"/>), or null: an FSM that comes out of the move
+    /// there came to its end, rather than being taken out of it by a global transition, or by what told it from outside
+    /// - a part of the creature that caught the scene host's player, which the copy never does by itself: it went on
+    /// round the room, its damage on, while the scene host's creature stood and struck the player it held.
     /// </summary>
     /// <param name="move">The states of the move.</param>
     /// <param name="outOfIt">The state out of the move.</param>
     /// <param name="lastIn">The state of the move that the FSM was last heard in, taken first if it goes there.</param>
     private static FsmState? WayOutOfTheMove(HashSet<FsmState> move, FsmState outOfIt, FsmState? lastIn) {
-        if (lastIn != null && Array.Exists(lastIn.Transitions, transition => transition.ToFsmState == outOfIt)) {
+        if (lastIn != null && GoesOutByItself(lastIn, outOfIt)) {
             return lastIn;
         }
 
         foreach (var state in move) {
-            if (Array.Exists(state.Transitions, transition => transition.ToFsmState == outOfIt)) {
+            if (GoesOutByItself(state, outOfIt)) {
                 return state;
             }
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Whether a transition of a state goes to the given state on an event that the state raises itself: as it is done,
+    /// or by one of its own actions - its time up, its animation through, the ground or the water it watches for
+    /// reached.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    /// <param name="to">The state that the transition goes to.</param>
+    private static bool GoesOutByItself(FsmState state, FsmState to) {
+        foreach (var transition in state.Transitions) {
+            if (transition.ToFsmState != to) {
+                continue;
+            }
+
+            if (transition.EventName == "FINISHED") {
+                return true;
+            }
+
+            foreach (var action in state.Actions) {
+                foreach (var field in FieldsOf(action.GetType())) {
+                    var raises = field.GetValue(action) switch {
+                        FsmEvent raised => raised.Name == transition.EventName,
+                        FsmEvent[] raised => Array.Exists(raised, one => one?.Name == transition.EventName),
+                        _ => false
+                    };
+                    if (raises) {
+                        return true;
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1541,32 +1627,8 @@ internal partial class Entity {
         var fsmIndex = _fsms.Client.IndexOf(copyFsm);
         if (!_isControlled || Object.Client == null || !Object.Client.activeInHierarchy || SwitchToStateField == null ||
             fsmIndex < 0 || fsmIndex >= _fsms.Host.Count || fsmIndex > byte.MaxValue ||
-            copyFsm.Fsm.GetState(fromName) is not { } from) {
-            return;
-        }
-
-        // Every state of the move, reached from the first through the others. An FSM of a creature of the same kind
-        // that goes another way through states of the same names plays no such move: the same foe met again, whose
-        // charge looks for the player as it goes
-        var states = new HashSet<FsmState> { from };
-        var toGo = new Stack<FsmState>();
-        toGo.Push(from);
-        while (toGo.Count > 0) {
-            foreach (var transition in toGo.Pop().Transitions) {
-                if (transition.ToFsmState is { } to && stateNames.Contains(to.Name) && states.Add(to)) {
-                    toGo.Push(to);
-                }
-            }
-        }
-
-        if (states.Count != stateNames.Count) {
-            if (MovesThatDoNotFit.Add($"{Type}/{copyFsm.FsmName}/{fromName}")) {
-                Logger.Info(
-                    $"The FSM '{copyFsm.FsmName}' of entity {Id} ({Type}) goes another way from '{fromName}' than " +
-                    "the move that starts there, so its copy follows the scene host through it"
-                );
-            }
-
+            copyFsm.Fsm.GetState(fromName) is not { } from ||
+            StatesOfTheMove(copyFsm, fromName, stateNames) is not { } states) {
             return;
         }
 
