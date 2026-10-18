@@ -22,7 +22,15 @@
     "fsm_names": [
       "Control",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Stagger": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Farmer Wisp Immolater Variant",
@@ -437,7 +445,16 @@
     "fsm_names": [
       "Control",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Fall",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Slab Fly Small Fresh",
@@ -564,7 +581,15 @@
       "Control",
       "Stun Control",
       "hero_binding_check"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Bone Worm BlueBlood",
@@ -793,7 +818,15 @@
       "Battle Music",
       "Stun Control",
       "hero_binding_check"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Crowman Juror Tiny",
@@ -970,7 +1003,15 @@
       "Control",
       "Bomb Blacken",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Blade Spider Hang",
@@ -1115,7 +1156,15 @@
       "Control",
       "Music Start",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Roachfeeder Short",
@@ -1195,7 +1244,15 @@
       "Stun Control",
       "Tornado Emission",
       "Tween Y Pos"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Lilypad Plat Trap",
@@ -1299,7 +1356,15 @@
     "fsm_names": [
       "Control",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Spike Lazy Flyer",
@@ -1673,7 +1738,15 @@
     ],
     "each_game_fsms": [
       "Bind Response"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Stagger": [
+          "Stun Air",
+          "Stun Land 2"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Mapper Spar NPC",
@@ -1974,7 +2047,15 @@
       "Stun Control",
       "Summon Bullets",
       "Tendril Cooldown"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Zap Core Enemy",
@@ -2388,7 +2469,16 @@
       "Slash Dust Effects",
       "Stun Control",
       "Y Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Fall",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "First Weaver",
@@ -2436,6 +2526,10 @@
         "DashCharge": [
           "DashCharge End",
           "Dash Audio End"
+        ],
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
         ]
       }
     }
@@ -2716,7 +2810,15 @@
       "FSM",
       "Save Hero",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Abyss Mass",
@@ -2783,6 +2885,15 @@
     ],
     "each_game_from": {
       "Control": "Death Stagger"
+    },
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Fall",
+          "Stun Land"
+        ]
+      }
     }
   },
   {
@@ -2797,7 +2908,15 @@
       "Control",
       "Flap Sfx",
       "Stun Control"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Crypt Worm",
@@ -2863,6 +2982,10 @@
           "J Slash 2",
           "J Slash 3",
           "J Slash 4"
+        ],
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
         ]
       }
     }
@@ -3004,6 +3127,11 @@
           "Charge Start",
           "Charge",
           "Charge End"
+        ],
+        "Stun Start": [
+          "Stun Air",
+          "Stun Fall",
+          "Stun Land"
         ]
       }
     }
@@ -3414,6 +3542,10 @@
         "Stab 1": [
           "Stab 2",
           "Stab 3"
+        ],
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
         ]
       }
     }
@@ -3440,6 +3572,10 @@
           "Tornado Slow",
           "Tornado Shoot",
           "Tornado End"
+        ],
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
         ]
       }
     }
@@ -3527,6 +3663,14 @@
         "Stab Launch": [
           "Stab",
           "Stab Recover"
+        ],
+        "Stun Start": [
+          "Stun Air",
+          "Stun Land"
+        ],
+        "Stun Start 2": [
+          "Stun Air 2",
+          "Stun Land 2"
         ]
       }
     }

@@ -4025,11 +4025,12 @@ internal partial class Entity {
                 // a catch is played here all through, and not again from what the scene host sends of it, and so is
                 // the part of an FSM that each game runs by itself (RunEachGamePart). What comes after what the copy
                 // plays by itself out of a catch that this game led is held until it has played that
-                // (HoldsForTheAftermath).
+                // (HoldsForTheAftermath), and so is what comes after a move that the copy plays on to its own end of
+                // once the scene host's FSM came out of it (HoldsForTheMoveEnd).
                 HearFromSceneHost(fsm, state);
                 if (fsm == _runHere && !_mutedHere.Contains(action)) {
                     // And while it runs here for a talk of the local player, until the talk is over (TalkHere)
-                    if (WaitsForEcho || HoldsForTheAftermath(state) || _runHereTalk) {
+                    if (WaitsForEcho || HoldsForTheAftermath(state) || HoldsForTheMoveEnd(state) || _runHereTalk) {
                         HoldForEcho(data);
                         continue;
                     }

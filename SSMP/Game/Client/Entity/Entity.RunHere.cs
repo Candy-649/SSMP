@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
@@ -279,6 +280,13 @@ internal partial class Entity {
     private const float AftermathTime = 5f;
 
     /// <summary>
+    /// How long a copy that plays a move by itself may still take to come to the end of it, once the scene host's FSM
+    /// came out of it first, in seconds: as long as the copy started it later, by the scene host's sends taking longer
+    /// then (see <see cref="_moveFinishBy"/>).
+    /// </summary>
+    private const float MoveFinishTime = 1f;
+
+    /// <summary>
     /// Whether a state has done all it does, after which it goes on only if something else sends it on.
     /// </summary>
     private static readonly FieldInfo? StateFinishedField = typeof(FsmState).GetField(
@@ -404,6 +412,19 @@ internal partial class Entity {
     private bool _moveVariablesHeld;
 
     /// <summary>
+    /// When the copy, playing a move by itself that the scene host's FSM came out of first the way the move goes out,
+    /// follows the scene host again even if it is not through the move yet; null while the scene host's FSM is not
+    /// out of it (see <see cref="HearStateFromSceneHost"/>).
+    /// </summary>
+    private float? _moveFinishBy;
+
+    /// <summary>
+    /// Whether the copy, playing a move by itself, is through it: its FSM would go out of the move, and waits at its
+    /// end for the scene host's FSM (see <see cref="OnSwitchState"/>).
+    /// </summary>
+    private bool _moveAtItsEnd;
+
+    /// <summary>
     /// The moves, by type of entity, FSM and first state, that an FSM was found to go through another way than its
     /// registry entry says, named once in the log (see <see cref="RunMoveHere"/>).
     /// </summary>
@@ -527,6 +548,8 @@ internal partial class Entity {
             _runHereMove = false;
             _moveHostAt = null;
             _moveEntered.Clear();
+            _moveFinishBy = null;
+            _moveAtItsEnd = false;
             TakeTheCopysBodyBack();
         }
 
@@ -1140,6 +1163,7 @@ internal partial class Entity {
 
         _runHere.Fsm.Update();
         UpdateAftermath();
+        UpdateMoveEnd();
 
         // A catch that the creature watches for itself which came to a state of its own that leads nowhere, and has
         // done all it does there, is over as the creature has it, and the scene host's FSM went there too. Left
@@ -1236,15 +1260,26 @@ internal partial class Entity {
     /// copy plays by itself (see <see cref="_runHereCombo"/>), nor for the part that each game runs by itself, nor
     /// while it plays what follows a catch that this game led, after which it follows the scene host again anyway (see
     /// <see cref="_aftermath"/>). Out of a catch that this game leads into what still has to do with the local player,
-    /// the copy goes that way instead (see <see cref="FollowIntoTheAftermath"/>).
+    /// the copy goes that way instead (see <see cref="FollowIntoTheAftermath"/>). Nor while the copy plays on to its
+    /// own end of a move that the scene host's FSM came out of first (see <see cref="_moveFinishBy"/>).
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="state">The state of the action.</param>
     private void HearFromSceneHost(PlayMakerFSM fsm, FsmState state) {
         if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
-            _runHereCombo?.Contains(state) != true && !FollowIntoTheAftermath(state.Name)) {
+            _moveFinishBy == null && _runHereCombo?.Contains(state) != true && !FollowIntoTheAftermath(state.Name)) {
             CatchUpWithSceneHost();
         }
+    }
+
+    /// <summary>
+    /// Whether what the scene host sent of the FSM that runs here, from the given state, is held until the copy has
+    /// played on to its own end of a move that the scene host's FSM came out of first (see
+    /// <see cref="_moveFinishBy"/>): what follows the move.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private bool HoldsForTheMoveEnd(FsmState state) {
+        return _moveFinishBy != null && _runHereCombo?.Contains(state) != true;
     }
 
     /// <summary>
@@ -1296,6 +1331,53 @@ internal partial class Entity {
             }
         }
 
+        // A move that the copy plays by itself starts as the scene host's FSM goes into it (see StartsAMove), once the
+        // rest of what came along is taken in too: what the scene host's FSM worked out on its way into the move, and
+        // what it sent of the states it went through to get there (StartMoveHeard). Whatever the copy plays here of
+        // that FSM ends, as the scene host's FSM is past it, whatever it makes of it: what the copy played of an input
+        // of the local player, waiting for the scene host's answer, ends now rather than once the answer comes, which
+        // the scene host sent only after it went into the move - a creature that caught the local player held them
+        // that much longer, and jumped from where it held them to where the scene host's creature had got to by then
+        if (StartsAMove(fsm, stateName, out var first, out var move)) {
+            _moveHeard = (fsm, first, move);
+            if (WaitsForEcho || _aftermath != null) {
+                Logger.Info(
+                    $"The scene host's FSM of entity {Id} went into the move from '{first}', so its copy stops " +
+                    "what it played here, and plays the move by itself"
+                );
+                FollowSceneHost();
+            } else if (_runHere != null) {
+                CatchUpWithSceneHost();
+            }
+
+            return;
+        }
+
+        // Out of a move that the copy plays by itself, the way the move goes out, the scene host's FSM came first: the
+        // copy plays on to its own end of it, as the scene host's creature did, rather than stop where it is - a
+        // creature knocked into the air stopped there and was put down where the scene host's lay - and follows the
+        // scene host again once it is through, or has taken too long (UpdateMoveEnd). What the scene host sends
+        // meanwhile is held until then; only a state that a global transition goes to - the creature killed - or
+        // another move takes the copy out of it at once. The scene host's FSM went through the state it came out of
+        // (CatchUpInTheMove).
+        if (_runHereMove && fsm == _runHere && !_moveAtItsEnd && _runHereCombo is { } moveHere &&
+            fsm.Fsm.GetState(stateName) is { } outOfIt && !moveHere.Contains(outOfIt)) {
+            if (_moveFinishBy == null && WayOutOfTheMove(moveHere, outOfIt, _moveHostAt) is { } exit) {
+                _moveFinishBy = Time.unscaledTime + MoveFinishTime;
+                _moveHostAt = exit;
+                Logger.Info(
+                    $"The scene host's FSM of entity {Id} came out of the move to '{stateName}' first, so its copy " +
+                    "plays on to its own end of it"
+                );
+                return;
+            }
+
+            if (_moveFinishBy != null &&
+                !Array.Exists(fsm.Fsm.GlobalTransitions, transition => transition.ToFsmState == outOfIt)) {
+                return;
+            }
+        }
+
         // Back where the input found it, the scene host's FSM is through with it, even where the copy is there already
         // and saw nothing new: it follows the scene host again (see HearEcho)
         if (fsm == _runHere && !WaitsForEcho && !_runHereForGood && !_runHereTalk && _aftermath == null &&
@@ -1304,28 +1386,98 @@ internal partial class Entity {
             CatchUpWithSceneHost();
         }
 
-        // A move that the copy plays by itself starts as the scene host's FSM goes into its first state, and again as
-        // it goes into that state again while the copy is past it, which a move never does within itself - but not
-        // from the state of a room asked for again after a gap, which says where the scene host's FSM is but not since
-        // when. It starts once the rest of what came along is taken in too: what the scene host's FSM worked out on
-        // its way into the move, and what it sent of the states it went through to get there (StartMoveHeard)
-        if (!FromRoomState && _eachGamePartWaiting == null && !_runHereTalk &&
-            (_runHere == null || _runHereMove && _runHere == fsm && fsm.ActiveStateName != stateName) &&
-            EntityRegistry.TryGetRunHere(Type, fsm.FsmName, stateName, out var move)) {
-            if (_runHere != null) {
-                CatchUpWithSceneHost();
-            }
-
-            _moveHeard = (fsm, stateName, move);
-            return;
-        }
-
         // How far the scene host's FSM went through a move that the copy plays by itself (see CatchUpInTheMove). By
         // the states it is said to go to only: what it sent of a state can come after a later state, in one packet
         if (_runHereMove && fsm == _runHere && fsm.Fsm.GetState(stateName) is { } heard &&
             _runHereCombo?.Contains(heard) == true) {
             _moveHostAt = heard;
         }
+    }
+
+    /// <summary>
+    /// Whether the scene host's FSM going to the given state starts a move that the copy plays by itself (see
+    /// <see cref="EntityRegistryEntry.RunsHere"/>), and which: as it goes into the move's first state, and again as it
+    /// goes into that state again while the copy is past it, which a move never does within itself; or as it goes into
+    /// a state of the move that the first one goes on to, which it passed over between two sends: only the latest state
+    /// of an FSM is sent, also again for one that was lost, and a stun starts in a state that it is out of the next
+    /// frame. Not from the state of a room asked for again after a gap, which says where the scene host's FSM is but
+    /// not since when, nor while the local player talks to the creature or the copy runs the part of the FSM that each
+    /// game runs by itself, nor while it runs another of the creature's FSMs here.
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    /// <param name="stateName">The state the scene host's FSM went to.</param>
+    /// <param name="first">The first state of the move.</param>
+    /// <param name="move">Every state of the move, the first one too.</param>
+    private bool StartsAMove(
+        PlayMakerFSM fsm,
+        string stateName,
+        out string first,
+        [NotNullWhen(true)] out HashSet<string>? move
+    ) {
+        first = stateName;
+        move = null;
+        if (FromRoomState || _eachGamePartWaiting != null || _runHereTalk || _runHereForGood ||
+            _runHere != null && _runHere != fsm) {
+            return false;
+        }
+
+        if (EntityRegistry.TryGetRunHere(Type, fsm.FsmName, stateName, out move)) {
+            return !IsInCombo(stateName) || _runHereMove && fsm.ActiveStateName != stateName;
+        }
+
+        if (!EntityRegistry.TryGetRunsHere(Type, fsm.FsmName, out var moves) || IsInCombo(stateName) ||
+            fsm.Fsm.GetState(stateName) is not { } heard) {
+            return false;
+        }
+
+        foreach (var (from, states) in moves) {
+            if (states.Contains(stateName) && fsm.Fsm.GetState(from) is { } fromState &&
+                Array.Exists(fromState.Transitions, transition => transition.ToFsmState == heard)) {
+                first = from;
+                move = states;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The state of a move from which a transition of its own goes out of the move to the given state, or null: an FSM
+    /// that comes out of the move there came to its end, rather than being taken out of it by a global transition.
+    /// </summary>
+    /// <param name="move">The states of the move.</param>
+    /// <param name="outOfIt">The state out of the move.</param>
+    /// <param name="lastIn">The state of the move that the FSM was last heard in, taken first if it goes there.</param>
+    private static FsmState? WayOutOfTheMove(HashSet<FsmState> move, FsmState outOfIt, FsmState? lastIn) {
+        if (lastIn != null && Array.Exists(lastIn.Transitions, transition => transition.ToFsmState == outOfIt)) {
+            return lastIn;
+        }
+
+        foreach (var state in move) {
+            if (Array.Exists(state.Transitions, transition => transition.ToFsmState == outOfIt)) {
+                return state;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Hands a move that the copy plays by itself back to the scene host's FSM, which came out of it first, once the
+    /// copy is through it too, or has taken too long (see <see cref="_moveFinishBy"/>), with what the scene host sent
+    /// meanwhile.
+    /// </summary>
+    private void UpdateMoveEnd() {
+        if (_moveFinishBy is not { } by || _runHere == null || !_moveAtItsEnd && Time.unscaledTime <= by) {
+            return;
+        }
+
+        Logger.Info(
+            $"The copy of entity {Id} is through the move too" + (_moveAtItsEnd ? "" : " (it took too long)") +
+            ", and follows the scene host again"
+        );
+        CatchUpWithSceneHost();
     }
 
     /// <summary>
@@ -1424,12 +1576,15 @@ internal partial class Entity {
         _runHereMove = true;
         StartRunningHere(copyFsm, from);
         LeaveWhatWorksOnThingsMade(states);
+        LeaveTheTurnToTheSceneHost(from);
         _runHereIndex = (byte) fsmIndex;
         _runHereCombo = states;
         _moveHostAt = from;
         _moveEntered.Clear();
         _moveEntered.Add(from);
         _moveVariablesHeld = true;
+        _moveFinishBy = null;
+        _moveAtItsEnd = false;
         GiveTheCopyItsBody();
         StartSteppingRunHere(copyFsm);
 
@@ -1438,6 +1593,24 @@ internal partial class Entity {
         Logger.Info(
             $"The copy of entity {Id} ({Type}) plays the move from '{fromName}' of '{copyFsm.FsmName}' by itself"
         );
+    }
+
+    /// <summary>
+    /// Leaves to the scene host how its creature turns to the player as a move that the copy plays by itself starts:
+    /// the copy goes into the move facing the way the scene host's creature turned, which rides along with every
+    /// position, taken in before what said the move started (see <see cref="UpdateScale"/>). Turned here, it turned to
+    /// this game's player, and a stunned creature was knocked the other way when the players stood on either side of
+    /// it.
+    /// </summary>
+    /// <param name="from">The first state of the move.</param>
+    private void LeaveTheTurnToTheSceneHost(FsmState from) {
+        foreach (var action in from.Actions) {
+            if (action is { Enabled: true } &&
+                action.GetType().Name.StartsWith("FaceObject", StringComparison.Ordinal)) {
+                action.Enabled = false;
+                _mutedHere.Add(action);
+            }
+        }
     }
 
     /// <summary>
@@ -1579,16 +1752,22 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Stops the copy's FSM running here, which follows the scene host again from here, and plays the last animation
-    /// that the scene host sent while the copy went through the combo of a catch by itself - unless the copy shows it
-    /// already, having played that part of the combo itself: played again, it would start over.
+    /// Stops the copy's FSM running here, which follows the scene host again from here, with what the scene host sent
+    /// while the copy played on to its own end of a move (see <see cref="_moveFinishBy"/>), and plays the last
+    /// animation that the scene host sent while the copy went through the combo of a catch by itself - unless the copy
+    /// shows it already, having played that part of the combo itself: played again, it would start over.
     /// </summary>
     private void CatchUpWithSceneHost() {
         CatchUpInTheMove();
 
+        var heldData = _heldData.Count > 0 ? new List<EntityNetworkData>(_heldData) : null;
         var heldAnimation = _heldAnimation;
         var heldScale = _heldScale;
         StopRunningHere();
+        if (heldData != null) {
+            UpdateData(heldData, false);
+        }
+
         if (heldAnimation is { } animation && !(_animationClipNameIds.TryGetValue(animation.Id, out var clipName) &&
                                                 _animator.Client != null &&
                                                 _animator.Client.CurrentClip?.name == clipName)) {
@@ -1959,12 +2138,19 @@ internal partial class Entity {
     /// ever put where it is told, and its body is one that nothing else moves
     /// (EntityInitializer.ConfigureClientRigidbody): a creature that leapt up with the player it caught flew on up for
     /// good, carrying them, and never landed to let them go. It is given its own kind back once its FSM stops running
-    /// here (see <see cref="TakeTheCopysBodyBack"/>).
+    /// here (see <see cref="TakeTheCopysBodyBack"/>), as it is when its FSM made it fall by itself meanwhile - a
+    /// creature stunned in a move that the copy plays by itself, which went on falling once it was put where it was
+    /// told.
     /// </summary>
     private void GiveTheCopyItsBody() {
-        if (_copyBodyBefore != null || Object.Client == null || Object.Host == null ||
-            !Object.Client.TryGetComponent<Rigidbody2D>(out var body) ||
-            !Object.Host.TryGetComponent<Rigidbody2D>(out var roomBody) || roomBody.bodyType == body.bodyType) {
+        if (_copyBodyBefore != null || Object.Client == null ||
+            !Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
+            return;
+        }
+
+        _copyBodyBefore = body.bodyType;
+        if (Object.Host == null || !Object.Host.TryGetComponent<Rigidbody2D>(out var roomBody) ||
+            roomBody.bodyType == body.bodyType) {
             return;
         }
 
@@ -1973,7 +2159,6 @@ internal partial class Entity {
                 ? interpolation.Velocity
                 : Vector3.zero;
 
-        _copyBodyBefore = body.bodyType;
         body.bodyType = roomBody.bodyType;
         body.linearVelocity = velocity;
     }
@@ -2039,6 +2224,8 @@ internal partial class Entity {
         _moveHostAt = null;
         _moveEntered.Clear();
         _moveVariablesHeld = false;
+        _moveFinishBy = null;
+        _moveAtItsEnd = false;
         _runHereAwaited = 0;
         _heldData.Clear();
         _heldAnimation = null;
@@ -2112,6 +2299,8 @@ internal partial class Entity {
         _moveHostAt = null;
         _moveEntered.Clear();
         _moveVariablesHeld = false;
+        _moveFinishBy = null;
+        _moveAtItsEnd = false;
         _aftermath = null;
         StopSteppingRunHere();
         TakeTheCopysBodyBack();
@@ -2314,6 +2503,9 @@ internal partial class Entity {
 
             SwitchToStateField!.SetValue(self, null);
             entity.TellCatchLeft(self, toState);
+
+            // A move that the copy plays by itself waits at its end for the scene host's FSM (UpdateMoveEnd)
+            entity._moveAtItsEnd |= entity._runHereMove;
             return;
         }
 

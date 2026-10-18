@@ -121,6 +121,19 @@ internal static class EntityRegistry {
     }
 
     /// <summary>
+    /// Gets the moves that the copy of an entity of the given type plays by itself in the FSM of the given name, by the
+    /// state each starts in, with every state of it, that one too (see <see cref="EntityRegistryEntry.RunsHere"/>).
+    /// </summary>
+    public static bool TryGetRunsHere(
+        EntityType type,
+        string fsmName,
+        [NotNullWhen(true)] out Dictionary<string, HashSet<string>>? moves
+    ) {
+        moves = null;
+        return RunsHere.TryGetValue(type, out var fsms) && fsms.TryGetValue(fsmName, out moves);
+    }
+
+    /// <summary>
     /// Filters out entries whose <see cref="EntityRegistryEntry.TypeName"/> has no mapping in
     /// <see cref="EntityType"/>, and recursively validates children.
     /// </summary>
