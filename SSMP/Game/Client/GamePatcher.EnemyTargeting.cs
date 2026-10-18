@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Linq.Expressions;
 using System.Reflection;
 using HutongGames.PlayMaker;
@@ -612,7 +613,7 @@ internal partial class GamePatcher {
             }
 
             foreach (var action in state.Actions) {
-                if (action == null || !ActionRegistry.TargetedFsmActionTypes.Contains(action.GetType().Name)) {
+                if (action == null || !ActionRegistry.IsRetargeted(action.GetType().Name)) {
                     continue;
                 }
 
@@ -696,7 +697,9 @@ internal partial class GamePatcher {
     private void RegisterTargetedFsmActionEnterHooks() {
         DisposeTargetedFsmActionEnterHooks();
 
-        foreach (var actionName in ActionRegistry.TargetedFsmActionTypes) {
+        foreach (var actionName in ActionRegistry.TargetedFsmActionTypes.Concat(
+                     ActionRegistry.TargetedWherePlayerActionTypes
+                 )) {
             var actionType = GetFsmActionTypeByName(actionName);
             if (actionType == null) {
                 continue;
@@ -1055,7 +1058,9 @@ internal partial class GamePatcher {
 
         var approvedTarget = GetFsmActionTarget(requester);
         if (approvedTarget != null) {
-            RetargetFsmActionGameObjectFields(action, approvedTarget);
+            RetargetFsmActionGameObjectFields(
+                action, approvedTarget, ActionRegistry.TargetedWherePlayerActionTypes.Contains(action.GetType().Name)
+            );
             return;
         }
 
@@ -1124,11 +1129,14 @@ internal partial class GamePatcher {
                 continue;
             }
 
-            if (!ActionRegistry.TargetedFsmActionTypes.Contains(action.GetType().Name)) {
+            var typeName = action.GetType().Name;
+            if (!ActionRegistry.IsRetargeted(typeName)) {
                 continue;
             }
 
-            RetargetFsmActionGameObjectFields(action, approvedTarget);
+            RetargetFsmActionGameObjectFields(
+                action, approvedTarget, ActionRegistry.TargetedWherePlayerActionTypes.Contains(typeName)
+            );
         }
     }
 
@@ -1300,6 +1308,13 @@ internal partial class GamePatcher {
         FieldInfo field,
         FsmGameObject fsmGameObject
     ) {
+        // Where the action keeps what it found or worked out, which it writes rather than looks at: a variable named
+        // like a target kept there would be cut off from the FSM, which then never got what the action found
+        if (field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase) ||
+            action is SetGameObject && field.Name.Equals("variable", StringComparison.Ordinal)) {
+            return false;
+        }
+
         var variableName = fsmGameObject.Name;
         if (!string.IsNullOrEmpty(variableName)) {
             if (variableName.Equals("Self", StringComparison.OrdinalIgnoreCase)) {
@@ -1334,7 +1349,7 @@ internal partial class GamePatcher {
     /// <see langword="true"/> when the variable is safe to rewrite to an approved player target; otherwise
     /// <see langword="false"/>.
     /// </returns>
-    private static bool IsTargetVariableName(string variableName) {
+    internal static bool IsTargetVariableName(string variableName) {
         return variableName.Equals("Hero", StringComparison.OrdinalIgnoreCase) ||
                variableName.Equals("Target", StringComparison.OrdinalIgnoreCase) ||
                variableName.Equals("Target Object", StringComparison.OrdinalIgnoreCase) ||

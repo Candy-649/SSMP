@@ -37,6 +37,14 @@ internal static class ActionRegistry {
     /// </summary>
     public static readonly HashSet<string> TargetedFsmActionTypes;
 
+    /// <summary>
+    /// Set of FSM action types that look at a player only now and then, among all else they are used for, like finding
+    /// the thing nearest to an object or keeping an object in a variable: pointed at the approved multiplayer target
+    /// only where they look at a player, and not taken for aiming at one otherwise (see
+    /// <see cref="TargetedFsmActionTypes"/>).
+    /// </summary>
+    public static readonly HashSet<string> TargetedWherePlayerActionTypes;
+
     static ActionRegistry() {
         var loadedEntries = FileUtil.LoadObjectFromEmbeddedJson<List<ActionRegistryEntry>>(ActionRegistryFilePath);
 
@@ -49,6 +57,19 @@ internal static class ActionRegistry {
         TargetedFsmActionTypes = new HashSet<string>(
             Entries.Where(entry => entry.TargetedFsm).Select(entry => entry.Type)
         );
+
+        TargetedWherePlayerActionTypes = new HashSet<string>(
+            Entries.Where(entry => entry.TargetedWherePlayer).Select(entry => entry.Type)
+        );
+    }
+
+    /// <summary>
+    /// Whether an FSM action type is pointed at the approved multiplayer target, everywhere or where it looks at a
+    /// player (see <see cref="TargetedFsmActionTypes"/> and <see cref="TargetedWherePlayerActionTypes"/>).
+    /// </summary>
+    /// <param name="typeName">The name of the action type.</param>
+    public static bool IsRetargeted(string typeName) {
+        return TargetedFsmActionTypes.Contains(typeName) || TargetedWherePlayerActionTypes.Contains(typeName);
     }
 
     /// <summary>
@@ -149,4 +170,11 @@ internal class ActionRegistryEntry {
     /// </summary>
     [JsonProperty("targeted_fsm")]
     public bool TargetedFsm { get; set; }
+
+    /// <summary>
+    /// Whether the action is pointed at the approved target only where it looks at a player (see
+    /// <see cref="ActionRegistry.TargetedWherePlayerActionTypes"/>).
+    /// </summary>
+    [JsonProperty("targeted_where_player")]
+    public bool TargetedWherePlayer { get; set; }
 }

@@ -220,7 +220,8 @@
   {
     "type": "SetGameObject",
     "update_field": "everyFrame",
-    "transfer_safe_setup": true
+    "transfer_safe_setup": true,
+    "targeted_where_player": true
   },
   {
     "type": "FaceDirection",
@@ -471,13 +472,16 @@
     "type": "ChaseObjectSpread"
   },
   {
-    "type": "ChaseObjectV3"
+    "type": "ChaseObjectV3",
+    "targeted_fsm": true
   },
   {
-    "type": "ChaseObjectVertical"
+    "type": "ChaseObjectVertical",
+    "targeted_fsm": true
   },
   {
-    "type": "ChaseObjectWisp"
+    "type": "ChaseObjectWisp",
+    "targeted_fsm": true
   },
   {
     "type": "CheckAlertRangeByName",
@@ -491,7 +495,8 @@
   },
   {
     "type": "CheckFacingTarget",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_fsm": true
   },
   {
     "type": "CheckHeroPerformanceRegion",
@@ -515,7 +520,8 @@
   },
   {
     "type": "CheckPassedTarget",
-    "update_field": "EveryFrame"
+    "update_field": "EveryFrame",
+    "targeted_fsm": true
   },
   {
     "type": "CheckTrackTriggerCount",
@@ -527,7 +533,8 @@
   },
   {
     "type": "CheckYPosition",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_where_player": true
   },
   {
     "type": "CheckYPositionV2",
@@ -629,19 +636,24 @@
     "update_field": "everyFrame"
   },
   {
-    "type": "DistanceFlyHorizontal"
+    "type": "DistanceFlyHorizontal",
+    "targeted_fsm": true
   },
   {
-    "type": "DistanceFlyV3"
+    "type": "DistanceFlyV3",
+    "targeted_fsm": true
   },
   {
-    "type": "DistanceWalk"
+    "type": "DistanceWalk",
+    "targeted_fsm": true
   },
   {
-    "type": "DistanceWalkServitor"
+    "type": "DistanceWalkServitor",
+    "targeted_fsm": true
   },
   {
-    "type": "DistanceWalkServitorV"
+    "type": "DistanceWalkServitorV",
+    "targeted_fsm": true
   },
   {
     "type": "DockClamberCheck"
@@ -680,15 +692,18 @@
   },
   {
     "type": "FaceObjectV3",
-    "update_field": "EveryFrame"
+    "update_field": "EveryFrame",
+    "targeted_fsm": true
   },
   {
     "type": "FaceObjectV4",
-    "update_field": "EveryFrame"
+    "update_field": "EveryFrame",
+    "targeted_fsm": true
   },
   {
     "type": "FaceObjectV5",
-    "update_field": "EveryFrame"
+    "update_field": "EveryFrame",
+    "targeted_fsm": true
   },
   {
     "type": "FadeAudio"
@@ -701,7 +716,8 @@
   },
   {
     "type": "FindClosest",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_where_player": true
   },
   {
     "type": "FlingObjectsFromGlobalPoolVelTime"
@@ -780,7 +796,8 @@
   },
   {
     "type": "GetDirection2D",
-    "update_field": "EveryFrame"
+    "update_field": "EveryFrame",
+    "targeted_fsm": true
   },
   {
     "type": "GetDirectionBetweenAngles",
@@ -788,7 +805,8 @@
   },
   {
     "type": "GetDistanceV2",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_fsm": true
   },
   {
     "type": "GetFsmBool",
@@ -832,11 +850,13 @@
   },
   {
     "type": "GetPosition2D",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_where_player": true
   },
   {
     "type": "GetPosition2d",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_where_player": true
   },
   {
     "type": "GetProperty",
@@ -887,7 +907,8 @@
   },
   {
     "type": "GetYDistance",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_fsm": true
   },
   {
     "type": "HasComponent",
@@ -961,7 +982,8 @@
     "type": "MovePosition2dV2"
   },
   {
-    "type": "MovedPastTargetEvent"
+    "type": "MovedPastTargetEvent",
+    "targeted_fsm": true
   },
   {
     "type": "MultiplyIntByFloat",
@@ -998,7 +1020,8 @@
     "type": "RayCast2dNoTriggers"
   },
   {
-    "type": "RayCast2dV2"
+    "type": "RayCast2dV2",
+    "targeted_where_player": true
   },
   {
     "type": "RendererIsVisible",
@@ -1298,7 +1321,8 @@
   },
   {
     "type": "Tk2DAnimationByDirection",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_fsm": true
   },
   {
     "type": "Tk2dPlayAnimationDelay"

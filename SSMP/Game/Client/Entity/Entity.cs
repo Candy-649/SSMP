@@ -2581,6 +2581,38 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Points the variables of an FSM of a creature taken over that are named for the player it goes after, and are
+    /// empty, at this game's player, as the creature's own states point them in a room of its own (MakeHost). What the
+    /// FSM keeps of objects is not told with the rest of it, an object meaning nothing in the other game: a variable
+    /// that the creature's states fill as it goes after someone, which the room's own creature here never went
+    /// through, was empty, and all that read it went after no one - a flyer taken over in the air flew off for good
+    /// rather than come down on a player. What aims at the player is turned to whom the creature goes after
+    /// (GamePatcher.EnemyTargeting), from there as from anywhere.
+    /// </summary>
+    /// <param name="fsm">The FSM of the room's own creature.</param>
+    private void FillEmptyPlayerVariables(PlayMakerFSM fsm) {
+        var hero = HeroController.SilentInstance;
+        if (hero == null) {
+            return;
+        }
+
+        List<string>? filled = null;
+        foreach (var variable in fsm.FsmVariables.GameObjectVariables) {
+            if (variable.Value == null && GamePatcher.IsTargetVariableName(variable.Name)) {
+                variable.Value = hero.gameObject;
+                (filled ??= []).Add(variable.Name);
+            }
+        }
+
+        if (filled != null) {
+            SSMP.Logging.Logger.Info(
+                $"'{fsm.FsmName}' of entity {Id}, taken over, kept no player in {string.Join(", ", filled)}, and " +
+                "now keeps this game's player there"
+            );
+        }
+    }
+
+    /// <summary>
     /// Makes the entity a host entity if the client user became the scene host.
     /// </summary>
     public void MakeHost(uint sceneHostEpoch) {
@@ -2667,6 +2699,8 @@ internal partial class Entity {
             for (var i = 0; i < snapshot.Vector3s.Length; i++) {
                 fsm.FsmVariables.Vector3Variables[i].Value = snapshot.Vector3s[i];
             }
+
+            FillEmptyPlayerVariables(fsm);
         }
 
         GiveTakenOverFurmItsCorpse();

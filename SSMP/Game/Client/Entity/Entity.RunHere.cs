@@ -1182,6 +1182,22 @@ internal partial class Entity {
             _runHereEnded = true;
             FollowSceneHost();
         }
+
+        // An input that took the FSM to a state of its own that leads nowhere, where the scene host's FSM went too, is
+        // over once the copy has done all it does there: nothing of it is left to run here. Held on to, it kept the
+        // copy from following the scene host in anything for as long as the room lasted - a boss stood where the
+        // player wounded it, as the wound took one of its FSMs into such a state for good. A catch, a move, a talk and
+        // the part that each game runs by itself end their own ways.
+        if (_runHere != null && !WaitsForEcho && _runHereCombo == null && !_runHereLed && !_runHereForGood &&
+            !_runHereTalk && !_runHereMove && _aftermath == null && _runHere.Fsm.ActiveState is { } deadEnd &&
+            deadEnd.Transitions.Length == 0 && StateFinishedField?.GetValue(deadEnd) is true &&
+            EntityFsmActions.HostStateOf(_runHere.Fsm) == deadEnd.Name) {
+            Logger.Info(
+                $"The copy of entity {Id} came to '{deadEnd.Name}' of '{_runHere.FsmName}', which leads nowhere, as " +
+                "the scene host's FSM did, and follows the scene host again"
+            );
+            FollowSceneHost();
+        }
     }
 
     /// <summary>
