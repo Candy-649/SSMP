@@ -55,6 +55,12 @@ internal static class ActionRegistry {
     /// Checks whether the given FSM action is an action that executes continuously. This is the case for actions
     /// that have the "everyFrame" field and the value for this field is true or in several other specific cases
     /// (such as actions related to collisions).
+    /// A state that a creature goes on in when this game takes it over runs only these again (Entity.MakeHost), so the
+    /// list holds every action that creatures use and that keeps running once its state is entered - a per-frame or
+    /// collision method of its own or inherited (ILPeek --actions in the tools) - but for those whose entering again
+    /// would do once more what the other game's creature did already: a sound, a shake of the screen or the pad, a
+    /// burst of particles, or something done once after a wait. Left out, a check that ends its state never ran: a
+    /// creature taken over asleep, which only its look at the screen wakes, slept on for good.
     /// </summary>
     /// <param name="action">The FSM action to check.</param>
     /// <returns>true if the action executes continuously; otherwise false.</returns>
@@ -78,6 +84,10 @@ internal static class ActionRegistry {
         var value = fieldInfo.GetValue(action);
         if (value is bool boolValue) {
             return boolValue;
+        }
+
+        if (value is FsmBool fsmBoolValue) {
+            return fsmBoolValue.Value;
         }
 
         if (value is FsmInt fsmIntValue) {

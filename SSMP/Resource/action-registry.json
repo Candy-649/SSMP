@@ -349,5 +349,1038 @@
   },
   {
     "type": "EnemySingControl"
+  },
+  {
+    "type": "AccelerateToX"
+  },
+  {
+    "type": "AccelerateToXByScale"
+  },
+  {
+    "type": "AccelerateVelocity"
+  },
+  {
+    "type": "ActivateGameObjectDelay"
+  },
+  {
+    "type": "AddForce2dAsAngle",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "AdjustColliderPosToEdge"
+  },
+  {
+    "type": "AnimateFloat"
+  },
+  {
+    "type": "AnimatePositionBy"
+  },
+  {
+    "type": "AnimatePositionTo"
+  },
+  {
+    "type": "AnimatePositionToV2"
+  },
+  {
+    "type": "AnimateRigidBody2DPositionTo"
+  },
+  {
+    "type": "AnimateRigidBody2DPositionToV2"
+  },
+  {
+    "type": "AnimateRigidBodyYPositionTo"
+  },
+  {
+    "type": "AnimateRotationTo"
+  },
+  {
+    "type": "AnimateRotationToV2"
+  },
+  {
+    "type": "AnimateXPositionTo"
+  },
+  {
+    "type": "AnimateYPositionTo"
+  },
+  {
+    "type": "AnimateZPositionTo"
+  },
+  {
+    "type": "AnimatorPlay",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ArrayGet",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ArrayGetRandom",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ArrayLength",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "BoolAllTrue",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "BoolAnyTrue",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "BoolNoneTrue",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "BoolTestDelay"
+  },
+  {
+    "type": "BoolTestToGameObject",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "BoolTestV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "BuildString",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CalculateProjectileVelocity",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CallMethodProper",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CallStaticMethod",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CameraBlurPlaneFade"
+  },
+  {
+    "type": "CharacterCheckForBump",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "ChaseObjectSpread"
+  },
+  {
+    "type": "ChaseObjectV3"
+  },
+  {
+    "type": "ChaseObjectVertical"
+  },
+  {
+    "type": "ChaseObjectWisp"
+  },
+  {
+    "type": "CheckAlertRangeByName",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CheckCollisionSideEnterV2"
+  },
+  {
+    "type": "CheckCollisionSideV2"
+  },
+  {
+    "type": "CheckFacingTarget",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CheckHeroPerformanceRegion",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CheckHeroPerformanceRegionV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CheckIsBlackThreaded",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CheckIsCharacterGrounded",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CheckOutOfCamera",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CheckPassedTarget",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CheckTrackTriggerCount",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CheckTrackTriggerCountV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "CheckYPosition",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CheckYPositionV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CheckZPosition",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ClampAngle",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ClampAngleByScale",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ClampPosition",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ClampSpeed",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ClampVelocity2D",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Collision2dEventLayerV2"
+  },
+  {
+    "type": "CompareHP",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CompareHPBool",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CompareUnalertTime",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ConstrainMovement"
+  },
+  {
+    "type": "ControllerIsGrounded",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ConvertAngleToVector2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ConvertBoolToFloat",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ConvertBoolToString",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ConvertDoubleBoolToFloat",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ConvertIntToFloat",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ConvertVector2ToAngle",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "CreateNoiseContinuous"
+  },
+  {
+    "type": "CurveFloat"
+  },
+  {
+    "type": "Decelerate"
+  },
+  {
+    "type": "DecelerateXY"
+  },
+  {
+    "type": "DecelerateXYConditional"
+  },
+  {
+    "type": "DestroyObject"
+  },
+  {
+    "type": "DetectGroundEdge"
+  },
+  {
+    "type": "DirectionalInvincibility"
+  },
+  {
+    "type": "DistanceBetweenPoints",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "DistanceFlyHorizontal"
+  },
+  {
+    "type": "DistanceFlyV3"
+  },
+  {
+    "type": "DistanceWalk"
+  },
+  {
+    "type": "DistanceWalkServitor"
+  },
+  {
+    "type": "DistanceWalkServitorV"
+  },
+  {
+    "type": "DockClamberCheck"
+  },
+  {
+    "type": "EaseColor"
+  },
+  {
+    "type": "EaseFloat"
+  },
+  {
+    "type": "EaseSpriteColor"
+  },
+  {
+    "type": "EdgeSlowdown"
+  },
+  {
+    "type": "EnemyDetectTurn",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "EnumCompare",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "EnumSwitch",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FaceAngleV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FaceAngleV3",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "FaceObjectV3",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "FaceObjectV4",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "FaceObjectV5",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "FadeAudio"
+  },
+  {
+    "type": "FadeAudioV2"
+  },
+  {
+    "type": "FadeHeroLightAlpha"
+  },
+  {
+    "type": "FindClosest",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FlingObjectsFromGlobalPoolVelTime"
+  },
+  {
+    "type": "FlipScale",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FloatAbs",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FloatAddV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FloatMinClamp",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FloatOperator",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FloatSignToBool",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "FloatSwitch",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "FsmIntAdd",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GameObjectCompare",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GameObjectCompareTag",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GameObjectIsNull",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GameObjectIsVisible",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetAngleBetweenPointsV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetAudioVolume",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetClosestGameObject",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "GetColliderRange",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetComponent",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetDifferenceBetweenFloats",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetDirection2D",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "GetDirectionBetweenAngles",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetDistanceV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetFsmBool",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetFsmFloat",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetFsmGameObject",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetFsmString",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetFsmVector2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetGravity2dScale",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetGroundPointClampedToEdge",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "GetHeroCState",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "GetHeroCStateEvent",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "GetName",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetPosition2D",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetPosition2d",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetProperty",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetRandomObject",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetRotation",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetTag",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetUnalertTime"
+  },
+  {
+    "type": "GetVector2Length",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetVector2XY",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetVector3XYZ",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetVelocity",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetVelocity2dNotZero",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetVelocityAsAngle",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetWalkerSpeed",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "GetYDistance",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "HasComponent",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "HeroControllerMethods",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "IdleBuzzV4"
+  },
+  {
+    "type": "IntClamp",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "IntCompareToBool",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "IntSwitchWait",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "IntTestToBool",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "KeepFloatPositive",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "LineCast2d"
+  },
+  {
+    "type": "ListenForAttack"
+  },
+  {
+    "type": "ListenForAttackV2"
+  },
+  {
+    "type": "ListenForCast"
+  },
+  {
+    "type": "ListenForDown"
+  },
+  {
+    "type": "ListenForJump"
+  },
+  {
+    "type": "ListenForLeft"
+  },
+  {
+    "type": "ListenForQuickCast"
+  },
+  {
+    "type": "ListenForRight"
+  },
+  {
+    "type": "ListenForUp"
+  },
+  {
+    "type": "MatchScaleSign",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "MatchScaleSignV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "MovePosition2dV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "MovedPastTargetEvent"
+  },
+  {
+    "type": "MultiplyIntByFloat",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "NextFixedFrameEvent"
+  },
+  {
+    "type": "ObjectJitter"
+  },
+  {
+    "type": "ObjectJitterLocal"
+  },
+  {
+    "type": "ObjectJitterOnRender"
+  },
+  {
+    "type": "ProjectileSquash",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "RandomFloatV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "RandomVector3",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "RandomWait"
+  },
+  {
+    "type": "RayCast2dNoTriggers"
+  },
+  {
+    "type": "RayCast2dV2"
+  },
+  {
+    "type": "RendererIsVisible",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "RigidBody2DSetPositionSafe",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "Rotate",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "RotateTo"
+  },
+  {
+    "type": "RunFSM",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ScaleTime",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ScaleTo"
+  },
+  {
+    "type": "SendEvent",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SendEventByNameV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SendEventByNameV3",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SendEventRepeat"
+  },
+  {
+    "type": "SendEventToGameObjectOptimized",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SendMessageV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SendRandomEvent"
+  },
+  {
+    "type": "SetAngularVelocity2d",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetAudioPitch",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetAudioVolume",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetBoolValueAtTime"
+  },
+  {
+    "type": "SetBoolValueV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetColorValue",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFloatSign",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFloatToHighest",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFloatToLowest",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFloatValueV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFsmFloat",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFsmGameObject",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFsmObject",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFsmString",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFsmVector2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetFsmVector3",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetGameObjectSelf",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetGravity2dScaleV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetHeroCState",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "SetHitEffectOrigin",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetInvincibleDelay"
+  },
+  {
+    "type": "SetObjectValue",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetParticleEmissionChildren",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "SetParticleEmissionTemp"
+  },
+  {
+    "type": "SetPosition",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetPosition2D",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "SetPosition2DV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "SetPosition2d",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetPositionToObject",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetPositionToObject2D",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetPositionToObject2DV2",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetPositionToObjectDelay"
+  },
+  {
+    "type": "SetProperty",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetPropertyV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "SetRandomAudioClipFromTable"
+  },
+  {
+    "type": "SetRotation",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetRotationDelay"
+  },
+  {
+    "type": "SetSpriteColor",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetStringValue",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetStringValueBool",
+    "update_field": "everyframe"
+  },
+  {
+    "type": "SetVector2Value",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetVelocity2dBool",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetVelocity2dIfFalse",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetVelocityAsAngle",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SetVelocityByScale",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ShoveFromBouncer",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ShoveFromPlayer",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "ShoveFromWall",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "SilkBossIdleBuzz"
+  },
+  {
+    "type": "SimpleTiltByVelocityX"
+  },
+  {
+    "type": "SimpleTiltOtherByVelocityX"
+  },
+  {
+    "type": "SpawnObjectFromGlobalPoolOverTimeV2"
+  },
+  {
+    "type": "StartWalker",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "StopClimber"
+  },
+  {
+    "type": "StopCrawler"
+  },
+  {
+    "type": "StopWalker",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "StringCompare",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "StringContains",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "StringSwitch",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "TiltBySpeed"
+  },
+  {
+    "type": "TiltBySpeedY"
+  },
+  {
+    "type": "TimeLimitCheck",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "TimeLimitCheckV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "TimeLimitRandomBool"
+  },
+  {
+    "type": "TimeLimitSetV2",
+    "update_field": "EveryFrame"
+  },
+  {
+    "type": "Tk2DAnimationByDirection",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Tk2dPlayAnimationDelay"
+  },
+  {
+    "type": "Tk2dPlayAnimationWithEventsV2"
+  },
+  {
+    "type": "Tk2dPlayAnimationWithEventsV3"
+  },
+  {
+    "type": "Tk2dSpriteGetColor",
+    "update_field": "everyframe"
+  },
+  {
+    "type": "Tk2dSpriteGetId",
+    "update_field": "everyframe"
+  },
+  {
+    "type": "Tk2dSpriteSetColor",
+    "update_field": "everyframe"
+  },
+  {
+    "type": "Tk2dSpriteSetScale",
+    "update_field": "everyframe"
+  },
+  {
+    "type": "Tk2dSpriteTweenColor"
+  },
+  {
+    "type": "Tk2dWatchAnimationEventsV2"
+  },
+  {
+    "type": "Tk2dWatchAnimationEventsV3"
+  },
+  {
+    "type": "TranslateVelocity2dConditional",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Trigger2dEventLayerIfBool"
+  },
+  {
+    "type": "Trigger2dEventV2"
+  },
+  {
+    "type": "UnalertTimer"
+  },
+  {
+    "type": "Vector2Add",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Vector2AddXY",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Vector2Multiply",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Vector3Add",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Vector3AddXYZ",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "Vector3Multiply",
+    "update_field": "everyFrame"
+  },
+  {
+    "type": "WaitBool"
+  },
+  {
+    "type": "WaitIfPoolCreation"
   }
 ]

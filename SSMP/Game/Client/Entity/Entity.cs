@@ -2369,8 +2369,11 @@ internal partial class Entity {
             state.Actions = oldActions.Where(a =>
                 ActionRegistry.IsActionContinuous(a) || ActionRegistry.IsActionTransferSafeSetup(a)
             ).ToArray();
-            fsm.SetState(wanted);
-            state.Actions = oldActions;
+            try {
+                fsm.SetState(wanted);
+            } finally {
+                state.Actions = oldActions;
+            }
         }
     }
 
@@ -2702,10 +2705,15 @@ internal partial class Entity {
 
             //Logger.Debug($"  Only using actions: {string.Join(", ", newActions.Select(a => a.GetType().ToString()))}");
 
-            // Replace the actions, set the state and reset the actions again
+            // Replace the actions, set the state and reset the actions again, also when one of them throws as it starts:
+            // the state kept only these for good otherwise
             state.Actions = newActions;
-            fsm.SetState(snapshot.CurrentState);
-            state.Actions = oldActions;
+            try {
+                fsm.SetState(snapshot.CurrentState);
+            } finally {
+                state.Actions = oldActions;
+            }
+
             resumed[fsmIndex] = true;
         }
 
