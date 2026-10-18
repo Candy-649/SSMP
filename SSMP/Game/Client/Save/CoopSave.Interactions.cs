@@ -1462,9 +1462,14 @@ internal partial class CoopSave {
             return;
         }
 
+        // Unless the beast was moved again since, by a change with a stamp of its own. The partner's save that a check
+        // found newer comes with none, and the local game sends its own station after that check, as its save still
+        // has it, which the partner's game takes: written over it, the two games had the beast at different stations
         _heldBeastLocation = null;
-        if (held.Stamp is { } stamp && (!_flagSequences.TryGetValue(BeastLocationName, out var now) ||
-                                        now.Count != stamp.Count || now.Key != stamp.Key)) {
+        var movedSince = _flagSequences.TryGetValue(BeastLocationName, out var now)
+            ? held.Stamp is not { } stamp || now.Count != stamp.Count || now.Key != stamp.Key
+            : held.Stamp != null;
+        if (movedSince) {
             return;
         }
 
