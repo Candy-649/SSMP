@@ -52,7 +52,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The source of the short invulnerability of a player who was just pulled back up, so that the hit that killed
-    /// them cannot land again in the same instant on half the health.
+    /// them cannot land again in the same instant on half the health. While it lasts, what the room hurts with takes
+    /// no health either (see <see cref="TryRevive"/>).
     /// </summary>
     private static readonly object RescueInvulnerability = new();
 
@@ -1941,6 +1942,16 @@ internal partial class CoopSave {
             hero.AddSilk(RescueHits, true);
 
             hero.AddInvulnerabilitySource(RescueInvulnerability);
+
+            // What the room hurts with goes through any invulnerability: lava, spikes, a drop take their health and
+            // send the player back to the room's safe place all the same (HeroController.TakeDamage). So a player
+            // pulled up over lava fell straight back in, losing two of the three masks a rescue gives, even when they
+            // stood up at that safe place: in a boss room it can sit over a floor the boss has broken, which the game
+            // brings back only on its own way back from the lava. For as long as the invulnerability lasts, the
+            // game's own switch for a hit that takes no health is on as well, which nothing in the game uses. Such a
+            // hit then goes all the way the game takes it - the dark, the way back to the safe place, the floors
+            // that come back with it - without the health. (USER 10-18)
+            hero.SetTakeNoDamage();
             MonoBehaviourUtil.Instance.StartCoroutine(EndRescueInvulnerability(hero));
 
             if (!IsHeroTakenByGame(hero)) {
@@ -2105,7 +2116,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes the short invulnerability of a rescue away again.
+    /// Takes the short invulnerability of a rescue away again, and with it the hits of the room that take no health.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     private static IEnumerator EndRescueInvulnerability(HeroController hero) {
@@ -2113,6 +2124,7 @@ internal partial class CoopSave {
 
         if (hero != null) {
             hero.RemoveInvulnerabilitySource(RescueInvulnerability);
+            hero.EndTakeNoDamage();
         }
     }
 
