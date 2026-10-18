@@ -792,6 +792,7 @@ internal static partial class EntityFsmActions {
 
         ActionsInState.Clear();
         HostStates.Clear();
+        SaidStillGivingOff.Clear();
     }
 
     /// <summary>
@@ -807,6 +808,33 @@ internal static partial class EntityFsmActions {
                 ExitAt(i);
             }
         }
+    }
+
+    /// <summary>
+    /// Leaves every state of an FSM of a creature's copy but the one that the scene host last said it is in, for a copy
+    /// told that its creature died (Entity.DropWhatTheCopyDidBeforeItDied).
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    /// <returns>The names of the states left, or null if none was.</returns>
+    public static List<string>? LeaveAllButHostState(HutongGames.PlayMaker.Fsm fsm) {
+        if (!HostStates.TryGetValue(fsm, out var hostState)) {
+            return null;
+        }
+
+        List<string>? left = null;
+        for (var i = ActionsInState.Count - 1; i >= 0; i--) {
+            var actionInState = ActionsInState[i];
+            if (actionInState.Fsm == fsm && actionInState.StateName != hostState) {
+                left ??= [];
+                if (!left.Contains(actionInState.StateName)) {
+                    left.Add(actionInState.StateName);
+                }
+
+                ExitAt(i);
+            }
+        }
+
+        return left;
     }
 
     /// <summary>

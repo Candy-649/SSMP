@@ -226,6 +226,12 @@ internal class HealthManagerComponent : EntityComponent {
     public event System.Action<bool, bool>? CopyDeathChanged;
 
     /// <summary>
+    /// Raised as the copy is told that the creature died in the game that runs it, just before it dies here (see
+    /// Entity.DropWhatTheCopyDidBeforeItDied).
+    /// </summary>
+    public event System.Action? CopyToldItDied;
+
+    /// <summary>
     /// Whether the copy was dead as this game last looked (see <see cref="CopyDeathChanged"/>).
     /// </summary>
     private bool _copyWasDead;
@@ -1830,6 +1836,9 @@ internal class HealthManagerComponent : EntityComponent {
                 // copy's own death throws out none: the body whose place the scene host sent is that one. Only one
                 // thrown out this frame, as a body of an earlier death may since have been taken for another
                 var replayedCorpse = _clientCorpseFrame == Time.frameCount ? _clientCorpse : null;
+
+                // The copy does nothing but die from here on
+                CopyToldItDied?.Invoke();
 
                 // Set a boolean to indicate that the client health manager is allowed to execute the Die method
                 _allowDeath = true;

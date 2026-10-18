@@ -983,6 +983,7 @@ internal partial class Entity {
             _components[EntityComponentType.Health] = hmComponent;
             _components[EntityComponentType.Invincibility] = hmComponent;
             hmComponent.CopyDeathChanged += RecordCopyDeath;
+            hmComponent.CopyToldItDied += DropWhatTheCopyDidBeforeItDied;
 
             // Check if the object from the health manager is in any of the colosseum trial scenes and remove the
             // geo drops from them if so
@@ -3949,6 +3950,43 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// The states of the copy's FSMs whose replays were thrown away after the copy was told it died, said once each
+    /// (see <see cref="UpdateData"/>).
+    /// </summary>
+    private readonly HashSet<string> _droppedAfterDeath = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Whether the health last told of the creature said that it is dead (HealthManagerComponent.ToldDead).
+    /// </summary>
+    private bool CopyToldDead => _components.TryGetValue(EntityComponentType.Health, out var component) &&
+                                 component is HealthManagerComponent { ToldDead: true };
+
+    /// <summary>
+    /// The scene host said its creature died: the copy does nothing after that but die, as the user wants it. What its
+    /// FSMs still did in a state before the one they are in is dropped now. The state that the death took them to was
+    /// told first, which leaves the others, but not what came after that of an earlier state, like what was held while
+    /// the copy ran an input here. What comes of those states afterwards is thrown away (see <see cref="UpdateData"/>).
+    /// A copy that died spraying went on spraying where its death let the spray out into the world (the user's report
+    /// of 2026-10-18), and which way that came about was not found.
+    /// </summary>
+    private void DropWhatTheCopyDidBeforeItDied() {
+        if (_fsms.Client == null) {
+            return;
+        }
+
+        foreach (var copyFsm in _fsms.Client) {
+            if (copyFsm == null || EntityFsmActions.LeaveAllButHostState(copyFsm.Fsm) is not { } left) {
+                continue;
+            }
+
+            SSMP.Logging.Logger.Info(
+                $"'{copyFsm.gameObject.name}' was told it died, and drops what it still did in " +
+                $"'{string.Join("', '", left)}' of '{copyFsm.FsmName}'"
+            );
+        }
+    }
+
+    /// <summary>
     /// Updates generic data for the client entity.
     /// </summary>
     /// <param name="entityNetworkData">A list of data to update the client entity with.</param>
@@ -4022,6 +4060,20 @@ internal partial class Entity {
                 }
 
                 var action = state.Actions[actionIndex];
+
+                // A creature told it died does nothing after that but die: what comes of a state before its death, held
+                // while the copy ran an input here or sent again after it went missing, is thrown away
+                // (DropWhatTheCopyDidBeforeItDied)
+                if (CopyToldDead && EntityFsmActions.HostStateOf(fsm.Fsm) is { } hostState && hostState != state.Name) {
+                    if (_droppedAfterDeath.Add(fsm.FsmName + "\n" + state.Name)) {
+                        SSMP.Logging.Logger.Info(
+                            $"'{fsm.gameObject.name}' was told it died, and throws away what came after that of " +
+                            $"'{state.Name}' of '{fsm.FsmName}', with the scene host's FSM in '{hostState}'"
+                        );
+                    }
+
+                    continue;
+                }
 
                 // Of a move that the copy is about to play by itself, from what came along (StartMoveHeard)
                 if (HoldsForTheMoveHeard(fsm, state, data)) {
