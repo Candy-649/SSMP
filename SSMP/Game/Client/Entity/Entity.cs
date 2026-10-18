@@ -1515,10 +1515,10 @@ internal partial class Entity {
                 var movedHere = IsAnticipating() || MovesByItself() || _runHere != null ||
                                 Time.time < _pulledHereUntil;
                 if (_wasMovedHere && !movedHere) {
-                    // Nothing wrote this object while that was going on, so the interpolation carried on predicting
-                    // from where the entity stood before any of it. Picking that up again would put it back there in
-                    // a single frame, which is the whole of what the wait was for, so where it is standing now is
-                    // handed over as what it should go on looking like.
+                    // The interpolation did not write this object while that was going on, so it carried on
+                    // predicting from where the entity stood before any of it. Picking that up again would put it back
+                    // there in a single frame, which is the whole of what the wait was for, so where it is standing now
+                    // is handed over as what it should go on looking like.
                     interpolation.KeepVisualPosition();
                 }
 
@@ -3725,8 +3725,10 @@ internal partial class Entity {
     /// giving up on it once it has waited longer than anything can take.
     /// </summary>
     private bool IsAnticipating() {
+        // The copy goes back to following the scene host the usual way, however much later the next position comes
         if (_outstandingAnticipation != 0 && Time.unscaledTime > _outstandingExpiry) {
             _outstandingAnticipation = 0;
+            _knockbackWait = null;
         }
 
         return _outstandingAnticipation != 0;

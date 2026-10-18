@@ -391,14 +391,18 @@ internal class PredictiveInterpolation : MonoBehaviour {
     }
 
     /// <summary>
-    /// Works out how fast an object goes from one more step of it, read as a step between two positions of the sender
-    /// is (SetNewState): one too small to be moving at all stops it, and any other blends into how fast it went.
+    /// Works out how fast an object goes from one more step of it, the way SetNewState reads a step between two
+    /// positions of the sender: one too small to be moving at all stops it, one too long to be anything but a jump
+    /// stops it as the snap there does, and any other blends into how fast it went. The ceiling that SetNewState puts
+    /// on the count of ticks by the clock is left out: too many ticks only read the step as slower, which is the side
+    /// to err on (see <see cref="MaxServerDeltaTime"/>).
     /// </summary>
     /// <param name="velocity">How fast it went before the step.</param>
     /// <param name="step">The step.</param>
     /// <param name="ticks">How many ticks of the sender the step took.</param>
     public Vector3 ReadVelocity(Vector3 velocity, Vector3 step, int ticks) {
-        if (step.sqrMagnitude < minPredictionSpeedSq) {
+        var stepSq = step.sqrMagnitude;
+        if (stepSq < minPredictionSpeedSq || stepSq > snapThresholdSq) {
             return Vector3.zero;
         }
 
