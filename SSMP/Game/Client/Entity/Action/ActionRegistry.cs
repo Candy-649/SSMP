@@ -59,8 +59,10 @@ internal static class ActionRegistry {
     /// list holds every action that creatures use and that keeps running once its state is entered - a per-frame or
     /// collision method of its own or inherited (ILPeek --actions in the tools) - but for those whose entering again
     /// would do once more what the other game's creature did already: a sound, a shake of the screen or the pad, a
-    /// burst of particles, or something done once after a wait. Left out, a check that ends its state never ran: a
-    /// creature taken over asleep, which only its look at the screen wakes, slept on for good.
+    /// burst of particles, something done once after a wait, or a sub-FSM started over from its beginning. Left out,
+    /// a check that ends its state never ran: a creature taken over asleep, which only its look at the screen wakes,
+    /// slept on for good. An action that waits out a delay before it sends its event keeps running for that long,
+    /// whatever its field of every frame says, and the event is often how its state is left (the entry's delay field).
     /// </summary>
     /// <param name="action">The FSM action to check.</param>
     /// <returns>true if the action executes continuously; otherwise false.</returns>
@@ -68,6 +70,12 @@ internal static class ActionRegistry {
         var entry = Entries.FirstOrDefault(entry => entry.Type == action.GetType().Name);
         if (entry == null) {
             return false;
+        }
+
+        // The game sends at once below 0.001 s of delay, and waits it out otherwise (SendEvent and its kind)
+        if (entry.DelayField != null &&
+            action.GetType().GetField(entry.DelayField)?.GetValue(action) is FsmFloat { Value: >= 0.001f }) {
+            return true;
         }
 
         if (entry.UpdateField == null) {
@@ -122,6 +130,13 @@ internal class ActionRegistryEntry {
     /// </summary>
     [JsonProperty("update_field")]
     public string UpdateField { get; set; }
+
+    /// <summary>
+    /// The name of the field of the delay that the action waits out before it sends its event, during which it keeps
+    /// running, or null.
+    /// </summary>
+    [JsonProperty("delay_field")]
+    public string DelayField { get; set; }
 
     /// <summary>
     /// Whether the action is a transfer-safe setup action.

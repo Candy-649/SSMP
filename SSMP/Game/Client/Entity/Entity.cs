@@ -2366,15 +2366,47 @@ internal partial class Entity {
                 $"and starting it over left it at '{fsm.ActiveStateName}'; putting it back"
             );
 
-            var oldActions = state.Actions;
-            state.Actions = oldActions.Where(a =>
-                ActionRegistry.IsActionContinuous(a) || ActionRegistry.IsActionTransferSafeSetup(a)
-            ).ToArray();
-            try {
-                fsm.SetState(wanted);
-            } finally {
-                state.Actions = oldActions;
-            }
+            ResumeState(fsm, state);
+        }
+    }
+
+    /// <summary>
+    /// The index in the actions of a state that runs them one after another of the one that runs now, which PlayMaker
+    /// keeps to itself.
+    /// </summary>
+    private static readonly FieldInfo? ActiveActionIndexField =
+        typeof(FsmState).GetField("activeActionIndex", BindingFlags.Instance | BindingFlags.NonPublic);
+
+    /// <summary>
+    /// Puts an FSM of the room's own creature in a state that the creature was in, as the other game's creature goes on
+    /// in it here, entering only the actions of the state that keep running once it is entered or that set up what the
+    /// others work on (ActionRegistry). The state's own actions are put back after, also when one of them throws as it
+    /// starts, which is logged and leaves the FSM as it is: thrown on, the entity was left half taken over, with its
+    /// copy still on and the rest of its FSMs never given their states.
+    /// A state that runs its actions one after another goes on with the first of these and ends after it. Which of its
+    /// actions the other game had got to is not known, and PlayMaker counted on in the whole list from where it was in
+    /// the shorter one, which did again or left out what came between, such as a hurt of the player.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="state">The state.</param>
+    private static void ResumeState(PlayMakerFSM fsm, FsmState state) {
+        var oldActions = state.Actions;
+        state.Actions = oldActions.Where(a =>
+            ActionRegistry.IsActionContinuous(a) || ActionRegistry.IsActionTransferSafeSetup(a)
+        ).ToArray();
+        try {
+            fsm.SetState(state.Name);
+        } catch (Exception e) {
+            SSMP.Logging.Logger.Warn(
+                $"Could not go on in '{state.Name}' of the FSM '{fsm.FsmName}' of '{fsm.gameObject.name}': {e}"
+            );
+            return;
+        } finally {
+            state.Actions = oldActions;
+        }
+
+        if (state.IsSequence && fsm.Fsm.ActiveState == state) {
+            ActiveActionIndexField?.SetValue(state, oldActions.Length - 1);
         }
     }
 
@@ -2699,22 +2731,7 @@ internal partial class Entity {
 
             //Logger.Debug($"  Setting FSM state: {snapshot.CurrentState}");
 
-            var oldActions = state.Actions;
-            var newActions = oldActions.Where(a =>
-                ActionRegistry.IsActionContinuous(a) || ActionRegistry.IsActionTransferSafeSetup(a)
-            ).ToArray();
-
-            //Logger.Debug($"  Only using actions: {string.Join(", ", newActions.Select(a => a.GetType().ToString()))}");
-
-            // Replace the actions, set the state and reset the actions again, also when one of them throws as it starts:
-            // the state kept only these for good otherwise
-            state.Actions = newActions;
-            try {
-                fsm.SetState(snapshot.CurrentState);
-            } finally {
-                state.Actions = oldActions;
-            }
-
+            ResumeState(fsm, state);
             resumed[fsmIndex] = true;
         }
 

@@ -619,9 +619,6 @@
     "type": "DecelerateXYConditional"
   },
   {
-    "type": "DestroyObject"
-  },
-  {
     "type": "DetectGroundEdge"
   },
   {
@@ -912,8 +909,7 @@
     "update_field": "everyFrame"
   },
   {
-    "type": "IntSwitchWait",
-    "update_field": "everyFrame"
+    "type": "IntSwitchWait"
   },
   {
     "type": "IntTestToBool",
@@ -962,8 +958,7 @@
     "update_field": "EveryFrame"
   },
   {
-    "type": "MovePosition2dV2",
-    "update_field": "everyFrame"
+    "type": "MovePosition2dV2"
   },
   {
     "type": "MovedPastTargetEvent"
@@ -1021,10 +1016,6 @@
     "type": "RotateTo"
   },
   {
-    "type": "RunFSM",
-    "update_field": "everyFrame"
-  },
-  {
     "type": "ScaleTime",
     "update_field": "everyFrame"
   },
@@ -1033,15 +1024,18 @@
   },
   {
     "type": "SendEvent",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "delay_field": "delay"
   },
   {
     "type": "SendEventByNameV2",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "delay_field": "delay"
   },
   {
     "type": "SendEventByNameV3",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "delay_field": "delay"
   },
   {
     "type": "SendEventRepeat"
