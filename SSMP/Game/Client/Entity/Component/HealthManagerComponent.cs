@@ -209,6 +209,15 @@ internal class HealthManagerComponent : EntityComponent {
     private readonly Dictionary<ushort, (uint copyKey, int damage)> _damageTaken = new();
 
     /// <summary>
+    /// In the game that runs the creature: the frame in which it died a death of its own that it lives on after (see
+    /// <see cref="HealthManager.hasSpecialDeath"/>), while it has not been able to be hit since, or -1. A summoned
+    /// creature that the room puts away at full health in the moment it dies, to send it out again later, is one. The
+    /// damage that copies tell of meanwhile was dealt before they heard of the death, as nothing can hit the creature
+    /// then: taken off its health, it was missing from it as it came out again (see <see cref="TakeInOwnDamage"/>).
+    /// </summary>
+    private int _diedToComeBackAt = -1;
+
+    /// <summary>
     /// In the game that runs the creature: the number of its last telling of its health in the current epoch.
     /// </summary>
     private uint _tellNumber;
@@ -1251,6 +1260,12 @@ internal class HealthManagerComponent : EntityComponent {
         _hostCorpse = null;
         InvokeOrig();
 
+        // A death of its own that left it alive, which its FSM played out in that call: what it went on to, it went on
+        // to in the same call (see _diedToComeBackAt)
+        if (hasSpecialDeath && !self.isDead) {
+            _diedToComeBackAt = Time.frameCount;
+        }
+
         var data = ObjectPool<EntityNetworkData>.Get();
         data.Type = EntityComponentType.Death;
 
@@ -1345,6 +1360,12 @@ internal class HealthManagerComponent : EntityComponent {
         var observedHealthManager = IsControlled ? _healthManager.Client : _healthManager.Host;
         if (observedHealthManager == null) {
             return;
+        }
+
+        // Out again where it can be hit, past the frame after its death, in which its FSM may still have put it away
+        if (!IsControlled && _diedToComeBackAt >= 0 && Time.frameCount >= _diedToComeBackAt + 2 &&
+            CanBeHit(observedHealthManager)) {
+            _diedToComeBackAt = -1;
         }
 
         // The room's own creature, taken over with blows of this game's player that killed it, dies of them once it is
@@ -2012,6 +2033,22 @@ internal class HealthManagerComponent : EntityComponent {
             taken = (copyKey, 0);
         }
 
+        // Dealt before the copy heard that the creature died a death it lives on after, as nothing can hit it until it
+        // is out again: taken in, so that it is not sent again, and left out of the health it comes out with
+        if (_diedToComeBackAt >= 0 && _healthManager.Host is { } away && !CanBeHit(away)) {
+            if (damage > taken.damage) {
+                Logger.Info(
+                    $"'{away.name}' died a death it lives on after and can't be hit yet: {damage - taken.damage} " +
+                    "damage of a copy, dealt before it heard, is left out"
+                );
+                taken.damage = damage;
+            }
+
+            _damageTaken[data.SenderId] = taken;
+            SendHealthState();
+            return;
+        }
+
         var health = GetCurrentHp();
         if (!whole && health > 0 && health - (damage - taken.damage) <= 0 && blows is { Count: > 0 } &&
             taken.damage + health <= blows[0].DamageBefore) {
@@ -2042,6 +2079,20 @@ internal class HealthManagerComponent : EntityComponent {
 
         _damageTaken[data.SenderId] = taken;
         SendHealthState();
+    }
+
+    /// <summary>
+    /// Whether a creature can be hit as it is: switched on, with the body that hits land on switched on, if it has one
+    /// of its own.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    private static bool CanBeHit(HealthManager creature) {
+        if (!creature.gameObject.activeInHierarchy) {
+            return false;
+        }
+
+        var body = creature.GetComponent<Collider2D>();
+        return body == null || body.enabled;
     }
 
     /// <summary>
