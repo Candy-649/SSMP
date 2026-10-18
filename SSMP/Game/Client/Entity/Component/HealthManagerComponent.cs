@@ -1796,6 +1796,7 @@ internal class HealthManagerComponent : EntityComponent {
             _ownBlows.Clear();
             _damageTaken.Clear();
             _tellNumber = 0;
+            _diedToComeBackAt = -1;
 
             // The damage that the copy was kept from hurting the player for is not counted any more
             LetHurt();
@@ -2082,8 +2083,11 @@ internal class HealthManagerComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Whether a creature can be hit as it is: switched on, with the body that hits land on switched on, if it has one
-    /// of its own.
+    /// Whether a creature can be hit as it is: switched on, with a collider switched on that the player's attacks touch
+    /// (by the game's matrix of layers) anywhere on the body that hits on it go to - the creature's own, or the one it
+    /// is part of - or under it. A hit goes from the collider it lands on to the nearest body above (HitTaker), so a
+    /// creature can be hit on colliders of its children, and a second one of its own; the ranges that see the player
+    /// coming and the blocks that keep the player out are on layers that attacks don't touch.
     /// </summary>
     /// <param name="creature">The creature.</param>
     private static bool CanBeHit(HealthManager creature) {
@@ -2091,9 +2095,21 @@ internal class HealthManagerComponent : EntityComponent {
             return false;
         }
 
-        var body = creature.GetComponent<Collider2D>();
-        return body == null || body.enabled;
+        var body = creature.GetComponentInParent<Rigidbody2D>();
+        var root = body != null ? body.gameObject : creature.gameObject;
+        foreach (var collider in root.GetComponentsInChildren<Collider2D>()) {
+            if (collider.enabled && !Physics2D.GetIgnoreLayerCollision(AttackLayer, collider.gameObject.layer)) {
+                return true;
+            }
+        }
+
+        return false;
     }
+
+    /// <summary>
+    /// The layer of the player's attacks.
+    /// </summary>
+    private const int AttackLayer = (int) GlobalEnums.PhysLayers.HERO_ATTACK;
 
     /// <summary>
     /// Gets the health value from the locally active side of the entity.
