@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
@@ -402,17 +401,18 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// The names of the things that copies let out into the world while they still gave off particles, which are said
-    /// once each in a room (see <see cref="SayIfStillGivingOff"/>).
+    /// The things that copies let out into the world while they still gave off particles, by instance, which are said
+    /// once each (see <see cref="SayIfStillGivingOff"/>).
     /// </summary>
-    private static readonly HashSet<string> SaidStillGivingOff = new(StringComparer.Ordinal);
+    private static readonly HashSet<int> SaidStillGivingOff = [];
 
     /// <summary>
     /// Says in the log that a copy let something out into the world that still gives off particles, once for each
     /// thing in a room. The game stops what a state of a creature gives off as the state is left, before the state
-    /// that comes after lets it out: a creature that dies spraying lets its spray out to drift away. A copy whose spray
-    /// went on for good where it died (the user's report of 2026-10-18, cause not found) shows here with the state that
-    /// the scene host last said its FSM is in.
+    /// that comes after lets it out: a creature that dies spraying lets its spray out to drift away. The spray of a
+    /// copy went on for good where it died (the user's report of 2026-10-18), most likely as its start came after the
+    /// death that left its state (ActionInState.Register); should one go on again, this says so, with the state that
+    /// the scene host last said the FSM is in.
     /// </summary>
     private static void SayIfStillGivingOff(GameObject gameObject, FsmStateAction action) {
         foreach (var particleSystem in gameObject.GetComponentsInChildren<ParticleSystem>()) {
@@ -420,11 +420,16 @@ internal static partial class EntityFsmActions {
                 continue;
             }
 
-            if (SaidStillGivingOff.Add(gameObject.name)) {
+            if (SaidStillGivingOff.Add(gameObject.GetInstanceID())) {
+                var hostState = HostStateOf(action.Fsm) switch {
+                    null => "before the scene host said any state of it",
+                    "" => "with the scene host's FSM stopped",
+                    var name => $"with the scene host's FSM in '{name}'"
+                };
                 Logger.Info(
-                    $"The copy's FSM '{action.Fsm.Name}' let '{gameObject.name}' out into the world in " +
-                    $"'{action.State.Name}' while its '{particleSystem.name}' still gives off particles, with the " +
-                    $"scene host's FSM in '{HostStateOf(action.Fsm) ?? "a state it did not say"}'"
+                    $"The copy '{action.Fsm.GameObject.name}' let '{gameObject.name}' out into the world in " +
+                    $"'{action.State.Name}' of its FSM '{action.Fsm.Name}' while its '{particleSystem.name}' still " +
+                    $"gives off particles, {hostState}"
                 );
             }
 

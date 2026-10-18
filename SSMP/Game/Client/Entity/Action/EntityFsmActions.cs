@@ -724,12 +724,6 @@ internal static partial class EntityFsmActions {
         action.Finished = false;
         action.OnEnter();
 
-        // Its state was left before the update was sent, so it is left here at once, as it was there
-        if (HostStates.TryGetValue(action.Fsm, out var hostState) && hostState != action.State.Name) {
-            action.OnExit();
-            return;
-        }
-
         System.Action? step = null;
         if (everyStep && !action.Finished) {
             // Like its updates, the game runs an action in the steps of physics only until it finishes
@@ -808,33 +802,6 @@ internal static partial class EntityFsmActions {
                 ExitAt(i);
             }
         }
-    }
-
-    /// <summary>
-    /// Leaves every state of an FSM of a creature's copy but the one that the scene host last said it is in, for a copy
-    /// told that its creature died (Entity.DropWhatTheCopyDidBeforeItDied).
-    /// </summary>
-    /// <param name="fsm">The FSM of the copy.</param>
-    /// <returns>The names of the states left, or null if none was.</returns>
-    public static List<string>? LeaveAllButHostState(HutongGames.PlayMaker.Fsm fsm) {
-        if (!HostStates.TryGetValue(fsm, out var hostState)) {
-            return null;
-        }
-
-        List<string>? left = null;
-        for (var i = ActionsInState.Count - 1; i >= 0; i--) {
-            var actionInState = ActionsInState[i];
-            if (actionInState.Fsm == fsm && actionInState.StateName != hostState) {
-                left ??= [];
-                if (!left.Contains(actionInState.StateName)) {
-                    left.Add(actionInState.StateName);
-                }
-
-                ExitAt(i);
-            }
-        }
-
-        return left;
     }
 
     /// <summary>
@@ -1213,9 +1180,20 @@ internal static partial class EntityFsmActions {
         public System.Action ExitAction { private get; init; }
 
         /// <summary>
-        /// Register this action by adding it to the list.
+        /// Register this action by adding it to the list, or leaves its state at once if the scene host's FSM has left
+        /// that state already, as it was left there. Replays come after the state they are of, but not always before
+        /// the state that leaves it: an update carries only the last state of each FSM, which the copy takes before
+        /// the replays that came with it, and a replay held while the copy ran an input here, or sent again after it
+        /// went missing, comes later still. What such a replay left running was never ended, as nothing left its state
+        /// again: most likely how the spray of a creature that died as it began to spray went on for good where its
+        /// death let the spray out into the world (the user's report of 2026-10-18).
         /// </summary>
         public void Register() {
+            if (HostStates.TryGetValue(Fsm, out var hostState) && hostState != StateName) {
+                ExitState();
+                return;
+            }
+
             ActionsInState.Add(this);
         }
 
