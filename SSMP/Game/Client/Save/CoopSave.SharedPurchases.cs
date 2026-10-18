@@ -7,7 +7,6 @@ using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
-using Object = UnityEngine.Object;
 
 namespace SSMP.Game.Client.Save;
 
@@ -17,10 +16,14 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// Purchases in shops of what both saves share: the furnishings and the paint of the one house that the players share
 /// are bought by one player for both, and the other can't buy them again (the user's rule of 2026-10-18). What such an
 /// item sets are story flags (tools/coop_story_flags.py), so the purchase goes to the partner with them. A partner who
-/// has the shop's list open sees the item gone from it, once they are back in the list if they were confirming
-/// something, and one who confirms it after it was bought is told so and pays nothing. Two players who bought it at the
-/// same moment, each before the other's purchase arrived, are settled as a toll is (RefundIfBothPaid): the one whose
-/// purchase has the larger key gets their payment back.
+/// confirms it after it was bought is told so and pays nothing, and their list no longer shows it once the game builds
+/// it again, as it does after every prompt. Two players who bought it at the same moment, each before the other's
+/// purchase arrived, are settled as a toll is (RefundIfBothPaid): the one whose purchase has the larger key gets their
+/// payment back.
+///
+/// The list that a partner has open is not built again from here: the game does that only with the list's input
+/// switched off (Item List Control's "Menu Down"), and a list built again under a player who picked an item in that
+/// moment would leave the prompt and the list both taking input, with no way out of the shop (the review of 7d8d30f).
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -34,15 +37,10 @@ internal partial class CoopSave {
     private const string ConfirmShopVariable = "Shop Window";
 
     /// <summary>
-    /// The FSM of the shop's window, its state while the player looks through the list, the variables of the item the
-    /// list shows first and of a prompt open over the list, and the events that build the list again and close it.
+    /// The FSM of the shop's window and its variable of the item that the list shows first.
     /// </summary>
     private const string ShopFsmName = "shop_control";
-    private const string ShopOpenState = "Open";
     private const string ShopCurrentItemVariable = "Current Item";
-    private const string ShopSecondMenuVariable = "In Second Menu";
-    private const string ShopResetEvent = "RESET SHOP WINDOW";
-    private const string ShopCloseEvent = "CLOSE SHOP WINDOW";
 
     private static readonly FieldInfo? ShopItemBoolField =
         typeof(ShopItem).GetField("playerDataBoolName", InstanceFlags);
@@ -61,12 +59,6 @@ internal partial class CoopSave {
     private readonly Dictionary<string, (ulong Key, string Name)> _remotePurchases = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The flags of the purchases of other members that a shop's list which the local player has open still shows, and
-    /// drops once the local player is back in it from a prompt over it (see <see cref="UpdateSharedPurchases"/>).
-    /// </summary>
-    private readonly HashSet<string> _purchasesToDropFromShop = new(StringComparer.Ordinal);
-
-    /// <summary>
     /// A purchase of the local player of something both saves share, from before it is paid for: the item, the flag it
     /// sets with its value before, and what it costs.
     /// </summary>
@@ -78,7 +70,6 @@ internal partial class CoopSave {
     private void ResetSharedPurchases() {
         _localPurchases.Clear();
         _remotePurchases.Clear();
-        _purchasesToDropFromShop.Clear();
     }
 
     /// <summary>
@@ -117,8 +108,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The local player bought something both saves share: the purchase goes to the other members with what it set,
-    /// and a purchase of another member that had arrived already makes it theirs, so the local payment goes back.
+    /// The local player bought something both saves share: the purchase goes to the other members with what it set. A
+    /// purchase of another member that arrived before it was turned away before paying (RedirectBoughtPurchase), which
+    /// is looked at in the same call of the game as the payment.
     /// </summary>
     private void AfterSharedPurchase(SharedPurchase? purchase) {
         if (purchase == null) {
@@ -133,13 +125,11 @@ internal partial class CoopSave {
             var interaction = new LocalInteraction(purchase.Item);
             interaction.Currency.Add((purchase.Currency, purchase.Cost));
             _localPurchases[purchase.Flag] = interaction;
-            var afterPartner = _remotePurchases.TryGetValue(purchase.Flag, out var first);
             var name = purchase.Item.DisplayName;
             if (_checkedMembers.Count > 0) {
                 var update = new CoopSaveUpdate {
                     Kind = CoopSaveUpdateKind.SharedPurchase,
                     Key = interaction.Key,
-                    PartCount = afterPartner ? InteractionAfterPartner : InteractionFirst,
                     StateName = name
                 };
                 update.FlagNames.Add(purchase.Flag);
@@ -150,19 +140,14 @@ internal partial class CoopSave {
                 RememberStoryValues([purchase.Flag]);
                 Logger.Info($"Bought '{name}' for both saves ({purchase.Flag} = {value}), sent to {GetCheckedNames()}");
             }
-
-            if (afterPartner) {
-                Refund(interaction, Lang.Pick("had already bought it", "已经买下了它"), first.Name);
-            }
         } catch (Exception e) {
             LogInteractionError(e);
         }
     }
 
     /// <summary>
-    /// Takes the purchase of another member of something both saves share: what it set goes into the local save, a
-    /// purchase of the same thing by the local player that crossed it on the way is settled, and a shop's list that
-    /// the local player has open drops it.
+    /// Takes the purchase of another member of something both saves share: what it set goes into the local save, and a
+    /// purchase of the same thing by the local player that crossed it on the way is settled.
     /// </summary>
     private void OnSharedPurchase(ClientPlayerData player, CoopSaveUpdate update) {
         if (GetCurrentMarker() is not { } marker || !IsMember(player, marker)) {
@@ -179,13 +164,10 @@ internal partial class CoopSave {
             foreach (var flag in update.FlagNames) {
                 _remotePurchases.TryAdd(flag, (update.Key, player.Username));
 
-                // Both players bought it. One who bought it after the purchase of the other had arrived gets the
-                // payment back in their own game, so only purchases that crossed on the way are settled here
+                // Both players bought it, each before the purchase of the other arrived: one confirmed after that is
+                // turned away before paying (RedirectBoughtPurchase)
                 if (_localPurchases.TryGetValue(flag, out var local)) {
-                    if (update.PartCount != InteractionAfterPartner) {
-                        RefundIfBothPaid(local, update.Key, player.Username);
-                    }
-
+                    RefundIfBothPaid(local, update.Key, player.Username);
                     continue;
                 }
 
@@ -193,59 +175,9 @@ internal partial class CoopSave {
                     $"{player.Username} bought {update.StateName}, and you have it too.",
                     $"{player.Username}买下了{update.StateName}，你这边也有了。"
                 ));
-                _purchasesToDropFromShop.Add(flag);
             }
-
-            UpdateSharedPurchases();
         } catch (Exception e) {
             LogInteractionError(e);
-        }
-    }
-
-    /// <summary>
-    /// Builds a shop's list that the local player has open again without what another member bought, once the local
-    /// player looks through the list rather than at a prompt over it, or closes the shop if nothing is left in it.
-    /// </summary>
-    private void UpdateSharedPurchases() {
-        if (_purchasesToDropFromShop.Count == 0) {
-            return;
-        }
-
-        var waits = false;
-        var stocks = Object.FindObjectsByType<ShopMenuStock>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
-        foreach (var stock in stocks) {
-            if (stock == null || !stock.EnumerateStock().Any(item =>
-                    GetSharedPurchaseFlag(item) is { } flag && _purchasesToDropFromShop.Contains(flag))) {
-                continue;
-            }
-
-            var shop = FindShopFsm(stock.gameObject);
-            if (shop == null || shop.ActiveStateName != ShopOpenState ||
-                shop.FsmVariables.FindFsmBool(ShopSecondMenuVariable) is { Value: true }) {
-                waits |= shop != null;
-                continue;
-            }
-
-            if (!stock.StockLeft()) {
-                Logger.Info("Closing the shop: what the partner bought was the last thing in it");
-                EventRegister.SendEvent(ShopCloseEvent, null);
-                continue;
-            }
-
-            // The list shows from the same place as before, but past its end
-            var count = stock.EnumerateStock().Count(item => item.IsAvailable);
-            if (shop.FsmVariables.FindFsmInt(ShopCurrentItemVariable) is { } current && current.Value >= count) {
-                current.Value = System.Math.Max(0, count - 1);
-            }
-
-            Logger.Info("Building the open shop's list again without what the partner bought");
-            EventRegister.SendEvent(ShopResetEvent, null);
-        }
-
-        // A shop that the local player still confirms something in, or picks a colour in, drops it once they are back
-        // in its list; one that is closed has nothing to drop
-        if (!waits) {
-            _purchasesToDropFromShop.Clear();
         }
     }
 

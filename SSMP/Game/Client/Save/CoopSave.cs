@@ -499,7 +499,6 @@ internal partial class CoopSave {
             UpdateWorldChanges();
             UpdateWishes();
             UpdateStoryFlags();
-            UpdateSharedPurchases();
             UpdateLifts();
             UpdateTrapdoors();
         }
