@@ -895,5 +895,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// it, and <see cref="CoopSaveUpdate.Amounts"/> holds 1 if it came to rest turned. Appended at the end, like every
     /// kind.
     /// </summary>
-    DialRest
+    DialRest,
+
+    /// <summary>
+    /// The sender bought in a shop something that both saves share, like a furnishing of the house that the players
+    /// share (see CoopSave.SharedPurchases). <see cref="CoopSaveUpdate.FlagNames"/> and
+    /// <see cref="CoopSaveUpdate.FlagValues"/> hold what the purchase set, <see cref="CoopSaveUpdate.Key"/> its random
+    /// key, <see cref="CoopSaveUpdate.PartCount"/> 1 if the purchase of another member had arrived before it, for which
+    /// the sender gets their payment back, and <see cref="CoopSaveUpdate.StateName"/> the name of what was bought, for
+    /// messages. Appended at the end, like every kind.
+    /// </summary>
+    SharedPurchase
 }

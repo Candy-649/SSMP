@@ -453,6 +453,7 @@ internal partial class CoopSave {
         ResetInteractions();
         _capturedMechanisms.Clear();
         _interactionFlags.Clear();
+        ResetSharedPurchases();
     }
 
     /// <summary>
@@ -513,6 +514,13 @@ internal partial class CoopSave {
         try {
             toState = RedirectArrival(self, toState);
             hiddenLandingFlag = GetLandingFlagToHide(self, toState);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
+        // And a purchase of what both saves share that the partner made while the local player confirmed it
+        try {
+            toState = RedirectBoughtPurchase(self, toState);
         } catch (Exception e) {
             LogInteractionError(e);
         }

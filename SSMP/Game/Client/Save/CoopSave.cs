@@ -499,6 +499,7 @@ internal partial class CoopSave {
             UpdateWorldChanges();
             UpdateWishes();
             UpdateStoryFlags();
+            UpdateSharedPurchases();
             UpdateLifts();
             UpdateTrapdoors();
         }
@@ -1149,6 +1150,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.PodProgress:
                 OnPodProgress(player, update);
+                break;
+            case CoopSaveUpdateKind.SharedPurchase:
+                OnSharedPurchase(player, update);
                 break;
         }
     }
@@ -2064,7 +2068,7 @@ internal partial class CoopSave {
     /// </summary>
     private void Send(CoopSaveUpdate update) {
         if (update.Kind is CoopSaveUpdateKind.WorldChange or CoopSaveUpdateKind.WishChange or
-            CoopSaveUpdateKind.Interaction or CoopSaveUpdateKind.WishTurnIn) {
+            CoopSaveUpdateKind.Interaction or CoopSaveUpdateKind.WishTurnIn or CoopSaveUpdateKind.SharedPurchase) {
             update.Sequence = NextChangeSequence();
             StampLocalChanges(update);
         } else if (update is { Kind: CoopSaveUpdateKind.DeliveryBreak, PartCount: DeliveryBreakReport }) {

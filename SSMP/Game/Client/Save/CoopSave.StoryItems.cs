@@ -71,12 +71,16 @@ internal partial class CoopSave {
         AddWishTalkHook(
             typeof(ShopItem).GetMethod("SetPurchased", InstanceFlags, null, [typeof(Action), typeof(int)], null),
             new Action<Action<ShopItem, Action, int>, ShopItem, Action, int>((orig, self, onComplete, subItem) => {
+                // What both saves share is bought for both (see CoopSave.SharedPurchases)
+                var shared = BeforeSharedPurchase(self);
                 _purchaseDepth++;
                 try {
                     orig(self, onComplete, subItem);
                 } finally {
                     _purchaseDepth--;
                 }
+
+                AfterSharedPurchase(shared);
             })
         );
         AddWishTalkHook(

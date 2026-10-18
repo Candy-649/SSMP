@@ -44,8 +44,9 @@ internal partial class CoopSave {
     private static readonly Dictionary<string, int> StoryFieldIndices = new(StringComparer.Ordinal);
 
     /// <summary>
-    /// The names of the story flags that record something done for good, like the win of an arena, which a check keeps
-    /// if either save has them.
+    /// The names of the story flags that record something done for good, like the win of an arena or a furnishing of
+    /// the shared house, which a check keeps if either save has them: a boolean that is set, or another flag that is
+    /// not 0.
     /// </summary>
     private static readonly HashSet<string> StoryRecordNames = new(StringComparer.Ordinal);
 
@@ -309,8 +310,9 @@ internal partial class CoopSave {
     /// longest since the players last played together, or from the save with the largest key of those that were played
     /// equally long, so every game chooses the same save. A boolean that a saved object of the world sets stays set if
     /// any save has that object, since the check gives it to every save, and so does a record of something done for
-    /// good, like an arena that any player won. Flags that changed live during the check are newer than all the saves
-    /// and stay as they are.
+    /// good, like an arena that any player won. A record of another type, like the paint of the shared house, keeps
+    /// what a save has if the chosen one has none. Flags that changed live during the check are newer than all the
+    /// saves and stay as they are.
     /// </summary>
     /// <param name="states">The parts of the world progress of each member of the round.</param>
     /// <returns>How many story flags changed in the local save.</returns>
@@ -380,6 +382,18 @@ internal partial class CoopSave {
             if (fields[index].FieldType == typeof(bool) &&
                 (worldItemFlags.Contains(name) || StoryRecordNames.Contains(name) || addedFlags.Contains(name))) {
                 value = 1;
+            } else if (value == 0 && StoryRecordNames.Contains(name)) {
+                // What the save with the largest key of those that have one says, which every game chooses alike
+                var recordKey = localValue != 0 ? LocalKey : null;
+                value = localValue;
+                for (var i = 0; i < states.Count; i++) {
+                    var key = GetMemberKey(marker, states[i].Member);
+                    if (memberValues[i].TryGetValue(name, out var memberValue) && memberValue != 0 &&
+                        (recordKey == null || string.CompareOrdinal(key, recordKey) > 0)) {
+                        recordKey = key;
+                        value = memberValue;
+                    }
+                }
             }
 
             if (hasSent) {
