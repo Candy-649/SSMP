@@ -497,6 +497,35 @@ internal class PredictiveInterpolation : MonoBehaviour {
     }
 
     /// <summary>
+    /// Puts the object where the sender's positions have it now, dropping what the smoothing still has to carry it
+    /// through of a step that the sender's object took, for something that moves it on from there by itself: a move
+    /// that the copy of a creature plays by itself starts where the creature started it. Only the rest of a step longer
+    /// than anyone could miss (see <see cref="BigMoveDistance"/>): what is left of shorter ones is the smoothing's own,
+    /// which moves were started from before, and dropped, it would make the object jump. How fast it goes, and how far
+    /// it is reckoned to have gone on since the last position, are kept. Nothing is done before the sender has said
+    /// anything.
+    /// </summary>
+    /// <returns>Whether it was moved.</returns>
+    public bool DropWhatIsLeftOfAStep() {
+        EnsureTransformCached();
+        if (!_isInitialized || !_hasNewServerData || _predictionDisabled) {
+            return false;
+        }
+
+        var reckoned = Mathf.Min(_timeSinceLastPacket, serverDeltaTime * _adaptedPredictionCapMultiplier);
+        var position = _lastServerPosition + _velocity * reckoned;
+        if ((position - _cachedTransform.position).sqrMagnitude < BigMoveDistance * BigMoveDistance) {
+            return false;
+        }
+
+        SayItMovedALongWay("dropping what the smoothing had left of a step", _cachedTransform.position, position);
+        _visualOffset = Vector3.zero;
+        _visualOffsetVelocity = Vector3.zero;
+        _cachedTransform.position = position;
+        return true;
+    }
+
+    /// <summary>
     /// Forces the position to the given position.
     /// </summary>
     /// <param name="position">Vector3 containing the position to snap to.</param>

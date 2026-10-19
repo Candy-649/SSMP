@@ -1246,6 +1246,53 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// The states of a creature's stun control from the blow that stuns it to the end of the stun. The first two go on
+    /// at once, and the other game, which hears only the latest state of an FSM in each update, hears of the stun as
+    /// "Stunned".
+    /// </summary>
+    private static readonly HashSet<string> StunnedStates = ["Stun", "Dazed Effect", "Stunned", "Quick End"];
+
+    /// <summary>
+    /// Says in the log that the creature was stunned - its stun control went into the stun from outside it - in this
+    /// game, which runs it, or in the scene host's, which the copy here follows: of a boss that the players saw never
+    /// stunned in a whole fight it could not be told whether it was stunned in the scene host's game only, or nowhere
+    /// (USER 10-19). In this game, with how much of a beating it had taken, where that is read in "Stun", before that
+    /// state clears it.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="fromState">The state it was in.</param>
+    /// <param name="toState">The state it went to.</param>
+    /// <param name="here">Whether this game runs the creature.</param>
+    private void SayStunned(PlayMakerFSM fsm, string fromState, string toState, bool here) {
+        if (fsm.FsmName != "Stun Control" || !StunnedStates.Contains(toState) || StunnedStates.Contains(fromState)) {
+            return;
+        }
+
+        if (!here) {
+            SSMP.Logging.Logger.Info(
+                $"[Stun] '{Object.Host.name}' ({Id}) is stunned in the scene host's game, which its copy here follows"
+            );
+            return;
+        }
+
+        if (toState != "Stun") {
+            SSMP.Logging.Logger.Info(
+                $"[Stun] '{Object.Host.name}' ({Id}) is stunned in this game, which runs it, seen first in " +
+                $"'{toState}', after the stun had cleared how much of a beating it had taken"
+            );
+            return;
+        }
+
+        var hits = fsm.FsmVariables.FindFsmFloat("Hits Total");
+        var combo = fsm.FsmVariables.FindFsmFloat("Combo Counter");
+        SSMP.Logging.Logger.Info(
+            $"[Stun] '{Object.Host.name}' ({Id}) is stunned in this game, which runs it, after " +
+            $"{(hits == null ? "?" : hits.Value.ToString("0.#"))} of the beating that stuns it, " +
+            $"{(combo == null ? "?" : combo.Value.ToString("0.#"))} of it in a row"
+        );
+    }
+
+    /// <summary>
     /// Sends the state that an FSM of the host is in, if it is not the one sent last.
     /// </summary>
     /// <param name="fsmIndex">The index of the FSM.</param>
@@ -1264,6 +1311,7 @@ internal partial class Entity {
         }
 
         var data = ObjectPool<EntityHostFsmData>.Get();
+        SayStunned(fsm, snapshot.CurrentState, fsm.ActiveStateName, true);
         snapshot.CurrentState = fsm.ActiveStateName;
         data.Types.Add(EntityHostFsmData.Type.State);
         data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
@@ -1811,6 +1859,7 @@ internal partial class Entity {
                 var data = ObjectPool<EntityHostFsmData>.Get();
 
                 if (hasStateChange) {
+                    SayStunned(fsm, snapshot.CurrentState, fsm.ActiveStateName, true);
                     snapshot.CurrentState = fsm.ActiveStateName;
                     data.Types.Add(EntityHostFsmData.Type.State);
                     data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
@@ -2734,6 +2783,11 @@ internal partial class Entity {
             //Logger.Debug("  Client object null, enabling host object and returning");
             return;
         }
+
+        // What the scene host sent of a move that the copy plays by itself and that still waits for the copy goes to
+        // it now, while it takes such things in: the room's own FSM goes on from where the scene host's was
+        // (ResumeState) without doing again what that did on its way there (TakeWhatWaitsInTheMove)
+        TakeWhatWaitsInTheMove();
 
         // Make sure that the sprite animator doesn't play the default clip after enabling the object
         if (_animator.Host != null) {
@@ -3970,6 +4024,7 @@ internal partial class Entity {
 
         positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + packetsCovered);
         _positionsHeldBack = 0;
+        StartWhereTheSceneHostDidAfterAll();
     }
 
     /// <summary>
@@ -4365,6 +4420,13 @@ internal partial class Entity {
                 if (fsm == _runHere) {
                     var muted = _mutedHere.Contains(action);
 
+                    // What only the scene host does in a state of a move that the copy plays by itself is done here as
+                    // the copy gets to that state (WaitsForTheCopy)
+                    if (muted && WaitsForTheCopy(state)) {
+                        HoldForTheCopy(state, data);
+                        continue;
+                    }
+
                     // And while it runs here for a talk of the local player, until the talk is over (TalkHere)
                     if ((!muted || HoldsWithWhatMadeIt(action)) &&
                         (WaitsForEcho || HoldsForTheAftermath(state) || HoldsForTheMoveEnd(state) || _runHereTalk)) {
@@ -4394,12 +4456,37 @@ internal partial class Entity {
                 continue;
             }
 
+            // How the scene host switches its creature in a move that the copy plays by itself - drawn, turned, on
+            // which layer, whether it can be hit or hurts, how it moves by itself - waits for the copy to get to the
+            // state of the move that the scene host's FSM is at (WaitsForTheCopy), and once that came out of the move
+            // first, for the copy to be through it, which it comes after (see _moveFinishBy). Not its health or death,
+            // which are the scene host's to settle as they come, nor the music of the room. A boss that rose out of the
+            // lava turned back as it came out, which came here before the copy's own rise turned it: it rose here and
+            // stayed on its side
+            if (!_takingWhatWaited && data.Type is not (EntityComponentType.Health or EntityComponentType.Death or
+                    EntityComponentType.Music)) {
+                // So does what came along with the start of the move, where the scene host's FSM was heard to be
+                // further into it than its first state, for the move to start (HoldsSwitchForTheMoveHeard)
+                if (HoldsSwitchForTheMoveHeard(data)) {
+                    continue;
+                }
+
+                if (_runHereMove && _moveFinishBy != null) {
+                    HoldForEcho(data);
+                    continue;
+                }
+
+                if (_runHereMove && _moveHostAt is { } hostAt && WaitsForTheCopy(hostAt)) {
+                    HoldForTheCopy(hostAt, data);
+                    continue;
+                }
+            }
+
             // How the entity moves by itself, the colours its FSMs leave it in, and whether the damage of its parts is
             // on, are its own FSM's to say while that runs here, and held until the scene host has answered the input
-            // (PlayHere), or until the copy is through a move that the scene host's FSM came out of first, which they
-            // come after (see _moveFinishBy)
+            // (PlayHere)
             if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint or
-                    EntityComponentType.DamageHero) && (WaitsForEcho || _moveFinishBy != null)) {
+                    EntityComponentType.DamageHero) && WaitsForEcho) {
                 HoldForEcho(data);
                 continue;
             }
@@ -4455,6 +4542,7 @@ internal partial class Entity {
                 } else {
                     var stateName = states[data.CurrentState].Name;
 
+                    SayStunned(hostFsm, snapshot.CurrentState, stateName, false);
                     snapshot.CurrentState = stateName;
 
                     // Also propagate this state change to the EntityFsmActions class with the client FSM for the

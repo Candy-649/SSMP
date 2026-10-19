@@ -1281,7 +1281,14 @@
       "Notify Boss Scene of Damage",
       "Stun Control",
       "Summon Cooldown"
-    ]
+    ],
+    "runs_here": {
+      "Control": {
+        "Lava Burst Antic": [
+          "Lava Burst"
+        ]
+      }
+    }
   },
   {
     "base_object_name": "Bone Hunter Tiny",

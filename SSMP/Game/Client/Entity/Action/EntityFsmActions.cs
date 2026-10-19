@@ -787,7 +787,15 @@ internal static partial class EntityFsmActions {
         ActionsInState.Clear();
         HostStates.Clear();
         SaidStillGivingOff.Clear();
+        SaidLeftAtOnce.Clear();
     }
+
+    /// <summary>
+    /// The states of the creatures of the room in which something that goes on for as long as the state lasts came
+    /// after the scene host's FSM had left the state, said once in the log for each (see
+    /// <see cref="ActionInState.Register"/>).
+    /// </summary>
+    private static readonly HashSet<string> SaidLeftAtOnce = [];
 
     /// <summary>
     /// Leaves the states of the copy of a creature that this game is taking over. The copy is switched off, and nothing
@@ -1200,6 +1208,16 @@ internal static partial class EntityFsmActions {
         /// </summary>
         public void Register() {
             if (HostStates.TryGetValue(Fsm, out var hostState) && hostState != StateName) {
+                // Nothing of it shows then: a warning of where a boss comes up, shown for the second before it does,
+                // never showed for a player whose game heard of it late (USER 10-19)
+                var owner = Fsm.GameObject == null ? "?" : Fsm.GameObject.name;
+                if (SaidLeftAtOnce.Add($"{owner}/{Fsm.Name}/{StateName}")) {
+                    Logger.Info(
+                        $"What '{owner}' does through '{StateName}' of '{Fsm.Name}' came after the scene host's FSM " +
+                        $"had gone on to '{hostState}', so it ended as it began and showed nothing (said once a room)"
+                    );
+                }
+
                 ExitState();
                 return;
             }
