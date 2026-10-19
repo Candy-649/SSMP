@@ -429,14 +429,16 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
-    /// Update an entity's animation in the packet.
+    /// Update the clip that an entity started to play in the packet, which goes reliably (see
+    /// <see cref="ReliableEntityUpdate.AnimationId"/>).
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>
     /// <param name="animationId">The animation ID of the entity.</param>
     /// <param name="animationWrapMode">The wrap mode of the animation of the entity.</param>
     public void UpdateEntityAnimation(ushort entityId, byte animationId, byte animationWrapMode) {
         lock (Lock) {
-            var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ClientUpdatePacketId.EntityUpdate);
+            var entityUpdate =
+                FindOrCreateEntityUpdate<ReliableEntityUpdate>(entityId, ClientUpdatePacketId.ReliableEntityUpdate);
             entityUpdate!.UpdateTypes.Add(EntityUpdateType.Animation);
             entityUpdate.AnimationId = animationId;
             entityUpdate.AnimationWrapMode = animationWrapMode;

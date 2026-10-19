@@ -1056,23 +1056,6 @@ internal abstract class ServerManager : IServerManager {
                 entityData.HeardAt[HeardScale] = now;
             }
         }
-
-        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Animation) &&
-            entityData.TakesNewer(id, HeardClip, sequence)) {
-            SendDataInSameScene(
-                id,
-                playerData.CurrentScene,
-                entityUpdate,
-                static (updateManager, update) =>
-                    updateManager.UpdateEntityAnimation(update.Id, update.AnimationId, update.AnimationWrapMode)
-            );
-
-            // Kept without the mark of a clip sent again (EntityUpdate.WrapModeSentAgain): to a player walking in
-            // later it is the clip the creature shows, which their copy has never been shown
-            entityData.AnimationId = entityUpdate.AnimationId;
-            entityData.AnimationWrapMode = (byte) (entityUpdate.AnimationWrapMode & ~EntityUpdate.WrapModeSentAgain);
-            entityData.HeardAt[HeardClip] = now;
-        }
     }
 
     /// <summary>
@@ -1104,6 +1087,26 @@ internal abstract class ServerManager : IServerManager {
         }
 
         var now = DateTime.UtcNow;
+
+        // The clip that the entity started to play first, as the copy takes it in (EntityManager), and only when it is
+        // newer than the one last taken from this player (ServerEntityData.TakesNewer), by the packet it was first sent
+        // in (ReliableEntityUpdate.ReceivedSequence): over a transport that does not keep order, one sent again because
+        // it was lost can come after a newer one
+        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Animation) &&
+            entityData.TakesNewer(id, HeardClip, entityUpdate.ReceivedSequence)) {
+            SendDataInSameScene(
+                id,
+                playerData.CurrentScene,
+                entityUpdate,
+                static (updateManager, update) =>
+                    updateManager.UpdateEntityAnimation(update.Id, update.AnimationId, update.AnimationWrapMode)
+            );
+
+            entityData.AnimationId = entityUpdate.AnimationId;
+            entityData.AnimationWrapMode = entityUpdate.AnimationWrapMode;
+            entityData.HeardAt[HeardClip] = now;
+        }
+
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Active)) {
             SendDataInSameScene(
                 id,

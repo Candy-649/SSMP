@@ -244,14 +244,16 @@ internal partial class Entity {
     private const float AnticipationStampTime = 2.5f;
 
     /// <summary>
-    /// When, in seconds after it last changed, the scene host sends again which way an entity faces, the clip it shows
-    /// and the place it came to stand in.
+    /// When, in seconds after it last changed, the scene host sends again which way an entity faces and the place it
+    /// came to stand in.
     ///
     /// Each of these goes once, when it changes, by the way that drops what it cannot deliver, and nothing comes after
     /// it until the next change. A creature that turned to charge and then flew straight sent its turn once, and a copy
     /// that missed it flew the whole charge rear first (USER 10-10, "飞天怪用屁股撞"). The player's own facing had been
     /// lost the same way and was walked backwards (ClientManager). Sent again a few times at growing gaps, a short break
-    /// in the line is covered for a few bytes each; a copy that already has it changes nothing.
+    /// in the line is covered for a few bytes each; a copy that already has it changes nothing. Not the clip it starts,
+    /// which goes the reliable way (ReliableEntityUpdate.AnimationId): sent again, it started over on a copy that had
+    /// played it to its end.
     /// </summary>
     private static readonly float[] SentAgainAfter = [0.1f, 0.3f, 0.7f];
 
@@ -383,29 +385,19 @@ internal partial class Entity {
     private Vector3 _lastScale;
 
     /// <summary>
-    /// When the place, the scale and the clip of this game's creature were last changed and sent, in unscaled seconds,
-    /// and how many times each has been sent again since (see <see cref="SentAgainAfter"/>). Counted as all sent until
-    /// the first change.
+    /// When the place and the scale of this game's creature were last changed and sent, in unscaled seconds, and how
+    /// many times each has been sent again since (see <see cref="SentAgainAfter"/>). Counted as all sent until the
+    /// first change.
     /// </summary>
-    private float _positionChangedAt, _scaleChangedAt, _clipChangedAt;
+    private float _positionChangedAt, _scaleChangedAt;
 
     /// <inheritdoc cref="_positionChangedAt"/>
-    private int _positionSentAgain = SentAgainAfter.Length,
-        _scaleSentAgain = SentAgainAfter.Length,
-        _clipSentAgain = SentAgainAfter.Length;
+    private int _positionSentAgain = SentAgainAfter.Length, _scaleSentAgain = SentAgainAfter.Length;
 
     /// <summary>
     /// The axes of the scale that changed since it was last sent other than again, which are what is sent again.
     /// </summary>
     private bool _scaleAgainX, _scaleAgainY, _scaleAgainZ;
-
-    /// <summary>
-    /// The clip last sent other than again, by its ID, wrap mode and name, which is what is sent again.
-    /// </summary>
-    private byte _clipAgainId, _clipAgainWrapMode;
-
-    /// <inheritdoc cref="_clipAgainId"/>
-    private string? _clipAgainName;
 
     /// <summary>
     /// The packet order of the scales the copy took, so that an older one arriving after a newer one is thrown away, as
@@ -1740,18 +1732,6 @@ internal partial class Entity {
             transform.hasChanged = false;
         }
 
-        // The clip goes again too (SentAgainAfter), while this game's creature still plays it: one that has played to
-        // its end would only start over, late, on a copy that missed it
-        if (_animator.Host != null && IsDueAgain(_clipChangedAt, ref _clipSentAgain) &&
-            _animator.Host.CurrentClip is { } shownClip && shownClip.name == _clipAgainName &&
-            _animator.Host.IsPlaying(shownClip)) {
-            _netClient.UpdateManager.UpdateEntityAnimation(
-                Id,
-                _clipAgainId,
-                (byte) (_clipAgainWrapMode | EntityUpdate.WrapModeSentAgain)
-            );
-        }
-
         var newActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
         if (newActive != _lastIsActive) {
             _lastIsActive = newActive;
@@ -1981,12 +1961,12 @@ internal partial class Entity {
         }
 
         //Logger.Info($"Entity '{Object.Host.name}' sends animation: {clip.name}, {animationId}, {clip.wrapMode}");
+        // Once, as it starts, the way that delivers everything once and in order (ReliableEntityUpdate.AnimationId)
         _netClient.UpdateManager.UpdateEntityAnimation(
             Id,
             animationId,
             (byte) clip.wrapMode
         );
-        NoteClipSent(animationId, (byte) clip.wrapMode, clip.name);
     }
 
     /// <summary>
@@ -2031,18 +2011,6 @@ internal partial class Entity {
                 zScale = scale.z
             }
         );
-    }
-
-    /// <summary>
-    /// Notes the clip this game's creature was just sent playing, for it to go again in case it was lost (see
-    /// <see cref="SentAgainAfter"/>).
-    /// </summary>
-    private void NoteClipSent(byte animationId, byte wrapMode, string clipName) {
-        _clipAgainId = animationId;
-        _clipAgainWrapMode = wrapMode;
-        _clipAgainName = clipName;
-        _clipChangedAt = Time.unscaledTime;
-        _clipSentAgain = 0;
     }
 
     /// <summary>
@@ -2335,7 +2303,6 @@ internal partial class Entity {
         }
 
         _netClient.UpdateManager.UpdateEntityAnimation(Id, animationId, (byte) clip.wrapMode);
-        NoteClipSent(animationId, (byte) clip.wrapMode, clip.name);
     }
 
     /// <summary>
@@ -4182,16 +4149,11 @@ internal partial class Entity {
     /// <param name="wrapMode">The wrap mode of the animation clip.</param>
     /// <param name="alreadyInSceneUpdate">Whether this update is when entering a new scene.</param>
     /// <param name="packet">The packet that brought it, or 0 for one that came in none.</param>
-    /// <param name="sentAgain">
-    /// Whether it is a clip sent again in case it was lost (EntityUpdate.WrapModeSentAgain), which a copy that shows it
-    /// already leaves be.
-    /// </param>
     public void UpdateAnimation(
         byte animationId,
         tk2dSpriteAnimationClip.WrapMode wrapMode,
         bool alreadyInSceneUpdate,
-        ushort packet = 0,
-        bool sentAgain = false
+        ushort packet = 0
     ) {
         if (_animator.Client == null) {
             //Logger.Warn($"Entity '{Object.Client.name}' received animation while client animator does not exist");
@@ -4219,15 +4181,6 @@ internal partial class Entity {
         // through a talk of the local player, and held till then (PlayHere, TalkHere)
         if (WaitsForEcho || _runHereCombo != null || _runHereTalk) {
             _heldAnimation = (animationId, wrapMode);
-            return;
-        }
-
-        // Sent again in case it was lost (SentAgainAfter): a copy that is still playing it leaves it be, and one whose
-        // own FSM runs here plays its own clips. A copy whose clip of that name has played to its end missed it being
-        // played again - the same attack twice - which the scene host sends again only while it still plays it.
-        if (sentAgain && (_runHere != null ||
-                          _animator.Client.CurrentClip is { } current && current.name == clipName &&
-                          _animator.Client.IsPlaying(current))) {
             return;
         }
 

@@ -425,7 +425,7 @@ internal class EntityManager {
     }
 
     /// <summary>
-    /// Applies an unreliable entity update (position, scale, animation).
+    /// Applies an unreliable entity update (position, scale, and the animation in the state of a room).
     /// Returns false and buffers the update if the entity isn't ready yet.
     /// </summary>
     public bool HandleEntityUpdate(EntityUpdate update, bool alreadyInSceneUpdate = false) {
@@ -459,17 +459,16 @@ internal class EntityManager {
         if (update.UpdateTypes.Contains(EntityUpdateType.Animation))
             entity.UpdateAnimation(
                 update.AnimationId,
-                (tk2dSpriteAnimationClip.WrapMode) (update.AnimationWrapMode & ~EntityUpdate.WrapModeSentAgain),
+                (tk2dSpriteAnimationClip.WrapMode) update.AnimationWrapMode,
                 alreadyInSceneUpdate,
-                update.ReceivedSequence,
-                (update.AnimationWrapMode & EntityUpdate.WrapModeSentAgain) != 0
+                update.ReceivedSequence
             );
 
         return true;
     }
 
     /// <summary>
-    /// Applies a reliable entity update (active state, host FSM data, generic data).
+    /// Applies a reliable entity update (the clip it started, active state, host FSM data, generic data).
     /// Returns false and buffers the update if the entity isn't ready yet.
     /// </summary>
     public bool HandleReliableEntityUpdate(ReliableEntityUpdate update, bool alreadyInSceneUpdate = false) {
@@ -501,6 +500,16 @@ internal class EntityManager {
 
         // Active state and host FSM are driven by the scene host; clients are consumers only.
         if (!IsSceneHost) {
+            // The clip first, as when it came in the unreliable kind, which is taken in before this one: the entity
+            // is switched on or off and told the rest of that moment after it started the clip
+            if (update.UpdateTypes.Contains(EntityUpdateType.Animation))
+                entity.UpdateAnimation(
+                    update.AnimationId,
+                    (tk2dSpriteAnimationClip.WrapMode) update.AnimationWrapMode,
+                    alreadyInSceneUpdate,
+                    update.ReceivedSequence
+                );
+
             if (update.UpdateTypes.Contains(EntityUpdateType.Active) && !isPersonal)
                 entity.UpdateIsActive(update.IsActive);
 

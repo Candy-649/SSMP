@@ -208,6 +208,8 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
             return false;
         }
 
+        StampReliableEntityUpdates(NormalPacketData, Sequence);
+
         try {
             // Read the length of the resend data
             var resendLength = packet.ReadUShort();
@@ -219,6 +221,7 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
                 // Create a new dictionary for the packet data and read the data from the packet into it
                 var packetData = new Dictionary<TPacketId, IPacketData>();
                 ReadPacketData(packet, packetData);
+                StampReliableEntityUpdates(packetData, seq);
 
                 // Input the data into the resend dictionary keyed by its sequence number
                 _resendPacketData[seq] = packetData;
@@ -245,6 +248,24 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Puts on each reliable entity update in the given data the number of the packet it was first sent in (see
+    /// <see cref="ReliableEntityUpdate.ReceivedSequence"/>).
+    /// </summary>
+    /// <param name="packetData">The data.</param>
+    /// <param name="sequence">The number: of this packet for its own data, of the lost one for data sent again.</param>
+    private static void StampReliableEntityUpdates(Dictionary<TPacketId, IPacketData> packetData, ushort sequence) {
+        foreach (var data in packetData.Values) {
+            if (data is not PacketDataCollection<ReliableEntityUpdate> updates) {
+                continue;
+            }
+
+            foreach (var update in updates.DataInstances) {
+                ((ReliableEntityUpdate) update).ReceivedSequence = sequence;
+            }
+        }
     }
 
     /// <summary>

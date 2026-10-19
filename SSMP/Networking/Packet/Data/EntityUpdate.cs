@@ -85,7 +85,8 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public ScaleData Scale { get; set; }
 
     /// <summary>
-    /// The ID of the animation of the entity.
+    /// The ID of the clip the entity shows, which only the state of a room carries in this kind: a clip that starts
+    /// goes in <see cref="ReliableEntityUpdate"/>.
     /// </summary>
     public byte AnimationId { get; set; }
 
@@ -93,14 +94,6 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     /// The wrap mode of the animation.
     /// </summary>
     public byte AnimationWrapMode { get; set; }
-
-    /// <summary>
-    /// The bit of <see cref="AnimationWrapMode"/> that marks a clip the scene host sends again, a little after it was
-    /// first sent, in case that was lost (Entity.SentAgainAfter). A wrap mode is a number below eight, so the top bit
-    /// is free. A copy that already shows a clip sent again leaves it be: played once more, a clip that has played to
-    /// its end starts over.
-    /// </summary>
-    public const byte WrapModeSentAgain = 0x80;
 
     /// <summary>
     /// Construct the entity update data.
@@ -604,6 +597,27 @@ internal class ReliableEntityUpdate : BaseEntityUpdate, IPoolable {
     public Dictionary<byte, EntityHostFsmData> HostFsmData { get; }
 
     /// <summary>
+    /// The ID of the clip the entity started to play, and its wrap mode. A clip starts once, and goes this way, which
+    /// delivers everything once and in order, like the FSM it comes from. It went by the way that drops what it cannot
+    /// deliver, sent again three times in case it was lost, and a copy whose clip had played to its end by the time one
+    /// of those came played it over again: a boss went through its throw twice and threw its balls once (USER 10-19).
+    /// </summary>
+    public byte AnimationId { get; set; }
+
+    /// <inheritdoc cref="AnimationId"/>
+    public byte AnimationWrapMode { get; set; }
+
+    /// <summary>
+    /// The number of the packet this was first sent in, filled in on reading rather than sent
+    /// (UpdatePacket.ReadPacket): the packet it came in, or for one sent again in a later packet because the first was
+    /// lost, the packet that was lost. Only the clip is compared by it (ServerEntityData.TakesNewer,
+    /// Entity.IsLatePose), as it was when it came in the unreliable kind: over a transport that does not keep in order
+    /// what it carries, a clip sent again after a newer one went, or one overtaken on the way, is older than the clip
+    /// shown and is not played.
+    /// </summary>
+    public ushort ReceivedSequence { get; set; }
+
+    /// <summary>
     /// Construct the reliable entity update data.
     /// </summary>
     public ReliableEntityUpdate() {
@@ -613,7 +627,8 @@ internal class ReliableEntityUpdate : BaseEntityUpdate, IPoolable {
     }
 
     /// <summary>
-    /// Creates a resend copy with only the host FSM fields not superseded by a newer update.
+    /// Creates a resend copy with only the host FSM fields not superseded by a newer update. A clip goes along whole:
+    /// the side it goes to tells a newer one apart itself (see <see cref="ReceivedSequence"/>).
     /// </summary>
     /// <param name="newerHostFsmData">Newer host FSM data grouped by FSM index.</param>
     /// <returns>A pooled copy, or null when all data in this update was superseded.</returns>
@@ -622,6 +637,12 @@ internal class ReliableEntityUpdate : BaseEntityUpdate, IPoolable {
     ) {
         var clone = ObjectPool<ReliableEntityUpdate>.Get();
         clone.Id = Id;
+
+        if (UpdateTypes.Contains(EntityUpdateType.Animation)) {
+            clone.UpdateTypes.Add(EntityUpdateType.Animation);
+            clone.AnimationId = AnimationId;
+            clone.AnimationWrapMode = AnimationWrapMode;
+        }
 
         if (UpdateTypes.Contains(EntityUpdateType.Active)) {
             clone.UpdateTypes.Add(EntityUpdateType.Active);
@@ -668,6 +689,9 @@ internal class ReliableEntityUpdate : BaseEntityUpdate, IPoolable {
         Id = 0;
         UpdateTypes.Clear();
         IsActive = false;
+        AnimationId = 0;
+        AnimationWrapMode = 0;
+        ReceivedSequence = 0;
 
         // Return pooled objects before clearing
         foreach (var data in GenericData) {
@@ -704,6 +728,11 @@ internal class ReliableEntityUpdate : BaseEntityUpdate, IPoolable {
 
         // Write the update type flag
         packet.Write(updateTypeFlag);
+
+        if (UpdateTypes.Contains(EntityUpdateType.Animation)) {
+            packet.Write(AnimationId);
+            packet.Write(AnimationWrapMode);
+        }
 
         if (UpdateTypes.Contains(EntityUpdateType.Active)) {
             packet.Write(IsActive);
@@ -751,6 +780,11 @@ internal class ReliableEntityUpdate : BaseEntityUpdate, IPoolable {
 
             // Increase the value of current bit
             currentTypeValue *= 2;
+        }
+
+        if (UpdateTypes.Contains(EntityUpdateType.Animation)) {
+            AnimationId = packet.ReadByte();
+            AnimationWrapMode = packet.ReadByte();
         }
 
         if (UpdateTypes.Contains(EntityUpdateType.Active)) {
