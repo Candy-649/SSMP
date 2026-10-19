@@ -459,6 +459,12 @@ internal partial class Entity {
     private readonly List<EntityNetworkData> _heldData = [];
 
     /// <summary>
+    /// The names of the variables that the things which what is held of the FSM that runs here makes are put in (see
+    /// <see cref="MakesThings"/>), for as long as it is held (see <see cref="HoldsWithWhatMadeIt"/>).
+    /// </summary>
+    private readonly HashSet<string> _madeByHeld = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The last animation that the scene host sent while the copy waited for its echo, or null for none.
     /// </summary>
     private (byte Id, tk2dSpriteAnimationClip.WrapMode WrapMode)? _heldAnimation;
@@ -1103,6 +1109,7 @@ internal partial class Entity {
         var heldScale = _heldScale;
         _runHereAwaited = 0;
         _heldData.Clear();
+        _madeByHeld.Clear();
         _heldAnimation = null;
         _heldScale = null;
 
@@ -1267,6 +1274,34 @@ internal partial class Entity {
             SenderId = data.SenderId,
             Packet = new global::SSMP.Networking.Packet.Packet(data.Packet.ToArray())
         });
+    }
+
+    /// <summary>
+    /// Holds what the scene host sent of an action of the FSM that runs here, as
+    /// <see cref="HoldForEcho(EntityNetworkData)"/> does, noting where the things it makes are put.
+    /// </summary>
+    /// <param name="data">What it sent.</param>
+    /// <param name="action">The action.</param>
+    private void HoldForEcho(EntityNetworkData data, FsmStateAction action) {
+        HoldForEcho(data);
+        if (MakesThings(action)) {
+            AddMadeInto(action, _madeByHeld);
+        }
+    }
+
+    /// <summary>
+    /// Whether what the scene host sent of an action that the copy leaves to it, which is taken from there at once
+    /// while the rest of the FSM that runs here is held, waits with the rest after all: it works on a thing that
+    /// something held makes. The scene host's game makes the thing and then works on it - a boss throws a ball and
+    /// sets the speed it comes off the walls with - and the copy did the second at once, to whatever its variable still
+    /// held, and made the ball only when it followed the scene host again; that ball never had its speed and went its
+    /// own way from the first wall, 21.7 from its twin (log of 10-18). Held, it comes after the ball, as it did there,
+    /// and is dropped with it when the scene host took the input and what is held is dropped: the ball is never made
+    /// here, and its variable holds something else.
+    /// </summary>
+    /// <param name="action">The action, which the copy leaves to the scene host.</param>
+    private bool HoldsWithWhatMadeIt(FsmStateAction action) {
+        return _madeByHeld.Count > 0 && WorksOnAny(action, _madeByHeld);
     }
 
     /// <summary>
@@ -1702,16 +1737,8 @@ internal partial class Entity {
         var made = new HashSet<string>(StringComparer.Ordinal);
         foreach (var state in states) {
             foreach (var action in state.Actions) {
-                if (!MakesThings(action)) {
-                    continue;
-                }
-
-                foreach (var field in FieldsOf(action.GetType())) {
-                    if (field.FieldType == typeof(FsmGameObject) &&
-                        field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase) &&
-                        field.GetValue(action) is FsmGameObject { UseVariable: true, Name.Length: > 0 } stored) {
-                        made.Add(stored.Name);
-                    }
+                if (MakesThings(action)) {
+                    AddMadeInto(action, made);
                 }
             }
         }
@@ -1731,7 +1758,24 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether an action works on an object that an FSM variable of one of the given names holds.
+    /// Adds to the given names those of the variables that an action which makes things puts them in (see
+    /// <see cref="MakesThings"/>).
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="names">The names.</param>
+    private static void AddMadeInto(FsmStateAction action, HashSet<string> names) {
+        foreach (var field in FieldsOf(action.GetType())) {
+            if (field.FieldType == typeof(FsmGameObject) &&
+                field.Name.StartsWith("store", StringComparison.OrdinalIgnoreCase) &&
+                field.GetValue(action) is FsmGameObject { UseVariable: true, Name.Length: > 0 } stored) {
+                names.Add(stored.Name);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an action works on an object that an FSM variable of one of the given names holds: as its object, or as
+    /// what it sends an event to.
     /// </summary>
     /// <param name="action">The action.</param>
     /// <param name="names">The names of the variables.</param>
@@ -1741,6 +1785,10 @@ internal partial class Entity {
                 FsmGameObject { UseVariable: true } variable => variable.Name,
                 FsmOwnerDefault { OwnerOption: OwnerDefaultOption.SpecifyGameObject } owner when
                     owner.GameObject is { UseVariable: true } variable => variable.Name,
+                FsmEventTarget {
+                    target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM,
+                    gameObject.OwnerOption: OwnerDefaultOption.SpecifyGameObject
+                } eventTarget when eventTarget.gameObject.GameObject is { UseVariable: true } variable => variable.Name,
                 _ => null
             };
             if (name != null && names.Contains(name)) {
@@ -2306,6 +2354,7 @@ internal partial class Entity {
         _moveAtItsEnd = false;
         _runHereAwaited = 0;
         _heldData.Clear();
+        _madeByHeld.Clear();
         _heldAnimation = null;
         _heldScale = null;
         foreach (var action in _mutedHere) {
@@ -2977,14 +3026,15 @@ internal partial class Entity {
     /// <summary>
     /// Whether an action of an FSM that runs on a copy does something beyond the entity itself to what both games
     /// share, which is left to the scene host: switched off while the copy runs here, and taken from the scene host's
-    /// game even while the rest of what it sends of that FSM is held (see <see cref="HoldForEcho"/>). These are exactly
-    /// what only the scene host's game does when the copy does not run: what it tells the room and other things, which
-    /// it sends here - a point told here as well would count twice - and the save, money and creatures, which reach
-    /// this game their own ways or not at all. A call on something else that the scene host's game does not send, like
-    /// the reaction that a harpooned flea sets off on the player who harpooned it, is the player's own and runs here.
-    /// So does what it tells or sets on the local player (see <see cref="EntityFsmActions.IsThePlayersOwn"/>), like
-    /// the way a creature that caught them turns them to face it: the scene host leaves that out (see
-    /// <see cref="PlayForPartner"/>).
+    /// game even while the rest of what it sends of that FSM is held (see
+    /// <see cref="HoldForEcho(EntityNetworkData)"/>), unless it works on a thing that something held makes (see
+    /// <see cref="HoldsWithWhatMadeIt"/>). These are exactly what only the scene host's game does when the copy does
+    /// not run: what it tells the room and other things, which it sends here - a point told here as well would count
+    /// twice - and the save, money and creatures, which reach this game their own ways or not at all. A call on
+    /// something else that the scene host's game does not send, like the reaction that a harpooned flea sets off on the
+    /// player who harpooned it, is the player's own and runs here. So does what it tells or sets on the local player
+    /// (see <see cref="EntityFsmActions.IsThePlayersOwn"/>), like the way a creature that caught them turns them to
+    /// face it: the scene host leaves that out (see <see cref="PlayForPartner"/>).
     /// </summary>
     private static bool IsLeftToSceneHost(FsmStateAction action) {
         var fsm = action.Fsm;

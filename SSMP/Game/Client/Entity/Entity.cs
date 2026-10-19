@@ -4354,21 +4354,25 @@ internal partial class Entity {
                 }
 
                 // Played here by the copy's own FSM until the scene host has answered its input, and held till then:
-                // all but what the copy leaves to the scene host, which only comes from there (PlayHere). The combo of
+                // all but what the copy leaves to the scene host, which only comes from there (PlayHere) - unless that
+                // works on a thing that something held makes, and waits for it (HoldsWithWhatMadeIt). The combo of
                 // a catch is played here all through, and not again from what the scene host sends of it, and so is
                 // the part of an FSM that each game runs by itself (RunEachGamePart). What comes after what the copy
                 // plays by itself out of a catch that this game led is held until it has played that
                 // (HoldsForTheAftermath), and so is what comes after a move that the copy plays on to its own end of
                 // once the scene host's FSM came out of it (HoldsForTheMoveEnd).
                 HearFromSceneHost(fsm, state);
-                if (fsm == _runHere && !_mutedHere.Contains(action)) {
+                if (fsm == _runHere) {
+                    var muted = _mutedHere.Contains(action);
+
                     // And while it runs here for a talk of the local player, until the talk is over (TalkHere)
-                    if (WaitsForEcho || HoldsForTheAftermath(state) || HoldsForTheMoveEnd(state) || _runHereTalk) {
-                        HoldForEcho(data);
+                    if ((!muted || HoldsWithWhatMadeIt(action)) &&
+                        (WaitsForEcho || HoldsForTheAftermath(state) || HoldsForTheMoveEnd(state) || _runHereTalk)) {
+                        HoldForEcho(data, action);
                         continue;
                     }
 
-                    if (_runHereForGood || _runHereCombo?.Contains(state) == true) {
+                    if (!muted && (_runHereForGood || _runHereCombo?.Contains(state) == true)) {
                         continue;
                     }
                 }
