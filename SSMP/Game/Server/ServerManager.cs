@@ -504,6 +504,11 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
+    /// Whether this server is running, which is whether this game hosts one.
+    /// </summary>
+    internal bool IsRunning => _netServer.IsStarted;
+
+    /// <summary>
     /// Called when the server settings are updated, and need to be broadcast.
     /// </summary>
     public void OnUpdateServerSettings() {

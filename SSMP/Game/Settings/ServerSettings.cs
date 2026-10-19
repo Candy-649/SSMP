@@ -318,6 +318,54 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
         }
     } = 1;
 
+    /// <inheritdoc />
+    [SettingAlias("enemyhp", "enemyhpmode")]
+    [ModMenuSetting("Enemy Health", "How enemy health grows with the players: 0 default, 1 power, 2 linear, 3 fixed")]
+    public byte EnemyHealthMode {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangeEvent?.Invoke(nameof(EnemyHealthMode));
+        }
+    }
+
+    /// <inheritdoc />
+    [SettingAlias("enemyhppower", "enemyhpexp")]
+    [ModMenuSetting("Enemy Health Power", "Tenths of what each extra player multiplies enemy health by")]
+    public byte EnemyHealthExponentialFactor {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangeEvent?.Invoke(nameof(EnemyHealthExponentialFactor));
+        }
+    } = 15;
+
+    /// <inheritdoc />
+    [SettingAlias("enemyhplinear")]
+    [ModMenuSetting("Enemy Health Linear", "Tenths of the solo enemy health that each extra player adds")]
+    public byte EnemyHealthLinearFactor {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangeEvent?.Invoke(nameof(EnemyHealthLinearFactor));
+        }
+    } = 5;
+
+    /// <inheritdoc />
+    [SettingAlias("enemyhpfixed")]
+    [ModMenuSetting("Enemy Health Fixed", "Tenths of what enemy health is multiplied by however many play")]
+    public byte EnemyHealthFixedFactor {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangeEvent?.Invoke(nameof(EnemyHealthFixedFactor));
+        }
+    } = 15;
+
     /// <summary>
     /// Set all properties in this <see cref="ServerSettings"/> instance to the values from the given
     /// <see cref="ServerSettings"/> instance.

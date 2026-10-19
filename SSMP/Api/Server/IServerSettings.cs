@@ -135,4 +135,27 @@ public interface IServerSettings {
     /// The number of masks of damage that Tacks deal.
     /// </summary>
     byte TacksDamage { get; }
+
+    /// <summary>
+    /// How the health of enemies grows with the number of players: 0 the default, each extra player adding half of
+    /// the health of one player alone; 1 each extra player multiplying it by n; 2 each extra player adding n times
+    /// it; 3 n times it, however many play. The n of each is its own setting below, in tenths.
+    /// </summary>
+    byte EnemyHealthMode { get; }
+
+    /// <summary>
+    /// The n of <see cref="EnemyHealthMode"/> 1, in tenths: what each extra player multiplies enemy health by.
+    /// </summary>
+    byte EnemyHealthExponentialFactor { get; }
+
+    /// <summary>
+    /// The n of <see cref="EnemyHealthMode"/> 2, in tenths: how many times the health of one player alone each extra
+    /// player adds.
+    /// </summary>
+    byte EnemyHealthLinearFactor { get; }
+
+    /// <summary>
+    /// The n of <see cref="EnemyHealthMode"/> 3, in tenths: what enemy health is multiplied by, however many play.
+    /// </summary>
+    byte EnemyHealthFixedFactor { get; }
 }

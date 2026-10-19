@@ -373,7 +373,7 @@ internal class ClientManager : IClientManager {
         _benchCoop = new BenchCoop(
             netClient, _playerData, _saveManager, () => AuthUtil.GetSaveKey(_modSettings.AuthKey)
         );
-        _enemyHealthCoop = new EnemyHealthCoop(_playerData);
+        _enemyHealthCoop = new EnemyHealthCoop(_playerData, _serverSettings);
         _bindCoop = new BindCoop();
         _arenaCoop = new ArenaCoop(
             netClient,
@@ -938,6 +938,7 @@ internal class ClientManager : IClientManager {
 
         // Update the locally stored server settings
         _serverSettings.SetAllProperties(serverInfo.ServerSettingsUpdate.ServerSettings);
+        Logger.Info($"Enemy health on this server: {EnemyHealthCoop.Describe(_serverSettings)}");
 
         // Note whether full synchronization is enabled
         _fullSynchronisation = serverInfo.FullSynchronisation;
@@ -1793,6 +1794,17 @@ internal class ClientManager : IClientManager {
             var message = newServerSettings.AllowSkins
                 ? Lang.Pick("Skins are now enabled", "皮肤功能已开启")
                 : Lang.Pick("Skins are no longer enabled", "皮肤功能已关闭");
+
+            UiManager.InternalChatBox.AddMessage(message);
+            Logger.Info(message);
+        }
+
+        // How enemy health grows with the players, which the host of the server has just changed: said in the chat,
+        // as it changes how every fight goes from now on
+        var enemyHealthBefore = EnemyHealthCoop.Describe(_serverSettings);
+        var enemyHealthNow = EnemyHealthCoop.Describe(newServerSettings);
+        if (enemyHealthNow != enemyHealthBefore) {
+            var message = Lang.Pick("Enemy health: ", "怪物血量：") + enemyHealthNow;
 
             UiManager.InternalChatBox.AddMessage(message);
             Logger.Info(message);

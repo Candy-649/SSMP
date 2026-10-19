@@ -5,6 +5,7 @@ using SSMP.Networking.Client;
 using SSMP.Networking.Packet;
 using SSMP.Networking.Server;
 using SSMP.Ui;
+using SSMP.Ui.Component;
 using SSMP.Ui.Resources;
 using SSMP.Util;
 
@@ -28,6 +29,11 @@ internal class GameManager {
     /// The server manager instance for the mod.
     /// </summary>
     private readonly ModServerManager _serverManager;
+
+    /// <summary>
+    /// The connection of this game to a server, its own or another player's.
+    /// </summary>
+    private readonly NetClient _netClient;
     
     /// <summary>
     /// Constructs this GameManager instance by instantiating all other necessary classes.
@@ -38,6 +44,7 @@ internal class GameManager {
         var packetManager = new PacketManager();
 
         var netClient = new NetClient(packetManager);
+        _netClient = netClient;
         var netServer = new NetServer(packetManager);
 
         var clientServerSettings = new ServerSettings();
@@ -90,6 +97,16 @@ internal class GameManager {
         _uiManager.Initialize();
         _serverManager.Initialize();
         _clientManager.Initialize(_serverManager);
+
+        // The choices that the host of a server makes for everyone in it, such as how tough enemies get with more
+        // players: changed on the settings page by the host while their server runs, or for a server of their own
+        // while not connected, and seen there by everyone else connected
+        _uiManager.ConnectInterface.SetRoomSettings(new RoomSettingsLink(
+            _clientManager.ServerSettings,
+            () => _serverManager.IsRunning,
+            () => _netClient.IsConnected,
+            _serverManager.OnUpdateServerSettings
+        ));
     }
 
     /// <summary>

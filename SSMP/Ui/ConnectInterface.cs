@@ -726,6 +726,13 @@ internal class ConnectInterface {
     #region Initialization
 
     /// <summary>
+    /// Gives the settings page what the choices that the host of a server makes for everyone are read from and sent
+    /// through.
+    /// </summary>
+    /// <param name="link">The link.</param>
+    internal void SetRoomSettings(RoomSettingsLink link) => _settingsPanel.SetRoomSettings(link);
+
+    /// <summary>
     /// Initializes the multiplayer connection interface with all tabs and UI elements.
     /// </summary>
     /// <param name="modSettings">Persistent mod settings for storing connection preferences.</param>
