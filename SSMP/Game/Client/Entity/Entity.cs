@@ -1316,8 +1316,174 @@ internal partial class Entity {
         data.Types.Add(EntityHostFsmData.Type.State);
         data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
 
+        // A move that the copy in the other game plays by itself starts there from what the FSM holds and where the
+        // creature is as it goes into it (RunMoveHere), which the states before it worked out, so both go with the
+        // state. Sent at once here, the state went ahead of them, which went with the next look at the entity, in the
+        // update after: a boss that the lava had moved to the floor it would come up through showed it, in the other
+        // game, by the floor where it had gone in (USER 2026-10-20: "怪物从岩浆里面出来的先行特效和真实出来的位置不一致").
+        if (IsInAMoveTheCopyPlays(fsm)) {
+            AddVariableChanges(fsm, snapshot, data);
+            SendPositionWithTheMove();
+        }
+
         _netClient.UpdateManager.AddEntityHostFsmData(Id, (byte) fsmIndex, data);
         ObjectPool<EntityHostFsmData>.Return(data);
+    }
+
+    /// <summary>
+    /// Whether the state an FSM of the host is in now belongs to a move that the copy in the other game plays by
+    /// itself (see <see cref="EntityRegistryEntry.RunsHere"/>).
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    private bool IsInAMoveTheCopyPlays(PlayMakerFSM fsm) {
+        if (!EntityRegistry.TryGetRunsHere(Type, fsm.FsmName, out var moves)) {
+            return false;
+        }
+
+        var stateName = fsm.ActiveStateName;
+        foreach (var move in moves.Values) {
+            if (move.Contains(stateName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Sends where the creature is and the way it faces, as a state of its FSM goes that a move the copy plays by
+    /// itself is in (see <see cref="SendStateChange"/>), the same as the next look at the entity would (see
+    /// <see cref="OnUpdate"/>), which then finds nothing new to send. Not for a part of another entity, while the
+    /// entity moves by itself or while what the other player did to it is being answered: then the next look sends it
+    /// with all else that it takes.
+    /// </summary>
+    private void SendPositionWithTheMove() {
+        if (_hasParent || _stamps.Count > 0 || HostMovesByItself() || Object.Host == null) {
+            return;
+        }
+
+        var transform = Object.Host.transform;
+        var newPosition = transform.position;
+        if (newPosition == _lastPosition) {
+            return;
+        }
+
+        _positionChangedAt = Time.unscaledTime;
+        _positionSentAgain = 0;
+        _lastPosition = newPosition;
+        _netClient.UpdateManager.UpdateEntityPosition(
+            Id,
+            new Math_Vector3(newPosition.x, newPosition.y, newPosition.z)
+        );
+
+        var newScale = transform.lossyScale;
+        _netClient.UpdateManager.UpdateEntityScale(
+            Id,
+            new EntityUpdate.ScaleData {
+                origin = true,
+                x = true,
+                y = true,
+                xFlipped = true,
+                yFlipped = true,
+                xScale = newScale.x,
+                yScale = newScale.y
+            }
+        );
+    }
+
+    /// <summary>
+    /// Adds to what goes of an FSM of the host the values of its variables that changed since they last went, which
+    /// it notes as gone.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="snapshot">What last went of it.</param>
+    /// <param name="data">What goes of it now.</param>
+    private static void AddVariableChanges(PlayMakerFSM fsm, FsmSnapshot snapshot, EntityHostFsmData data) {
+        var variables = fsm.FsmVariables;
+
+        var changed = false;
+        for (byte i = 0; i < variables.FloatVariables.Length; i++) {
+            var val = variables.FloatVariables[i].Value;
+            if (val != snapshot.Floats[i]) {
+                changed = true;
+                snapshot.Floats[i] = val;
+                data.Floats[i] = val;
+            }
+        }
+
+        if (changed) {
+            data.Types.Add(EntityHostFsmData.Type.Floats);
+        }
+
+        changed = false;
+        for (byte i = 0; i < variables.IntVariables.Length; i++) {
+            var val = variables.IntVariables[i].Value;
+            if (val != snapshot.Ints[i]) {
+                changed = true;
+                snapshot.Ints[i] = val;
+                data.Ints[i] = val;
+            }
+        }
+
+        if (changed) {
+            data.Types.Add(EntityHostFsmData.Type.Ints);
+        }
+
+        changed = false;
+        for (byte i = 0; i < variables.BoolVariables.Length; i++) {
+            var val = variables.BoolVariables[i].Value;
+            if (val != snapshot.Bools[i]) {
+                changed = true;
+                snapshot.Bools[i] = val;
+                data.Bools[i] = val;
+            }
+        }
+
+        if (changed) {
+            data.Types.Add(EntityHostFsmData.Type.Bools);
+        }
+
+        changed = false;
+        for (byte i = 0; i < variables.StringVariables.Length; i++) {
+            var val = variables.StringVariables[i].Value;
+            if (snapshot.Strings[i] != null && val != snapshot.Strings[i]) {
+                changed = true;
+                snapshot.Strings[i] = val;
+                data.Strings[i] = val;
+            }
+        }
+
+        if (changed) {
+            data.Types.Add(EntityHostFsmData.Type.Strings);
+        }
+
+        changed = false;
+        for (byte i = 0; i < variables.Vector2Variables.Length; i++) {
+            var val = variables.Vector2Variables[i].Value;
+            if (val != snapshot.Vector2s[i]) {
+                changed = true;
+                snapshot.Vector2s[i] = val;
+                data.Vec2s[i] = (Math_Vector2) val;
+            }
+        }
+
+        if (changed) {
+            data.Types.Add(EntityHostFsmData.Type.Vector2s);
+        }
+
+        changed = false;
+        for (byte i = 0; i < variables.Vector3Variables.Length; i++) {
+            var val = variables.Vector3Variables[i].Value;
+            if (val != snapshot.Vector3s[i]) {
+                changed = true;
+                snapshot.Vector3s[i] = val;
+                data.Vec3s[i] = (SSMP.Math.Vector3) val;
+            }
+        }
+
+        if (changed) {
+            data.Types.Add(EntityHostFsmData.Type.Vector3s);
+        }
     }
 
     /// <summary>
@@ -1865,71 +2031,7 @@ internal partial class Entity {
                     data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
                 }
 
-                if (hasFloatsChange) {
-                    data.Types.Add(EntityHostFsmData.Type.Floats);
-                    for (byte i = 0; i < fsm.FsmVariables.FloatVariables.Length; i++) {
-                        var val = fsm.FsmVariables.FloatVariables[i].Value;
-                        if (val != snapshot.Floats[i]) {
-                            snapshot.Floats[i] = val;
-                            data.Floats[i] = val;
-                        }
-                    }
-                }
-
-                if (hasIntsChange) {
-                    data.Types.Add(EntityHostFsmData.Type.Ints);
-                    for (byte i = 0; i < fsm.FsmVariables.IntVariables.Length; i++) {
-                        var val = fsm.FsmVariables.IntVariables[i].Value;
-                        if (val != snapshot.Ints[i]) {
-                            snapshot.Ints[i] = val;
-                            data.Ints[i] = val;
-                        }
-                    }
-                }
-
-                if (hasBoolsChange) {
-                    data.Types.Add(EntityHostFsmData.Type.Bools);
-                    for (byte i = 0; i < fsm.FsmVariables.BoolVariables.Length; i++) {
-                        var val = fsm.FsmVariables.BoolVariables[i].Value;
-                        if (val != snapshot.Bools[i]) {
-                            snapshot.Bools[i] = val;
-                            data.Bools[i] = val;
-                        }
-                    }
-                }
-
-                if (hasStringsChange) {
-                    data.Types.Add(EntityHostFsmData.Type.Strings);
-                    for (byte i = 0; i < fsm.FsmVariables.StringVariables.Length; i++) {
-                        var val = fsm.FsmVariables.StringVariables[i].Value;
-                        if (snapshot.Strings[i] != null && val != snapshot.Strings[i]) {
-                            snapshot.Strings[i] = val;
-                            data.Strings[i] = val;
-                        }
-                    }
-                }
-
-                if (hasVector2SChange) {
-                    data.Types.Add(EntityHostFsmData.Type.Vector2s);
-                    for (byte i = 0; i < fsm.FsmVariables.Vector2Variables.Length; i++) {
-                        var val = fsm.FsmVariables.Vector2Variables[i].Value;
-                        if (val != snapshot.Vector2s[i]) {
-                            snapshot.Vector2s[i] = val;
-                            data.Vec2s[i] = (Math_Vector2) val;
-                        }
-                    }
-                }
-
-                if (hasVector3SChange) {
-                    data.Types.Add(EntityHostFsmData.Type.Vector3s);
-                    for (byte i = 0; i < fsm.FsmVariables.Vector3Variables.Length; i++) {
-                        var val = fsm.FsmVariables.Vector3Variables[i].Value;
-                        if (val != snapshot.Vector3s[i]) {
-                            snapshot.Vector3s[i] = val;
-                            data.Vec3s[i] = (SSMP.Math.Vector3) val;
-                        }
-                    }
-                }
+                AddVariableChanges(fsm, snapshot, data);
 
                 _netClient.UpdateManager.AddEntityHostFsmData(Id, fsmIndex, data);
                 ObjectPool<EntityHostFsmData>.Return(data);
