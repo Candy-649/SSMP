@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Text;
 using MonoMod.RuntimeDetour;
 using SSMP.Api.Server;
 using SSMP.Util;
@@ -84,6 +85,43 @@ internal class EnemyHealthCoop {
     /// </summary>
     private Hook? _applyExtraDamageHook;
 
+    /// <summary>
+    /// Hook for writing down what a hit took from a creature (<see cref="WriteDamage"/>).
+    /// </summary>
+    private Hook? _takeDamageHook;
+
+    /// <summary>
+    /// Hook for writing down what extra damage that comes with a hit took from a creature.
+    /// </summary>
+    private Hook? _applyExtraHitDamageHook;
+
+    /// <summary>
+    /// How many lines of damage are written to the log in a minute at most, so that a long fight does not fill it.
+    /// </summary>
+    private const int DamageLinesPerMinute = 60;
+
+    /// <summary>
+    /// What the co-op scaling made of the damage that a creature is taking now, by the creature's instance ID, for its
+    /// line in the log: the damage it was given, the multiplier, what came of it, and whether it was left whole as a
+    /// blow that kills an untouched creature outright. Kept by creature, since the death of one can hurt another.
+    /// </summary>
+    private readonly Dictionary<int, (int From, float By, int To, bool KeptWhole)> _scaled = new();
+
+    /// <summary>
+    /// When the current minute of written damage began, in unscaled seconds.
+    /// </summary>
+    private float _damageMinuteStart = float.NegativeInfinity;
+
+    /// <summary>
+    /// How many lines of damage were written in the current minute.
+    /// </summary>
+    private int _damageLinesThisMinute;
+
+    /// <summary>
+    /// How many lines of damage were left out in the current minute.
+    /// </summary>
+    private int _damageLinesLeftOut;
+
     public EnemyHealthCoop(Dictionary<ushort, ClientPlayerData> playerData, IServerSettings serverSettings) {
         _playerData = playerData;
         _serverSettings = serverSettings;
@@ -105,6 +143,14 @@ internal class EnemyHealthCoop {
             typeof(HealthManager).GetMethod("ApplyExtraDamage", InstanceFlags, null, [typeof(int)], null),
             new Action<Action<HealthManager, int>, HealthManager, int>(OnApplyExtraDamage)
         );
+        _takeDamageHook = CreateHook(
+            typeof(HealthManager).GetMethod("TakeDamage", InstanceFlags, null, [typeof(HitInstance)], null),
+            new Action<Action<HealthManager, HitInstance>, HealthManager, HitInstance>(OnTakeDamage)
+        );
+        _applyExtraHitDamageHook = CreateHook(
+            typeof(HealthManager).GetMethod("ApplyExtraDamage", InstanceFlags, null, [typeof(HitInstance)], null),
+            new Action<Action<HealthManager, HitInstance>, HealthManager, HitInstance>(OnApplyExtraHitDamage)
+        );
 
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
     }
@@ -118,6 +164,13 @@ internal class EnemyHealthCoop {
 
         _applyExtraDamageHook?.Dispose();
         _applyExtraDamageHook = null;
+
+        _takeDamageHook?.Dispose();
+        _takeDamageHook = null;
+
+        _applyExtraHitDamageHook?.Dispose();
+        _applyExtraHitDamageHook = null;
+        _scaled.Clear();
 
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
         _damageRemainders.Clear();
@@ -136,10 +189,11 @@ internal class EnemyHealthCoop {
     }
 
     /// <summary>
-    /// Forgets the rounding remainders of the enemies in the previous scene.
+    /// Forgets the rounding remainders of the enemies in the previous scene, and what the scaling made of their damage.
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _damageRemainders.Clear();
+        _scaled.Clear();
     }
 
     /// <summary>
@@ -156,10 +210,105 @@ internal class EnemyHealthCoop {
     }
 
     /// <summary>
-    /// Scales extra damage that is applied as a plain amount.
+    /// Scales extra damage that is applied as a plain amount, and writes down what it took.
     /// </summary>
     private void OnApplyExtraDamage(Action<HealthManager, int> orig, HealthManager self, int damageAmount) {
+        var hpBefore = self.hp;
+        _scaled.Remove(self.GetInstanceID());
         orig(self, ScaleDamage(self, damageAmount));
+        WriteDamage(self, hpBefore, "extra damage", damageAmount, null, false);
+    }
+
+    /// <summary>
+    /// Writes down what a hit took from a creature. The game takes the health in TakeDamage, after the scaling of
+    /// ApplyDamageScaling and its own changes for some blows (repeated rapid hits, critical hits), so the health
+    /// before and after is what the hit really took.
+    /// </summary>
+    private void OnTakeDamage(Action<HealthManager, HitInstance> orig, HealthManager self, HitInstance hit) {
+        var hpBefore = self.hp;
+        _scaled.Remove(self.GetInstanceID());
+        orig(self, hit);
+        WriteDamage(self, hpBefore, "a hit", hit.DamageDealt, hit.Source, hit.IsHeroDamage);
+    }
+
+    /// <summary>
+    /// Writes down what extra damage that comes with a hit took from a creature.
+    /// </summary>
+    private void OnApplyExtraHitDamage(Action<HealthManager, HitInstance> orig, HealthManager self, HitInstance hit) {
+        var hpBefore = self.hp;
+        _scaled.Remove(self.GetInstanceID());
+        orig(self, hit);
+        WriteDamage(self, hpBefore, "extra damage of a hit", hit.DamageDealt, hit.Source, hit.IsHeroDamage);
+    }
+
+    /// <summary>
+    /// Writes a line to the log of what damage took from a creature in this game: its health before and after, the
+    /// damage as given, what the co-op scaling made of it, and whose it was. USER 2026-10-20: "日志里有log伤害多少吗".
+    /// Each game writes down the damage that it takes from creatures itself: the hits of its own player, and those of
+    /// copies of other players' attacks where they take health (not on creatures that both games of a two-player save
+    /// keep, which take another player's hit in that player's game). At most <see cref="DamageLinesPerMinute"/> lines a
+    /// minute.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="hpBefore">Its health before the damage.</param>
+    /// <param name="kind">What kind of damage it was.</param>
+    /// <param name="damage">The damage as given, before any scaling.</param>
+    /// <param name="source">What dealt it, if that is known.</param>
+    /// <param name="isHeroDamage">Whether the game counts it as damage of the hero.</param>
+    private void WriteDamage(
+        HealthManager creature,
+        int hpBefore,
+        string kind,
+        int damage,
+        GameObject? source,
+        bool isHeroDamage
+    ) {
+        // Only a record: never in the way of the damage itself
+        try {
+            var id = creature.GetInstanceID();
+            var wasScaled = _scaled.TryGetValue(id, out var scaled);
+            _scaled.Remove(id);
+
+            var now = Time.unscaledTime;
+            if (now - _damageMinuteStart >= 60f) {
+                if (_damageLinesLeftOut > 0) {
+                    Logger.Info($"[Damage] {_damageLinesLeftOut} more in the minute before were not written");
+                }
+
+                _damageMinuteStart = now;
+                _damageLinesThisMinute = 0;
+                _damageLinesLeftOut = 0;
+            }
+
+            if (_damageLinesThisMinute >= DamageLinesPerMinute) {
+                _damageLinesLeftOut++;
+                return;
+            }
+
+            _damageLinesThisMinute++;
+
+            var line = new StringBuilder();
+            line.Append($"[Damage] '{creature.name}' {hpBefore} -> {creature.hp} from {kind} of {damage}");
+            if (source != null) {
+                line.Append(" by ");
+                line.Append(
+                    RemoteAttackComponent.IsRemoteAttack(source) ? "a copy of another player's"
+                    : isHeroDamage || LocalToolComponent.IsLocalTool(source) ? "this player's"
+                    : "something else:"
+                );
+                line.Append($" '{source.name}'");
+            }
+
+            if (wasScaled) {
+                line.Append(scaled.KeptWhole
+                    ? $"; co-op: {scaled.From} kept whole, as it kills a creature at full health outright"
+                    : $"; co-op: {scaled.From} / {scaled.By:0.###} = {scaled.To}");
+            }
+
+            Logger.Info(line.ToString());
+        } catch (Exception e) {
+            Logger.Warn($"Could not write down damage to a creature: {e.Message}");
+        }
     }
 
     /// <summary>
@@ -171,7 +320,9 @@ internal class EnemyHealthCoop {
     /// <returns>The scaled damage.</returns>
     private int ScaleDamage(HealthManager healthManager, int damage) {
         var multiplier = GetHealthMultiplier();
+        var id = healthManager.GetInstanceID();
         if (damage <= 0 || Mathf.Approximately(multiplier, 1f)) {
+            _scaled[id] = (damage, multiplier, damage, false);
             return damage;
         }
 
@@ -184,10 +335,10 @@ internal class EnemyHealthCoop {
         // longer whole and this is not asked again. It is only the one that was never meant to take more than one
         // that is left alone.
         if (healthManager.initHp > 0 && healthManager.hp >= healthManager.initHp && damage >= healthManager.hp) {
+            _scaled[id] = (damage, multiplier, damage, true);
             return damage;
         }
 
-        var id = healthManager.GetInstanceID();
         _damageRemainders.TryGetValue(id, out var remainder);
 
         var scaled = damage / multiplier + remainder;
@@ -195,6 +346,7 @@ internal class EnemyHealthCoop {
 
         // Keep the remainder small, so that hits raised to 1 damage don't pile up a debt for later hits
         _damageRemainders[id] = Mathf.Clamp(scaled - result, -0.5f, 0.5f);
+        _scaled[id] = (damage, multiplier, result, false);
         return result;
     }
 
