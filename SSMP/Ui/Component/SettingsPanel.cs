@@ -82,6 +82,15 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The label of the map outline button.</summary>
     private readonly Text _outlineText;
 
+    /// <summary>The background of the button of the outline in a fight.</summary>
+    private readonly Image _fightOutlineImage;
+
+    /// <summary>The label of the button of the outline in a fight.</summary>
+    private readonly Text _fightOutlineText;
+
+    /// <summary>This player's Hornet, who sits on the bottom of the menu while this page is open.</summary>
+    private readonly SittingPreview _preview;
+
     /// <summary>The background of the health bar button.</summary>
     private readonly Image _healthBarsImage;
 
@@ -146,7 +155,7 @@ internal class SettingsPanel : IRootedComponent {
     private const float NameSectionHeight = 68f;
 
     /// <summary>
-    /// How much room the choices about the map take: a switch over a line or two saying what it does.
+    /// How much room the choices about outlines take: two switches over a line or two saying what they do.
     /// </summary>
     private const float MapSectionHeight = 74f;
 
@@ -170,13 +179,22 @@ internal class SettingsPanel : IRootedComponent {
 
     private static readonly Color Muted = new(0.75f, 0.75f, 0.75f, 1f);
 
+    /// <param name="parent">The component group of the menu.</param>
+    /// <param name="position">Where the page goes.</param>
+    /// <param name="size">How large it is.</param>
+    /// <param name="modSettings">The settings of this machine.</param>
+    /// <param name="menu">The menu the page is in, on whose bottom edge this player's Hornet sits.</param>
+    /// <param name="username">The name that this player goes by, as it stands in the menu.</param>
     public SettingsPanel(
         ComponentGroup parent,
         Vector2 position,
         Vector2 size,
-        Game.Settings.ModSettings modSettings
+        Game.Settings.ModSettings modSettings,
+        RectTransform menu,
+        Func<string> username
     ) {
         _modSettings = modSettings;
+        _preview = SittingPreview.Create(menu, modSettings, username);
         GameObject = new GameObject("SettingsPanel");
         var rect = GameObject.AddComponent<RectTransform>();
         rect.anchorMin = rect.anchorMax = new Vector2(position.x / 1920f, position.y / 1080f);
@@ -325,7 +343,7 @@ internal class SettingsPanel : IRootedComponent {
         WaitingRoomPanel.CreateLabel(
             mapArea,
             "MapSettingsLabel",
-            Lang.Pick("MAP", "地图"),
+            Lang.Pick("OUTLINE", "描边"),
             new Vector2(0.03f, 1f),
             new Vector2(0.30f, 1f),
             new Vector2(0f, 28f),
@@ -335,13 +353,14 @@ internal class SettingsPanel : IRootedComponent {
             TextAnchor.MiddleLeft
         );
 
-        // Same height as the switches above it: the top 28 of the section, between 1 and 29 down
+        // Same height as the switches above it: the top 28 of the section, between 1 and 29 down. Side by side like the
+        // switches of the name, since the page may be no taller
         var outlineButton = WaitingRoomPanel.CreateButton(
             mapArea,
             "OutlineButton",
             "",
             new Vector2(0.32f, 1f),
-            new Vector2(0.97f, 1f),
+            new Vector2(0.63f, 1f),
             WaitingRoomPanel.ReadyOff,
             () => {
                 _modSettings.OutlineOwnMapIcon = !_modSettings.OutlineOwnMapIcon;
@@ -351,16 +370,32 @@ internal class SettingsPanel : IRootedComponent {
             out _outlineImage,
             out _outlineText
         );
-        var outlineRect = outlineButton.GetComponent<RectTransform>();
-        outlineRect.offsetMin = new Vector2(0f, -29f);
-        outlineRect.offsetMax = new Vector2(0f, -1f);
+        PlaceInRow(outlineButton, 1f, 28f);
+
+        var fightOutlineButton = WaitingRoomPanel.CreateButton(
+            mapArea,
+            "FightOutlineButton",
+            "",
+            new Vector2(0.66f, 1f),
+            new Vector2(0.97f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => {
+                _modSettings.OutlineOwnHeroInFights = !_modSettings.OutlineOwnHeroInFights;
+                _modSettings.Save();
+                Refresh();
+            },
+            out _fightOutlineImage,
+            out _fightOutlineText
+        );
+        PlaceInRow(fightOutlineButton, 1f, 28f);
 
         WaitingRoomPanel.CreateLabel(
             mapArea,
             "OutlineNote",
             Lang.Pick(
-                "With the compass worn, your own head on the map gets an outline in the colour above.",
-                "戴着罗盘时，地图上你自己的头像描一圈上面选的颜色。"
+                "In the colour above: your map head (with the compass) and your Hornet in fights beside the other " +
+                "player.",
+                "用上面选的颜色：戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
             ),
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
@@ -732,8 +767,14 @@ internal class SettingsPanel : IRootedComponent {
         var outlined = _modSettings.OutlineOwnMapIcon;
         _outlineImage.color = outlined ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         _outlineText.text = outlined
-            ? Lang.Pick("OUTLINE MY HEAD: ON", "头像描边：开")
-            : Lang.Pick("OUTLINE MY HEAD: OFF", "头像描边：关");
+            ? Lang.Pick("MAP: ON", "地图头像：开")
+            : Lang.Pick("MAP: OFF", "地图头像：关");
+
+        var fightOutlined = _modSettings.OutlineOwnHeroInFights;
+        _fightOutlineImage.color = fightOutlined ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+        _fightOutlineText.text = fightOutlined
+            ? Lang.Pick("FIGHTS: ON", "战斗中：开")
+            : Lang.Pick("FIGHTS: OFF", "战斗中：关");
 
         var healthBars = _modSettings.ShowEnemyHealthBars;
         _healthBarsImage.color = healthBars ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
@@ -748,11 +789,13 @@ internal class SettingsPanel : IRootedComponent {
 
             // The one in use is shown at its full strength and the rest are faded. A tick or an outline would need
             // a colour of its own, and a colour laid over a row of colours is the one thing that cannot be read. In
-            // use means by the name or by the outline on the map, which takes the same colour.
-            var picked = (coloured || outlined) &&
+            // use means by the name or by an outline, which take the same colour.
+            var picked = (coloured || outlined || fightOutlined) &&
                          string.Equals(pair.Key, _modSettings.OwnNameColour, StringComparison.OrdinalIgnoreCase);
             pair.Value.color = picked ? colour : new Color(colour.r, colour.g, colour.b, 0.3f);
         }
+
+        _preview.Refresh();
     }
 
     /// <summary>
@@ -800,24 +843,38 @@ internal class SettingsPanel : IRootedComponent {
         _activeSelf = true;
         Refresh();
         GameObject.SetActive(_componentGroup.IsActive());
+        ShowPreviewWithPage();
     }
 
     /// <summary>Hides the panel.</summary>
     public void Hide() {
         _activeSelf = false;
         GameObject.SetActive(false);
+        ShowPreviewWithPage();
     }
 
     /// <inheritdoc />
     public void SetGroupActive(bool groupActive) {
         if (GameObject == null) return;
         GameObject.SetActive(_activeSelf && groupActive);
+        ShowPreviewWithPage();
     }
 
     /// <inheritdoc />
     public void SetActive(bool active) {
         _activeSelf = active;
         GameObject.SetActive(_activeSelf && _componentGroup.IsActive());
+        ShowPreviewWithPage();
+    }
+
+    /// <summary>
+    /// Has this player's Hornet sit on the menu while the page is shown, and let her go while it is not. She sits on
+    /// the menu rather than in the page, which ends above its bottom edge.
+    /// </summary>
+    private void ShowPreviewWithPage() {
+        if (_preview != null) {
+            _preview.gameObject.SetActive(GameObject.activeSelf);
+        }
     }
 
     /// <inheritdoc />

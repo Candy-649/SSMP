@@ -90,6 +90,15 @@ internal class PlayerManager : IPlayerManager {
     internal static readonly string[] OwnNameColourNames = ["yellow", "green", "cyan", "orange", "red"];
 
     /// <summary>
+    /// The colour this player picked for their own name, which also marks their head on the map and their hero in a
+    /// fight: yellow when the setting names none of the colours.
+    /// </summary>
+    /// <param name="modSettings">The settings of this machine.</param>
+    /// <returns>The colour.</returns>
+    internal static Color OwnNameColour(ModSettings modSettings) =>
+        OwnNameColours.TryGetValue(modSettings.OwnNameColour ?? "", out var colour) ? colour : OwnNameColours["yellow"];
+
+    /// <summary>
     /// How wide the black edge around a name is normally, and how wide it is when the name is drawn heavier.
     ///
     /// The edge does more than the weight of the letters does: the font is a thin one, and against a busy dark
@@ -907,11 +916,21 @@ internal class PlayerManager : IPlayerManager {
             return;
         }
 
-        textMeshObject.outlineWidth = _modSettings.BoldOwnName ? BoldNameOutline : NameOutline;
-        textMeshObject.fontStyle = _modSettings.BoldOwnName ? FontStyles.Bold : FontStyles.Normal;
+        DrawAsOwnName(textMeshObject, _modSettings);
+    }
 
-        if (_modSettings.ColourOwnName &&
-            OwnNameColours.TryGetValue(_modSettings.OwnNameColour ?? "", out var colour)) {
+    /// <summary>
+    /// Draws a name the way this player wants their own drawn: heavier and in their colour, as they chose. Also for
+    /// the name on the figure that shows this on the settings page (Ui.SittingPreview).
+    /// </summary>
+    /// <param name="textMeshObject">The name to draw, in the colour it has otherwise.</param>
+    /// <param name="modSettings">The settings of this machine.</param>
+    internal static void DrawAsOwnName(TextMeshPro textMeshObject, ModSettings modSettings) {
+        textMeshObject.outlineWidth = modSettings.BoldOwnName ? BoldNameOutline : NameOutline;
+        textMeshObject.fontStyle = modSettings.BoldOwnName ? FontStyles.Bold : FontStyles.Normal;
+
+        if (modSettings.ColourOwnName &&
+            OwnNameColours.TryGetValue(modSettings.OwnNameColour ?? "", out var colour)) {
             textMeshObject.color = colour;
         }
     }
@@ -1016,7 +1035,7 @@ internal class PlayerManager : IPlayerManager {
     /// </summary>
     /// <param name="playerContainer">The player container to add the username object as a child of.</param>
     /// <returns>The new GameObject that was created for the username.</returns>
-    private static GameObject CreateUsername(GameObject playerContainer) {
+    internal static GameObject CreateUsername(GameObject playerContainer) {
         var nameObject = new GameObject(UsernameObjectName) {
             transform = {
                 position = playerContainer.transform.position + Vector3.up * 1.5f

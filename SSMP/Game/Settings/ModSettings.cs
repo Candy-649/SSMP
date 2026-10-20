@@ -129,6 +129,20 @@ internal class ModSettings : IModSettings {
     } = true;
 
     /// <summary>
+    /// Whether to draw an outline in <see cref="OwnNameColour"/> around this player's own hero in a fight with another
+    /// player on the screen (Game.Client.FightOutline), where every player's hero is the same Hornet. Only on this
+    /// machine, like the name settings.
+    /// </summary>
+    public bool OutlineOwnHeroInFights {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(OutlineOwnHeroInFights));
+        }
+    } = true;
+
+    /// <summary>
     /// Whether to draw the health bars of creatures that were hurt: above their heads, and along the bottom of the
     /// screen for a boss (see Ui.EnemyHealthBars). Only on this machine, like the name settings. Off unless a player
     /// switches them on, as the game itself has none (USER 10-13: 血条最好默认关).

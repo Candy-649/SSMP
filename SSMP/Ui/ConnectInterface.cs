@@ -820,7 +820,9 @@ internal class ConnectInterface {
             _backgroundGroup,
             new Vector2(InitialX, panelY),
             new Vector2(ContentWidth, SettingsPanel.Height),
-            _modSettings
+            _modSettings,
+            _backgroundPanel.GetComponent<RectTransform>(),
+            () => _usernameInput.GetInput()
         );
 
         var steamComponents = CreateSteamTab(currentY);

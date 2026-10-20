@@ -299,6 +299,14 @@ internal partial class CoopHits {
     /// </summary>
     public Func<Fsm, string?, bool>? ShutsOutSign { get; set; }
 
+    /// <summary>
+    /// Event raised when a player's attack reaches a creature in this room: one of the local player's, or one of
+    /// another player's as this game hears of it - a copy of their attack that reaches the creature here, or what their
+    /// hit on a creature that both games keep looked like. For the outline of the player's own hero in a fight
+    /// (FightOutline).
+    /// </summary>
+    public event Action? CreatureHitEvent;
+
     public CoopHits(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
@@ -870,6 +878,32 @@ internal partial class CoopHits {
     }
 
     /// <summary>
+    /// Makes a hit of an attack on an object (<see cref="MakeDamagerHit"/>), and tells of a player's attack that
+    /// reached a creature (<see cref="CreatureHitEvent"/>).
+    /// </summary>
+    /// <param name="responder">The object that is hit.</param>
+    /// <param name="hit">The hit.</param>
+    /// <param name="damager">The attack that hits the object.</param>
+    /// <returns>How the object responded to the hit.</returns>
+    private IHitResponder.HitResponse OnDamagerHit(IHitResponder responder, HitInstance hit, DamageEnemies damager) {
+        var isRemote = RemoteAttackComponent.IsRemoteAttack(damager.gameObject);
+        var isPlayerOnCreature = responder is Component struck && struck.TryGetComponent<HealthManager>(out _) &&
+                                 (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source) || isRemote);
+
+        var response = MakeDamagerHit(responder, hit, damager);
+
+        // Whatever took the hit, a block too. A copy of another player's attack counts as it reaches the creature,
+        // although a creature that both games keep turns it away: their game works out what their hit did, and sends
+        // along what it looked like (ApplyHitEffect, ApplyBlockEffect) only for the hero's own damage, which the hit
+        // of a tool is not always
+        if (isPlayerOnCreature && (isRemote || response.response != IHitResponder.Response.None)) {
+            CreatureHitEvent?.Invoke();
+        }
+
+        return response;
+    }
+
+    /// <summary>
     /// Makes a hit of an attack on an object. In a checked two-player save, hits of the local player on shared objects
     /// go to the partner, and copies of remote attacks don't hit those objects, because their players send their hits.
     /// </summary>
@@ -877,7 +911,7 @@ internal partial class CoopHits {
     /// <param name="hit">The hit.</param>
     /// <param name="damager">The attack that hits the object.</param>
     /// <returns>How the object responded to the hit.</returns>
-    private IHitResponder.HitResponse OnDamagerHit(IHitResponder responder, HitInstance hit, DamageEnemies damager) {
+    private IHitResponder.HitResponse MakeDamagerHit(IHitResponder responder, HitInstance hit, DamageEnemies damager) {
         // A thrown tool is set off by the attacks of the player who threw it only, in the game and here: the copies
         // of the partner's attacks leave this player's tools alone, and this player's attacks leave the partner's.
         // That holds in any game with other players, not only in a two-player save.
@@ -2656,6 +2690,8 @@ internal partial class CoopHits {
             return;
         }
 
+        CreatureHitEvent?.Invoke();
+
         if (!TryReadHit(update.Hit, out var hit, out var source)) {
             Logger.Warn($"Could not read the hit effect of the partner on entity {update.EntityId}");
             return;
@@ -2717,6 +2753,8 @@ internal partial class CoopHits {
         if (FindHitEnemy(update.EntityId) is not { } healthManager) {
             return;
         }
+
+        CreatureHitEvent?.Invoke();
 
         if (!TryReadHit(update.Hit, out var hit, out var source)) {
             Logger.Warn($"Could not read the blocked hit of the partner on entity {update.EntityId}");

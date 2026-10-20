@@ -121,6 +121,11 @@ internal class ClientManager : IClientManager {
     private readonly EnemyHealthCoop _enemyHealthCoop;
 
     /// <summary>
+    /// The outline around this player's own hero in a fight.
+    /// </summary>
+    private readonly FightOutline _fightOutline;
+
+    /// <summary>
     /// The bind co-op instance.
     /// </summary>
     private readonly BindCoop _bindCoop;
@@ -374,6 +379,7 @@ internal class ClientManager : IClientManager {
             netClient, _playerData, _saveManager, () => AuthUtil.GetSaveKey(_modSettings.AuthKey)
         );
         _enemyHealthCoop = new EnemyHealthCoop(_playerData, _serverSettings);
+        _fightOutline = new FightOutline(modSettings, _playerData);
         _bindCoop = new BindCoop();
         _arenaCoop = new ArenaCoop(
             netClient,
@@ -413,6 +419,7 @@ internal class ClientManager : IClientManager {
         ) {
             ShutsOutSign = _bossRoomCoop.ShutsOutSign
         };
+        _coopHits.CreatureHitEvent += _fightOutline.NoteCreatureHit;
         _fleaGameCoop = new FleaGameCoop(
             netClient, _playerData, _entityManager, () => _coopSave.CheckedMemberIds, _coopHits.SendObjectEvent
         );
@@ -501,6 +508,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher.RegisterHooks();
         _benchCoop.RegisterHooks();
         _enemyHealthCoop.RegisterHooks();
+        _fightOutline.RegisterHooks();
         _bindCoop.RegisterHooks();
         _arenaCoop.RegisterHooks();
         _bossRoomCoop.RegisterHooks();
@@ -539,6 +547,7 @@ internal class ClientManager : IClientManager {
         _gamePatcher.DeregisterHooks();
         _benchCoop.DeregisterHooks();
         _enemyHealthCoop.DeregisterHooks();
+        _fightOutline.DeregisterHooks();
         _bindCoop.DeregisterHooks();
         _arenaCoop.DeregisterHooks();
         _bossRoomCoop.DeregisterHooks();

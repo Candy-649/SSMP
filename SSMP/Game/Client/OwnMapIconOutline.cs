@@ -1,7 +1,4 @@
-using System.Collections.Generic;
 using UnityEngine;
-using UnityEngine.Rendering;
-using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client;
 
@@ -14,12 +11,11 @@ namespace SSMP.Game.Client;
 /// stands out. The game shows this player's own head only while they wear the compass, so without it every head on
 /// the map is someone else's.
 ///
-/// The outline is drawn from copies of the head itself. Each copy draws the head's own mesh in one flat colour, moved
-/// a little to one side, below the head. A bright ring in the player's own name colour lies inside a dark one, so
-/// that it shows on the pale and the dark parts of the map alike. The copies share the head's mesh, which the game
-/// rebuilds in place when the head's animation changes frame, so the outline keeps to the head's shape.
+/// One ring in the player's own name colour, drawn from copies of the head (<see cref="SpriteOutline"/>), below the
+/// head. A dark ring used to lie around it; the player wanted none (USER 2026-10-20: "无论是大黄蜂的描边还是头像的描边
+/// 都不要加黑色外圈"). The head's own soft glow is in the ring too, which makes it soft at its edge.
 /// </summary>
-internal class OwnMapIconOutline : MonoBehaviour {
+internal class OwnMapIconOutline : SpriteOutline {
     /// <summary>
     /// The name of the object that holds the outline. The other players' heads are copied from this player's own
     /// head and drop the object by this name.
@@ -27,230 +23,74 @@ internal class OwnMapIconOutline : MonoBehaviour {
     public const string ObjectName = "SSMP Own Outline";
 
     /// <summary>
-    /// How far below this player's own head, in sorting order, the other players' heads are drawn: below both rings
-    /// of the outline, so that a head over this player's own does not cover the outline.
+    /// How far below this player's own head, in sorting order, the other players' heads are drawn: below the ring of
+    /// the outline, so that a head over this player's own does not cover the outline.
     /// </summary>
     public const int OtherHeadsBelow = 3;
 
     /// <summary>
-    /// The shader that draws a mesh in one flat colour with only its texture's alpha: Unity's own text shader, which
-    /// the game ships in its default resources.
+    /// How far the ring reaches out from the head, as a part of the head's larger side. At 0.08 it was too thick for
+    /// the player.
     /// </summary>
-    private const string FlatShaderName = "GUI/Text Shader";
+    private const float Reach = 0.05f;
 
     /// <summary>
-    /// How many directions the copies of each ring are moved in.
+    /// The material of the ring. Made once and kept, like the shader: there is only ever one outline, and a material
+    /// of an outline whose head was never shown would outlive it, because Unity does not call OnDestroy on an object
+    /// that was never active.
     /// </summary>
-    private const int Directions = 12;
-
-    /// <summary>
-    /// How far the bright ring reaches out from the head, as a part of the head's larger side. At 0.08, with the dark
-    /// ring at 0.13, the outline was too thick for the player.
-    /// </summary>
-    private const float BrightReach = 0.05f;
-
-    /// <summary>
-    /// How far the dark ring reaches out from the head, as a part of the head's larger side.
-    /// </summary>
-    private const float DarkReach = 0.08f;
-
-    /// <summary>
-    /// Where the inner copies of a ring sit, as a part of its reach. Copies only at the full reach would leave gaps
-    /// beside thin parts of the head, such as its horns.
-    /// </summary>
-    private const float InnerReach = 0.6f;
-
-    /// <summary>
-    /// The colour of the dark ring.
-    /// </summary>
-    private static readonly Color DarkColour = new(0.08f, 0.06f, 0.05f, 1f);
-
-    /// <summary>
-    /// The flat shader, once found.
-    /// </summary>
-    private static Shader? _flatShader;
-
-    /// <summary>
-    /// Whether the flat shader was looked for and is not there, so that it is looked for and reported once.
-    /// </summary>
-    private static bool _flatShaderMissing;
-
-    /// <summary>
-    /// The material of the bright ring. Made once and kept, like the shader: there is only ever one outline, and a
-    /// material of an outline whose head was never shown would outlive it, because Unity does not call OnDestroy on
-    /// an object that was never active.
-    /// </summary>
-    private static Material? _brightMaterial;
-
-    /// <summary>
-    /// The material of the dark ring, made once and kept like the bright one.
-    /// </summary>
-    private static Material? _darkMaterial;
-
-    /// <summary>
-    /// The copies of the head, each with the direction it is moved in and how far, as a part of the head's larger
-    /// side.
-    /// </summary>
-    private readonly List<(MeshFilter filter, Vector2 direction, float reach)> _copies = [];
-
-    /// <summary>
-    /// The mesh filter of the head, which holds the mesh the copies share.
-    /// </summary>
-    private MeshFilter? _headFilter;
-
-    /// <summary>
-    /// The renderer of the head, whose texture the copies draw with.
-    /// </summary>
-    private Renderer? _headRenderer;
-
-    /// <summary>
-    /// The mesh the copies were last given.
-    /// </summary>
-    private Mesh? _mesh;
-
-    /// <summary>
-    /// The texture the copies were last given.
-    /// </summary>
-    private Texture? _texture;
+    private static Material? _material;
 
     /// <summary>
     /// Put an outline around the given head.
     /// </summary>
     /// <param name="head">This player's own head on the map.</param>
-    /// <param name="colour">The colour of the bright ring.</param>
+    /// <param name="colour">The colour of the ring.</param>
     /// <returns>The outline, or null if the head has nothing to draw or the flat shader is not there.</returns>
     public static OwnMapIconOutline? Attach(GameObject head, Color colour) {
-        if (!head.TryGetComponent<MeshFilter>(out var headFilter) ||
-            !head.TryGetComponent<Renderer>(out var headRenderer)) {
+        if (!head.TryGetComponent<MeshFilter>(out _) || !head.TryGetComponent<Renderer>(out _)) {
             return null;
         }
 
-        var shader = FindFlatShader();
+        var shader = FindFlatShader("own head on the map");
         if (shader == null) {
             return null;
         }
 
-        // Anything left on the head by an outline that was not finished, so that a failure does not add one more
-        // every time the map opens
-        var left = head.transform.Find(ObjectName);
-        if (left != null) {
-            left.gameObject.SetActive(false);
-            Destroy(left.gameObject);
+        RemoveLeftOver(head, ObjectName);
+
+        if (_material == null) {
+            _material = new Material(shader);
         }
 
-        if (_brightMaterial == null) {
-            _brightMaterial = new Material(shader);
-        }
-
-        if (_darkMaterial == null) {
-            _darkMaterial = new Material(shader) { color = DarkColour };
-        }
-
-        _brightMaterial.color = colour;
+        _material.color = colour;
 
         var holder = new GameObject(ObjectName) { layer = head.layer };
         holder.transform.SetParent(head.transform, false);
 
         var outline = holder.AddComponent<OwnMapIconOutline>();
-        outline._headFilter = headFilter;
-        outline._headRenderer = headRenderer;
+        outline.TakeSprite(head);
 
-        // The dark ring lowest, then the bright ring, then the head itself
-        outline.AddRing(_darkMaterial, headRenderer.sortingOrder - 2, DarkReach);
-        outline.AddRing(_brightMaterial, headRenderer.sortingOrder - 1, BrightReach);
+        // The ring, then the head itself
+        outline.AddRing(_material, -1, Reach);
         outline.Follow();
 
         return outline;
     }
 
     /// <summary>
-    /// Set the colour of the bright ring.
+    /// Set the colour of the ring.
     /// </summary>
     /// <param name="colour">The colour.</param>
     public void SetColour(Color colour) {
-        if (_brightMaterial != null) {
-            _brightMaterial.color = colour;
+        if (_material != null) {
+            _material.color = colour;
         }
     }
 
-    /// <summary>
-    /// Add the copies of one ring.
-    /// </summary>
-    /// <param name="material">The material the ring is drawn with.</param>
-    /// <param name="sortingOrder">The sorting order the ring is drawn at.</param>
-    /// <param name="reach">How far the ring reaches out from the head, as a part of the head's larger side.</param>
-    private void AddRing(Material material, int sortingOrder, float reach) {
-        foreach (var part in new[] { InnerReach, 1f }) {
-            for (var i = 0; i < Directions; i++) {
-                var angle = i * 2f * Mathf.PI / Directions;
-
-                var copy = new GameObject("Outline Copy") { layer = gameObject.layer };
-                copy.transform.SetParent(transform, false);
-
-                var filter = copy.AddComponent<MeshFilter>();
-                var renderer = copy.AddComponent<MeshRenderer>();
-                renderer.sharedMaterial = material;
-                renderer.sortingLayerID = _headRenderer!.sortingLayerID;
-                renderer.sortingOrder = sortingOrder;
-                renderer.shadowCastingMode = ShadowCastingMode.Off;
-                renderer.receiveShadows = false;
-                renderer.lightProbeUsage = LightProbeUsage.Off;
-                renderer.reflectionProbeUsage = ReflectionProbeUsage.Off;
-
-                _copies.Add((filter, new Vector2(Mathf.Cos(angle), Mathf.Sin(angle)), reach * part));
-            }
-        }
-    }
-
-    /// <summary>
-    /// Give the copies the head's mesh and texture if either changed. The game builds the head's mesh the first time
-    /// the head is shown and then rebuilds that same mesh, so this mostly has nothing to do.
-    /// </summary>
-    private void Follow() {
-        var mesh = _headFilter != null ? _headFilter.sharedMesh : null;
-        if (mesh != _mesh) {
-            _mesh = mesh;
-
-            var size = mesh != null ? Mathf.Max(mesh.bounds.size.x, mesh.bounds.size.y) : 0f;
-            foreach (var (filter, direction, reach) in _copies) {
-                filter.sharedMesh = mesh;
-                filter.transform.localPosition = direction * (reach * size);
-            }
-        }
-
-        var headMaterial = _headRenderer != null ? _headRenderer.sharedMaterial : null;
-        var texture = headMaterial != null ? headMaterial.mainTexture : null;
-        if (texture != _texture) {
-            _texture = texture;
-
-            if (_brightMaterial != null) {
-                _brightMaterial.mainTexture = texture;
-            }
-
-            if (_darkMaterial != null) {
-                _darkMaterial.mainTexture = texture;
-            }
-        }
-    }
-
-    private void LateUpdate() {
-        Follow();
-    }
-
-    /// <summary>
-    /// Find the flat shader, or report once that it is not there.
-    /// </summary>
-    /// <returns>The shader, or null if it is not there.</returns>
-    private static Shader? FindFlatShader() {
-        if (_flatShader == null && !_flatShaderMissing) {
-            _flatShader = Shader.Find(FlatShaderName);
-
-            if (_flatShader == null) {
-                _flatShaderMissing = true;
-                Logger.Warn($"Shader \"{FlatShaderName}\" not found, own head on the map gets no outline");
-            }
-        }
-
-        return _flatShader;
+    /// <inheritdoc />
+    protected override Vector3 CopyPosition(Vector2 direction, float reach, Mesh? mesh) {
+        var size = mesh != null ? Mathf.Max(mesh.bounds.size.x, mesh.bounds.size.y) : 0f;
+        return direction * (reach * size);
     }
 }
