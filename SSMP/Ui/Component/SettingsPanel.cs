@@ -830,12 +830,9 @@ internal class SettingsPanel : IRootedComponent {
             _twoPlayersText.text = Lang.Pick($"two players: x{two:0.##}", $"两个人 ×{two:0.##}");
         }
 
-        _roomNoteText.text = EnemyHealthCoop.Describe(settings) + "\n" + Lang.Pick(
-            "It is the damage you deal that is cut down: an enemy's own health and when it changes phase stay as they " +
-            "are, and what dies to one blow still does. Everyone connected to the server counts.",
-            "做法是按比例减少你们打出的伤害：怪的血量数字和换阶段都不变，一下就能打死的怪照样一下打死。人数按连上服务" +
-            "器的人算。"
-        );
+        // What it comes to, and not how it is done: the user (2026-10-20) wanted no more on the page than that,
+        // since every further word is one that someone may dispute ("不需要写做法，阐述的太多万一有人说不对很难纠缠")
+        _roomNoteText.text = EnemyHealthCoop.Describe(settings);
     }
 
     /// <summary>Shows the panel, with the choices of the room as they stand now.</summary>
