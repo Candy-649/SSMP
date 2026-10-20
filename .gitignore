@@ -439,3 +439,5 @@ dist-npm/
 dist-nexus/
 # Where installer/upload-github.ps1 writes the zip for a GitHub Release, made from the stage above.
 dist-github/
+# Builds handed to the players by hand outside a release, for them to put in the game themselves.
+dist-manual/
