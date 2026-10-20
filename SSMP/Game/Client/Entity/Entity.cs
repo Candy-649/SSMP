@@ -1268,6 +1268,8 @@ internal partial class Entity {
             return;
         }
 
+        SayWhereTheDazeRingIsSoon(here ? fsm : CopyOf(fsm), here);
+
         if (!here) {
             SSMP.Logging.Logger.Info(
                 $"[Stun] '{Object.Host.name}' ({Id}) is stunned in the scene host's game, which its copy here follows"
@@ -1290,6 +1292,77 @@ internal partial class Entity {
             $"{(hits == null ? "?" : hits.Value.ToString("0.#"))} of the beating that stuns it, " +
             $"{(combo == null ? "?" : combo.Value.ToString("0.#"))} of it in a row"
         );
+    }
+
+    /// <summary>
+    /// How long into a stun <see cref="SayWhereTheDazeRingIsSoon"/> looks at the ring over the creature's head.
+    /// </summary>
+    private const float DazeRingLookTime = 0.5f;
+
+    /// <summary>
+    /// Says in the log, a moment into a stun, how the ring that the stun puts over the creature's head stands in this
+    /// game: whether there is one, whether it is on and drawn, what it hangs on and where, and how far its own FSM has
+    /// got, which shows it only once it has settled - at a depth near nought, or under something that does not fall.
+    /// A player saw no ring over a boss that the other game ran, stunned nine times, and nothing in either log could
+    /// tell where it went missing (USER 2026-10-20: "我看不到…眩晕的那个头上的特效").
+    /// </summary>
+    /// <param name="stunControl">The stun control of the creature that this game shows, or null.</param>
+    /// <param name="here">Whether this game runs the creature.</param>
+    private void SayWhereTheDazeRingIsSoon(PlayMakerFSM? stunControl, bool here) {
+        if (stunControl == null || stunControl.FsmVariables.FindFsmGameObject("DazedEffect") is not { } ringVariable) {
+            return;
+        }
+
+        var creature = Object.Host.name;
+        var where = here ? "in this game, which runs it" : "on its copy here";
+        MonoBehaviourUtil.Instance.StartCoroutine(LookLater());
+
+        System.Collections.IEnumerator LookLater() {
+            yield return new WaitForSeconds(DazeRingLookTime);
+
+            // Gone with its room
+            if (stunControl == null) {
+                yield break;
+            }
+
+            var stunState = here ? stunControl.ActiveStateName : EntityFsmActions.HostStateOf(stunControl.Fsm);
+            var ring = ringVariable.Value;
+            if (ring == null) {
+                SSMP.Logging.Logger.Info(
+                    $"[Stun] '{creature}' ({Id}) has no ring over its head {where} {DazeRingLookTime} s into the " +
+                    $"stun, with its stun control in '{stunState}'"
+                );
+                yield break;
+            }
+
+            var ringFsm = ring.GetComponent<PlayMakerFSM>();
+            var parent = ring.transform.parent;
+            var offset = ring.transform.position - stunControl.transform.position;
+            var renderer = ring.GetComponent<Renderer>();
+            var sparkling = ring.GetComponentsInChildren<ParticleSystem>().Count(particles => particles.isPlaying);
+            var ringFsmName = ringFsm == null ? "-" : ringFsm.FsmName;
+            var ringState = ringFsm == null ? "-" : ringFsm.ActiveStateName;
+            var readParent = ringFsm == null ? null : ringFsm.FsmVariables.FindFsmGameObject("Parent")?.Value;
+            var readGravity = ringFsm == null ? null : ringFsm.FsmVariables.FindFsmFloat("Parent Gravity");
+            SSMP.Logging.Logger.Info(
+                $"[Stun] '{creature}' ({Id})'s ring over its head {where}, {DazeRingLookTime} s into the stun with " +
+                $"its stun control in '{stunState}': '{ring.name}', on: {ring.activeInHierarchy}, drawn: " +
+                $"{(renderer == null ? "-" : renderer.enabled.ToString())}, {sparkling} part(s) sparkling, under " +
+                $"'{(parent == null ? "nothing" : parent.name)}', {offset.x:0.00}, {offset.y:0.00} from the creature " +
+                $"at depth {ring.transform.position.z:0.0000}; its own FSM '{ringFsmName}' in '{ringState}', " +
+                $"having read what it hangs on as '{(readParent == null ? "nothing" : readParent.name)}', whose " +
+                $"gravity it took as {(readGravity == null ? "-" : readGravity.Value.ToString("0.##"))}"
+            );
+        }
+    }
+
+    /// <summary>
+    /// The FSM of the copy that stands for an FSM of the room's own creature, or null.
+    /// </summary>
+    /// <param name="fsm">The FSM of the room's own creature.</param>
+    private PlayMakerFSM? CopyOf(PlayMakerFSM fsm) {
+        var index = _fsms.Host.IndexOf(fsm);
+        return _fsms.Client != null && index >= 0 && index < _fsms.Client.Count ? _fsms.Client[index] : null;
     }
 
     /// <summary>
