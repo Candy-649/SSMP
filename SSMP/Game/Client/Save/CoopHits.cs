@@ -302,10 +302,10 @@ internal partial class CoopHits {
     /// <summary>
     /// Event raised when a player's attack reaches a creature in this room: one of the local player's, or one of
     /// another player's as this game hears of it - a copy of their attack that reaches the creature here, or what their
-    /// hit on a creature that both games keep looked like. For the outline of the player's own hero in a fight
-    /// (FightOutline).
+    /// hit on a creature that both games keep looked like. With the creature, for the outline of the player's own hero
+    /// in a fight (FightOutline), which goes on while a creature that was hit is alive.
     /// </summary>
-    public event Action? CreatureHitEvent;
+    public event Action<HealthManager>? CreatureHitEvent;
 
     public CoopHits(
         NetClient netClient,
@@ -887,8 +887,11 @@ internal partial class CoopHits {
     /// <returns>How the object responded to the hit.</returns>
     private IHitResponder.HitResponse OnDamagerHit(IHitResponder responder, HitInstance hit, DamageEnemies damager) {
         var isRemote = RemoteAttackComponent.IsRemoteAttack(damager.gameObject);
-        var isPlayerOnCreature = responder is Component struck && struck.TryGetComponent<HealthManager>(out _) &&
-                                 (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source) || isRemote);
+        var creature = responder is Component struck &&
+                       (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source) || isRemote) &&
+                       struck.TryGetComponent<HealthManager>(out var health)
+            ? health
+            : null;
 
         var response = MakeDamagerHit(responder, hit, damager);
 
@@ -896,8 +899,8 @@ internal partial class CoopHits {
         // although a creature that both games keep turns it away: their game works out what their hit did, and sends
         // along what it looked like (ApplyHitEffect, ApplyBlockEffect) only for the hero's own damage, which the hit
         // of a tool is not always
-        if (isPlayerOnCreature && (isRemote || response.response != IHitResponder.Response.None)) {
-            CreatureHitEvent?.Invoke();
+        if (creature != null && (isRemote || response.response != IHitResponder.Response.None)) {
+            CreatureHitEvent?.Invoke(creature);
         }
 
         return response;
@@ -2690,7 +2693,7 @@ internal partial class CoopHits {
             return;
         }
 
-        CreatureHitEvent?.Invoke();
+        CreatureHitEvent?.Invoke(healthManager);
 
         if (!TryReadHit(update.Hit, out var hit, out var source)) {
             Logger.Warn($"Could not read the hit effect of the partner on entity {update.EntityId}");
@@ -2754,7 +2757,7 @@ internal partial class CoopHits {
             return;
         }
 
-        CreatureHitEvent?.Invoke();
+        CreatureHitEvent?.Invoke(healthManager);
 
         if (!TryReadHit(update.Hit, out var hit, out var source)) {
             Logger.Warn($"Could not read the blocked hit of the partner on entity {update.EntityId}");

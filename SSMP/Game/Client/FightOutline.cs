@@ -13,18 +13,23 @@ namespace SSMP.Game.Client;
 /// close together among flashes and creatures. Outside of a fight the hero is drawn as the game draws it.
 ///
 /// The rule is the user's (2026-10-20): "只有两个人在同一个屏幕里的时候，如果有人打怪了，那么亮". It is lit while another
-/// player's figure is on this player's screen and a player hit a creature in the room in the last
-/// <see cref="FightTime"/> seconds: this player, or another as this game hears of it. Each game goes by its own
-/// screen. Neither alone lights it: another player fighting far off in a large room is no reason for this player's hero
-/// to light up, and neither is the other player standing by while nobody fights. Only this player's own hero is
-/// outlined, in the colour of their own name, and only on this machine (the rule of the name: the one that stands
-/// out is you). A player can turn it off on the settings page (ModSettings.OutlineOwnHeroInFights).
+/// player's figure is on this player's screen and a fight is on: a player hit a creature in the room, this player or
+/// another as this game hears of it. Each game goes by its own screen. Neither alone lights it: another player
+/// fighting far off in a large room is no reason for this player's hero to light up, and neither is the other player
+/// standing by while nobody fights. Only this player's own hero is outlined, in the colour of their own name, and only
+/// on this machine (the rule of the name: the one that stands out is you). A player can turn it off on the settings
+/// page (ModSettings.OutlineOwnHeroInFights).
+///
+/// The fight is over as soon as the creatures that were hit are all dead or gone, and also once none of those still
+/// there was hit for <see cref="QuietTime"/> seconds. At first it went on for 8 seconds after any last hit, which the
+/// user found too long ("感觉8秒后有点久了") and chose this instead: the outline goes out as a fight is won, and stays
+/// while a creature that was fought keeps out of reach for a moment.
 /// </summary>
 internal class FightOutline {
     /// <summary>
-    /// How long after the last hit on a creature the outline stays lit, in seconds of the game.
+    /// How long after the last hit on a creature that is still alive the fight goes on, in seconds of the game.
     /// </summary>
-    private const float FightTime = 8f;
+    private const float QuietTime = 5f;
 
     /// <summary>
     /// How far the outline reaches out from the hero, in units of the room: about two pixels of a screen that is 1080
@@ -48,9 +53,10 @@ internal class FightOutline {
     private OwnFigureOutline? _outline;
 
     /// <summary>
-    /// The time of the game at which a player last hit a creature in this room.
+    /// The creatures in this room that a player hit, each with the time of the game of the last hit on it, for as long
+    /// as they keep the fight going.
     /// </summary>
-    private float _lastHitTime = float.NegativeInfinity;
+    private readonly List<(HealthManager Creature, float Time)> _hits = [];
 
     public FightOutline(ModSettings modSettings, Dictionary<ushort, ClientPlayerData> playerData) {
         _modSettings = modSettings;
@@ -72,21 +78,29 @@ internal class FightOutline {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         SceneManager.activeSceneChanged -= OnSceneChanged;
         Remove();
-        _lastHitTime = float.NegativeInfinity;
+        _hits.Clear();
     }
 
     /// <summary>
     /// Notes that a player hit a creature in this room.
     /// </summary>
-    public void NoteCreatureHit() {
-        _lastHitTime = Time.time;
+    /// <param name="creature">The creature.</param>
+    public void NoteCreatureHit(HealthManager creature) {
+        for (var i = 0; i < _hits.Count; i++) {
+            if (_hits[i].Creature == creature) {
+                _hits[i] = (creature, Time.time);
+                return;
+            }
+        }
+
+        _hits.Add((creature, Time.time));
     }
 
     /// <summary>
     /// A new room starts without a fight: a hit just before the door is not one in the room behind it.
     /// </summary>
     private void OnSceneChanged(Scene oldScene, Scene newScene) {
-        _lastHitTime = float.NegativeInfinity;
+        _hits.Clear();
     }
 
     private void OnUpdate() {
@@ -115,7 +129,24 @@ internal class FightOutline {
         }
 
         _outline.SetColour(colour);
-        _outline.SetLit(Time.time - _lastHitTime < FightTime && IsAnotherPlayerOnScreen());
+        _outline.SetLit(IsFightOn() && IsAnotherPlayerOnScreen());
+    }
+
+    /// <summary>
+    /// Whether a fight is on: a creature that a player hit is still alive and here, and was hit less than
+    /// <see cref="QuietTime"/> seconds ago. The creatures that no longer keep the fight going are let go.
+    /// </summary>
+    private bool IsFightOn() {
+        var now = Time.time;
+        for (var i = _hits.Count - 1; i >= 0; i--) {
+            var (creature, time) = _hits[i];
+            if (creature == null || creature.GetIsDead() || !creature.gameObject.activeInHierarchy ||
+                now - time >= QuietTime) {
+                _hits.RemoveAt(i);
+            }
+        }
+
+        return _hits.Count > 0;
     }
 
     /// <summary>
