@@ -140,6 +140,7 @@ internal abstract class SpriteOutline : MonoBehaviour {
     /// <param name="reach">How far the ring reaches out from the sprite, as <see cref="CopyPosition"/> takes it.
     /// </param>
     protected void AddRing(Material material, int order, float reach) {
+        var spriteRenderer = SpriteRenderer!;
         if (!_materials.Contains(material)) {
             _materials.Add(material);
         }
@@ -154,8 +155,8 @@ internal abstract class SpriteOutline : MonoBehaviour {
                 var filter = copy.AddComponent<MeshFilter>();
                 var renderer = copy.AddComponent<MeshRenderer>();
                 renderer.sharedMaterial = material;
-                renderer.sortingLayerID = SpriteRenderer!.sortingLayerID;
-                renderer.sortingOrder = SpriteRenderer.sortingOrder + order;
+                renderer.sortingLayerID = spriteRenderer.sortingLayerID;
+                renderer.sortingOrder = spriteRenderer.sortingOrder + order;
                 renderer.shadowCastingMode = ShadowCastingMode.Off;
                 renderer.receiveShadows = false;
                 renderer.lightProbeUsage = LightProbeUsage.Off;
@@ -166,7 +167,7 @@ internal abstract class SpriteOutline : MonoBehaviour {
             }
         }
 
-        _sorting = (SpriteRenderer.sortingLayerID, SpriteRenderer.sortingOrder);
+        _sorting = (spriteRenderer.sortingLayerID, spriteRenderer.sortingOrder);
     }
 
     /// <summary>
