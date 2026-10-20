@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Text;
 using MonoMod.RuntimeDetour;
 using SSMP.Api.Server;
+using SSMP.Game.Client.Entity.Component;
 using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -215,6 +216,7 @@ internal class EnemyHealthCoop {
     private void OnApplyExtraDamage(Action<HealthManager, int> orig, HealthManager self, int damageAmount) {
         var hpBefore = self.hp;
         _scaled.Remove(self.GetInstanceID());
+        HealthManagerComponent.ForgetPutBack();
         orig(self, ScaleDamage(self, damageAmount));
         WriteDamage(self, hpBefore, "extra damage", damageAmount, null, false);
     }
@@ -222,11 +224,14 @@ internal class EnemyHealthCoop {
     /// <summary>
     /// Writes down what a hit took from a creature. The game takes the health in TakeDamage, after the scaling of
     /// ApplyDamageScaling and its own changes for some blows (repeated rapid hits, critical hits), so the health
-    /// before and after is what the hit really took.
+    /// before and after is what the hit really took. A copy that the hit put back at the health last told is written
+    /// down with the health the hit left it (HealthManagerComponent.HealthBeforePutBack): this hook runs around that
+    /// one in a game that connected again, as hooks made later run first, and each line said the hit took nothing.
     /// </summary>
     private void OnTakeDamage(Action<HealthManager, HitInstance> orig, HealthManager self, HitInstance hit) {
         var hpBefore = self.hp;
         _scaled.Remove(self.GetInstanceID());
+        HealthManagerComponent.ForgetPutBack();
         orig(self, hit);
         WriteDamage(self, hpBefore, "a hit", hit.DamageDealt, hit.Source, hit.IsHeroDamage);
     }
@@ -237,6 +242,7 @@ internal class EnemyHealthCoop {
     private void OnApplyExtraHitDamage(Action<HealthManager, HitInstance> orig, HealthManager self, HitInstance hit) {
         var hpBefore = self.hp;
         _scaled.Remove(self.GetInstanceID());
+        HealthManagerComponent.ForgetPutBack();
         orig(self, hit);
         WriteDamage(self, hpBefore, "extra damage of a hit", hit.DamageDealt, hit.Source, hit.IsHeroDamage);
     }
@@ -288,7 +294,8 @@ internal class EnemyHealthCoop {
             _damageLinesThisMinute++;
 
             var line = new StringBuilder();
-            line.Append($"[Damage] '{creature.name}' {hpBefore} -> {creature.hp} from {kind} of {damage}");
+            var hpAfter = HealthManagerComponent.HealthBeforePutBack(creature);
+            line.Append($"[Damage] '{creature.name}' {hpBefore} -> {hpAfter} from {kind} of {damage}");
             if (source != null) {
                 line.Append(" by ");
                 line.Append(

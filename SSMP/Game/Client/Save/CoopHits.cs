@@ -302,10 +302,11 @@ internal partial class CoopHits {
     /// <summary>
     /// Event raised when a player's attack reaches a creature in this room: one of the local player's, or one of
     /// another player's as this game hears of it - a copy of their attack that reaches the creature here, or what their
-    /// hit on a creature that both games keep looked like. With the creature, for the outline of the player's own hero
-    /// in a fight (FightOutline), which goes on while a creature that was hit is alive.
+    /// hit on a creature that both games keep looked like. With the creature and what struck the hit, if this game
+    /// knows, for the outline of the player's own hero in a fight (FightOutline), which goes on while a creature that
+    /// was hit is alive.
     /// </summary>
-    public event Action<HealthManager>? CreatureHitEvent;
+    public event Action<HealthManager, GameObject?>? CreatureHitEvent;
 
     public CoopHits(
         NetClient netClient,
@@ -900,7 +901,7 @@ internal partial class CoopHits {
         // along what it looked like (ApplyHitEffect, ApplyBlockEffect) only for the hero's own damage, which the hit
         // of a tool is not always
         if (creature != null && (isRemote || response.response != IHitResponder.Response.None)) {
-            CreatureHitEvent?.Invoke(creature);
+            CreatureHitEvent?.Invoke(creature, hit.Source);
         }
 
         return response;
@@ -2693,7 +2694,7 @@ internal partial class CoopHits {
             return;
         }
 
-        CreatureHitEvent?.Invoke(healthManager);
+        CreatureHitEvent?.Invoke(healthManager, null);
 
         if (!TryReadHit(update.Hit, out var hit, out var source)) {
             Logger.Warn($"Could not read the hit effect of the partner on entity {update.EntityId}");
@@ -2757,7 +2758,7 @@ internal partial class CoopHits {
             return;
         }
 
-        CreatureHitEvent?.Invoke(healthManager);
+        CreatureHitEvent?.Invoke(healthManager, null);
 
         if (!TryReadHit(update.Hit, out var hit, out var source)) {
             Logger.Warn($"Could not read the blocked hit of the partner on entity {update.EntityId}");

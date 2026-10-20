@@ -230,6 +230,23 @@ internal class HealthManagerComponent : EntityComponent {
     private bool _hadHealth;
 
     /// <summary>
+    /// Raised as damage of a player lands on a creature, as this game learns of it: a blow of this game's player on the
+    /// creature or its copy, however it came - an attack, a tool, the tick of a tag they put on it - the damage of
+    /// another player's copy that this game takes in, and a drop in the health that the game which runs the creature
+    /// tells, which is how this game hears of the blows of that game's player, with what else hurt the creature there.
+    /// With the creature in this game, and what struck the blow, if this game knows. For the outline of the player's
+    /// own hero in a fight (FightOutline).
+    /// </summary>
+    internal static event Action<HealthManager, GameObject?>? DamageLanded;
+
+    /// <summary>
+    /// The copy that a blow just put back at the health last told, with the health the blow had left it. The log of
+    /// damage (EnemyHealthCoop) says what a blow took from that, as its hook on blows may run around this one, which
+    /// puts the health back before it looks (see <see cref="ForgetPutBack"/>, <see cref="HealthBeforePutBack"/>).
+    /// </summary>
+    private static (HealthManager? Copy, int Hp) _putBack;
+
+    /// <summary>
     /// Raised as the copy in this game dies or lives again: whether it is dead now, and whether its death was seen here
     /// rather than found as this player walked into the room (see Entity.RecordCopyDeath).
     /// </summary>
@@ -686,6 +703,10 @@ internal class HealthManagerComponent : EntityComponent {
             _taggingDamager = taggingDamager;
             _taggingBlowIsOwn = taggingBlowIsOwn;
         }
+
+        if (own) {
+            DamageLanded?.Invoke(self, hitInstance.Source);
+        }
     }
 
     /// <summary>
@@ -904,8 +925,25 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     private void PutBackToldHealth() {
         if (_healthManager.Client != null && !_healthManager.Client.GetIsDead()) {
+            _putBack = (_healthManager.Client, _healthManager.Client.hp);
             ApplyHp(_toldHp, triggerHostDeath: false);
         }
+    }
+
+    /// <summary>
+    /// Forgets which copy a blow last put back at the health last told, before a blow that the log of damage looks at.
+    /// </summary>
+    internal static void ForgetPutBack() {
+        _putBack = (null, 0);
+    }
+
+    /// <summary>
+    /// The health that a blow left a creature: on a copy that the blow put back at the health last told since
+    /// <see cref="ForgetPutBack"/>, the health before that; on anything else, its health.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    internal static int HealthBeforePutBack(HealthManager creature) {
+        return _putBack.Copy == creature ? _putBack.Hp : creature.hp;
     }
 
     /// <summary>
@@ -1991,6 +2029,12 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         if (epoch == _currentHealthEpoch && number > _toldNumber) {
+            // Lower than told before, as the game moves on: damage landed there, as the room's state that comes with
+            // walking in is not
+            if (!alreadyInSceneUpdate && hp < _toldHp && client != null) {
+                DamageLanded?.Invoke(client, null);
+            }
+
             _toldHp = hp;
             _toldNumber = number;
             _toldDead = dead;
@@ -2117,6 +2161,9 @@ internal class HealthManagerComponent : EntityComponent {
             var newHp = HealthAfter(health, taken.damage, damage, blows, out var killingBlow);
             ApplyHp(newHp, triggerHostDeath: true, killingBlow, new Killer(KillerKind.Copy, copyKey));
             taken.damage = damage;
+            if (_healthManager.Host != null) {
+                DamageLanded?.Invoke(_healthManager.Host, null);
+            }
         }
 
         _damageTaken[data.SenderId] = taken;
