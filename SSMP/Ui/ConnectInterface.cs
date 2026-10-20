@@ -43,6 +43,11 @@ internal class ConnectInterface {
     private const float UniformHeight = 50f;
 
     /// <summary>
+    /// The gap between two buttons side by side in a row.
+    /// </summary>
+    private const float ButtonRowGap = 10f;
+
+    /// <summary>
     /// Initial X position for the UI panel (centered at 1920x1080).
     /// </summary>
     private const float InitialX = 960f;
@@ -498,6 +503,11 @@ internal class ConnectInterface {
     private readonly IButtonComponent _lobbyConnectButton;
 
     /// <summary>
+    /// Button to host a lobby, beside the one to connect to one.
+    /// </summary>
+    private readonly IButtonComponent _hostLobbyButton;
+
+    /// <summary>
     /// Scrollable panel for browsing public lobbies.
     /// </summary>
     private readonly LobbyBrowserPanel _lobbyBrowserPanel;
@@ -767,6 +777,7 @@ internal class ConnectInterface {
         _matchmakingGroup = matchmakingComponents.group;
         _lobbyIdInput = matchmakingComponents.lobbyIdInput;
         _lobbyConnectButton = matchmakingComponents.connectButton;
+        _hostLobbyButton = matchmakingComponents.hostButton;
 
         // Create lobby browser panel
         _lobbyBrowserPanel = new LobbyBrowserPanel(
@@ -1100,11 +1111,9 @@ internal class ConnectInterface {
         );
         y -= (UniformHeight + 20f) / UiManager.ScreenHeightRatio;
 
-        // Two buttons side-by-side (same layout as Direct IP tab)
-        var buttonGap = 10f;
-        var buttonWidth = (ContentWidth - buttonGap) / 2f;
-        var buttonOffset = ((buttonWidth + buttonGap) / 2f) /
-                           (float) System.Math.Pow(UiManager.ScreenHeightRatio, 2);
+        // Two buttons side-by-side (same layout as Direct IP tab), placed for good once the frame is built
+        var buttonWidth = (ContentWidth - ButtonRowGap) / 2f;
+        var buttonOffset = (buttonWidth + ButtonRowGap) / 2f;
 
         // Connect button (left)
         var connectButton = new ButtonComponent(
@@ -1261,11 +1270,9 @@ internal class ConnectInterface {
         );
         y -= (UniformHeight + 20f) / UiManager.ScreenHeightRatio;
 
-        // Direct IP button values
-        var buttonGap = 10f;
-        var buttonWidth = (ContentWidth - buttonGap) / 2f;
-        var buttonOffset = ((buttonWidth + buttonGap) / 2f) /
-                           (float) System.Math.Pow(UiManager.ScreenHeightRatio, 2);
+        // Direct IP button values, placed for good once the frame is built
+        var buttonWidth = (ContentWidth - ButtonRowGap) / 2f;
+        var buttonOffset = (buttonWidth + ButtonRowGap) / 2f;
 
         // Connect button (left)
         var connectButton = new ButtonComponent(
@@ -1326,6 +1333,8 @@ internal class ConnectInterface {
             _directIpTab,
             _settingsTab
         );
+        ConnectInterfaceHelpers.PlaceSideBySide(_lobbyConnectButton, _hostLobbyButton, ButtonRowGap);
+        ConnectInterfaceHelpers.PlaceSideBySide(_directConnectButton, _serverButton, ButtonRowGap);
 
         LogFinalPositions();
     }

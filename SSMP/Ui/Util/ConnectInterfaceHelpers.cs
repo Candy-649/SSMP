@@ -173,6 +173,42 @@ internal static class ConnectInterfaceHelpers {
     }
 
     /// <summary>
+    /// Puts two buttons of a row side by side in the middle of the background panel, with a gap between them, as wide
+    /// as they are. Like the tabs, they are placed once they are in the panel: where they are made is a part of the
+    /// canvas before it is scaled to the screen, and the pairs made that way overlapped on any screen but 1920x1080
+    /// (at 2520x1680, their middles stood about 50 from the panel's middle instead of 92.5).
+    /// </summary>
+    /// <param name="left">The button on the left.</param>
+    /// <param name="right">The button on the right.</param>
+    /// <param name="gap">The gap between them.</param>
+    public static void PlaceSideBySide(IButtonComponent left, IButtonComponent right, float gap) {
+        if (left is not Component.Component leftComponent || right is not Component.Component rightComponent ||
+            leftComponent.GameObject == null || rightComponent.GameObject == null) {
+            return;
+        }
+
+        var leftRect = leftComponent.GameObject.GetComponent<RectTransform>();
+        var rightRect = rightComponent.GameObject.GetComponent<RectTransform>();
+        if (leftRect == null || rightRect == null) {
+            return;
+        }
+
+        // Centred on the panel: the middle of the row is at 0
+        var half = (leftRect.sizeDelta.x + gap + rightRect.sizeDelta.x) / 2f;
+        SetX(leftRect, -half + leftRect.sizeDelta.x / 2f);
+        SetX(rightRect, half - rightRect.sizeDelta.x / 2f);
+    }
+
+    /// <summary>
+    /// Sets where a button stands from left to right in its parent, keeping its height.
+    /// </summary>
+    private static void SetX(RectTransform rectTransform, float x) {
+        var position = rectTransform.localPosition;
+        position.x = x;
+        rectTransform.localPosition = position;
+    }
+
+    /// <summary>
     /// Adjusts a button's position and width.
     /// </summary>
     /// <param name="buttonGameObject">The button GameObject.</param>
