@@ -283,15 +283,39 @@ internal static partial class EntityFsmActions {
                 null!
             );
         } catch (Exception e) {
-            //Logger.Warn($"Apply method threw exception: {e.GetType()}, {e.Message}, {e.StackTrace}");
-
-            e = e.InnerException;
-            while (e != null) {
-                //Logger.Warn($"  Inner exception: {e.GetType()}, {e.Message}, {e.StackTrace}");
-
-                e = e.InnerException;
-            }
+            SayReplayFailed(action, e);
         }
+    }
+
+    /// <summary>
+    /// The kinds of replays that failed here in this room, by creature, FSM, state and action type, said once each.
+    /// </summary>
+    private static readonly HashSet<string> SaidReplayFailed = [];
+
+    /// <summary>
+    /// Says in the log, once a room for each kind, that a replay of an action of the scene host's creature failed here.
+    /// What failed was let go without a word, and a copy that missed what the creature did - a ring over its head that
+    /// never showed - left nothing in the log to tell it by.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="e">What it threw, wrapped in what the reflection call wraps it in.</param>
+    private static void SayReplayFailed(FsmStateAction action, Exception e) {
+        while (e is TargetInvocationException { InnerException: { } inner }) {
+            e = inner;
+        }
+
+        var owner = action.Fsm?.GameObject;
+        var ownerName = owner == null ? "?" : owner.name;
+        var stateName = action.State?.Name ?? "?";
+        var fsmName = action.Fsm?.Name ?? "?";
+        if (!SaidReplayFailed.Add($"{ownerName}/{fsmName}/{stateName}/{action.GetType().Name}")) {
+            return;
+        }
+
+        Logger.Warn(
+            $"[Replay] '{ownerName}'s {action.GetType().Name} in '{stateName}' of '{fsmName}' could not be played " +
+            $"here: {e.GetType().Name}: {e.Message} (said once a room)"
+        );
     }
 
     /// <summary>
@@ -788,6 +812,7 @@ internal static partial class EntityFsmActions {
         HostStates.Clear();
         SaidStillGivingOff.Clear();
         SaidLeftAtOnce.Clear();
+        SaidReplayFailed.Clear();
     }
 
     /// <summary>

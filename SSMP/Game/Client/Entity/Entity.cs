@@ -1240,8 +1240,13 @@ internal partial class Entity {
 
         // Only if the GetNetworkDataFromAction method returns true do we add the entity data
         // for sending
-        if (EntityFsmActions.GetNetworkDataFromAction(networkData, self)) {
+        var sent = EntityFsmActions.GetNetworkDataFromAction(networkData, self);
+        if (sent) {
             _netClient.UpdateManager.AddEntityData(Id, networkData);
+        }
+
+        if (IsDazeRingSpawn(self)) {
+            NoteDazeRingSpawn(sent ? "went to the other game" : "did not go to the other game");
         }
     }
 
@@ -1300,6 +1305,64 @@ internal partial class Entity {
     private const float DazeRingLookTime = 0.5f;
 
     /// <summary>
+    /// What became of the last spawn of the ring that a stun puts over the creature's head, in this game, and when (see
+    /// <see cref="NoteDazeRingSpawn"/>).
+    /// </summary>
+    private string _dazeRingSpawnNote = "";
+
+    /// <inheritdoc cref="_dazeRingSpawnNote"/>
+    private float _dazeRingSpawnAt = float.NegativeInfinity;
+
+    /// <summary>
+    /// Whether an action spawns the ring that a stun puts over a creature's head: the stun control's spawn that keeps
+    /// what it spawns in "DazedEffect".
+    /// </summary>
+    /// <param name="action">The action.</param>
+    private static bool IsDazeRingSpawn(FsmStateAction action) {
+        return action is SpawnObjectFromGlobalPool { storeObject.Name: "DazedEffect" };
+    }
+
+    /// <summary>
+    /// Notes what became of a spawn of the ring that a stun puts over the creature's head, for the line of
+    /// <see cref="SayWhereTheDazeRingIsSoon"/>: in the game that runs the creature whether it went to the other game,
+    /// in the other one whether it came and what it made. The copy of a boss had no ring 0.5 s into each of its stuns,
+    /// and nothing said whether the spawn of it ever came (USER 2026-10-21: "晕倒光圈没有在日志里有什么线索吗").
+    /// </summary>
+    /// <param name="note">What became of it.</param>
+    private void NoteDazeRingSpawn(string note) {
+        _dazeRingSpawnNote = note;
+        _dazeRingSpawnAt = Time.unscaledTime;
+    }
+
+    /// <summary>
+    /// Notes what the spawn of the ring that the scene host sent made here, and whether it was kept in the variable
+    /// that the stun control reads it from.
+    /// </summary>
+    /// <param name="spawn">The copy's own spawn action, which the scene host's was played on.</param>
+    private void NoteDazeRingSpawnMade(SpawnObjectFromGlobalPool spawn) {
+        var made = spawn.storeObject?.Value;
+        if (made == null) {
+            NoteDazeRingSpawn("came from the scene host and made nothing here");
+            return;
+        }
+
+        var read = spawn.Fsm?.Variables?.FindFsmGameObject("DazedEffect");
+        NoteDazeRingSpawn(
+            $"came from the scene host and made '{made.name}' here, kept where the stun control reads it: " +
+            $"{ReferenceEquals(read, spawn.storeObject)}"
+        );
+    }
+
+    /// <summary>
+    /// Says for the log what became of the last spawn of the ring in this game (see <see cref="NoteDazeRingSpawn"/>).
+    /// </summary>
+    private string DescribeDazeRingSpawn() {
+        return float.IsNegativeInfinity(_dazeRingSpawnAt)
+            ? "no spawn of the ring was seen in this game yet"
+            : $"the last spawn of the ring {_dazeRingSpawnNote}, {Time.unscaledTime - _dazeRingSpawnAt:0.00} s before";
+    }
+
+    /// <summary>
     /// Says in the log, a moment into a stun, how the ring that the stun puts over the creature's head stands in this
     /// game: whether there is one, whether it is on and drawn, what it hangs on and where, and how far its own FSM has
     /// got, which shows it only once it has settled - at a depth near nought, or under something that does not fall.
@@ -1330,7 +1393,7 @@ internal partial class Entity {
             if (ring == null) {
                 SSMP.Logging.Logger.Info(
                     $"[Stun] '{creature}' ({Id}) has no ring over its head {where} {DazeRingLookTime} s into the " +
-                    $"stun, with its stun control in '{stunState}'"
+                    $"stun, with its stun control in '{stunState}'; {DescribeDazeRingSpawn()}"
                 );
                 yield break;
             }
@@ -1351,7 +1414,8 @@ internal partial class Entity {
                 $"'{(parent == null ? "nothing" : parent.name)}', {offset.x:0.00}, {offset.y:0.00} from the creature " +
                 $"at depth {ring.transform.position.z:0.0000}; its own FSM '{ringFsmName}' in '{ringState}', " +
                 $"having read what it hangs on as '{(readParent == null ? "nothing" : readParent.name)}', whose " +
-                $"gravity it took as {(readGravity == null ? "-" : readGravity.Value.ToString("0.##"))}"
+                $"gravity it took as {(readGravity == null ? "-" : readGravity.Value.ToString("0.##"))}; " +
+                DescribeDazeRingSpawn()
             );
         }
     }
@@ -4578,6 +4642,12 @@ internal partial class Entity {
 
                 var action = state.Actions[actionIndex];
 
+                // What became of the ring that a stun puts over the creature's head (SayWhereTheDazeRingIsSoon)
+                var ringSpawn = IsDazeRingSpawn(action);
+                if (ringSpawn) {
+                    NoteDazeRingSpawn("came from the scene host and was not played here");
+                }
+
                 // Of a move that the copy is about to play by itself, from what came along (StartMoveHeard)
                 if (HoldsForTheMoveHeard(fsm, state, data)) {
                     continue;
@@ -4627,6 +4697,10 @@ internal partial class Entity {
 
                 EntityFsmActions.ReadSubject(data, action);
                 EntityFsmActions.ApplyNetworkDataFromAction(data, action);
+
+                if (ringSpawn) {
+                    NoteDazeRingSpawnMade((SpawnObjectFromGlobalPool) action);
+                }
 
                 continue;
             }

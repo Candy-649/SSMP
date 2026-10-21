@@ -6,6 +6,7 @@ using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client.Entity.Action;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -272,6 +273,7 @@ internal partial class GamePatcher {
             typeof(FsmState).GetMethod(nameof(FsmState.OnEnter), InstancePublicFlags)!,
             new Action<Action<FsmState>, FsmState>(OnStateEnter)
         );
+        MonoBehaviourUtil.Instance.OnUpdateEvent += WatchIdleBosses;
     }
 
     /// <summary>
@@ -280,6 +282,8 @@ internal partial class GamePatcher {
     private void DisposeMoveStartHook() {
         _stateEnterHook?.Dispose();
         _stateEnterHook = null;
+        MonoBehaviourUtil.Instance.OnUpdateEvent -= WatchIdleBosses;
+        IdleWatches.Clear();
     }
 
     /// <summary>
@@ -289,6 +293,7 @@ internal partial class GamePatcher {
         AwarenessRanges.Clear();
         Turns.Clear();
         KeptTargets.Clear();
+        IdleWatches.Clear();
     }
 
     /// <summary>
@@ -299,6 +304,7 @@ internal partial class GamePatcher {
         AwarenessRanges.Remove(instanceId);
         Turns.Remove(instanceId);
         KeptTargets.Remove(instanceId);
+        IdleWatches.Remove(instanceId);
     }
 
     /// <summary>
@@ -397,13 +403,20 @@ internal partial class GamePatcher {
     /// <param name="machine">The FSM of the creature.</param>
     /// <param name="state">The state where the move starts.</param>
     private static void TurnAtMoveStart(PlayMakerFSM machine, FsmState state) {
-        if (Save.SharedDice.PlaysAnotherGame || Entity.Entity.OwnSign != null || !AimsAtPlayers(machine) ||
-            !Entity.Entity.RunsHere(machine)) {
+        if (!AimsAtPlayers(machine) || !Entity.Entity.RunsHere(machine)) {
             return;
         }
 
         var owner = GetEnemyTargetOwner(machine.gameObject);
-        if (owner == null || owner.GetComponent<HealthManager>() == null) {
+        var health = owner == null ? null : owner.GetComponent<HealthManager>();
+        if (owner == null || health == null) {
+            return;
+        }
+
+        // Every move it starts, whoever set it off (see WatchIdleBosses)
+        NoteMoveForIdle(owner, health, machine, state);
+
+        if (Save.SharedDice.PlaysAnotherGame || Entity.Entity.OwnSign != null) {
             return;
         }
 
