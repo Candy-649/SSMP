@@ -810,8 +810,11 @@ internal class ConnectInterface {
                     return;
                 }
 
-                // Steam's own invite dialog, so the host never has to go looking for the overlay themselves
-                SteamFriends.ActivateGameOverlayInviteDialog(_waitingRoomLobbyId);
+                // Steam's own invite dialog, so the host never has to go looking for the overlay themselves, or the
+                // friends list while no friend is online to be invited
+                if (!SteamManager.OpenInviteDialog(_waitingRoomLobbyId)) {
+                    ShowFeedback(Color.yellow, SteamManager.NoFriendOnlineMessage, stays: true);
+                }
             }
         );
         _waitingRoomPanel.SetOnReady(() => {

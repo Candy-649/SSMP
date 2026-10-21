@@ -337,22 +337,66 @@ public static class SteamManager {
     }
 
     /// <summary>
+    /// What the player is told when none of their Steam friends is online to be invited (see
+    /// <see cref="OpenInviteDialog(CSteamID)"/>).
+    /// </summary>
+    public static string NoFriendOnlineMessage => Lang.Pick(
+        "None of your Steam friends is online right now; they can be invited once they are.",
+        "你的 Steam 好友现在都不在线，上线后才能邀请。"
+    );
+
+    /// <summary>
     /// Opens the Steam overlay invite dialog to invite friends to the current lobby.
     /// Works for all lobby types (Public, Friends Only, Private).
     /// </summary>
-    public static void OpenInviteDialog() {
+    /// <returns>Whether the invite dialog was opened (see <see cref="OpenInviteDialog(CSteamID)"/>).</returns>
+    public static bool OpenInviteDialog() {
         if (!IsInitialized) {
             Logger.Warn("Cannot open invite dialog: Steam is not initialized");
-            return;
+            return false;
         }
 
         if (CurrentLobbyId == NilLobbyId) {
             Logger.Warn("Cannot open invite dialog: Not in a lobby");
-            return;
+            return false;
         }
 
-        Logger.Info($"Opening Steam invite dialog for lobby: {CurrentLobbyId}");
-        SteamFriends.ActivateGameOverlayInviteDialog(CurrentLobbyId);
+        return OpenInviteDialog(CurrentLobbyId);
+    }
+
+    /// <summary>
+    /// Opens Steam's dialog for inviting friends to a lobby, or Steam's friends list instead while none of the
+    /// player's friends is online. Opened with no friend online, the dialog listed no one, under a search box that
+    /// found no one either, and a player recording how to invite the other one could not tell what had gone wrong
+    /// (USER 2026-10-21: "一打开这个界面我都懵了"; they chose to be shown the friends list then).
+    /// </summary>
+    /// <param name="lobbyId">The lobby to invite friends to.</param>
+    /// <returns>Whether the invite dialog was opened, rather than the friends list.</returns>
+    public static bool OpenInviteDialog(CSteamID lobbyId) {
+        if (!IsAnyFriendOnline()) {
+            Logger.Info("Steam: no friend is online to be invited, so the friends list opens instead");
+            SteamFriends.ActivateGameOverlay("Friends");
+            return false;
+        }
+
+        Logger.Info($"Opening Steam invite dialog for lobby: {lobbyId}");
+        SteamFriends.ActivateGameOverlayInviteDialog(lobbyId);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether any of the player's Steam friends is online, in any state but offline.
+    /// </summary>
+    private static bool IsAnyFriendOnline() {
+        var count = SteamFriends.GetFriendCount(EFriendFlags.k_EFriendFlagImmediate);
+        for (var i = 0; i < count; i++) {
+            var friend = SteamFriends.GetFriendByIndex(i, EFriendFlags.k_EFriendFlagImmediate);
+            if (SteamFriends.GetFriendPersonaState(friend) != EPersonaState.k_EPersonaStateOffline) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
