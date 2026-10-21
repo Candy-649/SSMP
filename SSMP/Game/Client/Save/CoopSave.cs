@@ -712,6 +712,7 @@ internal partial class CoopSave {
         OnDeliverySceneChanged();
         OnRescueSceneChanged();
         OnLavaChaseSceneChanged(newScene);
+        OnStorySceneChanged(newScene);
         OnCageSceneChanged();
         OnPrisonCatchSceneChanged();
         OnClothesGrabSceneChanged();

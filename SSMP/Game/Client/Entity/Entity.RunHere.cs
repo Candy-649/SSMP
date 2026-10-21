@@ -1094,7 +1094,7 @@ internal partial class Entity {
         data.Packet.Write(stateIndex);
         data.Packet.Write(tag);
 
-        _netClient.UpdateManager.AddEntityData(Id, data);
+        SendEntityData(data);
     }
 
     /// <summary>

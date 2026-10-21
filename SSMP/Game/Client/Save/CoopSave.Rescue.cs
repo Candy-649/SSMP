@@ -1891,6 +1891,7 @@ internal partial class CoopSave {
             if (rescue.StandAt is { } standAt) {
                 Logger.Info($"Standing back up beside a member at {standAt}");
                 hero.transform.position = new Vector3(standAt.x, standAt.y, hero.transform.position.z);
+                HoldLavaForOwnPutBack();
             } else if (rescue.ByGrinder) {
                 var safe = playerData.hazardRespawnLocation;
                 Logger.Info(

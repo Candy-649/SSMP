@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using MonoMod.RuntimeDetour;
+using SSMP.Fsm;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -103,6 +104,18 @@ internal class HealthManagerComponent : EntityComponent {
     /// in seconds (see <see cref="KeepFromHurting"/>).
     /// </summary>
     private const float OwnKillAnswerTime = 5f;
+
+    /// <summary>
+    /// How far a copy is put to where its creature died before that is said in the log (see
+    /// <see cref="PutCopyWhereItDied"/>): about the width of a player, below which nobody sees it.
+    /// </summary>
+    private const float LoggedDeathPlaceDistance = 1f;
+
+    /// <summary>
+    /// Whether the copy is a part of another entity's copy, which carries it where it goes: such a copy is told no
+    /// place of its own, and is not put anywhere when it dies (see <see cref="PutCopyWhereItDied"/>).
+    /// </summary>
+    public bool CarriedByParent { get; init; }
 
     /// <summary>
     /// Whether a copy plays something that a state machine of this game's player told it (CoopHits.TellCopy), like the
@@ -1157,13 +1170,17 @@ internal class HealthManagerComponent : EntityComponent {
     /// </summary>
     /// <param name="copy">The copy, or null if it has no health manager.</param>
     /// <param name="data">The data of the death.</param>
-    internal static void TakeDeathOf(HealthManager? copy, EntityNetworkData data) {
+    internal static void TakeDeathOf(HealthManager? copy, EntityNetworkData data) => TakeDeath(copy, data);
+
+    /// <inheritdoc cref="TakeDeathOf"/>
+    /// <returns>Who struck the blow of the death.</returns>
+    private static Killer TakeDeath(HealthManager? copy, EntityNetworkData data) {
         var lastAttackDirection = data.Packet.ReadByte();
         var lastAttackType = (AttackTypes) data.Packet.ReadByte();
         var kind = (KillerKind) data.Packet.ReadByte();
         var killer = new Killer(kind, kind == KillerKind.Copy ? data.Packet.ReadUInt() : 0);
         if (copy == null) {
-            return;
+            return killer;
         }
 
         copy.directionOfLastAttack = lastAttackDirection;
@@ -1174,6 +1191,40 @@ internal class HealthManagerComponent : EntityComponent {
                 ? component.StruckHere(killer, runsTheCreature: false)
                 : killer.Kind == KillerKind.None
         );
+
+        return killer;
+    }
+
+    /// <summary>
+    /// Puts the copy at once where the creature died in the scene host's game, for a death that came of nothing a
+    /// player did (see <see cref="Update"/>).
+    /// </summary>
+    /// <param name="diedAt">Where the creature died.</param>
+    private void PutCopyWhereItDied(Vector2 diedAt) {
+        var copy = GameObject.Client;
+        if (copy == null) {
+            return;
+        }
+
+        var transform = copy.transform;
+        var from = (Vector2) transform.position;
+        transform.position = new Vector3(diedAt.x, diedAt.y, transform.position.z);
+        if (copy.TryGetComponent<Rigidbody2D>(out var body)) {
+            body.position = diedAt;
+        }
+
+        // Where the positions of the creature put the copy from here on, which they would otherwise pull it back from
+        if (copy.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            interpolation.Rebase(transform.position, Vector3.zero);
+        }
+
+        var distance = Vector2.Distance(from, diedAt);
+        if (distance >= LoggedDeathPlaceDistance) {
+            Logger.Info(
+                $"'{copy.name}' died of nothing a player did {distance:0.00} away from where its copy was here, " +
+                $"at ({diedAt.x:0.00}, {diedAt.y:0.00}), so the copy dies there"
+            );
+        }
     }
 
     /// <summary>
@@ -1336,6 +1387,9 @@ internal class HealthManagerComponent : EntityComponent {
         // creature just before they kill it (SetSpecialDeath), only ever in the game that runs them
         var hasSpecialDeath = self.hasSpecialDeath;
 
+        // Where it dies, before its death takes it anywhere
+        var diedAt = (Vector2) self.transform.position;
+
         _hostCorpse = null;
         InvokeOrig();
 
@@ -1385,6 +1439,9 @@ internal class HealthManagerComponent : EntityComponent {
         // creature's own that its FSM plays out at once, has dropped it already
         data.Packet.Write((int) _killingToolDamage);
         _killingToolDamage = ToolDamageFlags.None;
+
+        data.Packet.Write(diedAt.x);
+        data.Packet.Write(diedAt.y);
 
         WriteDeath(self, _killer, data);
 
@@ -1921,10 +1978,20 @@ internal class HealthManagerComponent : EntityComponent {
                 _healthManager.Client.hasSpecialDeath = data.Packet.ReadBool();
                 var overrideSpecialDeath = data.Packet.ReadBool();
                 var killingToolDamage = (ToolDamageFlags) data.Packet.ReadInt();
+                var diedAt = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
 
                 // The way the last blow came from, for a death that the copy's FSM plays, and the moment held still
                 // only in the game of the player who struck it
-                TakeDeathOf(_healthManager.Client, data);
+                var killer = TakeDeath(_healthManager.Client, data);
+
+                // A creature that died of nothing a player did - the room's lava, its spikes, a fall - dies here where
+                // it died there. The copy can be somewhere else by then: one that the local player wounded went its
+                // own way from where it stood here, while the creature went its own from where it stood there, into
+                // the lava, and the copy burnt up on dry ground. One that a player's blow killed dies where this game
+                // has it, which is where the player who struck it saw the blow land
+                if (killer.Kind == KillerKind.None && !CarriedByParent) {
+                    PutCopyWhereItDied(diedAt);
+                }
 
                 // A creature whose FSM plays its own death threw out its body in the replay of that, which came just
                 // before this from the same death in the scene host's game (EntityFsmActions, SimulateDeath), and the

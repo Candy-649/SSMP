@@ -48,8 +48,19 @@ internal abstract class EntityComponent {
     /// </summary>
     /// <param name="data">The data to send.</param>
     protected void SendData(EntityNetworkData data) {
+        if (SendThrough != null) {
+            SendThrough(data);
+            return;
+        }
+
         _netClient.UpdateManager.AddEntityData(_entityId, data);
     }
+
+    /// <summary>
+    /// What sends the data of this part in its place, if anything: the entity, which holds it back behind its replays
+    /// while it holds any.
+    /// </summary>
+    public System.Action<EntityNetworkData>? SendThrough { get; set; }
 
     /// <summary>
     /// Initializes the entity component when the client user is the scene host.

@@ -439,7 +439,10 @@ internal partial class CoopSave {
         var bosses = AddBossScenes(update.Names);
 
         if (items > 0 || flags > 0 || bosses > 0) {
-            Logger.Info($"Added {items} changes of the world from {player.Username}, with {flags} player data flags and {bosses} boss scenes");
+            Logger.Info(
+                $"Added {items} changes of the world from {player.Username}, with {flags} player data flags of " +
+                $"{update.FlagNames.Count}{DescribeFlags(update)} and {bosses} boss scenes"
+            );
         }
 
         // Flags that changed again after this change, like in both games at about the same time, keep the newer change

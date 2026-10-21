@@ -1,7 +1,9 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -224,14 +226,110 @@ internal partial class CoopSave {
             if (update != null) {
                 SendToMembers(update);
                 Logger.Info(
-                    $"Sent {update.FlagNames.Count} story flags and {update.Names.Count} boss scenes to " +
-                    GetCheckedNames()
+                    $"Sent {update.FlagNames.Count} story flags{DescribeFlags(update)} and {update.Names.Count} boss " +
+                    $"scenes to {GetCheckedNames()}"
                 );
             }
         } catch (Exception e) {
             if (!_storyFlagsFailed) {
                 _storyFlagsFailed = true;
                 Logger.Error($"Could not send the story flags of the two-player save:\n{e}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// The flags of the player data that a change of the world carries, with their values, for the log: " (name=value,
+    /// ...)", or nothing if it carries none.
+    /// </summary>
+    private static string DescribeFlags(CoopSaveUpdate update) {
+        if (update.FlagNames.Count == 0) {
+            return "";
+        }
+
+        const int most = 20;
+        var named = update.FlagNames.Take(most).Select(
+            (name, i) => i < update.FlagValues.Count ? $"{name}={update.FlagValues[i]}" : name
+        );
+        var more = update.FlagNames.Count > most ? $", and {update.FlagNames.Count - most} more" : "";
+        return $" ({string.Join(", ", named)}{more})";
+    }
+
+    /// <summary>
+    /// How long after a room came in its FSMs that test story flags are written down, in seconds: they test them in
+    /// their first states, a frame or two in.
+    /// </summary>
+    private const float StoryReadersLogDelay = 2f;
+
+    /// <summary>
+    /// Writes down, a moment after a room of a two-player save came in, each FSM of it that tests a story flag, what
+    /// those flags are here and the state it is in: what the room made of the flags as the player came in. A flag that
+    /// came from the partner only after that is not looked at again by such a room until it is entered again (USER
+    /// 10-21: a monster's slams heard in the room next to where the partner had killed it, cause not found).
+    /// </summary>
+    private void OnStorySceneChanged(UnityEngine.SceneManagement.Scene scene) {
+        if (GetCurrentMarker() == null) {
+            return;
+        }
+
+        MonoBehaviourUtil.Instance.StartCoroutine(LogStoryReaders(scene));
+    }
+
+    /// <inheritdoc cref="OnStorySceneChanged"/>
+    private static IEnumerator LogStoryReaders(UnityEngine.SceneManagement.Scene scene) {
+        var at = Time.unscaledTime + StoryReadersLogDelay;
+        while (Time.unscaledTime < at) {
+            yield return null;
+        }
+
+        if (!scene.IsValid() || !scene.isLoaded) {
+            yield break;
+        }
+
+        try {
+            LogStoryReadersNow(scene);
+        } catch (Exception e) {
+            Logger.Warn($"Could not write down what tests the story flags in '{scene.name}': {e.Message}");
+        }
+    }
+
+    /// <inheritdoc cref="OnStorySceneChanged"/>
+    private static void LogStoryReadersNow(UnityEngine.SceneManagement.Scene scene) {
+        var playerData = PlayerData.instance;
+        if (playerData == null) {
+            return;
+        }
+
+        var fields = GetStoryFields();
+        var names = new HashSet<string>(StringComparer.Ordinal);
+        var tested = new List<string>();
+        foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(
+                     FindObjectsInactive.Include, FindObjectsSortMode.None
+                 )) {
+            if (fsm == null || fsm.gameObject.scene != scene || fsm.FsmStates == null) {
+                continue;
+            }
+
+            names.Clear();
+            tested.Clear();
+            foreach (var state in fsm.FsmStates) {
+                if (state?.Actions == null) {
+                    continue;
+                }
+
+                foreach (var action in state.Actions) {
+                    if (action is PlayerDataBoolTest { boolName.Value: { } name } && names.Add(name) &&
+                        StoryFieldIndices.TryGetValue(name, out var index) && index < fields.Length) {
+                        tested.Add($"{name}={ReadStoryValue(fields[index], playerData)}");
+                    }
+                }
+            }
+
+            if (tested.Count > 0) {
+                Logger.Info(
+                    $"[Story] '{PathOf(fsm.transform)}' ({fsm.FsmName}) is in '{fsm.ActiveStateName}' " +
+                    $"{StoryReadersLogDelay:0} s after '{scene.name}' came in, testing {string.Join(", ", tested)}"
+                );
             }
         }
     }

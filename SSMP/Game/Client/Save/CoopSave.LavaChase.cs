@@ -21,6 +21,7 @@ namespace SSMP.Game.Client.Save;
 /// same thing. Now it chases whichever of them is lowest, the game that runs the room says where it is, and the other
 /// games follow. A player it catches is not set down below it again: a burn they live through puts them back beside
 /// another player, and a death has them stand up beside a player on their feet a few seconds later, without a cocoon.
+/// Either way the lava stands still for them, neither rising nor going back, until a second after they can move.
 /// Only when no other player can take them - down themselves, or with nowhere safe to stand - does a burn put them
 /// back the game's own way, with the lava pulled down below them for everyone, as the game does it for one player.
 /// </summary>
@@ -99,6 +100,23 @@ internal partial class CoopSave {
     private const float LavaClearance = 6f;
 
     /// <summary>
+    /// How long the lava stands still once a player who was put back beside another, or stood up beside one, can move
+    /// again, in seconds: the pause the game gives a single player after a burn (its Restart Pause). From the moment
+    /// they are put there until then it neither rises nor goes back (USER 10-21 chose this over putting them back only
+    /// far above it). In the race it follows the lowest player at 4 a second within 6 of them, and a player put back
+    /// cannot move for about 1.3 s, so it came over their feet before they could (USER 10-21: 岩浆离我朋友的安全点
+    /// 非常近，她根本没有时间跳起来).
+    /// </summary>
+    private const float PutBackHoldAfterMoving = 1f;
+
+    /// <summary>
+    /// How far above where it is held the lava is shown the player it chases at most, while it is held. Its FSM pulls
+    /// it up at once to a set distance below a player further above it than that (Catchup, 14.5 or 16.5 below), which
+    /// it would do at every step, to be put back at every step; this is no further than it goes slowly from.
+    /// </summary>
+    private const float HeldChaseReach = 6f;
+
+    /// <summary>
     /// The layers on which the game looks for the ground below the place it puts a player back after a burn.
     /// </summary>
     private const int PutBackGroundLayerMask = 8448;
@@ -108,6 +126,11 @@ internal partial class CoopSave {
     /// steps.
     /// </summary>
     private const float PutBackGroundSlack = 0.5f;
+
+    /// <summary>
+    /// What the look for the ground below the local player hit, kept from one frame to the next.
+    /// </summary>
+    private static readonly List<RaycastHit2D> PutBackGroundHits = [];
 
     /// <summary>
     /// How long a player who died in the chase lies down before they stand up beside a player on their feet, in
@@ -291,11 +314,21 @@ internal partial class CoopSave {
         public float SafeTime { get; set; } = float.NegativeInfinity;
 
         /// <summary>
-        /// Where a burn in another game set the lava down, and until when it is held there.
+        /// Where the lava is held, and until when: set down there for a burn in another game, or standing still for a
+        /// player put back beside another (see <see cref="HoldLava"/>).
         /// </summary>
         public float HoldY { get; set; }
 
         public float HoldUntil { get; set; } = float.NegativeInfinity;
+
+        /// <summary>
+        /// Whether the lava stands still for the local player, who was put back beside a member after a burn or stood
+        /// up beside one after a death, and until when it does so: a second after they can move again, moved on while
+        /// they cannot (see <see cref="UpdateOwnPutBackHold"/>).
+        /// </summary>
+        public bool OwnHolding { get; set; }
+
+        public float OwnHoldUntil { get; set; } = float.NegativeInfinity;
 
         /// <summary>
         /// Whether the setting down of the lava for the current burn has been told to the game that runs the room.
@@ -601,6 +634,12 @@ internal partial class CoopSave {
                 return;
             }
 
+            // While the lava is held it is shown nobody further above it than it goes slowly from, which its FSM would
+            // otherwise pull it up to at once, and be put back at every step (HeldChaseReach)
+            if (Time.time < chase.HoldUntil) {
+                where.y = Mathf.Min(where.y, chase.HoldY + HeldChaseReach);
+            }
+
             var transform = chase.Target.transform;
             transform.position = new Vector3(where.x, where.y, transform.position.z);
             chase.TargetBody.position = where;
@@ -656,6 +695,10 @@ internal partial class CoopSave {
 
             var now = Time.time;
             if (now < chase.HoldUntil) {
+                // A hold keeps the lava from rising, never from going down: set down by this game for a burn of its
+                // own player, the game's own way, it stays down and is held there. Pulled back up to where it was
+                // held, it came up over that player as they were put back
+                chase.HoldY = Mathf.Min(chase.HoldY, GetLavaY(chase));
                 SetLavaY(chase, chase.HoldY, 0f);
                 return;
             }
@@ -770,6 +813,7 @@ internal partial class CoopSave {
             chase.LastTop = GetLavaTop(chase);
 
             NoteSafeSpot(hero, chase);
+            UpdateOwnPutBackHold(hero, chase);
 
             // The listeners go back on once the burn they were switched off for is over. The lava hears about a burn
             // while the player is still being put back, so this is soon enough for the next one.
@@ -794,7 +838,10 @@ internal partial class CoopSave {
     /// Notes where the local player stands if it is a safe place to put someone: on the ground, clear of the lava, and
     /// over nothing that hurts. The ground has to be right below the middle of the player, which is where the game
     /// looks for it when it puts a player back: standing on the very edge of a ledge already counts as being on the
-    /// ground, and from there the game would find the ground at the bottom of the drop instead, under the lava.
+    /// ground, and from there the game would find the ground at the bottom of the drop instead, under the lava. And it
+    /// has to be ground that stays: a floor that crumbles under a player crumbles in each game on its own (see
+    /// PersonalPlaces), so one that holds the local player here crumbles under a player put there, in their own game,
+    /// before they can move.
     /// </summary>
     private static void NoteSafeSpot(HeroController hero, LavaChase chase) {
         if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || hero.cState.hazardDeath ||
@@ -803,7 +850,8 @@ internal partial class CoopSave {
         }
 
         var position = (Vector2) hero.transform.position;
-        if (!IsAboveLava(chase, position) || IsInOrOverTheRoomsHarm(position) || !HasGroundRightBelow(hero, position)) {
+        if (!IsAboveLava(chase, position) || IsInOrOverTheRoomsHarm(position) ||
+            GetGroundRightBelow(hero, position) is not { } ground || PersonalPlaces.Contains(ground.gameObject)) {
             return;
         }
 
@@ -812,17 +860,31 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the ground the game puts a player back on is straight below the middle of the local player, no further
-    /// down than their feet and a little more.
+    /// The ground the game puts a player back on, if it is straight below the middle of the local player, no further
+    /// down than their feet and a little more: the nearest solid thing there on the layers the game looks on.
     /// </summary>
-    private static bool HasGroundRightBelow(HeroController hero, Vector2 position) {
+    private static Collider2D? GetGroundRightBelow(HeroController hero, Vector2 position) {
         var collider = hero.GetComponent<Collider2D>();
         if (collider == null) {
-            return false;
+            return null;
         }
 
         var reach = position.y - collider.bounds.min.y + PutBackGroundSlack;
-        return Helper.IsRayHittingNoTriggers(position, Vector2.down, reach, PutBackGroundLayerMask);
+        var filter = new ContactFilter2D { useTriggers = false };
+        filter.SetLayerMask(PutBackGroundLayerMask);
+        Physics2D.Raycast(position, Vector2.down, filter, PutBackGroundHits, reach);
+
+        Collider2D? ground = null;
+        var nearest = float.PositiveInfinity;
+        foreach (var hit in PutBackGroundHits) {
+            if (hit.collider != null && !hit.collider.isTrigger && hit.distance < nearest) {
+                ground = hit.collider;
+                nearest = hit.distance;
+            }
+        }
+
+        PutBackGroundHits.Clear();
+        return ground;
     }
 
     /// <summary>
@@ -850,9 +912,71 @@ internal partial class CoopSave {
                 hasSafeSpot ? 1f : 0f,
                 chase.SafeSpot.x,
                 chase.SafeSpot.y,
-                hasSafeSpot ? safeAge : 0f
+                hasSafeSpot ? safeAge : 0f,
+                chase.OwnHolding ? Mathf.Max(0f, chase.OwnHoldUntil - Time.time) : 0f
             ]
         });
+    }
+
+    /// <summary>
+    /// Has the lava stand still for the local player, who is being put back beside a member after a burn or stood up
+    /// beside one after a death, from now until a second after they can move (see <see cref="UpdateOwnPutBackHold"/>).
+    /// The other games hear it with what this game next says of its lava, which goes at once, and hold theirs too.
+    /// </summary>
+    private void HoldLavaForOwnPutBack() {
+        if (_lavaChase is not { } chase || chase.Body == null || !IsLavaChasing(chase)) {
+            return;
+        }
+
+        chase.OwnHolding = true;
+        chase.OwnHoldUntil = Time.time + PutBackHoldAfterMoving;
+        HoldLava(chase, chase.OwnHoldUntil);
+        _nextLavaSampleTime = 0f;
+        Logger.Info(
+            $"Put back beside a member in the chase, so the lava stands still at {chase.HoldY} until a second after " +
+            "this player can move"
+        );
+    }
+
+    /// <summary>
+    /// Keeps the lava standing still for the local player while they cannot move after being put back, and a second
+    /// after. Not for a player who goes down, as the lava stops for nobody who is down: what is held for them already
+    /// runs out within that second.
+    /// </summary>
+    private static void UpdateOwnPutBackHold(HeroController hero, LavaChase chase) {
+        if (!chase.OwnHolding) {
+            return;
+        }
+
+        if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+            chase.OwnHolding = false;
+            return;
+        }
+
+        var now = Time.time;
+        if (hero.cState.hazardDeath || hero.cState.hazardRespawning) {
+            chase.OwnHoldUntil = now + PutBackHoldAfterMoving;
+        } else if (now >= chase.OwnHoldUntil) {
+            chase.OwnHolding = false;
+            return;
+        }
+
+        HoldLava(chase, chase.OwnHoldUntil);
+    }
+
+    /// <summary>
+    /// Holds the lava where it is until the given time, or for as long as it is held already if that is longer, from
+    /// where it is if nothing holds it yet, so that it does not go back.
+    /// </summary>
+    /// <returns>Whether that began a hold.</returns>
+    private static bool HoldLava(LavaChase chase, float until) {
+        var began = Time.time >= chase.HoldUntil;
+        if (began) {
+            chase.HoldY = GetLavaY(chase);
+        }
+
+        chase.HoldUntil = Mathf.Max(chase.HoldUntil, until);
+        return began;
     }
 
     /// <summary>
@@ -931,6 +1055,14 @@ internal partial class CoopSave {
             member.SafeSpot = new Vector2(update.Values[4], update.Values[5]);
             // As old as it already was when it was sent
             member.SafeTime = Time.time - update.Values[6];
+        }
+
+        // The member was put back beside another, or stood up beside one, and cannot move yet or only just can: the
+        // lava stands still in every game for as long as theirs says, the one that runs the room and the others that
+        // follow it, which would otherwise go on rising, or pull theirs up to the member (HeldChaseReach)
+        if (update.Values.Count >= 8 && update.Values[7] > 0f && chase.Body != null &&
+            HoldLava(chase, Time.time + update.Values[7])) {
+            Logger.Info($"{player.Username} was put back beside a member, so the lava stands still at {chase.HoldY}");
         }
     }
 
@@ -1075,6 +1207,7 @@ internal partial class CoopSave {
         }
 
         playerData.hazardRespawnLocation = new Vector3(spot.x, spot.y, playerData.hazardRespawnLocation.z);
+        HoldLavaForOwnPutBack();
     }
 
     /// <summary>

@@ -662,9 +662,13 @@ internal partial class Entity {
 
         _updatableComponents = new List<EntityComponent>();
         foreach (var component in _components.Values) {
-            if (component != null &&
-                component is not HealthManagerComponent &&
-                !_updatableComponents.Contains(component)) {
+            if (component == null) {
+                continue;
+            }
+
+            // What the parts send goes through the entity, which holds it back with its replays (SendEntityData)
+            component.SendThrough = SendEntityData;
+            if (component is not HealthManagerComponent && !_updatableComponents.Contains(component)) {
                 _updatableComponents.Add(component);
             }
         }
@@ -996,7 +1000,9 @@ internal partial class Entity {
                 Object,
                 healthManager,
                 Type
-            );
+            ) {
+                CarriedByParent = _hasParent
+            };
             _components[EntityComponentType.Death] = hmComponent;
             _components[EntityComponentType.Health] = hmComponent;
             _components[EntityComponentType.Invincibility] = hmComponent;
@@ -1186,6 +1192,22 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// The replays of the creature that the scene host holds back until the end of the frame, in the order they came,
+    /// from one that switches on the drawing of the creature (see <see cref="DrawsItselfOn"/>); null while none are.
+    /// They go out after where the creature is by then (see <see cref="SendHeldOncePlaced"/>). Sent at once, the copy
+    /// was drawn where the creature had been: where the creature's FSM put it, before or after it showed it, only went
+    /// out with the next look at the entity, often in the packet after. A wave of creatures that rested out of sight
+    /// until called showed up at its resting place, and only then came flying in from where its wave starts it (USER
+    /// 10-21: 出怪的时候我这边怪会先闪一下，然后再出来).
+    /// </summary>
+    private List<EntityNetworkData>? _heldUntilPlaced;
+
+    /// <summary>
+    /// The frame in which <see cref="_heldUntilPlaced"/> began.
+    /// </summary>
+    private int _heldSince;
+
+    /// <summary>
     /// Callback method for entering a hooked FSM action.
     /// </summary>
     /// <param name="self">The FSM action instance that was entered.</param>
@@ -1242,7 +1264,12 @@ internal partial class Entity {
         // for sending
         var sent = EntityFsmActions.GetNetworkDataFromAction(networkData, self);
         if (sent) {
-            _netClient.UpdateManager.AddEntityData(Id, networkData);
+            if (_heldUntilPlaced == null && DrawsItselfOn(self)) {
+                _heldUntilPlaced = [];
+                _heldSince = Time.frameCount;
+            }
+
+            SendEntityData(networkData);
         }
 
         if (IsDazeRingSpawn(self)) {
@@ -1434,6 +1461,8 @@ internal partial class Entity {
     /// </summary>
     /// <param name="fsmIndex">The index of the FSM.</param>
     private void SendStateChange(int fsmIndex) {
+        SendHeldFromAnEarlierFrame();
+
         var fsm = _fsms.Host[fsmIndex];
         var snapshot = _fsmSnapshots[fsmIndex];
         // An action that works as its state is left (FsmActionHooks) runs while the FSM is in no state at all
@@ -1489,8 +1518,9 @@ internal partial class Entity {
 
     /// <summary>
     /// Sends where the creature is and the way it faces, as a state of its FSM goes that a move the copy plays by
-    /// itself is in (see <see cref="SendStateChange"/>), the same as the next look at the entity would (see
-    /// <see cref="OnUpdate"/>), which then finds nothing new to send. Not for a part of another entity, while the
+    /// itself is in (see <see cref="SendStateChange"/>), or before what showed the creature again (see
+    /// <see cref="SendHeldOncePlaced"/>), the same as the next look at the entity would (see <see cref="OnUpdate"/>),
+    /// which then finds nothing new to send. Not for a part of another entity, while the
     /// entity moves by itself or while what the other player did to it is being answered: then the next look sends it
     /// with all else that it takes.
     /// </summary>
@@ -1825,6 +1855,66 @@ internal partial class Entity {
     private void OnLateUpdate() {
         if (_isControlled) {
             HideTheRoomsOwnCopy();
+
+            // Nothing of the scene host's goes out from a game that no longer runs the room
+            _heldUntilPlaced = null;
+            return;
+        }
+
+        SendHeldOncePlaced();
+    }
+
+    /// <summary>
+    /// Whether an action of the creature's FSM switches on the drawing of the creature, or of a part of it that goes
+    /// where it goes. Not for a part of another entity, whose place goes nowhere: the copy of that carries it.
+    /// </summary>
+    private bool DrawsItselfOn(FsmStateAction action) {
+        return !_hasParent && Object.Host != null && action is SetMeshRenderer { active.Value: true } draw &&
+               draw.Fsm.GetOwnerDefaultTarget(draw.gameObject) is var drawn && drawn != null &&
+               drawn.transform.IsChildOf(Object.Host.transform);
+    }
+
+    /// <summary>
+    /// Sends data of the entity in this update: a replay, an echo, or what one of its parts sends. While replays are
+    /// held back (see <see cref="_heldUntilPlaced"/>) it goes behind them, in the order it came: an echo that went
+    /// ahead of the replays of the input it answers had the other game play its reaction a second time, and a death
+    /// ahead of the replay of the death that its FSM plays left the body where it fell.
+    /// </summary>
+    private void SendEntityData(EntityNetworkData data) {
+        if (_heldUntilPlaced != null) {
+            _heldUntilPlaced.Add(data);
+            return;
+        }
+
+        _netClient.UpdateManager.AddEntityData(Id, data);
+    }
+
+    /// <summary>
+    /// Sends what was held back in an earlier frame (see <see cref="_heldUntilPlaced"/>) before anything of this one.
+    /// A state entered after the entity's look at the end of a frame, as some are when an animation ends, holds what
+    /// it shows into the next frame, where a state the FSM went on to would otherwise go out ahead of it, and the
+    /// other game end what it began at once.
+    /// </summary>
+    private void SendHeldFromAnEarlierFrame() {
+        if (_heldUntilPlaced != null && _heldSince != Time.frameCount) {
+            SendHeldOncePlaced();
+        }
+    }
+
+    /// <summary>
+    /// Sends the replays of the creature held back this frame (see <see cref="_heldUntilPlaced"/>), after where the
+    /// creature is now. The other game takes the place in a packet before what came with it, and the place goes no
+    /// later than them, so the copy is there before it is drawn.
+    /// </summary>
+    private void SendHeldOncePlaced() {
+        if (_heldUntilPlaced is not { } held) {
+            return;
+        }
+
+        _heldUntilPlaced = null;
+        SendPositionWithTheMove();
+        foreach (var data in held) {
+            _netClient.UpdateManager.AddEntityData(Id, data);
         }
     }
 
@@ -1894,6 +1984,7 @@ internal partial class Entity {
             return;
         }
 
+        SendHeldFromAnEarlierFrame();
         UpdateLeads();
         LetThePlayerBackIn(false);
         SayIfTheCopyIsOnHere();
@@ -4903,6 +4994,7 @@ internal partial class Entity {
     public void Destroy() {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
+        _heldUntilPlaced = null;
 
         // What the entity was doing to the local player is undone first. Its hooks and parts go whatever happens there:
         // left behind, they would go on acting for a room that is gone
