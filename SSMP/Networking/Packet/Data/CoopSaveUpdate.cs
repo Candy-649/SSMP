@@ -755,7 +755,8 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.Part"/> is the part, counting from 0, <see cref="CoopSaveUpdate.PartCount"/> how many
     /// parts there are, <see cref="CoopSaveUpdate.Bytes"/> its bytes, and <see cref="CoopSaveUpdate.FsmName"/> is
     /// "gzip" when the save is compressed. With a part count of 0 it carries no part: it is the host's answer, sent as
-    /// soon as the request arrives, that the save follows once the host is in the game.
+    /// soon as the request arrives and again whenever it changes, and <see cref="CoopSaveUpdate.Part"/> says what keeps
+    /// the save from coming (0 for nothing), or that the host's game could not take it (CoopSave.HostSaveWait).
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.

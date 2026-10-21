@@ -353,12 +353,11 @@ internal partial class CoopSave {
             }
         }
 
-        // Its own try too: a player waiting in the menu for the host's save must get it even when the rest fails
+        // Its own try too. The host's save goes out from every frame, the menu included (OnHostSaveUpdate)
         try {
-            UpdateHostSaveRequests();
             UpdateJoinSummary();
         } catch (Exception e) {
-            Logger.Error($"Could not send the host's save:\n{e}");
+            Logger.Error($"Could not tell what joining the host's save changed:\n{e}");
         }
     }
 
@@ -695,6 +694,7 @@ internal partial class CoopSave {
     /// when the local player leaves the scene of its fight.
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
+        _activeSceneName = newScene.name;
         if (newScene.name == MenuSceneName) {
             OnReturnToMainMenu();
             return;
@@ -766,6 +766,7 @@ internal partial class CoopSave {
     /// </summary>
     public void OnPlayerDisconnect(ushort id, string username) {
         _hostSaveRequests.Remove(id);
+        _hostSaveWaitTold.Remove(id);
         _declinedBy.Remove(id);
 
         // What they sent while this game was out of the rooms belongs to the session they just left. A player who
@@ -875,6 +876,7 @@ internal partial class CoopSave {
         _declinedBy.Clear();
 
         _hostSaveRequests.Clear();
+        _hostSaveWaitTold.Clear();
         _hostSaveSends.Clear();
         _updatesOutOfRoom.Clear();
         ForgetJoin();

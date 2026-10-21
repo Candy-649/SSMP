@@ -70,6 +70,12 @@ internal partial class CoopSave {
     private const int PermadeathMode = 1;
 
     /// <summary>
+    /// The scene of the opening of a new game. It plays with the save that the game made for the new game before it
+    /// (GameManager.StartNewGame), whose world nothing has touched yet.
+    /// </summary>
+    private const string NewGameOpeningScene = "Opening_Sequence";
+
+    /// <summary>
     /// Whether the local game hosts the server, which only the host's own game knows.
     /// </summary>
     public Func<bool>? IsHosting { get; set; }
@@ -102,6 +108,17 @@ internal partial class CoopSave {
     /// </summary>
     private float _hostSaveNextSend;
 
+    /// <summary>
+    /// What each player whose request waits was last told about what keeps the host's save from coming.
+    /// </summary>
+    private readonly Dictionary<ushort, HostSaveWait> _hostSaveWaitTold = new();
+
+    /// <summary>
+    /// The name of the scene that is active, kept as it changes (<see cref="OnActiveSceneChanged"/>), so that asking
+    /// it every frame while requests for the host's save wait makes no new string, or null before the first change.
+    /// </summary>
+    private string? _activeSceneName;
+
     #endregion
 
     #region Joining player
@@ -125,6 +142,14 @@ internal partial class CoopSave {
     /// The parts of the host's save that arrived for the request, by part.
     /// </summary>
     private readonly Dictionary<ushort, byte[]> _hostSaveParts = new();
+
+    /// <summary>
+    /// The number of the message that the local player waits for the host's save with
+    /// (<see cref="CoopMessageBox.ShowWait"/>), and what it says keeps the save from coming.
+    /// </summary>
+    private int _joinMessage;
+
+    private HostSaveWait _joinWait;
 
     /// <summary>
     /// The slot that the local player chose to join with, while the host's save is on its way.
@@ -179,7 +204,44 @@ internal partial class CoopSave {
     #endregion
 
     /// <summary>
-    /// Registers the hook that loads aligned saves.
+    /// What keeps the host's save from coming, which the host's answer to a request carries in
+    /// <see cref="CoopSaveUpdate.Part"/>, with a part count of 0, so that the player who waits sees what for. Sent
+    /// again whenever it changes.
+    /// </summary>
+    private enum HostSaveWait : ushort {
+        /// <summary>
+        /// Nothing: the save comes at once.
+        /// </summary>
+        None = 0,
+
+        /// <summary>
+        /// The host hasn't loaded a save.
+        /// </summary>
+        InMenu = 1,
+
+        /// <summary>
+        /// The host watches a cutscene, or is in a moment of the game that can't be paused.
+        /// </summary>
+        Cutscene = 2,
+
+        /// <summary>
+        /// The host died, or is down until someone pulls them up.
+        /// </summary>
+        Down = 3,
+
+        /// <summary>
+        /// The host's game changes rooms, loads, or writes a save: a moment.
+        /// </summary>
+        Busy = 4,
+
+        /// <summary>
+        /// The host's game could not take its save, which ends the request.
+        /// </summary>
+        Failed = 5
+    }
+
+    /// <summary>
+    /// Registers the hook that loads aligned saves, and sends the host's save from every frame.
     /// </summary>
     private void RegisterHostSyncHooks() {
         _setLoadedGameDataHook = CreateHook(
@@ -190,6 +252,10 @@ internal partial class CoopSave {
                 OnSetLoadedGameData
             )
         );
+
+        // The menu included: the host answers from there, and sends from the opening of a new game, where there is no
+        // hero whose frames would do it
+        MonoBehaviourUtil.Instance.OnUpdateEvent += OnHostSaveUpdate;
     }
 
     /// <summary>
@@ -212,7 +278,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// A player who chose a save in the menu asks for the host's save. Only the host's game answers: at once, that it
-    /// has the save, and with the save once the host is in a moment that the game could save in.
+    /// has the save and what keeps it from coming, if anything, and with the save once nothing does.
     /// </summary>
     private void OnHostSaveRequest(ClientPlayerData player, CoopSaveUpdate update) {
         if (IsHosting?.Invoke() != true) {
@@ -220,15 +286,76 @@ internal partial class CoopSave {
         }
 
         // A part count of none: the answer of a host, which lets a player on a server that nobody hosts hear so
-        // rather than wait for good, and lets a host still in the menu be told apart from no host
-        Send(new CoopSaveUpdate { TargetId = player.Id, Kind = CoopSaveUpdateKind.HostSave, Key = update.Key });
+        // rather than wait for good, and lets a host still in the menu be told apart from no host. It goes out even
+        // when what keeps the save can't be told, or the player would hear after ten seconds that nobody hosts.
+        HostSaveWait wait;
+        try {
+            wait = GetHostSaveWait();
+        } catch (Exception e) {
+            Logger.Error($"Could not tell what keeps the host's save from coming:\n{e}");
+            wait = HostSaveWait.None;
+        }
+
+        SendHostSaveWait(player.Id, update.Key, wait);
         _hostSaveRequests[player.Id] = update.Key;
-        Logger.Info($"{player.Username} asks for the host's save to join with ({update.Key})");
+        _hostSaveWaitTold[player.Id] = wait;
+        Logger.Info($"{player.Username} asks for the host's save to join with ({update.Key}), kept by: {wait}");
     }
 
     /// <summary>
-    /// Sends the host's save to the players who asked for it, once the host is in a moment that the game could save in,
-    /// and sends the parts that are still to go.
+    /// The answer to a request for the host's save that carries no part: that this game hosts, and what keeps the save
+    /// from coming, or that it could not be taken.
+    /// </summary>
+    private void SendHostSaveWait(ushort id, ulong request, HostSaveWait wait) {
+        Send(new CoopSaveUpdate {
+            TargetId = id, Kind = CoopSaveUpdateKind.HostSave, Key = request, Part = (ushort) wait
+        });
+    }
+
+    /// <summary>
+    /// Sends the host's save and tells the players who wait for it what keeps it from coming. Its own try: a player
+    /// waiting in the menu for the host's save must get it even when the rest of the game's frame fails, or hear that
+    /// it won't come.
+    /// </summary>
+    private void OnHostSaveUpdate() {
+        try {
+            UpdateHostSaveRequests();
+        } catch (Exception e) {
+            Logger.Error($"Could not send the host's save:\n{e}");
+            FailHostSaveRequests();
+        }
+    }
+
+    /// <summary>
+    /// Tells every player who waits for the host's save, whose request waits or whose parts are still to go, that it
+    /// won't come, and forgets them all, so that a failure can't leave anyone waiting for good, nor repeat every frame.
+    /// </summary>
+    private void FailHostSaveRequests() {
+        // The parts first: a request that waits is always newer than the parts of an earlier one to the same player
+        var failed = new Dictionary<ushort, ulong>();
+        foreach (var part in _hostSaveSends) {
+            failed[part.TargetId] = part.Key;
+        }
+
+        foreach (var request in _hostSaveRequests) {
+            failed[request.Key] = request.Value;
+        }
+
+        _hostSaveRequests.Clear();
+        _hostSaveWaitTold.Clear();
+        _hostSaveSends.Clear();
+        foreach (var request in failed) {
+            try {
+                SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed);
+            } catch (Exception e) {
+                Logger.Error($"Could not tell a player that the host's save won't come:\n{e}");
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sends the host's save to the players who asked for it once nothing keeps it from coming, tells them what does
+    /// while something does, and sends the parts that are still to go.
     /// </summary>
     private void UpdateHostSaveRequests() {
         var now = UnityEngine.Time.unscaledTime;
@@ -246,11 +373,28 @@ internal partial class CoopSave {
             return;
         }
 
-        foreach (var id in _hostSaveRequests.Keys.Where(id => !_playerData.ContainsKey(id)).ToList()) {
-            _hostSaveRequests.Remove(id);
+        // Looked over first, so that nothing is made every frame while requests wait
+        List<ushort>? gone = null;
+        foreach (var id in _hostSaveRequests.Keys) {
+            if (!_playerData.ContainsKey(id)) {
+                (gone ??= []).Add(id);
+            }
         }
 
-        if (_hostSaveRequests.Count == 0 || !CanTakeHostSave()) {
+        if (gone != null) {
+            foreach (var id in gone) {
+                _hostSaveRequests.Remove(id);
+                _hostSaveWaitTold.Remove(id);
+            }
+        }
+
+        if (_hostSaveRequests.Count == 0) {
+            return;
+        }
+
+        var wait = GetHostSaveWait();
+        if (wait != HostSaveWait.None) {
+            TellHostSaveWait(wait);
             return;
         }
 
@@ -265,7 +409,14 @@ internal partial class CoopSave {
             );
         } catch (Exception e) {
             Logger.Error($"Could not take the host's save to send:\n{e}");
+
+            // The players who wait hear it, rather than wait for good
+            foreach (var request in _hostSaveRequests) {
+                SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed);
+            }
+
             _hostSaveRequests.Clear();
+            _hostSaveWaitTold.Clear();
             return;
         }
 
@@ -288,25 +439,75 @@ internal partial class CoopSave {
         }
 
         _hostSaveRequests.Clear();
+        _hostSaveWaitTold.Clear();
     }
 
     /// <summary>
-    /// Whether the host is in a moment that the game could save in, like <see cref="CopySave"/> asks: not in a room
-    /// change, a death or a scene that can't be paused, not about to wake in the last act, which the game sets up as
-    /// the save loads, and not while the game writes a save of its own.
+    /// Tells the players whose requests wait what keeps the host's save from coming, each once for as long as that
+    /// stays the same.
     /// </summary>
-    private static bool CanTakeHostSave() {
-        if (!IsInGame()) {
-            return false;
+    private void TellHostSaveWait(HostSaveWait wait) {
+        var told = 0;
+        foreach (var request in _hostSaveRequests) {
+            if (_hostSaveWaitTold.TryGetValue(request.Key, out var last) && last == wait) {
+                continue;
+            }
+
+            SendHostSaveWait(request.Key, request.Value, wait);
+            _hostSaveWaitTold[request.Key] = wait;
+            told++;
         }
 
-        var gameManager = global::GameManager.instance;
-        var hero = HeroController.instance;
+        if (told > 0) {
+            Logger.Info($"Told {told} players who wait for the host's save what keeps it: {wait}");
+        }
+    }
+
+    /// <summary>
+    /// What keeps the host's game from taking its save now, or nothing. It takes it in a moment that the game could
+    /// save in, like <see cref="CopySave"/> asks: not in a room change, a death or a moment that can't be paused, not
+    /// about to wake in the last act, which the game sets up as the save loads, and not while the game writes a save of
+    /// its own. And in two moments more, which a player waited through for nothing (USER 10-22: someone stuck on the
+    /// wait for the host's save): the pause menu, in which nothing of the game moves, and the opening of a new game,
+    /// which plays with the save that the game made for it before the opening, untouched by anything yet.
+    /// </summary>
+    private HostSaveWait GetHostSaveWait() {
+        // The quiet getters: the others search the scenes and log an error in every frame without one, like the frames
+        // between quitting to the menu and the menu
+        var gameManager = global::GameManager.UnsafeInstance;
+        if (gameManager == null) {
+            return HostSaveWait.InMenu;
+        }
+
+        var scene = _activeSceneName ?? SceneUtil.GetCurrentSceneName();
+        if (scene == NewGameOpeningScene) {
+            return IsGameSaving() ? HostSaveWait.Busy : HostSaveWait.None;
+        }
+
+        if (gameManager.GameState is GameState.MAIN_MENU or GameState.INACTIVE or GameState.PRIMER ||
+            scene is "Menu_Title" or "Quit_To_Menu" or "Pre_Menu_Intro") {
+            return HostSaveWait.InMenu;
+        }
+
+        // The game's own cinematic scenes, which SSMP's list of scenes without play lacks two of
+        if (gameManager.GameState == GameState.CUTSCENE || SceneUtil.IsNonGameplayScene(scene) ||
+            scene is "Opening_Sequence_Act3" or "Cinematic_Submarine_travel") {
+            return HostSaveWait.Cutscene;
+        }
+
+        var hero = HeroController.UnsafeInstance;
         var playerData = PlayerData.instance;
-        return gameManager.GameState == GameState.PLAYING && !gameManager.IsInSceneTransition && !hero.cState.dead &&
-               !hero.cState.transitioning && !hero.cState.hazardRespawning &&
-               !PlayerTargetRegistry.IsPlayerDown(hero.gameObject) && !playerData.disablePause &&
-               !playerData.IsAct3IntroQueued && !IsGameSaving();
+        if (hero == null || playerData == null ||
+            gameManager.GameState is not (GameState.PLAYING or GameState.PAUSED) || gameManager.IsInSceneTransition ||
+            hero.cState.transitioning || hero.cState.hazardRespawning || IsGameSaving()) {
+            return HostSaveWait.Busy;
+        }
+
+        if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+            return HostSaveWait.Down;
+        }
+
+        return playerData.disablePause || playerData.IsAct3IntroQueued ? HostSaveWait.Cutscene : HostSaveWait.None;
     }
 
     /// <summary>
@@ -320,11 +521,15 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The host's save as the game would save it now, as JSON: the objects of the room the host is in are saved into
-    /// the scene data first, like the game does at every room change, and nothing is written to disk.
+    /// the scene data first, like the game does at every room change, and nothing is written to disk. Not in the
+    /// opening of a new game, which has no such objects, while the first room loads behind it.
     /// </summary>
     private static string TakeHostSave() {
         var gameManager = global::GameManager.instance;
-        gameManager.SaveLevelState();
+        if (SceneUtil.GetCurrentSceneName() != NewGameOpeningScene) {
+            gameManager.SaveLevelState();
+        }
+
         return SaveDataUtility.SerializeSaveData(new SaveGameData(gameManager.playerData, gameManager.sceneData), null);
     }
 
@@ -428,13 +633,11 @@ internal partial class CoopSave {
         _hostAnswered = false;
         _hostSaveSender = null;
         _hostSaveParts.Clear();
+        _joinWait = HostSaveWait.None;
         SendToMembers(new CoopSaveUpdate { Kind = CoopSaveUpdateKind.HostSaveRequest, Key = request });
         Logger.Info($"Asked for the host's save to join with save slot {slot} ({request})");
-        CoopMessageBox.ShowWait(
-            Lang.Pick(
-                "Getting the host's save. If the host hasn't loaded theirs yet, this waits until they have.",
-                "正在接收房主的存档。房主还没进存档的话，会等房主进了再继续。"
-            ),
+        _joinMessage = CoopMessageBox.ShowWait(
+            GetJoinWaitText(HostSaveWait.None),
             Lang.Pick("Stop waiting", "不等了"),
             OnJoinMessageClosed
         );
@@ -456,6 +659,30 @@ internal partial class CoopSave {
                 "再选一次这个存档，就按原样进入，不和任何人的存档对齐。"
             ));
         });
+    }
+
+    /// <summary>
+    /// What the wait for the host's save says, with what keeps it from coming when the host said so.
+    /// </summary>
+    private static string GetJoinWaitText(HostSaveWait wait) {
+        var getting = Lang.Pick("Getting the host's save.", "正在接收房主的存档。");
+        var why = wait switch {
+            HostSaveWait.InMenu => Lang.Pick(
+                "The host hasn't loaded a save yet. It comes once they have.",
+                "房主还没进存档，进了存档就会传过来。"
+            ),
+            HostSaveWait.Cutscene => Lang.Pick(
+                "The host is in a cutscene. It comes once that's over.",
+                "房主正在看动画或剧情，完了就会传过来。"
+            ),
+            HostSaveWait.Down => Lang.Pick(
+                "The host is down. It comes once they're back up.",
+                "房主倒下了，起来以后就会传过来。"
+            ),
+            HostSaveWait.Busy => Lang.Pick("The host's game needs a moment.", "房主那边马上就好。"),
+            _ => null
+        };
+        return why == null ? getting : getting + Lang.Pick(" ", "") + why;
     }
 
     private static ulong NewHostSaveRequestId() {
@@ -483,6 +710,7 @@ internal partial class CoopSave {
         _hostAnswered = false;
         _hostSaveSender = null;
         _hostSaveParts.Clear();
+        _joinWait = HostSaveWait.None;
     }
 
     /// <summary>
@@ -511,6 +739,7 @@ internal partial class CoopSave {
                 Logger.Info($"{player.Username} answered as the host ({update.Key})");
             }
 
+            OnHostSaveWait(player, (HostSaveWait) update.Part);
             return;
         }
 
@@ -561,6 +790,35 @@ internal partial class CoopSave {
                 ContinueJoin(button, eventData, save, hostName);
             }
         });
+    }
+
+    /// <summary>
+    /// The host said what keeps their save from coming, which the wait shows, or that their game could not take it,
+    /// which ends the wait.
+    /// </summary>
+    private void OnHostSaveWait(ClientPlayerData player, HostSaveWait wait) {
+        if (wait == HostSaveWait.Failed) {
+            Logger.Info($"The game of the host {player.Username} could not take their save to send");
+            var waiting = _joinButton != null;
+            ClearJoin();
+            if (waiting) {
+                CloseMessage();
+                ShowLater(Lang.Pick(
+                    "The host's game couldn't get their save ready. Choose your save again to try again.",
+                    "房主那边的存档没能取出来。重新选一次存档再试。"
+                ));
+            }
+
+            return;
+        }
+
+        if (_joinButton == null || wait == _joinWait) {
+            return;
+        }
+
+        _joinWait = wait;
+        Logger.Info($"The host's save is kept by: {wait}");
+        CoopMessageBox.SetText(_joinMessage, GetJoinWaitText(wait));
     }
 
     /// <summary>

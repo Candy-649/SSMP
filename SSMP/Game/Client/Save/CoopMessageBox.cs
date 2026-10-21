@@ -111,6 +111,12 @@ internal static class CoopMessageBox {
     private static bool _wasInputActive;
 
     /// <summary>
+    /// The number of the last message shown, counted up as each is shown, so that a change of the text reaches only
+    /// the message it was meant for.
+    /// </summary>
+    private static int _shown;
+
+    /// <summary>
     /// Whether the box is up.
     /// </summary>
     public static bool IsOpen { get; private set; }
@@ -131,8 +137,20 @@ internal static class CoopMessageBox {
     /// <param name="text">The message.</param>
     /// <param name="stopLabel">The text of the button that stops waiting.</param>
     /// <param name="onStop">What runs once the player stopped waiting.</param>
-    public static void ShowWait(string text, string stopLabel, Action onStop) {
+    /// <returns>The number of the message, which <see cref="SetText"/> takes.</returns>
+    public static int ShowWait(string text, string stopLabel, Action onStop) {
         Open(text, Lang.Pick("Keep waiting", "继续等"), true, null, stopLabel, onStop, onStop);
+        return _shown;
+    }
+
+    /// <summary>
+    /// Changes the text of a message that is still up, named by the number that showing it gave, so that a message
+    /// shown in its place since keeps its own.
+    /// </summary>
+    public static void SetText(int shown, string text) {
+        if (IsOpen && shown == _shown && _text != null) {
+            _text.text = text;
+        }
     }
 
     /// <summary>
@@ -157,6 +175,7 @@ internal static class CoopMessageBox {
             return;
         }
 
+        _shown++;
         _text!.text = text;
         _firstLabel!.text = ButtonLabel(firstLabel ?? OkLabel());
         _firstKeepsOpen = firstKeepsOpen;
