@@ -6,7 +6,9 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        # No macOS: GitHub's macOS runners are often not to be had, and the job is then cancelled after 15 minutes,
+        # which fails the whole run. Nobody here uses the Mac build of the server.
+        os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -33,7 +35,7 @@ jobs:
           name: SSMP
           path: ${{ github.workspace }}/bin/Release/netstandard2.1/
           
-      # Upload the SSMPServer artifact for all three platforms, since it is platform dependent
+      # Upload the SSMPServer artifact for each platform, since it is platform dependent
       - name: Upload SSMPServer (Linux) artifact
         if: runner.os == 'Linux'
         uses: actions/upload-artifact@v7
@@ -46,13 +48,6 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: SSMPServer-windows
-          path: ${{ github.workspace }}/bin/Release/net9.0/
-
-      - name: Upload SSMPServer (Mac) artifact
-        if: runner.os == 'macOS'
-        uses: actions/upload-artifact@v7
-        with:
-          name: SSMPServer-macos
           path: ${{ github.workspace }}/bin/Release/net9.0/
 
       # Upload the NuGet package
