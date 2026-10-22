@@ -760,8 +760,10 @@ internal partial class Entity {
                 };
 
                 if (action is SpawnObjectFromGlobalPool or FlingObjectsFromGlobalPool
-                    or FlingObjectsFromGlobalPoolVel or SpawnRandomObjectsRadialV2 or SendEventByName
-                    or SendEventByNameV2 or SendEventByNameOnExit or SendEventToRegister or SendEventToRegisterV2) {
+                    or FlingObjectsFromGlobalPoolVel or SpawnRandomObjectsRadialV2 or FlingObjectsFromGlobalPoolTime
+                    or FlingObjectsFromGlobalPoolVelTime or SpawnObjectFromGlobalPoolOverTime
+                    or SpawnObjectFromGlobalPoolOverTimeV2 or SendEventByName or SendEventByNameV2
+                    or SendEventByNameOnExit or SendEventToRegister or SendEventToRegisterV2) {
                     ThrowingActions.AddOrUpdate(action, this);
                 }
 

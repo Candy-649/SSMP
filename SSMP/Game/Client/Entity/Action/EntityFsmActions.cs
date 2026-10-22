@@ -105,11 +105,6 @@ internal static partial class EntityFsmActions {
     private static ILHook? _flingPoolVelHook;
 
     /// <summary>
-    /// ILHook for FlingObjectsFromGlobalPoolTime.OnUpdate.
-    /// </summary>
-    private static ILHook? _flingPoolTimeUpdateHook;
-
-    /// <summary>
     /// ILHook for FlingObjectsFromGlobalPoolTime.OnEnter (NOP emit).
     /// </summary>
     private static ILHook? _flingPoolTimeEnterNopHook;
@@ -174,13 +169,6 @@ internal static partial class EntityFsmActions {
             )!,
             FlingObjectsFromGlobalPoolVelOnEnter
         );
-        _flingPoolTimeUpdateHook = new ILHook(
-            typeof(FlingObjectsFromGlobalPoolTime).GetMethod(
-                "OnUpdate",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
-            )!,
-            FlingObjectsFromGlobalPoolTimeOnUpdate
-        );
         _getRandomChildHook = new ILHook(
             typeof(GetRandomChild).GetMethod(
                 "DoGetRandomChild",
@@ -213,6 +201,8 @@ internal static partial class EntityFsmActions {
             )!,
             EmitNop
         );
+
+        HookTimedActions();
         return;
 
         // Register the IL hooks for modifying FSM action methods
@@ -1095,42 +1085,6 @@ internal static partial class EntityFsmActions {
             );
         } catch (Exception e) {
             Logger.Error($"Could not change FlingObjectsFromGlobalPoolVel#OnEnter IL:\n{e}");
-        }
-    }
-
-    /// <summary>
-    /// IL edit method for modifying the <see cref="FlingObjectsFromGlobalPoolTime"/>
-    /// <see cref="FlingObjectsFromGlobalPoolTime.OnUpdate"/> method to network the repeated spawning of objects.
-    /// </summary>
-    private static void FlingObjectsFromGlobalPoolTimeOnUpdate(ILContext il) {
-        try {
-            // Create a cursor for this context
-            var c = new ILCursor(il);
-
-            // Goto the next call instruction for Random.Range()
-            c.GotoNext(i => i.MatchCall(typeof(ObjectPoolExtensions), "Spawn"));
-
-            // Move the cursor after the call instruction
-            c.Index++;
-
-            // Push the current instance of the class onto the stack
-            c.Emit(OpCodes.Ldarg_0);
-
-            // Emit a delegate that pops the spawned object off the stack and pushes it onto it again
-            c.EmitDelegate<Func<GameObject, FlingObjectsFromGlobalPoolTime, GameObject>>((gameObject, action) => {
-                    EntitySpawnEvent?.Invoke(
-                        new EntitySpawnDetails {
-                            Type = EntitySpawnType.FsmAction,
-                            Action = action,
-                            GameObject = gameObject
-                        }
-                    );
-
-                    return gameObject;
-                }
-            );
-        } catch (Exception e) {
-            Logger.Error($"Could not change FlingObjectsFromGlobalPoolTime#OnUpdate IL:\n{e}");
         }
     }
 

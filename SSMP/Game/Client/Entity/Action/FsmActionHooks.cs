@@ -26,6 +26,13 @@ internal static class FsmActionHooks {
     };
 
     /// <summary>
+    /// The actions that have no OnEnter of their own, so that there is nothing of theirs to hook: hooking the OnEnter
+    /// they inherit would hook every action that has none. Their first update in each visit of their state tells that
+    /// they were entered instead (EntityFsmActions, <see cref="TellEntered"/>).
+    /// </summary>
+    private static readonly HashSet<Type> EnteredAtFirstUpdate = [typeof(SpawnObjectFromGlobalPoolOverTimeV2)];
+
+    /// <summary>
     /// Dictionary mapping types (subtypes of <see cref="FsmStateAction"/>) to an hook class.
     /// </summary>
     private static readonly Dictionary<Type, FsmActionHook> TypeEvents;
@@ -74,13 +81,15 @@ internal static class FsmActionHooks {
             fsmActionHook = new FsmActionHook();
 
             // Types that inherit "OnEnter" share one hook on the class that declares it
-            var onEnterMethodInfo = WorkMethodNames.TryGetValue(type, out var workMethodName)
-                ? type.GetMethod(
-                    workMethodName,
-                    System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public |
-                    System.Reflection.BindingFlags.NonPublic
-                )
-                : type.GetMethod("OnEnter");
+            var onEnterMethodInfo = EnteredAtFirstUpdate.Contains(type)
+                ? null
+                : WorkMethodNames.TryGetValue(type, out var workMethodName)
+                    ? type.GetMethod(
+                        workMethodName,
+                        System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public |
+                        System.Reflection.BindingFlags.NonPublic
+                    )
+                    : type.GetMethod("OnEnter");
             if (onEnterMethodInfo != null && HookedMethods.Add(onEnterMethodInfo)) {
                 Hooks.Add(new Hook(
                     onEnterMethodInfo,
@@ -92,6 +101,17 @@ internal static class FsmActionHooks {
         }
 
         fsmActionHook.HookEvent += action;
+    }
+
+    /// <summary>
+    /// Tells the callbacks of an action's type that the action was entered, for an action that has no OnEnter of its
+    /// own (see <see cref="EnteredAtFirstUpdate"/>).
+    /// </summary>
+    /// <param name="action">The action that was entered.</param>
+    public static void TellEntered(FsmStateAction action) {
+        if (TypeEvents.TryGetValue(action.GetType(), out var fsmActionHook)) {
+            fsmActionHook.InvokeEvent(action);
+        }
     }
 
     /// <summary>

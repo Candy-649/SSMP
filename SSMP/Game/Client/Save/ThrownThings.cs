@@ -23,8 +23,10 @@ namespace SSMP.Game.Client.Save;
 ///
 /// A thing gets its name, its key, as it comes out of the pool, before it is switched on: the game that runs the
 /// creature makes one up for what the creature throws and sends it with the throw (EntityFsmActions), and the other
-/// game gives it to its own; what a named thing throws in turn is named after it in both games, by what it is and how
-/// many of those it threw before. With the name the two games share
+/// game gives it to its own; what a creature throws on a clock while its state lasts is named in the order it is
+/// thrown, after a number sent as the state begins (see <see cref="Series"/>); what a named thing throws in turn is
+/// named after it in both games, by what it is and how many of those it threw before. With the name the two games
+/// share
 /// - the dice: everything that a named thing rolls - where it scatters what it bursts into, how long it lies, how high
 ///   it bounces - comes from its name rather than from the game's own dice (see SharedDice and CoopHits), so both games
 ///   roll the same without a word between them;
@@ -330,6 +332,58 @@ internal static class ThrownThings {
     }
 
     /// <summary>
+    /// Begins the names of what an action of a creature that this game runs throws on a clock in a run of its state,
+    /// to be sent with the run (see <see cref="WriteSeries"/>).
+    /// </summary>
+    /// <param name="target">The player the creature goes after.</param>
+    public static Series BeginSeries(GameObject? target) {
+        return new Series(Prefix, ++_lastNumber, CodeOf?.Invoke(target) ?? NoPlayer, target);
+    }
+
+    /// <summary>
+    /// Writes the names of a run for <see cref="ReadSeries"/> in the other game: whether there are any, and their
+    /// prefix, the number of the run and the player they go after.
+    /// </summary>
+    /// <param name="data">The data that goes with the action.</param>
+    /// <param name="series">The names, or null if the run throws nothing that is named.</param>
+    public static void WriteSeries(EntityNetworkData data, Series? series) {
+        data.Packet.Write(series != null);
+        if (series == null) {
+            return;
+        }
+
+        data.Packet.Write(series.Prefix);
+        data.Packet.Write(series.Number);
+        data.Packet.Write(series.TargetCode);
+    }
+
+    /// <summary>
+    /// Reads what <see cref="WriteSeries"/> wrote.
+    /// </summary>
+    /// <param name="data">The data that came with the action.</param>
+    /// <returns>The names, or null if the run throws nothing that is named.</returns>
+    public static Series? ReadSeries(EntityNetworkData data) {
+        if (!data.Packet.ReadBool()) {
+            return null;
+        }
+
+        var prefix = data.Packet.ReadString();
+        var number = data.Packet.ReadInt();
+        var targetCode = data.Packet.ReadUShort();
+        return new Series(prefix, number, targetCode, FigureOf?.Invoke(targetCode, data.SenderId));
+    }
+
+    /// <summary>
+    /// Has the next thing of a prefab that comes out of the pool named with the next name of a run.
+    /// </summary>
+    /// <param name="series">The names of the run.</param>
+    /// <param name="prefab">What the run throws.</param>
+    /// <returns>What stops the naming once the thing is out.</returns>
+    public static IDisposable ExpectSeries(Series series, GameObject prefab) {
+        return Begin(new Pending(prefab, series.Target, series.NextKey, null));
+    }
+
+    /// <summary>
     /// What a replayed throw of a creature makes here: what its action names here, unless the creature threw something
     /// else. An action can throw what a variable holds, which another action of the creature fills just before - the
     /// variant of the creature's spit or shot picked for it - and which this game's copy of the creature, which does
@@ -618,6 +672,35 @@ internal static class ThrownThings {
         string PrefabName,
         ushort Thrower
     );
+
+    /// <summary>
+    /// The names of what an action of a creature throws on a clock in a run of its state: a spray of spit, a cloud of
+    /// bubbles, bombs along a charge. The game that runs the creature takes a number for the run as the state begins
+    /// and sends it with the run, and each game names the things in the order the action throws them, which the dice
+    /// the two share for the run keep the same (EntityFsmActions).
+    /// </summary>
+    /// <param name="prefix">What the keys start with: those of the game that runs the creature.</param>
+    /// <param name="number">The number of the run.</param>
+    /// <param name="targetCode">Who the things go after, as a throw says it (see <see cref="CodeOf"/>).</param>
+    /// <param name="target">The player here that the things go after, or null for no one.</param>
+    public sealed class Series(string prefix, int number, ushort targetCode, GameObject? target) {
+        public readonly string Prefix = prefix;
+        public readonly int Number = number;
+        public readonly ushort TargetCode = targetCode;
+        public readonly GameObject? Target = target;
+
+        /// <summary>
+        /// How many things the run named so far.
+        /// </summary>
+        private int _count;
+
+        /// <summary>
+        /// The name of the next thing the run throws.
+        /// </summary>
+        public string NextKey() {
+            return $"{Prefix}.{Number}.{_count++}";
+        }
+    }
 
     /// <summary>
     /// What an action of a creature that this game runs threw in one frame.
