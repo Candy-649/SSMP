@@ -1141,6 +1141,64 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region SetRecoilBlocked
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetRecoilBlocked action) {
+        return true;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action: the ways that blows do not knock the creature back, as while it swoops.
+    /// The copy is knocked back by the local player's own blows at once (CoopHits.OnRecoilByDirection), so it is
+    /// knocked back the ways the creature is. Left as it was made, the copy was knocked back where the creature was
+    /// not, and slid back to it (USER 10-22, "她那边boss有点位移").
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetRecoilBlocked action) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.Target);
+        if (gameObject == null || !gameObject.TryGetComponent<Recoil>(out var recoil)) {
+            return;
+        }
+
+        if (!action.IsUpBlocked.IsNone) {
+            recoil.IsUpBlocked = action.IsUpBlocked.Value;
+        }
+
+        if (!action.IsDownBlocked.IsNone) {
+            recoil.IsDownBlocked = action.IsDownBlocked.Value;
+        }
+
+        if (!action.IsLeftBlocked.IsNone) {
+            recoil.IsLeftBlocked = action.IsLeftBlocked.Value;
+        }
+
+        if (!action.IsRightBlocked.IsNone) {
+            recoil.IsRightBlocked = action.IsRightBlocked.Value;
+        }
+    }
+
+    #endregion
+
+    #region SetRecoilSpeed
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, SetRecoilSpeed action) {
+        return true;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action: how fast blows knock the creature back, which the copy is knocked back
+    /// as fast as by the local player's own blows (see the one for <see cref="SetRecoilBlocked"/>).
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetRecoilSpeed action) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.target);
+        if (gameObject != null && gameObject.TryGetComponent<Recoil>(out var recoil)) {
+            recoil.SetRecoilSpeed(action.newRecoilSpeed.Value);
+        }
+    }
+
+    #endregion
+
     #region SetGravity2dScale
 
     /// <summary>Builds network data from the FSM action.</summary>
