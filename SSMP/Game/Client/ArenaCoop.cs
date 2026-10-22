@@ -528,6 +528,7 @@ internal partial class ArenaCoop {
                 SendRunning(self, state);
             }
 
+            ReportBossArenaStarted(self, state);
             return;
         }
 
@@ -688,6 +689,8 @@ internal partial class ArenaCoop {
             if (_isSharedSave()) {
                 LeaveWonMark(self, state);
             }
+
+            ReportBossArenaWon(self, state);
         }
 
         return orig(self, waitExtra);

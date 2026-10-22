@@ -440,6 +440,50 @@ internal partial class ArenaCoop {
     }
 
     /// <summary>
+    /// Event raised when the fight of an arena that counts as a boss starts, which may happen more than once for a
+    /// visit of its room. A two-player save gives it the checkpoint of a boss fight then, as it does for a boss room
+    /// (BossRoomCoop.BossFightStartedEvent): a member dropping out takes both back to the door.
+    /// </summary>
+    public event Action? BossFightStartedEvent;
+
+    /// <summary>
+    /// Event raised when an arena that counts as a boss is won in this game, which ends its fight the way a boss that
+    /// fell ends its own.
+    /// </summary>
+    public event Action? BossArenaWonEvent;
+
+    /// <summary>
+    /// Tells the two-player save that the fight of an arena started, if the arena counts as a boss. The save ignores
+    /// a report that comes too early, like one without every member in the room.
+    /// </summary>
+    private void ReportBossArenaStarted(BattleScene battleScene, ArenaState state) {
+        if (!IsBossArena(battleScene)) {
+            return;
+        }
+
+        try {
+            BossFightStartedEvent?.Invoke();
+        } catch (Exception e) {
+            Logger.Error($"Could not report the start of boss arena '{state.Path}':\n{e}");
+        }
+    }
+
+    /// <summary>
+    /// Tells the two-player save that an arena was won in this game, if the arena counts as a boss.
+    /// </summary>
+    private void ReportBossArenaWon(BattleScene battleScene, ArenaState state) {
+        if (!IsBossArena(battleScene)) {
+            return;
+        }
+
+        try {
+            BossArenaWonEvent?.Invoke();
+        } catch (Exception e) {
+            Logger.Error($"Could not report the win of boss arena '{state.Path}':\n{e}");
+        }
+    }
+
+    /// <summary>
     /// Finds the boss arena of the scene that an object is in: the one that isn't won, preferring the one the object is
     /// part of.
     /// </summary>

@@ -135,6 +135,15 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Called when an arena that counts as a boss is won in this game: its fight ends like that of a boss that fell,
+    /// which ends its checkpoint. An arena's win records no beaten boss, so the checkpoint would otherwise last until
+    /// the players left the room, and a member dropping out after the win took both back to the door.
+    /// </summary>
+    public void OnBossArenaWon() {
+        EndFightOfFallenBoss();
+    }
+
+    /// <summary>
     /// The game of a member saw a boss fight start with every player, or the local player came into a fight that goes
     /// on, so it gets a checkpoint here too if the local player is in its scene.
     /// </summary>
