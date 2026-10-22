@@ -52,7 +52,9 @@ internal class Longpin : BaseAttackTool {
             angle = UnityEngine.Random.Range(134, 140);
         }
 
-        SpawnPin(prefab, spawnPosition, angle, facingRight, poisoned);
+        var placements = PlacementsOf(effectInfo);
+        var placement = placements.Length > 0 ? placements[0] : (ToolPlacements.Placement?) null;
+        SpawnPin(prefab, spawnPosition, angle, facingRight, poisoned, placement, playerObject.transform.position);
     }
 
     /// <summary>
@@ -107,7 +109,17 @@ internal class Longpin : BaseAttackTool {
     /// <param name="angle">The angle to fire the Longpin at.</param>
     /// <param name="facingRight">Whether the player is facing right.</param>
     /// <param name="poisoned">Whether the Longpin is poisoned.</param>
-    private void SpawnPin(GameObject prefab, Vector3 spawnPosition, float angle, bool facingRight, bool poisoned) {
+    /// <param name="placement">Where the thrower's pin went, if known.</param>
+    /// <param name="player">Where the player who threw it is.</param>
+    private void SpawnPin(
+        GameObject prefab,
+        Vector3 spawnPosition,
+        float angle,
+        bool facingRight,
+        bool poisoned,
+        ToolPlacements.Placement? placement,
+        Vector3 player
+    ) {
         // Spawn pin
         var pin = prefab.Spawn(spawnPosition);
         if (!pin) return;
@@ -134,10 +146,16 @@ internal class Longpin : BaseAttackTool {
 
         // Set the rotation and activate
         pin.transform.SetRotationZ(angle);
+        var velocity = new Vector2(x, y);
+        if (placement is { } place) {
+            place.PutAt(pin.transform, player);
+            velocity = place.Velocity;
+        }
+
         pin.SetActive(true);
 
         // Set the velocity
-        body.linearVelocity = new Vector2(x, y);
+        body.linearVelocity = velocity;
 
         // Set damage settings
         SetDamageHeroState(pin, ServerSettings.LongpinDamage);

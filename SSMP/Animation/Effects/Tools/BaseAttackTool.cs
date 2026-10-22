@@ -18,6 +18,11 @@ internal abstract class BaseAttackTool : DamageAnimationEffect {
     };
 
     /// <summary>
+    /// How many bytes <see cref="GetToolInfo"/> gives, after which come where the things of the throw went.
+    /// </summary>
+    private const int ToolInfoLength = 2;
+
+    /// <summary>
     /// Gets important tool information, such as poison status and the tool being used.
     /// </summary>
     /// <returns>The tool info.</returns>
@@ -48,6 +53,15 @@ internal abstract class BaseAttackTool : DamageAnimationEffect {
     /// <returns>True if the effect should use poison, false otherwise.</returns>
     protected static bool EffectIsPoisoned(byte[]? effectInfo) {
         return effectInfo != null && effectInfo.Length > 0 && effectInfo[0] == 1;
+    }
+
+    /// <summary>
+    /// Where the things that the remote player's tool threw went in their game, in the order the game threw them, or
+    /// none if the effect info does not say.
+    /// </summary>
+    /// <param name="effectInfo">The effect info sent over the network.</param>
+    protected static ToolPlacements.Placement[] PlacementsOf(byte[]? effectInfo) {
+        return ToolPlacements.Read(effectInfo, ToolInfoLength);
     }
 
     /// <summary>

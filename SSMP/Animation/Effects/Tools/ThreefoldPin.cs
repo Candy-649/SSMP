@@ -34,11 +34,13 @@ internal class ThreefoldPin : BaseAttackTool {
         var audio = fsm.GetFirstAction<PlayAudioEventRandom>("TriPin Type");
         AudioUtil.PlayAudio(audio, playerObject);
 
-        // Spawn pins
+        // Spawn pins, where the thrower's went if the effect info says, which also tells the throw in the air from
+        // the one on the ground
         var isOnWall = EffectIsOnWall(effectInfo);
-        SpawnPin(playerObject, 177, 0, isOnWall, poisoned);
-        SpawnPin(playerObject, 167, -10, isOnWall, poisoned);
-        SpawnPin(playerObject, 157, -20, isOnWall, poisoned);
+        var placements = PlacementsOf(effectInfo);
+        SpawnPin(playerObject, 177, 0, isOnWall, poisoned, placements.Length > 0 ? placements[0] : null);
+        SpawnPin(playerObject, 167, -10, isOnWall, poisoned, placements.Length > 1 ? placements[1] : null);
+        SpawnPin(playerObject, 157, -20, isOnWall, poisoned, placements.Length > 2 ? placements[2] : null);
     }
 
     /// <summary>
@@ -49,7 +51,15 @@ internal class ThreefoldPin : BaseAttackTool {
     /// <param name="rotation">The pin's rotation.</param>
     /// <param name="onWall">If the player is on a wall or not.</param>
     /// <param name="poisoned">If the pin is poisoned or not.</param>
-    private void SpawnPin(GameObject playerObject, float minAngle, float rotation, bool onWall, bool poisoned) {
+    /// <param name="placement">Where the thrower's pin went, if known.</param>
+    private void SpawnPin(
+        GameObject playerObject,
+        float minAngle,
+        float rotation,
+        bool onWall,
+        bool poisoned,
+        ToolPlacements.Placement? placement
+    ) {
         // Determine spawn position
         var spawnPosition = playerObject.transform.position;
         var playerFacing = playerObject.transform.localScale.x;
@@ -88,11 +98,16 @@ internal class ThreefoldPin : BaseAttackTool {
             return;
         }
 
-        var angle = Random.Range(minAngle, maxAngle);
-        var x = 60 * Mathf.Cos(angle * (Mathf.PI / 180f));
-        var y = 60 * Mathf.Sin(angle * (Mathf.PI / 180f));
+        if (placement is { } place) {
+            place.PutAt(pin.transform, playerObject.transform.position);
+            body.linearVelocity = place.Velocity;
+        } else {
+            var angle = Random.Range(minAngle, maxAngle);
+            var x = 60 * Mathf.Cos(angle * (Mathf.PI / 180f));
+            var y = 60 * Mathf.Sin(angle * (Mathf.PI / 180f));
 
-        body.linearVelocity = new Vector2(x, y);
+            body.linearVelocity = new Vector2(x, y);
+        }
 
         SetDamageHeroState(pin, ServerSettings.ThreefoldPinDamage);
         pin.AddComponentIfNotPresent<RemoteAttackComponent>();

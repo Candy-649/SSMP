@@ -1802,7 +1802,8 @@ internal class AnimationManager {
             return;
         }
 
-        var effectInfo = BaseAttackTool.GetToolInfo();
+        // Where the things it threw went, which the game rolled, goes with it (see ToolPlacements)
+        var effectInfo = ToolPlacements.Append(BaseAttackTool.GetToolInfo());
         _netClient.UpdateManager.UpdatePlayerAnimation(toolClip, 0, effectInfo);
     }
 

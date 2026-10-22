@@ -31,6 +31,7 @@ internal class Tacks : BaseAttackTool {
         AudioUtil.PlayAudio(audio, playerObject);
 
         var poisoned = EffectIsPoisoned(effectInfo);
+        var placements = PlacementsOf(effectInfo);
 
         // Determine scatter angle
         var isFacingRight = playerObject.transform.localScale.x < 0;
@@ -75,18 +76,25 @@ internal class Tacks : BaseAttackTool {
             SetDamageHeroState(tack, ServerSettings.TacksDamage);
             tack.AddComponentIfNotPresent<RemoteAttackComponent>();
 
-            // Set spawn position
-            var variationX = Random.Range(-0.1f, 0.1f);
-            var variationY = Random.Range(-0.15f, 0.15f);
+            if (i < placements.Length) {
+                // Where the thrower's tack went, which their game rolled
+                tack.transform.position = new Vector3(position.x, position.y);
+                placements[i].PutAt(tack.transform, position);
+                velocity = placements[i].Velocity;
+            } else {
+                // Set spawn position
+                var variationX = Random.Range(-0.1f, 0.1f);
+                var variationY = Random.Range(-0.15f, 0.15f);
 
-            tack.transform.position = new Vector3(position.x + variationX, position.y + variationY);
+                tack.transform.position = new Vector3(position.x + variationX, position.y + variationY);
 
-            // Set velocity
-            var speed = Random.Range(15f, 22f);
-            var angle = Random.Range(minAngle, maxAngle);
+                // Set velocity
+                var speed = Random.Range(15f, 22f);
+                var angle = Random.Range(minAngle, maxAngle);
 
-            velocity.x = speed * Mathf.Cos(angle * (Mathf.PI / 180f));
-            velocity.y = speed * Mathf.Sin(angle * (Mathf.PI / 180f));
+                velocity.x = speed * Mathf.Cos(angle * (Mathf.PI / 180f));
+                velocity.y = speed * Mathf.Sin(angle * (Mathf.PI / 180f));
+            }
 
             if (tack.TryGetComponent<Rigidbody2D>(out var body)) {
                 body.linearVelocity = velocity;

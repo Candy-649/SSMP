@@ -353,10 +353,12 @@ internal static class ToolCopies {
 
         _throwPrefab = prefab;
         _thrown = null;
+        ToolPlacements.Clear();
         try {
             orig(self, isAutoThrow);
         } finally {
             _throwPrefab = null;
+            ToolPlacements.Clear();
         }
 
         var thrown = _thrown;
@@ -841,8 +843,12 @@ internal static class ToolCopies {
                     spawned.AddComponentIfNotPresent<LocalToolComponent>();
                 }
 
-                if (IsHeroToolsFsm() && ToolCopyRules.HeroToolSpawns.Contains(prefab!.name)) {
-                    Track(spawned, prefab.name);
+                if (IsHeroToolsFsm()) {
+                    if (ToolCopyRules.HeroToolSpawns.Contains(prefab!.name)) {
+                        Track(spawned, prefab.name);
+                    }
+
+                    ToolPlacements.Note(spawned);
                 }
             }
         } catch (Exception e) {
