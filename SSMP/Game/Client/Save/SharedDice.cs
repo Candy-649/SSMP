@@ -845,17 +845,39 @@ internal static class SharedDice {
             name = name[..^clone.Length];
         }
 
+        return Identify(name, fsm.FsmName, state?.Name ?? "", place);
+    }
+
+    /// <summary>
+    /// The number of an action from the name of its object without "(Clone)", of its state machine, of its state and
+    /// its place among all the state's actions (see <see cref="Identify(FsmStateAction, PlayMakerFSM)"/>): for a game
+    /// that plays the part of an object that it does not run, and rolls as that object's action would.
+    /// </summary>
+    public static int Identify(string objectName, string fsmName, string stateName, int place) {
         // FNV-1a, since the hash of a string is not promised to be the same in another process
-        var hash = 2166136261u;
-        foreach (var text in new[] { name, fsm.FsmName, state?.Name ?? "" }) {
+        var hash = Hash(Hash(Hash(2166136261u, objectName), fsmName), stateName);
+        return unchecked((int) ((hash ^ (uint) place) * 16777619u));
+
+        static uint Hash(uint hash, string text) {
             foreach (var character in text) {
                 hash = unchecked((hash ^ character) * 16777619u);
             }
 
-            hash = unchecked((hash ^ '/') * 16777619u);
+            return unchecked((hash ^ '/') * 16777619u);
         }
+    }
 
-        return unchecked((int) ((hash ^ (uint) place) * 16777619u));
+    /// <summary>
+    /// Rolls as an action of an object rolling under a name rolls the first time (see <see cref="RollByName"/>), for a
+    /// game that plays the part of an object that it does not run.
+    /// </summary>
+    /// <param name="name">The name the object rolls under in the game that runs it.</param>
+    /// <param name="action">The number of the action (see <see cref="Identify(string, string, string, int)"/>).</param>
+    /// <param name="roll">What the action rolls.</param>
+    public static T RollAs<T>(string name, int action, Func<T> roll) {
+        var result = default(T)!;
+        ThrownThings.Rolling(ThrownThings.Seed(name, action, 0), () => result = roll());
+        return result;
     }
 
     /// <summary>

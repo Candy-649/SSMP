@@ -845,12 +845,6 @@ internal class AnimationManager {
     /// </summary>
     private bool _dashHasEnded = true;
 
-    /// <summary>
-    /// List of encoded positions for Rune Rage blasts. Used to gather encoded positions before sending effect info to
-    /// server.
-    /// </summary>
-    private readonly List<byte> _runeRagePositions = [];
-
     public AnimationManager(
         NetClient netClient,
         PlayerManager playerManager,
@@ -1498,12 +1492,6 @@ internal class AnimationManager {
         var sonarBuildArray = silkSkillFsm.GetState("Build Enemy Array");
         FsmStateActionInjector.Inject(sonarBuildArray, OnBuildRuneRageArray);
 
-        var blastEnemy = silkSkillFsm.GetState("Blast Enemy");
-        FsmStateActionInjector.Inject(blastEnemy, OnRuneBlastEnemy, 4);
-
-        var blastRandom = silkSkillFsm.GetState("Random Blasts");
-        FsmStateActionInjector.Inject(blastRandom, OnRuneBlastRandom, 3);
-
         var blastFinished = silkSkillFsm.GetState("Silk Bomb Recover");
         FsmStateActionInjector.Inject(blastFinished, OnRuneBlastFinished);
 
@@ -1569,12 +1557,13 @@ internal class AnimationManager {
     /// Influences Rune Rage to be able to target players that can be attacked.
     /// </summary>
     private void OnBuildRuneRageArray(PlayMakerFSM fsm) {
+        // The clusters that the cast puts down from here are numbered by it (see RuneRolls)
+        RuneRolls.BeginCast();
+
         // If we are not connected, there is nothing to send to
         if (!_netClient.IsConnected) {
             return;
         }
-
-        _runeRagePositions.Clear();
 
         // Find tracker for Rune Rage
         var sonarObject = HeroController.instance.gameObject
@@ -1630,43 +1619,17 @@ internal class AnimationManager {
     }
 
     /// <summary>
-    /// Intercepts the spawn locations for targeted Rune Rages.
-    /// </summary>
-    private void OnRuneBlastEnemy(PlayMakerFSM fsm) {
-        // At this point the rune cluster has been created with a position and a given offset from the object.
-        // This position is relative to the player.
-        var spawnPosition = fsm.FsmVariables.FindFsmVector3("Shift Pos");
-        if (spawnPosition != null) {
-            var position = RuneRage.EncodeRunePosition(spawnPosition.Value + HeroController.instance.transform.position);
-            _runeRagePositions.AddRange(position);
-        }
-    }
-
-    /// <summary>
-    /// Intercepts the spawn locations for random Rune Rages.
-    /// </summary>
-    private void OnRuneBlastRandom(PlayMakerFSM fsm) {
-        // If there aren't enough targets, rune rage will spawn up to 3 other blasts
-        var spawnRadial = fsm.GetFirstAction<SpawnRandomObjectsRadialRandom>("Random Blasts");
-        // Get the positions of spawned blasts
-        var positions = spawnRadial.tempPosStore;
-
-        // Add to collection of positions
-        foreach (var position in positions) {
-            var encodedPosition = RuneRage.EncodeRunePosition(position);
-            _runeRagePositions.AddRange(encodedPosition);
-        }
-    }
-
-    /// <summary>
-    /// Animation hook to send Rune Rage positions.
+    /// Animation hook to send the number of the Rune Rage cast and where its clusters are, read from the clusters once
+    /// all are down: a cluster put on an enemy is at the enemy, moved a little at random, and one put down at random
+    /// is placed after it comes out of the pool.
     /// </summary>
     private void OnRuneBlastFinished(PlayMakerFSM fsm) {
-        var effectInfo = BaseSilkSkill.GetEffectFlags().ToList();
-        effectInfo.AddRange(_runeRagePositions);
-
-        _runeRagePositions.Clear();
-        _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.SilkBombLocations, 0, effectInfo.ToArray());
+        var effectInfo = RuneRage.EncodeClusters(
+            BaseSilkSkill.GetEffectFlags(),
+            RuneRolls.Cast,
+            RuneRolls.TakeCastClusters()
+        );
+        _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.SilkBombLocations, 0, effectInfo);
     }
 
     /// <summary>

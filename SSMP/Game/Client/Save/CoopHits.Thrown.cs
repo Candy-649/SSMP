@@ -4,6 +4,7 @@ using System.Reflection;
 using GlobalEnums;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Animation.Effects.SilkSkills;
 using SSMP.Game.Client.Entity.Action;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
@@ -112,7 +113,8 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Hook for the spawn of the pool that all others end in, which has what comes out of it named if it is thrown (see
-    /// <see cref="ExpectThrown"/>).
+    /// <see cref="ExpectThrown"/>), or if it is a cluster or a blast of the local player's Rune Rage (see
+    /// <see cref="RuneRolls"/>), whatever the two-player save.
     /// </summary>
     private GameObject OnPoolSpawn(
         PoolSpawn orig,
@@ -122,8 +124,10 @@ internal partial class CoopHits {
         Quaternion rotation,
         bool stealActiveSpawned
     ) {
+        IDisposable? runeNaming = null;
         IDisposable? naming = null;
         try {
+            runeNaming = RuneRolls.ExpectSpawn(prefab);
             naming = ExpectThrown(prefab);
         } catch (Exception e) {
             if (!_thrownFailed) {
@@ -136,6 +140,7 @@ internal partial class CoopHits {
             return orig(prefab, parent, position, rotation, stealActiveSpawned);
         } finally {
             naming?.Dispose();
+            runeNaming?.Dispose();
         }
     }
 
@@ -189,6 +194,7 @@ internal partial class CoopHits {
     private void OnActivateSpawningObject(Action<GameObject, bool> orig, GameObject gameObject, bool alreadyActive) {
         try {
             ThrownThings.OnActivating(gameObject);
+            RuneRolls.OnActivating(gameObject);
         } catch (Exception e) {
             if (!_thrownFailed) {
                 _thrownFailed = true;

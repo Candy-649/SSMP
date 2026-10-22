@@ -1,7 +1,9 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Save;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
@@ -24,14 +26,19 @@ internal class RuneRage : BaseSilkSkill {
     private const string AnticVoltName = "antic_thread_zap";
 
     /// <summary>
-    /// Scale used to keep a higher level of precision when converting a float to a byte.
+    /// Where the number of the cast is in the effect info, after the flags of
+    /// <see cref="BaseSilkSkill.GetEffectFlags"/>, and where the places of its clusters begin after it: x and y of
+    /// each, as floats.
     /// </summary>
-    private const int PositionScale = 9;
+    private const int CastAt = 1;
+
+    /// <inheritdoc cref="CastAt"/>
+    private const int ClustersAt = CastAt + 2;
 
     /// <summary>
-    /// Offset to keep negative values when converting an sbyte to a byte.
+    /// How many bytes the place of a cluster takes.
     /// </summary>
-    private const int PositionOffset = sbyte.MaxValue;
+    private const int ClusterSize = 8;
 
 
     /// <summary>
@@ -50,9 +57,9 @@ internal class RuneRage : BaseSilkSkill {
     private static GameObject? _localRuneBlastVolt;
 
     /// <summary>
-    /// Cached transform of an object that templates how a Rune Rage Cluster should be laid out.
+    /// Cached prefab of a cluster of Rune Rage blasts.
     /// </summary>
-    private static Transform? _clusterSpawnTemplate;
+    private static GameObject? _clusterPrefab;
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
@@ -65,19 +72,14 @@ internal class RuneRage : BaseSilkSkill {
             return;
         }
 
-        // Decode rune positions from effect info
-        var positions = DecodeRunePositions(effectInfo, playerObject);
-        
-        // Check volt status
-        if (effectInfo?.Length > 0 && effectInfo[0] == 1) {
-            isVolt = true;
-        }
+        // Decode the cast and where its clusters are from effect info
+        var positions = DecodeClusters(effectInfo, playerObject, out var cast);
 
         PlaySonar(playerObject, isVolt, isShaman);
 
         // There are runes to spawn; do at the same time as the sonar
         if (positions.Count > 0) {
-            PlayRuneRage(positions, isVolt, isShaman);
+            PlayRuneRage(cast, positions, isVolt, isShaman);
         }
     }
 
@@ -168,34 +170,17 @@ internal class RuneRage : BaseSilkSkill {
     /// <summary>
     /// Spawns clusters of Rune Rage blasts at the given positions.
     /// </summary>
+    /// <param name="cast">The number of the cast in the thrower's game, which names its clusters (see
+    /// <see cref="RuneRolls"/>).</param>
     /// <param name="positions">The positions to spawn blast clusters at.</param>
     /// <param name="isVolt">Whether the volt filament effects should be used.</param>
     /// <param name="isShaman">Whether the shaman crest effects should be used.</param>
-    private void PlayRuneRage(List<Vector3> positions, bool isVolt, bool isShaman) {
-        // Generate spawn template, whose layout kinda looks like . * .
-        if (_clusterSpawnTemplate == null) {
-            _clusterSpawnTemplate = new GameObject().transform;
-            var firstBlast = new GameObject().transform;
-            var secondBlast = new GameObject().transform;
-            var thirdBlast = new GameObject().transform;
-
-            firstBlast.SetParentReset(_clusterSpawnTemplate);
-            firstBlast.localPosition = new Vector3(1.732f, -1, 0);
-            firstBlast.SetRotation2D(240);
-
-            secondBlast.SetParentReset(_clusterSpawnTemplate);
-            secondBlast.SetLocalPositionY(2);
-
-            thirdBlast.SetParent(_clusterSpawnTemplate);
-            thirdBlast.localPosition = new Vector3(-1.732f, -1, 0);
-            thirdBlast.SetRotation2D(-240);
-
-            Object.DontDestroyOnLoad(_clusterSpawnTemplate.gameObject);
-        }
-
+    private void PlayRuneRage(ushort cast, List<Vector3> positions, bool isVolt, bool isShaman) {
         // Spawn clusters at each position
-        foreach (var position in positions) {
-            MonoBehaviourUtil.Instance.StartCoroutine(PlayRuneCluster(position, isVolt, isShaman));
+        for (var i = 0; i < positions.Count; i++) {
+            MonoBehaviourUtil.Instance.StartCoroutine(
+                PlayRuneCluster(RuneRolls.ClusterName(cast, i), positions[i], isVolt, isShaman)
+            );
         }
     }
 
@@ -236,9 +221,7 @@ internal class RuneRage : BaseSilkSkill {
         }
 
         // Get the rune cluster object from the FSM
-        var fsm = GetSkillFsm();
-        var cluster = fsm.GetFirstAction<SpawnObjectFromGlobalPool>("Blast Enemy").gameObject.Value;
-
+        var cluster = TryGetClusterPrefab();
         if (cluster == null) return null;
 
         // Find the individual rune from within the cluster FSM
@@ -256,36 +239,52 @@ internal class RuneRage : BaseSilkSkill {
     }
 
     /// <summary>
-    /// Spawns a cluster of three Rune Rage blasts.
+    /// Gets the prefab of a cluster of Rune Rage blasts.
     /// </summary>
-    /// <param name="position">The initial position to spawn the cluster.</param>
+    /// <returns>The cluster prefab, if found.</returns>
+    private static GameObject? TryGetClusterPrefab() {
+        if (_clusterPrefab) return _clusterPrefab;
+
+        _clusterPrefab = GetSkillFsm().GetFirstAction<SpawnObjectFromGlobalPool>("Blast Enemy").gameObject.Value;
+        return _clusterPrefab;
+    }
+
+    /// <summary>
+    /// Plays a cluster of Rune Rage blasts as its state machine does in the thrower's game, rolling as it rolls there
+    /// under the name it has there (see <see cref="RuneRolls"/>): it waits, is turned, and puts its blasts down at
+    /// once, each at a point of the cluster moved by a shift and waiting a time of its own before it goes off.
+    /// </summary>
+    /// <param name="name">The name of the cluster.</param>
+    /// <param name="position">The position of the cluster.</param>
     /// <param name="isVolt">Whether the volt filament effects should be used.</param>
     /// <param name="isShaman">Whether the shaman crest effects should be used.</param>
-    private IEnumerator PlayRuneCluster(Vector3 position, bool isVolt, bool isShaman) {
-        if (!_clusterSpawnTemplate) yield break;
+    private IEnumerator PlayRuneCluster(string name, Vector3 position, bool isVolt, bool isShaman) {
+        if (RuneRolls.GetPlan(TryGetClusterPrefab()) is not { } plan) yield break;
 
-        // Create local version of template and set the position
-        var spawnTemplate = Object.Instantiate(_clusterSpawnTemplate);
-        spawnTemplate.position = position;
-
-        // Change the local rotation for a bit more variety
-        spawnTemplate.SetLocalRotation2D(Random.Range(0, 360));
-
-        var offset = new Vector3(1.75f, 1.75f);
-
-        // Spawn 3 runes per cluster, each one with a random offset from their spawn point
-        for (var i = 0; i < spawnTemplate.childCount; i++) {
-            var blastPosition = spawnTemplate.GetChild(i).position;
-            blastPosition += offset.RandomInRange();
-
-            CreateBlast(spawnTemplate, isVolt, isShaman, blastPosition);
-
-            // Delay next rune by a little bit
-            var waitTime = Random.Range(0.15f, 0.2f);
-            yield return new WaitForSeconds(waitTime);
+        var wait = plan.Wait(name);
+        if (wait > 0f) {
+            yield return new WaitForSeconds(wait);
         }
 
-        Object.Destroy(spawnTemplate.gameObject);
+        // The blasts are made under an object of the room, so that they go with the room rather than with the player
+        // objects, which outlast it
+        var spawnPoint = new GameObject("Rune Cluster").transform;
+        spawnPoint.position = position;
+
+        var turn = plan.Turn(name);
+        for (var i = 0; i < plan.Blasts.Count; i++) {
+            var blast = plan.Blasts[i];
+            CreateBlast(
+                spawnPoint,
+                isVolt,
+                isShaman,
+                plan.Place(name, blast, position, turn),
+                blast.WaitTime,
+                RuneRolls.BlastName(name, i)
+            );
+        }
+
+        Object.Destroy(spawnPoint.gameObject);
     }
 
     /// <summary>
@@ -295,7 +294,16 @@ internal class RuneRage : BaseSilkSkill {
     /// <param name="isVolt">Whether the volt filament effects should be used.</param>
     /// <param name="isShaman">Whether the shaman crest effects should be used.</param>
     /// <param name="position">The final position of the blast.</param>
-    private void CreateBlast(Transform spawnTransform, bool isVolt, bool isShaman, Vector3 position) {
+    /// <param name="waitTime">How long the blast waits before it goes off.</param>
+    /// <param name="name">The name the blast rolls under (see <see cref="RuneRolls"/>).</param>
+    private void CreateBlast(
+        Transform spawnTransform,
+        bool isVolt,
+        bool isShaman,
+        Vector3 position,
+        float waitTime,
+        string name
+    ) {
         var localBlast = TryGetLocalBlast(isVolt);
         if (localBlast == null) return;
 
@@ -303,7 +311,11 @@ internal class RuneRage : BaseSilkSkill {
         var blast = EffectUtils.SpawnGlobalPoolObject(localBlast, spawnTransform, 3);
         if (blast == null) return;
 
-        blast.transform.position = position;
+        // Unturned, as the cluster puts its blasts down
+        blast.transform.SetPositionAndRotation(position, Quaternion.identity);
+
+        // How large it is, as it rolls in the thrower's game
+        SharedDice.RollByName(blast, name);
 
         // Add damager
         var damager = blast
@@ -352,56 +364,56 @@ internal class RuneRage : BaseSilkSkill {
         var end = fsm.GetState("End");
         end.Actions = [];
         end.SaveActions();
+
+        // How long it waits, as the cluster sets it
+        var wait = fsm.FsmVariables.FindFsmFloat("Wait Time");
+        if (wait != null) {
+            wait.Value = waitTime;
+        }
     }
 
     /// <summary>
-    /// Converts a Vector3 to an array of bytes that are within a margin of error of the original X and Y values.
-    /// To be used for encoding Rune Rage cluster positions.
+    /// Makes the effect info of a cast: the flags, the number of the cast and where each of its clusters is in the
+    /// room, as many as the effect info has room for.
     /// </summary>
-    /// <param name="runePosition">The position of the Rune Rage cluster.</param>
-    /// <returns>A byte array containing the encoded position.</returns>
-    internal static byte[] EncodeRunePosition(Vector3 runePosition) {
-        var hornetPosition = HeroController.instance.transform.position;
+    /// <param name="flags">The flags of the skill (see <see cref="BaseSilkSkill.GetEffectFlags"/>).</param>
+    /// <param name="cast">The number of the cast, which names its clusters (see <see cref="RuneRolls"/>).</param>
+    /// <param name="positions">Where the clusters are, in the order they came.</param>
+    /// <returns>The effect info.</returns>
+    internal static byte[] EncodeClusters(byte[] flags, ushort cast, List<Vector2> positions) {
+        var count = System.Math.Min(positions.Count, (byte.MaxValue - ClustersAt) / ClusterSize);
+        var info = new byte[ClustersAt + count * ClusterSize];
+        Array.Copy(flags, info, System.Math.Min(flags.Length, CastAt));
+        info[CastAt] = (byte) cast;
+        info[CastAt + 1] = (byte) (cast >> 8);
 
-        // The position of a cluster is always clamped to within +- ~13 units of Hornet.
-        // Get position relative to the player and offset by max value of sbyte.
-        // This allows us to keep negative values while using a byte.
-        // Multiplying by a larger number also allows higher precision.
-        var diffX = (byte) ((runePosition.x - hornetPosition.x) * PositionScale + PositionOffset);
-        var diffY = (byte) ((runePosition.y - hornetPosition.y) * PositionScale + PositionOffset);
+        for (var i = 0; i < count; i++) {
+            BitConverter.GetBytes(positions[i].x).CopyTo(info, ClustersAt + i * ClusterSize);
+            BitConverter.GetBytes(positions[i].y).CopyTo(info, ClustersAt + i * ClusterSize + 4);
+        }
 
-        return [
-            diffX,
-            diffY
-        ];
+        return info;
     }
 
     /// <summary>
-    /// Converts an array of bytes to Vector3s, using the reverse of the algorithm in <see cref="EncodeRunePosition"/>.
-    /// To be used for decoding Rune Rage cluster positions.
+    /// Reads the number of the cast and where its clusters are from the effect info (see
+    /// <see cref="EncodeClusters"/>).
     /// </summary>
-    /// <param name="info">The raw positions in byte form.</param>
-    /// <param name="playerObject">The player that used the effect. Cluster positions are relative to this player.</param>
-    /// <returns>A list of Vector3s that represent the decoded positions.</returns>
-    private static List<Vector3> DecodeRunePositions(byte[]? info, GameObject playerObject) {
-        if (info == null || info.Length < 3) {
+    /// <param name="info">The effect info.</param>
+    /// <param name="playerObject">The player that used the effect, whose depth the clusters take.</param>
+    /// <param name="cast">The number of the cast.</param>
+    /// <returns>Where the clusters are.</returns>
+    private static List<Vector3> DecodeClusters(byte[]? info, GameObject playerObject, out ushort cast) {
+        cast = 0;
+        if (info == null || info.Length < ClustersAt + ClusterSize) {
             return [];
         }
 
+        cast = (ushort) (info[CastAt] | info[CastAt + 1] << 8);
         var positions = new List<Vector3>();
-        var playerPosition = playerObject.transform.position;
-
-        // Loop through all xy pairs
-        for (var i = 1; i < info.Length - 1; i += 2) {
-            // Restore sbyte from byte, then convert to float for division
-            var x = (float) info[i] - PositionOffset;
-            var y = (float) info[i + 1] - PositionOffset;
-
-            // Restore original scale
-            var position = new Vector3(x / PositionScale, y / PositionScale, 0) ;
-            
-            // Convert relative position to global position
-            positions.Add(position + playerPosition);
+        var z = playerObject.transform.position.z;
+        for (var at = ClustersAt; at + ClusterSize <= info.Length; at += ClusterSize) {
+            positions.Add(new Vector3(BitConverter.ToSingle(info, at), BitConverter.ToSingle(info, at + 4), z));
         }
 
         return positions;
