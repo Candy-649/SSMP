@@ -85,6 +85,17 @@ internal class SittingPreview : MonoBehaviour {
     private const float Reach = FightOutline.Reach * RoomMenuUnitsPerUnit / MenuUnitsPerUnit;
 
     /// <summary>
+    /// How long she takes to come into sight once she is loaded, in seconds, with her name and outline. She came all at
+    /// once a moment after the page opened (USER 2026-10-22: "大黄蜂出现的有点突然，可以淡入这样子吗").
+    /// </summary>
+    private const float FadeInTime = 0.4f;
+
+    /// <summary>
+    /// The most time that one frame counts for in her fade, in seconds: that of a frame at 30 a second.
+    /// </summary>
+    private const float MaxFadeStep = 1f / 30f;
+
+    /// <summary>
     /// The settings of this machine.
     /// </summary>
     private ModSettings _modSettings = null!;
@@ -197,6 +208,15 @@ internal class SittingPreview : MonoBehaviour {
     }
 
     private void Update() {
+        // A little more of her at each frame from the one after she sat down, by the clock of the screen rather than
+        // the game's, which a pause stops. A long frame, like the one her pictures are first drawn in, brings no more
+        // of her than a short one: in one long enough she would have come all at once again
+        if (_rig != null && _image.color.a < 1f) {
+            var colour = _image.color;
+            colour.a = Mathf.MoveTowards(colour.a, 1f, Mathf.Min(Time.unscaledDeltaTime, MaxFadeStep) / FadeInTime);
+            _image.color = colour;
+        }
+
         if (_rig == null && _hero.IsValid() && _hero.IsDone) {
             if (_hero.Status == AsyncOperationStatus.Succeeded && _hero.Result != null) {
                 SitDown(_hero.Result);
@@ -278,6 +298,7 @@ internal class SittingPreview : MonoBehaviour {
         camera.targetTexture = _texture;
 
         _image.texture = _texture;
+        _image.color = new Color(1f, 1f, 1f, 0f);
         _image.enabled = true;
         Refresh();
     }
