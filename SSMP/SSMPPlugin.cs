@@ -32,6 +32,9 @@ public partial class SSMPPlugin : BaseUnityPlugin {
         // assembly that is really running, and is the same wording the other player's build is compared against.
         Logging.Logger.Info($"Plugin {Name} ({Id}) has loaded! Running build: {Game.SteamManager.LocalModVersion}");
 
+        // The game's own version and build: two players' logs then tell whether they run the same game
+        Logging.Logger.Info(GameVersion.Describe());
+
         PluginBackups.Tidy();
         StackOverflowRecovery.Apply();
 

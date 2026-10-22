@@ -70,6 +70,16 @@ internal class ConnectInterface {
     private const float HeaderHeight = 40f;
 
     /// <summary>
+    /// How far above the middle of the header the middle of the note that the game is older than the mod needs is,
+    /// and the size of that note.
+    /// </summary>
+    private const float GameTooOldNoteRaise = 80f;
+
+    private const float GameTooOldNoteWidth = 900f;
+
+    private const float GameTooOldNoteHeight = 60f;
+
+    /// <summary>
     /// Spacing between the header and the glowing notch.
     /// </summary>
     private const float HeaderToNotchSpacing = 45f;
@@ -796,6 +806,7 @@ internal class ConnectInterface {
 
         // Build UI from top to bottom
         CreateHeader(connectGroup, ref currentY);
+        CreateGameTooOldNote(connectGroup);
         _glowingNotch = CreateNotch(ref currentY);
         _backgroundPanel = CreateBackgroundPanel(ref currentY);
 
@@ -990,6 +1001,31 @@ internal class ConnectInterface {
         );
 
         currentY -= HeaderToNotchSpacing / UiManager.ScreenHeightRatio;
+    }
+
+    /// <summary>
+    /// A note above the header that stays while the game is older than the mod needs, which can lack what the mod
+    /// uses; nothing when it isn't.
+    /// </summary>
+    private static void CreateGameTooOldNote(ComponentGroup parent) {
+        if (!GameVersion.IsOlder) {
+            return;
+        }
+
+        var note = new TextComponent(
+            parent,
+            new Vector2(InitialX, InitialY + GameTooOldNoteRaise / UiManager.ScreenHeightRatio),
+            new Vector2(GameTooOldNoteWidth, GameTooOldNoteHeight),
+            Lang.Pick(
+                $"Your game ({GameVersion.Running}) is older than this mod needs ({GameVersion.BuiltFor}). " +
+                "Update the game to the latest version first, or co-op will run into errors.",
+                $"你的游戏版本太旧（{GameVersion.Running}，这个模组需要 {GameVersion.BuiltFor}）。" +
+                "请先把游戏更新到最新版，不然联机会出错。"
+            ),
+            UiManager.SubTextFontSize,
+            wrap: true
+        );
+        note.SetColor(Color.red);
     }
 
     /// <summary>

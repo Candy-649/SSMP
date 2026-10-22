@@ -66,6 +66,13 @@ internal partial class CoopSave {
     private const string HostSaveGzip = "gzip";
 
     /// <summary>
+    /// What <see cref="CoopSaveUpdate.StateName"/> says on the host's answer that their save won't come when the
+    /// host's game is older than the mod needs and lacks what the mod takes the save with. A joining player of an
+    /// earlier version, which reads no reason, hears that the save won't come.
+    /// </summary>
+    private const string HostGameTooOld = "GameTooOld";
+
+    /// <summary>
     /// The game mode of a save in which a death ends it (PlayerData.permadeathMode).
     /// </summary>
     private const int PermadeathMode = 1;
@@ -318,12 +325,29 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The answer to a request for the host's save that carries no part: that this game hosts, and what keeps the save
-    /// from coming, or that it could not be taken.
+    /// from coming, or that it could not be taken, with why when that is known.
     /// </summary>
-    private void SendHostSaveWait(ushort id, ulong request, HostSaveWait wait) {
+    private void SendHostSaveWait(ushort id, ulong request, HostSaveWait wait, string reason = "") {
         Send(new CoopSaveUpdate {
-            TargetId = id, Kind = CoopSaveUpdateKind.HostSave, Key = request, Part = (ushort) wait
+            TargetId = id, Kind = CoopSaveUpdateKind.HostSave, Key = request, Part = (ushort) wait, StateName = reason
         });
+    }
+
+    /// <summary>
+    /// Why the host's save couldn't be taken, for the players who wait for it: <see cref="HostGameTooOld"/> when the
+    /// host's game is older than the mod needs and lacks what the mod uses, which the host hears too, or nothing.
+    /// </summary>
+    private static string TellWhyHostSaveFailed(Exception e) {
+        if (!GameVersion.IsTooOldFor(e)) {
+            return "";
+        }
+
+        Chat(Lang.Pick(
+            "Your game is older than this mod needs, so your save can't be sent and your partner can't join. Update " +
+            "the game to the latest version, then try again.",
+            "你的游戏版本太旧，存档发不出去，队友进不来。请把游戏更新到最新版再试。"
+        ));
+        return HostGameTooOld;
     }
 
     /// <summary>
@@ -336,7 +360,7 @@ internal partial class CoopSave {
             UpdateHostSaveRequests();
         } catch (Exception e) {
             Logger.Error($"Could not send the host's save:\n{e}");
-            FailHostSaveRequests();
+            FailHostSaveRequests(e);
         }
     }
 
@@ -344,7 +368,7 @@ internal partial class CoopSave {
     /// Tells every player who waits for the host's save, whose request waits or whose parts are still to go, that it
     /// won't come, and forgets them all, so that a failure can't leave anyone waiting for good, nor repeat every frame.
     /// </summary>
-    private void FailHostSaveRequests() {
+    private void FailHostSaveRequests(Exception e) {
         // The parts first: a request that waits is always newer than the parts of an earlier one to the same player
         var failed = new Dictionary<ushort, ulong>();
         foreach (var part in _hostSaveSends) {
@@ -358,11 +382,22 @@ internal partial class CoopSave {
         _hostSaveRequests.Clear();
         _hostSaveWaitTold.Clear();
         _hostSaveSends.Clear();
+        if (failed.Count == 0) {
+            return;
+        }
+
+        var reason = "";
+        try {
+            reason = TellWhyHostSaveFailed(e);
+        } catch (Exception reasonException) {
+            Logger.Error($"Could not tell why the host's save won't come:\n{reasonException}");
+        }
+
         foreach (var request in failed) {
             try {
-                SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed);
-            } catch (Exception e) {
-                Logger.Error($"Could not tell a player that the host's save won't come:\n{e}");
+                SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed, reason);
+            } catch (Exception sendException) {
+                Logger.Error($"Could not tell a player that the host's save won't come:\n{sendException}");
             }
         }
     }
@@ -424,9 +459,10 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Error($"Could not take the host's save to send:\n{e}");
 
-            // The players who wait hear it, rather than wait for good
+            // The players who wait hear it, and why when that is known, rather than wait for good
+            var reason = TellWhyHostSaveFailed(e);
             foreach (var request in _hostSaveRequests) {
-                SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed);
+                SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed, reason);
             }
 
             _hostSaveRequests.Clear();
@@ -752,7 +788,7 @@ internal partial class CoopSave {
                 Logger.Info($"{player.Username} answered as the host ({update.Key})");
             }
 
-            OnHostSaveWait(player, (HostSaveWait) update.Part);
+            OnHostSaveWait(player, (HostSaveWait) update.Part, update.StateName);
             return;
         }
 
@@ -807,19 +843,28 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The host said what keeps their save from coming, which the wait shows, or that their game could not take it,
-    /// which ends the wait.
+    /// which ends the wait, with why when the host knows.
     /// </summary>
-    private void OnHostSaveWait(ClientPlayerData player, HostSaveWait wait) {
+    private void OnHostSaveWait(ClientPlayerData player, HostSaveWait wait, string reason) {
         if (wait == HostSaveWait.Failed) {
-            Logger.Info($"The game of the host {player.Username} could not take their save to send");
+            Logger.Info(
+                $"The game of the host {player.Username} could not take their save to send" +
+                (reason == HostGameTooOld ? ": the host's game is older than the mod needs" : "")
+            );
             var waiting = _joinButton != null;
             ClearJoin();
             if (waiting) {
                 CloseMessage();
-                ShowLater(Lang.Pick(
-                    "The host's game couldn't get their save ready. Choose your save again to try again.",
-                    "房主那边的存档没能取出来。重新选一次存档再试。"
-                ));
+                ShowLater(reason == HostGameTooOld
+                    ? Lang.Pick(
+                        "The host's game is older than this mod needs, so their save can't be sent. Once the host " +
+                        "has updated the game to the latest version, choose your save again.",
+                        "房主的游戏版本太旧，存档发不过来。请房主把游戏更新到最新版，再重新选一次存档。"
+                    )
+                    : Lang.Pick(
+                        "The host's game couldn't get their save ready. Choose your save again to try again.",
+                        "房主那边的存档没能取出来。重新选一次存档再试。"
+                    ));
             }
 
             return;
@@ -850,12 +895,24 @@ internal partial class CoopSave {
         } catch (Exception e) {
             _pendingJoin = null;
             Logger.Error($"Could not align save slot {button.SaveSlotIndex} with the host's save:\n{e}");
-            ShowMessage(Lang.Pick(
+            ShowMessage(GetGameTooOldText(e) ?? Lang.Pick(
                 "Your save couldn't be aligned with the host's, so it wasn't loaded. Choose it again to try again.",
                 "没能把你的存档按房主的存档对齐，所以没有进入。再选一次这个存档重试。"
             ));
         }
     }
+
+    /// <summary>
+    /// What the joining player hears when their own game is older than the mod needs and lacks what the mod uses to
+    /// join with their save, or null when that isn't why it failed.
+    /// </summary>
+    private static string? GetGameTooOldText(Exception e) => GameVersion.IsTooOldFor(e)
+        ? Lang.Pick(
+            "Your game is older than this mod needs, so it can't join the host's game. Update the game to the latest " +
+            "version, then try again.",
+            "你的游戏版本太旧，没法加入房主的游戏。请把游戏更新到最新版再试。"
+        )
+        : null;
 
     private void AlignAndLoad(
         UnityEngine.UI.SaveSlotButton button,
@@ -879,7 +936,7 @@ internal partial class CoopSave {
             client = hasSave ? ReadSave(button) : NewSave(hostSave);
         } catch (Exception e) {
             Logger.Error($"Could not read save slot {slot} to align it with the host's save:\n{e}");
-            ShowMessage(Lang.Pick("This save can't be read.", "这个存档读不出来。"));
+            ShowMessage(GetGameTooOldText(e) ?? Lang.Pick("This save can't be read.", "这个存档读不出来。"));
             return;
         }
 
@@ -1087,7 +1144,7 @@ internal partial class CoopSave {
     /// </summary>
     private static (string? Version, int? RevisionBreak) GetGameSaveVersion() {
         try {
-            var version = ReadConstant(typeof(global::Constants), "GAME_VERSION") as string;
+            var version = GameVersion.Running;
             var revisionBreak = ReadConstant(typeof(SaveDataUtility), "MANUAL_REVISION_BREAK") as int?;
             return (version, revisionBreak);
         } catch (Exception e) {
