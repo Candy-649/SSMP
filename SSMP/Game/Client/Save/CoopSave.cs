@@ -1020,6 +1020,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.RingHold:
                 OnRingHold(player, update);
                 break;
+            case CoopSaveUpdateKind.CogHold:
+                OnCogHold(player, update);
+                break;
             case CoopSaveUpdateKind.CageSprung:
                 OnCageSprung(player, update);
                 break;

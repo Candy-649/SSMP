@@ -913,5 +913,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.ObjectPath"/> names the game. While anyone watches, the game of the receiver shows
     /// them what is going on in its round. Appended at the end, like every kind.
     /// </summary>
-    MinigameWatch
+    MinigameWatch,
+
+    /// <summary>
+    /// A spiked cog that runs along a rail caught the sender and stopped where it is in their game, or let them go
+    /// and runs on (see CoopSave.SpikedCogs). <see cref="CoopSaveUpdate.Scene"/> and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> name the cog, and <see cref="CoopSaveUpdate.Part"/> is 1 while it holds
+    /// them and 0 once it let go. The same cog stops in the other games too until the last player it holds there is
+    /// let go. Appended at the end, like every kind.
+    /// </summary>
+    CogHold
 }

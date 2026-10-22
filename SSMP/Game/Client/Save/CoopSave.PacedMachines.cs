@@ -1044,6 +1044,8 @@ internal partial class CoopSave {
         _machinesSaid.Clear();
         _caughtGrinders.Clear();
         _caughtCogs.Clear();
+        _cogsStoppedForLocal.Clear();
+        _cogsStoppedForMembers.Clear();
         _grindersStoppedForPartner.Clear();
         _directors.Clear();
         ResetShownParts();
