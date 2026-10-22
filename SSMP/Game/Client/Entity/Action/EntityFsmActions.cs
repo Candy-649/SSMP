@@ -889,13 +889,13 @@ internal static partial class EntityFsmActions {
     private static bool IsObjectInRegistry(GameObject gameObject) {
         // A part of another entity, like a head on a body, is found under the entry of that entity rather than at the
         // top of the registry, and does its own animating and switching all the same
-        if (!EntityRegistry.TryGetEntry(gameObject, out var entry)) {
+        if (!EntityRegistry.TryGetEntry(gameObject, out _)) {
             return EntityProcessor.IsRegistered(gameObject);
         }
 
         // What a creature throws is often named after it, so the registry takes it for the creature, but it is not
         // an entity, and what is done to it is done again on the other game like anything else
-        return EntitySpawner.IsSpawnedAsEntity(gameObject, entry.Type) || EntityProcessor.IsRegistered(gameObject);
+        return EntitySpawner.IsSpawnedAsEntity(gameObject) || EntityProcessor.IsRegistered(gameObject);
     }
 
     /// <summary>

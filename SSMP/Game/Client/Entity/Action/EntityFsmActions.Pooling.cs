@@ -80,7 +80,7 @@ internal static partial class EntityFsmActions {
         );
         var throws = ThrownThings.ReadThrows(data);
 
-        if (action.gameObject == null || action.gameObject.Value is not { } prefab) {
+        if (ThrownThings.PrefabToThrow(action, action.gameObject?.Value, throws) is not { } prefab) {
             return;
         }
 
@@ -297,7 +297,7 @@ internal static partial class EntityFsmActions {
 
         var flings = ReadFlings(data);
         var throws = ThrownThings.ReadThrows(data);
-        if (action.gameObject.Value is not { } prefab) {
+        if (ThrownThings.PrefabToThrow(action, action.gameObject.Value, throws) is not { } prefab) {
             return;
         }
 
@@ -394,7 +394,7 @@ internal static partial class EntityFsmActions {
         }
 
         var throws = ThrownThings.ReadThrows(data);
-        if (action.Prefab == null || action.Prefab.Value is not { } prefab) {
+        if (ThrownThings.PrefabToThrow(action, action.Prefab?.Value, throws) is not { } prefab) {
             return;
         }
 
@@ -504,7 +504,7 @@ internal static partial class EntityFsmActions {
 
         var flings = ReadFlings(data);
         var throws = ThrownThings.ReadThrows(data);
-        if (action.gameObject.Value is not { } prefab) {
+        if (ThrownThings.PrefabToThrow(action, action.gameObject.Value, throws) is not { } prefab) {
             return;
         }
 

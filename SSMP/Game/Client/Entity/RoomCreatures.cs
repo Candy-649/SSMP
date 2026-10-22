@@ -142,7 +142,7 @@ internal class RoomCreatures {
             // A creature's own FSMs run in one game only, and what they spawn is sent already
             if (prefab == null ||
                 !EntityRegistry.TryGetEntry(prefab, out var entry) ||
-                !EntitySpawner.IsSpawnedAsEntity(prefab, entry.Type) ||
+                !EntitySpawner.IsSpawnedAsEntity(prefab) ||
                 EntityProcessor.IsRegistered(maker.gameObject)) {
                 return;
             }

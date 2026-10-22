@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
@@ -14,15 +13,11 @@ internal static class EntitySpawner {
     /// Whether the other game can make what the given action just spawned from a spawn message alone, which says no
     /// more than what kind of creature spawned what kind of entity. The other game looks for it among what its own
     /// copy of a creature of the spawning kind spawns (<see cref="FindPrefab"/>), so it makes the same thing only when
-    /// that finds the very thing this action spawned. A grass ball is always found, by its name if need be.
+    /// that finds the very thing this action spawned.
     /// </summary>
     /// <param name="action">The action that spawned it.</param>
     /// <param name="spawnedType">The type the registry takes the spawned object for.</param>
     public static bool CanSpawn(FsmStateAction action, EntityType spawnedType) {
-        if (spawnedType == EntityType.GrassBall) {
-            return true;
-        }
-
         var spawned = PrefabOf(action, out _)?.Value;
         return spawned != null &&
                FindPrefab(action.Fsm.GameObject.GetComponents<PlayMakerFSM>(), spawnedType, out _) == spawned;
@@ -46,7 +41,7 @@ internal static class EntitySpawner {
                     if (prefab != null &&
                         EntityRegistry.TryGetEntry(prefab, out var entry) &&
                         entry.Type == spawnedType &&
-                        IsSpawnedAsEntity(prefab, spawnedType)) {
+                        IsSpawnedAsEntity(prefab)) {
                         return prefab;
                     }
                 }
@@ -68,8 +63,8 @@ internal static class EntitySpawner {
                 var field = PrefabOf(action, out _);
                 var prefab = field is { UseVariable: false } ? field.Value : null;
                 if (prefab != null &&
-                    EntityRegistry.TryGetEntry(prefab, out var entry) &&
-                    IsSpawnedAsEntity(prefab, entry.Type)) {
+                    EntityRegistry.TryGetEntry(prefab, out _) &&
+                    IsSpawnedAsEntity(prefab)) {
                     return true;
                 }
             }
@@ -79,17 +74,14 @@ internal static class EntitySpawner {
     }
 
     /// <summary>
-    /// Whether an action spawns a creature: what it spawns has health, or the registry takes it for an entity that is
-    /// made one when spawned. The copy of a creature that first does what its first states do must not do these: the
-    /// creature that a copy's first state makes is a real one of the room, apart from every entity, which the game that
-    /// runs the creature makes once again and shows the other game as a spawn.
+    /// Whether an action spawns a creature: what it spawns has health. The copy of a creature that first does what its
+    /// first states do must not do these: the creature that a copy's first state makes is a real one of the room, apart
+    /// from every entity, which the game that runs the creature makes once again and shows the other game as a spawn.
     /// </summary>
     /// <param name="action">The action.</param>
     public static bool SpawnsCreature(FsmStateAction action) {
         var prefab = PrefabOf(action, out _)?.Value;
-        return prefab != null && (prefab.GetComponent<HealthManager>() != null ||
-                                  EntityRegistry.TryGetEntry(prefab, out var entry) &&
-                                  IsSpawnedAsEntity(prefab, entry.Type));
+        return prefab != null && IsSpawnedAsEntity(prefab);
     }
 
     /// <summary>
@@ -110,17 +102,16 @@ internal static class EntitySpawner {
     }
 
     /// <summary>
-    /// Whether something that was just spawned, and that the registry takes for an entity of the given type, is kept
-    /// out of the ordinary way of showing a spawn on the other game, which is doing the spawning action over there.
-    /// What the other game can make from a spawn message is made there as an entity. A creature it cannot make stays
-    /// in the game it was spawned in, since a copy made the ordinary way would go its own way unseen by this one. What
-    /// a creature throws is not kept out: its sickles, javelins and bombs are often named after it, so the registry
-    /// takes them for the creature itself, but they are thrown like anything else.
+    /// Whether something that was just spawned, and that the registry takes for an entity, is kept out of the ordinary
+    /// way of showing a spawn on the other game, which is doing the spawning action over there: a creature, which has
+    /// health. What the other game can make from a spawn message is made there as an entity. A creature it cannot make
+    /// stays in the game it was spawned in, since a copy made the ordinary way would go its own way unseen by this one.
+    /// What a creature throws is not kept out: its sickles, javelins and bombs are often named after it, so the
+    /// registry takes them for the creature itself, but they are thrown like anything else.
     /// </summary>
     /// <param name="gameObject">The spawned object, or the prefab it is spawned from.</param>
-    /// <param name="type">The type the registry takes it for.</param>
-    public static bool IsSpawnedAsEntity(GameObject gameObject, EntityType type) {
-        return type == EntityType.GrassBall || gameObject.GetComponent<HealthManager>() != null;
+    public static bool IsSpawnedAsEntity(GameObject gameObject) {
+        return gameObject.GetComponent<HealthManager>() != null;
     }
 
     /// <summary>
@@ -148,39 +139,7 @@ internal static class EntitySpawner {
         // happens to be, and the first position puts it right either way.
         var startPosition = clientObject != null ? clientObject.transform.position : Vector3.zero;
 
-        if (spawnedType == EntityType.GrassBall) {
-            IEnumerable<PlayMakerFSM> sourceFsms = clientObject != null
-                ? clientObject.GetComponentsInChildren<PlayMakerFSM>(true)
-                : clientFsms;
-
-            foreach (var fsm in sourceFsms) {
-                foreach (var state in fsm.FsmStates) {
-                    foreach (var action in state.Actions) {
-                        var prefab = action switch {
-                            SpawnObjectFromGlobalPool spawnAction => spawnAction.gameObject?.Value,
-                            FlingObjectsFromGlobalPool flingAction => flingAction.gameObject?.Value,
-                            FlingObjectsFromGlobalPoolVel flingAction => flingAction.gameObject?.Value,
-                            FlingObjectsFromGlobalPoolTime flingAction => flingAction.gameObject?.Value,
-                            _ => null
-                        };
-
-                        if (prefab != null && prefab.name.Equals("Grass Ball", StringComparison.OrdinalIgnoreCase)) {
-                            return prefab.Spawn(startPosition, Quaternion.identity);
-                        }
-                    }
-                }
-            }
-
-            foreach (var prefab in Resources.FindObjectsOfTypeAll<GameObject>()) {
-                if (prefab.scene.IsValid() || !prefab.name.Equals("Grass Ball", StringComparison.OrdinalIgnoreCase)) {
-                    continue;
-                }
-
-                return prefab.Spawn(startPosition, Quaternion.identity);
-            }
-        }
-
-        // Anything else is looked for among what the spawning creature's own FSMs spawn, which is where the game that
+        // It is looked for among what the spawning creature's own FSMs spawn, which is where the game that
         // spawned it made sure it would be found (CanSpawn)
         var creature = FindPrefab(clientFsms, spawnedType, out var pooled);
         if (creature != null) {

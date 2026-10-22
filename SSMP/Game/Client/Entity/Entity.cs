@@ -1073,7 +1073,7 @@ internal partial class Entity {
             );
         }
 
-        EntityInitializer.RemoveClientTypes(Object.Client, Type);
+        EntityInitializer.RemoveClientTypes(Object.Client);
 
         // Instantiate all types defined in the entity registry, which are passed to the constructor
         foreach (var type in types) {

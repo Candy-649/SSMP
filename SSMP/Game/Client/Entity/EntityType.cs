@@ -243,7 +243,6 @@ internal enum EntityType {
     Lace,
     GrandMotherSilk,
     LostLace,
-    GrassBall,
     BellfleaBouncer,
     BellfleaBouncerGiant,
     BellfleaJuggler,

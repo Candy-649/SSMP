@@ -3683,18 +3683,6 @@
     }
   },
   {
-    "base_object_name": "Grass Ball",
-    "type": "GrassBall",
-    "parent_name": null,
-    "components": [
-      "Rotation"
-    ],
-    "internal_name": "Grass Ball",
-    "fsm_names": [
-      "grass ball control"
-    ]
-  },
-  {
     "base_object_name": "Bellflea Bouncer",
     "type": "BellfleaBouncer",
     "parent_name": null,

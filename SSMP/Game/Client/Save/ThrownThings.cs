@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
+using System.Reflection;
 using System.Runtime.CompilerServices;
 using HutongGames.PlayMaker;
 using SSMP.Game.Client.Entity.Component;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 using Random = UnityEngine.Random;
 
 namespace SSMP.Game.Client.Save;
@@ -324,6 +327,117 @@ internal static class ThrownThings {
         return Begin(new Pending(prefab, target, () => next < throws.Count
             ? $"{throws.Prefix}.{throws.First + next++}"
             : null, null));
+    }
+
+    /// <summary>
+    /// What a replayed throw of a creature makes here: what its action names here, unless the creature threw something
+    /// else. An action can throw what a variable holds, which another action of the creature fills just before - the
+    /// variant of the creature's spit or shot picked for it - and which this game's copy of the creature, which does
+    /// not run, never fills: the copy threw nothing then, or a thing it had thrown before. What the creature threw is
+    /// then looked for by its name among what its state machine names.
+    /// </summary>
+    /// <param name="action">The replayed action.</param>
+    /// <param name="named">What the action names here.</param>
+    /// <param name="throws">The names that came with the throw (see <see cref="ReadThrows"/>).</param>
+    /// <returns>What to throw, or null for nothing.</returns>
+    public static GameObject? PrefabToThrow(FsmStateAction action, GameObject? named, Throws throws) {
+        if (throws.PrefabName.Length == 0 || named != null && named.name == throws.PrefabName) {
+            return named;
+        }
+
+        // Looked for once per state machine and name: what it holds does not change
+        var known = FoundByName.GetOrCreateValue(action.Fsm);
+        if (!known.TryGetValue(throws.PrefabName, out var found)) {
+            found = FindPrefab(action.Fsm, throws.PrefabName);
+            known[throws.PrefabName] = found;
+
+            var thrower = action.Fsm.GameObject;
+            var creature = thrower == null ? "-" : thrower.name;
+            if (found != null && SaidFoundByName.Add($"{creature}|{throws.PrefabName}")) {
+                Logger.Info(
+                    $"[Thrown] The copy of '{creature}' held {(named == null ? "nothing" : $"'{named.name}'")} " +
+                    $"where it threw '{throws.PrefabName}', so that was found by its name"
+                );
+            }
+        }
+
+        return found != null ? found : named;
+    }
+
+    /// <summary>
+    /// What <see cref="PrefabToThrow"/> found by its name in each state machine, or null where it found nothing.
+    /// </summary>
+    private static readonly ConditionalWeakTable<HutongGames.PlayMaker.Fsm, Dictionary<string, GameObject?>>
+        FoundByName = new();
+
+    /// <summary>
+    /// The creatures and what they threw that <see cref="PrefabToThrow"/> found by its name already, each said once.
+    /// </summary>
+    private static readonly HashSet<string> SaidFoundByName = [];
+
+    /// <summary>
+    /// The fields of each kind of action that can hold a prefab, found once per kind.
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> PrefabFields = new();
+
+    /// <summary>
+    /// A prefab of the given name that a state machine holds, in one of its variables or in a field of one of its
+    /// actions, or null if it holds none.
+    /// </summary>
+    /// <param name="fsm">The state machine.</param>
+    /// <param name="name">The name of the prefab.</param>
+    private static GameObject? FindPrefab(HutongGames.PlayMaker.Fsm fsm, string name) {
+        foreach (var variable in fsm.Variables.GameObjectVariables) {
+            if (IsPrefabNamed(variable.Value, name)) {
+                return variable.Value;
+            }
+        }
+
+        foreach (var state in fsm.States) {
+            foreach (var action in state.Actions) {
+                foreach (var field in FieldsHoldingPrefabs(action.GetType())) {
+                    switch (field.GetValue(action)) {
+                        case FsmGameObject one when IsPrefabNamed(one.Value, name):
+                            return one.Value;
+                        case GameObject gameObject when IsPrefabNamed(gameObject, name):
+                            return gameObject;
+                        case FsmGameObject[] many:
+                            foreach (var item in many) {
+                                if (item != null && IsPrefabNamed(item.Value, name)) {
+                                    return item.Value;
+                                }
+                            }
+
+                            break;
+                    }
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// The fields of a kind of action that can hold a prefab.
+    /// </summary>
+    private static FieldInfo[] FieldsHoldingPrefabs(Type type) {
+        if (!PrefabFields.TryGetValue(type, out var fields)) {
+            fields = type.GetFields(BindingFlags.Public | BindingFlags.Instance)
+                .Where(field => field.FieldType == typeof(FsmGameObject) ||
+                                field.FieldType == typeof(FsmGameObject[]) ||
+                                field.FieldType == typeof(GameObject))
+                .ToArray();
+            PrefabFields[type] = fields;
+        }
+
+        return fields;
+    }
+
+    /// <summary>
+    /// Whether an object is a prefab of the given name, rather than something in a scene.
+    /// </summary>
+    private static bool IsPrefabNamed(GameObject? gameObject, string name) {
+        return gameObject != null && !gameObject.scene.IsValid() && gameObject.name == name;
     }
 
     /// <summary>

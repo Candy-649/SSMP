@@ -700,7 +700,7 @@ internal class EntityManager {
 
         // What a creature throws is often named after it, so the registry takes it for the creature, but it is thrown
         // on the other game like anything else, by doing the spawning action there
-        if (!EntitySpawner.IsSpawnedAsEntity(details.GameObject, spawnedEntry.Type)) {
+        if (!EntitySpawner.IsSpawnedAsEntity(details.GameObject)) {
             return false;
         }
 

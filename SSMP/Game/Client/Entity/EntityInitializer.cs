@@ -212,16 +212,13 @@ internal static class EntityInitializer {
     /// Remove all types that should be removed from a client-side entity object.
     /// </summary>
     /// <param name="gameObject">The game object on which to remove the types.</param>
-    /// <param name="entityType">The registered entity type.</param>
-    public static void RemoveClientTypes(GameObject gameObject, EntityType entityType) {
+    public static void RemoveClientTypes(GameObject gameObject) {
         // Keep Rigidbody2D components alive. Native death and corpse components cache their bodies during Awake;
         // destroying one here leaves callbacks such as ActiveCorpse.Update and SetParticleScale.OnUpdate with a
         // Unity-null reference. Remote controller bodies are still made kinematic so they cannot simulate locally.
-        if (entityType != EntityType.GrassBall) {
-            foreach (var rigidbody in gameObject.GetComponentsInChildren<Rigidbody2D>(true)) {
-                if (rigidbody != null) {
-                    ConfigureClientRigidbody(rigidbody);
-                }
+        foreach (var rigidbody in gameObject.GetComponentsInChildren<Rigidbody2D>(true)) {
+            if (rigidbody != null) {
+                ConfigureClientRigidbody(rigidbody);
             }
         }
 
