@@ -1029,9 +1029,10 @@ internal partial class CoopHits {
         // the enemy's own state machine, and the rounding that the co-op damage split carries to the next hit.
         Entity.Entity? enemyEntity = null;
         HealthManager? enemyHealth = null;
+        var struckCopy = false;
         var isEnemyEntity = responder is Component enemyComponent &&
                             enemyComponent.TryGetComponent<HealthManager>(out enemyHealth) &&
-                            TryGetEntity(enemyComponent.gameObject, out enemyEntity, out _);
+                            TryGetEntity(enemyComponent.gameObject, out enemyEntity, out struckCopy);
         var enemyId = enemyEntity?.Id ?? 0;
 
         if (isEnemyEntity && isRemote) {
@@ -1053,11 +1054,19 @@ internal partial class CoopHits {
             ? FindCopyHolding(part.gameObject)
             : null;
 
-        // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is
+        // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is. A
+        // creature that this game runs answers a wound of this game's player at them, as it answers one of the
+        // partner's (see PlaySetOff)
         var lastContext = _hitContext;
         _hitContext = isRemote ? HitContext.Remote : hit.IsHeroDamage ? HitContext.Local : HitContext.None;
         try {
-            var response = copied != null ? HitCopy(copied, responder, hit) : responder.Hit(hit);
+            IHitResponder.HitResponse response;
+            if (copied == null && enemyHealth != null && enemyEntity != null && !struckCopy &&
+                _entityManager.IsSceneHost && (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source))) {
+                response = HitAnsweredHere(responder, hit, enemyHealth.gameObject);
+            } else {
+                response = copied != null ? HitCopy(copied, responder, hit) : responder.Hit(hit);
+            }
 
             // Nothing of this hit happens in the partner's game any more, so what it looked like is sent to them. A hit
             // that the enemy blocked showed only the spark of the block here, and that is what goes, not a wound.
@@ -1082,6 +1091,29 @@ internal partial class CoopHits {
         } finally {
             _hitContext = lastContext;
         }
+    }
+
+    /// <summary>
+    /// Makes a hit of this game's player on a creature that this game runs, which answers the wound at them (see
+    /// GamePatcher.AnswerWound).
+    /// </summary>
+    /// <param name="responder">The creature's part that is hit.</param>
+    /// <param name="hit">The hit.</param>
+    /// <param name="creature">The creature.</param>
+    /// <returns>How the creature responded to the hit.</returns>
+    private static IHitResponder.HitResponse HitAnsweredHere(
+        IHitResponder responder,
+        HitInstance hit,
+        GameObject creature
+    ) {
+        var hero = HeroController.SilentInstance;
+        if (hero == null) {
+            return responder.Hit(hit);
+        }
+
+        var response = default(IHitResponder.HitResponse);
+        GamePatcher.AnswerWound(creature, hero.gameObject, () => response = responder.Hit(hit));
+        return response;
     }
 
     /// <summary>
@@ -2372,8 +2404,8 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Plays at once what a wound of the local player makes the copy of an entity do, in each FSM of it that goes
-    /// somewhere on it (see Entity.FindWoundReactions), and sends the scene host the same, where the creature goes
-    /// after the local player as one that they set off, unless it fights a player already (see GoAfterSetter).
+    /// somewhere on it (see Entity.FindWoundReactions), and sends the scene host the same, where the creature answers
+    /// it at the local player as the copy does (see PlaySetOff).
     /// </summary>
     /// <param name="struck">The entity.</param>
     private void SetOffByWound(Entity.Entity struck) {
@@ -2649,12 +2681,10 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Has a creature that the partner set off - woke by coming near, hooked with the harpoon, heard a sign of theirs,
-    /// or wounded - go after the partner, as it would have gone after the one player there is who set it off. Only when
-    /// it takes the event: one that is up already keeps whom it chose, and the boss of a room that not every player is
-    /// in yet never hears the sign (see <see cref="ShutsOutSign"/>). A wound turns only one that fights no player yet:
-    /// whom one that fights goes after is up to its moves, whoever wounds it, as it is for this game's player
-    /// (GamePatcher.FightsAPlayer).
+    /// Has a creature that the partner set off - woke by coming near, hooked with the harpoon or heard a sign of
+    /// theirs - go after the partner, as it would have gone after the one player there is who set it off. Only when it
+    /// takes the event: one that is up already keeps whom it chose, and the boss of a room that not every player is in
+    /// yet never hears the sign (see <see cref="ShutsOutSign"/>). A wound is answered instead (see PlaySetOff).
     /// </summary>
     /// <param name="entity">The entity.</param>
     /// <param name="update">The update, from the partner, with the index of the FSM and the event.</param>
@@ -2664,8 +2694,7 @@ internal partial class CoopHits {
             Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) != null &&
             _playerData.TryGetValue(update.PlayerId, out var setter) && setter.PlayerObject != null &&
             entity.Object.Host != null && (!Entity.Entity.PlayerSigns.Contains(update.Responder) ||
-                                           ShutsOutSign?.Invoke(fsm.Fsm, state.Name) != true) &&
-            !(Entity.Entity.IsWoundEvent(update.Responder) && GamePatcher.FightsAPlayer(entity.Object.Host))) {
+                                           ShutsOutSign?.Invoke(fsm.Fsm, state.Name) != true)) {
             GamePatcher.SetTargetOf(entity.Object.Host, setter.PlayerObject);
         }
     }
@@ -2816,7 +2845,8 @@ internal partial class CoopHits {
     /// <see cref="GoAfterSetter"/>), so that what it measures of a player as it does is the partner. A sign of theirs
     /// that comes to nothing - the FSM that hears it is back where it heard it, like a creature that lets a player in
     /// one crest bind in peace - leaves it going after whom it went after before, as a sign of this game's player that
-    /// comes to nothing does (Entity.GoAfterOwnSign).
+    /// comes to nothing does (Entity.GoAfterOwnSign). A wound of theirs the creature answers at them, as it answers one
+    /// of this game's player (GamePatcher.AnswerWound): their copy of it answered it at them at once.
     /// </summary>
     /// <param name="entity">The entity.</param>
     /// <param name="update">The update, from the partner, with the index of the FSM and the event.</param>
@@ -2824,6 +2854,17 @@ internal partial class CoopHits {
     /// <param name="play">What plays it.</param>
     private void PlaySetOff(Entity.Entity entity, CoopHitUpdate update, PlayMakerFSM? fsm, Action play) {
         var creature = entity.Object.Host;
+        if (Entity.Entity.IsWoundEvent(update.Responder)) {
+            if (creature != null && _playerData.TryGetValue(update.PlayerId, out var striker) &&
+                striker.PlayerObject != null) {
+                GamePatcher.AnswerWound(creature, striker.PlayerObject, play);
+            } else {
+                play();
+            }
+
+            return;
+        }
+
         var isSign = Entity.Entity.PlayerSigns.Contains(update.Responder);
         var heardIn = fsm != null ? fsm.Fsm?.ActiveState : null;
         var hold = isSign && creature != null ? GamePatcher.TargetHoldOf(creature) : null;

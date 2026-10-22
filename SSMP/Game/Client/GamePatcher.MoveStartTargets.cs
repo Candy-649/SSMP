@@ -287,6 +287,8 @@ internal partial class GamePatcher {
         AwarenessRanges.Clear();
         Turns.Clear();
         IdleWatches.Clear();
+        WoundAnswers.Clear();
+        AnsweringFsms.Clear();
     }
 
     /// <summary>
@@ -297,6 +299,7 @@ internal partial class GamePatcher {
         AwarenessRanges.Remove(instanceId);
         Turns.Remove(instanceId);
         IdleWatches.Remove(instanceId);
+        ForgetWoundAnswer(instanceId);
     }
 
     /// <summary>
@@ -309,6 +312,16 @@ internal partial class GamePatcher {
     /// <param name="orig">The original method.</param>
     /// <param name="self">The state.</param>
     private static void OnStateEnter(Action<FsmState> orig, FsmState self) {
+        // First where a wound takes an FSM, or whether one goes on from there, which may give the creature back whom it
+        // went after before it rolls (see AnswerWound)
+        if (_woundedNow != null || AnsweringFsms.Count > 0) {
+            try {
+                NoteWoundState(self);
+            } catch (Exception e) {
+                Logger.Warn($"Could not note where a wound took '{self.Fsm?.Name}': {e.GetType().Name}: {e.Message}");
+            }
+        }
+
         if (self.Fsm?.FsmComponent is { } machine && machine != null && NoteOfState(self).Starts) {
             try {
                 TurnAtMoveStart(machine, self);
@@ -363,7 +376,7 @@ internal partial class GamePatcher {
     /// Whether a state measures a player: asks where one is, faces one, aims at one or asks a range about one.
     /// </summary>
     /// <param name="state">The state.</param>
-    internal static bool MeasuresAPlayer(FsmState state) {
+    private static bool MeasuresAPlayer(FsmState state) {
         foreach (var action in state.Actions ?? []) {
             if (action is GetHero or CheckAlertRange or CheckAlertRangeByName ||
                 action != null && ActionRegistry.TargetedFsmActionTypes.Contains(action.GetType().Name)) {
@@ -390,7 +403,7 @@ internal partial class GamePatcher {
     /// Only the game that runs the creature rolls, and the other games see it turn as they see it do anything. What
     /// another player set off plays here as it played in their game (SharedDice.PlaysAnotherGame), so nothing rolls
     /// while it does, and nothing rolls while the local player gives a sign, which the creature hears of them alone
-    /// (Entity.Signs).
+    /// (Entity.Signs), nor while it answers a wound at the player who dealt it (see <see cref="AnswerWound"/>).
     /// </summary>
     /// <param name="machine">The FSM of the creature.</param>
     /// <param name="state">The state where the move starts.</param>
@@ -414,7 +427,7 @@ internal partial class GamePatcher {
 
         // One that sings to a player of a song turns to them by the song (GetFsmActionTarget)
         var id = owner.GetInstanceID();
-        if (TryGetSongTarget(id, out _)) {
+        if (TryGetSongTarget(id, out _) || WoundAnswers.ContainsKey(id)) {
             return;
         }
 
@@ -537,34 +550,11 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// Whether a creature fights a player already (see <see cref="IsFighting"/>): whom it goes after is then up to its
-    /// moves when another player wounds it, as it is when the scene host's player does (CoopHits.GoAfterSetter).
+    /// moves when another player wounds it, after it has answered the wound (see <see cref="AnswerWound"/>).
     /// </summary>
     /// <param name="creature">The creature.</param>
     internal static bool FightsAPlayer(GameObject creature) {
         return TurnsOf(GetEnemyTargetOwner(creature)) is { } turns && IsFighting(turns, Time.unscaledTime);
-    }
-
-    /// <summary>
-    /// Whether a creature may fight a player already as another player wounds it, and so keep whom it fights (see
-    /// <see cref="FightsAPlayer"/>): one with a state machine that looks at players and picks its moves at random,
-    /// which turns at the start of its moves (see <see cref="TurnAtMoveStart"/>). Asked of the copy that the other
-    /// game shows, which cannot tell whom the creature fights, nor whether it fights anyone.
-    /// </summary>
-    /// <param name="machines">The state machines of the creature.</param>
-    internal static bool MayFightAPlayer(List<PlayMakerFSM> machines) {
-        foreach (var machine in machines) {
-            if (machine == null || !AimsAtPlayers(machine)) {
-                continue;
-            }
-
-            foreach (var state in machine.FsmStates ?? []) {
-                if (state != null && PicksAMove(state)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
     }
 
     /// <summary>

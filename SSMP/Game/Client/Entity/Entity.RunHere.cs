@@ -305,18 +305,6 @@ internal partial class Entity {
     private static Entity? _recordedEntity;
 
     /// <summary>
-    /// Whether the input that <see cref="_recordedFsm"/> plays goes no further than where the creature looks at a
-    /// player (see <see cref="MayFightAPlayer"/>).
-    /// </summary>
-    private static bool _recordedStopsAtALook;
-
-    /// <summary>
-    /// The state where the creature looks at a player that the input <see cref="_recordedFsm"/> plays stopped before,
-    /// if it did.
-    /// </summary>
-    private static FsmState? _recordedStoppedBefore;
-
-    /// <summary>
     /// The hook that notes each mix of the game's sound that the FSM of a copy that runs here changes to (see
     /// <see cref="_moods"/>), put in place the first time a copy runs a catch that this game leads.
     /// </summary>
@@ -577,33 +565,29 @@ internal partial class Entity {
         var fsm = copyFsm.Fsm;
         var fromName = _runHere != null ? fsm.ActiveStateName : EntityFsmActions.HostStateOf(fsm);
         if (fromName == null || fsm.GetState(fromName) is not { } from ||
-            EntityFsmActions.FindTransition(fsm, from, eventName) is not { } next) {
+            EntityFsmActions.FindTransition(fsm, from, eventName) == null) {
             return null;
         }
 
-        // A wound of a creature that may fight a player already plays here only up to where the creature looks at a
-        // player, which is for the scene host's game to play (see MayFightAPlayer)
-        var stopsAtALook = IsWoundEvent(eventName) && MayFightAPlayer;
-        if (stopsAtALook && GamePatcher.MeasuresAPlayer(next)) {
-            Logger.Info(
-                $"'{eventName}' takes the copy of entity {Id} to '{next.Name}', where it looks at a player, so the " +
-                "scene host's game plays it"
-            );
-            return null;
-        }
-
+        // Whether the copy moves as its body and the room take it while it plays this (see below)
+        var led = caught != null && !CatchEvents.Contains(eventName);
+        var withItsBody = led || setOff && caught == null && IsWoundEvent(eventName) && !MovesByItself();
+        var ranHere = _runHere != null;
         if (_runHere == null) {
             StartRunningHere(copyFsm, from);
         } else if (_runHereMove) {
             // The move that the copy played by itself goes on as what the local player did to it, played as any other,
-            // once what waited in it for the copy is taken in (TakeWhatWaitsInTheMove)
+            // once what waited in it for the copy is taken in (TakeWhatWaitsInTheMove), with the body it moved with if
+            // that moves with one too
             TakeWhatWaitsInTheMove();
             _runHereMove = false;
             _moveHostAt = null;
             _moveEntered.Clear();
             _moveFinishBy = null;
             _moveAtItsEnd = false;
-            TakeTheCopysBodyBack();
+            if (!withItsBody) {
+                TakeTheCopysBodyBack();
+            }
         }
 
         // Taken before the input, which the scene host plays from the same start
@@ -614,13 +598,19 @@ internal partial class Entity {
         }
 
         // The way it goes, which the scene host follows for a catch that this game leads
-        var led = caught != null && !CatchEvents.Contains(eventName);
         var path = new List<FsmState>();
 
         // A creature that carries off the player it caught moves as its body and the room take it, from the start, and
-        // what it does to the sound of the game for them is noted, to be given back if it stops before it does
+        // so does one that answers a wound of the local player: a boss that flew off from them or dodged away went
+        // through the walls of the room here, where they stopped it in the scene host's game (USER 10-22, "它移动的时
+        // 候超出范围又闪现回来"). Not one that moves by itself already, with the body its own motion gave it
+        if (withItsBody) {
+            GiveTheCopyItsBody(ranHere);
+        }
+
+        // What a catch that this game leads does to the sound of the game for the player it caught is noted, to be
+        // given back if it stops before it does
         if (led) {
-            GiveTheCopyItsBody();
             HookMoods();
         }
 
@@ -637,8 +627,6 @@ internal partial class Entity {
             _recordedFsm = fsm;
             _recordedEntity = this;
             _recordedPath = path;
-            _recordedStopsAtALook = stopsAtALook;
-            _recordedStoppedBefore = null;
             dice = SharedDice.Record(() => {
                 fsm.Event(eventName);
                 Settle(fsm);
@@ -647,16 +635,7 @@ internal partial class Entity {
             _recordedFsm = null;
             _recordedEntity = null;
             _recordedPath = null;
-            _recordedStopsAtALook = false;
             HeldFsms[fsm] = this;
-        }
-
-        if (_recordedStoppedBefore is { } lookedAt) {
-            _recordedStoppedBefore = null;
-            Logger.Info(
-                $"'{eventName}' took the copy of entity {Id} to '{fsm.ActiveStateName}' here and no further: it " +
-                $"looks at a player in '{lookedAt.Name}', which the scene host's game plays"
-            );
         }
 
         foreach (var state in path) {
@@ -697,14 +676,18 @@ internal partial class Entity {
             BeginAftermath(after, $"went out of the catch to '{reached.Name}' with the catch itself");
         }
 
-        if (_runHereLed) {
-            StartSteppingRunHere(copyFsm);
-        } else {
-            StopSteppingRunHere();
+        if (!_runHereLed) {
             _moods.Clear();
             if (led) {
                 TakeTheCopysBodyBack();
             }
+        }
+
+        // At the steps of the physics as well, while it plays a catch that this game leads or moves with its body
+        if (_runHereLed || _copyBodyBefore != null) {
+            StartSteppingRunHere(copyFsm);
+        } else {
+            StopSteppingRunHere();
         }
 
         // What the copy does now moves it, rather than what the creature does by itself over there
@@ -2499,10 +2482,11 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Steps the FSM of the copy that runs here for a catch that this game leads on at each step of the physics, as
-    /// the room's own FSM is, if it does anything there and nothing on its object steps it already: the switched off
-    /// copy gets no steps of the physics from the game, and what its FSM does at them - a creature slowing in the air,
-    /// a player it carries lifted up by it - was never done.
+    /// Steps the FSM of the copy that runs here for a catch that this game leads, or with the body of the room's
+    /// creature (see <see cref="GiveTheCopyItsBody"/>), on at each step of the physics, as the room's own FSM is, if
+    /// it does anything there and nothing on its object steps it already: the switched off copy gets no steps of the
+    /// physics from the game, and what its FSM does at them - a creature slowing in the air, a player it carries lifted
+    /// up by it - was never done.
     /// </summary>
     /// <param name="copyFsm">The FSM of the copy.</param>
     private void StartSteppingRunHere(PlayMakerFSM copyFsm) {
@@ -2567,15 +2551,18 @@ internal partial class Entity {
 
     /// <summary>
     /// Gives the copy the kind of body that the room's own creature has in the scene host's game - moved by the physics
-    /// - while its FSM runs here for a catch that this game leads, moving the way it is seen to move. The copy is only
-    /// ever put where it is told, and its body is one that nothing else moves
-    /// (EntityInitializer.ConfigureClientRigidbody): a creature that leapt up with the player it caught flew on up for
-    /// good, carrying them, and never landed to let them go. It is given its own kind back once its FSM stops running
-    /// here (see <see cref="TakeTheCopysBodyBack"/>), as it is when its FSM made it fall by itself meanwhile - a
-    /// creature stunned in a move that the copy plays by itself, which went on falling once it was put where it was
+    /// - while its FSM runs here for a catch that this game leads, a move it plays by itself or a wound of the local
+    /// player, moving the way it is seen to move. The copy is only ever put where it is told, and its body is one that
+    /// nothing else moves (EntityInitializer.ConfigureClientRigidbody): a creature that leapt up with the player it
+    /// caught flew on up for good, carrying them, and never landed to let them go, and a boss that flew off from the
+    /// player who wounded it went through the walls of the room. It is given its own kind back once its FSM stops
+    /// running here (see <see cref="TakeTheCopysBodyBack"/>), as it is when its FSM made it fall by itself meanwhile -
+    /// a creature stunned in a move that the copy plays by itself, which went on falling once it was put where it was
     /// told.
     /// </summary>
-    private void GiveTheCopyItsBody() {
+    /// <param name="ownSpeed">Whether it goes on at the speed of the body it has, which its own FSM moved as it ran
+    /// here already, rather than at the speed it is seen to move at.</param>
+    private void GiveTheCopyItsBody(bool ownSpeed = false) {
         if (_copyBodyBefore != null || Object.Client == null ||
             !Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
             return;
@@ -2587,8 +2574,9 @@ internal partial class Entity {
             return;
         }
 
-        Vector2 velocity =
-            Object.Client.TryGetComponent<global::SSMP.Fsm.PredictiveInterpolation>(out var interpolation)
+        Vector2 velocity = ownSpeed
+            ? body.linearVelocity
+            : Object.Client.TryGetComponent<global::SSMP.Fsm.PredictiveInterpolation>(out var interpolation)
                 ? interpolation.Velocity
                 : Vector3.zero;
 
@@ -2597,8 +2585,9 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Gives the copy back the kind of body it had before its FSM ran here for a catch that this game leads (see
-    /// <see cref="GiveTheCopyItsBody"/>), standing still: from here it is put where the scene host says again.
+    /// Gives the copy back the kind of body it had before its FSM ran here with the body of the room's creature (see
+    /// <see cref="GiveTheCopyItsBody"/>), standing still: from here it is put where the scene host says again. One that
+    /// was set moving by itself meanwhile keeps the body that its own motion gave it (OwnMotionComponent).
     /// </summary>
     private void TakeTheCopysBodyBack() {
         if (_copyBodyBefore is not { } before) {
@@ -2606,7 +2595,7 @@ internal partial class Entity {
         }
 
         _copyBodyBefore = null;
-        if (Object.Client == null || !Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
+        if (Object.Client == null || !Object.Client.TryGetComponent<Rigidbody2D>(out var body) || MovesByItself()) {
             return;
         }
 
@@ -2890,13 +2879,6 @@ internal partial class Entity {
         FsmState toState
     ) {
         if (self == _recordedFsm) {
-            // Nor where the creature looks at a player, for a wound that goes no further here (see PlayHere)
-            if (_recordedStopsAtALook && GamePatcher.MeasuresAPlayer(toState)) {
-                SwitchToStateField!.SetValue(self, null);
-                _recordedStoppedBefore ??= toState;
-                return;
-            }
-
             _recordedPath?.Add(toState);
             orig(self, toState);
             return;

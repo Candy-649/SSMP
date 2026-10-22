@@ -528,6 +528,7 @@ internal partial class GamePatcher {
             return;
         }
 
+        ForgetWoundAnswersBackTo(player);
         List<int>? owners = null;
         foreach (var pair in EnemyApprovedTargets) {
             if (pair.Value == player) {
