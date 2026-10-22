@@ -311,8 +311,8 @@ internal partial class Entity {
     private static Hook? _moodHook;
 
     /// <summary>
-    /// The kind of body that the copy had before its FSM ran here for a catch that this game leads, given back when it
-    /// stops (see <see cref="GiveTheCopyItsBody"/>), or null if it was not changed.
+    /// The kind of body that the copy had before its FSM ran here with the body of the room's creature, given back
+    /// when it stops (see <see cref="GiveTheCopyItsBody"/>), or null if it was not changed.
     /// </summary>
     private RigidbodyType2D? _copyBodyBefore;
 
@@ -571,7 +571,8 @@ internal partial class Entity {
 
         // Whether the copy moves as its body and the room take it while it plays this (see below)
         var led = caught != null && !CatchEvents.Contains(eventName);
-        var withItsBody = led || setOff && caught == null && IsWoundEvent(eventName) && !MovesByItself();
+        var withItsBody = led || setOff && caught == null && IsWoundEvent(eventName) &&
+                          !_components.ContainsKey(EntityComponentType.OwnMotion);
         var ranHere = _runHere != null;
         if (_runHere == null) {
             StartRunningHere(copyFsm, from);
@@ -603,7 +604,7 @@ internal partial class Entity {
         // A creature that carries off the player it caught moves as its body and the room take it, from the start, and
         // so does one that answers a wound of the local player: a boss that flew off from them or dodged away went
         // through the walls of the room here, where they stopped it in the scene host's game (USER 10-22, "它移动的时
-        // 候超出范围又闪现回来"). Not one that moves by itself already, with the body its own motion gave it
+        // 候超出范围又闪现回来"). Not one whose body is the copy's own as it moves by itself (OwnMotionComponent)
         if (withItsBody) {
             GiveTheCopyItsBody(ranHere);
         }
@@ -2582,12 +2583,18 @@ internal partial class Entity {
 
         body.bodyType = roomBody.bodyType;
         body.linearVelocity = velocity;
+
+        // And falls as hard as the scene host last said the creature does (GravityScaleComponent), which the copy is
+        // not given otherwise: one that the game made weightless as it ran would drop
+        if (_components.TryGetValue(EntityComponentType.GravityScale, out var gravity) &&
+            gravity is GravityScaleComponent { HeardScale: { } scale }) {
+            body.gravityScale = scale;
+        }
     }
 
     /// <summary>
     /// Gives the copy back the kind of body it had before its FSM ran here with the body of the room's creature (see
-    /// <see cref="GiveTheCopyItsBody"/>), standing still: from here it is put where the scene host says again. One that
-    /// was set moving by itself meanwhile keeps the body that its own motion gave it (OwnMotionComponent).
+    /// <see cref="GiveTheCopyItsBody"/>), standing still: from here it is put where the scene host says again.
     /// </summary>
     private void TakeTheCopysBodyBack() {
         if (_copyBodyBefore is not { } before) {
@@ -2595,7 +2602,7 @@ internal partial class Entity {
         }
 
         _copyBodyBefore = null;
-        if (Object.Client == null || !Object.Client.TryGetComponent<Rigidbody2D>(out var body) || MovesByItself()) {
+        if (Object.Client == null || !Object.Client.TryGetComponent<Rigidbody2D>(out var body)) {
             return;
         }
 

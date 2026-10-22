@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Text;
 using HutongGames.PlayMaker;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -15,26 +14,22 @@ namespace SSMP.Game.Client;
 /// its copy flew off from them at once (Entity.PlayHere), while the creature here flew off from the other player, and
 /// the copy was put back where the creature was as soon as it went on.
 ///
-/// Now the creature goes after the player who dealt a wound while the wound plays. One that fought no player yet goes
-/// on after them from there, as one does in a game of one, and so does one that the wound took into a new move, which
-/// it started against them. One that fights another player goes back to them once each of its FSMs that the wound took
-/// somewhere goes on from there - before the state it goes on to does anything - and rolls no turn as it starts a move
-/// meanwhile (TurnAtMoveStart). One that the wound took nowhere goes after whom it went after.
+/// Now the creature goes after the player who dealt a wound from the moment the wound plays. One that the wound took
+/// nowhere goes back to whom it went after at once. One that fought no player yet goes on after them, as one does in a
+/// game of one, and so does one that the wound took into a new move, which it started against them. One that fights
+/// another player goes back to them as it starts its next move, where it rolls whom it turns to as at any other
+/// (TurnAtMoveStart): what the wound takes it through until then - a flinch and the dodge after it, a flight off and
+/// the hovering that follows - goes by the player who dealt it.
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
-    /// A wound that a creature answers at the player who dealt it, while an FSM of it is still where the wound took it.
+    /// A wound that a creature answers at the player who dealt it, until it starts its next move.
     /// </summary>
     private sealed class WoundAnswer {
         /// <summary>
         /// Whom the creature went after before the wound, to give back (see <see cref="TargetHoldOf"/>).
         /// </summary>
         public readonly TargetHold Hold;
-
-        /// <summary>
-        /// Each FSM of the creature that the wound took somewhere, with the state it took it to.
-        /// </summary>
-        public readonly Dictionary<HutongGames.PlayMaker.Fsm, FsmState> Reactions = new();
 
         /// <summary>
         /// The player who dealt the wound, the last one if more than one did.
@@ -56,11 +51,6 @@ internal partial class GamePatcher {
     /// The wounds that creatures answer, by the instance ID of the creature (see <see cref="GetEnemyTargetOwner"/>).
     /// </summary>
     private static readonly Dictionary<int, WoundAnswer> WoundAnswers = new();
-
-    /// <summary>
-    /// The FSMs of the creatures that answer a wound, each with the instance ID of its creature.
-    /// </summary>
-    private static readonly Dictionary<HutongGames.PlayMaker.Fsm, int> AnsweringFsms = new();
 
     /// <summary>
     /// The creature that a wound is played on now (see <see cref="AnswerWound"/>), or null.
@@ -109,42 +99,54 @@ internal partial class GamePatcher {
         _woundedNow = owner;
         WoundPaths.Clear();
         _woundStartedAMove = false;
+        var played = false;
         try {
             play();
+            played = true;
         } finally {
             _woundedNow = null;
-        }
 
-        var startedAMove = _woundStartedAMove;
-        _woundStartedAMove = false;
-
-        // Gone with the creature or with the player it went after, as the wound played
-        if (!WoundAnswers.TryGetValue(id, out var still) || still != answer) {
-            WoundPaths.Clear();
-            return;
-        }
-
-        // Where the wound took each FSM, unless it came back to where it was before the wound, like a count of the
-        // blows that went up by one and back to waiting for the next; again, for one that it took somewhere already
-        foreach (var pair in WoundPaths) {
-            var (from, to) = pair.Value;
-            if (to != from || answer.Reactions.ContainsKey(pair.Key)) {
-                answer.Reactions[pair.Key] = to;
-                AnsweringFsms[pair.Key] = id;
+            // A wound that went wrong as it played leaves the creature going after whom it went after
+            if (!played) {
+                WoundPaths.Clear();
+                _woundStartedAMove = false;
+                if (isNew) {
+                    EndWoundAnswer(owner, id, null);
+                }
             }
         }
 
+        // Where it went, unless back to where it was before the wound, like a count of the blows that went up by one
+        // and back to waiting for the next
+        var moved = false;
+        foreach (var path in WoundPaths.Values) {
+            if (path.To != path.From) {
+                moved = true;
+                break;
+            }
+        }
+
+        var startedAMove = _woundStartedAMove;
         WoundPaths.Clear();
-        if (answer.Reactions.Count == 0) {
-            ForgetWoundAnswer(id);
-            GiveBackTarget(owner, answer.Hold);
+        _woundStartedAMove = false;
+
+        // Gone with the creature, or with the player it went after, as the wound played
+        if (!WoundAnswers.TryGetValue(id, out var still) || still != answer) {
+            return;
+        }
+
+        if (!moved) {
+            if (isNew) {
+                EndWoundAnswer(owner, id, null);
+            }
+
             return;
         }
 
         // Set off by the player who struck it, or into a move against them: it goes after them from here, as if it had
         // turned to them as it started the move
         if (!fights || startedAMove) {
-            ForgetWoundAnswer(id);
+            WoundAnswers.Remove(id);
             PutBackWhomItWentAfter(id, answer.Hold);
             Logger.Info(
                 $"{owner.name} goes after {DescribePlayer(striker)}, whose wound " +
@@ -156,73 +158,46 @@ internal partial class GamePatcher {
 
         if (isNew) {
             Logger.Info(
-                $"{owner.name} answers the wound of {DescribePlayer(striker)} at them ({DescribeReactions(answer)}), " +
-                $"and then goes after {DescribeHeld(answer.Hold)} again"
+                $"{owner.name} answers the wound of {DescribePlayer(striker)} at them, and goes after " +
+                $"{DescribeHeld(answer.Hold)} again as it starts its next move"
             );
         }
     }
 
     /// <summary>
-    /// Notes a state that an FSM goes into, for the wounds that creatures answer (see <see cref="AnswerWound"/>): as a
-    /// wound is played, where it takes each FSM of the creature, and whether it starts a move; after that, an FSM that
-    /// goes on from where a wound took it, which gives the creature back whom it went after once none of its FSMs is
-    /// still there - before the state does anything, so that what it aims at is the player it went after.
+    /// Notes a state that an FSM of the creature that a wound is played on goes into as it plays (see
+    /// <see cref="AnswerWound"/>): where the wound takes the FSM, and whether it starts a move.
     /// </summary>
     /// <param name="state">The state.</param>
     private static void NoteWoundState(FsmState state) {
-        if (state.Fsm is not { } fsm) {
+        if (_woundedNow == null || state.Fsm is not { } fsm || fsm.FsmComponent is not { } machine || machine == null ||
+            !machine.transform.IsChildOf(_woundedNow.transform)) {
             return;
         }
 
-        if (_woundedNow != null && fsm.FsmComponent is { } machine && machine != null &&
-            machine.transform.IsChildOf(_woundedNow.transform)) {
-            var from = WoundPaths.TryGetValue(fsm, out var path) ? path.From : fsm.PreviousActiveState;
-            WoundPaths[fsm] = (from, state);
-            _woundStartedAMove |= PicksAMove(state) && AimsAtPlayers(machine);
-            return;
-        }
+        var from = WoundPaths.TryGetValue(fsm, out var path) ? path.From : fsm.PreviousActiveState;
+        WoundPaths[fsm] = (from, state);
+        _woundStartedAMove |= PicksAMove(state) && AimsAtPlayers(machine);
+    }
 
-        if (!AnsweringFsms.TryGetValue(fsm, out var id)) {
-            return;
-        }
-
-        AnsweringFsms.Remove(fsm);
-        if (!WoundAnswers.TryGetValue(id, out var answer)) {
-            return;
-        }
-
-        answer.Reactions.Remove(fsm);
-        if (answer.Reactions.Count > 0) {
-            return;
-        }
-
-        ForgetWoundAnswer(id);
-        var owner = fsm.FsmComponent != null ? GetEnemyTargetOwner(fsm.FsmComponent.gameObject) : null;
-        if (owner == null) {
+    /// <summary>
+    /// Gives a creature that answers a wound back whom it went after before (see <see cref="AnswerWound"/>), if it
+    /// answers one.
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    /// <param name="id">Its instance ID.</param>
+    /// <param name="why">What it does that ends the answer, for the log, or null to say nothing.</param>
+    private static void EndWoundAnswer(GameObject owner, int id, string? why) {
+        if (!WoundAnswers.Remove(id, out var answer)) {
             return;
         }
 
         GiveBackTarget(owner, answer.Hold);
-        Logger.Info(
-            $"{owner.name} is through with the wound of " +
-            $"{(answer.Striker != null ? DescribePlayer(answer.Striker) : "a player who has gone")}: its " +
-            $"'{fsm.Name}' went on to '{state.Name}'"
-        );
-    }
-
-    /// <summary>
-    /// Forgets the wound that a creature answers, if it answers one, and the FSMs of it that were still where the wound
-    /// took them, leaving the creature going after whom it goes after now.
-    /// </summary>
-    /// <param name="id">The instance ID of the creature.</param>
-    private static void ForgetWoundAnswer(int id) {
-        if (!WoundAnswers.TryGetValue(id, out var answer)) {
-            return;
-        }
-
-        WoundAnswers.Remove(id);
-        foreach (var fsm in answer.Reactions.Keys) {
-            AnsweringFsms.Remove(fsm);
+        if (why != null) {
+            Logger.Info(
+                $"{owner.name} {why} and goes after {DescribeHeld(answer.Hold)} again after the wound of " +
+                (answer.Striker != null ? DescribePlayer(answer.Striker) : "a player who has gone")
+            );
         }
     }
 
@@ -240,7 +215,7 @@ internal partial class GamePatcher {
         }
 
         foreach (var id in ids ?? []) {
-            ForgetWoundAnswer(id);
+            WoundAnswers.Remove(id);
         }
     }
 
@@ -266,23 +241,6 @@ internal partial class GamePatcher {
         } else {
             EnemyTargetLocks.Remove(id);
         }
-    }
-
-    /// <summary>
-    /// Says where a wound took the FSMs of a creature, for the log.
-    /// </summary>
-    /// <param name="answer">The answer to the wound.</param>
-    private static string DescribeReactions(WoundAnswer answer) {
-        var text = new StringBuilder();
-        foreach (var pair in answer.Reactions) {
-            if (text.Length > 0) {
-                text.Append(", ");
-            }
-
-            text.Append($"'{pair.Value.Name}' of '{pair.Key.Name}'");
-        }
-
-        return text.ToString();
     }
 
     /// <summary>

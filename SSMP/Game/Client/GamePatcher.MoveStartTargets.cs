@@ -288,7 +288,6 @@ internal partial class GamePatcher {
         Turns.Clear();
         IdleWatches.Clear();
         WoundAnswers.Clear();
-        AnsweringFsms.Clear();
     }
 
     /// <summary>
@@ -299,7 +298,7 @@ internal partial class GamePatcher {
         AwarenessRanges.Remove(instanceId);
         Turns.Remove(instanceId);
         IdleWatches.Remove(instanceId);
-        ForgetWoundAnswer(instanceId);
+        WoundAnswers.Remove(instanceId);
     }
 
     /// <summary>
@@ -312,9 +311,8 @@ internal partial class GamePatcher {
     /// <param name="orig">The original method.</param>
     /// <param name="self">The state.</param>
     private static void OnStateEnter(Action<FsmState> orig, FsmState self) {
-        // First where a wound takes an FSM, or whether one goes on from there, which may give the creature back whom it
-        // went after before it rolls (see AnswerWound)
-        if (_woundedNow != null || AnsweringFsms.Count > 0) {
+        // Where a wound that is played takes an FSM of the creature (see AnswerWound)
+        if (_woundedNow != null) {
             try {
                 NoteWoundState(self);
             } catch (Exception e) {
@@ -403,7 +401,9 @@ internal partial class GamePatcher {
     /// Only the game that runs the creature rolls, and the other games see it turn as they see it do anything. What
     /// another player set off plays here as it played in their game (SharedDice.PlaysAnotherGame), so nothing rolls
     /// while it does, and nothing rolls while the local player gives a sign, which the creature hears of them alone
-    /// (Entity.Signs), nor while it answers a wound at the player who dealt it (see <see cref="AnswerWound"/>).
+    /// (Entity.Signs), nor while a wound of a player plays, after which a move it started turns it to them. A move
+    /// that a creature which answers a wound starts gives it back whom it went after first (see
+    /// <see cref="AnswerWound"/>).
     /// </summary>
     /// <param name="machine">The FSM of the creature.</param>
     /// <param name="state">The state where the move starts.</param>
@@ -425,9 +425,15 @@ internal partial class GamePatcher {
             return;
         }
 
-        // One that sings to a player of a song turns to them by the song (GetFsmActionTarget)
         var id = owner.GetInstanceID();
-        if (TryGetSongTarget(id, out _) || WoundAnswers.ContainsKey(id)) {
+        if (_woundedNow == owner) {
+            return;
+        }
+
+        EndWoundAnswer(owner, id, $"starts a move in '{state.Name}' of '{machine.FsmName}'");
+
+        // One that sings to a player of a song turns to them by the song (GetFsmActionTarget)
+        if (TryGetSongTarget(id, out _)) {
             return;
         }
 

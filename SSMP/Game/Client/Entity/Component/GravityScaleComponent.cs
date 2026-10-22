@@ -23,6 +23,13 @@ internal class GravityScaleComponent : EntityComponent {
     /// </summary>
     private float? _receivedGravityScale;
 
+    /// <summary>
+    /// The gravity scale that the scene host last said the entity has, for the copy of a scene client, or null if it
+    /// said none: the copy is not given it, and only a copy whose FSM runs with the body of the room's creature falls
+    /// by it (Entity.GiveTheCopyItsBody).
+    /// </summary>
+    public float? HeardScale => IsControlled ? _receivedGravityScale : null;
+
     public GravityScaleComponent(
         NetClient netClient,
         ushort entityId,
