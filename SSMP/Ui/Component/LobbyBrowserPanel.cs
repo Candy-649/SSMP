@@ -211,6 +211,11 @@ internal class LobbyBrowserPanel : IRootedComponent {
     public void SetOnBack(Action callback) => _onBack = callback;
 
     /// <summary>
+    /// Does what the Back button does, for the back button of a gamepad.
+    /// </summary>
+    public void Back() => _onBack?.Invoke();
+
+    /// <summary>
     /// Sets the callback invoked when the Refresh button is pressed.
     /// </summary>
     /// <param name="callback">Callback to invoke on refresh.</param>

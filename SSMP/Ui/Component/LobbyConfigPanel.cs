@@ -172,6 +172,16 @@ internal class LobbyConfigPanel : IRootedComponent {
     public void SetOnCancel(Action callback) => _onCancel = callback;
 
     /// <summary>
+    /// Does what the Cancel button does, for the back button of a gamepad.
+    /// </summary>
+    public void Cancel() => _onCancel?.Invoke();
+
+    /// <summary>
+    /// Whether the panel is shown.
+    /// </summary>
+    public bool IsVisible => GameObject.activeSelf;
+
+    /// <summary>
     /// Shows the panel.
     /// </summary>
     public void Show() {

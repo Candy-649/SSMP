@@ -46,6 +46,11 @@ internal class ButtonComponent : Component, IButtonComponent {
     private bool _interactable;
 
     /// <summary>
+    /// What a gamepad moves to and presses (see <see cref="PadNavigation"/>).
+    /// </summary>
+    private readonly Selectable _selectable;
+
+    /// <summary>
     /// Whether the user is hovering over the button.
     /// </summary>
     // ReSharper disable once PrivateFieldCanBeConvertedToLocalVariable
@@ -163,6 +168,12 @@ internal class ButtonComponent : Component, IButtonComponent {
         _isMouseDown = false;
         _isHover = false;
 
+        _selectable = PadNavigation.MakeSelectable(GameObject, eventTrigger, () => {
+            if (_interactable) {
+                _onPress?.Invoke();
+            }
+        });
+
         AddEventTrigger(eventTrigger, EventTriggerType.PointerEnter, _ => {
             _isHover = true;
 
@@ -248,6 +259,7 @@ internal class ButtonComponent : Component, IButtonComponent {
     /// <inheritdoc />
     public void SetInteractable(bool interactable) {
         _interactable = interactable;
+        _selectable.interactable = interactable;
 
         var color = _text.color;
 

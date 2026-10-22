@@ -1,4 +1,5 @@
 ﻿using SSMP.Ui.Resources;
+using SSMP.Ui.Util;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -41,6 +42,11 @@ internal class CheckboxComponent : Component, ICheckboxComponent {
     /// Whether this checkbox is interactable.
     /// </summary>
     private bool _interactable;
+
+    /// <summary>
+    /// What a gamepad moves to and presses (see <see cref="PadNavigation"/>).
+    /// </summary>
+    private readonly Selectable _selectable;
 
     /// <summary>
     /// Whether the checkbox is toggled on.
@@ -97,6 +103,12 @@ internal class CheckboxComponent : Component, ICheckboxComponent {
         var eventTrigger = GameObject.AddComponent<EventTrigger>();
         var isMouseDown = false;
         var isHover = false;
+
+        _selectable = PadNavigation.MakeSelectable(GameObject, eventTrigger, () => {
+            if (_interactable) {
+                OnToggle();
+            }
+        });
 
         AddEventTrigger(eventTrigger, EventTriggerType.PointerEnter, _ => {
             isHover = true;
@@ -162,6 +174,7 @@ internal class CheckboxComponent : Component, ICheckboxComponent {
     /// <inheritdoc />
     public void SetInteractable(bool interactable) {
         _interactable = interactable;
+        _selectable.interactable = interactable;
 
         var color = _checkmarkImage.color;
         if (interactable) {

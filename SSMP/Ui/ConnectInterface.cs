@@ -557,6 +557,43 @@ internal class ConnectInterface {
     private bool _waitingRoomActive;
 
     /// <summary>
+    /// Does what the back button of a gamepad does in this menu, if anything: it closes a list of lobbies or the setup
+    /// of a new lobby, as their own buttons do, goes back from the settings page to the tab before it, and does nothing
+    /// while a player waits for the others, since stopping to wait is a button of its own rather than a press that may
+    /// have been meant for something else.
+    /// </summary>
+    /// <returns>Whether the press was taken here; when it was not, it leaves the menu as the pause key does.</returns>
+    public bool TryGoBack() {
+        if (_lobbyBrowserPanel.IsVisible) {
+            _lobbyBrowserPanel.Back();
+            return true;
+        }
+
+        if (_steamLobbyBrowserPanel is { IsVisible: true } steamBrowser) {
+            steamBrowser.Back();
+            return true;
+        }
+
+        if (_lobbyConfigPanel.IsVisible) {
+            _lobbyConfigPanel.Cancel();
+            return true;
+        }
+
+        if (_steamLobbyConfigPanel is { IsVisible: true } steamConfig) {
+            steamConfig.Cancel();
+            return true;
+        }
+
+        // Left the whole menu, it would leave a waiting room that the settings page hides behind it
+        if (_activeTab == Tab.Settings) {
+            SwitchTab(_lastConnectTab);
+            return true;
+        }
+
+        return _waitingRoomPanel.IsVisible;
+    }
+
+    /// <summary>
     /// The last tab open other than the settings page, which a waiting room that comes up, or comes back, while the
     /// settings page is open goes to.
     /// </summary>

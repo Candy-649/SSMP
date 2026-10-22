@@ -37,6 +37,11 @@ internal class TabButtonComponent : Component, IButtonComponent {
     private bool _interactable;
 
     /// <summary>
+    /// What a gamepad moves to and presses (see <see cref="PadNavigation"/>).
+    /// </summary>
+    private readonly Selectable _selectable;
+
+    /// <summary>
     /// Whether the pointer is currently hovering over the button.
     /// </summary>
     private bool _isHover;
@@ -118,6 +123,12 @@ internal class TabButtonComponent : Component, IButtonComponent {
         var eventTrigger = GameObject.AddComponent<EventTrigger>();
         _isMouseDown = false;
         _isHover = false;
+
+        _selectable = PadNavigation.MakeSelectable(GameObject, eventTrigger, () => {
+            if (_interactable) {
+                _onPress?.Invoke();
+            }
+        });
 
         AddEventTrigger(eventTrigger, EventTriggerType.PointerEnter, _ => {
             _isHover = true;
@@ -214,6 +225,7 @@ internal class TabButtonComponent : Component, IButtonComponent {
     /// <param name="interactable">True if the button should be interactable, false otherwise.</param>
     public void SetInteractable(bool interactable) {
         _interactable = interactable;
+        _selectable.interactable = interactable;
         var color = _text.color;
         color.a = interactable ? 1f : NotInteractableOpacity;
         _text.color = color;

@@ -9,6 +9,7 @@ using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Networking.Transport.Common;
 using SSMP.Ui.Chat;
+using SSMP.Ui.Util;
 using SSMP.Util;
 using UnityEngine;
 using UnityEngine.EventSystems;
@@ -578,6 +579,9 @@ internal class UiManager : IUiManager {
         canvasScaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
         
         UiGameObject.AddComponent<GraphicRaycaster>();
+
+        // The frame around what a gamepad has selected in the mod's menus
+        PadFocusFrame.Create(UiGameObject);
         Object.DontDestroyOnLoad(UiGameObject);
     }
 
@@ -1131,6 +1135,9 @@ internal class UiManager : IUiManager {
     /// Handles the multiplayer menu request by firing the notification event, then invoking the hook chain.
     /// </summary>
     private void OnMultiplayerMenuRequested() {
+        // A gamepad starts from the top of the menu when it is opened from the main menu. Back from the save selection
+        // it stays by the control that went there
+        PadNavigation.StartOver();
         MultiplayerButtonPressed?.Invoke();
         _multiplayerMenuChain.Invoke();
     }
@@ -1307,11 +1314,27 @@ internal class UiManager : IUiManager {
     }
 
     /// <summary>
-    /// Checks for hotkey presses to exit multiplayer menu.
+    /// Checks for hotkey presses to exit multiplayer menu, and keeps the menu moved around with a gamepad.
     /// Called every frame by Unity's update system.
     /// </summary>
     private void CheckKeyBinds() {
-        if (_connectGroup.IsActive() && InputHandler.Instance.inputActions.Pause.IsPressed) {
+        if (!_connectGroup.IsActive()) {
+            return;
+        }
+
+        var actions = InputHandler.Instance.inputActions;
+        if (actions.Pause.IsPressed) {
+            HandlePauseKey();
+            return;
+        }
+
+        // A gamepad moves around this menu the way it moves around the game's own, which needs something selected to
+        // move from (see PadNavigation)
+        PadNavigation.KeepSelection(UiGameObject!.transform);
+
+        // The back button of a gamepad first stops typing into a text box, then closes what the menu closes with it,
+        // and otherwise leaves the menu, as the pause key does
+        if (actions.MenuCancel.WasPressed && !PadNavigation.StopTyping() && !_connectInterface.TryGoBack()) {
             HandlePauseKey();
         }
     }
