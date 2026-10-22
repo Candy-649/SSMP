@@ -214,9 +214,10 @@ internal partial class CoopSave {
         public float Time { get; init; }
 
         /// <summary>
-        /// Whether the slot was empty, so that the save starts as a new game does, with the opening.
+        /// Whether the save starts as a new game does, with the opening: the slot was empty and the alignment left the
+        /// place to wake at where a new save has it, so the host has none yet either (<see cref="GetWakePlace"/>).
         /// </summary>
-        public bool NewSave { get; init; }
+        public bool Opening { get; init; }
     }
 
     #endregion
@@ -238,24 +239,14 @@ internal partial class CoopSave {
         InMenu = 1,
 
         /// <summary>
-        /// The host watches a cutscene, or is in a moment of the game that can't be paused.
-        /// </summary>
-        Cutscene = 2,
-
-        /// <summary>
-        /// The host died, or is down until someone pulls them up.
-        /// </summary>
-        Down = 3,
-
-        /// <summary>
         /// The host's game changes rooms, loads, or writes a save: a moment.
         /// </summary>
-        Busy = 4,
+        Busy = 2,
 
         /// <summary>
         /// The host's game could not take its save, which ends the request.
         /// </summary>
-        Failed = 5
+        Failed = 3
     }
 
     /// <summary>
@@ -487,12 +478,18 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// What keeps the host's game from taking its save now, or nothing. It takes it in a moment that the game could
-    /// save in, like <see cref="CopySave"/> asks: not in a room change, a death or a moment that can't be paused, not
-    /// about to wake in the last act, which the game sets up as the save loads, and not while the game writes a save of
-    /// its own. And in two moments more, which a player waited through for nothing (USER 10-22: someone stuck on the
-    /// wait for the host's save): the pause menu, in which nothing of the game moves, and the opening of a new game,
-    /// which plays with the save that the game made for it before the opening, untouched by anything yet.
+    /// What keeps the host's game from taking its save now, or nothing: the menu, a room change or a load, in which
+    /// the objects of the room that taking the save puts into the scene data come and go, the game writing a save of
+    /// its own from the same data, and the moment before waking in the last act, which the game sets up as the save
+    /// loads. Not a cutscene, a talk, a death, a player down or the pause menu, which it used to wait through too,
+    /// for a moment that the game could save in, like <see cref="CopySave"/> (USER 10-22: someone stuck on the wait for
+    /// the host's save; "就不能无论什么动画都不等待吗").
+    ///
+    /// What the host's game writes after the save is taken reaches the joining player at the check of their arrival
+    /// if it is a story flag, a wish or an object of the world, and the rest at their next join. That is little: a
+    /// session starts with the host held on the bench until everyone has arrived, and boss fights wait for every
+    /// player on the server to be in the room. Only a host who already plays when someone connects can be in the
+    /// middle of a fight, in which the save would be taken before it ends whether this waited for cutscenes or not.
     /// </summary>
     private HostSaveWait GetHostSaveWait() {
         // The quiet getters: the others search the scenes and log an error in every frame without one, like the frames
@@ -503,34 +500,32 @@ internal partial class CoopSave {
         }
 
         var scene = _activeSceneName ?? SceneUtil.GetCurrentSceneName();
-        if (scene == NewGameOpeningScene) {
-            return IsGameSaving() ? HostSaveWait.Busy : HostSaveWait.None;
-        }
-
         if (gameManager.GameState is GameState.MAIN_MENU or GameState.INACTIVE or GameState.PRIMER ||
             scene is "Menu_Title" or "Quit_To_Menu" or "Pre_Menu_Intro") {
             return HostSaveWait.InMenu;
         }
 
-        // The game's own cinematic scenes, which SSMP's list of scenes without play lacks two of
-        if (gameManager.GameState == GameState.CUTSCENE || SceneUtil.IsNonGameplayScene(scene) ||
-            scene is "Opening_Sequence_Act3" or "Cinematic_Submarine_travel") {
-            return HostSaveWait.Cutscene;
-        }
-
-        var hero = HeroController.UnsafeInstance;
         var playerData = PlayerData.instance;
-        if (hero == null || playerData == null ||
-            gameManager.GameState is not (GameState.PLAYING or GameState.PAUSED) || gameManager.IsInSceneTransition ||
-            hero.cState.transitioning || hero.cState.hazardRespawning || IsGameSaving()) {
+        if (playerData == null || playerData.IsAct3IntroQueued || IsGameSaving() || gameManager.IsInSceneTransition ||
+            gameManager.GameState is GameState.LOADING or GameState.ENTERING_LEVEL or GameState.EXITING_LEVEL) {
             return HostSaveWait.Busy;
         }
 
-        if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
-            return HostSaveWait.Down;
+        // A scene that is no room, like an opening or the cinematic of a ride, has no hero to wait for
+        if (IsSceneWithoutRoom(scene)) {
+            return HostSaveWait.None;
         }
 
-        return playerData.disablePause || playerData.IsAct3IntroQueued ? HostSaveWait.Cutscene : HostSaveWait.None;
+        var hero = HeroController.UnsafeInstance;
+        return hero == null || hero.cState.transitioning ? HostSaveWait.Busy : HostSaveWait.None;
+    }
+
+    /// <summary>
+    /// Whether a scene is no room of the world, like an opening or the cinematic of a ride: the game's own cinematic
+    /// scenes, which SSMP's list of scenes without play lacks two of.
+    /// </summary>
+    private static bool IsSceneWithoutRoom(string scene) {
+        return SceneUtil.IsNonGameplayScene(scene) || scene is "Opening_Sequence_Act3" or "Cinematic_Submarine_travel";
     }
 
     /// <summary>
@@ -544,12 +539,13 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The host's save as the game would save it now, as JSON: the objects of the room the host is in are saved into
-    /// the scene data first, like the game does at every room change, and nothing is written to disk. Not in the
-    /// opening of a new game, which has no such objects, while the first room loads behind it.
+    /// the scene data first, like the game does at every room change, and nothing is written to disk. Not in a scene
+    /// that is no room, like the opening of a new game, which has no such objects, while the next room may be loading
+    /// behind it.
     /// </summary>
     private static string TakeHostSave() {
         var gameManager = global::GameManager.instance;
-        if (SceneUtil.GetCurrentSceneName() != NewGameOpeningScene) {
+        if (!IsSceneWithoutRoom(SceneUtil.GetCurrentSceneName())) {
             gameManager.SaveLevelState();
         }
 
@@ -693,14 +689,6 @@ internal partial class CoopSave {
             HostSaveWait.InMenu => Lang.Pick(
                 "The host hasn't loaded a save yet. It comes once they have.",
                 "房主还没进存档，进了存档就会传过来。"
-            ),
-            HostSaveWait.Cutscene => Lang.Pick(
-                "The host is in a cutscene. It comes once that's over.",
-                "房主正在看动画或剧情，完了就会传过来。"
-            ),
-            HostSaveWait.Down => Lang.Pick(
-                "The host is down. It comes once they're back up.",
-                "房主倒下了，起来以后就会传过来。"
             ),
             HostSaveWait.Busy => Lang.Pick("The host's game needs a moment.", "房主那边马上就好。"),
             _ => null
@@ -893,6 +881,8 @@ internal partial class CoopSave {
             return;
         }
 
+        // Where a new save wakes, before the alignment gives it the host's place to wake at
+        var newGameWake = hasSave ? default : GetWakePlace(client);
         var (version, revisionBreak) = GetGameSaveVersion();
         var merged = CoopHostSync.Merge(hostSave, client, data, out var report, version, revisionBreak);
         if (merged == null) {
@@ -943,7 +933,7 @@ internal partial class CoopSave {
 
         _pendingJoin = new PendingJoin {
             Slot = slot, Merged = merged, Report = report, HostName = hostName, Time = UnityEngine.Time.unscaledTime,
-            NewSave = !hasSave
+            Opening = !hasSave && GetWakePlace(merged) == newGameWake
         };
         MarkCoopSave(slot, report.ArrivalsToSee);
         Logger.Info(
@@ -1061,6 +1051,19 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// The place a save wakes at (PlayerData.respawnScene and respawnMarkerName), with an empty name as none. A new
+    /// game has none until its first bench or place to come back to, and the game then starts it in the first room
+    /// (GameManager.GetRespawnInfo). A joining save takes the host's, so a new save that joins a host who has played
+    /// on wakes where the host last was.
+    /// </summary>
+    private static (string? Scene, string? Marker) GetWakePlace(JObject save) {
+        var playerData = save["playerData"];
+        var scene = (string?) playerData?["respawnScene"];
+        var marker = (string?) playerData?["respawnMarkerName"];
+        return (string.IsNullOrEmpty(scene) ? null : scene, string.IsNullOrEmpty(marker) ? null : marker);
+    }
+
+    /// <summary>
     /// A new save, as the game starts one, in the game mode of the host: what an empty slot joins the host's game with.
     /// </summary>
     private static JObject NewSave(JObject hostSave) {
@@ -1173,7 +1176,7 @@ internal partial class CoopSave {
         _openingSlot = -1;
         if (_pendingJoin is { } join && join.Slot == slot) {
             _pendingJoin = null;
-            if (join.NewSave) {
+            if (join.Opening) {
                 _openingSlot = slot;
             }
 
@@ -1191,11 +1194,13 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Starts a new save, aligned with the host's world, with the opening of a new game, as a new game starts (USER
-    /// 10-22: "让加入的人也放一遍动画吧"), where the game would put the player at the place that a loaded save respawns at.
-    /// Such a save loads as a saved one does, with all that loading sets up (GameManager.RunContinueGame), which ends
-    /// here; the game itself ends that load with an opening instead for a save that wakes in the last act, in the same
-    /// way. The opening then loads the first room as for a new game (OpeningSequence: OnWillActivateFirstLevel, the
-    /// entrance of a new game), where an empty slot started anyway: the alignment takes over no place to start at.
+    /// 10-22: "让加入的人也放一遍动画吧"), where the game would put the player at the place that a loaded save respawns at:
+    /// only one that wakes where a new game starts (<see cref="GetWakePlace"/>), like when both players start new
+    /// games. One that takes the host's place to wake at wakes there, as any save that is loaded does. Such a save
+    /// loads as a saved one does, with all that loading sets up (GameManager.RunContinueGame), which ends here; the
+    /// game itself ends that load with an opening instead for a save that wakes in the last act, in the same way. The
+    /// opening then loads the first room as for a new game (OpeningSequence: OnWillActivateFirstLevel, the entrance of
+    /// a new game), the room that such a save would have woken in.
     /// </summary>
     private void OnReadyForRespawn(
         Action<global::GameManager, bool> orig,
