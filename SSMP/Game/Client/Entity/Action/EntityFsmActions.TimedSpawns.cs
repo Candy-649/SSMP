@@ -26,7 +26,9 @@ namespace SSMP.Game.Client.Entity.Action;
 // kinds throws with its own dice, so it flew other ways than what the creature threw, and two of the kinds it did not
 // throw at all. The game that runs the creature now rolls a seed for each run of such an action as its state begins,
 // and sends it with the run. Both games draw everything the action rolls from that seed, so the two throw the same
-// things the same way, named alike (ThrownThings), in the same rhythm.
+// things the same way, named alike (ThrownThings), in the same rhythm: the copy moves the action's clock on by the
+// frames of the game that runs the creature, since three of the kinds lose what is left over at each throw and so
+// throw more often or less often with frames of another length.
 internal static partial class EntityFsmActions {
     /// <summary>
     /// The kinds of actions that throw or spawn things on a clock while their state lasts.
@@ -58,6 +60,22 @@ internal static partial class EntityFsmActions {
     /// The action whose update runs now, whose rolls and spawns belong to its run.
     /// </summary>
     private static FsmStateAction? _timedAction;
+
+    /// <summary>
+    /// The length of a frame of the game that runs the creature while the copy's run moves its clock on by one (see
+    /// <see cref="RunTimed"/>), or 0 while updates go by this game's own frames.
+    /// </summary>
+    private static float _timedStep;
+
+    /// <summary>
+    /// The shortest and the longest frame that a run takes from the game that runs the creature.
+    /// </summary>
+    private const float ShortestTimedStep = 1f / 500f, LongestTimedStep = 0.1f;
+
+    /// <summary>
+    /// The most time that the copy's run catches up on in one frame of this game, after a frame that took long.
+    /// </summary>
+    private const float MostTimedCatchUp = 0.25f;
 
     /// <summary>
     /// The creatures and things already named for throwing on a clock, in each game, so that each is said once.
@@ -95,8 +113,8 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// IL hook for the update of an action that throws on a clock: its rolls come from the dice of its run (see
-    /// <see cref="RollTimed(float, float)"/>), and what it throws comes out of the pool through
-    /// <see cref="SpawnTimed"/>.
+    /// <see cref="RollTimed(float, float)"/>), what it throws comes out of the pool through <see cref="SpawnTimed"/>,
+    /// and the length of its frame is that of the run (see <see cref="TimedDeltaTime"/>).
     /// </summary>
     private static void ShareTimedRolls(ILContext il) {
         try {
@@ -133,6 +151,12 @@ internal static partial class EntityFsmActions {
                 Logger.Error(
                     $"Could not find where {il.Method.DeclaringType.Name} spawns what it throws, so it is not named"
                 );
+            }
+
+            c.Index = 0;
+            while (c.TryGotoNext(MoveType.Before, i => i.MatchCall(typeof(Time), "get_deltaTime"))) {
+                c.Remove();
+                c.EmitDelegate<Func<float>>(TimedDeltaTime);
             }
         } catch (Exception e) {
             Logger.Error($"Could not change {il.Method.DeclaringType.Name}#{il.Method.Name} IL:\n{e}");
@@ -185,6 +209,14 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The length of the frame of the update of an action that throws on a clock: this game's, or while the copy's run
+    /// moves the clock on, that of a frame of the game that runs the creature.
+    /// </summary>
+    private static float TimedDeltaTime() {
+        return _timedStep > 0f ? _timedStep : Time.deltaTime;
+    }
+
+    /// <summary>
     /// A roll of the action whose update runs now, with the dice of its run, or with the game's own dice if it has
     /// none.
     /// </summary>
@@ -224,7 +256,8 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// Takes what the action whose update runs now throws out of the pool, under the next name of its run if it has
-    /// one, and has it looked at like anything else a creature spawns, in case it is a creature (EntityManager).
+    /// one, and has it looked at like anything else a creature spawns if it is a creature, which only can be made an
+    /// entity (EntityManager). Most of what is thrown on a clock is not, and some of it is thrown many times a second.
     /// </summary>
     private static GameObject SpawnTimed(GameObject prefab, Vector3 position, Quaternion rotation) {
         var action = _timedAction;
@@ -237,7 +270,7 @@ internal static partial class EntityFsmActions {
             spawned = prefab.Spawn(position, rotation);
         }
 
-        if (action != null) {
+        if (action != null && spawned.TryGetComponent<HealthManager>(out _)) {
             EntitySpawnEvent?.Invoke(
                 new EntitySpawnDetails {
                     Type = EntitySpawnType.FsmAction,
@@ -253,7 +286,8 @@ internal static partial class EntityFsmActions {
     /// <summary>
     /// Begins a run of an action of a creature that this game runs that throws on a clock, as its state begins, and
     /// writes it for the other game: the seed it rolls from, how far along its clock and its wait before the first
-    /// throw are, and the names of what it throws, if it is something that is named (see ThrownThings).
+    /// throw are, how long the frames of this game are, and the names of what it throws, if it is something that is
+    /// named (see ThrownThings).
     /// </summary>
     /// <returns>
     /// Whether the run goes to the other game. A creature it spawns goes there as one (EntityManager), and what it
@@ -284,6 +318,7 @@ internal static partial class EntityFsmActions {
         data.Packet.Write(seed);
         data.Packet.Write(timer);
         data.Packet.Write(delay);
+        data.Packet.Write(Mathf.Clamp(Time.smoothDeltaTime, ShortestTimedStep, LongestTimedStep));
         ThrownThings.WriteSeries(data, names);
 
         SayTimedRun(action, prefab, true);
@@ -302,17 +337,19 @@ internal static partial class EntityFsmActions {
         var seed = data.Packet.ReadInt();
         var timer = data.Packet.ReadFloat();
         var delay = data.Packet.ReadFloat();
+        var step = Mathf.Clamp(data.Packet.ReadFloat(), ShortestTimedStep, LongestTimedStep);
         var names = ThrownThings.ReadSeries(data);
         return new TimedRun(seed, names, true) {
             Timer = timer,
-            Delay = delay
+            Delay = delay,
+            Step = step
         };
     }
 
     /// <summary>
     /// Runs a replayed action that throws on a clock on the copy, the way its state runs it in the game (see
     /// <see cref="RunInState"/>), with its run: OnEnter at once, its clock set to where the game that runs the creature
-    /// had it, and OnUpdate every frame until the scene host's FSM leaves the state.
+    /// had it, and OnUpdate once for each frame of that game that went by, until the scene host's FSM leaves the state.
     /// </summary>
     private static void RunTimed(FsmStateAction action, GameObject? prefab, TimedRun run) {
         if (prefab == null) {
@@ -341,17 +378,33 @@ internal static partial class EntityFsmActions {
         }.Register();
         return;
 
-        // An FSM stops running its state when its object is switched off or gone, and so does this
+        // An FSM stops running its state when its object is gone, and while it is switched off, and so does this
         IEnumerator UpdateWhileInState() {
+            var due = 0f;
             while (true) {
                 yield return null;
 
                 var owner = action.Fsm.GameObject;
-                if (owner == null || !owner.activeInHierarchy) {
+                if (owner == null) {
                     yield break;
                 }
 
-                action.OnUpdate();
+                if (!owner.activeInHierarchy) {
+                    due = 0f;
+                    continue;
+                }
+
+                due = Mathf.Min(due + Time.deltaTime, MostTimedCatchUp);
+                while (due >= run.Step) {
+                    due -= run.Step;
+                    var last = _timedStep;
+                    _timedStep = run.Step;
+                    try {
+                        action.OnUpdate();
+                    } finally {
+                        _timedStep = last;
+                    }
+                }
             }
         }
     }
@@ -512,6 +565,11 @@ internal static partial class EntityFsmActions {
         /// How long the action waited before its first throw there.
         /// </summary>
         public float Delay { get; init; }
+
+        /// <summary>
+        /// How long a frame of the game that runs the creature was as the state began.
+        /// </summary>
+        public float Step { get; init; }
 
         /// <summary>
         /// The dice that a seed gives, without touching the game's own.
