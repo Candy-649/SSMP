@@ -1180,10 +1180,13 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// A touch through <see cref="PlayMakerUnity2DProxy"/>, which goes like the others only on a thing that a creature
-    /// threw: the grass ball that a creature spits breaks when an attack touches it, heard through this component, so
-    /// the local player's strike on it was never sent and the copy of the partner's swing still broke it. Other
-    /// objects of the room that hear touches through it are left as they were.
+    /// A touch through <see cref="PlayMakerUnity2DProxy"/>, which goes like the others (see <see cref="OnTouchEnter"/>)
+    /// on a thing that a creature threw, and on an object of the room that listens through it for an attack: a lever, a
+    /// handle or a door that a strike opens, a snowflake or a chain that a needle breaks, a chest that a strike opens.
+    /// The local player's strike on such an object was never sent, and in each game the copy of the partner's swing set
+    /// it off by itself, wherever that copy happened to reach. An object that listens through it for whatever comes in,
+    /// like a place that rains on whoever stands in it, is about whoever is there, and is left as it was (see
+    /// <see cref="ListensForAttack"/>).
     /// </summary>
     private void OnProxyTouch(
         Action<PlayMakerUnity2DProxy, Collider2D> orig,
@@ -1191,18 +1194,79 @@ internal partial class CoopHits {
         Collider2D other,
         string callback
     ) {
-        // The cheap checks first: every object with the proxy is told of everything that stays in it, every frame
-        if (ThrownThings.Count == 0) {
-            orig(self, other);
-        } else if (IsBodyTouchOnThrown(self, other, out var thrown)) {
+        // Every object with the proxy is told of everything that stays in it, every frame, so the cheap checks come
+        // first, and whether the object is one of the room last
+        if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
             OnLocalTouchOfThrown(thrown, self, other, TouchCall(orig, self, other), callback);
-        } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal) ||
-                   !ThrownThings.TryGetMark(self.gameObject, out _)) {
+        } else if (other.gameObject.layer != (int) PhysLayers.HERO_ATTACK ||
+                   !ThrownThings.TryGetMark(self.gameObject, out _) && !ListensForAttack(self, other, callback) ||
+                   !IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
         } else if (isLocal) {
             OnLocalAttackTouch(self, other, TouchCall(orig, self, other), callback);
         }
     }
+
+    /// <summary>
+    /// Whether one of the actions that listen through a proxy for the kind of touch that it is told of waits for an
+    /// attack, and takes this one: one that singles attacks out by their tag, like a lever waiting for a nail, or by
+    /// the layer of attacks. One that takes whatever comes in, with neither, is about who or what is there.
+    /// </summary>
+    /// <param name="proxy">The proxy.</param>
+    /// <param name="attack">The attack touching its object.</param>
+    /// <param name="callback">Which of the touches it is told of.</param>
+    private static bool ListensForAttack(PlayMakerUnity2DProxy proxy, Collider2D attack, string callback) {
+        Delegate? listeners = callback switch {
+            ProxyStay => proxy.OnTriggerStay2dDelegates,
+            ProxyExit => proxy.OnTriggerExit2dDelegates,
+            _ => proxy.OnTriggerEnter2dDelegates
+        };
+        if (listeners == null) {
+            return false;
+        }
+
+        foreach (var listener in listeners.GetInvocationList()) {
+            if (listener.Target is FsmStateAction action && WaitsForAttack(action, attack.gameObject)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an action that listens for touches by tag and layer takes the given attack, and singles it out as an
+    /// attack doing so: by its tag, or by the layer of attacks. The actions check the tag and the layer of what comes
+    /// in, each unless it is not given (Trigger2dEventLayer and its kind).
+    /// </summary>
+    private static bool WaitsForAttack(FsmStateAction action, GameObject attack) {
+        var type = action.GetType();
+        if (!ListenerFields.TryGetValue(type, out var fields)) {
+            fields = (
+                type.GetField("collideTag", InstanceFlags) is { } tagField && tagField.FieldType == typeof(FsmString)
+                    ? tagField
+                    : null,
+                type.GetField("collideLayer", InstanceFlags) is { } layerField &&
+                layerField.FieldType == typeof(FsmInt)
+                    ? layerField
+                    : null
+            );
+            ListenerFields[type] = fields;
+        }
+
+        var tag = fields.Tag?.GetValue(action) as FsmString;
+        var layer = fields.Layer?.GetValue(action) as FsmInt;
+        var byTag = tag is { IsNone: false } && !string.IsNullOrEmpty(tag.Value) && tag.Value != "Untagged";
+        var byLayer = layer is { IsNone: false };
+        return (byTag || byLayer) && (!byTag || attack.tag == tag!.Value) &&
+               (!byLayer || attack.layer == layer!.Value) && (byTag || layer!.Value == (int) PhysLayers.HERO_ATTACK);
+    }
+
+    /// <summary>
+    /// The fields with the tag and the layer that an action listening for touches checks, by type, found once; null
+    /// where the type has none.
+    /// </summary>
+    private static readonly Dictionary<Type, (FieldInfo? Tag, FieldInfo? Layer)> ListenerFields = new();
 
     /// <summary>
     /// A touch told to the component as it would be, as an action. Made apart from the hooks of touches, whose
