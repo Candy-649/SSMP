@@ -268,6 +268,17 @@ internal class UiManager : IUiManager {
     private Hook? _menuCancelHook;
 
     /// <summary>
+    /// The hook on the game's way back to the main menu, which lets one go at a time.
+    /// </summary>
+    private Hook? _menuReturnHook;
+
+    /// <summary>
+    /// The game manager whose way back to the main menu is under way, if one is. The game manager goes with the game
+    /// that it ran, so a way back that reaches the menu ends with it, and the next game starts with none.
+    /// </summary>
+    private static GameManager? _returningManager;
+
+    /// <summary>
     /// Whether the save slot selection is open for hosting, where the chosen save loads before the server starts and
     /// before any other player can connect.
     /// </summary>
@@ -390,6 +401,77 @@ internal class UiManager : IUiManager {
         EventHooks.UIManagerUIGoToMainMenu += TryAddMultiplayerScreen;
         EventHooks.UIManagerReturnToMainMenu += OnReturnToMainMenu;
         _menuCancelHook = HookMenuCancel();
+        _menuReturnHook = HookMenuReturn();
+    }
+
+    /// <summary>
+    /// Lets the game go back to the main menu one way at a time (USER 10-22 "啥都点不了"). Two at once, as when the
+    /// mod went back for a lost connection while the quit of the pause menu was pressed too, each load the scene of
+    /// the main menu, the second over the first. The menu manager of the first then stays, with the title that it
+    /// knows gone with the first scene, and the one of the second is thrown away as a spare. The game's own step into
+    /// the main menu threw on that title after it had taken the menu's input away, and nothing could be pressed.
+    /// </summary>
+    private static Hook? HookMenuReturn() {
+        try {
+            var method = typeof(GameManager).GetMethod(
+                nameof(GameManager.ReturnToMainMenu),
+                [typeof(bool), typeof(Action<bool>), typeof(bool), typeof(bool)]
+            );
+            if (method == null) {
+                Logger.Warn("Could not find how the game goes back to the main menu, so it may go there twice at once");
+                return null;
+            }
+
+            return new Hook(
+                method,
+                (Func<Func<GameManager, bool, Action<bool>, bool, bool, IEnumerator>, GameManager, bool, Action<bool>,
+                    bool, bool, IEnumerator>) OnMenuReturn
+            );
+        } catch (Exception e) {
+            Logger.Error($"Could not hook how the game goes back to the main menu:\n{e}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Starts the game's way back to the main menu, unless one is under way already.
+    /// </summary>
+    private static IEnumerator OnMenuReturn(
+        Func<GameManager, bool, Action<bool>, bool, bool, IEnumerator> orig,
+        GameManager self,
+        bool willSave,
+        Action<bool> callback,
+        bool isEndGame,
+        bool forceMainMenu
+    ) {
+        if (_returningManager != null && _returningManager == self) {
+            Logger.Info("The game is on its way back to the main menu already, so a second way there is not started");
+            return NoMenuReturn();
+        }
+
+        _returningManager = self;
+        return ReturnOnce(orig(self, willSave, callback, isEndGame, forceMainMenu), self);
+    }
+
+    /// <summary>
+    /// Runs the game's way back to the main menu, which ends as one when it stops short of the menu: when the save
+    /// before it fails, the game stays where it is.
+    /// </summary>
+    private static IEnumerator ReturnOnce(IEnumerator menuReturn, GameManager manager) {
+        while (menuReturn.MoveNext()) {
+            yield return menuReturn.Current;
+        }
+
+        if (_returningManager == manager) {
+            _returningManager = null;
+        }
+    }
+
+    /// <summary>
+    /// The way back to the main menu that the second one is: none.
+    /// </summary>
+    private static IEnumerator NoMenuReturn() {
+        yield break;
     }
 
     /// <summary>
@@ -1122,7 +1204,15 @@ internal class UiManager : IUiManager {
         switch (UM.menuState) {
             case MainMenuState.MAIN_MENU:
                 UM.StartCoroutine(UM.FadeOutSprite(UM.gameTitle));
-                UM.subtitleFSM.SendEvent("FADE OUT");
+
+                // The line under the title can be gone (see HookMenuReturn). Sending to it would throw here, with the
+                // menu's input taken away, and nothing would give it back
+                if (UM.subtitleFSM != null) {
+                    UM.subtitleFSM.SendEvent("FADE OUT");
+                } else {
+                    Logger.Warn("The line under the title of the main menu is gone: the menu manager is a stale one");
+                }
+
                 yield return UM.StartCoroutine(UM.FadeOutCanvasGroup(UM.mainMenuScreen));
                 break;
             
