@@ -270,12 +270,13 @@ internal partial class MinigameCoop {
     /// and nothing else on screen. A no is not asked again until they have played another round.
     /// </summary>
     private void OfferToWatch(HeroController hero, Game? local) {
-        if (local != null || !_playedHere || _askedSinceRound || !IsHeroFree(hero) || CoopSave.IsDialogueOrBoxBusy()) {
+        if (local != null || !_playedHere || _askedSinceRound || !IsHeroFree(hero)) {
             return;
         }
 
+        // Whether a box or dialogue is up is read last: reading it makes garbage, and this runs every frame
         FindWatchable();
-        if (_watchable.Count == 0) {
+        if (_watchable.Count == 0 || CoopSave.IsDialogueOrBoxBusy()) {
             return;
         }
 
