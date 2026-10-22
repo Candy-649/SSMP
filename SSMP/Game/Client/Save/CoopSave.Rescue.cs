@@ -20,22 +20,14 @@ namespace SSMP.Game.Client.Save;
 /// death is shown over them with what it tells the room taken out, and they lie in a cocoon that the other members can
 /// break open to put them back on their feet with half their health. Each member who is down lies in a cocoon of their
 /// own, and the hits of everyone who hits one count together. The game's own death runs, from its very first step,
-/// only once nobody is left to do that: every member is down, the wait ran out, or the player gave up. Waiting is a
-/// choice, and the cocoon stops being shown to the others the moment waiting ends.
+/// only once nobody is left to do that: every member is down, or the player gave up. Waiting is a choice, it lasts
+/// until one of those, and the cocoon stops being shown to the others the moment waiting ends.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
     /// How many hits it takes to open the cocoon of the other player.
     /// </summary>
     private const int RescueHits = 5;
-
-    /// <summary>
-    /// How long a player waits to be pulled back up before going to their bench anyway, in seconds. Without this a
-    /// player whose partner never noticed would wait for as long as the game runs. It leaves the partner time to finish
-    /// what they are in the middle of first - 45 seconds was too short in play - and a player who does not want to wait
-    /// gives up on it with a key.
-    /// </summary>
-    private const float RescueWaitTime = 180f;
 
     /// <summary>
     /// How long, in seconds, at the start of a wait during which the key that gives up on it is not listened to at
@@ -155,7 +147,7 @@ internal partial class CoopSave {
         Rescued,
 
         /// <summary>
-        /// The player gave up, nobody could reach them, or waiting ran out of time.
+        /// The player gave up, or nobody could reach them.
         /// </summary>
         Ended
     }
@@ -903,8 +895,9 @@ internal partial class CoopSave {
     ///
     /// Everyone down means everyone to their bench - that is the rule - and this is the half of it that was missing.
     /// The death of the last player already goes straight to their bench, because a player whom nobody standing is
-    /// left to pull up cannot wait themselves, but the others were never told and lay there until their wait ran out of
-    /// time: watching an empty room, with the enemies that killed them all still swinging at the spot they fell on.
+    /// left to pull up cannot wait themselves, but the others were never told and lay there until their wait ran out
+    /// (it had a time limit then): watching an empty room, with the enemies that killed them all still swinging at the
+    /// spot they fell on.
     /// While another member is still on their feet nobody is told anything, since they can still pull everyone up.
     /// </summary>
     private void TellNobodyIsComing() {
@@ -1047,11 +1040,14 @@ internal partial class CoopSave {
         // the room, the cocoon and the line that explains what is happening rather than at nothing at all.
         MonoBehaviourUtil.Instance.StartCoroutine(BringScreenBackAfterDeath(lying));
 
-        // Running out of time is decided here rather than only frame by frame next door, because the update that runs
-        // frame by frame sits behind early returns of its own: a marker that is gone for a moment is enough to stop it,
-        // and then this would keep the player down for as long as the game runs. Going down has already switched the
-        // pause menu off, so there would be nothing left to do about it but kill the game. This loop is the one thing
-        // that is certainly still running while the player lies there, so the way out that must always work is in it.
+        // A wait has no time limit: it lasts until the player is pulled up, everyone is down, or the player gives up
+        // with the key. The three minutes it used to end after were never needed in play, where a player was either
+        // pulled up or went to their bench with the key (the user, 2026-10-22: "基本都能要么被救起来，要么直接K/L3回
+        // 椅子"). The key is listened to here rather than only frame by frame next door, because the update that runs
+        // frame by frame sits behind early returns of its own: a marker that is gone for a moment is enough to stop
+        // it. Going down has already switched the pause menu off, so there would be nothing left to do about it but
+        // kill the game. This loop is the one thing that is certainly still running while the player lies there, so
+        // the way out that must always work is in it.
         // Seeded with what the key is doing right now rather than with "not held". A player dies in the middle of
         // doing things, and a key that was already down when they died is not them asking to give up on being saved.
         var leaveHeld = _modSettings.Keybinds.CoopLeave.IsPressed;
@@ -1060,20 +1056,12 @@ internal partial class CoopSave {
         while (_rescue is { Outcome: RescueOutcome.Waiting } waiting) {
             waiting.HeldFrame = Time.frameCount;
 
-            if (Time.unscaledTime - waiting.StartTime >= RescueWaitTime) {
-                Logger.Info("Waited the whole time to be pulled back up and nobody came, going to the bench");
-                waiting.Outcome = RescueOutcome.Ended;
-
-                break;
-            }
-
-            // The line and the way out live here for the same reason the time limit does: this is the one thing that
-            // is certainly still running while the player lies there. They used to live next door, behind those early
-            // returns, so a player could be left staring at a cocoon with nothing on screen telling them anything and
-            // no way out but to sit through the whole wait.
+            // The line lives here with the way out, for the same reason: this is the one thing that is certainly still
+            // running while the player lies there. It used to live next door, behind those early returns, so a player
+            // could be left staring at a cocoon with nothing on screen telling them anything.
             ShowTheWayOutOfTheWait(waiting);
 
-            // Every press of the pad button is written down as it happens, whatever comes of it. A wait that ran out
+            // Every press of the pad button is written down as it happens, whatever comes of it. A wait that ended
             // with no line in it could not be told apart from a player who never pressed anything, and a player who
             // pressed the way out and was not let out cannot tell us whether the press never reached the game,
             // arrived while the chat had the keys, or came too early to count.
@@ -1129,7 +1117,7 @@ internal partial class CoopSave {
         }
 
         // Time only passes when every member is down. A member who is still connected and did not go down as well
-        // lived through this death, whether this player gave up, ran out of time or could not be stood back up
+        // lived through this death, whether this player gave up or could not be stood back up
         _deathPassesNoTime = !lying.EveryoneDown && GetCheckedMembers().Count > 0;
         Logger.Info(
             "Letting the game's own death take the player to their bench, " +
