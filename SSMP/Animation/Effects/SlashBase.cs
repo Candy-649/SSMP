@@ -122,7 +122,6 @@ internal abstract class SlashBase : ParryableEffect {
         // and use the attack gameObject as transform reference
         var slashObj = Object.Instantiate(nailAttackBase.gameObject, slashParent.transform);
         slashObj.layer = AttackLayer;
-        // slashObj.tag = "Nail Beam"; // Add if we want to disable hitting other peoples interactable objects
 
         var nailSlash = slashObj.GetComponent<NailSlash>();
         var downSpike = slashObj.GetComponent<Downspike>();

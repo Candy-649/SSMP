@@ -323,21 +323,16 @@ internal sealed class ChunkSender : IDisposable {
     /// </summary>
     /// <param name="sliceAckData">The received slice acknowledgement data.</param>
     public void ProcessReceivedData(SliceAckData sliceAckData) {
-        //Logger.Debug($"Received slice ack packet: {sliceAckData.ChunkId}, {sliceAckData.NumSlices}");
-
         lock (_stateLock) {
             if (!_isSending || _acked == null) {
-                //Logger.Debug("Not sending a chunk, ignoring ack packet");
                 return;
             }
 
             if (_chunkId != sliceAckData.ChunkId) {
-                //Logger.Debug("Chunk ID of received ack packet does not correspond with currently sending chunk");
                 return;
             }
 
             if (_numSlices != sliceAckData.NumSlices) {
-                //Logger.Debug("Number of slices in ack packet does not correspond with local number of slices");
                 return;
             }
 
@@ -358,8 +353,6 @@ internal sealed class ChunkSender : IDisposable {
                 }
 
                 newAckProcessed = true;
-
-                //Logger.Debug($"Received acknowledgement for slice {i}, total acked: {_numAckedSlices}");
             }
 
             if (newAckProcessed) {
@@ -386,8 +379,6 @@ internal sealed class ChunkSender : IDisposable {
                 if (!TryTakeNextPacket(cancellationToken, out var packet)) {
                     continue;
                 }
-
-                //Logger.Debug("Successfully taken new packet from blocking collection, starting networking chunk");
 
                 if (!TryPrepareChunkForSending(packet)) {
                     continue;
@@ -557,7 +548,6 @@ internal sealed class ChunkSender : IDisposable {
     /// finished sending (fully acknowledged). Must only be called when not cancelled.
     /// </summary>
     private void AdvanceToNextChunk() {
-        //Logger.Debug($"Incrementing chunk ID to: {_chunkId + 1}");
         lock (_stateLock) {
             _chunkId += 1;
             ReleaseArrays();

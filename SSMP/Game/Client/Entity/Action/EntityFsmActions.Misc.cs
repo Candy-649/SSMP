@@ -114,7 +114,6 @@ internal static partial class EntityFsmActions {
         }
 
         if (queue.Count == 0) {
-            //Logger.Debug("Getting data for GetRandomChild has not enough items in queue");
             return false;
         }
 
@@ -225,8 +224,6 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, CallMethodProper action) {
-        //Logger.Debug($"Getting network data for CallMethodProper: {action.Fsm.GameObject.name}, {action.Fsm.Name}");
-
         return action.Fsm.GameObject.name.StartsWith("Colosseum Manager") &&
                action.Fsm.Name.Equals("Battle Control") ||
                action.Fsm.GameObject.name.StartsWith("Mantis Lord Throne") &&

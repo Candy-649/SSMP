@@ -407,8 +407,6 @@ public static class EncodeUtil {
             var name = entry.Name;
             var decodedObject = entry.Value;
             
-            //Logger.Debug($"Encoding entry: {name}, {decodedObject}");
-
             CheckEncodeAddData(name, SaveDataMapping.Instance.PlayerDataIndices, decodedObject);
         }
 

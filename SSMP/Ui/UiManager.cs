@@ -84,14 +84,14 @@ internal class UiManager : IUiManager {
 
     /// <summary>
     /// Shorthand accessor for the UIManager singleton instance.
-    /// Hollow Knight's built-in UI manager for menu navigation.
+    /// The game's built-in UI manager for menu navigation.
     /// </summary>
     // ReSharper disable once InconsistentNaming
     private static UIManager UM => UIManager.instance;
 
     /// <summary>
     /// Shorthand accessor for the InputHandler singleton instance.
-    /// Handles keyboard/controller input for Hollow Knight.
+    /// Handles keyboard/controller input for the game.
     /// </summary>
     // ReSharper disable once InconsistentNaming
     private static InputHandler IH => InputHandler.Instance;
@@ -356,48 +356,6 @@ internal class UiManager : IUiManager {
         SetupUi();
         
         MonoBehaviourUtil.Instance.OnUpdateEvent += CheckKeyBinds;
-        
-        // Hook to make sure that after game completion cutscenes we do not head to the main menu, but stay hosting/
-        // connected to the server. Otherwise, if the host would go to the main menu, every other player would be
-        // disconnected
-        // On.CutsceneHelper.DoSceneLoad += (orig, self) => {
-        //     if (!_netClient.IsConnected) {
-        //         orig(self);
-        //         return;
-        //     }
-        //
-        //     var sceneName = self.gameObject.scene.name;
-        //     
-        //     Logger.Debug($"DoSceneLoad of CutsceneHelper for next scene type: {self.nextSceneType}, scene name: {sceneName}");
-        //
-        //     var toMainMenu = self.nextSceneType.Equals(CutsceneHelper.NextScene.MainMenu) 
-        //                      || self.nextSceneType.Equals(CutsceneHelper.NextScene.MainMenuNoSave);
-        //     if (self.nextSceneType.Equals(CutsceneHelper.NextScene.PermaDeathUnlock)) {
-        //         toMainMenu |= GM.GetStatusRecordInt("RecPermadeathMode") != 0;
-        //     }
-        //
-        //     if (toMainMenu) {
-        //         if (PlayerData.instance.GetInt("permadeathMode") != 0) {
-        //             // We are running Steel Soul mode, so we disconnect and go to main menu instead of reloading to
-        //             // the last save point
-        //             Logger.Debug("  NextSceneType is main menu, disconnecting because of Steel Soul");
-        //             
-        //             RequestClientDisconnectEvent?.Invoke();
-        //             RequestServerStopHostEvent?.Invoke();
-        //             
-        //             orig(self);
-        //             return;
-        //         }
-        //         
-        //         Logger.Debug("  NextSceneType is main menu, transitioning to last save point instead");
-        //         
-        //         GameManager.instance.ContinueGame();
-        //         return;
-        //     }
-        //
-        //     orig(self);
-        // };
-        
     }
 
     /// <summary>

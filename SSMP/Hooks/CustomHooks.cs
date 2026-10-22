@@ -98,9 +98,6 @@ public static class CustomHooks {
             HeroControllerOnRespawn
         );
 
-        // IL.HutongGames.PlayMaker.Actions.ApplyMusicCue.OnEnter += ApplyMusicCueOnEnter;
-        // IL.HutongGames.PlayMaker.Actions.TransitionToAudioSnapshot.OnEnter += TransitionToAudioSnapshotOnEnter;
-
         new Hook(
             typeof(HeroController).GetMethod(nameof(HeroController.Start), BindingFlags), 
             HeroControllerOnStart

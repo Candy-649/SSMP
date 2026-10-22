@@ -31,76 +31,8 @@ internal class SpawnJarComponent : EntityComponent {
         _spawnJar = spawnJar;
         spawnJar.Client.enabled = false;
         
-        // On.SpawnJarControl.OnEnable += SpawnJarControlOnEnable;
-
-        // We can't simply hook the Behaviour method itself because it returns a state machine for the IEnumerator
-        // Instead we get the state machine target with MonoMod and get the hook that way
-        // HookEndpointManager.Modify(
-        //     MonoMod.Utils.Extensions.GetStateMachineTarget(
-        //         ReflectionHelper.GetMethodInfo(
-        //             typeof(SpawnJarControl),
-        //             "Behaviour"
-        //         )
-        //     ),
-        //     SpawnJarControlOnBehaviour
-        // );
-
         _firstSpawn = true;
     }
-    
-    // /// <summary>
-    // /// Hook on the OnEnable method of the SpawnJarControl to network that it should start on the client-side.
-    // /// </summary>
-    // private void SpawnJarControlOnEnable(On.SpawnJarControl.orig_OnEnable orig, SpawnJarControl self) {
-    //     orig(self);
-    //     
-    //     if (self != _spawnJar.Host) {
-    //         return;
-    //     }
-    //     
-    //     if (_firstSpawn) {
-    //         return;
-    //     }
-    //     
-    //     var data = new EntityNetworkData {
-    //         Type = EntityComponentType.SpawnJar
-    //     };
-    //     SendData(data);
-    //     
-    //     Logger.Debug("Sending SpawnJarComponent data OnEnable");
-    // }
-
-    // /// <summary>
-    // /// IL hook for modifying the Behaviour method to grab the game object that is spawned from the jar.
-    // /// </summary>
-    // /// <param name="il">The IL context for the method.</param>
-    // private void SpawnJarControlOnBehaviour(ILContext il) {
-    //     try {
-    //         // Create a cursor for this context
-    //         var c = new ILCursor(il);
-    //
-    //         // Goto the next call instruction Spawn twice, the first one is a the spawning of a nail strike
-    //         c.GotoNext(i => i.MatchCall(typeof(ObjectPoolExtensions), "Spawn"));
-    //         c.GotoNext(i => i.MatchCall(typeof(ObjectPoolExtensions), "Spawn"));
-    //
-    //         // Move the cursor after the call instruction
-    //         c.Index++;
-    //
-    //         // Emit a delegate that pops the current game object off the stack (our spawned object) and uses it
-    //         // before putting it back on the stack again
-    //         c.EmitDelegate<Func<GameObject, GameObject>>(gameObject => {
-    //             Logger.Debug($"SpawnJarControl spawned entity: {gameObject.name}");
-    //             EntityFsmActions.CallEntitySpawnEvent(new EntitySpawnDetails {
-    //                 Type = EntitySpawnType.SpawnJarComponent,
-    //                 GameObject = gameObject
-    //             });
-    //             
-    //             return gameObject;
-    //         });
-    //     } catch (Exception e) {
-    //         Logger.Error($"Could not change SpawnJarControl#Behaviour IL:\n{e}");
-    //     }
-    // }
     
     /// <inheritdoc />
     protected override void InitializeHost() {
@@ -161,16 +93,5 @@ internal class SpawnJarComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void Destroy() {
-        // On.SpawnJarControl.OnEnable -= SpawnJarControlOnEnable;
-
-        // HookEndpointManager.Unmodify(
-        //     MonoMod.Utils.Extensions.GetStateMachineTarget(
-        //         ReflectionHelper.GetMethodInfo(
-        //             typeof(SpawnJarControl),
-        //             "Behaviour"
-        //         )
-        //     ),
-        //     SpawnJarControlOnBehaviour
-        // );
     }
 }

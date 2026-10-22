@@ -301,9 +301,6 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
 
         /// <inheritdoc cref="IPacketData.WriteData" />
         public void WriteData(IPacket packet) {
-            // Logger.Debug($"ScaleData.WriteData x: {x}, y: {y}, z: {z}, xFlipped: {xFlipped}, yFlipped: {yFlipped},
-            // zFlipped: {zFlipped}, xScale: {xScale}, yScale: {yScale}, zScale: {zScale}");
-
             // The two lowest bits say "x", "y", "x and y", or with neither of them all three: there is no way to say z
             // without both x and y. A z with only one of them was read back as all three, so the reader took floats
             // that had never been written and read the rest of the packet out of step. It is left out then: how deep a
@@ -358,21 +355,17 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
                 }
             }
 
-            // Logger.Debug($"  Flag: {flagByte}");
             packet.Write(flagByte);
 
             if (x && !xFlipped) {
-                // Logger.Debug($"  xScale: {xScale}");
                 packet.Write(xScale);
             }
 
             if (y && !yFlipped) {
-                // Logger.Debug($"  yScale: {yScale}");
                 packet.Write(yScale);
             }
 
             if (withZ && !zFlipped) {
-                // Logger.Debug($"  zScale: {zScale}");
                 packet.Write(zScale);
             }
         }
@@ -380,7 +373,6 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         /// <inheritdoc cref="IPacketData.ReadData "/>
         public void ReadData(IPacket packet) {
             var flagByte = packet.ReadByte();
-            // Logger.Debug($"ScaleData.ReadData flag: {flagByte}");
 
             var firstBit = (flagByte & 1) != 0;
             var secondBit = (flagByte & 2) != 0;
@@ -423,21 +415,15 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
 
             if (x && !xFlipped) {
                 xScale = packet.ReadFloat();
-                // Logger.Debug($"  xScale: {xScale}");
             }
 
             if (y && !yFlipped) {
                 yScale = packet.ReadFloat();
-                // Logger.Debug($"  yScale: {yScale}");
             }
 
             if (z && !zFlipped) {
                 zScale = packet.ReadFloat();
-                // Logger.Debug($"  zScale: {zScale}");
             }
-
-            // Logger.Debug($"  x: {x}, y: {y}, z: {z}, xFlipped: {xFlipped}, yFlipped: {yFlipped}, zFlipped:
-            // {zFlipped}, xPos: {xPos}, yPos: {yPos}, zPos: {zPos}");
         }
 
         /// <summary>

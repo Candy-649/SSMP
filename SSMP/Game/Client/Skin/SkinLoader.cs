@@ -27,7 +27,7 @@ internal class SkinLoader {
     private const string SkinFolderName = "Skins";
 
     /// <summary>
-    /// The name of the Knight texture file.
+    /// The name of the Hornet texture file.
     /// </summary>
     private const string KnightTextureFileName = "Knight.png";
 
@@ -50,9 +50,6 @@ internal class SkinLoader {
         var modsFolderPath = GetModsFolder();
 
         _skinFolderPath = CombinePaths(modsFolderPath, ModFolderName, SkinFolderName);
-        // if (!Directory.Exists(_skinFolderPath)) {
-            // Directory.CreateDirectory(_skinFolderPath);
-        // }
     }
 
     /// <summary>

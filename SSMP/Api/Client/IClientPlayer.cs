@@ -25,7 +25,7 @@ public interface IClientPlayer {
 
     /// <summary>
     /// The Unity game object for the player container. This container contains all player relevant
-    /// game objects, such as the player object, effects, spells, animations etc.
+    /// game objects, such as the player object, effects, silk skills, animations etc.
     /// </summary>
     GameObject? PlayerContainer { get; }
 

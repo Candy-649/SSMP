@@ -12,7 +12,7 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Entity.Component;
 
 /// <inheritdoc />
-/// This component manages the challenge prompt that appears for Mantis Lords.
+/// This component manages the challenge prompt that starts a boss fight.
 internal class ChallengePromptComponent : EntityComponent {
     /// <summary>
     /// The game object that handles the challenge prompt pop-up.

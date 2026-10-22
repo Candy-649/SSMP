@@ -23,29 +23,8 @@ internal class EnemySpawnerComponent : EntityComponent {
         _spawner = spawner;
         spawner.Client.enabled = false;
 
-        // On.EnemySpawner.Start += EnemySpawnerOnStart;
         spawner.Host.OnEnemySpawned += OnEnemySpawned;
     }
-
-    // /// <summary>
-    // /// Hook for when the EnemySpawner starts to check whether the interpolation move happens.
-    // /// </summary>
-    // private void EnemySpawnerOnStart(On.EnemySpawner.orig_Start orig, EnemySpawner self) {
-    //     orig(self);
-    //
-    //     if (self != _spawner.Host) {
-    //         return;
-    //     }
-    //
-    //     // If the game object is still active after this method, we know that the interpolation was
-    //     // initiated
-    //     if (self.gameObject.activeSelf) {
-    //         var data = new EntityNetworkData {
-    //             Type = EntityComponentType.EnemySpawner
-    //         };
-    //         SendData(data);
-    //     }
-    // }
 
     /// <summary>
     /// Hook for when the enemy object is spawned from the spawner so we can call the spawn event.
@@ -87,8 +66,6 @@ internal class EnemySpawnerComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void Destroy() {
-        // On.EnemySpawner.Start -= EnemySpawnerOnStart;
-
         if (_spawner.Host != null) {
             _spawner.Host.OnEnemySpawned -= OnEnemySpawned;
         }

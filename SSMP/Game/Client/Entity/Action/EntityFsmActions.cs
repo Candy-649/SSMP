@@ -1020,16 +1020,13 @@ internal static partial class EntityFsmActions {
 
             // Emit a delegate that pops the spawned game object off the stack and uses it, then puts it back again
             c.EmitDelegate<Func<GameObject, FlingObjectsFromGlobalPool, GameObject>>((go, action) => {
-                    //Logger.Debug($"Delegate of FlingObjectsFromGlobalPool: {go.name}");
-                    if (EntitySpawnEvent != null && EntitySpawnEvent.Invoke(
-                            new EntitySpawnDetails {
-                                Type = EntitySpawnType.FsmAction,
-                                Action = action,
-                                GameObject = go
-                            }
-                        )) {
-                        //Logger.Debug("FlingObjectsFromGlobalPool IL spawned object is entity");
-                    }
+                    EntitySpawnEvent?.Invoke(
+                        new EntitySpawnDetails {
+                            Type = EntitySpawnType.FsmAction,
+                            Action = action,
+                            GameObject = go
+                        }
+                    );
 
                     return go;
                 }
@@ -1085,15 +1082,13 @@ internal static partial class EntityFsmActions {
             // Emit a delegate that pops the spawned game object off the stack and uses it, then puts it back again
             c.EmitDelegate<Func<GameObject, FlingObjectsFromGlobalPoolVel, GameObject>>((go, action) => {
                     Logger.Debug($"Delegate of FlingObjectsFromGlobalPoolVel: {go.name}");
-                    if (EntitySpawnEvent != null && EntitySpawnEvent.Invoke(
-                            new EntitySpawnDetails {
-                                Type = EntitySpawnType.FsmAction,
-                                Action = action,
-                                GameObject = go
-                            }
-                        )) {
-                        //Logger.Debug("FlingObjectsFromGlobalPoolVel IL spawned object is entity");
-                    }
+                    EntitySpawnEvent?.Invoke(
+                        new EntitySpawnDetails {
+                            Type = EntitySpawnType.FsmAction,
+                            Action = action,
+                            GameObject = go
+                        }
+                    );
 
                     return go;
                 }
@@ -1162,17 +1157,12 @@ internal static partial class EntityFsmActions {
     /// <param name="fsm">The FSM that changed states.</param>
     /// <param name="stateName">The name of the state that was changed to.</param>
     public static void RegisterStateChange(HutongGames.PlayMaker.Fsm fsm, string stateName) {
-        //Logger.Debug($"RegisterStateChange: {fsm.Name}, {stateName}");
-
         HostStates[fsm] = stateName;
 
         for (var i = ActionsInState.Count - 1; i >= 0; i--) {
             var actionInState = ActionsInState[i];
 
-            //Logger.Debug($"  Action in state: {actionInState.Fsm.Name}, {actionInState.StateName}");
-
             if (actionInState.Fsm == fsm && actionInState.StateName != stateName) {
-                //Logger.Debug("EntityFsmActions: state changed, cancelling action in state");
                 ExitAt(i);
             }
         }

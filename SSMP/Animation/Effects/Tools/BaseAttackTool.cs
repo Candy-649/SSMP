@@ -13,29 +13,8 @@ internal abstract class BaseAttackTool : DamageAnimationEffect {
     public static readonly Dictionary<string, AnimationClip> ToolNameMap = new() {
         { "Straight Pin", AnimationClip.ToolStraightPin },
         { "Tri Pin", AnimationClip.ToolThreefoldPin } ,
-        //{ "Sting Shard", AnimationClip.ToolStingShard } ,
         { "Tack", AnimationClip.ToolTacks } ,
         { "Harpoon", AnimationClip.ToolLongpin } ,
-        //{ "Curve Claws", AnimationClip.ToolCurveclaw } ,
-        //{ "Curve Claws Upgraded", AnimationClip.ToolCurvesickle } ,
-        //{ "Shakra Ring", AnimationClip.ToolThrowingRing } ,
-        //{ "Pimpilo", AnimationClip.ToolPimpillo } ,
-        //{ "Conch Drill", AnimationClip.ToolConchcutter } ,
-        //{ "Cogwork Saw", AnimationClip.ToolCogworkWheel } ,
-        //{ "Cogwork Flier", AnimationClip.ToolCogfly } ,
-
-         //These are in the tool FSM. They might be handled differently
-        //{ "WebShot Weaver", AnimationClip.ToolSilkshotOriginal } ,
-        //{ "WebShot Architect", AnimationClip.ToolSilkshotArchitect } ,
-        //{ "WebShot Forge", AnimationClip.ToolSilkshotForge } ,
-        //{ "Screw Attack", AnimationClip.ToolDelversDrill } ,
-        //{ "Rosary Cannon", AnimationClip.ToolRosaryCannon } ,
-        //{ "Lightning Rod", AnimationClip.ToolVoltvesselSpear } ,
-        //{ "Flintstone", AnimationClip.ToolFlintslate } ,
-        //{ "Silk Snare", AnimationClip.ToolSnareSetter } ,
-        //{ "Flea Brew", AnimationClip.ToolFleaBrew },
-        //{ "Lifeblood Syringe", AnimationClip.ToolPlasmiumPhial },
-        //{ "Extractor", AnimationClip.ToolNeedlePhial }
     };
 
     /// <summary>

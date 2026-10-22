@@ -1604,11 +1604,6 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The beginning of the name of every state of the camera that shakes the screen until told to stop.
-    /// </summary>
-    private const string ShakingOnStateNamePrefix = "Rumbling";
-
-    /// <summary>
     /// The name of the one state of that FSM in which the screen is not being shaken at all.
     /// </summary>
     private const string RestingStateName = "Normal";

@@ -33,12 +33,6 @@ internal class ModServerManager : ServerManager {
     /// </summary>
     private readonly SettingsCommand _settingsCommand;
     
-    // /// <summary>
-    // /// Save data that was loaded from selecting a save file. Will be retroactively applied to a server, if one was
-    // /// requested to be started after selecting a save file.
-    // /// </summary>
-    // private ServerSaveData? _loadedLocalSaveData;
-    
     public ModServerManager(
         NetServer netServer,
         PacketManager packetManager,
@@ -66,9 +60,6 @@ internal class ModServerManager : ServerManager {
         PlayerConnectEvent += _ => UpdateMatchmakingRemotePlayerCount();
         PlayerDisconnectEvent += _ => UpdateMatchmakingRemotePlayerCount();
         ServerShutdownEvent += () => UpdateMatchmakingRemotePlayerCount(0);
-
-        // Register application quit handler
-        // ModHooks.ApplicationQuitHook += Stop;
     }
 
     /// <summary>
@@ -78,22 +69,6 @@ internal class ModServerManager : ServerManager {
     /// <param name="fullSynchronisation">Whether full synchronisation is enabled.</param>
     /// <param name="transportType">The type of transport to use.</param>
     private void OnRequestServerStartHost(int port, bool fullSynchronisation, TransportType transportType) {
-        // if (fullSynchronisation) {
-        //     // Get the global save data from the save manager, which obtains the global save data from the loaded
-        //     // save file that the user selected
-        //     ServerSaveData.GlobalSaveData = SaveManager.GetCurrentSaveData(true);
-        //
-        //     // Then we import the player save data from the (potentially) loaded modded save file from the user selected
-        //     // save file
-        //     if (_loadedLocalSaveData != null) {
-        //         ServerSaveData.PlayerSaveData = _loadedLocalSaveData.PlayerSaveData;
-        //     }
-        //
-        //     // Lastly, we get the player save data from the save manager, which obtains the player save data from the
-        //     // loaded save file that the user selected. We add this data to the server save as the local player
-        //     ServerSaveData.PlayerSaveData[_modSettings.AuthKey!] = SaveManager.GetCurrentSaveData(false);
-        // }
-
         IEncryptedTransportServer transportServer = transportType switch {
             TransportType.Udp => new UdpEncryptedTransportServer(),
             TransportType.Steam => new SteamEncryptedTransportServer(),

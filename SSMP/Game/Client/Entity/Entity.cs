@@ -19,8 +19,6 @@ using UnityEngine;
 using Math_Vector2 = SSMP.Math.Vector2;
 using Math_Vector3 = SSMP.Math.Vector3;
 
-//using Logger = SSMP.Logging.Logger;
-
 // ReSharper disable ConditionIsAlwaysTrueOrFalseAccordingToNullableAPIContract
 #pragma warning disable CS8604 // Possible null reference argument.
 #pragma warning disable CS8602 // Dereference of a possibly null reference.
@@ -511,10 +509,6 @@ internal partial class Entity {
 
         _lastIsActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
 
-        //Logger.Info(
-        //    $"Entity '{Object.Host.name}' was original active: {_originalIsActive}, last active: {_lastIsActive}"
-        //);
-
         // Add a position interpolation component to the enemy so we can smooth out position updates. A part of another
         // entity goes without: the parent's copy carries it (UpdatePosition)
         if (!_hasParent) {
@@ -541,7 +535,6 @@ internal partial class Entity {
                 _animationClipNameIds.Add(animationClip.name, (byte) index++);
 
                 if (index > byte.MaxValue) {
-                    //Logger.Error($"Too many animation clips to fit in a byte for entity: {Object.Client.name}");
                     break;
                 }
             }
@@ -697,21 +690,6 @@ internal partial class Entity {
         }
 
         Object.Client.SetActive(false);
-
-        // // Debug code that logs each action's OnEnter method call
-        // foreach (var fsm in _fsms.Host) {
-        //     foreach (var state in fsm.FsmStates) {
-        //         foreach (var action in state.Actions) {
-        //             FsmActionHooks.RegisterFsmStateActionType(action.GetType(), stateAction => {
-        //                 if (stateAction != action) {
-        //                     return;
-        //                 }
-        //
-        //                 Logger.Debug($"Entity ({Id}, {Type}) has host FSM enter action: {state.Name}, {action.GetType()}, {state.Actions.ToList().IndexOf(action)}");
-        //             });
-        //         }
-        //     }
-        // }
     }
 
     /// <summary>
@@ -721,8 +699,7 @@ internal partial class Entity {
     /// <param name="root">The root game object to start searching for children.</param>
     private void DestroyManagedChildren(GameObject root) {
         foreach (var child in root.GetChildren()) {
-            if (EntityRegistry.TryGetEntry(child, out _ /*var entry*/)) {
-                //Logger.Debug($"Found managed child: {child.name}, {entry.Type}, destroying it");
+            if (EntityRegistry.TryGetEntry(child, out _)) {
                 UnityEngine.Object.Destroy(child);
             } else {
                 DestroyManagedChildren(child);
@@ -735,8 +712,6 @@ internal partial class Entity {
     /// </summary>
     /// <param name="fsm">The Playmaker FSM to process.</param>
     private void ProcessHostFsm(PlayMakerFSM fsm) {
-        //Logger.Info($"Processing host FSM: {fsm.Fsm.Name}");
-
         // One made from a template is made only when its object is first switched on (in its Awake), and what this
         // hooks until then is a stand-in that never runs (see HookSummoningMadeLater). Whether it has been made yet
         // can't be told from the FSM: the room loading it already marks the stand-in set up. An object switched off
@@ -762,7 +737,6 @@ internal partial class Entity {
     private void HookActions(PlayMakerFSM fsm) {
         for (var i = 0; i < fsm.FsmStates.Length; i++) {
             var state = fsm.FsmStates[i];
-            //var stateName = state.Name;
 
             for (var j = 0; j < state.Actions.Length; j++) {
                 var action = state.Actions[j];
@@ -775,9 +749,6 @@ internal partial class Entity {
                 }
 
                 if (action.Fsm == null) {
-                    //Logger.Error(
-                    //    $"FSM in action for state ({i}, {state.Name}), action ({j}, {action.GetType()}) is null"
-                    //);
                     continue;
                 }
 
@@ -793,9 +764,6 @@ internal partial class Entity {
                     or SendEventByNameV2 or SendEventByNameOnExit or SendEventToRegister or SendEventToRegisterV2) {
                     ThrowingActions.AddOrUpdate(action, this);
                 }
-                //Logger.Info(
-                //    $"Created hooked action: {action.GetType()}, {_fsms.Host.IndexOf(fsm)}, {stateName}, {j}"
-                //);
 
                 if (_hookedTypes.Add(action.GetType())) {
                     FsmActionHooks.RegisterFsmStateActionType(action.GetType(), OnActionEntered);
@@ -914,7 +882,6 @@ internal partial class Entity {
     /// </summary>
     /// <param name="fsm">The Playmaker FSM to process.</param>
     private void ProcessClientFsm(PlayMakerFSM fsm) {
-        //Logger.Info($"Processing client FSM: {fsm.Fsm.Name}");
         if (IsRunByEachGame(fsm)) {
             ReadyToRunOnTheCopy(fsm);
             return;
@@ -1002,8 +969,6 @@ internal partial class Entity {
     /// Check the host and client objects for components that are supported for networking.
     /// </summary>
     private void HandleComponents(EntityComponentType[] types) {
-        //var addedComponentsString = $"Adding components to entity ({Object.Host.name}, {Id}):";
-
         var hostHealthManager = Object.Host.GetComponent<HealthManager>();
         var clientHealthManager = Object.Client.GetComponent<HealthManager>();
         if (hostHealthManager != null && clientHealthManager != null) {
@@ -1034,8 +999,6 @@ internal partial class Entity {
                 clientHealthManager.SetGeoMedium(0);
                 clientHealthManager.SetGeoLarge(0);
             }
-
-            //addedComponentsString += " Death Health Invincibility";
         }
 
         var climber = Object.Client.GetComponent<Climber>();
@@ -1051,15 +1014,11 @@ internal partial class Entity {
                 Id,
                 Object
             );
-
-            //addedComponentsString += " Climber Rotation";
         }
 
         var hostCollider = Object.Host.GetComponent<Collider2D>();
         var clientCollider = Object.Client.GetComponent<Collider2D>();
         if (hostCollider != null && clientCollider != null) {
-            //Logger.Info($"Adding collider component to entity: {Object.Host.name}");
-
             var collider = new HostClientPair<Collider2D> {
                 Host = hostCollider,
                 Client = clientCollider
@@ -1074,8 +1033,6 @@ internal partial class Entity {
 
             // What the collider can be hit by goes with the layer it is on
             _components[EntityComponentType.Layer] = new LayerComponent(_netClient, Id, Object);
-
-            //addedComponentsString += " Collider";
         }
 
         var hostBody = Object.Host.GetComponent<Rigidbody2D>();
@@ -1091,8 +1048,6 @@ internal partial class Entity {
         var hostDamageHeroes = Object.Host.GetComponentsInChildren<DamageHero>(true);
         var clientDamageHeroes = Object.Client.GetComponentsInChildren<DamageHero>(true);
         if (hostDamageHeroes.Length > 0 && clientDamageHeroes.Length > 0) {
-            //Logger.Info($"Adding DamageHero component to entity: {Object.Host.name}");
-
             _components[EntityComponentType.DamageHero] = new DamageHeroComponent(
                 _netClient,
                 Id,
@@ -1100,15 +1055,11 @@ internal partial class Entity {
                 hostDamageHeroes,
                 clientDamageHeroes
             );
-
-            //addedComponentsString += " DamageHero";
         }
 
         var hostMeshRenderer = Object.Host.GetComponent<MeshRenderer>();
         var clientMeshRenderer = Object.Client.GetComponent<MeshRenderer>();
         if (hostMeshRenderer != null && clientMeshRenderer != null) {
-            //Logger.Info($"Adding MeshRenderer component to entity: {Object.Host.name}");
-
             var meshRenderer = new HostClientPair<MeshRenderer> {
                 Host = hostMeshRenderer,
                 Client = clientMeshRenderer
@@ -1120,8 +1071,6 @@ internal partial class Entity {
                 Object,
                 meshRenderer
             );
-
-            //addedComponentsString += " MeshRenderer";
         }
 
         EntityInitializer.RemoveClientTypes(Object.Client, Type);
@@ -1129,13 +1078,9 @@ internal partial class Entity {
         // Instantiate all types defined in the entity registry, which are passed to the constructor
         foreach (var type in types) {
             var component = ComponentFactory.InstantiateByType(type, _netClient, Id, Object);
-            if (component == null) {
-                //Logger.Debug($"Could not instantiate component for type: {type}");
-            } else {
+            if (component != null) {
                 _components[type] = component;
             }
-
-            //addedComponentsString += $" {type}";
         }
 
         // The parts that the creature's own FSMs dress it in, which a player walking in later and a game taking the
@@ -1154,59 +1099,12 @@ internal partial class Entity {
         if (spritePaths.Count > 0) {
             _components[EntityComponentType.Tint] = new TintComponent(_netClient, Id, Object, spritePaths);
         }
-
-        //Logger.Debug(addedComponentsString);
     }
 
     /// <summary>
     /// Handle specifics for a set of enemies that rely on EnemyDeathEffects for additional enemies.
     /// </summary>
     private void HandleEnemyDeathEffects() {
-        // Hollow Knight specific death effects. Commented out since Silksong has different entities.
-        /*
-        string corpseName;
-        switch (Type) {
-            case EntityType.Ooma:
-                corpseName = "Corpse Jellyfish(Clone)";
-                break;
-            case EntityType.Flukemon:
-                corpseName = "Corpse Flukeman(Clone)";
-                break;
-            case EntityType.HuskHornhead:
-                corpseName = "Zombie Spider 2(Clone)";
-                break;
-            case EntityType.WanderingHusk:
-                corpseName = "Zombie Spider 1(Clone)";
-                break;
-            case EntityType.DungDefender:
-                corpseName = "Corpse Dung Defender(Clone)";
-                break;
-            case EntityType.BrokenVessel:
-                corpseName = "Corpse Infected Knight(Clone)";
-                break;
-            case EntityType.LostKin:
-                corpseName = "Corpse Infected Knight Dream(Clone)";
-                break;
-            default:
-                return;
-        }
-
-        Logger.Debug($"Entity ({Id}, {Type}) has corpse that is also enemy, deleting death effects and corpse from client entity");
-
-        var enemyDeathEffects = Object.Client.GetComponent<EnemyDeathEffects>();
-        if (enemyDeathEffects == null) {
-            Logger.Debug("  EnemyDeathEffects is null, cannot remove");
-        }
-        UnityEngine.Object.Destroy(enemyDeathEffects);
-
-        var corpse = Object.Client.FindGameObjectInChildren(corpseName);
-        if (corpse != null) {
-            Logger.Debug($"  Destroying corpse of client object: {corpse.name}");
-            UnityEngine.Object.Destroy(corpse);
-        } else {
-            Logger.Debug("  Could not find corpse of client object");
-        }
-        */
     }
 
     /// <summary>
@@ -1253,10 +1151,6 @@ internal partial class Entity {
             component is OwnMotionComponent ownMotion) {
             ownMotion.MarkChanged();
         }
-        //
-        //Logger.Info(
-        //    $"Entity ({Id}, {Type}) hooked action: {self.Fsm.Name}, {self.State.Name}, {self.GetType()} ({hookedEntityAction.FsmIndex}, {hookedEntityAction.StateIndex}, {hookedEntityAction.ActionIndex})"
-        //);
 
         // The state goes out with the actions that entering it runs, in the same update. Left to the next look at the
         // FSMs it could go in the update after them, and the other game, which takes the states of an update before
@@ -1950,11 +1844,6 @@ internal partial class Entity {
             if (_lastIsActive) {
                 // If the host object was active, but now it null (or destroyed in Unity), we can send
                 // to the server that the entity can be regarded as inactive
-                //Logger.Info(
-                //    Object.Client == null
-                //        ? $"Entity ({Id}, {Type}) host and client object is null (or destroyed) and was active"
-                //        : $"Entity '{Object.Client.name}' host object is null (or destroyed) and was active"
-                //);
 
                 _lastIsActive = false;
 
@@ -2197,8 +2086,6 @@ internal partial class Entity {
         if (newActive != _lastIsActive) {
             _lastIsActive = newActive;
 
-            //Logger.Info($"Entity '{Object.Host.name}' changed active: {newActive}");
-
             _netClient.UpdateManager.UpdateEntityIsActive(
                 Id,
                 newActive
@@ -2326,11 +2213,7 @@ internal partial class Entity {
     ) {
         if (self == _animator.Client) {
             // The copy's own FSM plays its animations while it runs here (PlayHere)
-            if (!_allowClientAnimation && _runHere == null) {
-                //Logger.Info($"Entity '{Object.Client.name}' client animator tried playing animation");
-            } else {
-                // Logger.Info($"Entity '{_object.Client.name}' client animator was allowed to play animation");
-
+            if (_allowClientAnimation || _runHere != null) {
                 orig(self, clip, clipStartTime, overrideFps);
                 NotePose(clip, _copyPosePacket);
 
@@ -2354,11 +2237,9 @@ internal partial class Entity {
         NotePose(clip, 0);
 
         if (!_animationClipNameIds.TryGetValue(clip.name, out var animationId)) {
-            //Logger.Warn($"Entity '{Object.Client.name}' played unknown animation: {clip.name}");
             return;
         }
 
-        //Logger.Info($"Entity '{Object.Host.name}' sends animation: {clip.name}, {animationId}, {clip.wrapMode}");
         // Once, as it starts, the way that delivers everything once and in order (ReliableEntityUpdate.AnimationId)
         _netClient.UpdateManager.UpdateEntityAnimation(
             Id,
@@ -2417,7 +2298,6 @@ internal partial class Entity {
     /// </summary>
     private static void OnAnyObjectRecycled(Action<GameObject> orig, GameObject obj) {
         if (obj is not null && EntitiesByCopy.ContainsKey(obj)) {
-            //Logger.Debug($"Client object of entity: {Id}, {Type} tried to be recycled");
             return;
         }
 
@@ -2464,10 +2344,6 @@ internal partial class Entity {
             return;
         }
 
-        //Logger.Debug(
-        //    $"Entity '{Object.Host.name}' tried changing active of host object, while host is not determined yet, updating original active to: {self.activate.Value}"
-        //);
-
         // Update the original active value to whatever this action will set
         // Also, we do not let this action execute any further since we do not want it to modify our host object
         // before the scene host is determined
@@ -2509,10 +2385,6 @@ internal partial class Entity {
         // Also update the last active variable to account for this potential change
         // Otherwise we might trigger the update sending of activity twice
         _lastIsActive = Object.Host != null && (_hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy);
-
-        //Logger.Info(
-        //    $"Initializing entity '{Object.Host.name}' with active: {_originalIsActive}, sending active: {_lastIsActive}"
-        //);
 
         _netClient.UpdateManager.UpdateEntityIsActive(Id, _lastIsActive);
 
@@ -3113,8 +2985,6 @@ internal partial class Entity {
         ResetAnticipation();
         ForgetPosePackets();
 
-        //Logger.Info($"Making entity ({Id}, {Type}) a host entity");
-
         // If the client object is null, we don't have to care about doing anything for the host object anymore
         if (Object.Client == null) {
             if (Object.Host != null) {
@@ -3129,7 +2999,6 @@ internal partial class Entity {
                 component.InitializeHost(sceneHostEpoch);
             }
 
-            //Logger.Debug("  Client object null, enabling host object and returning");
             return;
         }
 
@@ -3143,8 +3012,6 @@ internal partial class Entity {
             _animator.Host.playAutomatically = false;
         }
 
-        //.Debug("  Restoring FSM variables from snapshots");
-
         for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count; fsmIndex++) {
             var fsm = _fsms.Host[fsmIndex];
 
@@ -3153,8 +3020,6 @@ internal partial class Entity {
             if (IsRunByEachGame(fsm)) {
                 continue;
             }
-
-            //Logger.Debug($"    Restoring variables for FSM: {fsm.Fsm.Name}");
 
             var snapshot = _fsmSnapshots[fsmIndex];
 
@@ -3196,13 +3061,9 @@ internal partial class Entity {
         // game where it started with the room: a creature that lets go of the markers it hides at, so that they stay
         // where the room has them, let them go wherever the copy had run to, and hid beside itself after
         if (_hasParent) {
-            //Logger.Debug("  Entity has parent, only setting local transform");
-
             Object.Host.transform.localPosition = _lastPosition = Object.Client.transform.localPosition;
             Object.Host.transform.localScale = _lastScale = Object.Client.transform.localScale;
         } else {
-            //Logger.Debug("  Entity has no parent, calculating transform");
-
             // Where the copy stands is where the room's own creature must stand. Worked out by hand from the position
             // of its parent alone, this left out the parent's scale: a crawler on a platform scaled a little narrower
             // was put down almost half a unit from the ledge it had been crawling on, and circled in the air after.
@@ -3228,8 +3089,6 @@ internal partial class Entity {
             Object.Host.transform.localScale = _lastScale = new Vector3(newScaleX, newScaleY, newScaleZ);
         }
 
-        //Logger.Debug("  Restoring FSM states from snapshots");
-
         // Which FSMs were given the state the other game's copy was in, so that switching the object on below does
         // not start just those over
         var resumed = new bool[_fsms.Host.Count];
@@ -3245,17 +3104,13 @@ internal partial class Entity {
             // should be executed again (including actions with "everyFrame" on true or that continuously check
             // collisions for example).
             if (string.IsNullOrEmpty(snapshot.CurrentState)) {
-                //.Debug("Not setting FSM state, because current state is empty");
                 continue;
             }
 
             var state = fsm.GetStateOrNull(snapshot.CurrentState);
             if (state == null) {
-                //Logger.Debug($"  Not setting FSM state, because state '{snapshot.CurrentState}' was not found");
                 continue;
             }
-
-            //Logger.Debug($"  Setting FSM state: {snapshot.CurrentState}");
 
             ResumeState(fsm, state);
             resumed[fsmIndex] = true;
@@ -3276,8 +3131,6 @@ internal partial class Entity {
             if (currentClip != null) {
                 var clientAnimation = currentClip.name;
                 var wrapMode = currentClip.wrapMode;
-
-                //Logger.Debug($"  Animator and current clip present, updating animation: {clientAnimation}, {wrapMode}");
 
                 LateUpdateAnimation(_animator.Host, clientAnimation, wrapMode);
             }
@@ -3310,8 +3163,6 @@ internal partial class Entity {
         Object.Client.SetActive(false);
         SwitchOnWithoutStartingOver(clientActive, resumed);
         SayWhatWasTakenOver();
-
-        //Logger.Debug($"  Set Active of host object to: {clientActive}, disabling client object");
 
         _lastIsActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
 
@@ -4344,7 +4195,6 @@ internal partial class Entity {
         }
 
         if (Object.Client == null || Object.Host == null) {
-            //.Warn($"Cannot update position for entity ({Id}, {Type}), client or host object is null");
             return;
         }
 
@@ -4509,7 +4359,6 @@ internal partial class Entity {
         // The part of an FSM that each game runs by itself turns the copy to the local player (RunEachGamePart), and so
         // does a talk with them (TalkHere)
         if (Object.Client == null || _runHereForGood || _runHereTalk) {
-            //Logger.Warn($"Cannot update scale for entity ({Id}, {Type}), client object is null");
             return;
         }
 
@@ -4588,12 +4437,10 @@ internal partial class Entity {
         ushort packet = 0
     ) {
         if (_animator.Client == null) {
-            //Logger.Warn($"Entity '{Object.Client.name}' received animation while client animator does not exist");
             return;
         }
 
         if (!_animationClipNameIds.TryGetValue(animationId, out var clipName)) {
-            //Logger.Warn($"Entity '{Object.Client.name}' received unknown animation ID: {animationId}");
             return;
         }
 
@@ -4615,8 +4462,6 @@ internal partial class Entity {
             _heldAnimation = (animationId, wrapMode);
             return;
         }
-
-        //Logger.Info($"Entity '{Object.Client.name}' received animation: {animationId}, {clipName}, {wrapMode}");
 
         // All paths lead to calling the Play method of the sprite animator that is hooked, so we allow the call
         // through the hook
@@ -4652,8 +4497,6 @@ internal partial class Entity {
 
         var clip = animator.GetClipByName(clipName);
 
-        //Logger.Debug($"Entity ({Id}, {Type}) LateUpdateAnimation: {clip.name}, {wrapMode}");
-
         switch (wrapMode) {
             case tk2dSpriteAnimationClip.WrapMode.LoopSection:
                 // The clip loops in a specific section in the frames, so we start playing
@@ -4666,8 +4509,6 @@ internal partial class Entity {
                 var clipLength = clip.frames.Length;
                 animator.PlayFromFrame(clipName, clipLength - 1);
 
-                // Logger.Info(
-                // $"  Played animation: {clipName}, {clipLength - 1} on {_animator.Client.name}, {_animator.Client.GetHashCode()}");
                 break;
             }
         }
@@ -4692,7 +4533,6 @@ internal partial class Entity {
         _saidTheCopyIsOff = false;
 
         if (Object.Client != null) {
-            //Logger.Info($"Entity '{Object.Client.name}' received active: {active}");
             if (Object.Client.TryGetComponent<SaysWhoSwitchesTheCopyOff>(out var says)) {
                 says.Caller = null;
             } else if (active) {
@@ -4700,8 +4540,6 @@ internal partial class Entity {
             }
 
             Object.Client.SetActive(active);
-        } else {
-            //Logger.Warn($"Entity ({Id}, {Type}) could not update active, because client object is null");
         }
     }
 
@@ -4718,7 +4556,7 @@ internal partial class Entity {
             }
 
             // What plays something out once - a prompt to a challenge, a spawner moving into place, a jar breaking, a
-            // dream platform showing - is played on walking into the room, and not again for a room this game is in
+            // platform showing - is played on walking into the room, and not again for a room this game is in
             if (FromRoomState && data.Type is EntityComponentType.ChallengePrompt or EntityComponentType.EnemySpawner
                     or EntityComponentType.SpawnJar or EntityComponentType.DreamPlatform) {
                 continue;
@@ -4829,10 +4667,6 @@ internal partial class Entity {
                     continue;
                 }
 
-                //Logger.Info(
-                //    $"Received entity network data for FSM: {fsm.Fsm.Name}, {state.Name}, {actionIndex} ({action.GetType()})"
-                //);
-
                 EntityFsmActions.ReadSubject(data, action);
                 EntityFsmActions.ApplyNetworkDataFromAction(data, action);
 
@@ -4902,7 +4736,6 @@ internal partial class Entity {
             }
 
             if (_fsms.Host.Count <= fsmIndex) {
-                //Logger.Warn($"Tried to update host FSM data for unknown FSM index: {fsmIndex}");
                 continue;
             }
 
@@ -4924,9 +4757,7 @@ internal partial class Entity {
                     // fewer states than the scene host's (Entity.WaitForTheFsmToBeMade)
                     snapshot.CurrentState = "";
                     EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, "");
-                } else if (states.Length <= data.CurrentState) {
-                    //Logger.Warn($"Tried to update host FSM state for unknown state index: {data.CurrentState}");
-                } else {
+                } else if (states.Length > data.CurrentState) {
                     var stateName = states[data.CurrentState].Name;
 
                     SayStunned(hostFsm, snapshot.CurrentState, stateName, false);

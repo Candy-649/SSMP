@@ -110,8 +110,6 @@ internal class AnimationManager {
         { "Dash Down", AnimationClip.DashDown },
         { "Dash Down Land", AnimationClip.DashDownLand },
         { "Dash Down End", AnimationClip.DashDownEnd },
-        //{ "DashStabEffect", AnimationClip.DashStabEffect },
-        //{ "DashStabEffect_Glow", AnimationClip.DashStabEffectGlow },
         { "Sprint Lv2", AnimationClip.SprintLv2 },
         { "Sprint Lv3", AnimationClip.SprintLv3 },
         { "Sprint Recoil", AnimationClip.SprintRecoil },
@@ -837,11 +835,6 @@ internal class AnimationManager {
     /// </summary>
     private float _nextClipLogAt;
 
-    // /// <summary>
-    // /// Whether the animation controller was responsible for the last clip that was sent.
-    // /// </summary>
-    // private bool _animationControllerWasLastSent;
-
     /// <summary>
     /// Whether we should stop sending animations until the scene has changed.
     /// </summary>
@@ -858,36 +851,6 @@ internal class AnimationManager {
     /// </summary>
     private readonly List<byte> _runeRagePositions = [];
 
-    // /// <summary>
-    // /// Whether the player has sent that they stopped crystal dashing.
-    // /// </summary>
-    // private bool _hasSentCrystalDashEnd = true;
-
-    // /// <summary>
-    // /// Whether the charge effect was last update active.
-    // /// </summary>
-    // private bool _lastChargeEffectActive;
-    //
-    // /// <summary>
-    // /// Whether the charged effect was last update active
-    // /// </summary>
-    // private bool _lastChargedEffectActive;
-
-    // /// <summary>
-    // /// Stopwatch to keep track of a delay before being able to send another update for the charged effect.
-    // /// </summary>
-    // private readonly Stopwatch _chargedEffectStopwatch;
-    //
-    // /// <summary>
-    // /// Stopwatch to keep track of a delay before being able to send another update for the charged end effect.
-    // /// </summary>
-    // private readonly Stopwatch _chargedEndEffectStopwatch;
-
-    // /// <summary>
-    // /// Whether the player was wall sliding last update.
-    // /// </summary>
-    // private bool _lastWallSlideActive;
-
     public AnimationManager(
         NetClient netClient,
         PlayerManager playerManager,
@@ -898,9 +861,6 @@ internal class AnimationManager {
         _playerManager = playerManager;
         _playerData = playerData;
         _serverSettings = serverSettings;
-
-        // _chargedEffectStopwatch = new Stopwatch();
-        // _chargedEndEffectStopwatch = new Stopwatch();
     }
 
     /// <summary>
@@ -930,10 +890,6 @@ internal class AnimationManager {
         // Register scene change, which is where we update the animation event handler
         SceneManager.activeSceneChanged += OnSceneChange;
 
-        // Register callbacks for the hero animation controller for the Airborne animation
-        // On.HeroAnimationController.Play += HeroAnimationControllerOnPlay;
-        // On.HeroAnimationController.PlayFromFrame += HeroAnimationControllerOnPlayFromFrame;
-
         // Register callbacks for tracking the start of playing animation clips
         EventHooks.SpriteAnimatorWarpClipToLocalTime += Tk2dSpriteAnimatorOnWarpClipToLocalTime;
         EventHooks.SpriteAnimatorProcessEvents += Tk2dSpriteAnimatorOnProcessEvents;
@@ -951,20 +907,6 @@ internal class AnimationManager {
         ToolCopies.Install();
         ToolCopies.MessageReady += OnToolMessage;
         MonoBehaviourUtil.Instance.OnUpdateEvent += ToolCopies.Tick;
-
-        // Register a callback so we know when the dash has finished
-        // On.HeroController.CancelDash += HeroControllerOnCancelDash;
-
-        // Register a callback so we can check the nail art charge status
-        // ModHooks.HeroUpdateHook += OnHeroUpdateHook;
-
-        // Register a callback for when we get hit by a hazard
-        // On.HeroController.DieFromHazard += HeroControllerOnDieFromHazard;
-        // Also register a callback from when we respawn from a hazard
-        // On.GameManager.HazardRespawn += GameManagerOnHazardRespawn;
-
-        // Relinquish Control cancels a lot of effects, so we need to broadcast the end of these effects
-        // On.HeroController.RelinquishControl += HeroControllerOnRelinquishControl;
     }
 
     /// <summary>
@@ -990,21 +932,6 @@ internal class AnimationManager {
         if (eventRegister) {
             eventRegister.ReceivedEvent -= OnBench;
         }
-        
-        // On.HeroAnimationController.Play -= HeroAnimationControllerOnPlay;
-        // On.HeroAnimationController.PlayFromFrame -= HeroAnimationControllerOnPlayFromFrame;
-
-        // On.tk2dSpriteAnimator.WarpClipToLocalTime -= Tk2dSpriteAnimatorOnWarpClipToLocalTime;
-        // On.tk2dSpriteAnimator.ProcessEvents -= Tk2dSpriteAnimatorOnProcessEvents;
-
-        // On.HeroController.CancelDash -= HeroControllerOnCancelDash;
-
-        // ModHooks.HeroUpdateHook -= OnHeroUpdateHook;
-
-        // On.HeroController.DieFromHazard -= HeroControllerOnDieFromHazard;
-        // On.GameManager.HazardRespawn -= GameManagerOnHazardRespawn;
-
-        // On.HeroController.RelinquishControl -= HeroControllerOnRelinquishControl;
     }
 
     /// <summary>
@@ -1035,7 +962,6 @@ internal class AnimationManager {
         if (animationEffect != null) {
             var playerObject = _playerManager.GetPlayerObject(id);
             if (!playerObject) {
-                // Logger.Get().Warn(this, $"Tried to play animation effect {clipName} with ID: {id}, but player object doesn't exist");
                 return;
             }
 
@@ -1074,7 +1000,6 @@ internal class AnimationManager {
     public bool UpdatePlayerAnimation(ushort id, int clipId, int frame, CrestType crestType, float startTime = 0f) {
         var playerObject = _playerManager.GetPlayerObject(id);
         if (!playerObject) {
-            // Logger.Get().Warn(this, $"Tried to update animation, but there was not matching player object for ID {id}");
             return false;
         }
 
@@ -1092,7 +1017,7 @@ internal class AnimationManager {
 
         if (!ClipEnumNames.ContainsSecond(animationClip)) {
             // This happens when we send custom clips, that can't be played by the sprite animator, so for now we
-            // don't log it. This warning might be useful if we seem to be missing animations from the Knights
+            // don't log it. This warning might be useful if we seem to be missing animations from the player's
             // sprite animator.
 
             if (_debugLogAnimations) Logger.Warn($"Tried to update animation, but there was no entry for clip ID: {clipId}, enum: {animationClip}");
@@ -1444,9 +1369,6 @@ internal class AnimationManager {
 
         // Update the last clip name, since it changed
         _lastAnimationClip = clip.name;
-
-        // // We have sent a different clip, so we can reset this
-        // _animationControllerWasLastSent = false;
     }
 
     /// <summary>
@@ -1959,136 +1881,6 @@ internal class AnimationManager {
 
     #endregion
 
-    // /// <summary>
-    // /// Callback method on the HeroAnimationController#Play method.
-    // /// </summary>
-    // /// <param name="self">The hero animation controller instance.</param>
-    // /// <param name="clipName">The name of the clip to play.</param>
-    // private void HeroAnimationControllerOnPlay(HeroAnimationController self, string clipName) {
-    //     OnAnimationControllerPlay(clipName, 0);
-    // }
-    //
-    // /// <summary>
-    // /// Callback method on the HeroAnimationController#PlayFromFrame method.
-    // /// </summary>
-    // /// <param name="self">The hero animation controller instance.</param>
-    // /// <param name="clipName">The name of the clip to play.</param>
-    // /// <param name="frame">The frame from which to play the clip.</param>
-    // private void HeroAnimationControllerOnPlayFromFrame(HeroAnimationController self, string clipName, int frame) {
-    //     OnAnimationControllerPlay(clipName, frame);
-    // }
-    //
-    // /// <summary>
-    // /// Callback method when the HeroAnimationController plays an animation.
-    // /// </summary>
-    // /// <param name="clipName">The name of the clip to play.</param>
-    // /// <param name="frame">The frame from which to play the clip.</param>
-    // private void OnAnimationControllerPlay(string clipName, int frame) {
-    //     // If we are not connected, there is nothing to send to
-    //     if (!_netClient.IsConnected) {
-    //         return;
-    //     }
-    //
-    //     // If this is not a clip that should be handled by the animation controller hook, we return
-    //     if (!AnimationControllerClipNames.Contains(clipName)) {
-    //         return;
-    //     }
-    //
-    //     // If the animation controller is responsible for the last sent clip, we skip
-    //     // this is to ensure that we don't spam packets of the same clip
-    //     if (!_animationControllerWasLastSent) {
-    //         if (!ClipEnumNames.ContainsFirst(clipName)) {
-    //             Logger.Warn($"Player animation controller played unknown clip, name: {clipName}");
-    //             return;
-    //         }
-    //
-    //         var clipId = ClipEnumNames[clipName];
-    //
-    //         _netClient.UpdateManager.UpdatePlayerAnimation(clipId, frame);
-    //
-    //         // This was the last clip we sent
-    //         _animationControllerWasLastSent = true;
-    //     }
-    // }
-    //
-    // /// <summary>
-    // /// Callback method on the HeroController#CancelDash method.
-    // /// </summary>
-    // /// <param name="orig">The original method.</param>
-    // /// <param name="self">The HeroController instance.</param>
-    // private void HeroControllerOnCancelDash(On.HeroController.orig_CancelDash orig, HeroController self) {
-    //     orig(self);
-    //
-    //     // If we are not connected, there is nothing to send to
-    //     if (!_netClient.IsConnected) {
-    //         return;
-    //     }
-    //
-    //     _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.DashEnd);
-    //
-    //     // The dash has ended, so we can send a new one when we dash
-    //     _dashHasEnded = true;
-    // }
-    //
-    // /// <summary>
-    // /// Callback method for when the hero updates.
-    // /// </summary>
-    // private void OnHeroUpdateHook() {
-    //     // If we are not connected, there is nothing to send to
-    //     if (!_netClient.IsConnected) {
-    //         return;
-    //     }
-    //
-    //     var chargeEffectActive = HeroController.instance.artChargeEffect.activeSelf;
-    //     var chargedEffectActive = HeroController.instance.artChargedEffect.activeSelf;
-    //
-    //     if (chargeEffectActive && !_lastChargeEffectActive) {
-    //         // Charge effect is now active, which wasn't last update, so we can send the charge animation packet
-    //         _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.NailArtCharge);
-    //     }
-    //
-    //     if (chargedEffectActive && !_lastChargedEffectActive) {
-    //         if (!_chargedEffectStopwatch.IsRunning || _chargedEffectStopwatch.ElapsedMilliseconds > 100) {
-    //             // Charged effect is now active, which wasn't last update, so we can send the charged animation packet
-    //             _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.NailArtCharged);
-    //
-    //             // Start the stopwatch to make sure this animation is not triggered repeatedly
-    //             _chargedEffectStopwatch.Restart();
-    //         }
-    //     }
-    //
-    //     if (!chargeEffectActive && _lastChargeEffectActive && !chargedEffectActive) {
-    //         // The charge effect is now inactive and we are not fully charged
-    //         // This means that we cancelled the nail art charge
-    //         _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.NailArtChargeEnd);
-    //     }
-    //
-    //     if (!chargedEffectActive && _lastChargedEffectActive) {
-    //         if (!_chargedEndEffectStopwatch.IsRunning || _chargedEndEffectStopwatch.ElapsedMilliseconds > 100) {
-    //             // The charged effect is now inactive, so we are done with the nail art
-    //             _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.NailArtChargeEnd);
-    //
-    //             // Set the delay variable to make sure this animation is not triggered repeatedly
-    //             _chargedEndEffectStopwatch.Restart();
-    //         }
-    //     }
-    //
-    //     // Update the latest states
-    //     _lastChargeEffectActive = chargeEffectActive;
-    //     _lastChargedEffectActive = chargedEffectActive;
-    //
-    //     // Obtain the current wall slide state
-    //     var wallSlideActive = HeroController.instance.cState.wallSliding;
-    //
-    //     if (!wallSlideActive && _lastWallSlideActive) {
-    //         // We were wall sliding last update, but not anymore, so we send a wall slide end animation
-    //         _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.WallSlideEnd);
-    //     }
-    //
-    //     // Update the last state
-    //     _lastWallSlideActive = wallSlideActive;
-    // }
-
     /// <summary>
     /// The animator of the player character that <see cref="_heroAnimatorOf"/> is, kept for
     /// <see cref="HeroAnimatorOf"/>.
@@ -2188,50 +1980,13 @@ internal class AnimationManager {
                 continue;
             }
 
-            // if (!allowedClipNames.Contains(self.CurrentClip.name)) {
-            //     continue;
-            // }
-        
             if (_debugLogAnimations) Logger.Info($"OnAnimationEvent from tk2dSpriteAnimatorOnProcessEvents: {self.CurrentClip.name}, conditions: {i}, {frames[i].triggerEvent}");
-            // OnAnimationEvent(self.CurrentClip);
         }
     }
 
-    // /// <summary>
-    // /// Callback method on the HeroController#DieFromHazard method.
-    // /// </summary>
-    // /// <param name="self">The HeroController instance.</param>
-    // /// <param name="hazardType">The type of hazard.</param>
-    // /// <param name="angle">The angle at which the hero entered the hazard.</param>
-    // /// <returns>An enumerator for this coroutine.</returns>
-    // private void HeroControllerOnDieFromHazard(HeroController self, HazardType hazardType, float angle) {
-    //     // If we are not connected, there is nothing to send to
-    //     if (!_netClient.IsConnected) {
-    //         return;
-    //     }
-    //
-    //     _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.HazardDeath, 0, [
-    //         // hazardType.Equals(HazardType.SPIKES),
-    //         // hazardType.Equals(HazardType.ACID)
-    //     ]);
-    // }
-    //
-    // /// <summary>
-    // /// Callback method on the GameManager#HazardRespawn method.
-    // /// </summary>
-    // /// <param name="self">The GameManager instance.</param>
-    // private void GameManagerOnHazardRespawn(GameManager self) {
-    //     // If we are not connected, there is nothing to send to
-    //     if (!_netClient.IsConnected) {
-    //         return;
-    //     }
-    //
-    //     // _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.HazardRespawn);
-    // }
-
-    // /// <summary>
-    // /// Callback method for when the local player dies.
-    // /// </summary>
+    /// <summary>
+    /// Callback method for when the local player dies.
+    /// </summary>
     private void OnDeath(bool nonLethal, bool frostDeath) {
         // If we are not connected, there is nothing to send to
         if (!_netClient.IsConnected) {
@@ -2260,30 +2015,6 @@ internal class AnimationManager {
         // it or after it put the clip from before the death back on the figure, over the death
         SendClipChange(AnimationClip.Death, effectInfo);
     }
-
-    // /// <summary>
-    // /// Callback method on the HeroController#RelinquishControl method.
-    // /// </summary>
-    // /// <param name="self">The HeroController instance.</param>
-    // private void HeroControllerOnRelinquishControl(HeroController self) {
-    //     // If we are not connected, there is no need to send
-    //     if (!_netClient.IsConnected) {
-    //         return;
-    //     }
-    //
-    //     // If we need to stop sending until a scene change occurs, we skip
-    //     if (_stopSendingAnimationUntilSceneChange) {
-    //         return;
-    //     }
-    //
-    //     // If the player has not sent the end of the crystal dash animation then we need to do it now,
-    //     // because crystal dash is cancelled when relinquishing control
-    //     if (!_hasSentCrystalDashEnd) {
-    //         // _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.SDAirBrake);
-    //     }
-    //
-    //     // _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.DashEnd);
-    // }
 
     /// <summary>
     /// Get the AnimationClip enum value for the currently playing animation of the local player.

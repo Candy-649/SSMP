@@ -377,7 +377,6 @@ internal abstract class UpdatePacket<TPacketId> : BasePacket<TPacketId> where TP
                 continue;
             }
 
-            // Logger.Info($"  Resending {data.GetType()} data");
             reliablePacketData[key] = data;
         }
 

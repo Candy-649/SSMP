@@ -37,28 +37,6 @@ internal class DebugCommand : IClientCommand, ICommandWithDescription {
         }
     }
 
-    private void ListHeroControllerFsmNames() {
-        var hc = HeroController.instance;
-        Logger.Info($"sprintFSM: {hc.sprintFSM.name}, {hc.sprintFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.toolsFSM.name}, {hc.toolsFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.mantleFSM.name}, {hc.mantleFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.umbrellaFSM.name}, {hc.umbrellaFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.silkSpecialFSM.name}, {hc.silkSpecialFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.crestAttacksFSM.name}, {hc.crestAttacksFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.harpoonDashFSM.name}, {hc.harpoonDashFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.superJumpFSM.name}, {hc.superJumpFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.bellBindFSM.name}, {hc.bellBindFSM.fsm.name}");
-        Logger.Info($"sprintFSM: {hc.wallScrambleFSM.name}, {hc.wallScrambleFSM.fsm.name}");
-    }
-
-    private void EquipCloaklessCrest() {
-        ToolItemManager.AutoEquip(ToolItemManager.GetCrestByName("Cloakless"), true, true);
-    }
-
-    private void EquipCursedCrest() {
-        ToolItemManager.AutoEquip(ToolItemManager.GetCrestByName("Cursed"), true, true);
-    }
-
     private void Test() {
         tk2dSpriteAnimationClip clip = null!;
 

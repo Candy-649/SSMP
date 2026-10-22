@@ -407,7 +407,6 @@ internal class PlayerManager : IPlayerManager {
     /// <param name="sequence">The sequence number of the packet it arrived in.</param>
     public void UpdatePosition(ushort id, Math_Vector2 position, ushort sequence) {
         if (!_playerData.TryGetValue(id, out var playerData) || !playerData.IsInLocalScene) {
-            // Logger.Info($"Tried to update position for ID {id} while player data did not exists");
             return;
         }
 
@@ -433,7 +432,6 @@ internal class PlayerManager : IPlayerManager {
     /// false indicating an X scale of -1.</param>
     public void UpdateScale(ushort id, bool scale) {
         if (!_playerData.TryGetValue(id, out var playerData) || !playerData.IsInLocalScene) {
-            // Logger.Info($"Tried to update scale for ID {id} while player data did not exist");
             return;
         }
 

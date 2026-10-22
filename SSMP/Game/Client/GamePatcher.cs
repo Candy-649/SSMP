@@ -768,7 +768,7 @@ internal partial class GamePatcher {
     /// <summary>
     /// IL Hook to modify the behaviour of the TakeDamage method in HealthManager. This modification adds a
     /// conditional branch in case the nail swing from the HitInstance was from a remote player to ensure that
-    /// soul is not gained for remote hits.
+    /// silk is not gained for remote hits.
     /// </summary>
     private void HealthManagerOnTakeDamage(ILContext il) {
         try {
@@ -793,8 +793,9 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Hook for the 'DoMethodCall' method in the 'CallMethodProper' FSM action. This is used for the Crystal Shot
-    /// game object to ensure that knockback is not applied to the local player if a remote player hits the crystal.
+    /// Hook for the 'DoMethodCall' method in the 'CallMethodProper' FSM action. This is used for the objects that
+    /// push the hero back when a slash hits them, to ensure that knockback is not applied to the local player if a
+    /// remote player hits the object.
     /// </summary>
     private void CallMethodProperOnDoMethodCall(
         Action<CallMethodProper> orig,

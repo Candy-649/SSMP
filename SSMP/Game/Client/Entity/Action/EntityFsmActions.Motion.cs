@@ -121,7 +121,6 @@ internal static partial class EntityFsmActions {
         }
 
         if (IsObjectInRegistry(gameObject)) {
-            //Logger.Debug("Tried getting SetVelocity2d network data, but entity is in registry");
             return false;
         }
 
@@ -297,7 +296,6 @@ internal static partial class EntityFsmActions {
         }
 
         if (IsObjectInRegistry(gameObject)) {
-            //Logger.Debug("Tried getting SetPosition network data, but entity is in registry");
             return false;
         }
 
@@ -456,7 +454,6 @@ internal static partial class EntityFsmActions {
         }
 
         if (IsObjectInRegistry(gameObject)) {
-            //Logger.Debug("Tried getting SetVelocityAsAngle network data, but entity is in registry");
             return false;
         }
 
@@ -1183,7 +1180,6 @@ internal static partial class EntityFsmActions {
         }
 
         if (IsObjectInRegistry(gameObject)) {
-            //Logger.Debug("Tried getting SetCollider network data, but entity is in registry");
             return false;
         }
 

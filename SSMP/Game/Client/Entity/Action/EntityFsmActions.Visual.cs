@@ -516,48 +516,11 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, SpawnBlood action) {
-        // if (GlobalPref.Instance == null) {
-        //     return false;
-        // }
-        //
-        // data.Packet.Write((short) action.spawnMin.Value);
-        // data.Packet.Write((short) action.spawnMax.Value);
-        //
-        // data.Packet.Write(action.speedMin.Value);
-        // data.Packet.Write(action.speedMax.Value);
-        // data.Packet.Write(action.angleMin.Value);
-        // data.Packet.Write(action.angleMax.Value);
-        //
-        // return true;
         return false;
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SpawnBlood action) {
-        // var spawnMin = data.Packet.ReadShort();
-        // var spawnMax = data.Packet.ReadShort();
-        //
-        // var speedMin = data.Packet.ReadFloat();
-        // var speedMax = data.Packet.ReadFloat();
-        //
-        // var angleMin = data.Packet.ReadFloat();
-        // var angleMax = data.Packet.ReadFloat();
-        //
-        // var position = action.position.Value;
-        // if (action.spawnPoint.Value != null) {
-        //     position += action.spawnPoint.Value.transform.position;
-        // }
-        //
-        // GlobalPrefabDefaults.Instance.SpawnBlood(
-        //     position,
-        //     spawnMin,
-        //     spawnMax,
-        //     speedMin,
-        //     speedMax,
-        //     angleMin,
-        //     angleMax,
-        //     action.colorOverride.IsNone ? new Color?() : action.colorOverride.Value
-        // );
     }
 
     #endregion
@@ -571,50 +534,6 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData data, SpawnBloodTime action) {
-        // var position = action.position.Value;
-        // if (action.spawnPoint.Value != null) {
-        //     position += action.spawnPoint.Value.transform.position;
-        // }
-        //
-        // var spawnMin = (short) action.spawnMin.Value;
-        // var spawnMax = (short) action.spawnMax.Value;
-        //
-        // var speedMin = action.speedMin.Value;
-        // var speedMax = action.speedMax.Value;
-        //
-        // var angleMin = action.angleMin.Value;
-        // var angleMax = action.angleMax.Value;
-        //
-        // var color = action.colorOverride.IsNone ? new Color?() : action.colorOverride.Value;
-        //
-        // var coroutine = MonoBehaviourUtil.Instance.StartCoroutine(Behaviour());
-        //
-        // new ActionInState {
-        //     Fsm = action.Fsm,
-        //     StateName = action.State.Name,
-        //     Coroutine = coroutine
-        // }.Register();
-        //
-        // IEnumerator Behaviour() {
-        //     while (true) {
-        //         yield return new WaitForSeconds(action.delay.Value);
-        //
-        //         if (GlobalPrefabDefaults.Instance == null) {
-        //             break;
-        //         }
-        //
-        //         GlobalPrefabDefaults.Instance.SpawnBlood(
-        //             position,
-        //             spawnMin,
-        //             spawnMax,
-        //             speedMin,
-        //             speedMax,
-        //             angleMin,
-        //             angleMax,
-        //             color
-        //         );
-        //     }
-        // }
     }
 
     #endregion

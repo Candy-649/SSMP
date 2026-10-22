@@ -13,8 +13,7 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Entity.Component;
 
 /// <inheritdoc />
-/// This component manages the hazard respawn changes within certain bossfights. Currently only Radiance and Absolute
-/// Radiance.
+/// This component manages the hazard respawn changes within certain bossfights.
 internal class HazardRespawnComponent : EntityComponent {
     /// <summary>
     /// The offset of the climb hazard respawn indices.
@@ -54,7 +53,7 @@ internal class HazardRespawnComponent : EntityComponent {
         var host = gameObject.Host;
         _hostControlFsm = host.LocateMyFSM("Control");
         if (!_hostControlFsm) {
-            Logger.Error("Could not find 'Control' FSM on Radiance host object");
+            Logger.Error("Could not find 'Control' FSM on host object");
             return;
         }
 
@@ -95,58 +94,7 @@ internal class HazardRespawnComponent : EntityComponent {
                 }
             }
         }
-
-        // On.HazardRespawnTrigger.OnTriggerEnter2D += HazardRespawnTriggerOnTriggerEnter2D;
     }
-
-    // /// <summary>
-    // /// Hook for the "OnTriggerEnter2D" method of HazardRespawnTrigger to network that a certain hazard respawn
-    // trigger
-    // /// has been reached.
-    // /// </summary>
-    // private void HazardRespawnTriggerOnTriggerEnter2D(
-    //     On.HazardRespawnTrigger.orig_OnTriggerEnter2D orig, 
-    //     HazardRespawnTrigger self, 
-    //     Collider2D otherCollider
-    // ) {
-    //     var inactive = ReflectionHelper.GetField<HazardRespawnTrigger, bool>(self, "inactive"); 
-    //     if (inactive || otherCollider.gameObject.layer != 9) {
-    //         orig(self, otherCollider);
-    //         return;
-    //     }
-    //     
-    //     orig(self, otherCollider);
-    //     
-    //     var name = self.gameObject.name;
-    //     
-    //     Logger.Debug($"Player triggered hazard respawn: {name}");
-    //
-    //     var numRespawn = ClimbRespawnOffset;
-    //     if (name.Contains("(") && name.Contains(")")) {
-    //         if (int.TryParse(name.Split('(')[1].Split(')')[0], out var result)) {
-    //             numRespawn += result;
-    //         }
-    //     }
-    //     
-    //     Logger.Debug($"Num respawn: {numRespawn}");
-    //
-    //     if (numRespawn > _highestRespawn) {
-    //         _highestRespawn = numRespawn;
-    //         
-    //         var data = new EntityNetworkData {
-    //             Type = EntityComponentType.HazardRespawn
-    //         };
-    //         
-    //         data.Packet.Write((byte) numRespawn);
-    //         data.Packet.Write(_lastActiveAscendsRespawns);
-    //
-    //         SendData(data);
-    //         
-    //         Logger.Debug("Num respawn exceeds highest respawn, sending to server");
-    //     } else {
-    //         Logger.Debug("Num respawn is less than or equal to highest respawn");
-    //     }
-    // }
 
     /// <inheritdoc />
     public override void SendAgain() {
@@ -238,6 +186,5 @@ internal class HazardRespawnComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void Destroy() {
-        // On.HazardRespawnTrigger.OnTriggerEnter2D -= HazardRespawnTriggerOnTriggerEnter2D;
     }
 }

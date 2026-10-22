@@ -72,8 +72,6 @@ internal class ServerInfo : IPacketData {
             
             packet.Write(FullSynchronisation);
 
-            // CurrentSave.WriteData(packet);
-        
             packet.Write((ushort) PlayerInfos.Count);
 
             foreach (var playerInfo in PlayerInfos) {
@@ -116,9 +114,6 @@ internal class ServerInfo : IPacketData {
 
             FullSynchronisation = packet.ReadBool();
 
-            // CurrentSave = new CurrentSave();
-            // CurrentSave.ReadData(packet);
-        
             var length = packet.ReadUShort();
 
             PlayerInfos = [];

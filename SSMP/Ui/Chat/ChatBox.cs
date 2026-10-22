@@ -903,9 +903,9 @@ internal class ChatBox : IChatBox {
     }
 
     /// <summary>
-    /// Whether the GodHome menu is open.
+    /// Whether a boss challenge menu is open.
     /// </summary>
-    /// <returns>True if the GodHome menu is open, otherwise false.</returns>
+    /// <returns>True if a boss challenge menu is open, otherwise false.</returns>
     private static bool IsGodHomeMenuOpen() {
         var bossChallengeUi = Object.FindObjectsByType<BossChallengeUI>(FindObjectsSortMode.None);
         var bossDoorChallengeUi = Object.FindObjectsByType<BossDoorChallengeUI>(FindObjectsSortMode.None);

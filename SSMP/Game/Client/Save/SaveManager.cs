@@ -836,13 +836,6 @@ internal class SaveManager {
                 }
             }
 
-            
-            // sceneData.SaveMyState(new GeoRockData {
-            //     id = itemData.Id,
-            //     sceneName = itemData.SceneName,
-            //     activated = value
-            // });
-
             _saveChanges.ApplyPersistentValueSaveChange(itemData);
         } else if (SaveDataMapping.PersistentIntIndices.TryGetValue(index, out itemData)) {
             if (CheckPlayerSpecificHosting(SaveDataMapping.PersistentIntVarProperties, itemData)) {
@@ -867,12 +860,6 @@ internal class SaveManager {
                 }
             }
 
-            // sceneData.SaveMyState(new PersistentIntData {
-            //     id = itemData.Id,
-            //     sceneName = itemData.SceneName,
-            //     value = value
-            // });
-            
             _saveChanges.ApplyPersistentValueSaveChange(itemData);
         }
 
@@ -897,14 +884,14 @@ internal class SaveManager {
     }
 
     /// <summary>
-    /// Encode a save data value by first recasting HK/Unity internal types to SSMP types and then using the EncodeUtil.
+    /// Encode a save data value by first recasting game/Unity internal types to SSMP types and then using EncodeUtil.
     /// </summary>
     /// <param name="value">The object to encode, which should be part of save data.</param>
     /// <returns>A byte array containing the encoded data.</returns>
     private static byte[] EncodeSaveDataValue(object? value) {
-        // First cast HK or Unity internal types to SSMP types, this is to make sure we can use our internal
+        // First cast game or Unity internal types to SSMP types, this is to make sure we can use our internal
         // EncodeUtil to encode all types. This util is also used on the server side, where (in the case of the
-        // standalone server) we have no reference of HK or Unity internal types
+        // standalone server) we have no reference to the game's or Unity's internal types
         if (value is Vector3 vector3) {
             value = (Math.Vector3) vector3;
         } else if (value is MapZone mapZone) {
@@ -1013,39 +1000,6 @@ internal class SaveManager {
             fieldInfo => fieldInfo.GetValue(pd)
         );
 
-        // AddToSaveData(
-        //     sd.geoRocks,
-        //     geoRock => new PersistentItemKey {
-        //         Id = geoRock.id,
-        //         SceneName = geoRock.sceneName
-        //     },
-        //     SaveDataMapping.GeoRockBools,
-        //     SaveDataMapping.GeoRockIndices,
-        //     geoRock => geoRock.hitsLeft
-        // );
-        //
-        // AddToSaveData(
-        //     sd.persistentBoolItems,
-        //     boolData => new PersistentItemKey {
-        //         Id = boolData.id,
-        //         SceneName = boolData.sceneName
-        //     },
-        //     SaveDataMapping.PersistentBoolVarProperties,
-        //     SaveDataMapping.PersistentBoolIndices,
-        //     boolData => boolData.activated
-        // );
-        //
-        // AddToSaveData(
-        //     sd.persistentIntItems,
-        //     intData => new PersistentItemKey {
-        //         Id = intData.id,
-        //         SceneName = intData.sceneName
-        //     },
-        //     SaveDataMapping.PersistentIntVarProperties,
-        //     SaveDataMapping.PersistentIntIndices,
-        //     intData => intData.value
-        // );
-        
         return saveData;
     }
 

@@ -6,8 +6,8 @@ using Newtonsoft.Json;
 namespace SSMP.Serialization;
 
 /// <summary>
-/// Class that mirrors BossSequenceDoor.Completion from HK to allow (de)serialization on the server side (including
-/// the standalone server).
+/// Class that mirrors BossSequenceDoor.Completion from the game to allow (de)serialization on the server side
+/// (including the standalone server).
 /// </summary>
 public class BossSequenceDoorCompletion {
     [JsonProperty("canUnlock")]

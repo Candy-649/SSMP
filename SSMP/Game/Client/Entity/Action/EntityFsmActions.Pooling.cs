@@ -31,7 +31,6 @@ internal static partial class EntityFsmActions {
                     GameObject = action.storeObject.Value
                 }
             )) {
-            //Logger.Debug($"Tried getting SpawnObjectFromGlobalPool network data, but spawned object is entity");
             return false;
         }
 
@@ -218,10 +217,6 @@ internal static partial class EntityFsmActions {
         // for the action and sent an EntitySpawn packet instead. So we need not also network this action separately.
         var rigidbody = action.rb2d;
         if (rigidbody != null && rigidbody.gameObject != null && IsObjectInRegistry(rigidbody.gameObject)) {
-            //Logger.Debug(
-            //    "Skipping getting network data for FlingObjectsFromGlobalPool, because spawned objects are managed by
-            // system"
-            //);
             return false;
         }
 
@@ -242,7 +237,6 @@ internal static partial class EntityFsmActions {
         }
 
         if (queue.Count == 0) {
-            //Logger.Debug("Getting data for FlingObjectsFromGlobalPool has not enough items in queue 1");
             return false;
         }
 
@@ -256,7 +250,6 @@ internal static partial class EntityFsmActions {
         for (var i = 0; i < numSpawns; i++) {
             if (action.originVariationX != null) {
                 if (queue.Count == 0) {
-                    //Logger.Debug("Getting data for FlingObjectsFromGlobalPool has not enough items in queue 2");
                     return false;
                 }
 
@@ -268,7 +261,6 @@ internal static partial class EntityFsmActions {
 
             if (action.originVariationY != null) {
                 if (queue.Count == 0) {
-                    //Logger.Debug("Getting data for FlingObjectsFromGlobalPool has not enough items in queue 3");
                     return false;
                 }
 
@@ -279,7 +271,6 @@ internal static partial class EntityFsmActions {
             }
 
             if (queue.Count < 2) {
-                //Logger.Debug("Getting data for FlingObjectsFromGlobalPool has not enough items in queue 4");
                 queue.Clear();
                 return false;
             }
@@ -433,10 +424,6 @@ internal static partial class EntityFsmActions {
         // for the action and sent an EntitySpawn packet instead. So we need not also network this action separately.
         var rigidbody = action.rb2d;
         if (rigidbody != null && rigidbody.gameObject != null && IsObjectInRegistry(rigidbody.gameObject)) {
-            //Logger.Debug(
-            //    "Skipping getting network data for FlingObjectsFromGlobalPool, because spawned objects are managed by
-            // system"
-            //);
             return false;
         }
 
@@ -457,7 +444,6 @@ internal static partial class EntityFsmActions {
         }
 
         if (queue.Count == 0) {
-            //Logger.Debug("Getting data for FlingObjectsFromGlobalPoolVel has not enough items in queue 1");
             return false;
         }
 
@@ -471,7 +457,6 @@ internal static partial class EntityFsmActions {
         for (var i = 0; i < numSpawns; i++) {
             if (action.originVariationX != null) {
                 if (queue.Count == 0) {
-                    //Logger.Debug("Getting data for FlingObjectsFromGlobalPoolVel has not enough items in queue 2");
                     return false;
                 }
 
@@ -483,7 +468,6 @@ internal static partial class EntityFsmActions {
 
             if (action.originVariationY != null) {
                 if (queue.Count == 0) {
-                    //Logger.Debug("Getting data for FlingObjectsFromGlobalPoolVel has not enough items in queue 3");
                     return false;
                 }
 
@@ -494,7 +478,6 @@ internal static partial class EntityFsmActions {
             }
 
             if (queue.Count < 2) {
-                //Logger.Debug("Getting data for FlingObjectsFromGlobalPoolVel has not enough items in queue 4");
                 queue.Clear();
                 return false;
             }

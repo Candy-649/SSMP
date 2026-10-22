@@ -455,7 +455,6 @@ internal class ClientManager : IClientManager {
 
         _entityManager.Initialize();
         _coopSave.Initialize();
-        // _saveManager.Initialize();
 
         RegisterCommands();
 
@@ -519,7 +518,6 @@ internal class ClientManager : IClientManager {
 
         if (_fullSynchronisation) {
             _entityManager.RegisterHooks();
-            //_saveManager.RegisterHooks();
         }
 
         // Register handlers for various things
@@ -558,7 +556,6 @@ internal class ClientManager : IClientManager {
 
         if (_fullSynchronisation) {
             _entityManager.DeregisterHooks();
-            //_saveManager.DeregisterHooks();
         }
 
         // Deregister handlers for various things
@@ -571,9 +568,6 @@ internal class ClientManager : IClientManager {
         CustomHooks.AfterEnterSceneHeroTransformed -= OnEnterScene;
 
         EventHooks.ToolItemManagerSetEquippedCrest -= OnSetEquippedCrest;
-
-        // Deregister application quit handler
-        // ModHooks.ApplicationQuitHook -= OnApplicationQuit;
     }
 
     /// <summary>
@@ -1838,8 +1832,6 @@ internal class ClientManager : IClientManager {
             if (!_serverSettings.TeamsEnabled) {
                 _playerManager.ResetAllTeams();
             }
-
-            // _uiManager.OnTeamSettingChange();
         }
 
         // If the allow skins setting changed, and it is no longer allowed, we reset all existing skins and call the
@@ -1954,7 +1946,7 @@ internal class ClientManager : IClientManager {
         _lastScene = sceneName;
 
         // Set some default values for the packet variables in case we don't have a HeroController instance
-        // This might happen when we are in a non-gameplay scene without the knight
+        // This might happen when we are in a non-gameplay scene without the player
         var position = Vector2.Zero;
         var scale = Vector3.zero;
         ushort animationClipId = 0;

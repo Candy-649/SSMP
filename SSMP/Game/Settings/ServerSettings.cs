@@ -85,11 +85,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
         }
     } = true;
 
-    // /// <inheritdoc />
-    // [SettingAlias("parries")]
-    // [ModMenuSetting("Parries", "Whether parrying certain player attacks is possible")]
-    // public bool AllowParries { get; set; } = true;
-    
     /// <inheritdoc />
     [SettingAlias("needledmg")]
     [ModMenuSetting("Needle Damage", "The number of masks of damage that a player's needle swing deals")]

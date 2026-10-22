@@ -5,7 +5,7 @@ using Newtonsoft.Json.Linq;
 namespace SSMP.Serialization;
 
 /// <summary>
-/// Class that encompasses the MapZone enum from HK to allow (de)serialization on the server side (including the
+/// Class that encompasses the MapZone enum from the game to allow (de)serialization on the server side (including the
 /// standalone server).
 /// </summary>
 [JsonConverter(typeof(MapZoneConverter))]

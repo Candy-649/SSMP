@@ -28,11 +28,6 @@ internal static class GameObjectUtil {
                 return child.gameObject;
             }
         }
-        // foreach (var componentsInChild in gameObject.GetComponentsInChildren<Transform>(true)) {
-        //     if (componentsInChild.name == name) {
-        //         return componentsInChild.gameObject;
-        //     }
-        // }
 
         return null;
     }

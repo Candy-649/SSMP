@@ -61,8 +61,6 @@ internal enum AnimationClip {
     DashDown,
     DashDownLand,
     DashDownEnd,
-    //DashStabEffect,
-    //DashStabEffectGlow,
     SprintLv2,
     SprintLv3,
     SprintRecoil,

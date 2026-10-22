@@ -104,7 +104,6 @@ internal class SkinManager {
             return;
         }
 
-        // SetTextureInMaterialBlock(playerObject, playerSkin.KnightTexture);
         var spriteAnimator = playerObject.GetComponent<tk2dSpriteAnimator>();
         if (spriteAnimator == null) {
             Logger.Warn("Tried to update player skin, but SpriteAnimator is null");

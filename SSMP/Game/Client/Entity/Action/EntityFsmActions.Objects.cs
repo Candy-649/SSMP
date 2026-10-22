@@ -30,7 +30,6 @@ internal static partial class EntityFsmActions {
                     GameObject = action.storeObject.Value
                 }
             )) {
-            //Logger.Debug($"Tried getting CreateObject network data, but spawned object is entity");
             return false;
         }
 
@@ -72,8 +71,6 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Applies network data to the FSM action.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, CreateObject action) {
-        //Logger.Debug("ApplyNetworkDataFromAction CreateObject");
-
         Vector3 position;
         Vector3 euler;
 
@@ -460,8 +457,6 @@ internal static partial class EntityFsmActions {
         foreach (var fsm in fsms) {
             if (fsm.Fsm.Name.Equals("destroy_if_gameobject_null")) {
                 Object.Destroy(fsm);
-
-                //Logger.Debug($"De-parented object contained \"{fsm.Fsm.Name}\" FSM, removing it");
             }
         }
     }
@@ -527,8 +522,6 @@ internal static partial class EntityFsmActions {
 
     /// <summary>Builds network data from the FSM action.</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, GetPosition action) {
-        //Logger.Debug($"Getting network data for GetPosition: {action.Fsm.GameObject.name}, {action.Fsm.Name}");
-
         return action.Fsm.GameObject.name.StartsWith("Colosseum Manager") && action.Fsm.Name.Equals("Battle Control");
     }
 
@@ -629,8 +622,6 @@ internal static partial class EntityFsmActions {
                             GameObject = spawnedGo
                         }
                     )) {
-                    //Logger.Debug("Tried getting PreSpawnGameObjects network data, but spawned objects contains
-                    // entity");
                     spawnedEntity = true;
                 }
             }

@@ -24,14 +24,15 @@ namespace SSMP.Game.Client.Save;
 internal static class HitCounters {
     /// <summary>
     /// The events of a hit that a state machine of the creature hears of from the partner wherever it goes on them,
-    /// not only into a state that counts. Where a heavy blow, a spell or an explosion takes a creature is for good -
-    /// out of its daze at once, into shattering, into breaking apart - a hit ends a creature's song, for which another
-    /// one has to be played to it, a hit that extracts from a creature has it give way to that, and at a blocked hit a
-    /// creature blocks, bounces off or strikes back. Census (10-11, FsmScan --events): heavy blows take 41 bosses and
-    /// elites out of their daze, break 25 crystal creatures and shatter the boss thorns, which spells and explosions
-    /// shatter too; about 2300 state machines end a song on a hit, 150 give way to extracting, and about 870 answer a
-    /// blocked hit. The partner's hits did none of it in the game that runs the creature: one that the partner had
-    /// struck kept singing, stayed dazed and stood unbroken, and one that blocked the partner never struck back.
+    /// not only into a state that counts. Where a heavy blow, a silk skill or an explosion takes a creature is for
+    /// good - out of its daze at once, into shattering, into breaking apart - a hit ends a creature's song, for which
+    /// another one has to be played to it, a hit that extracts from a creature has it give way to that, and at a
+    /// blocked hit a creature blocks, bounces off or strikes back. Census (10-11, FsmScan --events): heavy blows take
+    /// 41 bosses and elites out of their daze, break 25 crystal creatures and shatter the boss thorns, which silk
+    /// skills and explosions shatter too; about 2300 state machines end a song on a hit, 150 give way to extracting,
+    /// and about 870 answer a blocked hit. The partner's hits did none of it in the game that runs the creature: one
+    /// that the partner had struck kept singing, stayed dazed and stood unbroken, and one that blocked the partner
+    /// never struck back.
     /// </summary>
     private static readonly HashSet<string> OutcomeEvents = [
         "TOOK HEAVY DAMAGE", "SING DURATION END", "TOOK SPELL DAMAGE", "TOOK EXPLOSION DAMAGE", "EXTRACT",

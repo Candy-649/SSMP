@@ -57,7 +57,7 @@ internal class ModSaveFile {
     }
 
     /// <summary>
-    /// Serializable save data that contains PlayerData and SceneData similar to the HK save file.
+    /// Serializable save data that contains PlayerData and SceneData similar to the game's save file.
     /// </summary>
     public class SaveData {
         /// <summary>

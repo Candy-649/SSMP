@@ -3,7 +3,7 @@ using InControl;
 namespace SSMP.Ui.Menu;
 
 /// <summary>
-/// Class that stores keybinds for HKMP, to allow them to be (de)serialized to the settings file.
+/// Class that stores keybinds for SSMP, to allow them to be (de)serialized to the settings file.
 /// </summary>
 internal class Keybinds : PlayerActionSet {
     /// <summary>

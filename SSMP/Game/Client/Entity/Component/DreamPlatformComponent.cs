@@ -6,7 +6,7 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Entity.Component;
 
 /// <inheritdoc />
-/// This component manages the platforms that (dis)appear in dream sequences.
+/// This component manages the platforms that appear when a player comes near them and disappear once none is near.
 internal class DreamPlatformComponent : EntityComponent {
     /// <summary>
     /// Host-client pair of the DreamPlatform components.
@@ -38,22 +38,8 @@ internal class DreamPlatformComponent : EntityComponent {
 
             _platform.Client.innerCollider.OnTriggerEntered += InnerColliderOnTriggerEntered;
             _platform.Host.innerCollider.OnTriggerEntered += InnerColliderOnTriggerEntered;
-
-            // On.DreamPlatform.Start += DreamPlatformOnStart;
         }
     }
-
-    // /// <summary>
-    // /// Hook for the Start method of DreamPlatform. Used to prevent the original method from registering event
-    // /// handlers to the trigger enter/exit.
-    // /// </summary>
-    // private void DreamPlatformOnStart(On.DreamPlatform.orig_Start orig, DreamPlatform self) {
-    //     if (self == _platform.Client || self == _platform.Host) {
-    //         return;
-    //     }
-    //
-    //     orig(self);
-    // }
 
     /// <summary>
     /// Show the correct platform based on whether the entity is controlled or not.
@@ -190,7 +176,5 @@ internal class DreamPlatformComponent : EntityComponent {
             _platform.Host.outerCollider.OnTriggerExited -= OuterColliderOnTriggerExited;
             _platform.Host.innerCollider.OnTriggerEntered -= InnerColliderOnTriggerEntered;
         }
-
-        // On.DreamPlatform.Start -= DreamPlatformOnStart;
     }
 }
