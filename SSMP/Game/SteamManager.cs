@@ -52,7 +52,7 @@ public static class SteamManager {
     public static CSteamID Lobby => CurrentLobbyId;
 
     /// <summary>
-    /// Event fired when Steam says that a member left the lobby this player is in, or was dropped from it.
+    /// Event fired when Steam says that a member left the lobby this player is in.
     /// Parameters: the lobby, the member. Raised on the thread that Steam's messages are taken on.
     /// </summary>
     public static event Action<CSteamID, CSteamID>? LobbyMemberLeftEvent;
@@ -106,6 +106,12 @@ public static class SteamManager {
     /// Cached CSteamID.Nil value to avoid repeated struct creation.
     /// </summary>
     private static readonly CSteamID NilLobbyId = CSteamID.Nil;
+
+    /// <summary>
+    /// Guards the lobby this player is in, which Steam's messages (taken on the main thread or the mod's own timer)
+    /// and the game both change.
+    /// </summary>
+    private static readonly object LobbyGate = new();
 
     /// <summary>
     /// Cached string keys for lobby metadata to avoid allocations.
@@ -337,14 +343,16 @@ public static class SteamManager {
     public static void LeaveLobby() {
         if (!IsInitialized) return;
 
-        // Fast path check - direct comparison is faster than property access
-        if (CurrentLobbyId == NilLobbyId) return;
+        CSteamID lobbyToLeave;
+        lock (LobbyGate) {
+            if (CurrentLobbyId == NilLobbyId) return;
 
-        // Take local copy and clear state
-        var lobbyToLeave = CurrentLobbyId;
-        CurrentLobbyId = NilLobbyId;
-        IsHostingLobby = false;
-        _currentLobbyType = DefaultLobbyType;
+            // Take local copy and clear state
+            lobbyToLeave = CurrentLobbyId;
+            CurrentLobbyId = NilLobbyId;
+            IsHostingLobby = false;
+            _currentLobbyType = DefaultLobbyType;
+        }
 
         // Clear Rich Presence so friends no longer see "Join Game" option
         SteamFriends.ClearRichPresence();
@@ -359,12 +367,14 @@ public static class SteamManager {
     /// <param name="lobbyId">The lobby.</param>
     /// <returns>Whether it was left now.</returns>
     public static bool LeaveLobby(CSteamID lobbyId) {
-        if (lobbyId == NilLobbyId || lobbyId != CurrentLobbyId) {
-            return false;
-        }
+        lock (LobbyGate) {
+            if (lobbyId == NilLobbyId || lobbyId != CurrentLobbyId) {
+                return false;
+            }
 
-        LeaveLobby();
-        return true;
+            LeaveLobby();
+            return true;
+        }
     }
 
     /// <summary>
@@ -672,10 +682,12 @@ public static class SteamManager {
         }
 
         var lobbyId = new CSteamID(callback.m_ulSteamIDLobby);
-        LeaveLobbyFor(lobbyId);
-        CurrentLobbyId = lobbyId;
-        IsHostingLobby = true;
-        _currentLobbyType = _pendingLobbyType;
+        lock (LobbyGate) {
+            LeaveLobbyFor(lobbyId);
+            CurrentLobbyId = lobbyId;
+            IsHostingLobby = true;
+            _currentLobbyType = _pendingLobbyType;
+        }
 
         Logger.Info($"Steam lobby created successfully: {lobbyId}");
 
@@ -731,26 +743,27 @@ public static class SteamManager {
         }
 
         var lobbyId = new CSteamID(callback.m_ulSteamIDLobby);
-        LeaveLobbyFor(lobbyId);
-        CurrentLobbyId = lobbyId;
-        // We are a client
-        IsHostingLobby = false;
+        lock (LobbyGate) {
+            LeaveLobbyFor(lobbyId);
+            CurrentLobbyId = lobbyId;
+            // We are a client
+            IsHostingLobby = false;
+        }
         
         Logger.Info($"Joined lobby successfully: {lobbyId}");
         LobbyJoinedEvent?.Invoke(lobbyId);
     }
 
     /// <summary>
-    /// Says when a member left the lobby this player is in, or was dropped from it (see
-    /// <see cref="LobbyMemberLeftEvent"/>).
+    /// Says when a member left the lobby this player is in (see <see cref="LobbyMemberLeftEvent"/>). Only one who left
+    /// it: Steam also drops from a lobby a member whose own link to Steam dropped for a moment, which a game carried
+    /// over the relay may outlive (review of d82c3f0); a game that is really gone stops answering, and that is told by
+    /// the wait for anything to arrive.
     /// </summary>
     private static void OnLobbyChatUpdate(LobbyChatUpdate_t update) {
-        const uint gone = (uint) (EChatMemberStateChange.k_EChatMemberStateChangeLeft |
-                                  EChatMemberStateChange.k_EChatMemberStateChangeDisconnected |
-                                  EChatMemberStateChange.k_EChatMemberStateChangeKicked |
-                                  EChatMemberStateChange.k_EChatMemberStateChangeBanned);
+        const uint left = (uint) EChatMemberStateChange.k_EChatMemberStateChangeLeft;
         var lobbyId = new CSteamID(update.m_ulSteamIDLobby);
-        if ((update.m_rgfChatMemberStateChange & gone) == 0 || lobbyId != CurrentLobbyId) {
+        if ((update.m_rgfChatMemberStateChange & left) == 0 || lobbyId != CurrentLobbyId) {
             return;
         }
 

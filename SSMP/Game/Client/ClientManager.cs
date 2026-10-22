@@ -783,6 +783,12 @@ internal class ClientManager : IClientManager {
 
         // Stop existing client
         if (_netClient.IsConnected) {
+            // Not the lobby the next connection is made through as well, as when an invite to it is accepted again
+            if (transportType is TransportType.Steam or TransportType.SteamRelay &&
+                SteamManager.IsInitialized && _connectionLobby == SteamManager.Lobby) {
+                _connectionLobby = CSteamID.Nil;
+            }
+
             Logger.Info("Client was already connected, disconnecting first");
             Disconnect();
         }

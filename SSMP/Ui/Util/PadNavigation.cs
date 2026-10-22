@@ -202,7 +202,7 @@ internal static class PadNavigation {
     private static void OnPressSelected(Action<HollowKnightInputModule> orig, HollowKnightInputModule self) {
         var selected = EventSystem.current == null ? null : EventSystem.current.currentSelectedGameObject;
         var root = UiManager.UiGameObject;
-        if (selected != null && root != null && selected.transform.IsChildOf(root.transform) && IsFromKeys()) {
+        if (selected != null && root != null && selected.transform.IsChildOf(root.transform) && IsFromKeys(self)) {
             return;
         }
 
@@ -210,14 +210,22 @@ internal static class PadNavigation {
     }
 
     /// <summary>
-    /// Whether what the game's actions last took came from the keyboard or the mouse rather than a gamepad. The press
-    /// that the menu input is about to act on has been taken in by then, so this is that press's.
+    /// Whether the press that the game's menu input acts on this frame came from the keyboard or the mouse rather than
+    /// a gamepad: the input of the action pressed, which it has taken in by then. Not the input the hero actions took
+    /// last, which follows whichever of them comes first in their list among those held, so a stick held off its
+    /// middle let a typed key through, and a key held kept a gamepad's press out (review of d82c3f0).
     /// </summary>
-    private static bool IsFromKeys() {
-        var actions = InputHandler.Instance == null ? null : InputHandler.Instance.inputActions;
-        return actions != null && actions.LastInputType is BindingSourceType.KeyBindingSource
+    private static bool IsFromKeys(HollowKnightInputModule module) {
+        var pressed = Pressed(module.SubmitAction) ?? Pressed(module.CancelAction) ?? Pressed(module.JumpAction) ??
+                      Pressed(module.AttackAction) ?? Pressed(module.CastAction);
+        return pressed != null && pressed.LastInputType is BindingSourceType.KeyBindingSource
             or BindingSourceType.MouseBindingSource;
     }
+
+    /// <summary>
+    /// The action if it was pressed this frame.
+    /// </summary>
+    private static PlayerAction? Pressed(PlayerAction? action) => action != null && action.WasPressed ? action : null;
 
     /// <summary>
     /// Forgets the control that was selected last, for a menu that is shown anew, which starts from its top.

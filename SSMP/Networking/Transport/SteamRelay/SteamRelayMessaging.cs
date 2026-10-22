@@ -522,16 +522,19 @@ internal static class SteamRelayMessaging {
                 return;
             }
 
+            // Closed while the entry is still held, so that a connection to the player that keeps the session
+            // (KeepSession) or the mod letting go of Steam (CloseGoodbyesNow) waits for the close rather than crossing
+            // it (review of d82c3f0)
             lock (Goodbyes) {
                 if (!Goodbyes.TryGetValue(goodbye.SteamId, out var current) || current != goodbye) {
                     return;
                 }
 
                 Goodbyes.Remove(goodbye.SteamId);
+                CloseGoodbyeSession(goodbye.SteamId, "once what was sent to them last had had time to arrive");
             }
 
             goodbye.Timer?.Dispose();
-            CloseGoodbyeSession(goodbye.SteamId, "once what was sent to them last had had time to arrive");
         } catch (Exception e) {
             Logger.Warn($"Steam relay: could not close a session after the game's last word over it: {e.Message}");
         }
@@ -559,20 +562,13 @@ internal static class SteamRelayMessaging {
     /// </summary>
     /// <param name="why">Why now, for the log.</param>
     public static void CloseGoodbyesNow(string why) {
-        Goodbye[] goodbyes;
         lock (Goodbyes) {
-            if (Goodbyes.Count == 0) {
-                return;
+            foreach (var goodbye in Goodbyes.Values) {
+                goodbye.Timer?.Dispose();
+                CloseGoodbyeSession(goodbye.SteamId, why);
             }
 
-            goodbyes = new Goodbye[Goodbyes.Count];
-            Goodbyes.Values.CopyTo(goodbyes, 0);
             Goodbyes.Clear();
-        }
-
-        foreach (var goodbye in goodbyes) {
-            goodbye.Timer?.Dispose();
-            CloseGoodbyeSession(goodbye.SteamId, why);
         }
     }
 
