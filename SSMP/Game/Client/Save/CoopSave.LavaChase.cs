@@ -827,6 +827,7 @@ internal partial class CoopSave {
                 return;
             }
 
+            TurnCocoonsIntoTheChase(hero, chase);
             SendLavaSample(chase);
             ReportLavaSetDown(chase);
         } catch (Exception e) {
@@ -1396,13 +1397,7 @@ internal partial class CoopSave {
     /// <param name="update">The news of their death.</param>
     /// <param name="tell">Whether to tell the local player, who is on their feet.</param>
     private void OnChaseDeath(ClientPlayerData player, CoopSaveUpdate update, bool tell) {
-        _chaseStandUps[player.Id] = new ChaseStandUp(
-            player.Id, update.Key, update.Scene, Time.unscaledTime + ChaseStandUpDelay
-        );
-
-        SetPartnerBodyHidden(player.Id, true);
-        _chaseHiddenMembers.Add(player.Id);
-
+        BeginChaseStandUp(player.Id, update.Key, update.Scene);
         if (!tell) {
             return;
         }
@@ -1420,6 +1415,83 @@ internal partial class CoopSave {
                     $"{player.Username} 倒下了，马上会在一个站着的队友身边站起来。"
                 )
         );
+    }
+
+    /// <summary>
+    /// Has a member who lies down in the chase stand up beside a member on their feet a few seconds from now (see
+    /// <see cref="UpdateChaseStandUp"/>), with nothing shown where they lie.
+    /// </summary>
+    /// <param name="playerId">The member.</param>
+    /// <param name="key">What they called their death.</param>
+    /// <param name="scene">The room of the chase.</param>
+    private void BeginChaseStandUp(ushort playerId, ulong key, string scene) {
+        _chaseStandUps[playerId] = new ChaseStandUp(playerId, key, scene, Time.unscaledTime + ChaseStandUpDelay);
+
+        SetPartnerBodyHidden(playerId, true);
+        _chaseHiddenMembers.Add(playerId);
+    }
+
+    /// <summary>
+    /// Has a player who lies in a cocoon in the room of a lava that starts chasing stand up beside a player on their
+    /// feet a few seconds later, as one who died in the chase does (USER 10-22: "岩浆赛跑前有遭遇战，要是在遭遇战被打死了，
+    /// 又没有被救起来，然后岩浆就上来了咋办", and they chose this): nobody can come back for a cocoon that the lava is over a
+    /// moment later. The cocoon goes in every game. The game of a member on their feet in the room stands them up (see
+    /// <see cref="UpdateChaseStandUp"/>), with what opens a cocoon, and the game of the player lying there only says
+    /// what they wait for now. A cocoon in another room is no nearer to the lava than it was.
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    /// <param name="chase">The lava, which chases.</param>
+    private void TurnCocoonsIntoTheChase(HeroController hero, LavaChase chase) {
+        if (_rescue is { Outcome: RescueOutcome.Waiting, Chase: false } own && own.Scene == chase.Scene &&
+            IsChaseWithMembers()) {
+            own.Chase = true;
+            RemoveOwnCocoon();
+            Logger.Info(
+                $"The lava in '{chase.Scene}' started chasing while the local player lay in their cocoon, so they " +
+                "stand up beside a member on their feet soon"
+            );
+            Chat(Lang.Pick(
+                "The lava is rising. You will stand up beside a teammate in a moment.",
+                "岩浆涨起来了，你马上会在队友身边站起来。"
+            ));
+        }
+
+        // Those of the members, for a player on their feet here
+        if (_rescue != null || hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+            return;
+        }
+
+        List<ushort>? lying = null;
+        foreach (var pair in _waitingMembers) {
+            if (pair.Value.Scene == chase.Scene && !_chaseStandUps.ContainsKey(pair.Key)) {
+                (lying ??= []).Add(pair.Key);
+            }
+        }
+
+        foreach (var playerId in lying ?? []) {
+            // No cocoon of theirs is shown here any more, as for a death in the chase
+            var waiting = _waitingMembers[playerId];
+            _waitingMembers[playerId] = new WaitingMember("", waiting.Position, waiting.Key);
+            RemoveRescueTarget(playerId);
+            BeginChaseStandUp(playerId, waiting.Key, chase.Scene);
+
+            var name = _playerData.TryGetValue(playerId, out var member) ? member.Username : $"player {playerId}";
+            Logger.Info(
+                $"The lava in '{chase.Scene}' started chasing while {name} lay in their cocoon here, so they stand " +
+                "up beside a member on their feet soon"
+            );
+            Chat(
+                IsStandingMemberIn(chase.Scene)
+                    ? Lang.Pick(
+                        $"The lava is rising. {name} will stand up beside a teammate on their feet in a moment.",
+                        $"岩浆涨起来了，{name} 马上会在一个站着的队友身边站起来。"
+                    )
+                    : Lang.Pick(
+                        $"The lava is rising. {name} will stand up beside you in a moment.",
+                        $"岩浆涨起来了，{name} 马上会在你身边站起来。"
+                    )
+            );
+        }
     }
 
     /// <summary>
