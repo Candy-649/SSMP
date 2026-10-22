@@ -502,6 +502,7 @@ internal partial class CoopHits {
         RegisterThrownHooks();
         RegisterBounceHooks();
         RegisterSignalHooks();
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent += WatchKnocks;
     }
 
     /// <summary>
@@ -522,6 +523,8 @@ internal partial class CoopHits {
 
         _hooks.Clear();
         _partnerPushes.Clear();
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent -= WatchKnocks;
+        _knockWatches.Clear();
         DeregisterThrownHooks();
         OpenShownShutPods();
         _isReplaying = false;
@@ -1378,9 +1381,21 @@ internal partial class CoopHits {
     /// attacks of the partner don't knock back enemies, since the partner's game sends its knockback.
     /// </summary>
     private void OnRecoilByDirection(Action<Recoil, int, float> orig, Recoil self, int direction, float magnitude) {
-        if (_hitContext == HitContext.None || !HasMembers ||
-            !TryGetEntity(self.gameObject, out var entity, out var isClientCopy)) {
+        // Read before the knockback, because what it reads afterwards is the whole of how this tells whether the
+        // knockback happened at all
+        var recoilBefore = self.recoilTimeRemaining;
+
+        Entity.Entity? entity = null;
+        var isClientCopy = false;
+        if (_hitContext == HitContext.None || !TryGetEntity(self.gameObject, out entity, out isClientCopy) ||
+            !HasMembers) {
             orig(self, direction, magnitude);
+
+            // A hit of the local player's on a creature with nobody to tell, which is the game's own knockback
+            if (_hitContext == HitContext.Local && entity != null && KnockbackStarted(self, recoilBefore)) {
+                WatchKnock(self, entity, isClientCopy, direction, magnitude, "this player's hit");
+            }
+
             return;
         }
 
@@ -1388,11 +1403,11 @@ internal partial class CoopHits {
             return;
         }
 
-        // Read before the knockback, because what it reads afterwards is the whole of how this tells whether the
-        // knockback happened at all
-        var recoilBefore = self.recoilTimeRemaining;
-
         orig(self, direction, magnitude);
+
+        if (KnockbackStarted(self, recoilBefore)) {
+            WatchKnock(self, entity, isClientCopy, direction, magnitude, "this player's hit");
+        }
 
         if (!isClientCopy) {
             return;
@@ -1414,9 +1429,7 @@ internal partial class CoopHits {
         // middle of a combo that is the usual state - so every refused hit of a combo opened a wait of its own for
         // a knockback that never happened. The clock is only ever wound back up by a knockback that was taken, and
         // nothing winds it down between here and there.
-        var id = self.recoilTimeRemaining > recoilBefore && self.recoilSpeed > 0f
-            ? entity.BeginKnockbackAnticipation()
-            : (byte) 0;
+        var id = KnockbackStarted(self, recoilBefore) ? entity.BeginKnockbackAnticipation() : (byte) 0;
 
         // Sent whatever happened here, since the scene host may be able to knock the enemy back when this game
         // could not. A number of zero is one that nothing is waiting on, and the scene host answers it with nothing.
@@ -1434,6 +1447,35 @@ internal partial class CoopHits {
     /// like the local player's own hit, winds the clock back up, and what it pushes is no longer the partner's.
     /// </summary>
     private void OnRecoilStep(Action<Recoil, float> orig, Recoil self, float deltaTime) {
+        // How far a knockback that is watched moves the creature at each of its steps (WatchKnock)
+        if (_knockWatches.Count > 0 && _knockWatches.TryGetValue(self, out var watch)) {
+            var before = PositionOf(self);
+            StepRecoil(orig, self, deltaTime);
+            var moved = PositionOf(self) - before;
+            if (moved != Vector2.zero) {
+                watch.Pushed += moved;
+                watch.Steps++;
+            }
+
+            return;
+        }
+
+        StepRecoil(orig, self, deltaTime);
+    }
+
+    /// <summary>
+    /// Where a knockback moves its creature: its body if it has one, and the object if not.
+    /// </summary>
+    /// <param name="recoil">The knockback.</param>
+    private static Vector2 PositionOf(Recoil recoil) {
+        return recoil.body != null ? recoil.body.position : recoil.transform.position;
+    }
+
+    /// <summary>
+    /// Takes a step of a knockback (see <see cref="OnRecoilStep"/>), noting for the partner how far a knockback of
+    /// their hit moved the creature.
+    /// </summary>
+    private void StepRecoil(Action<Recoil, float> orig, Recoil self, float deltaTime) {
         if (_partnerPushes.Count == 0 || !_partnerPushes.TryGetValue(self, out var push)) {
             orig(self, deltaTime);
             return;
@@ -1635,6 +1677,9 @@ internal partial class CoopHits {
 
         var recoilBefore = recoil.recoilTimeRemaining;
         recoil.RecoilByDirection(direction, magnitude);
+        if (KnockbackStarted(recoil, recoilBefore)) {
+            WatchKnock(recoil, entity, false, direction, magnitude, "the partner's hit");
+        }
 
         // What is left on the knockback's clock is how much longer this game goes on carrying the enemy along, and
         // the player waiting on this is told nothing until then. They have already watched their own copy go the
@@ -1644,7 +1689,7 @@ internal partial class CoopHits {
         // How far it pushes the enemy is told to the partner beside the positions, as long as they wait on one of
         // their own knockbacks that their game played first (OnRecoilStep). Only one that started, as the partner's
         // game takes a number only for one that started there
-        if (id != 0 && recoil.recoilTimeRemaining > recoilBefore && recoil.recoilSpeed > 0f) {
+        if (id != 0 && KnockbackStarted(recoil, recoilBefore)) {
             foreach (var gone in _partnerPushes.Keys.Where(other => other == null).ToList()) {
                 _partnerPushes.Remove(gone);
             }

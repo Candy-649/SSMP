@@ -167,6 +167,24 @@ internal partial class Entity {
     private KnockbackWait? _knockbackWait;
 
     /// <summary>
+    /// How the last wait on a knockback that the local game played first ended, for the [Knock] lines (CoopHits): when,
+    /// in game time, how far the scene host said it pushed the creature meanwhile, how far the copy went on by what the
+    /// creature did by itself, and what ended the wait.
+    /// </summary>
+    public (float At, Vector2 Told, Vector2 OwnMoved, string How)? LastKnockbackWait { get; private set; }
+
+    /// <summary>
+    /// When the copy last went back to following the scene host's positions after the local game had moved it, in game
+    /// time, and how far it then had to slide to get to them, for the [Knock] lines (CoopHits).
+    /// </summary>
+    public (float At, Vector2 Slide)? LastHandOver { get; private set; }
+
+    /// <summary>
+    /// The state that the FSM of the copy runs in here, or null while none runs here (see <see cref="PlayHere"/>).
+    /// </summary>
+    public string? RunsHereIn => _runHere != null ? _runHere.Fsm.ActiveStateName : null;
+
+    /// <summary>
     /// What the scene host has been told of the things scene clients did to this entity, one for each game that told
     /// it, by the tag that game puts on what it asks (see <see cref="RequestTag"/>). Every position goes to everyone in
     /// the room, and each game takes only what is under its own tag: with more than one other player there, one game
@@ -1973,6 +1991,7 @@ internal partial class Entity {
                     // there in a single frame, which is the whole of what the wait was for, so where it is standing now
                     // is handed over as what it should go on looking like.
                     interpolation.KeepVisualPosition();
+                    LastHandOver = (Time.time, -(Vector2) interpolation.VisualOffset);
                 }
 
                 _wasMovedHere = movedHere;
@@ -4011,8 +4030,21 @@ internal partial class Entity {
     /// Stops waiting on the last number taken, for something that turned out not to be done after all.
     /// </summary>
     public void EndAnticipation() {
+        if (_knockbackWait != null) {
+            NoteKnockbackWaitEnd(_knockbackWait, "the knockback was not sent");
+        }
+
         _outstandingAnticipation = 0;
         _knockbackWait = null;
+    }
+
+    /// <summary>
+    /// Notes how a wait on a knockback that the local game played first ended (see <see cref="LastKnockbackWait"/>).
+    /// </summary>
+    /// <param name="wait">The wait.</param>
+    /// <param name="how">What ended it.</param>
+    private void NoteKnockbackWaitEnd(KnockbackWait wait, string how) {
+        LastKnockbackWait = (Time.time, wait.Pushed, wait.OwnMoved, how);
     }
 
     /// <summary>
@@ -4181,6 +4213,11 @@ internal partial class Entity {
         /// How fast the creature went by itself, by those positions.
         /// </summary>
         public Vector3 OwnVelocity { get; set; }
+
+        /// <summary>
+        /// How far the copy went on by itself meanwhile, all of it, for the [Knock] lines (CoopHits).
+        /// </summary>
+        public Vector2 OwnMoved { get; set; }
     }
 
     /// <summary>
@@ -4188,6 +4225,10 @@ internal partial class Entity {
     /// change means nothing after it: the game that would have answered it is not the one answering now.
     /// </summary>
     private void ResetAnticipation() {
+        if (_knockbackWait != null) {
+            NoteKnockbackWaitEnd(_knockbackWait, "the entity changed hands or started again");
+        }
+
         _outstandingAnticipation = 0;
         _knockbackWait = null;
         _stamps.Clear();
@@ -4229,6 +4270,10 @@ internal partial class Entity {
     private bool IsAnticipating() {
         // The copy goes back to following the scene host the usual way, however much later the next position comes
         if (_outstandingAnticipation != 0 && Time.unscaledTime > _outstandingExpiry) {
+            if (_knockbackWait != null) {
+                NoteKnockbackWaitEnd(_knockbackWait, "it waited too long");
+            }
+
             _outstandingAnticipation = 0;
             _knockbackWait = null;
         }
@@ -4346,6 +4391,7 @@ internal partial class Entity {
         if (knockbackWait != null) {
             _knockbackWait = null;
             GoOnWhileKnockedBack(knockbackWait, unityPos, anticipation, packetsCovered, positionInterpolation);
+            NoteKnockbackWaitEnd(knockbackWait, "the scene host had it");
             positionInterpolation.Rebase(unityPos, knockbackWait.OwnVelocity);
             _positionsHeldBack = 0;
 
@@ -4413,6 +4459,7 @@ internal partial class Entity {
         if (wait.OwnFrom is { } from) {
             var step = own - from;
             MoveCopyBy(step);
+            wait.OwnMoved += step;
             wait.OwnVelocity = interpolation.ReadVelocity(wait.OwnVelocity, step, packetsCovered);
         }
 

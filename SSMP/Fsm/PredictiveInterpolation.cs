@@ -102,6 +102,11 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// </summary>
     public Vector3 Velocity => _velocity;
 
+    /// <summary>
+    /// How far the object is drawn from where the sender's positions have it, which the smoothing takes away.
+    /// </summary>
+    public Vector3 VisualOffset => _visualOffset;
+
     private float _timeSinceLastPacket;
     private float _lastUpdateTime;
 
