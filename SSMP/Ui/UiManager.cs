@@ -455,15 +455,17 @@ internal class UiManager : IUiManager {
 
     /// <summary>
     /// Runs the game's way back to the main menu, which ends as one when it stops short of the menu: when the save
-    /// before it fails, the game stays where it is.
+    /// before it fails, the game stays where it is, and when a step of it throws, nothing more of it runs.
     /// </summary>
     private static IEnumerator ReturnOnce(IEnumerator menuReturn, GameManager manager) {
-        while (menuReturn.MoveNext()) {
-            yield return menuReturn.Current;
-        }
-
-        if (_returningManager == manager) {
-            _returningManager = null;
+        try {
+            while (menuReturn.MoveNext()) {
+                yield return menuReturn.Current;
+            }
+        } finally {
+            if (_returningManager == manager) {
+                _returningManager = null;
+            }
         }
     }
 
