@@ -1461,18 +1461,20 @@ internal partial class CoopSave {
             return;
         }
 
+        // Lying in this room themselves, where the place they are stood up at is
         List<ushort>? lying = null;
         foreach (var pair in _waitingMembers) {
-            if (pair.Value.Scene == chase.Scene && !_chaseStandUps.ContainsKey(pair.Key)) {
+            if (pair.Value.Scene == chase.Scene && !_chaseStandUps.ContainsKey(pair.Key) &&
+                _playerData.TryGetValue(pair.Key, out var there) && there.IsInLocalScene) {
                 (lying ??= []).Add(pair.Key);
             }
         }
 
         foreach (var playerId in lying ?? []) {
-            // No cocoon of theirs is shown here any more, as for a death in the chase
+            // No cocoon of theirs is shown here any more, as for a death in the chase, and their body stays hidden
             var waiting = _waitingMembers[playerId];
             _waitingMembers[playerId] = new WaitingMember("", waiting.Position, waiting.Key);
-            RemoveRescueTarget(playerId);
+            RemoveRescueTarget(playerId, false);
             BeginChaseStandUp(playerId, waiting.Key, chase.Scene);
 
             var name = _playerData.TryGetValue(playerId, out var member) ? member.Username : $"player {playerId}";
