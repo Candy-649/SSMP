@@ -512,6 +512,7 @@ internal class UiManager : IUiManager {
         
         CreateRootCanvas();
         CreateEventSystem();
+        PadNavigation.KeepKeysFromPressing();
         CreateUiComponents();
         RegisterInterfaceCallbacks();
 

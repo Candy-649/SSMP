@@ -47,6 +47,17 @@ public static class SteamManager {
     public static bool IsInLobby => CurrentLobbyId != NilLobbyId;
 
     /// <summary>
+    /// The lobby this player is in, hosting or not; nil if none.
+    /// </summary>
+    public static CSteamID Lobby => CurrentLobbyId;
+
+    /// <summary>
+    /// Event fired when Steam says that a member left the lobby this player is in, or was dropped from it.
+    /// Parameters: the lobby, the member. Raised on the thread that Steam's messages are taken on.
+    /// </summary>
+    public static event Action<CSteamID, CSteamID>? LobbyMemberLeftEvent;
+
+    /// <summary>
     /// Event fired when a Steam lobby is successfully created.
     /// Parameters: Lobby ID, Lobby owner's username
     /// </summary>
@@ -121,6 +132,11 @@ public static class SteamManager {
     private static CallResult<LobbyCreated_t>? _lobbyCreatedCallback;
     private static CallResult<LobbyMatchList_t>? _lobbyMatchListCallback;
     private static CallResult<LobbyEnter_t>? _lobbyEnterCallback;
+
+    /// <summary>
+    /// What hears of members coming to and going from the lobby this player is in.
+    /// </summary>
+    private static Callback<LobbyChatUpdate_t>? _lobbyChatUpdateCallback;
 
     /// <summary>
     /// What stands in for the game in taking Steam's messages while the game takes none (see
@@ -209,6 +225,7 @@ public static class SteamManager {
             _lobbyCreatedCallback = CallResult<LobbyCreated_t>.Create(OnLobbyCreated);
             _lobbyMatchListCallback = CallResult<LobbyMatchList_t>.Create(OnLobbyMatchList);
             _lobbyEnterCallback = CallResult<LobbyEnter_t>.Create(OnLobbyEnter);
+            _lobbyChatUpdateCallback = Callback<LobbyChatUpdate_t>.Create(OnLobbyChatUpdate);
 
             // The game takes Steam's messages every frame, and the mod only while the game takes none. Not being able
             // to hook the game's taking, as after an update of the game that changed it, is no reason to go without
@@ -337,6 +354,35 @@ public static class SteamManager {
     }
 
     /// <summary>
+    /// Leaves a lobby if this player is still in it. One that another lobby took the place of was left as it did.
+    /// </summary>
+    /// <param name="lobbyId">The lobby.</param>
+    /// <returns>Whether it was left now.</returns>
+    public static bool LeaveLobby(CSteamID lobbyId) {
+        if (lobbyId == NilLobbyId || lobbyId != CurrentLobbyId) {
+            return false;
+        }
+
+        LeaveLobby();
+        return true;
+    }
+
+    /// <summary>
+    /// Leaves the lobby this player is in for another one they just joined or made. A player is in one game's lobby at
+    /// a time: accepting the host's invite to their next lobby left the one before open with this player alone in it,
+    /// which friends still saw as a game to join (USER 10-22 "上一个没关掉").
+    /// </summary>
+    /// <param name="lobbyId">The lobby they are in now.</param>
+    private static void LeaveLobbyFor(CSteamID lobbyId) {
+        if (CurrentLobbyId == NilLobbyId || CurrentLobbyId == lobbyId) {
+            return;
+        }
+
+        Logger.Info($"Steam lobby {CurrentLobbyId} is left for {lobbyId}");
+        LeaveLobby();
+    }
+
+    /// <summary>
     /// What the player is told when none of their Steam friends is online to be invited (see
     /// <see cref="OpenInviteDialog(CSteamID)"/>).
     /// </summary>
@@ -448,6 +494,10 @@ public static class SteamManager {
 
             // Stop standing in for the game, which goes on taking Steam's messages by itself
             StopCallbackTimer();
+
+            // A session left open is what crashed a game in Steam's own networking as it closed (see
+            // SteamRelayMessaging.AnswerSessionRequests)
+            SteamRelayMessaging.CloseGoodbyesNow("as the game closes");
 
             // Nothing may ask Steam anything or be called by it once it is let go
             SteamRelayRecorder.Halt();
@@ -622,6 +672,7 @@ public static class SteamManager {
         }
 
         var lobbyId = new CSteamID(callback.m_ulSteamIDLobby);
+        LeaveLobbyFor(lobbyId);
         CurrentLobbyId = lobbyId;
         IsHostingLobby = true;
         _currentLobbyType = _pendingLobbyType;
@@ -680,12 +731,30 @@ public static class SteamManager {
         }
 
         var lobbyId = new CSteamID(callback.m_ulSteamIDLobby);
+        LeaveLobbyFor(lobbyId);
         CurrentLobbyId = lobbyId;
         // We are a client
         IsHostingLobby = false;
         
         Logger.Info($"Joined lobby successfully: {lobbyId}");
         LobbyJoinedEvent?.Invoke(lobbyId);
+    }
+
+    /// <summary>
+    /// Says when a member left the lobby this player is in, or was dropped from it (see
+    /// <see cref="LobbyMemberLeftEvent"/>).
+    /// </summary>
+    private static void OnLobbyChatUpdate(LobbyChatUpdate_t update) {
+        const uint gone = (uint) (EChatMemberStateChange.k_EChatMemberStateChangeLeft |
+                                  EChatMemberStateChange.k_EChatMemberStateChangeDisconnected |
+                                  EChatMemberStateChange.k_EChatMemberStateChangeKicked |
+                                  EChatMemberStateChange.k_EChatMemberStateChangeBanned);
+        var lobbyId = new CSteamID(update.m_ulSteamIDLobby);
+        if ((update.m_rgfChatMemberStateChange & gone) == 0 || lobbyId != CurrentLobbyId) {
+            return;
+        }
+
+        LobbyMemberLeftEvent?.Invoke(lobbyId, new CSteamID(update.m_ulSteamIDUserChanged));
     }
 
     /// <summary>

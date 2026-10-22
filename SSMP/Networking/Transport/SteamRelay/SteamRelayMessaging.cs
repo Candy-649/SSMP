@@ -456,6 +456,161 @@ internal static class SteamRelayMessaging {
     }
 
     /// <summary>
+    /// How long, in milliseconds, the session with a player is left open after the last thing a game that ends sent
+    /// them, before it is closed: long enough for Steam to get it across, and to send it again if it was lost, at the
+    /// round trips the two players have. Steam drops what it has not sent yet over a session that is closed, and the
+    /// host's server closed its players' sessions a few milliseconds after telling them that it was closing, so they
+    /// never heard it (USER 10-22 "离开并没有正常断开连接"). The other player's game went on sending, which opened the
+    /// session again, and the host's next game took it in as a player who had just come.
+    /// </summary>
+    private const int GoodbyeMs = 2000;
+
+    /// <summary>
+    /// The sessions left open for a moment after the last thing sent over them (see <see cref="CloseAfterGoodbye"/>),
+    /// by Steam ID.
+    /// </summary>
+    private static readonly Dictionary<ulong, Goodbye> Goodbyes = new();
+
+    /// <summary>
+    /// A session left open for a moment after the last thing sent over it, and what closes it then.
+    /// </summary>
+    private sealed class Goodbye {
+        /// <summary>
+        /// The player the session is with.
+        /// </summary>
+        public readonly ulong SteamId;
+
+        /// <summary>
+        /// What closes the session once the time is up.
+        /// </summary>
+        public Timer? Timer;
+
+        public Goodbye(ulong steamId) {
+            SteamId = steamId;
+        }
+    }
+
+    /// <summary>
+    /// Closes the session with a player once what was just sent to them has had time to arrive (see
+    /// <see cref="GoodbyeMs"/>), rather than at once.
+    /// </summary>
+    /// <param name="steamId">The player.</param>
+    public static void CloseAfterGoodbye(ulong steamId) {
+        if (steamId == 0 || steamId == SteamUser.GetSteamID().m_SteamID) {
+            return;
+        }
+
+        var goodbye = new Goodbye(steamId);
+        Goodbye? earlier;
+        lock (Goodbyes) {
+            Goodbyes.Remove(steamId, out earlier);
+            Goodbyes[steamId] = goodbye;
+            goodbye.Timer = new Timer(EndGoodbye, goodbye, GoodbyeMs, Timeout.Infinite);
+        }
+
+        earlier?.Timer?.Dispose();
+    }
+
+    /// <summary>
+    /// Closes a session that was left open after the last thing sent over it, once the time for it is up, unless this
+    /// game took it up again since (see <see cref="KeepSession"/>).
+    /// </summary>
+    private static void EndGoodbye(object? state) {
+        // Nothing may leave a timer's thread: an exception there would close the game
+        try {
+            if (state is not Goodbye goodbye) {
+                return;
+            }
+
+            lock (Goodbyes) {
+                if (!Goodbyes.TryGetValue(goodbye.SteamId, out var current) || current != goodbye) {
+                    return;
+                }
+
+                Goodbyes.Remove(goodbye.SteamId);
+            }
+
+            goodbye.Timer?.Dispose();
+            CloseGoodbyeSession(goodbye.SteamId, "once what was sent to them last had had time to arrive");
+        } catch (Exception e) {
+            Logger.Warn($"Steam relay: could not close a session after the game's last word over it: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Keeps the session with a player open past the moment it was left open for (see
+    /// <see cref="CloseAfterGoodbye"/>): this game talks to them again, over the same session.
+    /// </summary>
+    /// <param name="steamId">The player.</param>
+    public static void KeepSession(ulong steamId) {
+        Goodbye? goodbye;
+        lock (Goodbyes) {
+            if (!Goodbyes.Remove(steamId, out goodbye)) {
+                return;
+            }
+        }
+
+        goodbye.Timer?.Dispose();
+    }
+
+    /// <summary>
+    /// Closes at once every session that was left open after the last thing sent over it (see
+    /// <see cref="CloseAfterGoodbye"/>).
+    /// </summary>
+    /// <param name="why">Why now, for the log.</param>
+    public static void CloseGoodbyesNow(string why) {
+        Goodbye[] goodbyes;
+        lock (Goodbyes) {
+            if (Goodbyes.Count == 0) {
+                return;
+            }
+
+            goodbyes = new Goodbye[Goodbyes.Count];
+            Goodbyes.Values.CopyTo(goodbyes, 0);
+            Goodbyes.Clear();
+        }
+
+        foreach (var goodbye in goodbyes) {
+            goodbye.Timer?.Dispose();
+            CloseGoodbyeSession(goodbye.SteamId, why);
+        }
+    }
+
+    /// <summary>
+    /// Closes a session that was left open after the last thing sent over it, if there still is one: the player's own
+    /// game closes it as soon as it hears what was sent.
+    /// </summary>
+    private static void CloseGoodbyeSession(ulong steamId, string why) {
+        if (!SteamManager.IsInitialized) {
+            return;
+        }
+
+        var identity = IdentityOf(steamId);
+        if (SteamNetworkingMessages.CloseSessionWithUser(ref identity)) {
+            Logger.Info($"Steam relay: closed the session with {steamId}, {why}");
+        }
+    }
+
+    /// <summary>
+    /// Takes everything waiting on a channel and lets it go unread.
+    /// </summary>
+    /// <returns>How many messages there were.</returns>
+    public static int DropAll(int channel, IntPtr[] messageBuffer) {
+        var dropped = 0;
+        int count;
+        while ((count = Drain(channel, messageBuffer, Ignore)) > 0) {
+            dropped += count;
+        }
+
+        return dropped;
+    }
+
+    /// <summary>
+    /// What <see cref="DropAll"/> does with each message: nothing.
+    /// </summary>
+    private static readonly Action<ulong, byte[], int> Ignore = (_, _, _) => { };
+
+    /// <summary>
     /// Says in words how Steam's link to a player stands, and how this machine's access to the relay network does, for
     /// the log of a connection that hears nothing.
     ///

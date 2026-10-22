@@ -136,6 +136,10 @@ internal sealed class SteamRelayTransport : IReliableTransport, ISessionStateTra
             _loopbackChannel = SteamRelayLoopbackChannel.GetOrCreate();
             _loopbackChannel.RegisterClient(this);
         } else {
+            // A game that this one hosted until a moment ago may have left the session with them open for its last
+            // word, which would close it under this connection
+            SteamRelayMessaging.KeepSession(steamId);
+
             // Both sides listen now. The host answers the first message with its own, and a session that fails is
             // reported here rather than only on the other machine.
             SteamRelayMessaging.TakeSessionRequests(TakeSession);

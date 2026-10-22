@@ -197,6 +197,17 @@ internal class ClientManager : IClientManager {
     private string? _lastFallbackAddress;
 
     /// <summary>
+    /// The Steam lobby this connection was made through, if any, which is left with it.
+    /// </summary>
+    private CSteamID _connectionLobby = CSteamID.Nil;
+
+    /// <summary>
+    /// The Steam ID of the host of a game joined over Steam, whose leaving the lobby of the connection ends it; 0 for
+    /// any other connection, the player's own game among them.
+    /// </summary>
+    private ulong _hostSteamId;
+
+    /// <summary>
     /// The username that was last used to connect with.
     /// </summary>
     private string? _username;
@@ -492,6 +503,8 @@ internal class ClientManager : IClientManager {
         _netClient.ConnectEvent += OnClientConnect;
         _netClient.TimeoutEvent += OnTimeout;
         _netClient.UpdateManager.ReceiveResumed += gap => ThreadUtil.RunActionOnMainThread(() => OnReceiveResumed(gap));
+        SteamManager.LobbyMemberLeftEvent += (lobby, member) =>
+            ThreadUtil.RunActionOnMainThread(() => OnLobbyMemberLeft(lobby, member));
 
         EventHooks.GameManagerQuitGame += () => { _modSettings.Save(); };
     }
@@ -774,6 +787,14 @@ internal class ClientManager : IClientManager {
             Disconnect();
         }
 
+        // Taken after the connection before was let go of, which left the lobby it was made through
+        _connectionLobby = SteamManager.IsInitialized ? SteamManager.Lobby : CSteamID.Nil;
+        _hostSteamId = 0;
+        if (transportType is TransportType.Steam or TransportType.SteamRelay && SteamManager.IsInitialized &&
+            ulong.TryParse(address, out var hostSteamId) && hostSteamId != SteamUser.GetSteamID().m_SteamID) {
+            _hostSteamId = hostSteamId;
+        }
+
         // Store username, so we know what to send the server if we are connected
         _username = username;
 
@@ -823,11 +844,12 @@ internal class ClientManager : IClientManager {
         _netClient.Disconnect();
         _coopSave.OnLocalDisconnect();
 
-        // Leave Steam Lobby in case we are connected
-        if (SteamManager.IsInLobby) {
-            Logger.Info("Leaving Steam lobby.");
-            SteamManager.LeaveLobby();
-        }
+        // The lobby this connection was made through, not whichever is current: accepting an invite to the host's next
+        // lobby makes that one current before the connection before is let go of, and leaving the current one left the
+        // player out of the lobby they had just joined, still in the one before (USER 10-22)
+        SteamManager.LeaveLobby(_connectionLobby);
+        _connectionLobby = CSteamID.Nil;
+        _hostSteamId = 0;
 
         // Let the player manager know we disconnected
         _playerManager.OnDisconnect();
@@ -2030,6 +2052,32 @@ internal class ClientManager : IClientManager {
     private void OnSaveUpdate(SaveUpdate saveUpdate) {
         // Left unapplied on purpose: this copies raw player data between the players field by field, which goes
         // against what a two-player save shares deliberately (see CoopSave). Nothing sends these any more either.
+    }
+
+    /// <summary>
+    /// A member left the lobby this player is in. When that is the host of the game joined through it, their game is
+    /// gone, which their server says in a message of its own as it closes - a message that once never came, while
+    /// this game went on as if connected (USER 10-22 "离开并没有正常断开连接"). Steam says so whichever way their game
+    /// went, a crash among them.
+    /// </summary>
+    /// <param name="lobby">The lobby.</param>
+    /// <param name="member">The member who left.</param>
+    private void OnLobbyMemberLeft(CSteamID lobby, CSteamID member) {
+        if (!_netClient.IsConnected || _hostSteamId == 0 || member.m_SteamID != _hostSteamId ||
+            lobby != _connectionLobby) {
+            return;
+        }
+
+        Logger.Info($"The host ({_hostSteamId}) left the Steam lobby {lobby}, so the game they hosted is over");
+        UiManager.InternalChatBox.AddMessage(Lang.Pick(
+            "You are disconnected from the server (the host left)",
+            "你和服务器断开了（房主离开了）"
+        ));
+
+        _uiManager.ReturnToMainMenuFromGame();
+
+        // As for a server that closes: the host's game knows already
+        InternalDisconnect();
     }
 
     /// <summary>

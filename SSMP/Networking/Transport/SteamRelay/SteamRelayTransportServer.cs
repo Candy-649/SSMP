@@ -90,6 +90,14 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         SteamRelayMessaging.WaitLongerThanTheMod();
         SteamRelayRecorder.Start();
 
+        // The players of the last game hosted here were told that it closed, and what they still sent is not for this
+        // one, which took it as players who had just come (10-22)
+        SteamRelayMessaging.CloseGoodbyesNow("as a new game is hosted here");
+        var dropped = SteamRelayMessaging.DropAll(SteamRelayMessaging.ClientToServerChannel, _messageBuffer);
+        if (dropped > 0) {
+            Logger.Info($"Steam relay: let go of {dropped} message(s) that players of the last game here still sent");
+        }
+
         SteamRelayMessaging.TakeSessionRequests(TakeSession);
         _sessionFailedCallback = Callback<SteamNetworkingMessagesSessionFailed_t>.Create(OnSessionFailed);
 
@@ -133,8 +141,10 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
 
         _silenceWatches.Clear();
 
+        // Each player's session stays open for a moment, for the server's last word - that it is closing - to reach
+        // them: closed at once, it never did (SteamRelayMessaging.CloseAfterGoodbye)
         foreach (var client in _clients.Values) {
-            DisconnectClientInternal(client);
+            DisconnectClientInternal(client, afterGoodbye: true);
         }
 
         _clients.Clear();
@@ -162,7 +172,13 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         }
     }
 
-    private void DisconnectClientInternal(SteamRelayTransportClient client) {
+    /// <summary>
+    /// Lets a player go, closing their session at once or after the last thing sent to them had time to arrive.
+    /// </summary>
+    /// <param name="client">The player.</param>
+    /// <param name="afterGoodbye">Whether to leave their session open for a moment first (see
+    /// <see cref="SteamRelayMessaging.CloseAfterGoodbye"/>).</param>
+    private void DisconnectClientInternal(SteamRelayTransportClient client, bool afterGoodbye = false) {
         // Only this entry of the player: one that a session of theirs opened since is not this one to end, as a player
         // let go for silence while their next session already carried their messages lost those too (review of
         // 54f7161)
@@ -174,8 +190,12 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
         SteamRelayRecorder.Forget(client.SteamId, "the link to them is closed");
 
         if (SteamManager.IsInitialized && client.SteamId != SteamUser.GetSteamID().m_SteamID) {
-            var identity = SteamRelayMessaging.IdentityOf(client.SteamId);
-            SteamNetworkingMessages.CloseSessionWithUser(ref identity);
+            if (afterGoodbye) {
+                SteamRelayMessaging.CloseAfterGoodbye(client.SteamId);
+            } else {
+                var identity = SteamRelayMessaging.IdentityOf(client.SteamId);
+                SteamNetworkingMessages.CloseSessionWithUser(ref identity);
+            }
         }
 
         Logger.Info($"Steam relay: disconnected {client.SteamId}");

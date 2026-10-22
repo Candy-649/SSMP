@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.Reflection;
+using InControl;
+using MonoMod.RuntimeDetour;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
+using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
 
 namespace SSMP.Ui.Util;
@@ -156,6 +160,63 @@ internal static class PadNavigation {
         var position = content.anchoredPosition;
         position.y -= shift;
         content.anchoredPosition = position;
+    }
+
+    /// <summary>
+    /// The hook that keeps the keys of a keyboard from pressing the mod's controls, made once.
+    /// </summary>
+    private static Hook? _keyPressHook;
+
+    /// <summary>
+    /// Keeps the keys of a keyboard from pressing the mod's controls (USER 10-22 "我一打字就已停止等待，断开连接"). The
+    /// game's menus take the jump key and the confirm key of a keyboard as a press of what is selected, and the
+    /// attack and spell keys as going back, and a menu of the mod always has something selected for a gamepad to start
+    /// from (see <see cref="KeepSelection"/>). So typing where the chat did not take the keys could press whatever was
+    /// selected, and the host's waiting room was left as they typed, which closed their game for both players. The
+    /// mod's controls are clicked with the mouse, or pressed with a gamepad, which still works; the game's own menus
+    /// are left as they are.
+    /// </summary>
+    public static void KeepKeysFromPressing() {
+        if (_keyPressHook != null) {
+            return;
+        }
+
+        var method = typeof(HollowKnightInputModule).GetMethod(
+            "SendButtonEventToSelectedObject",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+        );
+        if (method == null) {
+            Logger.Warn("Could not find where the game's menus press what is selected, so keys may press the mod's");
+            return;
+        }
+
+        _keyPressHook = new Hook(
+            method,
+            (Action<Action<HollowKnightInputModule>, HollowKnightInputModule>) OnPressSelected
+        );
+    }
+
+    /// <summary>
+    /// The game's menu input pressing, or going back from, what is selected: not a control of the mod's from a key.
+    /// </summary>
+    private static void OnPressSelected(Action<HollowKnightInputModule> orig, HollowKnightInputModule self) {
+        var selected = EventSystem.current == null ? null : EventSystem.current.currentSelectedGameObject;
+        var root = UiManager.UiGameObject;
+        if (selected != null && root != null && selected.transform.IsChildOf(root.transform) && IsFromKeys()) {
+            return;
+        }
+
+        orig(self);
+    }
+
+    /// <summary>
+    /// Whether what the game's actions last took came from the keyboard or the mouse rather than a gamepad. The press
+    /// that the menu input is about to act on has been taken in by then, so this is that press's.
+    /// </summary>
+    private static bool IsFromKeys() {
+        var actions = InputHandler.Instance == null ? null : InputHandler.Instance.inputActions;
+        return actions != null && actions.LastInputType is BindingSourceType.KeyBindingSource
+            or BindingSourceType.MouseBindingSource;
     }
 
     /// <summary>
