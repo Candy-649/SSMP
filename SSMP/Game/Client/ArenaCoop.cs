@@ -690,10 +690,30 @@ internal partial class ArenaCoop {
                 LeaveWonMark(self, state);
             }
 
-            ReportBossArenaWon(self, state);
+            ReportArenaWon(self, state);
         }
 
         return orig(self, waitExtra);
+    }
+
+    /// <summary>
+    /// Event raised when an arena is won in this game, or by the scene host while the local player won it before in
+    /// their own save, with the name of the room it is in.
+    /// </summary>
+    public event Action<string>? ArenaWonEvent;
+
+    /// <summary>
+    /// Tells the two-player save that an arena was won (see <see cref="ArenaWonEvent"/>), and that a boss fell if the
+    /// arena counts as one.
+    /// </summary>
+    private void ReportArenaWon(BattleScene battleScene, ArenaState state) {
+        try {
+            ArenaWonEvent?.Invoke(battleScene.gameObject.scene.name);
+        } catch (Exception e) {
+            Logger.Error($"Could not report the win of arena '{state.Path}':\n{e}");
+        }
+
+        ReportBossArenaWon(battleScene, state);
     }
 
     /// <summary>
@@ -929,7 +949,7 @@ internal partial class ArenaCoop {
                     // An arena that the local player won before in their own save stays as it is here, while the fight
                     // that the scene host's game had them in is over all the same
                     state.Ended = true;
-                    ReportBossArenaWon(battleScene, state);
+                    ReportArenaWon(battleScene, state);
                 }
 
                 break;

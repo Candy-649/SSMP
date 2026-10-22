@@ -427,6 +427,7 @@ internal class ClientManager : IClientManager {
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _arenaCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _arenaCoop.BossArenaWonEvent += _coopSave.OnBossArenaWon;
+        _arenaCoop.ArenaWonEvent += _coopSave.OnArenaWon;
         _coopHits = new CoopHits(
             netClient, _playerData, _gamePatcher, _entityManager, () => _coopSave.CheckedMemberIds
         ) {
