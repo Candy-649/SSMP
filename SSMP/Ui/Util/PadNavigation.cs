@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using InControl;
 using MonoMod.RuntimeDetour;
+using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -253,7 +254,8 @@ internal static class PadNavigation {
 /// <summary>
 /// A frame around the control of the mod's interface that is selected, so that a player with a gamepad sees where they
 /// are. It only shows in the mod's menus and while a gamepad is plugged in, since a player on the mouse sees what they
-/// point at.
+/// point at, and not around a text box that is being typed into, which shows where it is with its caret: the chat's
+/// box always is while the chat is open (USER 10-22 "聊天框的橙色高光是啥，不是很有必要哎").
 /// </summary>
 internal class PadFocusFrame : MonoBehaviour {
     /// <summary>
@@ -319,7 +321,7 @@ internal class PadFocusFrame : MonoBehaviour {
         var selected = EventSystem.current == null ? null : EventSystem.current.currentSelectedGameObject;
         var show = PadNavigation.IsMenuShown && selected != null && selected.activeInHierarchy &&
                    selected.transform.IsChildOf(_root) && selected.transform is RectTransform &&
-                   InputHandler.Instance != null &&
+                   !IsTypedInto(selected) && InputHandler.Instance != null &&
                    InputHandler.Instance.activeGamepadType != GlobalEnums.GamepadType.NONE;
         for (var index = 0; index < _sides.Length; index++) {
             if (_sides[index].gameObject.activeSelf != show) {
@@ -351,6 +353,13 @@ internal class PadFocusFrame : MonoBehaviour {
         Place(_sides[2], x, y, Thickness, height);
         Place(_sides[3], x + width - Thickness, y, Thickness, height);
     }
+
+    /// <summary>
+    /// Whether a control is a text box that is being typed into: the chat's is TextMeshPro's, the others are Unity's.
+    /// </summary>
+    private static bool IsTypedInto(GameObject selected) =>
+        selected.TryGetComponent<TMP_InputField>(out var chatField) && chatField.isFocused ||
+        selected.TryGetComponent<InputField>(out var field) && field.isFocused;
 
     /// <summary>
     /// Puts a side of the frame at a place, measured from the bottom left of the interface.
