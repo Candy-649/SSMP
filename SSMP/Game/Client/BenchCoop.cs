@@ -20,8 +20,8 @@ namespace SSMP.Game.Client;
 /// that a player is in at that moment keeps its state until it is loaded again, so enemies that are fighting a player
 /// don't respawn around them. Players who sit on the same bench take places of their own on it: with two players
 /// connected, the host sits right of the seat and the other player left of it, and with more, every player has a
-/// place of their own across the seat in the order of their save keys, whether they sit down, sit down without the
-/// tween to the seat, or wake up on the bench.
+/// place of their own across the seat in the order of their save keys, squeezed closer together, whether they sit
+/// down, sit down without the tween to the seat, or wake up on the bench.
 /// </summary>
 internal class BenchCoop {
     /// <summary>
@@ -63,6 +63,16 @@ internal class BenchCoop {
     /// without either player disappearing behind the other.
     /// </summary>
     private const float SeatOffset = 0.6f;
+
+    /// <summary>
+    /// How far apart, in units, the places of more than two players are. Three players two seat offsets apart would
+    /// sit 2.4 units from the outer one to the outer one and, with their sitting art about 1.5 units wide, hang off the
+    /// ends of most benches, whose sprites are about 4 units wide with their transparent margins (the median of the 76
+    /// benches that draw one, measured with FsmScan --tree). The user would rather they squeeze together (2026-10-22:
+    /// "三个人的话挤一挤应该可以"): three this far apart take about 3.3 units, overlapping each other a little more than
+    /// two do. More than three are hard to fit on a bench anyway ("3个人以上就比较难坐了").
+    /// </summary>
+    private const float CrowdSeatGap = 0.9f;
 
     /// <summary>
     /// The largest distance, in units, between the hero and the position they were moved to on waking up for the hero
@@ -416,9 +426,9 @@ internal class BenchCoop {
 
     /// <summary>
     /// Gets how far the local player sits from the middle of the seat. With two players, to the right for the host and
-    /// to the left for the other player. With more, the players are spread across the seat a gap apart in the order of
-    /// their save keys, which every game puts the same way: by who hosts, every player but the host would sit in the
-    /// one place left of the seat.
+    /// to the left for the other player. With more, the players are spread across the seat a smaller gap apart
+    /// (<see cref="CrowdSeatGap"/>) in the order of their save keys, which every game puts the same way: by who hosts,
+    /// every player but the host would sit in the one place left of the seat.
     /// </summary>
     private float GetSeatOffset() {
         if (_playerData.Count <= 1) {
@@ -433,7 +443,7 @@ internal class BenchCoop {
             }
         }
 
-        return (place - _playerData.Count / 2f) * SeatOffset * 2f;
+        return (place - _playerData.Count / 2f) * CrowdSeatGap;
     }
 
     /// <summary>
