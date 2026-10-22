@@ -305,6 +305,18 @@ internal partial class Entity {
     private static Entity? _recordedEntity;
 
     /// <summary>
+    /// Whether the input that <see cref="_recordedFsm"/> plays goes no further than where the creature looks at a
+    /// player (see <see cref="MayFightAPlayer"/>).
+    /// </summary>
+    private static bool _recordedStopsAtALook;
+
+    /// <summary>
+    /// The state where the creature looks at a player that the input <see cref="_recordedFsm"/> plays stopped before,
+    /// if it did.
+    /// </summary>
+    private static FsmState? _recordedStoppedBefore;
+
+    /// <summary>
     /// The hook that notes each mix of the game's sound that the FSM of a copy that runs here changes to (see
     /// <see cref="_moods"/>), put in place the first time a copy runs a catch that this game leads.
     /// </summary>
@@ -565,7 +577,18 @@ internal partial class Entity {
         var fsm = copyFsm.Fsm;
         var fromName = _runHere != null ? fsm.ActiveStateName : EntityFsmActions.HostStateOf(fsm);
         if (fromName == null || fsm.GetState(fromName) is not { } from ||
-            EntityFsmActions.FindTransition(fsm, from, eventName) == null) {
+            EntityFsmActions.FindTransition(fsm, from, eventName) is not { } next) {
+            return null;
+        }
+
+        // A wound of a creature that may fight a player already plays here only up to where the creature looks at a
+        // player, which is for the scene host's game to play (see MayFightAPlayer)
+        var stopsAtALook = IsWoundEvent(eventName) && MayFightAPlayer;
+        if (stopsAtALook && GamePatcher.MeasuresAPlayer(next)) {
+            Logger.Info(
+                $"'{eventName}' takes the copy of entity {Id} to '{next.Name}', where it looks at a player, so the " +
+                "scene host's game plays it"
+            );
             return null;
         }
 
@@ -614,6 +637,8 @@ internal partial class Entity {
             _recordedFsm = fsm;
             _recordedEntity = this;
             _recordedPath = path;
+            _recordedStopsAtALook = stopsAtALook;
+            _recordedStoppedBefore = null;
             dice = SharedDice.Record(() => {
                 fsm.Event(eventName);
                 Settle(fsm);
@@ -622,7 +647,16 @@ internal partial class Entity {
             _recordedFsm = null;
             _recordedEntity = null;
             _recordedPath = null;
+            _recordedStopsAtALook = false;
             HeldFsms[fsm] = this;
+        }
+
+        if (_recordedStoppedBefore is { } lookedAt) {
+            _recordedStoppedBefore = null;
+            Logger.Info(
+                $"'{eventName}' took the copy of entity {Id} to '{fsm.ActiveStateName}' here and no further: it " +
+                $"looks at a player in '{lookedAt.Name}', which the scene host's game plays"
+            );
         }
 
         foreach (var state in path) {
@@ -2856,6 +2890,13 @@ internal partial class Entity {
         FsmState toState
     ) {
         if (self == _recordedFsm) {
+            // Nor where the creature looks at a player, for a wound that goes no further here (see PlayHere)
+            if (_recordedStopsAtALook && GamePatcher.MeasuresAPlayer(toState)) {
+                SwitchToStateField!.SetValue(self, null);
+                _recordedStoppedBefore ??= toState;
+                return;
+            }
+
             _recordedPath?.Add(toState);
             orig(self, toState);
             return;

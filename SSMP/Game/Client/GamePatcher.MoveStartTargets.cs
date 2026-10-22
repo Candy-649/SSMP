@@ -363,7 +363,7 @@ internal partial class GamePatcher {
     /// Whether a state measures a player: asks where one is, faces one, aims at one or asks a range about one.
     /// </summary>
     /// <param name="state">The state.</param>
-    private static bool MeasuresAPlayer(FsmState state) {
+    internal static bool MeasuresAPlayer(FsmState state) {
         foreach (var action in state.Actions ?? []) {
             if (action is GetHero or CheckAlertRange or CheckAlertRangeByName ||
                 action != null && ActionRegistry.TargetedFsmActionTypes.Contains(action.GetType().Name)) {
@@ -542,6 +542,29 @@ internal partial class GamePatcher {
     /// <param name="creature">The creature.</param>
     internal static bool FightsAPlayer(GameObject creature) {
         return TurnsOf(GetEnemyTargetOwner(creature)) is { } turns && IsFighting(turns, Time.unscaledTime);
+    }
+
+    /// <summary>
+    /// Whether a creature may fight a player already as another player wounds it, and so keep whom it fights (see
+    /// <see cref="FightsAPlayer"/>): one with a state machine that looks at players and picks its moves at random,
+    /// which turns at the start of its moves (see <see cref="TurnAtMoveStart"/>). Asked of the copy that the other
+    /// game shows, which cannot tell whom the creature fights, nor whether it fights anyone.
+    /// </summary>
+    /// <param name="machines">The state machines of the creature.</param>
+    internal static bool MayFightAPlayer(List<PlayMakerFSM> machines) {
+        foreach (var machine in machines) {
+            if (machine == null || !AimsAtPlayers(machine)) {
+                continue;
+            }
+
+            foreach (var state in machine.FsmStates ?? []) {
+                if (state != null && PicksAMove(state)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
