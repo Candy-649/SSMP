@@ -325,7 +325,14 @@ internal partial class CoopHits {
     /// <param name="receiver">The component that tells the thing of the touch.</param>
     /// <param name="body">The part of the player that touches it.</param>
     /// <param name="touch">Tells the thing of the touch.</param>
-    private void OnLocalTouchOfThrown(ThrownMark mark, Component receiver, Collider2D body, Action touch) {
+    /// <param name="callback">For a receiver that hears more than one kind of touch, which it was.</param>
+    private void OnLocalTouchOfThrown(
+        ThrownMark mark,
+        Component receiver,
+        Collider2D body,
+        Action touch,
+        string? callback = null
+    ) {
         var key = mark.Key;
         var place = ThrownThings.PlaceOf(mark);
         var turned = TurnThrownToLocalPlayer(receiver.gameObject, out var before);
@@ -336,8 +343,8 @@ internal partial class CoopHits {
         }
 
         if (key == null || !_netClient.IsConnected ||
-            CreateTouchUpdate(receiver, body, ThrownThings.PathOf(key, mark, receiver.gameObject, place)) is not
-                { } update) {
+            CreateTouchUpdate(receiver, body, ThrownThings.PathOf(key, mark, receiver.gameObject, place), callback) is
+                not { } update) {
             return;
         }
 

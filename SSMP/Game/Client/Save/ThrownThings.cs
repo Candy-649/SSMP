@@ -345,9 +345,10 @@ internal static class ThrownThings {
             return named;
         }
 
-        // Looked for once per state machine and name: what it holds does not change
+        // Looked for once per state machine and name, since what it holds does not change, and again if what was found
+        // has been destroyed since
         var known = FoundByName.GetOrCreateValue(action.Fsm);
-        if (!known.TryGetValue(throws.PrefabName, out var found)) {
+        if (!known.TryGetValue(throws.PrefabName, out var found) || found is not null && found == null) {
             found = FindPrefab(action.Fsm, throws.PrefabName);
             known[throws.PrefabName] = found;
 
@@ -361,7 +362,9 @@ internal static class ThrownThings {
             }
         }
 
-        return found != null ? found : named;
+        // Nothing of that name: a prefab of another name stands in for it, but not a thing of the room or one thrown
+        // before, which this game would make a clone of, as whatever it has become since
+        return found != null ? found : named != null && !named.scene.IsValid() ? named : null;
     }
 
     /// <summary>

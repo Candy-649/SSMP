@@ -104,8 +104,20 @@ internal partial class CoopHits {
         typeof(PlayMakerTriggerEnter2D),
         typeof(PlayMakerTriggerStay2D),
         typeof(PlayMakerTriggerExit2D),
-        typeof(CustomPlayMakerTriggerStay2D)
+        typeof(CustomPlayMakerTriggerStay2D),
+        typeof(PlayMakerUnity2DProxy)
     ];
+
+    /// <summary>
+    /// What Unity calls on <see cref="PlayMakerUnity2DProxy"/> for something coming into its object, staying in it and
+    /// leaving it. The proxy passes each on to the actions of the object that listen for touches by layer or tag, so a
+    /// touch sent through it says which of the three it was, after the name of the proxy and a dot.
+    /// </summary>
+    private const string ProxyEnter = "OnTriggerEnter2D";
+
+    private const string ProxyStay = "OnTriggerStay2D";
+
+    private const string ProxyExit = "OnTriggerExit2D";
 
     /// <summary>
     /// Whether objects of a type are there for the player who hits them, for the types that were looked up.
@@ -482,6 +494,18 @@ internal partial class CoopHits {
             new Action<Action<CustomPlayMakerTriggerStay2D, Collider2D>, CustomPlayMakerTriggerStay2D, Collider2D>(
                 OnCustomTouchStay
             )
+        );
+        AddHook(
+            GetTouchMethod(typeof(PlayMakerUnity2DProxy), ProxyEnter),
+            new Action<Action<PlayMakerUnity2DProxy, Collider2D>, PlayMakerUnity2DProxy, Collider2D>(OnProxyTouchEnter)
+        );
+        AddHook(
+            GetTouchMethod(typeof(PlayMakerUnity2DProxy), ProxyStay),
+            new Action<Action<PlayMakerUnity2DProxy, Collider2D>, PlayMakerUnity2DProxy, Collider2D>(OnProxyTouchStay)
+        );
+        AddHook(
+            GetTouchMethod(typeof(PlayMakerUnity2DProxy), ProxyExit),
+            new Action<Action<PlayMakerUnity2DProxy, Collider2D>, PlayMakerUnity2DProxy, Collider2D>(OnProxyTouchExit)
         );
         AddHook(
             typeof(HeroController).GetMethod(
@@ -1128,6 +1152,59 @@ internal partial class CoopHits {
     }
 
     /// <summary>
+    /// Hooks for the component through which actions that listen for touches by layer or tag hear of something coming
+    /// into their object, staying in it and leaving it, like <see cref="OnTouchEnter"/>.
+    /// </summary>
+    private void OnProxyTouchEnter(
+        Action<PlayMakerUnity2DProxy, Collider2D> orig,
+        PlayMakerUnity2DProxy self,
+        Collider2D other
+    ) {
+        OnProxyTouch(orig, self, other, ProxyEnter);
+    }
+
+    private void OnProxyTouchStay(
+        Action<PlayMakerUnity2DProxy, Collider2D> orig,
+        PlayMakerUnity2DProxy self,
+        Collider2D other
+    ) {
+        OnProxyTouch(orig, self, other, ProxyStay);
+    }
+
+    private void OnProxyTouchExit(
+        Action<PlayMakerUnity2DProxy, Collider2D> orig,
+        PlayMakerUnity2DProxy self,
+        Collider2D other
+    ) {
+        OnProxyTouch(orig, self, other, ProxyExit);
+    }
+
+    /// <summary>
+    /// A touch through <see cref="PlayMakerUnity2DProxy"/>, which goes like the others only on a thing that a creature
+    /// threw: the grass ball that a creature spits breaks when an attack touches it, heard through this component, so
+    /// the local player's strike on it was never sent and the copy of the partner's swing still broke it. Other
+    /// objects of the room that hear touches through it are left as they were.
+    /// </summary>
+    private void OnProxyTouch(
+        Action<PlayMakerUnity2DProxy, Collider2D> orig,
+        PlayMakerUnity2DProxy self,
+        Collider2D other,
+        string callback
+    ) {
+        // The cheap checks first: every object with the proxy is told of everything that stays in it, every frame
+        if (ThrownThings.Count == 0) {
+            orig(self, other);
+        } else if (IsBodyTouchOnThrown(self, other, out var thrown)) {
+            OnLocalTouchOfThrown(thrown, self, other, TouchCall(orig, self, other), callback);
+        } else if (!IsPlayerAttackOnRoomObject(self, other, out var isLocal) ||
+                   !ThrownThings.TryGetMark(self.gameObject, out _)) {
+            orig(self, other);
+        } else if (isLocal) {
+            OnLocalAttackTouch(self, other, TouchCall(orig, self, other), callback);
+        }
+    }
+
+    /// <summary>
     /// A touch told to the component as it would be, as an action. Made apart from the hooks of touches, whose
     /// parameters a lambda in them made into a closure on every touch of the game.
     /// </summary>
@@ -1169,10 +1246,11 @@ internal partial class CoopHits {
     /// <param name="receiver">The component that tells the object of the touch.</param>
     /// <param name="attack">The attack.</param>
     /// <param name="touch">Tells the object of the touch.</param>
-    private void OnLocalAttackTouch(Component receiver, Collider2D attack, Action touch) {
+    /// <param name="callback">For a receiver that hears more than one kind of touch, which it was.</param>
+    private void OnLocalAttackTouch(Component receiver, Collider2D attack, Action touch, string? callback = null) {
         // The update is made before the touch, since a touch can break the object and move its parts. A thing that a
         // creature threw goes after the player who touched it.
-        var update = HasMembers ? CreateTouchUpdate(receiver, attack) : null;
+        var update = HasMembers ? CreateTouchUpdate(receiver, attack, callback: callback) : null;
         GameObject? before = null;
         var turned = update != null ? TurnThrownToLocalPlayer(receiver.gameObject, out before) : null;
         int[] dice = [];
@@ -2940,8 +3018,14 @@ internal partial class CoopHits {
     /// <param name="attack">What touches it.</param>
     /// <param name="thrownPath">For a thing that a creature threw, its path as it was before the touch (see
     /// <see cref="ThrownThings.PathOf(GameObject)"/>), which the touch can take away.</param>
+    /// <param name="callback">For a receiver that hears more than one kind of touch, which it was.</param>
     /// <returns>The update, or null if no member is in the scene or the object can't be found by others.</returns>
-    private CoopHitUpdate? CreateTouchUpdate(Component receiver, Collider2D attack, string? thrownPath = null) {
+    private CoopHitUpdate? CreateTouchUpdate(
+        Component receiver,
+        Collider2D attack,
+        string? thrownPath = null,
+        string? callback = null
+    ) {
         try {
             if (!IsAnyMemberInRoom()) {
                 return null;
@@ -2978,7 +3062,7 @@ internal partial class CoopHits {
                 Kind = CoopHitKind.ObjectTouch,
                 Scene = scene,
                 Path = path,
-                Responder = type.FullName,
+                Responder = callback == null ? type.FullName : $"{type.FullName}.{callback}",
                 Index = (byte) index,
                 Hit = stream.ToArray()
             };
@@ -2997,7 +3081,15 @@ internal partial class CoopHits {
     /// the same component that told the object of it in their game.
     /// </summary>
     private void ReplayTouch(CoopHitUpdate update) {
-        var type = Array.Find(TouchReceiverTypes, touchType => touchType.FullName == update.Responder);
+        var typeName = update.Responder;
+        string? callback = null;
+        var proxyName = typeof(PlayMakerUnity2DProxy).FullName + ".";
+        if (typeName.StartsWith(proxyName, StringComparison.Ordinal)) {
+            callback = typeName.Substring(proxyName.Length);
+            typeName = typeof(PlayMakerUnity2DProxy).FullName;
+        }
+
+        var type = Array.Find(TouchReceiverTypes, touchType => touchType.FullName == typeName);
         if (type == null) {
             NotReplayed(update, "touch", "that kind of receiver is unknown here");
             return;
@@ -3039,7 +3131,7 @@ internal partial class CoopHits {
         try {
             SetReplayedRanges(target, touch.Ranges);
             answered = AnswersAttack(() => _gamePatcher.RunAsRemoteHit(
-                () => SharedDice.Throw(touch.Dice, () => TellOfTouch(receiver, attack))
+                () => SharedDice.Throw(touch.Dice, () => TellOfTouch(receiver, attack, callback))
             ), touch.HitName);
         } catch (Exception e) {
             Logger.Warn($"Could not replay a touch of the partner on {update.Path}:\n{e}");
@@ -3131,8 +3223,20 @@ internal partial class CoopHits {
     /// <summary>
     /// Tells a component that hears of touches of an attack touching its object, as Unity does.
     /// </summary>
-    private static void TellOfTouch(Component receiver, Collider2D attack) {
+    /// <param name="receiver">The component.</param>
+    /// <param name="attack">What touches its object.</param>
+    /// <param name="callback">For a receiver that hears more than one kind of touch, which it was.</param>
+    private static void TellOfTouch(Component receiver, Collider2D attack, string? callback) {
         switch (receiver) {
+            case PlayMakerUnity2DProxy proxy when callback == ProxyStay:
+                proxy.OnTriggerStay2D(attack);
+                break;
+            case PlayMakerUnity2DProxy proxy when callback == ProxyExit:
+                proxy.OnTriggerExit2D(attack);
+                break;
+            case PlayMakerUnity2DProxy proxy:
+                proxy.OnTriggerEnter2D(attack);
+                break;
             case PlayMakerTriggerEnter2D enter:
                 enter.OnTriggerEnter2D(attack);
                 break;
