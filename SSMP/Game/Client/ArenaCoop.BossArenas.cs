@@ -447,8 +447,8 @@ internal partial class ArenaCoop {
     public event Action? BossFightStartedEvent;
 
     /// <summary>
-    /// Event raised when an arena that counts as a boss is won in this game, which ends its fight the way a boss that
-    /// fell ends its own.
+    /// Event raised when an arena that counts as a boss is won in this game, or by the scene host while the local
+    /// player won it before in their own save, which ends its fight the way a boss that fell ends its own.
     /// </summary>
     public event Action? BossArenaWonEvent;
 
@@ -469,7 +469,7 @@ internal partial class ArenaCoop {
     }
 
     /// <summary>
-    /// Tells the two-player save that an arena was won in this game, if the arena counts as a boss.
+    /// Tells the two-player save that an arena was won, if the arena counts as a boss.
     /// </summary>
     private void ReportBossArenaWon(BattleScene battleScene, ArenaState state) {
         if (!IsBossArena(battleScene)) {

@@ -925,6 +925,11 @@ internal partial class ArenaCoop {
                             battleScene.StartCoroutine(routine);
                         }
                     });
+                } else if (!state.Ended) {
+                    // An arena that the local player won before in their own save stays as it is here, while the fight
+                    // that the scene host's game had them in is over all the same
+                    state.Ended = true;
+                    ReportBossArenaWon(battleScene, state);
                 }
 
                 break;
