@@ -23,7 +23,8 @@ namespace SSMP.Game.Client.Save;
 /// their save is aligned with it before it loads (<see cref="CoopHostSync"/>): the host's world, story, beaten bosses
 /// and wishes, the important things that the host found and they haven't, and everything else their own. The save is a
 /// co-op save from then on, which opens only with another player on the server. An empty slot starts with the host's
-/// world and a new character. During play nothing of this runs: each player picks up their own, as before.
+/// world and a new character, with the opening of a new game. During play nothing of this runs: each player picks up
+/// their own, as before.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -89,6 +90,18 @@ internal partial class CoopSave {
     /// Hook that puts the aligned save in place of the one the game loads.
     /// </summary>
     private Hook? _setLoadedGameDataHook;
+
+    /// <summary>
+    /// Hook that starts a new save, aligned with the host's, with the opening of a new game.
+    /// </summary>
+    private Hook? _readyForRespawnHook;
+
+    /// <summary>
+    /// The slot of a new save, aligned with the host's, that is loading and starts with the opening of a new game, or
+    /// -1. Set as its data is put in place, taken by the end of that load (<see cref="OnReadyForRespawn"/>), and
+    /// dropped as any scene comes in, so that it never reaches a later load.
+    /// </summary>
+    private int _openingSlot = -1;
 
     #region Host
 
@@ -199,6 +212,11 @@ internal partial class CoopSave {
         /// When it was aligned, in unscaled seconds.
         /// </summary>
         public float Time { get; init; }
+
+        /// <summary>
+        /// Whether the slot was empty, so that the save starts as a new game does, with the opening.
+        /// </summary>
+        public bool NewSave { get; init; }
     }
 
     #endregion
@@ -251,6 +269,11 @@ internal partial class CoopSave {
             new Action<Action<global::GameManager, SaveGameData, int>, global::GameManager, SaveGameData, int>(
                 OnSetLoadedGameData
             )
+        );
+
+        _readyForRespawnHook = CreateHook(
+            typeof(global::GameManager).GetMethod("ReadyForRespawn", InstanceFlags, null, [typeof(bool)], null),
+            new Action<Action<global::GameManager, bool>, global::GameManager, bool>(OnReadyForRespawn)
         );
 
         // The menu included: the host answers from there, and sends from the opening of a new game, where there is no
@@ -919,7 +942,8 @@ internal partial class CoopSave {
         }
 
         _pendingJoin = new PendingJoin {
-            Slot = slot, Merged = merged, Report = report, HostName = hostName, Time = UnityEngine.Time.unscaledTime
+            Slot = slot, Merged = merged, Report = report, HostName = hostName, Time = UnityEngine.Time.unscaledTime,
+            NewSave = !hasSave
         };
         MarkCoopSave(slot, report.ArrivalsToSee);
         Logger.Info(
@@ -1145,8 +1169,14 @@ internal partial class CoopSave {
         SaveGameData gameData,
         int slot
     ) {
+        // Every load starts over, so that the mark of a load that failed in the menu never reaches the next one
+        _openingSlot = -1;
         if (_pendingJoin is { } join && join.Slot == slot) {
             _pendingJoin = null;
+            if (join.NewSave) {
+                _openingSlot = slot;
+            }
+
             try {
                 gameData = SaveDataUtility.DeserializeSaveData<SaveGameData>(join.Merged.ToString(Formatting.None));
                 _joinSummary = GetJoinSummary(join);
@@ -1157,6 +1187,43 @@ internal partial class CoopSave {
         }
 
         orig(self, gameData, slot);
+    }
+
+    /// <summary>
+    /// Starts a new save, aligned with the host's world, with the opening of a new game, as a new game starts (USER
+    /// 10-22: "让加入的人也放一遍动画吧"), where the game would put the player at the place that a loaded save respawns at.
+    /// Such a save loads as a saved one does, with all that loading sets up (GameManager.RunContinueGame), which ends
+    /// here; the game itself ends that load with an opening instead for a save that wakes in the last act, in the same
+    /// way. The opening then loads the first room as for a new game (OpeningSequence: OnWillActivateFirstLevel, the
+    /// entrance of a new game), where an empty slot started anyway: the alignment takes over no place to start at.
+    /// </summary>
+    private void OnReadyForRespawn(
+        Action<global::GameManager, bool> orig,
+        global::GameManager self,
+        bool isFirstLevelForPlayer
+    ) {
+        var slot = _openingSlot;
+        _openingSlot = -1;
+        if (slot < 0 || slot != self.profileID || !isFirstLevelForPlayer) {
+            orig(self, isFirstLevelForPlayer);
+            return;
+        }
+
+        Logger.Info($"Save slot {slot} is new, so it starts with the opening of a new game");
+
+        // Loading a save asks for the fade of a loaded save, which only a respawn takes back (EnterHero); a new game
+        // enters the first room by its entrance and never asks for it, and leaving it would fade each room after
+        self.needFirstFadeIn = false;
+
+        // As the game loads its openings: a new game's (RunStartNewGame) and the last act's (RunContinueGame)
+        self.BeginSceneTransition(new global::GameManager.SceneLoadInfo {
+            AlwaysUnloadUnusedAssets = true,
+            IsFirstLevelForPlayer = true,
+            PreventCameraFadeOut = true,
+            WaitForSceneTransitionCameraFade = false,
+            SceneName = NewGameOpeningScene,
+            Visualization = (global::GameManager.SceneLoadVisualizations) (-1)
+        });
     }
 
     /// <summary>

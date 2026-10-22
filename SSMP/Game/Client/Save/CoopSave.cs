@@ -695,6 +695,9 @@ internal partial class CoopSave {
     /// </summary>
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _activeSceneName = newScene.name;
+
+        // The load that a new save starts with the opening in has ended by now, either way
+        _openingSlot = -1;
         if (newScene.name == MenuSceneName) {
             OnReturnToMainMenu();
             return;
