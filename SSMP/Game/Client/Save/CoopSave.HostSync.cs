@@ -483,7 +483,9 @@ internal partial class CoopSave {
     /// its own from the same data, and the moment before waking in the last act, which the game sets up as the save
     /// loads. Not a cutscene, a talk, a death, a player down or the pause menu, which it used to wait through too,
     /// for a moment that the game could save in, like <see cref="CopySave"/> (USER 10-22: someone stuck on the wait for
-    /// the host's save; "就不能无论什么动画都不等待吗").
+    /// the host's save; "就不能无论什么动画都不等待吗"). A host held on the bench at the start of a session can pause,
+    /// a host who started a new game watches its opening, and a host whose partner dropped plays on to the next bench,
+    /// where they could talk or go down as the partner comes back.
     ///
     /// What the host's game writes after the save is taken reaches the joining player at the check of their arrival
     /// if it is a story flag, a wish or an object of the world, and the rest at their next join. That is little: a
