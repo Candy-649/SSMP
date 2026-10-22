@@ -5,6 +5,7 @@ using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.CompilerServices;
 using GlobalEnums;
 using HutongGames.PlayMaker;
 using Mono.Cecil.Cil;
@@ -24,6 +25,12 @@ namespace SSMP.Game.Client.Save;
 
 // SSMP.Fsm hides the Fsm type of PlayMaker in this namespace
 using Fsm = HutongGames.PlayMaker.Fsm;
+using SendTrigger2DEvent = HutongGames.PlayMaker.Actions.SendTrigger2DEvent;
+using SendTrigger2DEventByName = HutongGames.PlayMaker.Actions.SendTrigger2DEventByName;
+using Trigger2dEventLayer = HutongGames.PlayMaker.Actions.Trigger2dEventLayer;
+using Trigger2dEventLayerIfBool = HutongGames.PlayMaker.Actions.Trigger2dEventLayerIfBool;
+using Trigger2dEventLayerNoTriggers = HutongGames.PlayMaker.Actions.Trigger2dEventLayerNoTriggers;
+using Trigger2dEventToParent = HutongGames.PlayMaker.Actions.Trigger2dEventToParent;
 
 /// <summary>
 /// Replays hits between the players of a two-player save. When the local player hits an object of the room, such as a
@@ -1195,10 +1202,10 @@ internal partial class CoopHits {
         string callback
     ) {
         // Every object with the proxy is told of everything that stays in it, every frame, so the cheap checks come
-        // first, and whether the object is one of the room last
+        // first, also those that a game without a partner stops at, and whether the object is one of the room last
         if (ThrownThings.Count > 0 && IsBodyTouchOnThrown(self, other, out var thrown)) {
             OnLocalTouchOfThrown(thrown, self, other, TouchCall(orig, self, other), callback);
-        } else if (other.gameObject.layer != (int) PhysLayers.HERO_ATTACK ||
+        } else if (other.gameObject.layer != (int) PhysLayers.HERO_ATTACK || _isReplaying || !HasMembers ||
                    !ThrownThings.TryGetMark(self.gameObject, out _) && !ListensForAttack(self, other, callback) ||
                    !IsPlayerAttackOnRoomObject(self, other, out var isLocal)) {
             orig(self, other);
@@ -1225,8 +1232,9 @@ internal partial class CoopHits {
             return false;
         }
 
-        foreach (var listener in listeners.GetInvocationList()) {
-            if (listener.Target is FsmStateAction action && WaitsForAttack(action, attack.gameObject)) {
+        // A proxy's list is made anew whenever an action begins or stops listening, so each is taken apart once
+        foreach (var listener in ListenerLists.GetValue(listeners, list => list.GetInvocationList())) {
+            if (listener.Target is FsmStateAction action && WaitsForAttack(action, attack)) {
                 return true;
             }
         }
@@ -1235,38 +1243,55 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Whether an action that listens for touches by tag and layer takes the given attack, and singles it out as an
-    /// attack doing so: by its tag, or by the layer of attacks. The actions check the tag and the layer of what comes
-    /// in, each unless it is not given (Trigger2dEventLayer and its kind).
+    /// The listeners in each list of a proxy, by the list.
     /// </summary>
-    private static bool WaitsForAttack(FsmStateAction action, GameObject attack) {
-        var type = action.GetType();
-        if (!ListenerFields.TryGetValue(type, out var fields)) {
-            fields = (
-                type.GetField("collideTag", InstanceFlags) is { } tagField && tagField.FieldType == typeof(FsmString)
-                    ? tagField
-                    : null,
-                type.GetField("collideLayer", InstanceFlags) is { } layerField &&
-                layerField.FieldType == typeof(FsmInt)
-                    ? layerField
-                    : null
-            );
-            ListenerFields[type] = fields;
-        }
-
-        var tag = fields.Tag?.GetValue(action) as FsmString;
-        var layer = fields.Layer?.GetValue(action) as FsmInt;
-        var byTag = tag is { IsNone: false } && !string.IsNullOrEmpty(tag.Value) && tag.Value != "Untagged";
-        var byLayer = layer is { IsNone: false };
-        return (byTag || byLayer) && (!byTag || attack.tag == tag!.Value) &&
-               (!byLayer || attack.layer == layer!.Value) && (byTag || layer!.Value == (int) PhysLayers.HERO_ATTACK);
-    }
+    private static readonly ConditionalWeakTable<Delegate, Delegate[]> ListenerLists = new();
 
     /// <summary>
-    /// The fields with the tag and the layer that an action listening for touches checks, by type, found once; null
-    /// where the type has none.
+    /// Whether an action that listens through a proxy takes the given attack, as its own check does: what comes in has
+    /// its tag and its layer, each where it gives one (Trigger2dEventLayer and its kind). And whether it singles the
+    /// attack out as one doing so, by a tag that only attacks have or by the layer of attacks.
     /// </summary>
-    private static readonly Dictionary<Type, (FieldInfo? Tag, FieldInfo? Layer)> ListenerFields = new();
+    private static bool WaitsForAttack(FsmStateAction action, Collider2D attack) {
+        FsmString tag;
+        FsmInt layer;
+        switch (action) {
+            case Trigger2dEventLayer listener:
+                (tag, layer) = (listener.collideTag, listener.collideLayer);
+                break;
+            case Trigger2dEventLayerIfBool listener:
+                (tag, layer) = (listener.collideTag, listener.collideLayer);
+                break;
+            case Trigger2dEventLayerNoTriggers listener:
+                // It takes nothing that is a trigger itself, which attacks are
+                if (attack.isTrigger) {
+                    return false;
+                }
+
+                (tag, layer) = (listener.collideTag, listener.collideLayer);
+                break;
+            case Trigger2dEventToParent listener:
+                (tag, layer) = (listener.collideTag, listener.collideLayer);
+                break;
+            case SendTrigger2DEvent listener:
+                (tag, layer) = (listener.collideTag, listener.collideLayer);
+                break;
+            case SendTrigger2DEventByName listener:
+                (tag, layer) = (listener.collideTag, listener.collideLayer);
+                break;
+            default:
+                return false;
+        }
+
+        var byTag = tag is { IsNone: false } && !string.IsNullOrEmpty(tag.Value);
+        var byLayer = layer is { IsNone: false };
+
+        // "Untagged" is the tag of whatever has none, attacks or not
+        var singlesOut = byTag && tag!.Value != "Untagged" ||
+                         byLayer && layer!.Value == (int) PhysLayers.HERO_ATTACK;
+        return singlesOut && (!byLayer || attack.gameObject.layer == layer!.Value) &&
+               (!byTag || attack.gameObject.tag == tag!.Value);
+    }
 
     /// <summary>
     /// A touch told to the component as it would be, as an action. Made apart from the hooks of touches, whose
