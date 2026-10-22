@@ -239,7 +239,10 @@ internal class PredictiveInterpolation : MonoBehaviour {
             pz + _visualOffset.z
         );
 
-        SayItMovedALongWay("what it was predicted to be doing", _cachedTransform.position, applied);
+        // As far as its own speed takes it in this frame is no jump, however long the frame was
+        SayItMovedALongWay(
+            "what it was predicted to be doing", _cachedTransform.position, applied, _velocity.magnitude * dt
+        );
 
         _cachedTransform.position = applied;
     }
@@ -486,9 +489,10 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// <param name="what">What moved it.</param>
     /// <param name="from">Where it was.</param>
     /// <param name="to">Where it was put.</param>
-    private void SayItMovedALongWay(string what, Vector3 from, Vector3 to) {
+    /// <param name="explained">How much of the way its own speed accounts for.</param>
+    private void SayItMovedALongWay(string what, Vector3 from, Vector3 to, float explained = 0f) {
         var distance = (to - from).magnitude;
-        if (distance < BigMoveDistance || Time.unscaledTime < _nextBigMoveLogTime) {
+        if (distance - explained < BigMoveDistance || Time.unscaledTime < _nextBigMoveLogTime) {
             return;
         }
 

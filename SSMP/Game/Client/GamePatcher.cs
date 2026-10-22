@@ -534,7 +534,7 @@ internal partial class GamePatcher {
         }
 
         var rootObject = root.gameObject;
-        return rootObject.CompareTag("Player") || rootObject.name == "Knight";
+        return rootObject.CompareTag("Player");
     }
 
     /// <summary>
@@ -825,34 +825,13 @@ internal partial class GamePatcher {
             return;
         }
 
-        Transform attacks;
-
-        // Find either the 'Damager' or the 'Collider' game object from the FSM variables, and check up the hierarchy.
-        // If it matches the local player's object, then we know it was the local player's slash and not a remote
-        // player's slash
+        // What struck the object is in its 'Damager' or 'Collider' variable. A swing copy of a remote player striking
+        // it here pushes nobody back, and anything else does as in the game: the local player's own strike, also of
+        // a tool they threw
         var damager = self.Fsm.Variables.FindFsmGameObject("Damager");
         var collider = self.Fsm.Variables.FindFsmGameObject("Collider");
-        if (damager != null && damager.Value != null) {
-            attacks = damager.Value.transform.parent;
-        } else if (collider != null && collider.Value != null && collider.Value.transform.parent != null) {
-            attacks = collider.Value.transform.parent.parent;
-        } else {
-            orig(self);
-            return;
-        }
-
-        if (attacks == null) {
-            orig(self);
-            return;
-        }
-
-        var knight = attacks.parent;
-        if (knight == null) {
-            orig(self);
-            return;
-        }
-
-        if (knight.name.Equals("Knight")) {
+        var striker = damager is { Value: not null } ? damager.Value : collider?.Value;
+        if (!RemoteAttackComponent.IsRemoteAttack(striker)) {
             orig(self);
         }
     }

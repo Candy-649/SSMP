@@ -1573,14 +1573,14 @@ internal partial class CoopSave {
             }
 
             if (left.Count == 0) {
-                Logger.Info($"The death left nothing of its own drawing around the player, {when}");
+                Logger.Debug($"The death left nothing of its own drawing around the player, {when}");
 
                 return;
             }
 
             left.Sort(StringComparer.Ordinal);
 
-            Logger.Info(
+            Logger.Debug(
                 $"The death switched these on around the player and they are still drawing, {when} " +
                 $"({left.Count}): " +
                 string.Join(", ", left.Count > MostLeftoversWorthNaming ? left.GetRange(0, MostLeftoversWorthNaming) : left)

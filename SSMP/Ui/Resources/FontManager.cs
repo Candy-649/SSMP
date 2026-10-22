@@ -198,10 +198,11 @@ internal static class FontManager {
     public static void LoadFonts() {
         Logger.Info("Loading fonts...");
 
+        // Logged because which fonts a game has loaded depends on the language it is set to, and they arrive in
+        // compressed bundles that cannot be read from outside the game. A log says what was really there.
+        var fontNames = new List<string>();
         foreach (var font in UnityEngine.Resources.FindObjectsOfTypeAll<Font>()) {
-            // Logged because which fonts a game has loaded depends on the language it is set to, and they arrive in
-            // compressed bundles that cannot be read from outside the game. A log says what was really there.
-            Logger.Info($"Font: {font.name}");
+            fontNames.Add(font.name);
 
             switch (font.name) {
                 case "Perpetua":
@@ -210,8 +211,11 @@ internal static class FontManager {
             }
         }
 
+        Logger.Info($"Fonts: {string.Join(", ", fontNames)}");
+
+        var textMeshProFontNames = new List<string>();
         foreach (var textMeshProFont in UnityEngine.Resources.FindObjectsOfTypeAll<TMP_FontAsset>()) {
-            Logger.Info($"TMP_FontAsset: {textMeshProFont.name}");
+            textMeshProFontNames.Add(textMeshProFont.name);
 
             switch (textMeshProFont.name) {
                 case "TrajanPro-Bold SDF":
@@ -219,6 +223,8 @@ internal static class FontManager {
                     break;
             }
         }
+
+        Logger.Info($"TextMeshPro fonts: {string.Join(", ", textMeshProFontNames)}");
 
         if (_latinFont == null) {
             Logger.Error("UI font regular is missing!");

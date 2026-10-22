@@ -1358,10 +1358,10 @@ internal class HealthManagerComponent : EntityComponent {
                 // Said once: a copy with no health left asks to die every frame for as long as the room lasts
                 if (!_toldRefusedDeath) {
                     _toldRefusedDeath = true;
-                    Logger.Info($"HealthManager Die was called on client entity '{self.name}'");
+                    Logger.Debug($"HealthManager Die was called on client entity '{self.name}'");
                 }
             } else {
-                Logger.Info($"HealthManager Die was called on client entity '{self.name}', but it is allowed death");
+                Logger.Debug($"HealthManager Die was called on client entity '{self.name}', but it is allowed death");
 
                 InvokeOrig();
 

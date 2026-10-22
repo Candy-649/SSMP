@@ -1200,10 +1200,12 @@ internal class ClientManager : IClientManager {
             return false;
         }
 
-        Logger.Info("Received AlreadyInScene packet");
+        Logger.Info(
+            $"Taking in what was in the room already: {alreadyInScene.PlayerEnterSceneList.Count} player(s), " +
+            $"{alreadyInScene.EntityUpdateList.Count} entities"
+        );
 
         foreach (var playerEnterScene in alreadyInScene.PlayerEnterSceneList) {
-            Logger.Info($"Updating already in scene player with ID: {playerEnterScene.Id}");
             OnPlayerEnterScene(playerEnterScene);
         }
 
@@ -1224,14 +1226,12 @@ internal class ClientManager : IClientManager {
             }
 
             foreach (var entityUpdate in alreadyInScene.EntityUpdateList) {
-                Logger.Info($"Updating already in scene entity with ID: {entityUpdate.Id}");
                 if (_entityManager.HandleEntityUpdate(entityUpdate, true)) {
                     ObjectPool<EntityUpdate>.Return(entityUpdate);
                 }
             }
 
             foreach (var entityUpdate in alreadyInScene.ReliableEntityUpdateList) {
-                Logger.Info($"Updating already in scene reliable entity data with ID: {entityUpdate.Id}");
                 if (_entityManager.HandleReliableEntityUpdate(entityUpdate, true)) {
                     ObjectPool<ReliableEntityUpdate>.Return(entityUpdate);
                 }

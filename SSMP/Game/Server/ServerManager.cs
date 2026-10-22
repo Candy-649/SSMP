@@ -632,12 +632,6 @@ internal abstract class ServerManager : IServerManager {
                     entitySpawnList.Add(entitySpawn);
                 }
 
-                if (!roomState) {
-                    Logger.Info(
-                        $"Sending that entity '{entityKey.EntityId}' is already in scene to '{playerData.Id}'"
-                    );
-                }
-
                 var entityUpdate = new EntityUpdate {
                     Id = entityKey.EntityId
                 };
@@ -691,6 +685,13 @@ internal abstract class ServerManager : IServerManager {
 
                 entityUpdateList.Add(entityUpdate);
                 reliableEntityUpdateList.Add(reliableEntityUpdate);
+            }
+
+            if (!roomState && entityUpdateList.Count > 0) {
+                Logger.Info(
+                    $"Sending the {entityUpdateList.Count} entities already in '{playerData.CurrentScene}' to " +
+                    $"'{playerData.Id}'"
+                );
             }
 
             // Answering again decides nothing again: the room keeps whoever has been running it, and this player
@@ -1684,7 +1685,7 @@ internal abstract class ServerManager : IServerManager {
             return;
         }
 
-        Logger.Info($"Received SemiPersistentReset data from ({id}, {playerData.Username})");
+        Logger.Debug($"Received SemiPersistentReset data from ({id}, {playerData.Username})");
 
         foreach (var otherId in _playerData.Keys) {
             if (otherId != id) {

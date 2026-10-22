@@ -232,7 +232,9 @@ internal class BenchCoop {
                 return;
             }
 
-            Logger.Info($"Player {data.Id} rested or died, respawning semi-persistent objects outside the current room");
+            Logger.Debug(
+                $"Player {data.Id} rested or died, respawning semi-persistent objects outside the current room"
+            );
             ResetSceneData(gameManager);
         });
     }
