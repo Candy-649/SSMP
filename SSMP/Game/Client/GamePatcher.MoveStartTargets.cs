@@ -140,12 +140,6 @@ internal partial class GamePatcher {
     private static readonly Dictionary<int, TargetTurns> Turns = new();
 
     /// <summary>
-    /// The creatures and things whose target a rule of their own sets, by instance ID, which roll for nothing: the one
-    /// that throws at the players of a festival game is given whom it throws at each time (FleaGameCoop).
-    /// </summary>
-    private static readonly HashSet<int> KeptTargets = [];
-
-    /// <summary>
     /// The dice of the turns: not the game's own, which the dice of what is set off here are taken from and handed to
     /// the partner (SharedDice), so that a roll here does not change what the partner's game rolls after it.
     /// </summary>
@@ -292,7 +286,6 @@ internal partial class GamePatcher {
     private static void ClearMoveStartTargets() {
         AwarenessRanges.Clear();
         Turns.Clear();
-        KeptTargets.Clear();
         IdleWatches.Clear();
     }
 
@@ -303,7 +296,6 @@ internal partial class GamePatcher {
     private static void ForgetMoveStartTargets(int instanceId) {
         AwarenessRanges.Remove(instanceId);
         Turns.Remove(instanceId);
-        KeptTargets.Remove(instanceId);
         IdleWatches.Remove(instanceId);
     }
 
@@ -422,7 +414,7 @@ internal partial class GamePatcher {
 
         // One that sings to a player of a song turns to them by the song (GetFsmActionTarget)
         var id = owner.GetInstanceID();
-        if (KeptTargets.Contains(id) || TryGetSongTarget(id, out _)) {
+        if (TryGetSongTarget(id, out _)) {
             return;
         }
 

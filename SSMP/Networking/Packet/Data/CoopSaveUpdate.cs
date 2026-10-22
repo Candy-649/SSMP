@@ -510,12 +510,12 @@ internal enum CoopSaveUpdateKind : byte {
     RescueEnd,
 
     /// <summary>
-    /// Which game of the festival the sender is playing, their score in it and whether their game runs the room, sent
-    /// whenever any of that changes. <see cref="CoopSaveUpdate.Part"/> has the bit 1 while they play one, and
-    /// <see cref="CoopSaveUpdate.ObjectPath"/> is then the name of the game's object, and the bit 2 while their game is
-    /// the scene host, which is the game that sends the fleas out. <see cref="CoopSaveUpdate.Key"/>
-    /// is the score of the round as a running total rather than a single point, so a lost or repeated update cannot
-    /// make the other game count wrong: it only ever takes the larger of the two.
+    /// Which of the games that each player plays on their own the sender is playing a round of - the games of the
+    /// festival and the contest of throwing pins (see MinigameCoop) - and their score in it, sent whenever either
+    /// changes. <see cref="CoopSaveUpdate.Part"/> has the bit 1 while they play one, and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> is then the name of the game. <see cref="CoopSaveUpdate.Key"/> is the
+    /// score of the round as a running total rather than a single point, so a lost or repeated update cannot make the
+    /// other game count wrong: it only ever takes the larger of the two.
     ///
     /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
     /// change what every later kind means to a game running an older build.
@@ -905,5 +905,13 @@ internal enum CoopSaveUpdateKind : byte {
     /// key, which settles two purchases that crossed on the way, and <see cref="CoopSaveUpdate.StateName"/> the name of
     /// what was bought, for messages. Appended at the end, like every kind.
     /// </summary>
-    SharedPurchase
+    SharedPurchase,
+
+    /// <summary>
+    /// The sender watches the round of a game that the receiver plays, or no longer does (see MinigameCoop).
+    /// <see cref="CoopSaveUpdate.Part"/> is 1 while they watch and 0 once they stop, and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> names the game. While anyone watches, the game of the receiver shows
+    /// them what is going on in its round. Appended at the end, like every kind.
+    /// </summary>
+    MinigameWatch
 }

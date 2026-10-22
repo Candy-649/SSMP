@@ -816,5 +816,8 @@ internal enum AnimationClip {
     HeroRoomFigure,
 
     // The dust that the game raises anew under the hero as they land, jump, run or dash back
-    HeroDust
+    HeroDust,
+
+    // What the round of a game that each player plays on their own shows, for the players who watch it
+    MinigameView
 }

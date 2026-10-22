@@ -8,12 +8,14 @@ namespace SSMP.Game.Client;
 /// <summary>
 /// Parts of rooms that each player has to themselves. Nothing in them is shared between the two games: what moves there
 /// runs in each game on its own rather than as an entity that the scene host runs for both, a hit or touch of the local
-/// player there stays in this game, and the copies of the partner's attacks leave it alone. The partner is still seen
-/// there, playing with things that this game does not show.
+/// player there stays in this game, and the copies of the partner's attacks leave it alone. The places are the games
+/// that each player plays on their own, whose rounds hide the players from each other (see <see cref="MinigameCoop"/>).
 ///
 /// What is in a place is taken down once per loaded room, before anything in it has moved, since the things of a place
 /// can leave it while they are in use: the festival's fleas fly about without a parent and go back when they are done.
-/// Whatever is under something that was taken down counts too, like what those fleas make for themselves.
+/// Whatever is under something that was taken down counts too, like what those fleas make for themselves. Every part of
+/// a place is numbered in the order it was taken down, which is the same in every game, since every game loads the same
+/// room the same way: that is how one game tells another which part of a place it means.
 /// </summary>
 internal static class PersonalPlaces {
     /// <summary>
@@ -23,6 +25,12 @@ internal static class PersonalPlaces {
         // The festival's game of landing on fleas from above. Both players went for the same fleas, and one of them was
         // soon left with nothing to land on
         ["Caravan_States", "Flea Festival", "Flea Game - Bouncing"],
+
+        // The festival's games of keeping fleas up and of dodging them. Played with the same fleas, whose game the
+        // scene host ran, until each player got a round of their own (2026-10-22, the user: "全都改成一起开始但是各玩
+        // 各的")
+        ["Caravan_States", "Flea Festival", "Flea Game - Juggling"],
+        ["Caravan_States", "Flea Festival", "Flea Game - Dodging"],
 
         // The contest of throwing pins at small targets, which each player enters, pays for and wins on their own. A hit
         // of one player on a target was sent to the other game, where it scored for whoever was playing there
@@ -59,6 +67,13 @@ internal static class PersonalPlaces {
     private static readonly HashSet<int> InPlace = [];
 
     /// <summary>
+    /// The parts of the places in the loaded rooms, by the handle of the room, with one list for each of
+    /// <see cref="Places"/>, empty for a place that the room does not have: the place itself first, then everything
+    /// under it, in the order they were taken down.
+    /// </summary>
+    private static readonly Dictionary<int, List<GameObject>[]> PlaceParts = [];
+
+    /// <summary>
     /// The objects of the room being looked through.
     /// </summary>
     private static readonly List<Transform> Parts = [];
@@ -69,6 +84,16 @@ internal static class PersonalPlaces {
         // when the room is gone
         SceneManager.sceneLoaded += (scene, _) => LookThrough(scene);
         SceneManager.sceneUnloaded += Forget;
+    }
+
+    /// <summary>
+    /// Looks through the rooms that are loaded now, and from here on every room as it loads (see the class), rather
+    /// than when one of its things is first asked about, by which time they may have moved.
+    /// </summary>
+    public static void LookThroughLoaded() {
+        for (var index = 0; index < SceneManager.sceneCount; index++) {
+            LookThrough(SceneManager.GetSceneAt(index));
+        }
     }
 
     /// <summary>
@@ -91,6 +116,47 @@ internal static class PersonalPlaces {
     }
 
     /// <summary>
+    /// Finds the place that an object is under, as it stands now: an object that left its place while in use is not
+    /// found in it. Meant for the objects that run a place, which stay where they are.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    /// <param name="place">The number of the place, which <see cref="GetParts"/> takes.</param>
+    /// <returns>Whether the object is under a place.</returns>
+    public static bool TryFindPlace(GameObject gameObject, out int place) {
+        place = -1;
+        var scene = gameObject.scene;
+        LookThrough(scene);
+        if (!PlaceParts.TryGetValue(scene.handle, out var places)) {
+            return false;
+        }
+
+        for (var index = 0; index < places.Length; index++) {
+            if (places[index].Count > 0 && places[index][0] is { } root && root != null &&
+                gameObject.transform.IsChildOf(root.transform)) {
+                place = index;
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Gets the parts of a place in a loaded room, by the number each part has in every game: the place itself first,
+    /// then everything under it. A part that is gone since is null in it.
+    /// </summary>
+    /// <param name="scene">The room.</param>
+    /// <param name="place">The number of the place (see <see cref="TryFindPlace"/>).</param>
+    /// <returns>The parts, or null if the room has no such place.</returns>
+    public static IReadOnlyList<GameObject>? GetParts(Scene scene, int place) {
+        LookThrough(scene);
+        return PlaceParts.TryGetValue(scene.handle, out var places) && place >= 0 && place < places.Length &&
+               places[place].Count > 0
+            ? places[place]
+            : null;
+    }
+
+    /// <summary>
     /// Takes down what is in the places and things of a room, once per loaded room.
     /// </summary>
     private static void LookThrough(Scene scene) {
@@ -106,42 +172,58 @@ internal static class PersonalPlaces {
             return;
         }
 
+        List<GameObject>[]? places = null;
         foreach (var top in scene.GetRootGameObjects()) {
-            foreach (var path in Places) {
+            for (var index = 0; index < Places.Length; index++) {
+                var path = Places[index];
                 if (top.name != path[0]) {
                     continue;
                 }
 
                 var place = top.transform;
-                for (var index = 1; index < path.Length && place != null; index++) {
-                    place = place.Find(path[index]);
+                for (var step = 1; step < path.Length && place != null; step++) {
+                    place = place.Find(path[step]);
                 }
 
-                if (place != null) {
-                    TakeDown(place, takenDown);
+                if (place == null) {
+                    continue;
                 }
+
+                if (places == null) {
+                    places = new List<GameObject>[Places.Length];
+                    for (var other = 0; other < places.Length; other++) {
+                        places[other] = [];
+                    }
+                }
+
+                TakeDown(place, takenDown, places[index]);
             }
 
             top.GetComponentsInChildren(true, Parts);
             foreach (var part in Parts) {
                 if (IsThing(part.name)) {
-                    TakeDown(part, takenDown);
+                    TakeDown(part, takenDown, null);
                 }
             }
         }
 
         Parts.Clear();
+        if (places != null) {
+            PlaceParts[scene.handle] = places;
+        }
     }
 
     /// <summary>
-    /// Takes down an object and everything under it.
+    /// Takes down an object and everything under it, numbering them as parts of a place when it is one.
     /// </summary>
-    private static void TakeDown(Transform root, List<int> takenDown) {
+    private static void TakeDown(Transform root, List<int> takenDown, List<GameObject>? placeParts) {
         foreach (var part in root.GetComponentsInChildren<Transform>(true)) {
             var id = part.gameObject.GetInstanceID();
             if (InPlace.Add(id)) {
                 takenDown.Add(id);
             }
+
+            placeParts?.Add(part.gameObject);
         }
     }
 
@@ -162,6 +244,7 @@ internal static class PersonalPlaces {
     /// Forgets what was taken down in a room that is gone.
     /// </summary>
     private static void Forget(Scene scene) {
+        PlaceParts.Remove(scene.handle);
         if (!LookedThrough.TryGetValue(scene.handle, out var takenDown)) {
             return;
         }

@@ -1798,23 +1798,6 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Sends the partner an event that a state machine of the room was told here, with the dice this game had as it
-    /// was told, for their game to tell its own state machine the same (see <see cref="ReplayObjectEvents"/>): what the
-    /// director of a game of the festival has the room do, which the scene host's game says for both.
-    /// </summary>
-    /// <param name="fsm">The state machine.</param>
-    /// <param name="eventName">The event.</param>
-    /// <param name="dice">The dice.</param>
-    public void SendObjectEvent(PlayMakerFSM fsm, string eventName, int[] dice) {
-        if (!HasMembers || !_netClient.IsConnected || CreateEventsUpdate(fsm, [(eventName, dice)]) is not { } update) {
-            return;
-        }
-
-        SendToRoomMembers(update);
-        NoteTraffic(update.Scene, update.Path, $"sent '{eventName}' to {update.Responder}");
-    }
-
-    /// <summary>
     /// Makes a hit of the local player on an object of the room that is there for the player who strikes it, marked as
     /// theirs for what the object tells the world of the direction it was struck in (see
     /// <see cref="OnSendHitInDirection"/>).

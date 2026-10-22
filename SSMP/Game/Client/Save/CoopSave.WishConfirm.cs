@@ -997,6 +997,11 @@ internal partial class CoopSave {
                             $"{player.Username} said yes too, so you race together.",
                             $"{player.Username} 也选了「是」，一起跑。"
                         )
+                        : IsFleaGameHold(update.Key) && update.Part == YesWithoutPlaying
+                        ? Lang.Pick(
+                            $"{player.Username} can't start the pin contest right now, so you don't wait for them.",
+                            $"{player.Username} 那边现在开不了扔飞镖的比赛，就不等了。"
+                        )
                         : IsFleaGameHold(update.Key)
                         ? Lang.Pick(
                             $"{player.Username} said yes too, so you start together.",
@@ -1365,6 +1370,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // A game whose character offers this player no round now would keep the partner from it for as long as that
+        // lasts, waiting for a yes that can't come (CoopSave.FleaGames)
+        if (AgreeWithoutPlaying(player, update)) {
+            return;
+        }
+
         // A turn-in takes a full copy from this save too, and this game looks in its own bag right now. When it is
         // short, the partner hears it at once, with what this save has, rather than standing at their prompt until
         // their time runs out for a yes that could never come
@@ -1538,11 +1549,16 @@ internal partial class CoopSave {
                 $"{player.Username} wants to start a race. Talk to the racer and say yes too, and you run together.",
                 $"{player.Username} 想开始比赛。你也去跟对手说话、选「是」，就一起跑。"
             ),
-            WishConfirmFleaGame => Lang.Pick(
-                $"{player.Username} wants to start a game of the festival. Say yes at the same game too, and you " +
-                "start together.",
-                $"{player.Username} 想开始跳蚤游戏。你也去同一个游戏那里选「是」，就一起开始。"
-            ),
+            WishConfirmFleaGame => IsPinGameWish(asked.Wish)
+                ? Lang.Pick(
+                    $"{player.Username} wants to start the pin contest. Say yes there too, and you start together.",
+                    $"{player.Username} 想开始扔飞镖的比赛。你也去那里选「是」，就一起开始。"
+                )
+                : Lang.Pick(
+                    $"{player.Username} wants to start a game of the festival. Say yes at the same game too, and you " +
+                    "start together.",
+                    $"{player.Username} 想开始跳蚤游戏。你也去同一个游戏那里选「是」，就一起开始。"
+                ),
             WishConfirmAid => Lang.Pick(
                 $"{player.Username} asked a character for help in a fight. Ask the same character and say yes too, " +
                 "and the help comes for you together.",
@@ -1652,6 +1668,31 @@ internal partial class CoopSave {
         // rather than freezing them in the middle of something. A two-player save shares what a death costs.
         var hero = HeroController.instance;
         return hero != null && !hero.controlReqlinquished && !IsHeroTakenByGame(hero);
+    }
+
+    /// <summary>
+    /// Whether the game shows dialogue or one of its yes/no boxes is in use, so that a box opened now would land on top
+    /// of something (see <see cref="CanShowConfirmNow"/>). For the box of the games that each player plays on their own
+    /// (MinigameCoop).
+    /// </summary>
+    internal static bool IsDialogueOrBoxBusy() {
+        return IsAnyDialogueRunning() == true || IsBoxBusy(GetPromptBox(true)) || IsBoxBusy(GetPromptBox(false));
+    }
+
+    /// <summary>
+    /// What the yes/no box that names items holds as its yes, which tells whether it is still the box that was opened,
+    /// or null if there is none or it can't be read.
+    /// </summary>
+    internal static object? GetItemBoxYes() {
+        return GetPromptBox(false) is { } box ? BoxCurrentYesField?.GetValue(box) : null;
+    }
+
+    /// <summary>
+    /// Forgets which side of the yes/no box that names items was picked last, before opening it (see
+    /// <see cref="ClearBoxChoice"/>).
+    /// </summary>
+    internal static void ForgetItemBoxChoice() {
+        ClearBoxChoice(false);
     }
 
     /// <summary>
@@ -1866,7 +1907,7 @@ internal partial class CoopSave {
             Kind = CoopSaveUpdateKind.WishConfirm,
             PartCount = agreed ? WishConfirmYes : WishConfirmNo,
             Key = key,
-            Part = agreed ? NoBecauseSaid : why
+            Part = why
         });
     }
 

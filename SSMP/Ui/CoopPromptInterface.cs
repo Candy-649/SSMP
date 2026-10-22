@@ -22,7 +22,14 @@ internal class CoopPromptInterface {
     /// <summary>
     /// How far below the top of the screen the line sits, clear of the ping display in the corner.
     /// </summary>
-    private const float TopMargin = 140f;
+    public const float TopMargin = 140f;
+
+    /// <summary>
+    /// How far below the top of the screen a line at the bottom of the screen sits: above the line that is typed into
+    /// the chat, which is at the left. The line that says whom a player watches is there (USER 2026-10-22: "左右键和
+    /// 正在看谁最后在屏幕下方").
+    /// </summary>
+    public const float BottomLineTopMargin = 1080f - 110f;
 
     /// <summary>
     /// The component group of the line, which is what hides and shows it.
@@ -45,7 +52,9 @@ internal class CoopPromptInterface {
     /// </summary>
     private string _shown = "";
 
-    public CoopPromptInterface(ComponentGroup group) {
+    /// <param name="group">The component group of the line.</param>
+    /// <param name="topMargin">How far below the top of the screen the line sits.</param>
+    public CoopPromptInterface(ComponentGroup group, float topMargin = TopMargin) {
         _group = group;
 
         // Nothing to offer until a game is joined
@@ -53,7 +62,7 @@ internal class CoopPromptInterface {
 
         _text = new TextComponent(
             group,
-            new Vector2(1920f / 2f, 1080f - TopMargin),
+            new Vector2(1920f / 2f, 1080f - topMargin),
             new Vector2(Width, Height),
             "",
             UiManager.NormalFontSize

@@ -238,9 +238,14 @@ internal partial class CoopSave {
     public Action<string>? OnPartnerFlagSet { get; set; }
 
     /// <summary>
-    /// Takes how many fleas the partner has hit in the game of the festival they are playing.
+    /// Takes which game that each player plays on their own the partner is playing a round of, and their score in it.
     /// </summary>
     public Action<ClientPlayerData, CoopSaveUpdate>? OnFleaGameScore { get; set; }
+
+    /// <summary>
+    /// Takes whether the partner watches the round that the local player is playing.
+    /// </summary>
+    public Action<ClientPlayerData, CoopSaveUpdate>? OnMinigameWatch { get; set; }
 
     /// <summary>
     /// Takes whether the partner has won every game of the festival.
@@ -1137,6 +1142,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.FleaGamesOutroReady:
                 OnFleaGamesOutroReady?.Invoke(player, update);
+                break;
+            case CoopSaveUpdateKind.MinigameWatch:
+                OnMinigameWatch?.Invoke(player, update);
                 break;
             case CoopSaveUpdateKind.CreatureDeath:
                 OnCreatureDeath(player, update);

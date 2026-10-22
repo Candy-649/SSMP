@@ -318,14 +318,6 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// Events of a festival game that a flea sends when it scores or is dropped. Both players play such a game with the
-    /// same fleas, so they count in both games: a point is a point for both players, whoever hit the flea or got past
-    /// it, and a dropped flea counts against both. Only the game the flea belongs to takes them, though: broadcast to
-    /// the whole room, a point would also land on another game of the festival that the local player is playing there.
-    /// </summary>
-    private static readonly HashSet<string> GameEvents = ["SCORE", "FLEA FAIL"];
-
-    /// <summary>
     /// The game's own lists of what is registered for each event, by the hash of the event's name.
     /// </summary>
     private static readonly FieldInfo? EventRegistersField =
@@ -409,19 +401,9 @@ internal static partial class EntityFsmActions {
             return;
         }
 
-        // An event of a game goes only to what is registered on the way up from where the flea belongs in the room,
-        // which is where the room's own copy of it still sits: it sleeps here, so it never flies off
-        Transform? within = null;
-        if (GameEvents.Contains(eventName)) {
-            within = EntityProcessor.GetRoomObjectOfCopy(fsm.GameObject)?.transform;
-            if (within == null) {
-                return;
-            }
-        }
-
         BossRoomCoop.RunAsNetworkSender(fsm, () => {
             foreach (var register in list) {
-                if (!IsLeftToTheSceneHost(register) && (within == null || within.IsChildOf(register.transform))) {
+                if (!IsLeftToTheSceneHost(register)) {
                     register.ReceiveEvent();
                 }
             }

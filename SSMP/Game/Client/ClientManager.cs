@@ -161,9 +161,9 @@ internal class ClientManager : IClientManager {
     private readonly CoopAttackCheck _coopAttackCheck;
 
     /// <summary>
-    /// Scores the hits on the fleas of the festival games for the player whose game doesn't control them.
+    /// The games that each player plays on their own: who plays a round, whom to hide, and watching another's round.
     /// </summary>
-    private readonly FleaGameCoop _fleaGameCoop;
+    private readonly MinigameCoop _minigameCoop;
 
     /// <summary>
     /// The FSM patcher instance.
@@ -420,18 +420,17 @@ internal class ClientManager : IClientManager {
             ShutsOutSign = _bossRoomCoop.ShutsOutSign
         };
         _coopHits.CreatureHitEvent += _fightOutline.NoteCreatureHit;
-        _fleaGameCoop = new FleaGameCoop(
-            netClient, _playerData, _entityManager, () => _coopSave.CheckedMemberIds, _coopHits.SendObjectEvent
-        );
+        _minigameCoop = new MinigameCoop(netClient, _playerData, () => _coopSave.CheckedMemberIds, uiManager);
         _coopStateCheck = new CoopStateCheck(
             netClient, _playerData, _entityManager, _coopSave, () => _coopSave.CheckedMemberIds
         );
         _coopAttackCheck = new CoopAttackCheck(
             netClient, _playerData, _entityManager, () => _coopSave.CheckedMemberIds
         );
-        _coopSave.OnFleaGameScore = _fleaGameCoop.OnPartnerScore;
+        _coopSave.OnFleaGameScore = _minigameCoop.OnMemberGame;
+        _coopSave.OnMinigameWatch = _minigameCoop.OnMemberWatch;
         _coopSave.OnPartnerFlagSet = _arenaCoop.OnPartnerFlagSet;
-        _coopSave.OnFleaGamesOutroReady = _fleaGameCoop.OnPartnerOutroReady;
+        _coopSave.OnFleaGamesOutroReady = _minigameCoop.OnMemberOutroReady;
         _fsmPatcher = new FsmPatcher();
 
         _commandManager = new ClientCommandManager();
@@ -515,7 +514,7 @@ internal class ClientManager : IClientManager {
         _coopHits.RegisterHooks();
         _coopStateCheck.RegisterHooks();
         _coopAttackCheck.RegisterHooks();
-        _fleaGameCoop.RegisterHooks();
+        _minigameCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
         if (_fullSynchronisation) {
@@ -554,7 +553,7 @@ internal class ClientManager : IClientManager {
         _coopHits.DeregisterHooks();
         _coopStateCheck.DeregisterHooks();
         _coopAttackCheck.DeregisterHooks();
-        _fleaGameCoop.DeregisterHooks();
+        _minigameCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
         if (_fullSynchronisation) {

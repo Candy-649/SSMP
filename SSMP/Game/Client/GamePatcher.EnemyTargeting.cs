@@ -261,13 +261,8 @@ internal partial class GamePatcher {
     /// </summary>
     /// <param name="thing">The thing, or one of its parts.</param>
     /// <param name="player">The player.</param>
-    /// <param name="kept">Whether a rule of its own sets whom it goes after, so that it never turns to another player
-    /// by itself as it starts a move (see TurnAtMoveStart).</param>
-    public static void SetTargetOf(GameObject thing, GameObject player, bool kept = false) {
+    public static void SetTargetOf(GameObject thing, GameObject player) {
         ApproveEnemyTarget(thing, player);
-        if (kept && GetEnemyTargetOwner(thing) is { } owner && owner != null) {
-            KeptTargets.Add(owner.GetInstanceID());
-        }
     }
 
     /// <summary>

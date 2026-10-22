@@ -227,6 +227,11 @@ internal class UiManager : IUiManager {
     private CoopPromptInterface _coopPromptInterface = null!;
 
     /// <summary>
+    /// The line in game, at the bottom of the screen, that says whose round of a game a player watches.
+    /// </summary>
+    private CoopPromptInterface _minigamePromptInterface = null!;
+
+    /// <summary>
     /// The health bars of creatures that were hurt.
     /// </summary>
     private EnemyHealthBars? _enemyHealthBars;
@@ -287,6 +292,12 @@ internal class UiManager : IUiManager {
     /// The line in game that offers a two-player save, which the two-player saves themselves put text into.
     /// </summary>
     public CoopPromptInterface CoopPrompt => _coopPromptInterface;
+
+    /// <summary>
+    /// The line in game, at the bottom of the screen, that says whose round of a game a player watches, and how to
+    /// watch another player's or stop.
+    /// </summary>
+    public CoopPromptInterface MinigamePrompt => _minigamePromptInterface;
 
     /// <summary>
     /// Gets the chat box interface for sending and receiving messages.
@@ -624,6 +635,11 @@ internal class UiManager : IUiManager {
 
         var coopPromptGroup = new ComponentGroup(parent: _inGameGroup);
         _coopPromptInterface = new CoopPromptInterface(coopPromptGroup);
+
+        var minigamePromptGroup = new ComponentGroup(parent: _inGameGroup);
+        _minigamePromptInterface = new CoopPromptInterface(
+            minigamePromptGroup, CoopPromptInterface.BottomLineTopMargin
+        );
     }
 
     /// <summary>

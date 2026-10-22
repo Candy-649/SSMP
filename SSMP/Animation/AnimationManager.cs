@@ -737,7 +737,10 @@ internal class AnimationManager {
         { AnimationClip.HeroRoomFigure, HeroRoomFigure.Instance },
 
         // The dust that the game raises anew under the hero
-        { AnimationClip.HeroDust, HeroDust.Instance }
+        { AnimationClip.HeroDust, HeroDust.Instance },
+
+        // What the round of a game that each player plays on their own shows, for the players who watch it
+        { AnimationClip.MinigameView, MinigameView.Instance }
     };
 
     #endregion

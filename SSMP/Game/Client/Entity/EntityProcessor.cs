@@ -143,23 +143,6 @@ internal class EntityProcessor {
     }
 
     /// <summary>
-    /// Gets the room's own object of the entity whose shown copy the given object is, or is a part of.
-    /// </summary>
-    /// <param name="gameObject">The object to look for.</param>
-    /// <returns>The room's own object of the entity, or null if the object is not in a shown copy.</returns>
-    public static GameObject? GetRoomObjectOfCopy(GameObject gameObject) {
-        for (var current = gameObject.transform; current != null; current = current.parent) {
-            foreach (var entity in _entities.Values) {
-                if (entity.Object.Client == current.gameObject) {
-                    return entity.Object.Host;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// Finds the registered entity that an object is, or is a part of: its ID, the object of the entity that the object
     /// is under, which is the room's own object or its shown copy, and the room's own object.
     /// </summary>
