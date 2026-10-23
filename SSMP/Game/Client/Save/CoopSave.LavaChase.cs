@@ -102,10 +102,18 @@ internal partial class CoopSave {
 
     /// <summary>
     /// How far below the middle of a player the game sets the lava down when it puts them back after a burn, where
-    /// the lava's FSM says nothing of it: what it says in the race of the arena. In the other race it is 4, with the
-    /// part that burns lower under the lava's own height, which comes to the same gap below the feet of about 6.
+    /// the lava's FSM says nothing of it: what it says in the race of the arena, which puts the top of the lava about 6
+    /// below the feet. In the other race it is 4, about 4 below the feet.
     /// </summary>
     private const float DefaultSetDownBelow = 6f;
+
+    /// <summary>
+    /// How long a member who died in the chase waits past their time to stand up for the local player to stand on
+    /// something, in seconds, before they stand up where the local player last stood, however long ago that was: a
+    /// player who climbs walls, or by platforms that crumble, can be off firm ground for a while, and the last place
+    /// they stood on falls behind them.
+    /// </summary>
+    private const float StandUpFreshWait = 2f;
 
     /// <summary>
     /// How long the lava stands still once a player who was put back beside another, or stood up beside one, can move
@@ -981,20 +989,21 @@ internal partial class CoopSave {
     private void SetLavaDownBelow(LavaChase chase, Vector2 place) {
         var from = GetLavaY(chase);
         var to = Mathf.Max(place.y - chase.SetDownBelow, chase.SetDownFloor);
-        if (from <= to) {
-            return;
+        if (from > to) {
+            chase.HoldY = Mathf.Min(chase.HoldY, to);
+            SetLavaY(chase, chase.HoldY, 0f);
         }
 
-        chase.HoldY = Mathf.Min(chase.HoldY, to);
-        SetLavaY(chase, chase.HoldY, 0f);
+        // Told even when the lava of this game is that low already, as it can be below the one of the game that runs
+        // the room, which it goes back to following once it is no longer held; a game whose lava is lower leaves it
         SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.LavaChaseSetDown,
             Scene = SceneUtil.GetCurrentSceneName(),
-            Values = [chase.HoldY, Mathf.Max(0f, chase.HoldUntil - Time.time) + LavaSetDownHoldExtra]
+            Values = [to, Mathf.Max(0f, chase.HoldUntil - Time.time) + LavaSetDownHoldExtra]
         });
         Logger.Info(
-            $"The lava is set down from {from} to {chase.HoldY}, {chase.SetDownBelow} below where this player is put " +
-            $"at {place}, as the game does for one player's burn, telling the other games"
+            $"The lava goes no higher than {to}, {chase.SetDownBelow} below where this player is put at {place}, as " +
+            $"the game does for one player's burn: from {from} here to {GetLavaY(chase)}, telling the other games"
         );
     }
 
@@ -1153,7 +1162,7 @@ internal partial class CoopSave {
             return;
         }
 
-        chase.HoldY = update.Values[0];
+        chase.HoldY = Time.time < chase.HoldUntil ? Mathf.Min(chase.HoldY, update.Values[0]) : update.Values[0];
         chase.HoldUntil = Mathf.Max(chase.HoldUntil, Time.time + update.Values[1]);
         Logger.Info(
             $"The game of {player.Username} set its lava down for a player it put back, so it is set down to " +
@@ -1277,7 +1286,9 @@ internal partial class CoopSave {
     /// <param name="spot">The place.</param>
     /// <param name="time">When it was stood on, in seconds of game time.</param>
     private static bool IsStillSafe(LavaChase chase, Vector2 spot, float time) {
-        if (float.IsNegativeInfinity(time) || time < chase.RestedAt || IsInOrOverTheRoomsHarm(spot, chase.Bands)) {
+        // The lava is set down below a place only while it chases, so a lava at rest is something that hurts like any
+        var lava = chase.Body != null && IsLavaChasing(chase) ? chase.Bands : null;
+        if (float.IsNegativeInfinity(time) || time < chase.RestedAt || IsInOrOverTheRoomsHarm(spot, lava)) {
             return false;
         }
 
@@ -1421,7 +1432,7 @@ internal partial class CoopSave {
                     // local player stood on since the lava started, which can still be stood on
                     if (hero.cState.dead || PlayerTargetRegistry.IsPlayerDown(hero.gameObject) ||
                         hero.cState.hazardDeath || hero.cState.hazardRespawning ||
-                        !TryGetOwnSafeSpot(chase, out var beside)) {
+                        !TryGetOwnSafeSpot(chase, Time.unscaledTime - standUp.At >= StandUpFreshWait, out var beside)) {
                         continue;
                     }
 
@@ -1449,16 +1460,25 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Where the local player last stood safely since the lava started, however long ago, if it can still be stood on
-    /// (see <see cref="IsStillSafe"/>). How near the lava is to it does not matter, as the lava is set down below it
-    /// (USER 10-23: "所以正确逻辑是复活在我身边并且把岩浆降下去，而不是非要我比岩浆高6格"): waiting for a place well
-    /// above the lava, and for one stood on a moment ago, kept a member who died lying there until the player on their
-    /// feet went down as well (the friend, 10-23: "根本没刷起来").
+    /// Where the local player last stood safely since the lava started, if it can still be stood on (see
+    /// <see cref="IsStillSafe"/>): a moment ago, or however long ago when that may do. How near the lava is to it
+    /// does not matter, as the lava is set down below it (USER 10-23: "所以正确逻辑是复活在我身边并且把岩浆降下去，
+    /// 而不是非要我比岩浆高6格"): waiting for a place well above the lava, and for one stood on a moment ago, kept a
+    /// member who died lying there until the player on their feet went down as well (the friend, 10-23: "根本没刷起来").
     /// </summary>
-    private static bool TryGetOwnSafeSpot(LavaChase chase, out Vector2 spot) {
+    /// <param name="chase">The lava.</param>
+    /// <param name="old">Whether a place stood on longer ago than a moment does.</param>
+    /// <param name="spot">The place.</param>
+    private static bool TryGetOwnSafeSpot(LavaChase chase, bool old, out Vector2 spot) {
         spot = chase.SafeSpot;
-        return IsStillSafe(chase, spot, chase.SafeTime);
+        return (old || Time.time - chase.SafeTime <= LavaSafeSpotLifetime) && IsStillSafe(chase, spot, chase.SafeTime);
     }
+
+    /// <summary>
+    /// Whether the lava of the local player's room chases the players now, so that one put somewhere has it set down
+    /// below them if it is near (see <see cref="SetLavaDownBelow"/>).
+    /// </summary>
+    private bool IsLavaChasingHere() => _lavaChase is { } chase && chase.Body != null && IsLavaChasing(chase);
 
     /// <summary>
     /// Stands up the members who are still lying down in the chase of the room the local player is leaving, at once,

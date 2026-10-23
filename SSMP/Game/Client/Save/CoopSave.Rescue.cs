@@ -1888,8 +1888,15 @@ internal partial class CoopSave {
             // only on the way back to that place after a hit the player lives through; the hit that takes the last
             // of the health goes straight to the death without it (HeroController.TakeDamage).
             // Beside a member, for a death in the chase: a place their game picked, below which the lava is set
-            // down if it has come near, while the game's own mark is usually under it by now
-            if (rescue.StandAt is { } standAt) {
+            // down if it has come near, while the game's own mark is usually under it by now. Only while the lava
+            // here chases: one at rest is not set down, and a place in or over it is no place to stand up
+            var besideMember = rescue.StandAt;
+            if (besideMember is { } over && !IsLavaChasingHere() && IsInOrOverTheRoomsHarm(over)) {
+                Logger.Info($"Not standing up beside a member at {over}, in or over something that hurts here");
+                besideMember = null;
+            }
+
+            if (besideMember is { } standAt) {
                 Logger.Info($"Standing back up beside a member at {standAt}");
                 hero.transform.position = new Vector3(standAt.x, standAt.y, hero.transform.position.z);
                 // The game's own mark goes there with them, as if they had climbed past one: a burn later on with
