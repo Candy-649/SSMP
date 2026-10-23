@@ -123,6 +123,34 @@ internal class SettingsPanel : IRootedComponent {
     private readonly Button _skinBackButton;
     private readonly Button _skinOnButton;
 
+    /// <summary>The line beside the colour of the cloak that says which it is, or why there is none.</summary>
+    private readonly Text _cloakStatusText;
+
+    /// <summary>What the choice of a colour of the cloak comes to, or why there is none.</summary>
+    private readonly Text _cloakNoteText;
+
+    /// <summary>The button that leaves the cloak in its own colour, and its background.</summary>
+    private readonly Button _cloakOwnButton;
+    private readonly Image _cloakOwnImage;
+
+    /// <summary>The swatch of each colour of <see cref="CloakColours"/>, in the same order.</summary>
+    private readonly List<(Button Button, Image Image)> _cloakSwatches = [];
+
+    /// <summary>
+    /// The colours that the cloak may be given, by their names: far apart, so that two players who chose two of them
+    /// are told apart at a glance. The first is Player Color's own.
+    /// </summary>
+    private static readonly (string English, string Chinese, Color32 Colour)[] CloakColours = [
+        ("Light blue", "浅蓝", new Color32(0x66, 0xCC, 0xFF, 0xFF)),
+        ("Blue", "蓝", new Color32(0x33, 0x55, 0xFF, 0xFF)),
+        ("Teal", "青", new Color32(0x22, 0xCC, 0xAA, 0xFF)),
+        ("Green", "绿", new Color32(0x55, 0xDD, 0x33, 0xFF)),
+        ("Yellow", "黄", new Color32(0xFF, 0xDD, 0x22, 0xFF)),
+        ("Orange", "橙", new Color32(0xFF, 0x88, 0x22, 0xFF)),
+        ("Purple", "紫", new Color32(0x99, 0x44, 0xFF, 0xFF)),
+        ("Pink", "粉", new Color32(0xFF, 0x55, 0xAA, 0xFF))
+    ];
+
     /// <summary>The background of the button that shows the choices of the room.</summary>
     private readonly Image _roomTabImage;
 
@@ -715,8 +743,83 @@ internal class SettingsPanel : IRootedComponent {
             "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, RoomSectionHeight - 70f),
-            new Vector2(0f, -70f),
+            new Vector2(0f, 52f),
+            new Vector2(0f, -67f),
+            13,
+            Muted,
+            TextAnchor.UpperLeft
+        );
+
+        // The colour of the cloak, which Player Color draws: one press on a colour, like the colours of the name
+        WaitingRoomPanel.CreateLabel(
+            skinArea,
+            "CloakLabel",
+            Lang.Pick("CLOAK", "斗篷颜色"),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.40f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -121f),
+            14,
+            WaitingRoomPanel.Accent,
+            TextAnchor.MiddleLeft
+        );
+
+        _cloakStatusText = WaitingRoomPanel.CreateLabel(
+            skinArea,
+            "CloakStatus",
+            "",
+            new Vector2(0.40f, 1f),
+            new Vector2(0.97f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -121f),
+            13,
+            Muted,
+            TextAnchor.MiddleRight
+        );
+
+        var cloakOwn = WaitingRoomPanel.CreateButton(
+            skinArea,
+            "CloakOwn",
+            Lang.Pick("Own", "原色"),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.17f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => ChooseCloak(null),
+            out _cloakOwnImage,
+            out _
+        );
+        PlaceInRow(cloakOwn, 153f, 28f);
+        _cloakOwnButton = cloakOwn.GetComponent<Button>();
+
+        for (var i = 0; i < CloakColours.Length; i++) {
+            // Copied out, because the button keeps the action rather than running it
+            Color colour = CloakColours[i].Colour;
+            var slot = 0.78f / CloakColours.Length;
+            var left = 0.19f + slot * i;
+
+            var swatch = WaitingRoomPanel.CreateButton(
+                skinArea,
+                $"Cloak{CloakColours[i].English}",
+                "",
+                new Vector2(left + 0.006f, 1f),
+                new Vector2(left + slot - 0.006f, 1f),
+                Color.white,
+                () => ChooseCloak(colour),
+                out var swatchImage,
+                out _
+            );
+            PlaceInRow(swatch, 153f, 28f);
+            _cloakSwatches.Add((swatch.GetComponent<Button>(), swatchImage));
+        }
+
+        _cloakNoteText = WaitingRoomPanel.CreateLabel(
+            skinArea,
+            "CloakNote",
+            "",
+            new Vector2(0.03f, 1f),
+            new Vector2(0.97f, 1f),
+            new Vector2(0f, RoomSectionHeight - 185f),
+            new Vector2(0f, -185f),
             13,
             Muted,
             TextAnchor.UpperLeft
@@ -817,6 +920,18 @@ internal class SettingsPanel : IRootedComponent {
     }
 
     /// <summary>
+    /// Has the cloak drawn in the given colour, or in its own for null.
+    /// </summary>
+    private void ChooseCloak(Color? colour) {
+        if (!PlayerColorMod.CanChoose) {
+            return;
+        }
+
+        PlayerColorMod.Choose(colour);
+        Refresh();
+    }
+
+    /// <summary>
     /// Draws the skin that this player wears, while that part of the page is shown.
     /// </summary>
     private void RefreshSkin() {
@@ -860,6 +975,79 @@ internal class SettingsPanel : IRootedComponent {
                 "Worn at once, and still the next time the game starts. The other player sees it if they have the " +
                 "same skin.",
                 "选了马上换上，下次开游戏也还是它。队友装了同一个皮肤，才看得到你穿的。"
+            );
+        }
+
+        RefreshCloak(current != null);
+    }
+
+    /// <summary>
+    /// Draws the colour of the cloak that this player chose.
+    /// </summary>
+    /// <param name="wearingSkin">Whether this player wears a skin, which keeps its own colours.</param>
+    private void RefreshCloak(bool wearingSkin) {
+        var canChoose = PlayerColorMod.CanChoose;
+        var chosen = canChoose ? PlayerColorMod.ChosenColour() : null;
+
+        _cloakOwnButton.interactable = canChoose;
+        _cloakOwnImage.color = canChoose && chosen == null ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+
+        // As the colours of the name: the one chosen at its full strength and the rest faded. Player Color keeps the
+        // colour in its file in bytes, as these are
+        Color32? chosen32 = chosen.HasValue ? (Color32) chosen.Value : null;
+        var named = -1;
+        for (var i = 0; i < _cloakSwatches.Count; i++) {
+            var swatch = CloakColours[i].Colour;
+            var picked = chosen32 is { } colour && colour.r == swatch.r && colour.g == swatch.g && colour.b == swatch.b;
+            if (picked) {
+                named = i;
+            }
+
+            _cloakSwatches[i].Button.interactable = canChoose;
+            Color full = swatch;
+            _cloakSwatches[i].Image.color = picked ? full : new Color(full.r, full.g, full.b, 0.3f);
+        }
+
+        _cloakStatusText.text = !PlayerColorMod.IsLoaded
+            ? Lang.Pick("Player Color isn't installed", "没装 Player Color")
+            : !canChoose
+                ? Lang.Pick("Not fully installed", "没装全")
+                : wearingSkin
+                    ? Lang.Pick("Not on a skin", "穿着皮肤时不变色")
+                    : chosen == null
+                        ? Lang.Pick("Own colour", "原色")
+                        : named >= 0
+                            ? Lang.Pick(CloakColours[named].English, CloakColours[named].Chinese)
+                            : Lang.Pick("Another colour", "别的颜色");
+
+        if (!PlayerColorMod.IsLoaded) {
+            _cloakNoteText.text = Lang.Pick(
+                "With Player Color installed, the cloak can be given a colour here, so that the two of you are told " +
+                "apart at a glance.",
+                "装了 Player Color，就能在这里给斗篷换颜色，两个人一眼就分得清。"
+            );
+        } else if (!PlayerColorMod.HasMasks) {
+            _cloakNoteText.text = Lang.Pick(
+                "Player Color's masks weren't found, so the cloak keeps its colour. They go in Hollow Knight " +
+                "Silksong_Data\\Mods\\Mask in the game's folder.",
+                "没找到 Player Color 的 Mask 文件夹，斗篷变不了色。它要放在游戏目录的 " +
+                "Hollow Knight Silksong_Data\\Mods\\Mask 里。"
+            );
+        } else if (!canChoose) {
+            _cloakNoteText.text = Lang.Pick(
+                "Player Color didn't load fully, so the cloak keeps its colour.",
+                "Player Color 没有完整加载，斗篷变不了色。"
+            );
+        } else if (wearingSkin) {
+            _cloakNoteText.text = Lang.Pick(
+                "A skin keeps its own colours. The colour chosen shows on the game's own look, and is kept for it.",
+                "穿着皮肤时斗篷不变色，换回“原样”才看得到；选的颜色会留着。"
+            );
+        } else {
+            _cloakNoteText.text = Lang.Pick(
+                "Worn at once, and still the next time the game starts. The other player sees it if they have " +
+                "Player Color too.",
+                "选了马上换上，下次开游戏也还在。队友也装了 Player Color，才看得到你的颜色。"
             );
         }
     }

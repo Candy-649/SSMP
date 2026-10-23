@@ -233,6 +233,23 @@ internal static class PlayerColorMod {
     private const string PluginGuid = "com.PDE26jjk.PlayerColor";
 
     /// <summary>
+    /// The full name of the type that holds Player Color's settings.
+    /// </summary>
+    private const string SettingsTypeName = "silksong_PlayerColor.Settings";
+
+    /// <summary>
+    /// The properties of Player Color's shader.
+    /// </summary>
+    private static readonly int MainTexId = UnityEngine.Shader.PropertyToID("_MainTex");
+    private static readonly int MaskTexId = UnityEngine.Shader.PropertyToID("_MaskTex");
+    private static readonly int FlashColorId = UnityEngine.Shader.PropertyToID("_FlashColor");
+    private static readonly int FlashAmountId = UnityEngine.Shader.PropertyToID("_FlashAmount");
+    private static readonly int MaskFromColorId = UnityEngine.Shader.PropertyToID("_MaskFromColor1");
+    private static readonly int MaskColorId = UnityEngine.Shader.PropertyToID("_MaskColor1");
+    private static readonly int BrightnessId = UnityEngine.Shader.PropertyToID("t1");
+    private static readonly int SaturationId = UnityEngine.Shader.PropertyToID("t2");
+
+    /// <summary>
     /// The masks loaded so far, by sheet and atlas, with null for those that have none.
     /// </summary>
     private static readonly Dictionary<string, Texture2D?> Masks = new(StringComparer.Ordinal);
@@ -260,9 +277,80 @@ internal static class PlayerColorMod {
         Chainloader.PluginInfos.TryGetValue(PluginGuid, out var info) ? info.Instance : null;
 
     /// <summary>
+    /// Whether Player Color is loaded.
+    /// </summary>
+    public static bool IsLoaded => Plugin != null;
+
+    /// <summary>
+    /// Whether the masks of Player Color are where it looks for them, which come apart from it.
+    /// </summary>
+    public static bool HasMasks => Directory.Exists(MaskDir);
+
+    /// <summary>
     /// Whether Player Color is loaded, has its masks and its shader, and so can draw a cloak in a colour.
     /// </summary>
     public static bool CanDraw => Plugin != null && Directory.Exists(MaskDir) && Shader != null;
+
+    /// <summary>
+    /// Whether the colour of the cloak can be chosen here: Player Color can draw it and has made its settings, which
+    /// it does once the game has its game manager.
+    /// </summary>
+    public static bool CanChoose =>
+        CanDraw && Setting<bool>("UseOverrideMaterial") != null && Setting<Color>("Color2") != null;
+
+    /// <summary>
+    /// The colour that Player Color draws the player's own cloak in, or null while it leaves the cloak in its own.
+    /// </summary>
+    public static Color? ChosenColour() {
+        var use = Setting<bool>("UseOverrideMaterial");
+        var colour = Setting<Color>("Color2");
+        return use is { Value: true } && colour != null ? colour.Value : null;
+    }
+
+    /// <summary>
+    /// Has Player Color draw the player's own cloak in the given colour from now on, or in its own colour for null.
+    /// They are Player Color's own settings, which it saves at once for the next start and which its own window shows.
+    /// </summary>
+    public static void Choose(Color? colour) {
+        var use = Setting<bool>("UseOverrideMaterial");
+        var target = Setting<Color>("Color2");
+        if (use == null || target == null) {
+            return;
+        }
+
+        try {
+            if (colour is { } picked) {
+                target.Value = picked;
+            }
+
+            use.Value = colour != null;
+        } catch (Exception e) {
+            Logger.Warn($"Could not change the colour of the cloak in Player Color: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Sets what a material of Player Color's shader draws an atlas with: its art, the mask of its cloak, the flash of
+    /// the material that the sprite draws with otherwise, and the colour.
+    /// </summary>
+    /// <param name="colored">The material.</param>
+    /// <param name="art">The art of the atlas.</param>
+    /// <param name="mask">The mask of the atlas, or <see cref="NoMask"/> for art that has none.</param>
+    /// <param name="source">The material that the sprite draws with otherwise.</param>
+    /// <param name="look">The colour.</param>
+    public static void Paint(Material colored, Texture? art, Texture mask, Material source, PlayerColorLook look) {
+        colored.SetTexture(MainTexId, art);
+        colored.SetTexture(MaskTexId, mask);
+        if (source.HasColor(FlashColorId)) {
+            colored.SetColor(FlashColorId, source.GetColor(FlashColorId));
+            colored.SetFloat(FlashAmountId, source.GetFloat(FlashAmountId));
+        }
+
+        colored.SetFloat(BrightnessId, look.Brightness);
+        colored.SetFloat(SaturationId, look.Saturation);
+        colored.SetColor(MaskFromColorId, SkinLook.PlayerColorOriginal);
+        colored.SetColor(MaskColorId, look.Color);
+    }
 
     /// <summary>
     /// The shader that Player Color draws with, or null if it hasn't loaded it.
@@ -286,30 +374,19 @@ internal static class PlayerColorMod {
     /// off, without its masks or with its settings not read yet.
     /// </summary>
     public static PlayerColorLook? LocalLook() {
-        var plugin = Plugin;
-        if (plugin == null || !Directory.Exists(MaskDir)) {
+        if (Plugin == null || !Directory.Exists(MaskDir)) {
             return null;
         }
 
-        try {
-            var settings = plugin.GetType().Assembly.GetType("silksong_PlayerColor.Settings");
-            if (settings == null) {
-                return null;
-            }
-
-            var use = Entry<bool>(settings, "UseOverrideMaterial");
-            var color = Entry<Color>(settings, "Color2");
-            var saturation = Entry<float>(settings, "Saturation");
-            var brightness = Entry<float>(settings, "Brightness");
-            if (use != true || color == null || saturation == null || brightness == null) {
-                return null;
-            }
-
-            return new PlayerColorLook(color.Value, saturation.Value, brightness.Value);
-        } catch (Exception e) {
-            Logger.Warn($"Could not read the settings of Player Color: {e.Message}");
+        var use = Setting<bool>("UseOverrideMaterial");
+        var color = Setting<Color>("Color2");
+        var saturation = Setting<float>("Saturation");
+        var brightness = Setting<float>("Brightness");
+        if (use is not { Value: true } || color == null || saturation == null || brightness == null) {
             return null;
         }
+
+        return new PlayerColorLook(color.Value, saturation.Value, brightness.Value);
     }
 
     /// <summary>
@@ -428,11 +505,22 @@ internal static class PlayerColorMod {
     }
 
     /// <summary>
-    /// The value of a setting of Player Color, or null if it has none yet.
+    /// A setting of Player Color, or null if it isn't loaded or has made no settings yet.
     /// </summary>
-    private static T? Entry<T>(Type settings, string name) where T : struct {
-        var entry = settings.GetProperty(name, BindingFlags.Public | BindingFlags.Static)?.GetValue(null);
-        return entry is ConfigEntry<T> typed ? typed.Value : null;
+    private static ConfigEntry<T>? Setting<T>(string name) {
+        var plugin = Plugin;
+        if (plugin == null) {
+            return null;
+        }
+
+        try {
+            return plugin.GetType().Assembly.GetType(SettingsTypeName)?
+                .GetProperty(name, BindingFlags.Public | BindingFlags.Static)?
+                .GetValue(null) as ConfigEntry<T>;
+        } catch (Exception e) {
+            Logger.Warn($"Could not read the setting '{name}' of Player Color: {e.Message}");
+            return null;
+        }
     }
 }
 

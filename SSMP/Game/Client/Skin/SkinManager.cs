@@ -18,18 +18,6 @@ namespace SSMP.Game.Client.Skin;
 /// </summary>
 internal class SkinManager {
     /// <summary>
-    /// The properties of Player Color's shader.
-    /// </summary>
-    private static readonly int MainTexId = Shader.PropertyToID("_MainTex");
-    private static readonly int MaskTexId = Shader.PropertyToID("_MaskTex");
-    private static readonly int FlashColorId = Shader.PropertyToID("_FlashColor");
-    private static readonly int FlashAmountId = Shader.PropertyToID("_FlashAmount");
-    private static readonly int MaskFromColorId = Shader.PropertyToID("_MaskFromColor1");
-    private static readonly int MaskColorId = Shader.PropertyToID("_MaskColor1");
-    private static readonly int BrightnessId = Shader.PropertyToID("t1");
-    private static readonly int SaturationId = Shader.PropertyToID("t2");
-
-    /// <summary>
     /// Whether the server lets players wear skins.
     /// </summary>
     private readonly Func<bool> _skinsAllowed;
@@ -490,25 +478,17 @@ internal class SkinManager {
             Material? colored = null;
             if (look.PlayerColor is { } color && colorShader != null) {
                 colored = ColoredMaterial(slot, colorShader);
-                colored.SetTexture(MainTexId, texture);
                 // Player Color colours the cloak by the mask of the game's own atlas, which it finds by the name of
                 // the texture: the art of a skin, whose texture has no name, has no mask
-                colored.SetTexture(
-                    MaskTexId,
+                PlayerColorMod.Paint(
+                    colored,
+                    texture,
                     art == null && slot.TextureName.Length > 0
                         ? PlayerColorMod.MaskFor(slot.SheetName, slot.TextureName)
-                        : PlayerColorMod.NoMask
+                        : PlayerColorMod.NoMask,
+                    slot.Materials[0],
+                    color
                 );
-                var source = slot.Materials[0];
-                if (source.HasColor(FlashColorId)) {
-                    colored.SetColor(FlashColorId, source.GetColor(FlashColorId));
-                    colored.SetFloat(FlashAmountId, source.GetFloat(FlashAmountId));
-                }
-
-                colored.SetFloat(BrightnessId, color.Brightness);
-                colored.SetFloat(SaturationId, color.Saturation);
-                colored.SetColor(MaskFromColorId, SkinLook.PlayerColorOriginal);
-                colored.SetColor(MaskColorId, color.Color);
             }
 
             slot.Sheet.Use(slot.Index, colored);

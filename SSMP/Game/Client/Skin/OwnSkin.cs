@@ -346,7 +346,7 @@ internal static class OwnSkin {
     /// <summary>
     /// Whether a texture is one of the game's own: one that a skin put in has no name or is named after the skin.
     /// </summary>
-    private static bool IsGameTexture(Texture? texture) =>
+    internal static bool IsGameTexture(Texture? texture) =>
         texture != null && texture.name.Length > 0 &&
         !texture.name.StartsWith(PackArt.NamePrefix, StringComparison.Ordinal);
 

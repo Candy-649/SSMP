@@ -297,6 +297,7 @@ internal class SittingPreview : MonoBehaviour {
         camera.allowHDR = false;
         camera.allowMSAA = false;
         camera.targetTexture = _texture;
+        CloakColourPreview.Attach(camera, figure);
 
         _image.texture = _texture;
         _image.color = new Color(1f, 1f, 1f, 0f);
