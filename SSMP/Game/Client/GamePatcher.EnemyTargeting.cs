@@ -26,48 +26,10 @@ internal partial class GamePatcher {
     private const float EnemyRetargetIntervalSeconds = 0.2f;
 
     /// <summary>
-    /// How much nearer the other player has to be, as a share of the distance to the one an enemy is already after,
-    /// before it turns to them. A fifth nearer.
-    ///
-    /// A share rather than a fixed amount, because a fixed one was added to the **square** of the distance and so
-    /// meant less and less the further away the enemy was. Four units of it is a real margin at two units' distance
-    /// and half a percent at twenty, which is why a flyer far from both players changed its mind six hundred and
-    /// sixty times in one session: the two distances crossed each other constantly and there was nothing to stop it
-    /// following them. A share is the same margin at every distance.
-    /// </summary>
-    private const float TargetSwitchNearerShare = 0.2f;
-
-    /// <summary>
-    /// <see cref="TargetSwitchNearerShare"/> as it is compared: distances are kept squared to avoid a square root on
-    /// every check, so the share has to be squared with them.
-    /// </summary>
-    private const float TargetSwitchNearerShareSquared =
-        (1f - TargetSwitchNearerShare) * (1f - TargetSwitchNearerShare);
-
-    /// <summary>
-    /// Approved multiplayer target per enemy owner instance ID.
+    /// Approved multiplayer target per enemy owner instance ID: whom each creature goes after, by the one rule for every
+    /// creature, whatever looks for a player for it (see KeptTarget and TurnAtMoveStart).
     /// </summary>
     private static readonly Dictionary<int, GameObject> EnemyApprovedTargets = new();
-
-    /// <summary>
-    /// How long an enemy stays with the player it has just turned to, in seconds, before the nearer of the two can
-    /// take it away again.
-    ///
-    /// Without this an enemy re-decides every time it is asked, and with two players in a room it is asked
-    /// constantly: one fight of a few enemies changed its mind twenty-one times, one enemy eleven of them. What that
-    /// looks like is an enemy that cannot commit to either player and does nothing well to either of them.
-    ///
-    /// Three seconds because that is roughly what the games that solved this first settled on - Doom holds a target
-    /// for a hundred tics, which is just under three - and because it is long enough to see a whole attack out, which
-    /// is the thing the changing of minds was interrupting.
-    /// </summary>
-    private const float TargetLockTime = 3f;
-
-    /// <summary>
-    /// When each enemy's hold on the player it turned to runs out, by the same key as
-    /// <see cref="EnemyApprovedTargets"/>.
-    /// </summary>
-    private static readonly Dictionary<int, float> EnemyTargetLocks = new();
 
     /// <summary>
     /// Cached resolved enemy target owner per GameObject instance ID to avoid deep transform parent lookups.
@@ -131,6 +93,12 @@ internal partial class GamePatcher {
         typeof(Walker).GetField("hero", InstanceNonPublicFlags);
 
     /// <summary>
+    /// Reflected field storing the place across which a <see cref="Walker"/> that waits for the hero to cross it starts.
+    /// </summary>
+    private static readonly FieldInfo? WalkerWaitHeroXField =
+        typeof(Walker).GetField("waitHeroX", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+    /// <summary>
     /// Reflected private field storing the cached hero transform used by <see cref="WalkerV2"/>.
     /// </summary>
     private static readonly FieldInfo? WalkerV2HeroField =
@@ -144,6 +112,8 @@ internal partial class GamePatcher {
 
     private static readonly Func<Walker, HeroController?>? GetWalkerHero =
         CompileGetter<HeroController?>(WalkerHeroField);
+
+    private static readonly Func<Walker, float>? GetWalkerWaitHeroX = CompileGetter<float>(WalkerWaitHeroXField);
 
     /// <summary>
     /// Compiles a dynamic lambda delegate for retrieving the value of a private field on a <see cref="Walker"/> instance.
@@ -245,9 +215,8 @@ internal partial class GamePatcher {
         EnemyApprovedTargets[id] = target;
 
         if (changed) {
-            // Only on a change. Set every time it is approved, and an enemy that is asked about the same player five
-            // times a second would hold a lock that never runs out and could never turn to the other one at all.
-            EnemyTargetLocks[id] = Time.unscaledTime + TargetLockTime;
+            // Only on a change: the hold after a turn (see IsHolding) starts again with each one, and one started every
+            // time it is approved would never run out for an enemy asked about the same player five times a second
             NoteTurn(id, last);
 
             SayWhoAnEnemyGoesAfter(owner, target);
@@ -266,8 +235,8 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whom a creature or a thing went after, until when it held to them and how it had turned (see TargetTurns), to
-    /// give back with <see cref="GiveBackTarget"/>.
+    /// Whom a creature or a thing went after and how it had turned (see TargetTurns), to give back with
+    /// <see cref="GiveBackTarget"/>.
     /// </summary>
     internal sealed class TargetHold {
         /// <summary>
@@ -276,19 +245,14 @@ internal partial class GamePatcher {
         public GameObject? Target;
 
         /// <summary>
-        /// Until when it held to them, if it did.
-        /// </summary>
-        public float? LockedUntil;
-
-        /// <summary>
-        /// A copy of how it had turned, if it picks its moves.
+        /// A copy of how it had turned, if it went after a player before.
         /// </summary>
         public TargetTurns? Turns;
     }
 
     /// <summary>
-    /// Whom a creature or a thing goes after now, until when it holds to them if it does, and how it has turned, to
-    /// give back with <see cref="GiveBackTarget"/>; null for nothing that goes after anyone.
+    /// Whom a creature or a thing goes after now and how it has turned, to give back with
+    /// <see cref="GiveBackTarget"/>; null for nothing that goes after anyone.
     /// </summary>
     /// <param name="thing">The creature or thing, or one of its parts.</param>
     public static TargetHold? TargetHoldOf(GameObject thing) {
@@ -301,7 +265,6 @@ internal partial class GamePatcher {
         var target = EnemyApprovedTargets.TryGetValue(id, out var approved) && approved != null ? approved : null;
         return new TargetHold {
             Target = target,
-            LockedUntil = target != null && EnemyTargetLocks.TryGetValue(id, out var lockedUntil) ? lockedUntil : null,
             Turns = Turns.TryGetValue(id, out var turns) ? turns.Copy() : null
         };
     }
@@ -330,16 +293,10 @@ internal partial class GamePatcher {
         var target = hold?.Target is { } held && held != null ? held : hero != null ? hero.gameObject : null;
         if (target == null) {
             EnemyApprovedTargets.Remove(id);
-            EnemyTargetLocks.Remove(id);
             return;
         }
 
         EnemyApprovedTargets[id] = target;
-        if (hold is { LockedUntil: { } lockedUntil }) {
-            EnemyTargetLocks[id] = lockedUntil;
-        } else {
-            EnemyTargetLocks.Remove(id);
-        }
     }
 
     /// <summary>
@@ -385,7 +342,6 @@ internal partial class GamePatcher {
         foreach (var id in owners) {
             if (player == null) {
                 EnemyApprovedTargets.Remove(id);
-                EnemyTargetLocks.Remove(id);
             } else {
                 EnemyApprovedTargets[id] = player;
             }
@@ -506,7 +462,6 @@ internal partial class GamePatcher {
     /// </summary>
     private static void ClearTargetCaches() {
         EnemyApprovedTargets.Clear();
-        EnemyTargetLocks.Clear();
         TargetOwnerCache.Clear();
         SetOffByEnemy.Clear();
         SetOffForPlayer.Clear();
@@ -517,10 +472,9 @@ internal partial class GamePatcher {
     /// <summary>
     /// Takes a player away from every enemy that had settled on them.
     ///
-    /// Leaving them off the list of people worth going after is not enough on its own: an enemy that has already
-    /// settled on someone holds on to them for a few seconds whatever the list says, which is deliberate - it is
-    /// what stops two enemies swapping between two players every frame - and here it would mean a few more seconds
-    /// of hitting a player who is already down.
+    /// Leaving them off the list of people worth going after is not enough on its own: an enemy no longer keeps them
+    /// (KeepsTarget), but what it aims at for it aims at the one it settled on until it settles on someone else, and
+    /// here that would mean more hitting of a player who is already down.
     /// </summary>
     /// <param name="player">The player to take away.</param>
     public static void ForgetPlayerAsTarget(GameObject? player) {
@@ -543,7 +497,6 @@ internal partial class GamePatcher {
 
         foreach (var owner in owners) {
             EnemyApprovedTargets.Remove(owner);
-            EnemyTargetLocks.Remove(owner);
         }
 
         var turned = TurnEnemiesAwayFrom(player, owners);
@@ -938,13 +891,13 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Resolves the approved target transform for a <see cref="Walker"/> instance.
-    /// Falls back to the vanilla target field when no approved multiplayer target exists.
+    /// Resolves the approved target transform for a <see cref="Walker"/> instance, by the one rule for every creature
+    /// (see MoverTarget). Falls back to the vanilla target field when no approved multiplayer target exists.
     /// </summary>
     /// <param name="self">The walker being queried.</param>
     /// <returns>The transform of the target, or null if none is available.</returns>
     private static Transform? GetApprovedEnemyTargetTransform(Walker self) {
-        var approvedTarget = GetApprovedEnemyTarget(self.gameObject);
+        var approvedTarget = MoverTarget(self.gameObject, "as it walked");
         if (approvedTarget != null) {
             return approvedTarget.transform;
         }
@@ -954,8 +907,39 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// The player a <see cref="Walker"/> that waits to start goes by (see ILWalkerUpdateWaitingForConditions): of the
+    /// players in the room, the one nearest across the place where it starts as the hero crosses it, so that either
+    /// player starts it there, without it going after anyone yet. It went by whom it went after or the player of the
+    /// game that runs it before, and the other player walked across that place without starting it.
+    /// </summary>
+    /// <param name="self">The walker being queried.</param>
+    /// <returns>The transform of the player, or null for nobody in the room.</returns>
+    private static Transform? GetWaitingWalkerTargetTransform(Walker self) {
+        if (GetWalkerWaitHeroX == null) {
+            return GetApprovedEnemyTargetTransform(self);
+        }
+
+        var waitX = GetWalkerWaitHeroX(self);
+        Transform? nearest = null;
+        var nearestDistance = float.PositiveInfinity;
+        foreach (var player in PlayerTargetRegistry.GetTrackedPlayers()) {
+            if (player == null) {
+                continue;
+            }
+
+            var distance = Mathf.Abs(player.transform.position.x - waitX);
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest = player.transform;
+            }
+        }
+
+        return nearest;
+    }
+
+    /// <summary>
     /// IL hook that rewrites hero field reads in <see cref="Walker.UpdateWaitingForConditions"/>
-    /// to use the approved multiplayer target instead.
+    /// to use the player nearest the place where it starts instead (see GetWaitingWalkerTargetTransform).
     /// </summary>
     /// <param name="il">The IL context to modify.</param>
     private static void ILWalkerUpdateWaitingForConditions(ILContext il) {
@@ -974,7 +958,7 @@ internal partial class GamePatcher {
                     c.Emit(
                         OpCodes.Call,
                         typeof(GamePatcher).GetMethod(
-                            nameof(GetApprovedEnemyTargetTransform), BindingFlags.NonPublic | BindingFlags.Static
+                            nameof(GetWaitingWalkerTargetTransform), BindingFlags.NonPublic | BindingFlags.Static
                         )!
                     );
                 } else {
@@ -983,7 +967,7 @@ internal partial class GamePatcher {
                     c.Emit(
                         OpCodes.Call,
                         typeof(GamePatcher).GetMethod(
-                            nameof(GetApprovedEnemyTargetTransform), BindingFlags.NonPublic | BindingFlags.Static
+                            nameof(GetWaitingWalkerTargetTransform), BindingFlags.NonPublic | BindingFlags.Static
                         )!
                     );
                 }
@@ -1067,6 +1051,9 @@ internal partial class GamePatcher {
             return;
         }
 
+        // Whom its creature goes after, by the one rule for every creature, as it aims at a player (see LookAsItAims)
+        LookAsItAims(action.Fsm?.FsmComponent);
+
         var approvedTarget = GetFsmActionTarget(requester);
         if (approvedTarget != null) {
             RetargetFsmActionGameObjectFields(
@@ -1125,13 +1112,19 @@ internal partial class GamePatcher {
             return;
         }
 
-        var approvedTarget = GetFsmActionTarget(fsm.gameObject);
-        if (approvedTarget == null) {
+        var activeState = fsm.Fsm?.ActiveState;
+        if (activeState?.Actions == null) {
             return;
         }
 
-        var activeState = fsm.Fsm?.ActiveState;
-        if (activeState?.Actions == null) {
+        // A creature that stays in a state where it aims at a player keeps going after one, or looks for one, there too
+        // (see LookAsItAims)
+        if (AimsAtAPlayerNow(activeState)) {
+            LookAsItAims(fsm);
+        }
+
+        var approvedTarget = GetFsmActionTarget(fsm.gameObject);
+        if (approvedTarget == null) {
             return;
         }
 
@@ -1448,44 +1441,6 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Determines whether an enemy should transfer its approved target to a new candidate.
-    /// </summary>
-    /// <param name="owner">The enemy owner.</param>
-    /// <param name="approvedTarget">The currently approved target.</param>
-    /// <param name="candidateTarget">The candidate target found by the acquisition range.</param>
-    /// <returns>
-    /// <see langword="true"/> when the candidate is clearly closer than the current approved target; otherwise
-    /// <see langword="false"/>.
-    /// </returns>
-    private static bool ShouldSwitchApprovedTarget(
-        GameObject owner,
-        GameObject approvedTarget,
-        GameObject candidateTarget
-    ) {
-        if (approvedTarget == candidateTarget) {
-            return false;
-        }
-
-        if (!PlayerTargetRegistry.IsHeroLikeObject(approvedTarget)) {
-            return true;
-        }
-
-        // Held to the player it turned to for a moment, so that being asked again does not mean deciding again. This
-        // is only ever reached while the player it is holding to is still there and still in sight: a target that has
-        // died, left or gone out of sight never gets this far, it is taken away before anything is asked.
-        if (EnemyTargetLocks.TryGetValue(owner.GetInstanceID(), out var lockedUntil) &&
-            Time.unscaledTime < lockedUntil) {
-            return false;
-        }
-
-        var ownerPosition = (Vector2) owner.transform.position;
-        var approvedDistance = ((Vector2) approvedTarget.transform.position - ownerPosition).sqrMagnitude;
-        var candidateDistance = ((Vector2) candidateTarget.transform.position - ownerPosition).sqrMagnitude;
-
-        return candidateDistance < approvedDistance * TargetSwitchNearerShareSquared;
-    }
-
-    /// <summary>
     /// Updates a cached target field on all active behaviour instances of the given type.
     /// </summary>
     /// <typeparam name="TComponent">The behaviour type containing the cached target field.</typeparam>
@@ -1525,7 +1480,8 @@ internal partial class GamePatcher {
     /// <param name="field">The target field to write the approved target to.</param>
     private static void UpdateComponentTarget<TComponent>(TComponent component, FieldInfo field)
         where TComponent : Behaviour {
-        var target = GetApprovedEnemyTarget(component.gameObject);
+        // By the one rule for every creature, as for a walker (see MoverTarget)
+        var target = MoverTarget(component.gameObject, "as it moved");
         if (target == null) {
             return;
         }
@@ -1587,7 +1543,6 @@ internal partial class GamePatcher {
         if (obj == null) return;
         var instanceId = obj.GetInstanceID();
         EnemyApprovedTargets.Remove(instanceId);
-        EnemyTargetLocks.Remove(instanceId);
         TargetOwnerCache.Remove(instanceId);
         SongTargets.Remove(instanceId);
         PendingSongTargets.Remove(instanceId);

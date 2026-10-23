@@ -220,7 +220,7 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Puts back whom a creature went after, until when it held to them and how it had turned, as a hold says, without
+    /// Puts back whom a creature went after and how it had turned, as a hold says, without
     /// pointing what it aims at anywhere: for a creature that is turned to a player at once after.
     /// </summary>
     /// <param name="id">The instance ID of the creature.</param>
@@ -234,12 +234,6 @@ internal partial class GamePatcher {
             EnemyApprovedTargets[id] = target;
         } else {
             EnemyApprovedTargets.Remove(id);
-        }
-
-        if (hold.LockedUntil is { } lockedUntil) {
-            EnemyTargetLocks[id] = lockedUntil;
-        } else {
-            EnemyTargetLocks.Remove(id);
         }
     }
 

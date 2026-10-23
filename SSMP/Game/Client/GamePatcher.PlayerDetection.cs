@@ -177,6 +177,8 @@ internal partial class GamePatcher {
 
         var requester = self.Fsm?.GameObject;
         if (requester != null && requester.GetComponentInParent<HealthManager>() != null) {
+            // Whom it goes after, by the one rule for every creature, as it asks where the player is (see LookAsItAims)
+            LookAsItAims(self.Fsm?.FsmComponent);
             var approvedTarget = GetFsmActionTarget(requester);
             if (approvedTarget == null) {
                 orig(self);
@@ -280,23 +282,21 @@ internal partial class GamePatcher {
             return inside;
         }
 
-        var approvedTargetIsValid = IsValidTargetForAlertRange(self, approvedTarget);
-        NoteRangeAnswer(turns, approvedTargetIsValid);
-
-        // A creature that picks its moves and fights the player it goes after turns from them only as it starts a move
-        // (TurnAtMoveStart), while they are still within its reach. A range with which it chooses a move asks about
-        // them alone, with the other player standing nearer or not; a range with which it notices players still
-        // notices the other one when its own is not in it, and only then.
-        if (approvedTarget != null && turns != null && HoldsTargetBetweenMoves(owner, turns, approvedTarget) &&
-            (approvedTargetIsValid || !IsAwarenessRange(self))) {
-            return approvedTargetIsValid;
+        // The one rule for every creature, whatever asks (see KeptTarget): while it keeps going after a player, each of
+        // its ranges asks about them alone, with the other player standing nearer or not, and it turns from them only by
+        // its roll or once it no longer keeps them
+        if (KeptTarget(owner) is { } kept) {
+            var keptInside = IsValidTargetForAlertRange(self, kept);
+            NoteRangeAnswer(TurnsOf(owner), keptInside);
+            return keptInside;
         }
 
+        var approvedTargetIsValid = IsValidTargetForAlertRange(self, approvedTarget);
+        NoteRangeAnswer(TurnsOf(owner), approvedTargetIsValid);
+
+        // Nobody it keeps going after: the nearest player this range sees
         var candidateTarget = GetNearestPlayerInsideAlertRange(self);
-        if (candidateTarget != null &&
-            HasLineOfSightToAlertRangeTarget(self, candidateTarget) &&
-            (approvedTarget == null || !approvedTargetIsValid ||
-             ShouldSwitchApprovedTarget(owner, approvedTarget, candidateTarget))) {
+        if (candidateTarget != null && HasLineOfSightToAlertRangeTarget(self, candidateTarget)) {
             ApproveEnemyTarget(owner, candidateTarget);
             return true;
         }
@@ -447,58 +447,74 @@ internal partial class GamePatcher {
             return approvedTarget;
         }
 
-        // What its sight finds is what its ranges would (see IsFighting)
+        // What its sight finds is what its ranges would (see IsFighting), and the ranges it looks through are ones it
+        // notices players with (see NoteSightAsked)
         var owner = GetEnemyTargetOwner(detector.gameObject);
         var turns = TurnsOf(owner);
         NoteRangeAnswer(turns, false);
-        if (approvedTarget == null) {
-            GameObject? candidateTarget = null;
-            var candidateDistance = float.PositiveInfinity;
+        NoteSightAsked(alertRanges);
 
+        // The one rule for every creature (see KeptTarget): its sight looks for the player it keeps going after alone, and
+        // loses sight of them without turning to the other player. It turned at once before, and back again as soon as
+        // the first came back into sight, several times a second while both stood at the edge of what it sees (USER
+        // 10-23: "这个遭遇战的虫子真的有换目标吗？！")
+        if (owner != null && KeptTarget(owner) is { } kept) {
             foreach (var alertRange in alertRanges) {
-                if (alertRange == null || !CanAcquireMultiplayerTarget(alertRange)) {
-                    continue;
+                if (alertRange != null && IsValidTargetForAlertRange(alertRange, kept)) {
+                    NoteRangeAnswer(TurnsOf(owner), true);
+                    return kept;
                 }
-
-                var target = GetNearestPlayerInsideAlertRange(alertRange);
-                if (target == null || !HasLineOfSightToAlertRangeTarget(alertRange, target)) {
-                    continue;
-                }
-
-                var distance = ((Vector2) detector.transform.position - (Vector2) target.transform.position)
-                    .sqrMagnitude;
-                if (distance >= candidateDistance) {
-                    continue;
-                }
-
-                candidateDistance = distance;
-                candidateTarget = target;
             }
 
-            if (candidateTarget != null && owner != null) {
-                ApproveEnemyTarget(owner, candidateTarget);
-            }
-
-            return candidateTarget;
+            return null;
         }
 
+        // Nobody it keeps going after: the nearest player its ranges see
+        GameObject? candidateTarget = null;
+        var candidateDistance = float.PositiveInfinity;
+
         foreach (var alertRange in alertRanges) {
-            if (alertRange == null) {
+            if (alertRange == null || !CanAcquireMultiplayerTarget(alertRange)) {
                 continue;
             }
 
-            if (IsValidTargetForAlertRange(alertRange, approvedTarget)) {
-                NoteRangeAnswer(turns, true);
-                return approvedTarget;
+            var target = GetNearestPlayerInsideAlertRange(alertRange);
+            if (target == null || !HasLineOfSightToAlertRangeTarget(alertRange, target)) {
+                continue;
+            }
+
+            var distance = ((Vector2) detector.transform.position - (Vector2) target.transform.position)
+                .sqrMagnitude;
+            if (distance >= candidateDistance) {
+                continue;
+            }
+
+            candidateDistance = distance;
+            candidateTarget = target;
+        }
+
+        if (candidateTarget != null && owner != null) {
+            ApproveEnemyTarget(owner, candidateTarget);
+        }
+
+        return candidateTarget;
+    }
+
+    /// <summary>
+    /// Notes that a creature's sight asked the ranges it looks through, as a range is noted when the creature asks it
+    /// itself: they are ranges it notices players with (see AwarenessRangesOf), and a player it goes after who is in
+    /// none of them is not noticed (see IsNoticedBy). Asked by nothing else, they counted for nothing, and a flyer kept
+    /// going after a player who had flown out of its sight while the other one stood in it.
+    /// </summary>
+    /// <param name="alertRanges">The ranges.</param>
+    private static void NoteSightAsked(AlertRange[] alertRanges) {
+        var now = Time.unscaledTime;
+        foreach (var alertRange in alertRanges) {
+            if (alertRange != null && BelongsToAnEnemy(alertRange) &&
+                EnemyAlertRanges.TryGetValue(alertRange, out var note)) {
+                note.AskedAt = now;
             }
         }
-
-        if (owner != null) {
-            EnemyApprovedTargets.Remove(owner.GetInstanceID());
-            EnemyTargetLocks.Remove(owner.GetInstanceID());
-        }
-
-        return null;
     }
 
     /// <summary>

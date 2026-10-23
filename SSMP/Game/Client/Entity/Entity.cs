@@ -3332,6 +3332,15 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether this game runs the creature that an object is a part of: the game of the scene host, once that is
+    /// settled, where the creature's own FSMs run (see <see cref="RunsHere"/>).
+    /// </summary>
+    /// <param name="part">The creature or one of its parts.</param>
+    internal static bool RunsCreatureHere(GameObject? part) {
+        return part != null && FindByPart(part) is { _isSceneHostDetermined: true, _isControlled: false };
+    }
+
+    /// <summary>
     /// Whether an FSM is one of those of this entity that only the game of the scene host runs: an FSM of the creature
     /// itself, on the room's own object or on the copy, that is not run by each game (see
     /// <see cref="IsRunByEachGame"/>). What such an FSM opens - a line, a prompt - opens in that game alone.

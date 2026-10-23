@@ -18,17 +18,25 @@ namespace SSMP.Game.Client;
 /// 锁敌。").
 ///
 /// Before this a creature turned only to a player who stood in one of its ranges while the one it went after did
-/// not, or who stood a fifth nearer (see ShouldSwitchApprovedTarget), and a creature with no ranges went after the
-/// scene host's player alone: it fought whoever kept closest to it, and the other player could stand back for the
-/// whole fight.
+/// not, or who stood a fifth nearer, and a creature with no ranges went after the scene host's player alone: it fought
+/// whoever kept closest to it, and the other player could stand back for the whole fight.
 /// Now the game that runs a creature rolls, each time the creature starts a move, whether it turns to another player
 /// within its reach - the way the games that share one monster between players do it, on a growing chance that is
 /// reset by a turn - and while it fights the player it goes after, nothing between two moves turns it to the nearer
 /// one.
+///
+/// Since 10-24 this is the one rule for every creature (USER: "我不知道你再说哪个，那个遭遇战所有的虫子都会飞，你就不能统一
+/// 一下吗，这换目标都改了多少版了，就不能所有怪都统一成一版吗"): it applied to creatures that pick their moves at random,
+/// while their ranges, the sight of a flyer and the walking of a walker each kept a rule of their own, so a flyer turned
+/// back and forth between two players several times a second. A creature goes after the nearest player it notices,
+/// keeps going after them for <see cref="TurnHoldTime"/> whatever else, and after that while they are within its
+/// reach and it notices them (see KeepsTarget), rolling whether to turn to another as it starts a move, or, for one
+/// that picks no moves, as it looks for players (see RollBetweenTimes).
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
-    /// How far a player may be from a creature, in units, to be one that it may turn to as it starts a move: half the
+    /// How far a player may be from a creature, in units, to be one that it keeps going after once its hold is over (see
+    /// KeepsTarget), may turn to as it rolls, or takes as it first looks for one (see AcquireNearestNoticed): half the
     /// width of what the camera shows (<see cref="CameraHalfWidth"/>), so that it turns only to someone it can reach
     /// without crossing the room. The further this reaches, the more a creature runs from one player to the other
     /// between its moves; the shorter, the more it keeps to whoever is near it.
@@ -89,10 +97,29 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// How long after it last started a move a creature still counts as one that picks its moves, in seconds, and so
-    /// turns only as it starts one (see <see cref="HoldsTargetBetweenMoves"/>). One that picks a move only now and
-    /// then goes back to turning as it did before.
+    /// rolls whether to turn only as it starts one (see <see cref="PicksMovesLately"/>). One that picks a move only now
+    /// and then rolls as it looks for players between times as well.
     /// </summary>
     private const float MovePickerMemory = 10f;
+
+    /// <summary>
+    /// How often a creature that goes after no one may look for the nearest player it notices, in seconds (see
+    /// <see cref="AcquireNearestNoticed"/>), since what looks for one for it, like its walking, may ask every frame.
+    /// </summary>
+    private const float LookSpacing = 0.25f;
+
+    /// <summary>
+    /// How long whether a creature keeps going after a player is taken as it was worked out, in seconds (see
+    /// <see cref="KeepsTarget"/>): its ranges, its sight, its walking and its chase ask every frame, and each time it
+    /// is worked out it measures how far the player is and looks for walls in between.
+    /// </summary>
+    private const float KeepSpacing = 0.1f;
+
+    /// <summary>
+    /// How often what aims at a player for a creature has it keep going after one or look for one, in seconds (see
+    /// <see cref="LookAsItAims"/>): a creature that chases a player aims at them every frame.
+    /// </summary>
+    private const float AimLookSpacing = 0.1f;
 
     /// <summary>
     /// The actions with which a creature picks its next move at random, by name: a state that holds one is where a
@@ -105,8 +132,9 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// The parts of the names of the ranges with which a creature notices a player, rather than chooses what to do to
-    /// one it goes after: someone who comes into one is noticed whomever it goes after (see
-    /// <see cref="IsAwarenessRange"/>). A name that starts with "Start" counts as well.
+    /// one it goes after: it keeps going after a player while it notices them by one, and may turn to another player
+    /// it notices by one (see <see cref="IsAwarenessRange"/>, IsNoticedBy). A name that starts with "Start" counts as
+    /// well.
     /// </summary>
     private static readonly string[] AwarenessRangeNameParts = [
         "Wake", "Alert", "Ambush", "Sight", "Seen", "Look", "Needolin", "Aggro"
@@ -135,9 +163,16 @@ internal partial class GamePatcher {
     private static readonly Dictionary<int, AlertRange[]> AwarenessRanges = new();
 
     /// <summary>
-    /// How each creature that picks its moves has turned, by its instance ID (see <see cref="TargetTurns"/>).
+    /// How each creature that went after a player or looked for one has turned, by its instance ID (see
+    /// <see cref="TargetTurns"/>).
     /// </summary>
     private static readonly Dictionary<int, TargetTurns> Turns = new();
+
+    /// <summary>
+    /// When what aimed at a player for each creature last had it keep going after one or look for one, by the instance
+    /// ID of the creature (see <see cref="LookAsItAims"/>).
+    /// </summary>
+    private static readonly Dictionary<int, float> AimLooks = new();
 
     /// <summary>
     /// The dice of the turns: not the game's own, which the dice of what is set off here are taken from and handed to
@@ -174,7 +209,7 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// How a creature that picks its moves has turned from one player to another.
+    /// How a creature has turned from one player to another.
     /// </summary>
     internal sealed class TargetTurns {
         /// <summary>
@@ -221,16 +256,28 @@ internal partial class GamePatcher {
         public readonly Dictionary<GameObject, float> LeftAt = new();
 
         /// <summary>
-        /// Whether the player it went after was within its reach, as last worked out, for whom and in which frame (see
-        /// <see cref="HoldsTargetBetweenMoves"/>), since that is asked many times in one frame.
+        /// Whether it was seen to pick a move at random (see TurnAtMoveStart): one that does rolls whether to turn as it
+        /// starts a move, one that does not as it looks for players (see <see cref="PicksMovesLately"/>).
         /// </summary>
-        public bool TargetInReach;
+        public bool PicksMoves;
 
-        /// <inheritdoc cref="TargetInReach"/>
-        public GameObject? ReachTarget;
+        /// <summary>
+        /// Whether it keeps going after the player it goes after, as last worked out, for whom and when (see
+        /// <see cref="KeepsTarget"/>), since that is asked many times a frame.
+        /// </summary>
+        public bool Keeps;
 
-        /// <inheritdoc cref="TargetInReach"/>
-        public int ReachFrame = -1;
+        /// <inheritdoc cref="Keeps"/>
+        public GameObject? KeepTarget;
+
+        /// <inheritdoc cref="Keeps"/>
+        public float KeptAt = float.NegativeInfinity;
+
+        /// <summary>
+        /// When it last looked for the nearest player it notices while it went after no one (see
+        /// <see cref="AcquireNearestNoticed"/>).
+        /// </summary>
+        public float LookedAt = float.NegativeInfinity;
 
         /// <summary>
         /// A copy of how it has turned, to put back with <see cref="PutBack"/>.
@@ -286,6 +333,7 @@ internal partial class GamePatcher {
     private static void ClearMoveStartTargets() {
         AwarenessRanges.Clear();
         Turns.Clear();
+        AimLooks.Clear();
         IdleWatches.Clear();
         WoundAnswers.Clear();
     }
@@ -297,6 +345,7 @@ internal partial class GamePatcher {
     private static void ForgetMoveStartTargets(int instanceId) {
         AwarenessRanges.Remove(instanceId);
         Turns.Remove(instanceId);
+        AimLooks.Remove(instanceId);
         IdleWatches.Remove(instanceId);
         WoundAnswers.Remove(instanceId);
     }
@@ -439,10 +488,17 @@ internal partial class GamePatcher {
 
         var now = Time.unscaledTime;
         if (!Turns.TryGetValue(id, out var turns)) {
-            // The first move it is seen to start counts as a turn to whom it goes after
-            Turns[id] = new TargetTurns { TurnedAt = now, MoveFrame = Time.frameCount, MoveAt = now };
+            // The first move it is seen to start counts as a turn to whom it goes after: one that goes after no one yet
+            // and notices players by no range of its own goes after the nearest player it can reach
+            Turns[id] = new TargetTurns { TurnedAt = now, MoveFrame = Time.frameCount, MoveAt = now, PicksMoves = true };
+            if (GetApprovedEnemyTarget(owner) == null && !HasAwarenessRanges(owner)) {
+                AcquireNearestNoticed(owner, $"as it started its first move in '{state.Name}' of '{machine.FsmName}'");
+            }
+
             return;
         }
+
+        turns.PicksMoves = true;
 
         // Two of its FSMs that start a move in the same frame start one move, and a pick that the state where the move
         // started leads straight into is a part of that move (the game notes the state it left as it leaves it)
@@ -460,9 +516,14 @@ internal partial class GamePatcher {
         }
 
         // A creature that has noticed nobody yet turns to nobody; one that notices no one by itself - a boss that only
-        // ever looks at the player - goes after this game's player while it goes after no one in particular
-        var held = GetApprovedEnemyTarget(owner) ?? (HasAwarenessRanges(owner) ? null : LocalPlayerObject());
+        // ever looks at the player - goes after the nearest player within its reach while it goes after no one, where
+        // it went after this game's player before, whoever stood nearer
+        var held = GetApprovedEnemyTarget(owner);
         if (held == null) {
+            if (!HasAwarenessRanges(owner)) {
+                AcquireNearestNoticed(owner, $"as it started a move in '{state.Name}' of '{machine.FsmName}'");
+            }
+
             return;
         }
 
@@ -471,15 +532,16 @@ internal partial class GamePatcher {
             return;
         }
 
-        var holding = IsHolding(turns, now);
         var forced = !candidates.Contains(held);
         var chance = 1f;
         if (forced) {
-            if (holding && PlayerTargetRegistry.GetTrackedPlayers().Contains(held)) {
+            // Out of its reach or unnoticed, it lets them go once its hold of TurnHoldTime is over, as everything else
+            // that looks for a player for it does (see KeepsTarget); down or gone, at once
+            if (IsHeldByTime(turns, now) && PlayerTargetRegistry.GetTrackedPlayers().Contains(held)) {
                 return;
             }
         } else {
-            if (candidates.Count < 2 || holding || now - turns.RolledAt < TurnRollSpacing) {
+            if (candidates.Count < 2 || IsHolding(turns, now) || now - turns.RolledAt < TurnRollSpacing) {
                 return;
             }
 
@@ -535,7 +597,7 @@ internal partial class GamePatcher {
     /// <param name="from">The player it went after before, or null for none.</param>
     private static void NoteTurn(int instanceId, GameObject? from) {
         if (!Turns.TryGetValue(instanceId, out var turns)) {
-            return;
+            Turns[instanceId] = turns = new TargetTurns();
         }
 
         turns.TurnedAt = Time.unscaledTime;
@@ -547,7 +609,7 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// How a creature that picks its moves has turned, or null for one that does not.
+    /// How a creature has turned, or null for one that never went after a player nor looked for one.
     /// </summary>
     /// <param name="owner">The creature, or null.</param>
     private static TargetTurns? TurnsOf(GameObject? owner) {
@@ -555,19 +617,45 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whether a creature fights a player already (see <see cref="IsFighting"/>): whom it goes after is then up to its
-    /// moves when another player wounds it, after it has answered the wound (see <see cref="AnswerWound"/>).
+    /// How a creature has turned, written down the first time it is asked for, as a turn now.
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    private static TargetTurns TurnsFor(GameObject owner) {
+        var id = owner.GetInstanceID();
+        if (!Turns.TryGetValue(id, out var turns)) {
+            Turns[id] = turns = new TargetTurns { TurnedAt = Time.unscaledTime, MovesSince = -1 };
+        }
+
+        return turns;
+    }
+
+    /// <summary>
+    /// Whether a creature fights a player already (see <see cref="IsFighting"/>) and picks its moves: whom it goes after
+    /// is then up to its moves when another player wounds it, after it has answered the wound (see
+    /// <see cref="AnswerWound"/>). One that picks no moves goes after the player who wounded it from there.
     /// </summary>
     /// <param name="creature">The creature.</param>
     internal static bool FightsAPlayer(GameObject creature) {
-        return TurnsOf(GetEnemyTargetOwner(creature)) is { } turns && IsFighting(turns, Time.unscaledTime);
+        var now = Time.unscaledTime;
+        return TurnsOf(GetEnemyTargetOwner(creature)) is { } turns && PicksMovesLately(turns, now) &&
+               IsFighting(turns, now);
+    }
+
+    /// <summary>
+    /// Whether a creature picks its moves at random and started one within <see cref="MovePickerMemory"/>, so that it
+    /// rolls whether to turn as it starts one rather than between times.
+    /// </summary>
+    /// <param name="turns">How it has turned.</param>
+    /// <param name="now">The time now.</param>
+    private static bool PicksMovesLately(TargetTurns turns, float now) {
+        return turns.PicksMoves && now - turns.MoveAt <= MovePickerMemory;
     }
 
     /// <summary>
     /// Notes that a creature asked one of its ranges about a player, and whether the range found the player it goes
     /// after inside (see <see cref="IsFighting"/>).
     /// </summary>
-    /// <param name="turns">How the creature has turned, or null for one that does not pick its moves.</param>
+    /// <param name="turns">How the creature has turned, or null for one that never went after a player.</param>
     /// <param name="foundTarget">Whether the range found the player it goes after inside.</param>
     private static void NoteRangeAnswer(TargetTurns? turns, bool foundTarget) {
         if (turns == null) {
@@ -581,13 +669,25 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whether a creature still holds to the player it last turned to whatever else: for the next two moves it starts
-    /// and <see cref="TurnHoldTime"/>.
+    /// Whether a creature still holds to the player it last turned to before it may roll to turn again: for
+    /// <see cref="TurnHoldTime"/>, and for one that picks its moves, the next two moves it starts as well.
     /// </summary>
     /// <param name="turns">How it has turned.</param>
     /// <param name="now">The time now.</param>
     private static bool IsHolding(TargetTurns turns, float now) {
-        return turns.MovesSince < TurnHoldMoves || now - turns.TurnedAt < TurnHoldTime;
+        return PicksMovesLately(turns, now) && turns.MovesSince < TurnHoldMoves || IsHeldByTime(turns, now);
+    }
+
+    /// <summary>
+    /// Whether a creature still keeps the player it last turned to whatever else: for <see cref="TurnHoldTime"/>. The
+    /// moves it starts count only for when it may roll (see <see cref="IsHolding"/>): one that starts no move while the
+    /// player it turned to is out of its reach - its ranges ask about them alone and never find them - would hold to
+    /// them for as long as it counts as one that picks its moves.
+    /// </summary>
+    /// <param name="turns">How it has turned.</param>
+    /// <param name="now">The time now.</param>
+    private static bool IsHeldByTime(TargetTurns turns, float now) {
+        return now - turns.TurnedAt < TurnHoldTime;
     }
 
     /// <summary>
@@ -603,28 +703,219 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whether a creature that picks its moves holds to the player it goes after until it starts its next move (see
-    /// AnswerWhetherAPlayerIsInAlertRange): it does while it started one lately, fights the player (see
-    /// <see cref="IsFighting"/>) and the player is still within its reach. The reach is worked out once a frame, since
-    /// its ranges ask many times.
+    /// Whom a creature goes after and keeps going after (see <see cref="KeepsTarget"/>), after it rolled whether to turn
+    /// to another player if it picks no moves (see <see cref="RollBetweenTimes"/>); null when it keeps going after no
+    /// one, and what looks for a player for it takes the nearest it finds. The one rule of whom a creature goes after
+    /// for everything that looks for a player for it - its ranges, its sight, its walking - beside the turns it rolls
+    /// as it starts a move (TurnAtMoveStart) and the wounds it answers (AnswerWound).
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    private static GameObject? KeptTarget(GameObject owner) {
+        var held = GetApprovedEnemyTarget(owner);
+        if (held == null) {
+            return null;
+        }
+
+        // One that answers a wound goes after the player who dealt it until it starts its next move, from afar too (see
+        // AnswerWound)
+        if (WoundAnswers.ContainsKey(owner.GetInstanceID())) {
+            return held;
+        }
+
+        var turns = TurnsFor(owner);
+        if (!KeepsTarget(owner, turns, held)) {
+            return null;
+        }
+
+        if (!PicksMovesLately(turns, Time.unscaledTime)) {
+            RollBetweenTimes(owner, turns, held);
+            held = GetApprovedEnemyTarget(owner) ?? held;
+        }
+
+        return held;
+    }
+
+    /// <summary>
+    /// Whether a creature keeps going after the player it goes after: while they are in the room and up, for
+    /// <see cref="TurnHoldTime"/> after it turned to them (see <see cref="IsHeldByTime"/>) whatever else, and after that
+    /// while they are within its reach and it notices them (see <see cref="IsNoticedBy"/>). Worked out no more often than
+    /// <see cref="KeepSpacing"/>, since what looks for a player for it asks many times a frame.
     /// </summary>
     /// <param name="owner">The creature.</param>
     /// <param name="turns">How it has turned.</param>
     /// <param name="target">The player it goes after.</param>
-    private static bool HoldsTargetBetweenMoves(GameObject owner, TargetTurns turns, GameObject target) {
+    private static bool KeepsTarget(GameObject owner, TargetTurns turns, GameObject target) {
         var now = Time.unscaledTime;
-        if (now - turns.MoveAt > MovePickerMemory || !IsHolding(turns, now) && now - turns.FoundAt > FightMemory) {
-            return false;
+        if (now - turns.KeptAt < KeepSpacing && turns.KeepTarget == target) {
+            return turns.Keeps;
         }
 
-        if (turns.ReachFrame != Time.frameCount || turns.ReachTarget != target) {
-            turns.ReachFrame = Time.frameCount;
-            turns.ReachTarget = target;
-            turns.TargetInReach = PlayerTargetRegistry.GetTrackedPlayers().Contains(target) &&
-                                  IsWithinReach(owner.transform.position, target);
+        turns.KeptAt = now;
+        turns.KeepTarget = target;
+        turns.Keeps = PlayerTargetRegistry.GetTrackedPlayers().Contains(target) &&
+                      (IsHeldByTime(turns, now) ||
+                       IsWithinReach(owner.transform.position, target) && IsNoticedBy(owner, target));
+        return turns.Keeps;
+    }
+
+    /// <summary>
+    /// Rolls whether a creature that picks no moves turns from the player it keeps going after to another one, as one
+    /// that picks its moves does as it starts one (see TurnAtMoveStart): once its hold is over, no more often than
+    /// <see cref="TurnRollSpacing"/>, on the same chance that grows with every roll that kept it where it was, among the
+    /// players within its reach that it notices, weighed the same way (see <see cref="PickTarget"/>). Only the game
+    /// that runs the creature rolls.
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    /// <param name="turns">How it has turned.</param>
+    /// <param name="held">The player it keeps going after.</param>
+    private static void RollBetweenTimes(GameObject owner, TargetTurns turns, GameObject held) {
+        var now = Time.unscaledTime;
+        if (IsHolding(turns, now) || now - turns.RolledAt < TurnRollSpacing) {
+            return;
         }
 
-        return turns.TargetInReach;
+        // Spaced also where nothing rolls, so that the game that does not run the creature works out where it runs once
+        // a second, not each time it is asked
+        turns.RolledAt = now;
+        if (_woundedNow == owner || Save.SharedDice.PlaysAnotherGame || Entity.Entity.OwnSign != null ||
+            !Entity.Entity.RunsCreatureHere(owner) || TryGetSongTarget(owner.GetInstanceID(), out _)) {
+            return;
+        }
+
+        var candidates = FindReachablePlayers(owner);
+        if (candidates.Count < 2 || !candidates.Contains(held)) {
+            return;
+        }
+
+        var chance = Mathf.Min(TurnChanceFirst + TurnChanceStep * turns.Misses, TurnChanceMost);
+        if (TurnDice.NextDouble() >= chance) {
+            turns.Misses++;
+            return;
+        }
+
+        var pick = PickTarget(owner, turns, candidates, held);
+        if (pick == held) {
+            turns.Misses++;
+            return;
+        }
+
+        Logger.Info(
+            $"{owner.name} turned to {DescribePlayer(pick)} between moves: it rolled under {chance:P0} after " +
+            $"{turns.Misses} roll(s) that kept it where it was; weights {DescribeWeights(candidates)}"
+        );
+        turns.LeftAt[held] = now;
+        ApproveEnemyTarget(owner, pick);
+    }
+
+    /// <summary>
+    /// Has a creature that goes after no one go after the nearest player within its reach that it notices (see
+    /// <see cref="FindReachablePlayers"/>), in the game that runs it, no more often than <see cref="LookSpacing"/>:
+    /// what looks for a player for a creature that notices players by no range of its own - its moves, its aim, its
+    /// walking - took the player of the game that runs it before, whoever stood nearer.
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    /// <param name="why">What it does as it looks, for the log.</param>
+    /// <returns>The player, or null for none.</returns>
+    private static GameObject? AcquireNearestNoticed(GameObject owner, string why) {
+        var turns = TurnsFor(owner);
+        var now = Time.unscaledTime;
+        if (now - turns.LookedAt < LookSpacing) {
+            return null;
+        }
+
+        turns.LookedAt = now;
+        if (!Entity.Entity.RunsCreatureHere(owner)) {
+            return null;
+        }
+
+        var origin = (Vector2) owner.transform.position;
+        GameObject? nearest = null;
+        var nearestDistance = float.PositiveInfinity;
+        foreach (var player in FindReachablePlayers(owner)) {
+            var distance = ((Vector2) player.transform.position - origin).sqrMagnitude;
+            if (distance < nearestDistance) {
+                nearestDistance = distance;
+                nearest = player;
+            }
+        }
+
+        if (nearest != null && nearest != GetApprovedEnemyTarget(owner)) {
+            Logger.Info($"{owner.name} goes after {DescribePlayer(nearest)}, the nearest player it notices, {why}");
+            ApproveEnemyTarget(owner, nearest);
+        }
+
+        return nearest;
+    }
+
+    /// <summary>
+    /// Whom a creature that moves by a component of its own - a walker - goes after, by the one rule for every creature:
+    /// whom it keeps going after (see <see cref="KeptTarget"/>), or, for one that can be fought, the nearest player it
+    /// notices as it first looks for one (see <see cref="AcquireNearestNoticed"/>); otherwise whom it was set on, or
+    /// null for no one.
+    /// </summary>
+    /// <param name="part">The component's object.</param>
+    /// <param name="why">What it does as it looks, for the log.</param>
+    private static GameObject? MoverTarget(GameObject part, string why) {
+        var owner = GetEnemyTargetOwner(part);
+        if (owner == null) {
+            return null;
+        }
+
+        return KeptTarget(owner) ??
+               (owner.GetComponent<HealthManager>() != null ? AcquireNearestNoticed(owner, why) : null) ??
+               GetApprovedEnemyTarget(owner);
+    }
+
+    /// <summary>
+    /// Has a creature that this game runs keep going after a player, or look for one, by the one rule for every
+    /// creature (see <see cref="KeptTarget"/>), as one of its FSMs aims at a player or asks where one is, no more often
+    /// than <see cref="AimLookSpacing"/>: one that picks no moves rolls there whether to turn; one that no longer keeps
+    /// the player it went after goes after the nearest player within its reach that it notices (see
+    /// <see cref="AcquireNearestNoticed"/>), and so does one that notices players by no range of its own and goes after
+    /// no one yet. Such a creature - no range, no sight, no move it picks - aimed at the player of the game that runs
+    /// it before, whoever stood nearer, and never turned; one that fights by its aim alone after a range woke it went
+    /// on after the player it woke for wherever they went.
+    /// </summary>
+    /// <param name="machine">The FSM, or null.</param>
+    private static void LookAsItAims(PlayMakerFSM? machine) {
+        if (machine == null) {
+            return;
+        }
+
+        var owner = GetEnemyTargetOwner(machine.gameObject);
+        if (owner == null) {
+            return;
+        }
+
+        var id = owner.GetInstanceID();
+        var now = Time.unscaledTime;
+        if (AimLooks.TryGetValue(id, out var lookedAt) && now - lookedAt < AimLookSpacing) {
+            return;
+        }
+
+        AimLooks[id] = now;
+        if (!Entity.Entity.RunsHere(machine) || owner.GetComponent<HealthManager>() == null) {
+            return;
+        }
+
+        if (KeptTarget(owner) == null && (GetApprovedEnemyTarget(owner) != null || !HasAwarenessRanges(owner))) {
+            AcquireNearestNoticed(owner, "as it aimed at a player");
+        }
+    }
+
+    /// <summary>
+    /// Whether a state holds an action that aims at a player, which is pointed at the player its creature goes after
+    /// (see ActionRegistry.IsRetargeted).
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private static bool AimsAtAPlayerNow(FsmState state) {
+        foreach (var action in state.Actions ?? []) {
+            if (action != null && action.Enabled && ActionRegistry.IsRetargeted(action.GetType().Name)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -692,8 +983,9 @@ internal partial class GamePatcher {
     private static bool HasAwarenessRanges(GameObject owner) => AwarenessRangesOf(owner).Length > 0;
 
     /// <summary>
-    /// The ranges under a creature with which it notices players, found the first time. One that the creature handed
-    /// to something else as it started up is not under it any more and is not among them.
+    /// The ranges under a creature with which it notices players, and those its sight looks through, found the first
+    /// time. One that the creature handed to something else as it started up is not under it any more and is not among
+    /// them, unless its sight looks through it.
     /// </summary>
     /// <param name="owner">The creature.</param>
     private static AlertRange[] AwarenessRangesOf(GameObject owner) {
@@ -709,6 +1001,20 @@ internal partial class GamePatcher {
             }
         }
 
+        // The ranges its sight looks through are ones it notices players with, whatever they are called (see
+        // NoteSightAsked)
+        foreach (var detector in owner.GetComponentsInChildren<LineOfSightDetector>(true)) {
+            if (detector == null || LineOfSightDetectorAlertRangesField?.GetValue(detector) is not AlertRange[] sight) {
+                continue;
+            }
+
+            foreach (var range in sight) {
+                if (range != null && !found.Contains(range) && !IsNonAcquiringAlertRangeName(range.name)) {
+                    found.Add(range);
+                }
+            }
+        }
+
         AwarenessRanges[id] = ranges = found.ToArray();
         return ranges;
     }
@@ -716,9 +1022,8 @@ internal partial class GamePatcher {
     /// <summary>
     /// Whether a range is one with which a creature notices a player - it wakes, comes out of hiding or keeps watch by
     /// it - by the game's own word for it in its name, rather than one with which it chooses what to do to the player
-    /// it goes after. A player who comes into one is noticed whomever the creature goes after, as before; one who
-    /// comes into another does not turn a creature that fights until it starts a move (see
-    /// AnswerWhetherAPlayerIsInAlertRange).
+    /// it goes after. A creature keeps going after a player it notices by one, and may turn to another player it
+    /// notices by one (see <see cref="IsNoticedBy"/>, <see cref="KeepsTarget"/>).
     /// </summary>
     /// <param name="range">The range.</param>
     private static bool IsAwarenessRange(AlertRange range) {
