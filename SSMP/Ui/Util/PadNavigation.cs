@@ -253,25 +253,30 @@ internal static class PadNavigation {
 
 /// <summary>
 /// A frame around the control of the mod's interface that is selected, so that a player with a gamepad sees where they
-/// are. It only shows in the mod's menus and while a gamepad is plugged in, since a player on the mouse sees what they
-/// point at, and not around a text box that is being typed into, which shows where it is with its caret: the chat's
-/// box always is while the chat is open (USER 10-22 "聊天框的橙色高光是啥，不是很有必要哎").
+/// are. It only shows in the mod's menus, and not around a text box that is being typed into, which shows where it is
+/// with its caret: the chat's box always is while the chat is open (USER 10-22 "聊天框的橙色高光是啥，不是很有必要哎").
+/// It shows while the player moves around with a gamepad, from a press of its buttons or stick until the mouse moves,
+/// as the game itself hides the mouse pointer then and shows it again. It used to show whenever a gamepad was plugged
+/// in, so a player on the mouse saw it too, and only if the gamepad was plugged in after the game started (USER 10-23
+/// "鼠标用的时候也会有高光，能不能改成只有用手柄输入了才有高光"). It is a thin pale line close around the control,
+/// which used to be a thick orange one further out (USER 10-23 "不要这么大个框然后这么黄", option A of four).
 /// </summary>
 internal class PadFocusFrame : MonoBehaviour {
     /// <summary>
     /// How thick the frame is, in units of the interface.
     /// </summary>
-    private const float Thickness = 3f;
+    private const float Thickness = 2f;
 
     /// <summary>
     /// How far outside the control the frame is drawn, in units of the interface.
     /// </summary>
-    private const float Margin = 4f;
+    private const float Margin = 2f;
 
     /// <summary>
-    /// The colour of the frame: the warm orange of the mod's highlights.
+    /// The colour of the frame: a warm white, half see-through, which shows on the dark panels and on the olive and
+    /// coloured controls of the mod's menus without standing out.
     /// </summary>
-    private static readonly Color FrameColor = new(1f, 0.7f, 0.3f, 0.9f);
+    private static readonly Color FrameColor = new(1f, 0.96f, 0.88f, 0.6f);
 
     /// <summary>
     /// The root of the mod's interface, whose controls the frame goes around.
@@ -319,10 +324,11 @@ internal class PadFocusFrame : MonoBehaviour {
 
     private void LateUpdate() {
         var selected = EventSystem.current == null ? null : EventSystem.current.currentSelectedGameObject;
+        // Whether the game takes the player to be on a gamepad, by which it hides the mouse pointer in its menus: set
+        // by a press of the gamepad's buttons or of the keys that move, and cleared as the mouse moves
         var show = PadNavigation.IsMenuShown && selected != null && selected.activeInHierarchy &&
                    selected.transform.IsChildOf(_root) && selected.transform is RectTransform &&
-                   !IsTypedInto(selected) && InputHandler.Instance != null &&
-                   InputHandler.Instance.activeGamepadType != GlobalEnums.GamepadType.NONE;
+                   !IsTypedInto(selected) && InputHandler._controllerPressed;
         for (var index = 0; index < _sides.Length; index++) {
             if (_sides[index].gameObject.activeSelf != show) {
                 _sides[index].gameObject.SetActive(show);
