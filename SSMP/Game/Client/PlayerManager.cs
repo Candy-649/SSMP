@@ -702,9 +702,9 @@ internal class PlayerManager : IPlayerManager {
         var copies = new FigureCopies();
         _figureCopies[playerObject] = copies;
         var library = localPlayer.GetComponent<tk2dSpriteAnimator>().Library;
-        copies.Libraries.Add(library);
         var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
         spriteAnimator.Library = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
+        copies.Libraries[library] = spriteAnimator.Library;
 
         // Its own sheets of sprites, so that it can wear a skin of its own
         _skinManager.RegisterFigure(playerObject, copiedSheets);
@@ -729,18 +729,61 @@ internal class PlayerManager : IPlayerManager {
             return clip;
         }
 
-        if (copies.Libraries.Add(library)) {
-            var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
-            CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
-            _skinManager.AddSheets(playerObject, copiedSheets);
-        }
-
+        FigureLibrary(playerObject, copies, library);
         return copies.Objects.TryGetValue(clip, out var copy) ? (tk2dSpriteAnimationClip) copy : clip;
     }
 
     /// <summary>
-    /// What was copied of the local hero for the character of another player: every original with its copy, and the
-    /// libraries of clips copied so far.
+    /// Dresses a figure that the room shows in place of another player as that player's character (see
+    /// <see cref="HeroRoomFigure"/>). It is a copy of this game's own figure, which played from this game's library and
+    /// drew from this game's sheets of sprites, so the other player showed in the local player's skin and cloak colour
+    /// whenever the room showed them by a figure of its own. It now plays from the character's own copy of that library
+    /// and draws from the character's own copies of those sheets, which wear what that player wears.
+    /// </summary>
+    /// <param name="playerObject">The object that draws the character.</param>
+    /// <param name="standIn">The copy of the figure, with every part of it that plays or draws.</param>
+    public void DressStandIn(GameObject playerObject, GameObject standIn) {
+        if (!_figureCopies.TryGetValue(playerObject, out var copies)) {
+            return;
+        }
+
+        foreach (var animator in standIn.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
+            if (animator.Library != null) {
+                animator.Library = FigureLibrary(playerObject, copies, animator.Library);
+            }
+        }
+
+        // The picture it shows until its first clip starts
+        foreach (var sprite in standIn.GetComponentsInChildren<tk2dBaseSprite>(true)) {
+            if (sprite.Collection != null && copies.Objects.TryGetValue(sprite.Collection, out var sheet)) {
+                sprite.SetSprite((tk2dSpriteCollectionData) sheet, sprite.spriteId);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The character's own copy of a library of clips, made the first time it is needed, with the sheets of sprites
+    /// that it draws from dressed in what the player wears.
+    /// </summary>
+    private tk2dSpriteAnimation FigureLibrary(
+        GameObject playerObject,
+        FigureCopies copies,
+        tk2dSpriteAnimation library
+    ) {
+        if (copies.Libraries.TryGetValue(library, out var copy) && copy != null) {
+            return copy;
+        }
+
+        var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
+        copy = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
+        copies.Libraries[library] = copy;
+        _skinManager.AddSheets(playerObject, copiedSheets);
+        return copy;
+    }
+
+    /// <summary>
+    /// What was copied for the character of another player: every original with its copy, and the libraries of clips
+    /// copied so far.
     /// </summary>
     private sealed class FigureCopies {
         /// <summary>
@@ -749,9 +792,9 @@ internal class PlayerManager : IPlayerManager {
         public readonly Dictionary<object, object> Objects = new();
 
         /// <summary>
-        /// The original libraries that were copied.
+        /// The copies of the libraries copied so far, by their originals.
         /// </summary>
-        public readonly HashSet<tk2dSpriteAnimation> Libraries = [];
+        public readonly Dictionary<tk2dSpriteAnimation, tk2dSpriteAnimation> Libraries = new();
     }
 
     /// <summary>

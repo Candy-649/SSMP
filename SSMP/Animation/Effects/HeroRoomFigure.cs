@@ -41,6 +41,12 @@ internal class HeroRoomFigure : AnimationEffect {
     public static readonly HeroRoomFigure Instance = new();
 
     /// <summary>
+    /// Dresses the copy of a figure, made for another player, as that player's character: given the character and the
+    /// copy (see <see cref="PlayerManager.DressStandIn"/>).
+    /// </summary>
+    internal static Action<GameObject, GameObject>? DressCopy;
+
+    /// <summary>
     /// How often a player whom the room shows says again what their figure plays, in seconds. It is said the way
     /// animations are, which may be lost on the way, and so may the word that the room shows them no more (see
     /// <see cref="ShownFor"/>); and a player who comes into the room meanwhile sees the figure from then on.
@@ -1116,6 +1122,7 @@ internal class RoomFigureCopy : MonoBehaviour {
                 return;
             }
 
+            HeroRoomFigure.DressCopy?.Invoke(gameObject, _copy);
             _animator = _copy.GetComponent<tk2dSpriteAnimator>();
             _path = path;
             _loose = false;
@@ -1179,6 +1186,7 @@ internal class RoomFigureCopy : MonoBehaviour {
             }
 
             _missing = null;
+            HeroRoomFigure.DressCopy?.Invoke(gameObject, _copy);
             _animator = _copy.GetComponent<tk2dSpriteAnimator>();
             _path = key;
             _loose = true;

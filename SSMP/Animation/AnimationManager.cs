@@ -855,6 +855,8 @@ internal class AnimationManager {
         _playerManager = playerManager;
         _playerData = playerData;
         _serverSettings = serverSettings;
+
+        HeroRoomFigure.DressCopy = playerManager.DressStandIn;
     }
 
     /// <summary>
