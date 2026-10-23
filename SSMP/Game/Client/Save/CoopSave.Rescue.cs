@@ -235,6 +235,12 @@ internal partial class CoopSave {
         public Vector2? StandAt { get; set; }
 
         /// <summary>
+        /// What the player is told as they stand up when the end of a fight or the start of a lava stood them up, or
+        /// null when the hits of members did: nobody pulled them up then.
+        /// </summary>
+        public string? StandUpNote { get; set; }
+
+        /// <summary>
         /// Whether a grinder held the player as they went down. They stand up at the last safe place, as the game puts
         /// back a player that a grinder caught: where they fell is on the grinder's way, and it would catch them again
         /// as soon as they stood up.
@@ -1387,9 +1393,17 @@ internal partial class CoopSave {
 
         if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
             Logger.Info("The boss fell while the local player lay waiting to be pulled up, so they get up");
+            rescue.StandUpNote = FightOverNote;
             rescue.Outcome = RescueOutcome.Rescued;
         }
     }
+
+    /// <summary>
+    /// What a player who lay waiting is told as the end of a fight stands them up.
+    /// </summary>
+    private static string FightOverNote => Lang.Pick(
+        "The fight is over. You are back on your feet.", "战斗结束了，你站起来了。"
+    );
 
     /// <summary>
     /// Stops waiting to be pulled back up, so the player is no longer down, and tells the members so that the cocoon
@@ -1996,9 +2010,11 @@ internal partial class CoopSave {
             _lastStoodBackUpTime = Time.unscaledTime;
 
             Chat(
-                rescue.HitsBy.Count > 1
-                    ? Lang.Pick("Your teammates pulled you back up.", "队友们把你拉起来了。")
-                    : Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。")
+                rescue.StandUpNote ?? (
+                    rescue.HitsBy.Count > 1
+                        ? Lang.Pick("Your teammates pulled you back up.", "队友们把你拉起来了。")
+                        : Lang.Pick("Your teammate pulled you back up.", "队友把你拉起来了。")
+                )
             );
             Logger.Info("Pulled back up after a death instead of going to the bench");
 

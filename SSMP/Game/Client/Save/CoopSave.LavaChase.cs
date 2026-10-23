@@ -1442,6 +1442,7 @@ internal partial class CoopSave {
             $"The fight in '{scene}', whose win starts the lava there, was won while the local player lay in their " +
             "cocoon, so they stand up where they lie"
         );
+        rescue.StandUpNote = FightOverNote;
         rescue.Outcome = RescueOutcome.Rescued;
     }
 
@@ -1462,6 +1463,7 @@ internal partial class CoopSave {
             $"The lava in '{chase.Scene}' started while the local player lay in their cocoon, so they stand up where " +
             "they lie"
         );
+        rescue.StandUpNote = Lang.Pick("The lava is rising. You are back on your feet.", "岩浆涨起来了，你站起来了。");
         rescue.Outcome = RescueOutcome.Rescued;
     }
 
