@@ -39,11 +39,14 @@ internal static class PersonalPlaces {
 
     /// <summary>
     /// The things that each player has to themselves wherever a room has them, by how their names start, each with
-    /// what is under it: the floors that crumble under a player, or under their attack, and come back a moment later.
-    /// Both games used to break them together, so a floor that the partner stood on was gone under this player as
-    /// well, who then had to wait for it to come back - or, where lava rises behind them, fell in. The partner's body
-    /// sets none of them off here, so a floor stays whole here under a partner who is seen to fall through it. Floors
-    /// that stay broken are still shared, since the save keeps them (see CoopSave.WorldTriggerKinds).
+    /// what is under it: the floors that crumble under a player, or under their attack, and come back a moment later,
+    /// and the flies that a player bounces off, which one blow kills. Both games used to break them together, so a
+    /// floor that the partner stood on was gone under this player as well, who then had to wait for it to come back -
+    /// or, where lava rises behind them, fell in - and a fly that the partner bounced off was gone for this player
+    /// too, where lava rises behind them until one of them was put back (USER 10-23, "本来时间就很赶了还要等"). The
+    /// partner's body sets none of them off here, so a floor stays whole here under a partner who is seen to fall
+    /// through it. Floors that stay broken are still shared, since the save keeps them (see
+    /// CoopSave.WorldTriggerKinds).
     /// </summary>
     private static readonly string[] Things = [
         "moss_crumble_plat",
@@ -52,7 +55,10 @@ internal static class PersonalPlaces {
         "bone_plat_02_crumble",
         "bone_plat_crumble",
         "crumble_plat_peak_",
-        "memory_ground_plat"
+        "memory_ground_plat",
+
+        // The death of one shows in the others' games, where theirs stays (see CoopHits.DeathLooks)
+        "Bone Goomba Bounce Fly"
     ];
 
     /// <summary>

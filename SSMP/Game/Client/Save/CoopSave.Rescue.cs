@@ -2011,6 +2011,13 @@ internal partial class CoopSave {
             // walking around looking at whatever is left, and everything the rescue itself undoes has now run
             SayWhatTheDeathLeftSwitchedOn("with the player back on their feet");
 
+            // Wrapped for the same reason as above
+            try {
+                BringBackOwnThings();
+            } catch (Exception e) {
+                LogRescueError(e);
+            }
+
             _lastStoodBackUpTime = Time.unscaledTime;
 
             Chat(

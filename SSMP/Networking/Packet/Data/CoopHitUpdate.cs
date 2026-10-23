@@ -228,5 +228,12 @@ internal enum CoopHitKind : byte {
     /// other game takes each of its own that waits in the same state the same way (see CoopHits.WalkSignHere).
     /// Appended at the end, like the ones before.
     /// </summary>
-    ObjectSignWalk
+    ObjectSignWalk,
+
+    /// <summary>
+    /// A creature of the room that each player has to themselves (see PersonalPlaces), found by its path, that died in
+    /// the sender's game, whose death the other game shows on its own creature, which stays as it is there.
+    /// <see cref="CoopHitUpdate.Hit"/> holds the way its body was flung. Appended at the end, like the ones before.
+    /// </summary>
+    DeathLook
 }

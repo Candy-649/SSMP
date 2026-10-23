@@ -11,12 +11,13 @@ namespace SSMP.Game.Client.Save;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Creatures that the game sets right as the player is put back at the last safe place after a hazard: flies to bounce
-/// on and spitters come back to life, spiked flyers go back to where they started with their health filled, and
-/// spitters that the player is put back above switch themselves off. Only the game that runs the room runs its
-/// creatures, so only its own player's put-backs reached them: a player of another game who fell found the creatures
-/// they had used up gone, and a fall of the player whose game runs the room sent the spiked flyers back and switched
-/// the spitters off under the others.
+/// Creatures that the game sets right as the player is put back at the last safe place after a hazard: spitters come
+/// back to life, spiked flyers go back to where they started with their health filled, and spitters that the player is
+/// put back above switch themselves off. Only the game that runs the room runs its creatures, so only its own player's
+/// put-backs reached them: a player of another game who fell found the creatures they had used up gone, and a fall of
+/// the player whose game runs the room sent the spiked flyers back and switched the spitters off under the others.
+/// The flies that a player bounces off, which also come back, are each player's own since 10-23 (see PersonalPlaces):
+/// each game brings back its own for its own player, as the game does.
 ///
 /// The user decided (10-11) to go about them the way the grinders went (see CoopSave.PacedMachines):
 /// - A creature that is dead or out comes back, and one that lost health gets it back, whichever player of the room is
@@ -30,8 +31,7 @@ internal partial class CoopSave {
     /// The creatures that the game sets right as the player is put back, each named by what its objects are called.
     /// </summary>
     private static readonly PutBackKind[] PutBackKinds = [
-        // Flies that the player bounces on: one that died waits for it to come back, one that lost health gets it back
-        new(["Bone Goomba Bounce Fly"], "Control", "HAZARD RELOAD", ["Die", "Wait For Hazard", "Idle"], null, false),
+        // The flies that a player bounces off are each player's own (see PersonalPlaces and BringBackOwnThings)
 
         // Spiked flyers: one that died comes back where it started, and the event sends a living one back there too,
         // where it gets its health back (Activate)
@@ -205,6 +205,39 @@ internal partial class CoopSave {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Brings back what the local player has to themselves in the room (see PersonalPlaces) and the game brings back as
+    /// the player is put back at a safe place after a hazard, like the flies to bounce off that they used up, as the
+    /// player stands back up from a death. The game would have brought it back with the room, on the way back from the
+    /// bench that a stand-up stands in for. A player stood up beside the partner below flies that they had used found
+    /// them gone, where they come back only as the player is put back, and the partner's put-backs no longer bring
+    /// them back, as they are each player's own (review of 10-23).
+    /// </summary>
+    private static void BringBackOwnThings() {
+        const string OwnThingsComeBackEvent = "HAZARD RELOAD";
+
+        var told = new List<PlayMakerFSM>();
+        foreach (var playMakerFsm in PlayMakerFSM.FsmList) {
+            if (playMakerFsm == null || playMakerFsm.Fsm?.ActiveState is not { } state ||
+                !Array.Exists(state.Transitions, transition => transition.EventName == OwnThingsComeBackEvent) ||
+                !PersonalPlaces.Contains(playMakerFsm.gameObject)) {
+                continue;
+            }
+
+            told.Add(playMakerFsm);
+        }
+
+        foreach (var playMakerFsm in told) {
+            if (playMakerFsm != null) {
+                playMakerFsm.SendEvent(OwnThingsComeBackEvent);
+            }
+        }
+
+        if (told.Count > 0) {
+            Logger.Info($"Brought back {told.Count} thing(s) of the local player's own with the stand-up");
+        }
     }
 
     /// <summary>

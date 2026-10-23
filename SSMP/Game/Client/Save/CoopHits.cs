@@ -532,6 +532,7 @@ internal partial class CoopHits {
 
         RegisterThrownHooks();
         RegisterBounceHooks();
+        RegisterDeathLookHooks();
         RegisterSignalHooks();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += WatchKnocks;
     }
@@ -652,6 +653,11 @@ internal partial class CoopHits {
 
         if (update.Kind == CoopHitKind.BounceLook) {
             ShowBounceLook(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.DeathLook) {
+            ShowDeathLook(update);
             return;
         }
 
@@ -1036,6 +1042,12 @@ internal partial class CoopHits {
         var enemyId = enemyEntity?.Id ?? 0;
 
         if (isEnemyEntity && isRemote) {
+            return IHitResponder.Response.None;
+        }
+
+        // Nor one that each player has to themselves, like a fly to bounce off: the partner's is in their game, and
+        // its death shows here as it looked (see ShowDeathLook)
+        if (isRemote && responder is Component personal && PersonalPlaces.Contains(personal.gameObject)) {
             return IHitResponder.Response.None;
         }
 
