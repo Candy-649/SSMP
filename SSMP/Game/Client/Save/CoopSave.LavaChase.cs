@@ -1034,6 +1034,13 @@ internal partial class CoopSave {
         member.Sequence = update.Sequence;
         member.SampleTime = Time.time;
 
+        // The lava of a member chases in this room, which stands up whoever lies in a cocoon here as this game's own
+        // does as it starts (StandUpBeforeTheLava). A game whose own lava rests never starts it, as after coming in
+        // by the top door, where the race is over, while the member's game counts the one lying as standing already.
+        if (update.Values[2] > 0f) {
+            StandUpCocoonsIn(update.Scene, $"The lava of {player.Username} in '{update.Scene}' chases", LavaRisingNote);
+        }
+
         // The lava as the game that runs the room has it, which is what a game that doesn't run it follows, and only
         // that one: following a game that follows it as well only follows it later, and two such games would follow
         // each other. A member who is the only other one in the room runs it whenever this game doesn't. With no game
@@ -1458,7 +1465,8 @@ internal partial class CoopSave {
     /// <summary>
     /// Stands the local player up where they lie, at once, if they lie in their cocoon in the given room, which has a
     /// lava that chases, and counts the members who lie in theirs there as standing, whom their own games stand up for
-    /// the same (see <see cref="CountCocoonsUp"/>).
+    /// the same (see <see cref="CountCocoonsUp"/>). Asked when the fight whose win starts the lava is won, when the
+    /// lava of this game starts, and when a member's game says that theirs chases or that they died in its chase.
     /// </summary>
     /// <param name="scene">The room.</param>
     /// <param name="what">What happened there, for the log.</param>
