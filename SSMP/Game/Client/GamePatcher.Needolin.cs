@@ -6,6 +6,7 @@ using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client;
 
@@ -77,6 +78,28 @@ internal partial class GamePatcher {
     private static readonly Dictionary<int, bool> NeedolinEnemyTargets = new();
 
     /// <summary>
+    /// Whether a needolin check that ignores range hears every player's song, per check (see
+    /// <see cref="CountsEveryPerformer"/>).
+    /// </summary>
+    private static readonly Dictionary<CheckHeroPerformanceRegionBase, bool> CheckCountsEveryPerformer = new();
+
+    /// <summary>
+    /// The checks of NPCs that were written down as hearing every player's song or this game's player's alone, so that
+    /// each is written once.
+    /// </summary>
+    private static readonly HashSet<string> NeedolinChecksNoted = [];
+
+    /// <summary>
+    /// The needolin check whose action runs now, while it asks how the songs being played affect its target; or null.
+    /// </summary>
+    private static CheckHeroPerformanceRegionBase? _askingCheck;
+
+    /// <summary>
+    /// Whether a <see cref="HeroPerformanceSingReaction"/> runs now, while it asks how the songs being played affect it.
+    /// </summary>
+    private static bool _singReactionAsks;
+
+    /// <summary>
     /// Look target overrides that turn NPCs towards the remote performer they react to, per owner instance ID: the
     /// enemy owner of an FSM song, or the <see cref="HeroPerformanceSingReaction"/> component.
     /// </summary>
@@ -112,6 +135,11 @@ internal partial class GamePatcher {
     /// Hook for counting remote performers in <see cref="HeroPerformanceRegion.IsPlayingInRange"/>.
     /// </summary>
     private Hook? _isPlayingInRangeHook;
+
+    /// <summary>
+    /// Hook for knowing which needolin check asks how the songs being played affect its target.
+    /// </summary>
+    private Hook? _checkPerformanceRegionDoActionHook;
 
     /// <summary>
     /// Hook for remembering which performer set off a <see cref="CheckHeroPerformanceRegion"/> reaction.
@@ -170,6 +198,9 @@ internal partial class GamePatcher {
             typeof(HeroPerformanceRegion), "IsPlayingInRange", OnIsPlayingInRange, StaticNonPublicPublicFlags
         );
 
+        _checkPerformanceRegionDoActionHook = TryCreateHook(
+            typeof(CheckHeroPerformanceRegionBase), "DoAction", OnCheckHeroPerformanceRegionDoAction
+        );
         _checkPerformanceRegionSendEventsHook = TryCreateHook(
             typeof(CheckHeroPerformanceRegion), "SendEvents", OnCheckHeroPerformanceRegionSendEvents
         );
@@ -205,6 +236,9 @@ internal partial class GamePatcher {
 
         _isPlayingInRangeHook?.Dispose();
         _isPlayingInRangeHook = null;
+
+        _checkPerformanceRegionDoActionHook?.Dispose();
+        _checkPerformanceRegionDoActionHook = null;
 
         _checkPerformanceRegionSendEventsHook?.Dispose();
         _checkPerformanceRegionSendEventsHook = null;
@@ -248,6 +282,7 @@ internal partial class GamePatcher {
         SongTargets.Clear();
         PendingSongTargets.Clear();
         NeedolinEnemyTargets.Clear();
+        CheckCountsEveryPerformer.Clear();
 
         NeedolinIdsToRemove.Clear();
         NeedolinIdsToRemove.AddRange(LookTargetOverrides.Keys);
@@ -337,15 +372,26 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
-    /// Whether remote performers count for a needolin check on the given target. Checks that ignore range usually
-    /// run after the object's own trigger zone found the local hero, as for thread memories, so for anything that
-    /// is not an enemy they only count the local player. Enemies find their players with multiplayer-aware alert
-    /// ranges, so any performer counts for them.
+    /// Whether remote performers count for a needolin check on the given target. A check within a range counts
+    /// whoever plays in it. Of the checks that hear a song anywhere in the room, every player's counts for an enemy,
+    /// which finds its players by alert ranges that are answered for either player, for a creature or NPC that sings
+    /// along by a <see cref="HeroPerformanceSingReaction"/>, and for an NPC's check that sends nothing personal (see
+    /// <see cref="CountsEveryPerformer"/>): an NPC who sings along to the song of the player of the game sings along
+    /// to the other player's too (USER 10-23: "貌似是不会响应另一个人弹琴了。在远野这个椅子旁边的织姬"). Any other such
+    /// check hears the player of the game alone: they usually run after the object's own trigger zone found that
+    /// player, as for thread memories, and lead into a scene of the player's own.
     /// </summary>
     /// <param name="target">The transform being checked.</param>
     /// <param name="ignoreRange">Whether the check ignores range.</param>
+    /// <param name="check">The FSM action that checks, or null.</param>
+    /// <param name="singReaction">Whether a <see cref="HeroPerformanceSingReaction"/> checks.</param>
     /// <returns>true if remote performers count; otherwise false.</returns>
-    private static bool CountsRemotePerformers(Transform target, bool ignoreRange) {
+    private static bool CountsRemotePerformers(
+        Transform target,
+        bool ignoreRange,
+        CheckHeroPerformanceRegionBase? check,
+        bool singReaction
+    ) {
         if (!ignoreRange) {
             return true;
         }
@@ -356,7 +402,106 @@ internal partial class GamePatcher {
             NeedolinEnemyTargets[id] = isEnemy;
         }
 
-        return isEnemy;
+        return isEnemy || singReaction || check != null && CountsEveryPerformer(check);
+    }
+
+    /// <summary>
+    /// Whether a needolin check that ignores range hears every player's song: it is an NPC's, it does not ask in the
+    /// same state about a zone that the player of the game alone counts in, and the events it sends lead to nothing
+    /// personal to that player (as for the zones of NPCs, <see cref="LeadsToSomethingPersonal"/>); a check that sends
+    /// only an event for nobody playing, which keeps a state going while somebody plays, by its state.
+    /// </summary>
+    private static bool CountsEveryPerformer(CheckHeroPerformanceRegionBase check) {
+        if (CheckCountsEveryPerformer.TryGetValue(check, out var known)) {
+            return known;
+        }
+
+        var counts = false;
+        if (check.Fsm is { } fsm && check.State is { } state && IsNpc(fsm.GameObject)) {
+            counts = !AsksAboutALocalZone(state) && !SendsSomethingPersonal(fsm, state, check);
+            NoteNeedolinCheck(fsm, state, counts);
+        }
+
+        CheckCountsEveryPerformer[check] = counts;
+        return counts;
+    }
+
+    /// <summary>
+    /// Whether a state asks how many players are in a zone that the player of the game alone counts in.
+    /// </summary>
+    private static bool AsksAboutALocalZone(FsmState state) {
+        foreach (var action in state.Actions) {
+            if (action is CheckTrackTriggerCount { Enabled: true } count && count.track != null &&
+                !CountsEveryPlayer(count)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the events that a needolin check sends when somebody plays lead to something personal to the player of
+    /// the game; for a check that sends only the event for nobody playing, whether its state does.
+    /// </summary>
+    private static bool SendsSomethingPersonal(
+        HutongGames.PlayMaker.Fsm fsm,
+        FsmState state,
+        CheckHeroPerformanceRegionBase check
+    ) {
+        FsmEvent? inner, outer;
+        switch (check) {
+            case CheckHeroPerformanceRegion first:
+                inner = first.ActiveInner;
+                outer = first.ActiveOuter;
+                break;
+            case CheckHeroPerformanceRegionV2 second:
+                inner = second.ActiveInner;
+                outer = second.ActiveOuter;
+                break;
+            default:
+                return true;
+        }
+
+        if (!IsEventSet(inner) && !IsEventSet(outer)) {
+            return IsPersonal(fsm, state, NpcZoneReachStates);
+        }
+
+        return IsEventSet(inner) && LeadsToSomethingPersonal(fsm, state, inner!.Name) ||
+               IsEventSet(outer) && LeadsToSomethingPersonal(fsm, state, outer!.Name);
+    }
+
+    /// <summary>
+    /// Writes down once whether a check of an NPC hears every player's song or the player of the game's alone.
+    /// </summary>
+    private static void NoteNeedolinCheck(HutongGames.PlayMaker.Fsm fsm, FsmState state, bool counts) {
+        var owner = fsm.GameObject;
+        var ownerName = owner != null ? owner.name : "?";
+        var key = $"{(owner != null ? owner.scene.name : "")}/{ownerName}/{fsm.Name}/{state.Name}";
+        if (NeedolinChecksNoted.Add(key)) {
+            Logger.Info(
+                $"[Needolin] The song check of '{ownerName}' ('{fsm.Name}', '{state.Name}') " +
+                (counts ? "hears every player" : "hears the player of this game alone")
+            );
+        }
+    }
+
+    /// <summary>
+    /// Notes which needolin check asks how the songs being played affect its target, for
+    /// <see cref="OnGetAffectedState"/>.
+    /// </summary>
+    private static void OnCheckHeroPerformanceRegionDoAction(
+        Action<CheckHeroPerformanceRegionBase, bool> orig,
+        CheckHeroPerformanceRegionBase self,
+        bool isDelayed
+    ) {
+        var asking = _askingCheck;
+        _askingCheck = self;
+        try {
+            orig(self, isDelayed);
+        } finally {
+            _askingCheck = asking;
+        }
     }
 
     /// <summary>
@@ -368,7 +513,8 @@ internal partial class GamePatcher {
         bool ignoreRange
     ) {
         var state = orig(target, ignoreRange);
-        if (!NeedolinCoop.HasRemotePerformers || target == null || !CountsRemotePerformers(target, ignoreRange)) {
+        if (!NeedolinCoop.HasRemotePerformers || target == null ||
+            !CountsRemotePerformers(target, ignoreRange, _askingCheck, _singReactionAsks)) {
             return state;
         }
 
@@ -409,7 +555,7 @@ internal partial class GamePatcher {
         HeroPerformanceRegion.AffectedState state
     ) {
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
-            RememberPendingSongTarget(self.Fsm, self.Target, self.IgnoreNeedolinRange.Value, 0f);
+            RememberPendingSongTarget(self, self.Target, self.IgnoreNeedolinRange.Value, 0f);
         } else if (state != HeroPerformanceRegion.AffectedState.None) {
             RefreshPendingSongTarget(self.Fsm);
         }
@@ -426,7 +572,7 @@ internal partial class GamePatcher {
         HeroPerformanceRegion.AffectedState state
     ) {
         if (SendsReactionEvent(state, self.ActiveInner, self.ActiveOuter)) {
-            RememberPendingSongTarget(self.Fsm, self.Target, self.IgnoreNeedolinRange.Value, self.Radius.Value);
+            RememberPendingSongTarget(self, self.Target, self.IgnoreNeedolinRange.Value, self.Radius.Value);
         } else if (state != HeroPerformanceRegion.AffectedState.None) {
             RefreshPendingSongTarget(self.Fsm);
         }
@@ -461,16 +607,17 @@ internal partial class GamePatcher {
     /// Stores the performer that affects a needolin check's target the most as the pending song target of the enemy,
     /// unless the enemy is already singing to someone. An NPC that reacts to a remote performer turns towards them.
     /// </summary>
-    /// <param name="fsm">The FSM of the check.</param>
+    /// <param name="check">The check.</param>
     /// <param name="targetOwner">The check's target.</param>
     /// <param name="ignoreRange">Whether the check ignores range.</param>
     /// <param name="radius">The radius of the check's target, or 0.</param>
     private static void RememberPendingSongTarget(
-        HutongGames.PlayMaker.Fsm? fsm,
+        CheckHeroPerformanceRegionBase check,
         FsmOwnerDefault targetOwner,
         bool ignoreRange,
         float radius
     ) {
+        var fsm = check.Fsm;
         var requester = fsm?.GameObject;
         var target = fsm?.GetOwnerDefaultTarget(targetOwner);
         if (requester == null || target == null) {
@@ -494,7 +641,7 @@ internal partial class GamePatcher {
             ignoreRange,
             ignoreRange ? 0f : radius,
             true,
-            CountsRemotePerformers(targetTransform, ignoreRange),
+            CountsRemotePerformers(targetTransform, ignoreRange, check, false),
             out var performer
         );
         if (performer == null) {
@@ -608,7 +755,13 @@ internal partial class GamePatcher {
         Action<HeroPerformanceSingReaction> orig,
         HeroPerformanceSingReaction self
     ) {
-        orig(self);
+        var asks = _singReactionAsks;
+        _singReactionAsks = true;
+        try {
+            orig(self);
+        } finally {
+            _singReactionAsks = asks;
+        }
 
         var isAffected = SingReactionAffectedStateField?.GetValue(self) is HeroPerformanceRegion.AffectedState state &&
                          state != HeroPerformanceRegion.AffectedState.None;
@@ -634,7 +787,7 @@ internal partial class GamePatcher {
             ignoreRange,
             0f,
             true,
-            CountsRemotePerformers(target, ignoreRange),
+            CountsRemotePerformers(target, ignoreRange, null, true),
             out var performer
         );
         if (performer is { IsLocal: false }) {

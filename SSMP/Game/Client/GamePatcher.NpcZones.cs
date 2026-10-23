@@ -32,12 +32,12 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// The kinds of action with which a state takes the player of its game into a scene of their own or writes their
-    /// save, besides those whose names begin with SetPlayerData.
+    /// save, an item or a collectable they get among it, besides those whose names begin with SetPlayerData.
     /// </summary>
     private static readonly HashSet<string> PersonalActionNames = [
         nameof(RunFSM), nameof(RunDialogue), nameof(HeroTurnToFace), "HeroLockState", "HeroControllerMethods",
         "AddHeroInputBlocker", nameof(StartRoarEmitter), "PlayerDataIntAdd", "IncrementPlayerDataInt",
-        "DecrementPlayerDataInt"
+        "DecrementPlayerDataInt", "SavedItemGet", "SavedItemGetV2", "CollectableItemCollect", "CollectableItemTakeV2"
     ];
 
     /// <summary>
