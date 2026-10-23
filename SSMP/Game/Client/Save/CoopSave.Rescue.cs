@@ -1887,8 +1887,8 @@ internal partial class CoopSave {
             // What the death left behind cannot tell this. The game marks a death by the room (cState.hazardDeath)
             // only on the way back to that place after a hit the player lives through; the hit that takes the last
             // of the health goes straight to the death without it (HeroController.TakeDamage).
-            // Beside a member, for a death in the chase: a place their game picked as clear of the lava, while the
-            // game's own mark is usually under it by now
+            // Beside a member, for a death in the chase: a place their game picked, below which the lava is set
+            // down if it has come near, while the game's own mark is usually under it by now
             if (rescue.StandAt is { } standAt) {
                 Logger.Info($"Standing back up beside a member at {standAt}");
                 hero.transform.position = new Vector3(standAt.x, standAt.y, hero.transform.position.z);
@@ -1898,7 +1898,7 @@ internal partial class CoopSave {
                 // the friend back to the bottom, with the lava set down there for everyone)
                 var mark = playerData.hazardRespawnLocation;
                 playerData.hazardRespawnLocation = new Vector3(standAt.x, standAt.y, mark.z);
-                HoldLavaForOwnPutBack();
+                HoldLavaForOwnPutBack(standAt);
             } else if (rescue.ByGrinder) {
                 var safe = playerData.hazardRespawnLocation;
                 Logger.Info(
@@ -2056,14 +2056,18 @@ internal partial class CoopSave {
     /// straight into it.
     /// </summary>
     /// <param name="position">Where the player would stand up.</param>
-    private static bool IsInOrOverTheRoomsHarm(Vector2 position) {
+    /// <param name="passOver">What hurts that is looked through as if it were not there: the lava of a chase, which is
+    /// set down below a place a player is put on.</param>
+    private static bool IsInOrOverTheRoomsHarm(Vector2 position, ICollection<Collider2D>? passOver = null) {
         // Inside is asked on its own. This game's physics settings keep a query from seeing a collider it starts in
         // (queriesStartInColliders is off), so the look below would pass the lava the player is sunk in and find the
         // floor under it
         var inside = new List<Collider2D>();
         Physics2D.OverlapPoint(position, new ContactFilter2D().NoFilter(), inside);
-        if (inside.Exists(IsTheRoomsHarm)) {
-            return true;
+        foreach (var collider in inside) {
+            if (passOver?.Contains(collider) != true && IsTheRoomsHarm(collider)) {
+                return true;
+            }
         }
 
         var hits = new List<RaycastHit2D>();
@@ -2074,6 +2078,10 @@ internal partial class CoopSave {
         var harm = false;
         foreach (var hit in hits) {
             var collider = hit.collider;
+            if (passOver?.Contains(collider) == true) {
+                continue;
+            }
+
             var isGround = !collider.isTrigger &&
                            !Physics2D.GetIgnoreLayerCollision(PlayerLayer, collider.gameObject.layer);
             var isHarm = IsTheRoomsHarm(collider);
