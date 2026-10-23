@@ -95,6 +95,11 @@ internal class ChatBox : IChatBox {
     /// The current scroll offset based on how much the user has scrolled the chat when opened.
     /// </summary>
     private int _scrollOffset;
+    /// <summary>
+    /// The frame in which the chat was last closed. The key that closed it went down in that frame, and a cutscene
+    /// takes any key that went down as a skip.
+    /// </summary>
+    private int _closedOnFrame = -1;
 
     /// <summary>
     /// Event that is called when the user submits a message in the chat input.
@@ -127,16 +132,16 @@ internal class ChatBox : IChatBox {
         );
 
         // In a cutscene the game takes any key at all as its skip: the first press offers to skip and the next one
-        // skips, or the first one already in the travel scene. The chat can't be opened in a cutscene, so its key did
-        // nothing but that, and pressing it again to say something skipped the scene. It is now left out of both, and
-        // so are the letters typed into a chat that was already open when the cutscene began.
+        // skips, or the first one already in the travel scene. The key that opens the chat, the letters typed into it
+        // and the key that sends or closes it are all left out of that, so that the players can talk through a
+        // cutscene without skipping it.
         HookCutsceneInput("CutsceneInput");
         HookCutsceneInput("StagCutsceneInput");
     }
 
     /// <summary>
-    /// Keeps a method of the game that skips a cutscene on any key from running while the chat is open or the key that
-    /// opens it is down.
+    /// Keeps a method of the game that skips a cutscene on any key from running while the chat is open, in the frame it
+    /// was closed in, or while the key that opens it is down.
     /// </summary>
     /// <param name="methodName">The name of the method of <see cref="InputHandler"/>.</param>
     private void HookCutsceneInput(string methodName) {
@@ -150,7 +155,7 @@ internal class ChatBox : IChatBox {
         }
 
         new Hook(method, (Action<Action<InputHandler>, InputHandler>) ((orig, self) => {
-            if (!IsOpen && !_modSettings.Keybinds.OpenChat.IsPressed) {
+            if (!IsOpen && Time.frameCount != _closedOnFrame && !_modSettings.Keybinds.OpenChat.IsPressed) {
                 orig(self);
             }
         }));
@@ -200,6 +205,10 @@ internal class ChatBox : IChatBox {
     /// Handles key-bind input when the chat box is open.
     /// </summary>
     private void HandleOpenChatInput() {
+        // A chat opened in a cutscene can still be open as the game begins a level and allows pausing again, and the
+        // key that closes the chat would then also open the pause menu
+        if (InputHandler.Instance.PauseAllowed) InputHandler.Instance.PreventPause();
+
         if (InputHandler.Instance.inputActions.Pause.IsPressed) {
             HideChatInput();
             return;
@@ -256,7 +265,8 @@ internal class ChatBox : IChatBox {
     }
 
     /// <summary>
-    /// Check whether the game state is valid for opening the chat.
+    /// Check whether the game state is valid for opening the chat: in play, in the main menu, or in a cutscene, such as
+    /// the one that begins a new save.
     /// </summary>
     /// <returns>True if the game state is valid, otherwise false.</returns>
     private static bool IsGameStateValid() {
@@ -264,14 +274,16 @@ internal class ChatBox : IChatBox {
         if (gameManager == null) return false;
 
         var validGameStates = gameManager.GameState == GameState.PLAYING ||
-                              gameManager.GameState == GameState.MAIN_MENU;
+                              gameManager.GameState == GameState.MAIN_MENU ||
+                              gameManager.GameState == GameState.CUTSCENE;
         if (!validGameStates) return false;
 
         var uiManager = UIManager.instance;
         if (uiManager == null) return false;
 
         return uiManager.uiState == UIState.PLAYING ||
-               uiManager.uiState == UIState.MAIN_MENU_HOME;
+               uiManager.uiState == UIState.MAIN_MENU_HOME ||
+               uiManager.uiState == UIState.CUTSCENE;
     }
 
     /// <summary>
@@ -324,6 +336,7 @@ internal class ChatBox : IChatBox {
     /// </summary>
     private void HideChatInput() {
         IsOpen = false;
+        _closedOnFrame = Time.frameCount;
         _scrollOffset = 0;
 
         UpdateMessageVisibility();
