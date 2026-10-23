@@ -286,6 +286,7 @@ internal class PlayerManager : IPlayerManager {
     /// </summary>
     private void HeroControllerOnStart() {
         TryCreatePlayerPool();
+        OwnSkin.LetGo();
     }
 
     /// <summary>

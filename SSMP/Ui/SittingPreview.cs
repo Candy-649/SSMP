@@ -1,5 +1,6 @@
 using System;
 using SSMP.Game.Client;
+using SSMP.Game.Client.Skin;
 using SSMP.Game.Settings;
 using TMProOld;
 using UnityEngine;
@@ -301,6 +302,10 @@ internal class SittingPreview : MonoBehaviour {
         _image.color = new Color(1f, 1f, 1f, 0f);
         _image.enabled = true;
         Refresh();
+
+        // In the skin that the player wears: Customizer dresses only what a room finds as it loads, and she is loaded
+        // after the menu
+        OwnSkin.DressLoaded();
     }
 
     /// <summary>

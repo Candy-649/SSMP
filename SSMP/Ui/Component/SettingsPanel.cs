@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using SSMP.Api.Server;
 using SSMP.Game.Client;
+using SSMP.Game.Client.Skin;
 using SSMP.Game.Settings;
 using SSMP.Util;
 using UnityEngine;
@@ -97,11 +98,30 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The label of the health bar button.</summary>
     private readonly Text _healthBarsText;
 
-    /// <summary>Whether the part with the choices of the room is shown, rather than this player's own.</summary>
-    private bool _roomPage;
+    /// <summary>Which part of the page is shown.</summary>
+    private Page _page;
 
     /// <summary>The background of the button that shows this player's own choices.</summary>
     private readonly Image _ownTabImage;
+
+    /// <summary>The background of the button that shows the skin that this player wears.</summary>
+    private readonly Image _skinTabImage;
+
+    /// <summary>The box of the skin that this player wears.</summary>
+    private readonly GameObject _skinSection;
+
+    /// <summary>The name of the skin that this player wears.</summary>
+    private readonly Text _skinNameText;
+
+    /// <summary>The line that says how many skins there are, or that one is being put on.</summary>
+    private readonly Text _skinStatusText;
+
+    /// <summary>What the choice of a skin comes to, or why there is none.</summary>
+    private readonly Text _skinNoteText;
+
+    /// <summary>The buttons that put on the skin before and after the one worn.</summary>
+    private readonly Button _skinBackButton;
+    private readonly Button _skinOnButton;
 
     /// <summary>The background of the button that shows the choices of the room.</summary>
     private readonly Image _roomTabImage;
@@ -214,29 +234,42 @@ internal class SettingsPanel : IRootedComponent {
             TextAnchor.MiddleCenter
         );
 
-        // Where a line said that all of this stays on this computer, two buttons now choose between what does and
-        // what the host of the server sets for everyone
+        // Where a line said that all of this stays on this computer, buttons now choose between what does, the skin
+        // that this player wears, and what the host of the server sets for everyone
         var ownTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "OwnTab",
             Lang.Pick("MINE ONLY", "只改我这边"),
             new Vector2(0.03f, 1f),
-            new Vector2(0.49f, 1f),
+            new Vector2(0.33f, 1f),
             WaitingRoomPanel.ReadyOn,
-            () => ShowPage(false),
+            () => ShowPage(Page.Own),
             out _ownTabImage,
             out _
         );
         PlaceInRow(ownTab, HeaderHeight + 1f, NoteHeight - 2f);
 
+        var skinTab = WaitingRoomPanel.CreateButton(
+            GameObject.transform,
+            "SkinTab",
+            Lang.Pick("SKIN", "我的皮肤"),
+            new Vector2(0.35f, 1f),
+            new Vector2(0.53f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => ShowPage(Page.Skin),
+            out _skinTabImage,
+            out _
+        );
+        PlaceInRow(skinTab, HeaderHeight + 1f, NoteHeight - 2f);
+
         var roomTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "RoomTab",
-            Lang.Pick("WHOLE ROOM (HOST)", "整个房间（房主定）"),
-            new Vector2(0.51f, 1f),
+            Lang.Pick("ROOM (HOST)", "整个房间（房主定）"),
+            new Vector2(0.55f, 1f),
             new Vector2(0.97f, 1f),
             WaitingRoomPanel.ReadyOff,
-            () => ShowPage(true),
+            () => ShowPage(Page.Room),
             out _roomTabImage,
             out _
         );
@@ -605,7 +638,98 @@ internal class SettingsPanel : IRootedComponent {
             TextAnchor.UpperLeft
         );
 
+        // The skin, laid out like the n of the room's choices: a button either side of the name of the one worn
+        var skinArea = CreateSection("SkinSettings", HeaderHeight + NoteHeight + SectionGap, RoomSectionHeight);
+        _skinSection = skinArea.gameObject;
+
+        WaitingRoomPanel.CreateLabel(
+            skinArea,
+            "SkinLabel",
+            Lang.Pick("SKIN", "皮肤"),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.40f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -1f),
+            14,
+            WaitingRoomPanel.Accent,
+            TextAnchor.MiddleLeft
+        );
+
+        _skinStatusText = WaitingRoomPanel.CreateLabel(
+            skinArea,
+            "SkinStatus",
+            "",
+            new Vector2(0.40f, 1f),
+            new Vector2(0.97f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -1f),
+            13,
+            Muted,
+            TextAnchor.MiddleRight
+        );
+
+        var skinBack = WaitingRoomPanel.CreateButton(
+            skinArea,
+            "SkinBack",
+            "<",
+            new Vector2(0.03f, 1f),
+            new Vector2(0.13f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => StepSkin(-1),
+            out _,
+            out _
+        );
+        PlaceInRow(skinBack, 35f, 28f);
+        _skinBackButton = skinBack.GetComponent<Button>();
+
+        _skinNameText = WaitingRoomPanel.CreateLabel(
+            skinArea,
+            "SkinName",
+            "",
+            new Vector2(0.13f, 1f),
+            new Vector2(0.87f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -35f),
+            16,
+            Color.white,
+            TextAnchor.MiddleCenter
+        );
+
+        var skinOn = WaitingRoomPanel.CreateButton(
+            skinArea,
+            "SkinOn",
+            ">",
+            new Vector2(0.87f, 1f),
+            new Vector2(0.97f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => StepSkin(1),
+            out _,
+            out _
+        );
+        PlaceInRow(skinOn, 35f, 28f);
+        _skinOnButton = skinOn.GetComponent<Button>();
+
+        _skinNoteText = WaitingRoomPanel.CreateLabel(
+            skinArea,
+            "SkinNote",
+            "",
+            new Vector2(0.03f, 1f),
+            new Vector2(0.97f, 1f),
+            new Vector2(0f, RoomSectionHeight - 70f),
+            new Vector2(0f, -70f),
+            13,
+            Muted,
+            TextAnchor.UpperLeft
+        );
+
         Refresh();
+
+        // The art of a skin takes a moment to load, and the page says when Hornet wears it
+        OwnSkin.Changed += () => {
+            if (_activeSelf && _page == Page.Skin) {
+                RefreshSkin();
+            }
+        };
 
         _componentGroup = parent;
         _activeSelf = false;
@@ -662,12 +786,82 @@ internal class SettingsPanel : IRootedComponent {
     }
 
     /// <summary>
-    /// Shows this player's own choices, or those of the room.
+    /// Shows a part of the page.
     /// </summary>
-    /// <param name="room">Whether to show those of the room.</param>
-    private void ShowPage(bool room) {
-        _roomPage = room;
+    /// <param name="page">The part.</param>
+    private void ShowPage(Page page) {
+        _page = page;
         Refresh();
+    }
+
+    /// <summary>
+    /// Puts on the skin before or after the one worn, the game's own look counting as one before the first.
+    /// </summary>
+    /// <param name="step">One to go to the next, minus one to go back.</param>
+    private void StepSkin(int step) {
+        if (!OwnSkin.CanChoose) {
+            return;
+        }
+
+        var choices = OwnSkin.Choices();
+        if (choices.Count == 0) {
+            return;
+        }
+
+        var current = OwnSkin.Current(choices);
+        var at = current == null ? 0 : choices.IndexOf(current) + 1;
+        var count = choices.Count + 1;
+        var next = ((at + step) % count + count) % count;
+        OwnSkin.Choose(next == 0 ? null : choices[next - 1]);
+        Refresh();
+    }
+
+    /// <summary>
+    /// Draws the skin that this player wears, while that part of the page is shown.
+    /// </summary>
+    private void RefreshSkin() {
+        if (_page != Page.Skin) {
+            return;
+        }
+
+        var canChoose = OwnSkin.CanChoose;
+        var choices = canChoose ? OwnSkin.Choices() : new List<SkinPack>();
+        var current = OwnSkin.Current(choices);
+        _skinNameText.text = current != null ? current.Name : Lang.Pick("Game's own look", "原样");
+        _skinBackButton.interactable = _skinOnButton.interactable = canChoose && choices.Count > 0;
+
+        _skinStatusText.text = !canChoose
+            ? ""
+            : OwnSkin.IsDressing
+                ? Lang.Pick("Putting it on...", "换装中…")
+                : Lang.Pick($"{choices.Count} installed", $"装了 {choices.Count} 个");
+
+        // What it comes to, as the notes of the other choices
+        if (!canChoose) {
+            _skinNoteText.text = Lang.Pick(
+                "Silksong Customizer isn't installed, so no skin can be worn.",
+                "没装 Silksong Customizer，穿不了皮肤。"
+            );
+        } else if (choices.Count == 0) {
+            _skinNoteText.text = Lang.Pick(
+                "No skin of Hornet was found. A skin goes in a folder of its own in Hollow Knight Silksong_Data" +
+                "\\Mods\\Customizer in the game's folder.",
+                "没找到大黄蜂的皮肤。皮肤放在游戏目录的 Hollow Knight Silksong_Data\\Mods\\Customizer 里，" +
+                "一个皮肤一个文件夹。"
+            );
+        } else if (OwnSkin.SwitchedOn(choices) > 1) {
+            _skinNoteText.text = Lang.Pick(
+                $"Several skins are switched on, and Hornet wears \"{current!.Name}\", the first. Choose one here " +
+                "to keep it alone.",
+                $"有几个皮肤同时开着，穿的是排在前面的「{current!.Name}」。在这里选一下，就只开选中的那个。"
+            );
+        } else {
+            _skinNoteText.text = Lang.Pick(
+                "Worn at once, and still the next time the game starts. The other player sees it if they have the " +
+                "same skin.",
+                "选了马上换上，下次开游戏也还是它。队友装了同一个皮肤，才看得到你穿的。"
+            );
+        }
     }
 
     /// <summary>
@@ -743,14 +937,17 @@ internal class SettingsPanel : IRootedComponent {
     /// Draws the choices as they currently stand.
     /// </summary>
     private void Refresh() {
-        _ownTabImage.color = _roomPage ? WaitingRoomPanel.ReadyOff : WaitingRoomPanel.ReadyOn;
-        _roomTabImage.color = _roomPage ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+        _ownTabImage.color = _page == Page.Own ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+        _skinTabImage.color = _page == Page.Skin ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+        _roomTabImage.color = _page == Page.Room ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         foreach (var section in _ownSections) {
-            section.SetActive(!_roomPage);
+            section.SetActive(_page == Page.Own);
         }
 
-        _roomSection.SetActive(_roomPage);
+        _skinSection.SetActive(_page == Page.Skin);
+        _roomSection.SetActive(_page == Page.Room);
         RefreshRoom();
+        RefreshSkin();
 
         var bold = _modSettings.BoldOwnName;
         _boldImage.color = bold ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
@@ -888,4 +1085,18 @@ internal class SettingsPanel : IRootedComponent {
 
     /// <inheritdoc />
     public Vector2 GetSize() => GameObject.GetComponent<RectTransform>().sizeDelta;
+
+    /// <summary>
+    /// The parts of the page.
+    /// </summary>
+    private enum Page {
+        /// <summary>The choices that change only how this player's own game draws things.</summary>
+        Own,
+
+        /// <summary>The skin that this player's own Hornet wears.</summary>
+        Skin,
+
+        /// <summary>The choices of the room, which the host makes for everyone.</summary>
+        Room
+    }
 }

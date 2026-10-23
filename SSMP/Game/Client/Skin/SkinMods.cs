@@ -198,6 +198,22 @@ internal sealed class SkinPack {
     }
 
     /// <summary>
+    /// The names of the sheets of sprites that it has art for: the names of its folders.
+    /// </summary>
+    public List<string> SheetNames() {
+        var names = new List<string>();
+        try {
+            foreach (var dir in Directory.GetDirectories(Dir)) {
+                names.Add(Path.GetFileName(dir));
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not read the folders of the skin '{Name}': {e.Message}");
+        }
+
+        return names;
+    }
+
+    /// <summary>
     /// The image of its art for an atlas of a sheet of sprites, as Customizer names it, or null if it has none.
     /// </summary>
     public string? ArtFile(string sheet, string texture) {
@@ -293,6 +309,27 @@ internal static class PlayerColorMod {
         } catch (Exception e) {
             Logger.Warn($"Could not read the settings of Player Color: {e.Message}");
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Makes Player Color look again at every object that it chose to leave alone. It chooses only the first time it
+    /// sees each, by whether there is a mask for the atlas the object draws from then, and an object that wore a skin,
+    /// whose art has no mask, may wear the game's own art now.
+    /// </summary>
+    public static void LookAgain() {
+        var plugin = Plugin;
+        if (plugin == null) {
+            return;
+        }
+
+        try {
+            var others = plugin.GetType().GetField("otherObjs", BindingFlags.NonPublic | BindingFlags.Static);
+            if (others?.GetValue(null) is HashSet<GameObject> leftAlone) {
+                leftAlone.Clear();
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not have Player Color look again at what it leaves alone: {e.Message}");
         }
     }
 

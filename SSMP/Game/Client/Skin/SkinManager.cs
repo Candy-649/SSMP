@@ -66,7 +66,8 @@ internal class SkinManager {
     private Action? _stopWatchingPlayerColor;
 
     /// <summary>
-    /// Raised when what the player's own hero wears may have changed: a setting of Player Color changed.
+    /// Raised when what the player's own hero wears may have changed: a setting of Player Color changed, or the player
+    /// chose another skin in the menu.
     /// </summary>
     public event Action? LocalLookChanged;
 
@@ -79,6 +80,8 @@ internal class SkinManager {
     /// </summary>
     public void RegisterHooks() {
         _stopWatchingPlayerColor ??= PlayerColorMod.OnSettingsChanged(() => LocalLookChanged?.Invoke());
+        OwnSkin.Changed -= OnOwnSkinChanged;
+        OwnSkin.Changed += OnOwnSkinChanged;
     }
 
     /// <summary>
@@ -87,6 +90,14 @@ internal class SkinManager {
     public void DeregisterHooks() {
         _stopWatchingPlayerColor?.Invoke();
         _stopWatchingPlayerColor = null;
+        OwnSkin.Changed -= OnOwnSkinChanged;
+    }
+
+    /// <summary>
+    /// Callback for the player choosing a skin in the menu.
+    /// </summary>
+    private void OnOwnSkinChanged() {
+        LocalLookChanged?.Invoke();
     }
 
     /// <summary>
@@ -290,7 +301,7 @@ internal class SkinManager {
     /// Customizer replaces, whose name names the image of a skin, kept by the sheet even after Customizer has replaced
     /// it in the material of the player's own hero.
     /// </summary>
-    private static Texture? OwnTexture(tk2dSpriteCollectionData original, int index) {
+    internal static Texture? OwnTexture(tk2dSpriteCollectionData original, int index) {
         var textures = original.textures;
         var ids = original.materialPngTextureId;
         var textureIndex = ids != null && index < ids.Length ? ids[index] : index;
@@ -705,159 +716,5 @@ internal class SkinManager {
             Own = own;
             TextureName = own != null ? own.name : "";
         }
-    }
-
-    /// <summary>
-    /// The art of a skin of Customizer that some player wears, loaded image by image off the main thread.
-    /// </summary>
-    private sealed class PackArt {
-        /// <summary>
-        /// The skin.
-        /// </summary>
-        public readonly SkinPack Pack;
-
-        /// <summary>
-        /// Called once all the art asked for has loaded.
-        /// </summary>
-        private readonly Action<PackArt> _loaded;
-
-        /// <summary>
-        /// The loaded textures by sheet and atlas, with null for the atlases that the skin has no art for.
-        /// </summary>
-        private readonly Dictionary<string, Texture2D?> _textures = new(StringComparer.Ordinal);
-
-        /// <summary>
-        /// The images that are loading, by sheet and atlas.
-        /// </summary>
-        private readonly Dictionary<string, UnityWebRequest> _loading = new(StringComparer.Ordinal);
-
-        /// <summary>
-        /// Whether the art was let go, after which nothing that finishes loading is kept.
-        /// </summary>
-        private bool _destroyed;
-
-        public PackArt(SkinPack pack, Action<PackArt> loaded) {
-            Pack = pack;
-            _loaded = loaded;
-        }
-
-        /// <summary>
-        /// The texture of the skin for the given atlas, or null if it has none or hasn't loaded it.
-        /// </summary>
-        public Texture2D? Get(string sheet, string texture) =>
-            _textures.TryGetValue(Key(sheet, texture), out var loaded) ? loaded : null;
-
-        /// <summary>
-        /// Starts loading the art of the given atlases that isn't loaded yet, and says whether all of it is in.
-        /// </summary>
-        public bool Load(IEnumerable<(string Sheet, string Texture)> atlases) {
-            foreach (var (sheet, texture) in atlases) {
-                var key = Key(sheet, texture);
-                if (_textures.ContainsKey(key) || _loading.ContainsKey(key)) {
-                    continue;
-                }
-
-                var file = Pack.ArtFile(sheet, texture);
-                if (file == null) {
-                    _textures[key] = null;
-                    continue;
-                }
-
-                Start(key, file);
-            }
-
-            // The same atlases are asked for every time, so this is all of them
-            return _loading.Count == 0;
-        }
-
-        /// <summary>
-        /// Starts loading one image. Unity decodes it off the main thread, so a large atlas doesn't stall the game.
-        /// </summary>
-        private void Start(string key, string file) {
-            UnityWebRequest request;
-            try {
-                var parameters = DownloadedTextureParams.Default;
-                parameters.mipmapChain = true;
-                parameters.readable = false;
-                request = UnityWebRequestTexture.GetTexture(new Uri(file).AbsoluteUri, parameters);
-            } catch (Exception e) {
-                Logger.Warn($"Could not start loading '{file}', loading it at once: {e.Message}");
-                _textures[key] = LoadNow(file);
-                return;
-            }
-
-            _loading[key] = request;
-            request.SendWebRequest().completed += _ => {
-                _loading.Remove(key);
-
-                Texture2D? texture = null;
-                if (request.result == UnityWebRequest.Result.Success) {
-                    texture = DownloadHandlerTexture.GetContent(request);
-                } else if (!_destroyed) {
-                    Logger.Warn($"Could not load '{file}' in the background ({request.error}), loading it at once");
-                    texture = LoadNow(file);
-                }
-
-                request.Dispose();
-
-                if (_destroyed) {
-                    if (texture != null) {
-                        Object.Destroy(texture);
-                    }
-
-                    return;
-                }
-
-                if (texture != null) {
-                    texture.name = "SSMP skin " + key;
-                }
-
-                _textures[key] = texture;
-
-                if (_loading.Count == 0) {
-                    Logger.Info($"Loaded the art of the skin '{Pack.Name}'");
-                    _loaded(this);
-                }
-            };
-        }
-
-        /// <summary>
-        /// Loads one image on the main thread, as Customizer itself does, for when Unity can't load it otherwise.
-        /// </summary>
-        private static Texture2D? LoadNow(string file) {
-            try {
-                var texture = new Texture2D(2, 2);
-                if (texture.LoadImage(File.ReadAllBytes(file), true)) {
-                    return texture;
-                }
-
-                Object.Destroy(texture);
-            } catch (Exception e) {
-                Logger.Warn($"Could not load '{file}': {e.Message}");
-            }
-
-            return null;
-        }
-
-        /// <summary>
-        /// Lets go of the art: stops what is loading and frees the textures.
-        /// </summary>
-        public void Destroy() {
-            _destroyed = true;
-
-            foreach (var request in new List<UnityWebRequest>(_loading.Values)) {
-                request.Abort();
-            }
-
-            foreach (var texture in _textures.Values) {
-                if (texture != null) {
-                    Object.Destroy(texture);
-                }
-            }
-
-            _textures.Clear();
-        }
-
-        private static string Key(string sheet, string texture) => sheet + "/" + texture;
     }
 }
