@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
@@ -10,9 +11,10 @@ namespace SSMP.Animation.Effects.Tools;
 /// </summary>
 internal class StraightPin : BaseAttackTool {
     /// <summary>
-    /// Cached prefab for the attacking straight pin.
+    /// Cached prefab for the attacking straight pin, one for each character of another player: what is spawned from
+    /// it wears what that player wears (see HeroCopies).
     /// </summary>
-    private GameObject? _modifiedPrefab;
+    private readonly Dictionary<GameObject, GameObject> _modifiedPrefabs = new();
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
@@ -23,18 +25,19 @@ internal class StraightPin : BaseAttackTool {
         var poisoned = EffectIsPoisoned(effectInfo);
 
         // Set up modified prefab
-        if (!_modifiedPrefab) {
+        if (!_modifiedPrefabs.TryGetValue(playerObject, out var modifiedPrefab) || !modifiedPrefab) {
             var prefab = tool.usageOptions.ThrowPrefab;
-            _modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(prefab, playerObject.transform, 0);
-            if (!_modifiedPrefab) return;
+            modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(prefab, playerObject.transform, 0);
+            if (!modifiedPrefab) return;
 
-            _modifiedPrefab.SetActive(false);
-            _modifiedPrefab.name = "STRAIGHT PIN";
+            modifiedPrefab.SetActive(false);
+            modifiedPrefab.name = "STRAIGHT PIN";
+            _modifiedPrefabs[playerObject] = modifiedPrefab;
         }
 
         // Spawn in prefab
-        _modifiedPrefab.transform.rotation = Quaternion.identity;
-        var pin = _modifiedPrefab.Spawn(playerObject.transform.position);
+        modifiedPrefab.transform.rotation = Quaternion.identity;
+        var pin = modifiedPrefab.Spawn(playerObject.transform.position);
 
         // Set scale
         var scale = playerObject.transform.localScale.x * -1;

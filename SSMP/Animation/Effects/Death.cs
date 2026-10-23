@@ -221,7 +221,7 @@ internal class Death : AnimationEffect {
 
         // If not found, make it!
         if (deathParticles == null) {
-            deathParticles = Object.Instantiate(_deathParticles);
+            deathParticles = HeroCopies.Make(_deathParticles, playerObject.transform);
             deathParticles.transform.SetParentReset(playerObject.transform);
             deathParticles.transform.SetLocalPositionZ(0.2f);
             deathParticles.name = DeathParticleObjectName;

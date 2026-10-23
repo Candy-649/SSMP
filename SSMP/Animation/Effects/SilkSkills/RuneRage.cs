@@ -79,7 +79,7 @@ internal class RuneRage : BaseSilkSkill {
 
         // There are runes to spawn; do at the same time as the sonar
         if (positions.Count > 0) {
-            PlayRuneRage(cast, positions, isVolt, isShaman);
+            PlayRuneRage(playerObject, cast, positions, isVolt, isShaman);
         }
     }
 
@@ -170,16 +170,23 @@ internal class RuneRage : BaseSilkSkill {
     /// <summary>
     /// Spawns clusters of Rune Rage blasts at the given positions.
     /// </summary>
+    /// <param name="playerObject">The character of the player whose blasts they are.</param>
     /// <param name="cast">The number of the cast in the thrower's game, which names its clusters (see
     /// <see cref="RuneRolls"/>).</param>
     /// <param name="positions">The positions to spawn blast clusters at.</param>
     /// <param name="isVolt">Whether the volt filament effects should be used.</param>
     /// <param name="isShaman">Whether the shaman crest effects should be used.</param>
-    private void PlayRuneRage(ushort cast, List<Vector3> positions, bool isVolt, bool isShaman) {
+    private void PlayRuneRage(
+        GameObject playerObject,
+        ushort cast,
+        List<Vector3> positions,
+        bool isVolt,
+        bool isShaman
+    ) {
         // Spawn clusters at each position
         for (var i = 0; i < positions.Count; i++) {
             MonoBehaviourUtil.Instance.StartCoroutine(
-                PlayRuneCluster(RuneRolls.ClusterName(cast, i), positions[i], isVolt, isShaman)
+                PlayRuneCluster(playerObject, RuneRolls.ClusterName(cast, i), positions[i], isVolt, isShaman)
             );
         }
     }
@@ -254,11 +261,18 @@ internal class RuneRage : BaseSilkSkill {
     /// under the name it has there (see <see cref="RuneRolls"/>): it waits, is turned, and puts its blasts down at
     /// once, each at a point of the cluster moved by a shift and waiting a time of its own before it goes off.
     /// </summary>
+    /// <param name="playerObject">The character of the player whose blasts they are.</param>
     /// <param name="name">The name of the cluster.</param>
     /// <param name="position">The position of the cluster.</param>
     /// <param name="isVolt">Whether the volt filament effects should be used.</param>
     /// <param name="isShaman">Whether the shaman crest effects should be used.</param>
-    private IEnumerator PlayRuneCluster(string name, Vector3 position, bool isVolt, bool isShaman) {
+    private IEnumerator PlayRuneCluster(
+        GameObject playerObject,
+        string name,
+        Vector3 position,
+        bool isVolt,
+        bool isShaman
+    ) {
         if (RuneRolls.GetPlan(TryGetClusterPrefab()) is not { } plan) yield break;
 
         var wait = plan.Wait(name);
@@ -275,6 +289,7 @@ internal class RuneRage : BaseSilkSkill {
         for (var i = 0; i < plan.Blasts.Count; i++) {
             var blast = plan.Blasts[i];
             CreateBlast(
+                playerObject,
                 spawnPoint,
                 isVolt,
                 isShaman,
@@ -290,6 +305,8 @@ internal class RuneRage : BaseSilkSkill {
     /// <summary>
     /// Spawns a single Rune Rage blast.
     /// </summary>
+    /// <param name="playerObject">The character of the player whose blast it is, which it is drawn as, though it is
+    /// made under the room.</param>
     /// <param name="spawnTransform">The initial parent to use for spawning.</param>
     /// <param name="isVolt">Whether the volt filament effects should be used.</param>
     /// <param name="isShaman">Whether the shaman crest effects should be used.</param>
@@ -297,6 +314,7 @@ internal class RuneRage : BaseSilkSkill {
     /// <param name="waitTime">How long the blast waits before it goes off.</param>
     /// <param name="name">The name the blast rolls under (see <see cref="RuneRolls"/>).</param>
     private void CreateBlast(
+        GameObject playerObject,
         Transform spawnTransform,
         bool isVolt,
         bool isShaman,
@@ -308,7 +326,7 @@ internal class RuneRage : BaseSilkSkill {
         if (localBlast == null) return;
 
         // Create copy of blast and set position
-        var blast = EffectUtils.SpawnGlobalPoolObject(localBlast, spawnTransform, 3);
+        var blast = EffectUtils.SpawnGlobalPoolObject(localBlast, spawnTransform, 3, character: playerObject);
         if (blast == null) return;
 
         // Unturned, as the cluster puts its blasts down

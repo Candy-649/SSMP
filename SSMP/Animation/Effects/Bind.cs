@@ -112,7 +112,7 @@ internal class Bind : DamageAnimationEffect {
                 return;
             }
 
-            bindBell = Object.Instantiate(localBell, bindEffects.transform);
+            bindBell = HeroCopies.Make(localBell, bindEffects.transform);
             bindBell.name = BindBellObjectName;
             
             var follower = bindBell.GetComponent<FollowTransform>();
@@ -186,7 +186,7 @@ internal class Bind : DamageAnimationEffect {
                 return;
             }
 
-            failAntic = Object.Instantiate(localFailAntic, bindEffects.transform);
+            failAntic = HeroCopies.Make(localFailAntic, bindEffects.transform);
             failAntic.name = CursedBindFailObjectName;
             failAntic.transform.SetLocalPositionZ(failAntic.transform.localPosition.z - 0.25f);
 
@@ -379,7 +379,7 @@ internal class Bind : DamageAnimationEffect {
             return false;
         }
 
-        effect = Object.Instantiate(localObj, bindEffects.transform);
+        effect = HeroCopies.Make(localObj, bindEffects.transform);
         effect.name = objectName;
         return true;
     }

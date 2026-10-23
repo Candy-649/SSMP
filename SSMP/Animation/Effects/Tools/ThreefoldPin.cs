@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Internals;
 using SSMP.Util;
@@ -10,9 +11,10 @@ namespace SSMP.Animation.Effects.Tools;
 /// </summary>
 internal class ThreefoldPin : BaseAttackTool {
     /// <summary>
-    /// Cached prefab for one attacking Threefold Pin.
+    /// Cached prefab for one attacking Threefold Pin, one for each character of another player: what is spawned from
+    /// it wears what that player wears (see HeroCopies).
     /// </summary>
-    private static GameObject? _modifiedPrefab;
+    private static readonly Dictionary<GameObject, GameObject> ModifiedPrefabs = new();
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
@@ -20,14 +22,15 @@ internal class ThreefoldPin : BaseAttackTool {
         var fsm = HeroController.instance.toolsFSM;
 
         // Set up modified prefab
-        if (!_modifiedPrefab) {
+        if (!ModifiedPrefabs.TryGetValue(playerObject, out var modifiedPrefab) || !modifiedPrefab) {
             var prefab = fsm.GetFirstAction<SpawnObjectFromGlobalPool>("TriPin Ground L");
 
-            _modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(prefab, playerObject.transform, 0);
-            if (!_modifiedPrefab) return;
+            modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(prefab, playerObject.transform, 0);
+            if (!modifiedPrefab) return;
 
-            _modifiedPrefab.SetActive(false);
-            _modifiedPrefab.name = "THREEFOLD PIN";
+            modifiedPrefab.SetActive(false);
+            modifiedPrefab.name = "THREEFOLD PIN";
+            ModifiedPrefabs[playerObject] = modifiedPrefab;
         }
 
         // Play audio
@@ -38,14 +41,18 @@ internal class ThreefoldPin : BaseAttackTool {
         // the one on the ground
         var isOnWall = EffectIsOnWall(effectInfo);
         var placements = PlacementsOf(effectInfo);
-        SpawnPin(playerObject, 177, 0, isOnWall, poisoned, placements.Length > 0 ? placements[0] : null);
-        SpawnPin(playerObject, 167, -10, isOnWall, poisoned, placements.Length > 1 ? placements[1] : null);
-        SpawnPin(playerObject, 157, -20, isOnWall, poisoned, placements.Length > 2 ? placements[2] : null);
+        SpawnPin(modifiedPrefab, playerObject, 177, 0, isOnWall, poisoned,
+            placements.Length > 0 ? placements[0] : null);
+        SpawnPin(modifiedPrefab, playerObject, 167, -10, isOnWall, poisoned,
+            placements.Length > 1 ? placements[1] : null);
+        SpawnPin(modifiedPrefab, playerObject, 157, -20, isOnWall, poisoned,
+            placements.Length > 2 ? placements[2] : null);
     }
 
     /// <summary>
     /// Spawns a pin at a given player object.
     /// </summary>
+    /// <param name="modifiedPrefab">The player's prefab of the pin.</param>
     /// <param name="playerObject">The player using the pin.</param>
     /// <param name="minAngle">The minimum angle for the pin.</param>
     /// <param name="rotation">The pin's rotation.</param>
@@ -53,6 +60,7 @@ internal class ThreefoldPin : BaseAttackTool {
     /// <param name="poisoned">If the pin is poisoned or not.</param>
     /// <param name="placement">Where the thrower's pin went, if known.</param>
     private void SpawnPin(
+        GameObject modifiedPrefab,
         GameObject playerObject,
         float minAngle,
         float rotation,
@@ -70,7 +78,7 @@ internal class ThreefoldPin : BaseAttackTool {
         }
 
         // Spawn pin
-        var pin = _modifiedPrefab.Spawn(spawnPosition);
+        var pin = modifiedPrefab.Spawn(spawnPosition);
         if (!pin) return;
 
         // Set up variables, then change depending on facing direction

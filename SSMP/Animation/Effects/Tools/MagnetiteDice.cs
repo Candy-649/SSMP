@@ -32,7 +32,7 @@ internal class MagnetiteDice : AnimationEffect {
             var localDice = HeroController.instance.spawnedLuckyDiceShieldEffect;
             if (localDice == null) return;
 
-            dice = Object.Instantiate(localDice, effects.transform);
+            dice = HeroCopies.Make(localDice, effects.transform);
             dice.transform.localPosition = new Vector3(0, 0, -0.02f);
             dice.transform.localScale = new Vector3(0.5f, 0.5f, 1);
 

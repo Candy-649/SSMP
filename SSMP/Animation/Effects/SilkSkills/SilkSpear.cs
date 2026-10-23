@@ -155,7 +155,7 @@ internal class SilkSpear : BaseSilkSkill {
         }
 
         // Create new spear
-        spear = Object.Instantiate(localSpear, silkAttacks.transform);
+        spear = HeroCopies.Make(localSpear, silkAttacks.transform);
         spear.name = SpearObjectName;
 
         // Remove components

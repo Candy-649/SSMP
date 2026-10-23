@@ -46,8 +46,16 @@ internal static class EffectUtils {
     /// <param name="spawnLocation">The location where the object will be spawned.</param>
     /// <param name="destroyAfterDelay">The duration, in seconds, after which the spawned object will be destroyed.</param>
     /// <param name="keepParent">Whether to keep the parent or unparent the new object</param>
+    /// <param name="character">The character of the player whose it is, for one spawned at a part of the room; else
+    /// it is the one that the spawn location belongs to (see <see cref="HeroCopies"/>).</param>
     /// <returns>A newly spawned GameObject from the global pool.</returns>
-    public static GameObject? SpawnGlobalPoolObject(GameObject? globalObj, Transform spawnLocation, float destroyAfterDelay, bool keepParent = false) {
+    public static GameObject? SpawnGlobalPoolObject(
+        GameObject? globalObj,
+        Transform spawnLocation,
+        float destroyAfterDelay,
+        bool keepParent = false,
+        GameObject? character = null
+    ) {
         if (globalObj == null) {
             Logger.Warn("Unable to find global pool object");
             return null;
@@ -55,7 +63,7 @@ internal static class EffectUtils {
 
         // Regardless of if the parent is kept, the object needs to be moved outside
         // of the HideAndDontSave flag, which can be done by moving to the other object's scene.
-        var newObj = Object.Instantiate(globalObj, spawnLocation);
+        var newObj = HeroCopies.Make(globalObj, spawnLocation, character);
         if (newObj == null) {
             Logger.Warn($"Unable to spawn global pool object {globalObj.name}");
             return null;

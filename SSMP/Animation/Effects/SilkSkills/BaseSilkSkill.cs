@@ -136,7 +136,7 @@ internal abstract class BaseSilkSkill : DamageAnimationEffect {
             return false;
         }
 
-        skill = Object.Instantiate(localSkill, skills.transform);
+        skill = HeroCopies.Make(localSkill, skills.transform);
         skill.name = name;
         return true;
     }

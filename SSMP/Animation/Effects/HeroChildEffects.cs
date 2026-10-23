@@ -355,6 +355,9 @@ internal class HeroChildEffects : AnimationEffect {
         copy.name = original.name;
         copy.SetActive(false);
 
+        // In what the other player wears, rather than in what the local player wears (see HeroCopies)
+        HeroCopies.DressCopy(character.gameObject, copy);
+
         // Switched off rather than removed: switched off they do nothing, and the animation events that call some of
         // them still find them
         foreach (var shaker in copy.GetComponentsInChildren<CameraControlAnimationEvents>(true)) {

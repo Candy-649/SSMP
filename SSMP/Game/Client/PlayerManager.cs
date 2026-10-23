@@ -124,6 +124,18 @@ internal class PlayerManager : IPlayerManager {
     private readonly Dictionary<GameObject, FigureCopies> _figureCopies = new();
 
     /// <summary>
+    /// The animators found on a copy that is being dressed (see <see cref="DressHeroCopy"/>), kept from one copy to
+    /// the next.
+    /// </summary>
+    private static readonly List<tk2dSpriteAnimator> DressedAnimators = [];
+
+    /// <summary>
+    /// The sprites found on a copy that is being dressed (see <see cref="DressHeroCopy"/>), kept from one copy to the
+    /// next.
+    /// </summary>
+    private static readonly List<tk2dBaseSprite> DressedSprites = [];
+
+    /// <summary>
     /// Reference to the client player data dictionary (<see cref="ClientManager._playerData"/>)
     /// from <see cref="ClientManager"/>.
     /// </summary>
@@ -708,6 +720,7 @@ internal class PlayerManager : IPlayerManager {
         var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
         spriteAnimator.Library = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
         copies.Libraries[library] = spriteAnimator.Library;
+        copies.Own.Add(spriteAnimator.Library);
         copies.CopiedWith[library] = copies.Objects;
         copies.TakeSheets(copiedSheets, ofTheHero: true);
 
@@ -735,7 +748,7 @@ internal class PlayerManager : IPlayerManager {
         }
 
         // A library that a figure of a room played from first was copied as the room's
-        FigureLibrary(playerObject, copies, library, ofTheHero: true);
+        FigureLibrary(playerObject, copies, library, SheetRole.Body);
         return copies.CopiedWith.TryGetValue(library, out var objects) && objects.TryGetValue(clip, out var copy)
             ? (tk2dSpriteAnimationClip) copy
             : clip;
@@ -759,7 +772,7 @@ internal class PlayerManager : IPlayerManager {
 
         foreach (var animator in standIn.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
             if (animator.Library != null &&
-                FigureLibrary(playerObject, copies, animator.Library, ofTheHero: false) is { } library) {
+                FigureLibrary(playerObject, copies, animator.Library, SheetRole.Room) is { } library) {
                 animator.Library = library;
             }
         }
@@ -808,7 +821,7 @@ internal class PlayerManager : IPlayerManager {
             roomCopy.Took(null, copiedSheets);
             copies.RoomCopies.Add(roomCopy);
             copies.TakeSheets(copiedSheets, ofTheHero: false);
-            _skinManager.AddSheets(playerObject, copiedSheets);
+            _skinManager.AddSheets(playerObject, copiedSheets, SheetRole.Room);
         } catch (Exception e) {
             Logger.Warn($"Could not copy the sheet of sprites '{sheet.name}' for the character of another player: " +
                         e.Message);
@@ -821,6 +834,106 @@ internal class PlayerManager : IPlayerManager {
     }
 
     /// <summary>
+    /// The character of another player that a part of the world belongs to: the first character from it upwards, or
+    /// null for a part of none.
+    /// </summary>
+    /// <param name="part">The part.</param>
+    public GameObject? CharacterOf(Transform part) {
+        for (var current = part; current != null; current = current.parent) {
+            if (_figureCopies.ContainsKey(current.gameObject)) {
+                return current.gameObject;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Dresses a copy of one of the local hero's own objects, or of the game's own, that shows what another player
+    /// does, as that player's character (see <see cref="HeroCopies"/>). It played from the same libraries of clips and
+    /// drew from the same sheets of sprites as its original, so the other player's slashes, strikes, silk skills and
+    /// the rest showed in the local player's skin and cloak colour. Its animators now play from the character's own
+    /// copies of those libraries, and its sprites draw from the character's own copies of those sheets, which wear what
+    /// that player wears. Those libraries and sheets stay loaded as long as the game runs, as the local hero's own do,
+    /// so their copies stay with the character. It is dressed while it is switched off, as Player Color chooses once
+    /// for each object, by the sheet that it first draws from, whether to colour it in the local player's colour.
+    /// </summary>
+    /// <param name="playerObject">The object that draws the character.</param>
+    /// <param name="copy">The copy, switched off.</param>
+    public void DressHeroCopy(GameObject playerObject, GameObject copy) {
+        if (!_figureCopies.TryGetValue(playerObject, out var copies)) {
+            return;
+        }
+
+        try {
+            copy.GetComponentsInChildren(true, DressedAnimators);
+            foreach (var animator in DressedAnimators) {
+                var library = animator.Library;
+                if (library != null && !copies.Own.Contains(library) &&
+                    FigureLibrary(playerObject, copies, library, SheetRole.Effects) is { } own) {
+                    animator.Library = own;
+                }
+            }
+
+            // The picture that a sprite shows until its first clip starts, or for good on one that plays none. A
+            // sprite that is switched off only takes the sheet, which it draws from as it wakes
+            copy.GetComponentsInChildren(true, DressedSprites);
+            foreach (var sprite in DressedSprites) {
+                var sheet = sprite.Collection;
+                if (sheet == null || copies.Own.Contains(sheet) ||
+                    HeroSheet(playerObject, copies, sheet) is not { } own) {
+                    continue;
+                }
+
+                if (sprite.gameObject.activeInHierarchy) {
+                    sprite.SetSprite(own, sprite.spriteId);
+                } else {
+                    sprite.Collection = own;
+                }
+            }
+        } finally {
+            DressedAnimators.Clear();
+            DressedSprites.Clear();
+        }
+    }
+
+    /// <summary>
+    /// The character's own copy of a sheet of sprites that stays loaded as long as the game runs, as the local hero's
+    /// own do, made the first time it is needed and dressed in what the player wears; or null for a sheet that could
+    /// not be copied, which is not tried again. The copy stays with the character, as the copies of the local hero's
+    /// own sheets do.
+    /// </summary>
+    /// <param name="playerObject">The object that draws the character.</param>
+    /// <param name="copies">What was copied for the character.</param>
+    /// <param name="sheet">The original sheet.</param>
+    private tk2dSpriteCollectionData? HeroSheet(
+        GameObject playerObject,
+        FigureCopies copies,
+        tk2dSpriteCollectionData sheet
+    ) {
+        if (copies.Objects.TryGetValue(sheet, out var known)) {
+            return known as tk2dSpriteCollectionData;
+        }
+
+        if (copies.Failed.Contains(sheet)) {
+            return null;
+        }
+
+        try {
+            var copy = CopyUtil.SmartCopySpriteCollection(sheet, playerObject, copies.Objects);
+            var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> { [copy] = sheet };
+            copies.TakeSheets(copiedSheets, ofTheHero: true);
+            _skinManager.AddSheets(playerObject, copiedSheets, SheetRole.Effects);
+            return copy;
+        } catch (Exception e) {
+            Logger.Warn($"Could not copy the sheet of sprites '{sheet.name}' for the character of another player: " +
+                        e.Message);
+            copies.Failed.Add(sheet);
+            return null;
+        }
+    }
+
+    /// <summary>
     /// The character's own copy of a library of clips, made the first time it is needed, with the sheets of sprites
     /// that it draws from dressed in what the player wears; or null for a library that could not be copied, which is
     /// not tried again. The libraries of the local hero stay loaded, and their copies stay with the character; a
@@ -829,16 +942,19 @@ internal class PlayerManager : IPlayerManager {
     /// <param name="playerObject">The object that draws the character.</param>
     /// <param name="copies">What was copied for the character.</param>
     /// <param name="library">The original library.</param>
-    /// <param name="ofTheHero">Whether it is a library of the local hero.</param>
+    /// <param name="role">What it is played for: by the character itself, by the copies of the player's effects, both
+    /// libraries of the local hero, or by a figure of a room.</param>
     private tk2dSpriteAnimation? FigureLibrary(
         GameObject playerObject,
         FigureCopies copies,
         tk2dSpriteAnimation library,
-        bool ofTheHero
+        SheetRole role
     ) {
         if (copies.Libraries.TryGetValue(library, out var copy) && copy != null) {
             return copy;
         }
+
+        var ofTheHero = role != SheetRole.Room;
 
         if (copies.Failed.Contains(library)) {
             return null;
@@ -858,8 +974,9 @@ internal class PlayerManager : IPlayerManager {
             }
 
             copies.Libraries[library] = copy;
+            copies.Own.Add(copy);
             copies.TakeSheets(copiedSheets, ofTheHero);
-            _skinManager.AddSheets(playerObject, copiedSheets);
+            _skinManager.AddSheets(playerObject, ofTheHero ? SheetsOf(copy, copiedSheets) : copiedSheets, role);
         } catch (Exception e) {
             Logger.Warn($"Could not copy the library '{library.name}' for the character of another player: " +
                         e.Message);
@@ -872,6 +989,29 @@ internal class PlayerManager : IPlayerManager {
         }
 
         return copy;
+    }
+
+    /// <summary>
+    /// The copied sheets of sprites that a copied library of clips draws from, each with its original: a copy of a
+    /// library of the local hero reuses the copies of the sheets that came before it, and is given all of them.
+    /// </summary>
+    /// <param name="library">The copied library.</param>
+    /// <param name="copiedSheets">The copied sheets, by their copies.</param>
+    private static Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> SheetsOf(
+        tk2dSpriteAnimation library,
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copiedSheets
+    ) {
+        var drawn = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
+        foreach (var clip in library.clips ?? []) {
+            foreach (var frame in clip?.frames ?? []) {
+                var sheet = frame?.spriteCollection;
+                if (sheet != null && !drawn.ContainsKey(sheet) && copiedSheets.TryGetValue(sheet, out var original)) {
+                    drawn[sheet] = original;
+                }
+            }
+        }
+
+        return drawn;
     }
 
     /// <summary>
@@ -901,6 +1041,7 @@ internal class PlayerManager : IPlayerManager {
 
             _skinManager.RemoveSheets(playerObject, sheets);
             foreach (var sheet in sheets) {
+                copies.Own.Remove(sheet);
                 if (sheet != null) {
                     Object.Destroy(sheet.gameObject);
                 }
@@ -918,6 +1059,7 @@ internal class PlayerManager : IPlayerManager {
             }
 
             if (roomCopy.Library != null) {
+                copies.Own.Remove(roomCopy.Library);
                 Object.Destroy(roomCopy.Library);
             }
         }
@@ -968,6 +1110,12 @@ internal class PlayerManager : IPlayerManager {
         public readonly HashSet<Object> Failed = [];
 
         /// <summary>
+        /// The libraries and sheets copied for the character, which are its own already: a copy of one of them would
+        /// wear nothing, as a skin names the sheets that it dresses by the names of the originals.
+        /// </summary>
+        public readonly HashSet<Object> Own = [];
+
+        /// <summary>
         /// Notes copied sheets of sprites, each copy with its original.
         /// </summary>
         public void TakeSheets(
@@ -976,6 +1124,7 @@ internal class PlayerManager : IPlayerManager {
         ) {
             foreach (var pair in copiedSheets) {
                 Sheets[pair.Value] = pair.Key;
+                Own.Add(pair.Key);
                 if (ofTheHero) {
                     HeroSheets[pair.Value] = pair.Key;
                 }

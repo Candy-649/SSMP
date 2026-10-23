@@ -120,7 +120,7 @@ internal abstract class SlashBase : ParryableEffect {
 
         // Instantiate the slash gameObject from the given prefab
         // and use the attack gameObject as transform reference
-        var slashObj = Object.Instantiate(nailAttackBase.gameObject, slashParent.transform);
+        var slashObj = HeroCopies.Make(nailAttackBase.gameObject, slashParent.transform);
         slashObj.layer = AttackLayer;
 
         var nailSlash = slashObj.GetComponent<NailSlash>();
@@ -191,7 +191,7 @@ internal abstract class SlashBase : ParryableEffect {
             if (castEffectObjName != null) {
                 var castEffectObj = GetGameObjectInCrestObjectFromName(configGroup, castEffectObjName);
                 if (castEffectObj != null) {
-                    var newCastEffectObj = Object.Instantiate(castEffectObj, slashParent.transform);
+                    var newCastEffectObj = HeroCopies.Make(castEffectObj, slashParent.transform);
                     newCastEffectObj.SetActive(true);
                 }
             }

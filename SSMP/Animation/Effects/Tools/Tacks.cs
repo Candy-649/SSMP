@@ -14,9 +14,10 @@ namespace SSMP.Animation.Effects.Tools;
 /// </summary>
 internal class Tacks : BaseAttackTool {
     /// <summary>
-    /// Cached prefab for the attacking Tacks.
+    /// Cached prefab for the attacking Tacks, one for each character of another player: what is spawned from it wears
+    /// what that player wears (see HeroCopies).
     /// </summary>
-    private static GameObject? _modifiedPrefab;
+    private static readonly Dictionary<GameObject, GameObject> ModifiedPrefabs = new();
 
     /// <summary>
     /// Dictionary mapping player object IDs to a list of Tacks they own.
@@ -201,27 +202,29 @@ internal class Tacks : BaseAttackTool {
     /// <returns>The modified prefab, if found.</returns>
     private GameObject? GetTackPrefab(GameObject playerObject) {
         // Create prefab if needed
-        if (_modifiedPrefab == null) {
+        if (!ModifiedPrefabs.TryGetValue(playerObject, out var modifiedPrefab) || !modifiedPrefab) {
             // Create a copy of the original prefab
             var fsm = HeroController.instance.toolsFSM;
 
             var tacks = fsm.GetFirstAction<FlingObjectsFromGlobalPool>("Tacks L").gameObject.Value;
-            _modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(tacks, playerObject.transform, 0);
+            modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(tacks, playerObject.transform, 0);
 
-            if (!_modifiedPrefab) return null;
+            if (!modifiedPrefab) return null;
 
-            _modifiedPrefab.SetActive(false);
-            _modifiedPrefab.name = "TACK";
+            ModifiedPrefabs[playerObject] = modifiedPrefab;
+
+            modifiedPrefab.SetActive(false);
+            modifiedPrefab.name = "TACK";
 
             // Remove interfering components
-            _modifiedPrefab.DestroyComponent<ToolItemLimiter>();
-            _modifiedPrefab.DestroyComponent<EventRegister>();
+            modifiedPrefab.DestroyComponent<ToolItemLimiter>();
+            modifiedPrefab.DestroyComponent<EventRegister>();
 
-            var recycler = _modifiedPrefab.AddComponent<AutoRecycleSelf>();
+            var recycler = modifiedPrefab.AddComponent<AutoRecycleSelf>();
             recycler.afterEvent = GlobalEnums.AfterEvent.LEVEL_UNLOAD;
 
             // Modify FSM to remove poison check
-            var controller = _modifiedPrefab.LocateMyFSM("Control");
+            var controller = modifiedPrefab.LocateMyFSM("Control");
 
             var init = controller.GetState("Init");
             var pauseFrame = controller.GetState("Pause Frame");
@@ -233,6 +236,6 @@ internal class Tacks : BaseAttackTool {
             };
         }
 
-        return _modifiedPrefab;
+        return modifiedPrefab;
     }
 }

@@ -95,8 +95,9 @@ internal static class ImbuedNail {
 
         GameObject? particles = null;
         if (config.HeroParticles != null) {
-            particles = Object.Instantiate(
+            particles = HeroCopies.Make(
                 config.HeroParticles.gameObject,
+                playerObject,
                 playerObject.transform.position,
                 Quaternion.identity
             );
@@ -158,7 +159,7 @@ internal static class ImbuedNail {
 
         if (config.SlashEffect != null) {
             // Its own copy, which goes with the slash
-            var burst = Object.Instantiate(config.SlashEffect, slash.transform).transform;
+            var burst = HeroCopies.Make(config.SlashEffect, slash.transform).transform;
             burst.localPosition = Vector3.zero;
             burst.localRotation = Quaternion.identity;
             burst.localScale = Vector3.one;

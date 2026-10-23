@@ -111,8 +111,9 @@ internal class ThrownTool : BaseAttackTool {
             Object.Destroy(old.gameObject);
         }
 
-        var copy = Object.Instantiate(
+        var copy = HeroCopies.Make(
             ToolCopies.GetCopyPrefab(prefab),
+            playerObject,
             new Vector3(spawn.Snapshot.Position.x, spawn.Snapshot.Position.y, spawn.Z),
             Quaternion.Euler(0f, 0f, spawn.Snapshot.Rotation)
         );

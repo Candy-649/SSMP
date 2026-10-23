@@ -257,7 +257,7 @@ internal class CrossStitch : BaseSilkSkill {
         }
 
         // Create an instance of it, then prepare
-        slash = Object.Instantiate(localSlashObj, attacks.transform);
+        slash = HeroCopies.Make(localSlashObj, attacks.transform);
         slash.name = name;
         slash.transform.localPosition = new Vector3(1, 1, 0);
 

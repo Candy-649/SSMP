@@ -473,7 +473,7 @@ internal class PaleNails : BaseSilkSkill {
         }
 
         // Set name and remove components
-        antic = Object.Instantiate(localAntic, effects.transform);
+        antic = HeroCopies.Make(localAntic, effects.transform);
         antic.name = AnticName;
 
         antic.DestroyComponent<ToolEquipChecker>();

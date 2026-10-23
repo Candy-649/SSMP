@@ -111,7 +111,10 @@ internal class SkinManager {
     }
 
     /// <summary>
-    /// The names of the sheets of sprites that the player's own hero draws from, or null while there is no hero.
+    /// The names of the sheets of sprites that the player's own hero draws from, or null while there is no hero: its
+    /// own, its crests', and those of everything on it, its slashes, strikes, silk skills, binds and the rest, which
+    /// the games of other players show copies of in what the player wears (see HeroCopies). A skin that dresses only
+    /// some of those, the slashes alone, still changes how the player looks to the others.
     /// </summary>
     private HashSet<string>? HeroSheets() {
         if (_heroSheets != null) {
@@ -130,6 +133,40 @@ internal class SkinManager {
         }
 
         var sheets = new HashSet<string>(StringComparer.Ordinal);
+        AddSheetsOf(library, sheets);
+
+        // The libraries of its crests, which it plays from in place of its own
+        foreach (var groups in new[] { hero.configs, hero.specialConfigs }) {
+            if (groups == null) {
+                continue;
+            }
+
+            foreach (var group in groups) {
+                AddSheetsOf(group?.Config != null ? group.Config.heroAnimOverrideLib : null, sheets);
+            }
+        }
+
+        foreach (var part in hero.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
+            AddSheetsOf(part.Library, sheets);
+        }
+
+        foreach (var sprite in hero.GetComponentsInChildren<tk2dBaseSprite>(true)) {
+            if (sprite.Collection != null) {
+                sheets.Add(sprite.Collection.name);
+            }
+        }
+
+        return _heroSheets = sheets;
+    }
+
+    /// <summary>
+    /// Adds the names of the sheets of sprites that a library of clips draws from.
+    /// </summary>
+    private static void AddSheetsOf(tk2dSpriteAnimation? library, HashSet<string> sheets) {
+        if (library == null || library.clips == null) {
+            return;
+        }
+
         foreach (var clip in library.clips) {
             if (clip?.frames == null) {
                 continue;
@@ -142,8 +179,6 @@ internal class SkinManager {
                 }
             }
         }
-
-        return _heroSheets = sheets;
     }
 
     /// <summary>
@@ -207,18 +242,24 @@ internal class SkinManager {
     ) {
         var figure = new Figure(figureObject);
         _figures[figureObject] = figure;
-        AddSlots(figure, copies);
+        figure.OwnSheets.UnionWith(copies.Keys);
+        AddSlots(figure, copies, SheetRole.Body);
     }
 
     /// <summary>
     /// Takes in more sheets of sprites copied for the character of another player, as it first plays from a library of
-    /// a crest that draws from them, and dresses it again so that they wear what it wears too.
+    /// a crest that draws from them, or as something of it first draws from them, and dresses it again so that they
+    /// wear what it wears too.
     /// </summary>
+    /// <param name="figureObject">The object that draws the character.</param>
+    /// <param name="copies">The copied sheets, by the originals they were copied from.</param>
+    /// <param name="role">What they are drawn for.</param>
     public void AddSheets(
         GameObject figureObject,
-        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copies
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copies,
+        SheetRole role
     ) {
-        if (_figures.TryGetValue(figureObject, out var figure) && AddSlots(figure, copies)) {
+        if (_figures.TryGetValue(figureObject, out var figure) && AddSlots(figure, copies, role)) {
             Draw(figure);
         }
     }
@@ -291,14 +332,32 @@ internal class SkinManager {
     /// and starts loading the art of what is worn for atlases that no character had before.
     /// </summary>
     /// <returns>Whether any sheet was new to the character.</returns>
-    private bool AddSlots(Figure figure, Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copies) {
+    private bool AddSlots(
+        Figure figure,
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copies,
+        SheetRole role
+    ) {
         var atlasesBefore = _atlases.Count;
         var added = false;
 
         foreach (var pair in copies) {
             var copy = pair.Key;
             var original = pair.Value;
-            if (copy.materials == null || !figure.Sheets.Add(copy)) {
+            if (copy.materials == null) {
+                continue;
+            }
+
+            if (!figure.Sheets.Add(copy)) {
+                // A sheet that the character's own clips draw from as well is drawn as the character is
+                if (role == SheetRole.Body) {
+                    foreach (var slot in figure.Slots) {
+                        if (slot.Sheet.Copy == copy && slot.Role != SheetRole.Body) {
+                            slot.Role = SheetRole.Body;
+                            added = true;
+                        }
+                    }
+                }
+
                 continue;
             }
 
@@ -306,7 +365,7 @@ internal class SkinManager {
             var sheet = new SheetCopy(copy);
             for (var i = 0; i < copy.materials.Length; i++) {
                 var own = OwnTexture(original, i);
-                var slot = new Slot(sheet, i, original.name, own);
+                var slot = new Slot(sheet, i, original.name, own, role);
 
                 AddMaterial(slot, copy.materials[i]);
                 if (copy.materialInsts != null && i < copy.materialInsts.Length) {
@@ -519,18 +578,28 @@ internal class SkinManager {
 
         var colorShader = look.PlayerColor != null ? PlayerColorMod.Shader : null;
 
-        foreach (var slot in figure.Slots) {
-            // An atlas takes the art of the first skin that has it, as Customizer gives it
-            Texture? art = null;
-            if (slot.TextureName.Length > 0) {
-                foreach (var pack in arts) {
-                    art = pack.Get(slot.SheetName, slot.TextureName);
-                    if (art != null) {
-                        break;
-                    }
-                }
+        // An atlas takes the art of the first skin that has it, as Customizer gives it
+        var artOfSlot = new Texture?[figure.Slots.Count];
+        var ownSheetDressed = false;
+        for (var s = 0; s < figure.Slots.Count; s++) {
+            var slot = figure.Slots[s];
+            if (slot.TextureName.Length == 0) {
+                continue;
             }
 
+            foreach (var pack in arts) {
+                var art = pack.Get(slot.SheetName, slot.TextureName);
+                if (art != null) {
+                    artOfSlot[s] = art;
+                    ownSheetDressed |= figure.OwnSheets.Contains(slot.Sheet.Copy);
+                    break;
+                }
+            }
+        }
+
+        for (var s = 0; s < figure.Slots.Count; s++) {
+            var slot = figure.Slots[s];
+            var art = artOfSlot[s];
             var texture = art != null ? art : slot.Own;
             foreach (var material in slot.Materials) {
                 if (material != null) {
@@ -540,18 +609,24 @@ internal class SkinManager {
 
             Material? colored = null;
             if (look.PlayerColor is { } color && colorShader != null) {
-                colored = ColoredMaterial(slot, colorShader);
                 // Player Color colours the cloak by the mask of the game's own atlas, which it finds by the name of
                 // the texture: the art of a skin, whose texture has no name, has no mask
-                PlayerColorMod.Paint(
-                    colored,
-                    texture,
-                    art == null && slot.TextureName.Length > 0
-                        ? PlayerColorMod.MaskFor(slot.SheetName, slot.TextureName)
-                        : PlayerColorMod.NoMask,
-                    slot.Materials[0],
-                    color
-                );
+                var mask = art == null && slot.TextureName.Length > 0
+                    ? PlayerColorMod.MaskFor(slot.SheetName, slot.TextureName)
+                    : PlayerColorMod.NoMask;
+
+                // It draws an object with its shader, mask or no mask, when the atlas that the object first draws from
+                // has a mask, and leaves it alone for good otherwise: the player's own character unless a skin dresses
+                // its own sheet, and of anything else only what draws from an atlas with a mask
+                var shaded = slot.Role switch {
+                    SheetRole.Body => !ownSheetDressed,
+                    SheetRole.Effects => mask != PlayerColorMod.NoMask,
+                    _ => true
+                };
+                if (shaded) {
+                    colored = ColoredMaterial(slot, colorShader);
+                    PlayerColorMod.Paint(colored, texture, mask, slot.Materials[0], color);
+                }
             }
 
             slot.Sheet.Use(slot.Index, colored);
@@ -620,6 +695,12 @@ internal class SkinManager {
         /// The copied sheets of sprites that its atlases are of.
         /// </summary>
         public readonly HashSet<tk2dSpriteCollectionData> Sheets = [];
+
+        /// <summary>
+        /// The copies of the local hero's own sheets that it was made with, whose first atlas Player Color decides by
+        /// whether to draw the character in its colour.
+        /// </summary>
+        public readonly HashSet<tk2dSpriteCollectionData> OwnSheets = [];
 
         /// <summary>
         /// What its player wears, as the text it travelled as.
@@ -752,12 +833,42 @@ internal class SkinManager {
         /// </summary>
         public Material? Colored;
 
-        public Slot(SheetCopy sheet, int index, string sheetName, Texture? own) {
+        /// <summary>
+        /// What it is drawn for, which says whether Player Color's shader draws it.
+        /// </summary>
+        public SheetRole Role;
+
+        public Slot(SheetCopy sheet, int index, string sheetName, Texture? own, SheetRole role) {
             Sheet = sheet;
             Index = index;
             SheetName = sheetName;
             Own = own;
             TextureName = own != null ? own.name : "";
+            Role = role;
         }
     }
+}
+
+/// <summary>
+/// What copied sheets of sprites of the character of another player are drawn for, which says whether Player Color's
+/// shader draws them. Player Color decides once for each object, by the atlas that it first draws from, whether to draw
+/// it with its shader: with the colour where the atlas has a mask of the cloak, and changed a little all over.
+/// </summary>
+internal enum SheetRole {
+    /// <summary>
+    /// What the character itself draws from: the local hero's own sheets and those of its crests, all drawn with the
+    /// shader, unless a skin dresses the hero's own sheet, whose art has no mask.
+    /// </summary>
+    Body,
+
+    /// <summary>
+    /// What the copies of the player's slashes, strikes, silk skills, binds and the rest draw from (see HeroCopies),
+    /// each atlas drawn with the shader only where it has a mask.
+    /// </summary>
+    Effects,
+
+    /// <summary>
+    /// What figures of rooms, and creatures that hold the player, draw the player with in place of the character.
+    /// </summary>
+    Room
 }

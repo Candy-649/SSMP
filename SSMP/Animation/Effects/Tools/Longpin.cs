@@ -12,9 +12,10 @@ namespace SSMP.Animation.Effects.Tools;
 /// </summary>
 internal class Longpin : BaseAttackTool {
     /// <summary>
-    /// Cached prefab for one attacking pin.
+    /// Cached prefab for one attacking pin, one for each character of another player: what is spawned from it wears
+    /// what that player wears (see HeroCopies).
     /// </summary>
-    private static GameObject? _modifiedPrefab;
+    private static readonly Dictionary<GameObject, GameObject> ModifiedPrefabs = new();
 
     /// <summary>
     /// Map of player object IDs to their last pin throw time.
@@ -63,8 +64,10 @@ internal class Longpin : BaseAttackTool {
     /// <param name="playerObject">The player using the Longpin.</param>
     /// <returns>The Longpin prefab.</returns>
     private static GameObject? GetPrefab(GameObject playerObject) {
-        // If the modified prefab exists already, return it
-        if (_modifiedPrefab) return _modifiedPrefab;
+        // If the character's modified prefab exists already, return it
+        if (ModifiedPrefabs.TryGetValue(playerObject, out var modifiedPrefab) && modifiedPrefab) {
+            return modifiedPrefab;
+        }
 
         // Locate the original prefab
         var fsm = HeroController.instance.toolsFSM;
@@ -72,14 +75,16 @@ internal class Longpin : BaseAttackTool {
         var prefab = fsm.GetFirstAction<SpawnProjectileV2>("Fisherpin");
 
         // Create a new version to modify
-        _modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(prefab.Prefab.Value, playerObject.transform, 0);
-        if (!_modifiedPrefab) return null;
+        modifiedPrefab = EffectUtils.SpawnGlobalPoolObject(prefab.Prefab.Value, playerObject.transform, 0);
+        if (!modifiedPrefab) return null;
 
-        _modifiedPrefab.SetActive(false);
-        _modifiedPrefab.name = "LONGPIN";
+        ModifiedPrefabs[playerObject] = modifiedPrefab;
+
+        modifiedPrefab.SetActive(false);
+        modifiedPrefab.name = "LONGPIN";
 
         // Set up rebound effect
-        var longPinTool = _modifiedPrefab.GetComponent<ToolPin>();
+        var longPinTool = modifiedPrefab.GetComponent<ToolPin>();
         var straightPin = ToolItemManager.GetToolByName("Straight Pin");
 
         if (straightPin is ToolItemBasic pinTool) {
@@ -98,7 +103,7 @@ internal class Longpin : BaseAttackTool {
 
         longPinTool.reboundBox = reboundBoxObject;
 
-        return _modifiedPrefab;
+        return modifiedPrefab;
     }
 
     /// <summary>

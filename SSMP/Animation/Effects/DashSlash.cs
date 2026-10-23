@@ -81,7 +81,7 @@ internal class DashSlash : SlashBase {
             slashParent.transform.localPosition = Vector3.zero;
             slashParent.transform.localScale = Vector3.one;
 
-            var slashObj = Object.Instantiate(dashStabNailAttackPrefab.gameObject, slashParent.transform);
+            var slashObj = HeroCopies.Make(dashStabNailAttackPrefab.gameObject, slashParent.transform);
 
             var dashStab = slashObj.GetComponent<DashStabNailAttack>();
             var poly = slashObj.GetComponent<PolygonCollider2D>();

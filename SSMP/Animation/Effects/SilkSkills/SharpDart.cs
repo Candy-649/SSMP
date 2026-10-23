@@ -155,7 +155,7 @@ internal class SharpDart : BaseSilkSkill {
             return false;
         }
 
-        particles = Object.Instantiate(localParticles, effects.transform);
+        particles = HeroCopies.Make(localParticles, effects.transform);
         particles.name = VoltParticlesName;
 
         // Set up components

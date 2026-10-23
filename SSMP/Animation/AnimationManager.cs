@@ -859,6 +859,8 @@ internal class AnimationManager {
 
         HeroRoomFigure.DressCopy = playerManager.DressStandIn;
         HeldLook.SheetOf = playerManager.FigureSheet;
+        HeroCopies.Dress = playerManager.DressHeroCopy;
+        HeroCopies.CharacterOf = playerManager.CharacterOf;
     }
 
     /// <summary>

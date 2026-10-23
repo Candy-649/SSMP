@@ -157,7 +157,7 @@ internal class NeedleStrike : DamageAnimationEffect {
                 return;
             }
 
-            var strikeObj = Object.Instantiate(_chargeSlashBasic, playerAttacks.transform);
+            var strikeObj = HeroCopies.Make(_chargeSlashBasic, playerAttacks.transform);
             strikeObj.layer = AttackLayer;
             strikeObj.name = "Needle Strike (Hunter)";
 
@@ -180,7 +180,7 @@ internal class NeedleStrike : DamageAnimationEffect {
             _reaperAudioEvent ??= GetOrFindNailArtsFsm().GetFirstAction<PlayAudioEvent>("Antic Rpr");
             AudioUtil.PlayAudio(_reaperAudioEvent, playerObject);
 
-            var strikeObj = Object.Instantiate(_chargeSlashScythe, playerAttacks.transform);
+            var strikeObj = HeroCopies.Make(_chargeSlashScythe, playerAttacks.transform);
             strikeObj.layer = AttackLayer;
             strikeObj.name = "Needle Strike (Reaper)";
 
@@ -201,7 +201,7 @@ internal class NeedleStrike : DamageAnimationEffect {
                 return;
             }
 
-            var strikeObj = Object.Instantiate(_chargeSlashWanderer, playerAttacks.transform);
+            var strikeObj = HeroCopies.Make(_chargeSlashWanderer, playerAttacks.transform);
             strikeObj.layer = AttackLayer;
             strikeObj.name = "Needle Strike (Wanderer)";
             
@@ -247,7 +247,7 @@ internal class NeedleStrike : DamageAnimationEffect {
                     return;
                 }
 
-                var strikeObj = Object.Instantiate(prefab, playerAttacks.transform);
+                var strikeObj = HeroCopies.Make(prefab, playerAttacks.transform);
                 strikeObj.layer = AttackLayer;
                 strikeObj.name = "Needle Strike (Beast)";
                 
@@ -294,7 +294,7 @@ internal class NeedleStrike : DamageAnimationEffect {
 
             _witchAudioEvent ??= GetOrFindNailArtsFsm().GetFirstAction<PlayAudioEvent>("Begin Spin");
 
-            var strikeObj = Object.Instantiate(_chargeSlashWitch, playerAttacks.transform);
+            var strikeObj = HeroCopies.Make(_chargeSlashWitch, playerAttacks.transform);
             strikeObj.layer = AttackLayer;
             strikeObj.name = "Needle Strike (Witch)";
             
@@ -323,7 +323,7 @@ internal class NeedleStrike : DamageAnimationEffect {
 
             _architectAudioEvent ??= GetOrFindNailArtsFsm().GetFirstAction<PlayAudioEvent>("Drill Sfx");
 
-            var strikeObj = Object.Instantiate(_chargeSlashArchitect, playerAttacks.transform);
+            var strikeObj = HeroCopies.Make(_chargeSlashArchitect, playerAttacks.transform);
             strikeObj.layer = AttackLayer;
             strikeObj.name = "Needle Strike (Architect)";
 
@@ -352,7 +352,7 @@ internal class NeedleStrike : DamageAnimationEffect {
                 return;
             }
 
-            var strikeObj = Object.Instantiate(_chargeSlashShaman, playerAttacks.transform);
+            var strikeObj = HeroCopies.Make(_chargeSlashShaman, playerAttacks.transform);
             strikeObj.layer = AttackLayer;
             strikeObj.name = "Needle Strike (Shaman)";
 

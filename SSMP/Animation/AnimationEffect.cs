@@ -108,7 +108,7 @@ internal abstract class AnimationEffect : IAnimationEffect {
             return false;
         }
 
-        effect = Object.Instantiate(localEffect, effects.transform);
+        effect = Effects.HeroCopies.Make(localEffect, effects.transform);
         effect.name = effectName;
 
         return true;

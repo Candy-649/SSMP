@@ -14,16 +14,18 @@ internal class FleaBrew : BaseAttackTool {
     private const string ParticlesName = "Flea Brew Particles";
 
     /// <summary>
-    /// Cached reference to a modified version of the poisoned flea brew trail that hurts the local player.
+    /// Cached modified versions of the poisoned flea brew trail that hurt the local player, one for each character of
+    /// another player, which wears what that player wears (see HeroCopies).
     /// </summary>
-    private static GameObject? _hurtingPoisonTrail;
+    private static readonly Dictionary<GameObject, GameObject> HurtingPoisonTrails = new();
 
     /// <summary>
-    /// Cached reference to a modified version of the poisoned flea brew trail that does not hurt the local player. Each
-    /// brew spawns its trail from one of the two for as long as it lasts, so setting up a single one for every brew
-    /// changed the trails of brews still running: of another remote player, or from before PvP was turned off.
+    /// Cached modified versions of the poisoned flea brew trail that do not hurt the local player, one for each
+    /// character of another player. Each brew spawns its trail from one of the two for as long as it lasts, so setting
+    /// up a single one for every brew changed the trails of brews still running: of another remote player, or from
+    /// before PvP was turned off.
     /// </summary>
-    private static GameObject? _harmlessPoisonTrail;
+    private static readonly Dictionary<GameObject, GameObject> HarmlessPoisonTrails = new();
 
     /// <summary>
     /// Cached values of sprite flashes for Flea Brews.
@@ -70,7 +72,7 @@ internal class FleaBrew : BaseAttackTool {
 
         // Set up poison clouds
         if (isPoison) {
-            SetPoisonTrail(particles, ShouldDoDamage && ServerSettings.IsPvpEnabled);
+            SetPoisonTrail(playerObject, particles, ShouldDoDamage && ServerSettings.IsPvpEnabled);
         }
 
         // Play sprite flash
@@ -157,9 +159,10 @@ internal class FleaBrew : BaseAttackTool {
     /// the trail in the game of the player who drank the brew poisoned theirs, and the game that runs a creature took
     /// the poison of both. The particles are made for this player alone, so the trail they spawn is theirs to change.
     /// </summary>
+    /// <param name="playerObject">The character of the player who drank the brew.</param>
     /// <param name="particles">The poisoned Flea Brew particle spawner.</param>
     /// <param name="hurtsPlayers">Whether the trail hurts the local player.</param>
-    private void SetPoisonTrail(GameObject particles, bool hurtsPlayers) {
+    private void SetPoisonTrail(GameObject playerObject, GameObject particles, bool hurtsPlayers) {
         // Find the prefab spawner
         var spawnerObj = particles.FindGameObjectInChildren("Trail Spawner");
         if (!spawnerObj) return;
@@ -169,19 +172,15 @@ internal class FleaBrew : BaseAttackTool {
         }
 
         // Set up a modified version of the prefab
-        var trail = hurtsPlayers ? _hurtingPoisonTrail : _harmlessPoisonTrail;
-        if (!trail) {
+        var trails = hurtsPlayers ? HurtingPoisonTrails : HarmlessPoisonTrails;
+        if (!trails.TryGetValue(playerObject, out var trail) || !trail) {
             var prefab = spawner.prefab;
             if (!prefab) return;
 
             trail = MakePoisonTrail(prefab, particles.transform, hurtsPlayers);
             if (!trail) return;
 
-            if (hurtsPlayers) {
-                _hurtingPoisonTrail = trail;
-            } else {
-                _harmlessPoisonTrail = trail;
-            }
+            trails[playerObject] = trail;
         }
 
         // Set the damage every time the brew is used, as the damage amount can change
