@@ -44,7 +44,7 @@ internal class ServerPlayerData : IServerPlayer {
     public Team Team { get; set; } = Team.None;
 
     /// <inheritdoc />
-    public byte SkinId { get; set; }
+    public string Skin { get; set; } = "";
 
     /// <inheritdoc />
     public CrestType CrestType { get; set; } = CrestType.Hunter;

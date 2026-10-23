@@ -578,11 +578,11 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     /// </summary>
     /// <param name="team">The team that the player would like to switch to, or null, if the team does not need to be
     /// updated.</param>
-    /// <param name="skinId">The ID of the skin that the player would like to switch to, or null, if the skin does not
-    /// need to be updated.</param>
+    /// <param name="skin">What the player wears through skin mods, as the text of a <c>SkinLook</c>, or null if
+    /// that need not be sent.</param>
     /// <param name="crestType">The type of crest that the player has switched to.</param>
-    public void AddPlayerSettingUpdate(Team? team = null, byte? skinId = null, CrestType? crestType = null) {
-        if (!team.HasValue && !skinId.HasValue && !crestType.HasValue) {
+    public void AddPlayerSettingUpdate(Team? team = null, string? skin = null, CrestType? crestType = null) {
+        if (!team.HasValue && skin == null && !crestType.HasValue) {
             return;
         }
 
@@ -602,9 +602,9 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
                 playerSettingUpdate.Team = team.Value;
             }
 
-            if (skinId.HasValue) {
+            if (skin != null) {
                 playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Skin);
-                playerSettingUpdate.SkinId = skinId.Value;
+                playerSettingUpdate.Skin = skin;
             }
 
             if (crestType.HasValue) {

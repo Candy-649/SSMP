@@ -48,7 +48,7 @@ internal class ClientPlayerData : IClientPlayer {
     public Team Team { get; set; }
 
     /// <inheritdoc />
-    public byte SkinId { get; set; }
+    public string Skin { get; set; } = "";
 
     /// <inheritdoc />
     public CrestType CrestType { get; set; }

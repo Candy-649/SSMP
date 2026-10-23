@@ -10,14 +10,24 @@ namespace SSMP.Util;
 /// </summary>
 internal static class CopyUtil {
     /// <summary>
+    /// How many sheets of sprites have been copied, which numbers the objects that hold the copies.
+    /// </summary>
+    private static int _copiedSheets;
+
+    /// <summary>
     /// Make a copy of a tk2dSpriteAnimation instance, which will preserve internal references in the object.
     /// The targetObject parameter given is used to initialize Unity related components in.
     /// </summary>
     /// <param name="original">The original tk2dSpriteAnimation instance.</param>
     /// <param name="targetObject">The target object to initialize Unity components in.</param>
+    /// <param name="copiedSheets">If given, filled with the copied sheets of sprites, each with the original it was
+    /// copied from.</param>
     /// <returns>A copied tk2dSpriteAnimation instance.</returns>
-    public static tk2dSpriteAnimation SmartCopySpriteAnimation(tk2dSpriteAnimation original,
-        GameObject targetObject) {
+    public static tk2dSpriteAnimation SmartCopySpriteAnimation(
+        tk2dSpriteAnimation original,
+        GameObject targetObject,
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>? copiedSheets = null
+    ) {
         // Keep track of internal references between object in the original objects.
         // Every time we make a copy of an object we add the original object as a key and
         // the new object as a value. Then when we encounter an object in the original that we
@@ -42,6 +52,14 @@ internal static class CopyUtil {
                 newSpriteAnimation.clips[i] = newSpriteAnimationClip;
 
                 objectDict[originalClip] = newSpriteAnimationClip;
+            }
+        }
+
+        if (copiedSheets != null) {
+            foreach (var pair in objectDict) {
+                if (pair.Key is tk2dSpriteCollectionData originalSheet && pair.Value is tk2dSpriteCollectionData copy) {
+                    copiedSheets[copy] = originalSheet;
+                }
             }
         }
 
@@ -159,7 +177,13 @@ internal static class CopyUtil {
             Logger.Warn($"Could not set up sprite collection '{original.spriteCollectionName}' before copying it: {e.Message}");
         }
 
-        var newSpriteCollectionData = targetObject.AddComponent<tk2dSpriteCollectionData>();
+        // Each copy sits on an object of its own, with a name of its own: a component takes the name of its object,
+        // and when every copy sat on the character itself they all had its name. Silksong Customizer, which finds the
+        // sheets it dresses by name, then stopped dressing anything at all, the player's own hero included. The name
+        // is the original's with a number, which no skin names a folder after, so skin mods leave the copies alone
+        var holder = new GameObject($"{original.name} (SSMP copy {++_copiedSheets})");
+        holder.transform.SetParent(targetObject.transform, false);
+        var newSpriteCollectionData = holder.AddComponent<tk2dSpriteCollectionData>();
 
         newSpriteCollectionData.version = original.version;
         newSpriteCollectionData.materialIdsValid = original.materialIdsValid;

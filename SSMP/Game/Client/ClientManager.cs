@@ -241,6 +241,17 @@ internal class ClientManager : IClientManager {
     private string? _sentCrestId;
 
     /// <summary>
+    /// What this game last told the server that its player wears through skin mods, empty for the game's own look,
+    /// which the server assumes until told.
+    /// </summary>
+    private string _sentSkinLook = "";
+
+    /// <summary>
+    /// When to tell the server again what the player wears, after a setting of a skin mod changed, or below 0.
+    /// </summary>
+    private float _skinLookDueAt = -1f;
+
+    /// <summary>
     /// Whether full synchronisation is enabled for the server we are connected to.
     /// </summary>
     private bool _fullSynchronisation;
@@ -539,6 +550,8 @@ internal class ClientManager : IClientManager {
         // Register handlers for various things
         SceneManager.activeSceneChanged += OnSceneChange;
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdateSceneResync;
+        MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdateSkinLook;
+        _playerManager.LocalSkinLookChanged += OnLocalSkinLookChanged;
         CustomHooks.HeroControllerStartAction += OnHeroControllerStart;
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
@@ -577,6 +590,9 @@ internal class ClientManager : IClientManager {
         // Deregister handlers for various things
         SceneManager.activeSceneChanged -= OnSceneChange;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdateSceneResync;
+        MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdateSkinLook;
+        _playerManager.LocalSkinLookChanged -= OnLocalSkinLookChanged;
+        _skinLookDueAt = -1f;
         CustomHooks.HeroControllerStartAction -= OnHeroControllerStart;
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
@@ -968,6 +984,7 @@ internal class ClientManager : IClientManager {
         // Nothing sent before this connection counts for it: the first frame of play sends the crest if nothing else
         // has by then
         _sentCrestId = null;
+        _sentSkinLook = "";
 
         // Update the locally stored server settings
         _serverSettings.SetAllProperties(serverInfo.ServerSettingsUpdate.ServerSettings);
@@ -1017,12 +1034,17 @@ internal class ClientManager : IClientManager {
                 Id = playerInfo.Id,
                 Username = playerInfo.Username,
                 Team = playerInfo.Team,
-                SkinId = playerInfo.SkinId,
+                Skin = playerInfo.Skin,
                 CrestType = playerInfo.CrestType,
                 SaveKey = playerInfo.SaveKey,
                 Room = playerInfo.Room
             };
         }
+
+        // What the players who were here already wear, and what this game can't show of it; then what this player
+        // wears, for them
+        _playerManager.OnSkinsKnown();
+        SendSkinLook();
 
         // Only now, because the waiting room has to list the players who were here before this client arrived, and
         // those only exist in the dictionary once the loop above has run
@@ -1083,6 +1105,54 @@ internal class ClientManager : IClientManager {
                 _playerManager.LocalPlayerTeam
             );
         }
+
+        // The skins of Customizer that the player wears are known only once their hero is there
+        SendSkinLook();
+    }
+
+    /// <summary>
+    /// Tells the server what the player wears through skin mods, if that changed since the last time.
+    /// </summary>
+    private void SendSkinLook() {
+        if (!_netClient.IsConnected) {
+            return;
+        }
+
+        string look;
+        try {
+            look = _playerManager.LocalSkinLook();
+        } catch (Exception e) {
+            Logger.Warn($"Could not tell what the player wears through skin mods: {e}");
+            return;
+        }
+
+        if (look == _sentSkinLook) {
+            return;
+        }
+
+        _sentSkinLook = look;
+        Logger.Info($"Wearing: {(look.Length == 0 ? "the game's own look" : look.Replace('\n', ';'))}");
+        _netClient.UpdateManager.AddPlayerSettingUpdate(skin: look);
+    }
+
+    /// <summary>
+    /// Callback for a setting of a skin mod changing, which may change what the player wears: told a moment later,
+    /// once the player has stopped dragging a slider.
+    /// </summary>
+    private void OnLocalSkinLookChanged() {
+        _skinLookDueAt = Time.unscaledTime + 1f;
+    }
+
+    /// <summary>
+    /// Tells the server what the player wears once a moment has passed after a setting of a skin mod changed.
+    /// </summary>
+    private void OnUpdateSkinLook() {
+        if (_skinLookDueAt < 0f || Time.unscaledTime < _skinLookDueAt) {
+            return;
+        }
+
+        _skinLookDueAt = -1f;
+        SendSkinLook();
     }
 
     /// <summary>
@@ -1177,6 +1247,7 @@ internal class ClientManager : IClientManager {
 
         // Clear the player from the player data mapping
         _playerData.Remove(id);
+        _playerManager.OnPlayerSkinsChanged();
 
         UiManager.InternalChatBox.AddMessage(
             playerDisconnect.TimedOut
@@ -1865,10 +1936,10 @@ internal class ClientManager : IClientManager {
             }
         }
 
-        // If the allow skins setting changed, and it is no longer allowed, we reset all existing skins and call the
-        // event
-        if (allowSkinsChanged && !_serverSettings.AllowSkins) {
-            _playerManager.ResetAllPlayerSkins();
+        // If the allow skins setting changed, every other player's character is dressed again, in their skin or in the
+        // game's own look
+        if (allowSkinsChanged) {
+            _playerManager.OnSkinsAllowedChanged();
         }
     }
 
@@ -1893,6 +1964,9 @@ internal class ClientManager : IClientManager {
         if (!_netClient.IsConnected) {
             return;
         }
+
+        // Customizer dresses the game anew with every room, with the skins that are active then
+        SendSkinLook();
 
         // Reset the status of whether we determined the scene host or not
         _sceneHostDetermined = false;
@@ -2034,12 +2108,8 @@ internal class ClientManager : IClientManager {
             }
         }
 
-        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Skin)) {
-            if (settingUpdate.Self) {
-                _playerManager.OnPlayerSkinUpdate(true, settingUpdate.SkinId);
-            } else {
-                _playerManager.OnPlayerSkinUpdate(false, settingUpdate.SkinId, settingUpdate.Id);
-            }
+        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Skin) && !settingUpdate.Self) {
+            _playerManager.OnPlayerSkinUpdate(settingUpdate.Id, settingUpdate.Skin);
         }
 
         if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {

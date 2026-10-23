@@ -679,10 +679,8 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// </summary>
     /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.
     /// </param>
-    /// <param name="skinId">An optional byte for the ID of the skin, if the player's skin changed, or null if no skin
-    /// ID was supplied.</param>
-    public void AddPlayerSettingUpdateData(Team? team = null, byte? skinId = null) {
-        if (!team.HasValue && !skinId.HasValue) {
+    public void AddPlayerSettingUpdateData(Team? team = null) {
+        if (!team.HasValue) {
             return;
         }
 
@@ -697,11 +695,6 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                 playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Team);
                 playerSettingUpdate.Team = team.Value;
             }
-
-            if (skinId.HasValue) {
-                playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Skin);
-                playerSettingUpdate.SkinId = skinId.Value;
-            }
         }
     }
 
@@ -711,16 +704,16 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// <param name="id">The ID of the player.</param>
     /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.
     /// </param>
-    /// <param name="skinId">An optional byte for the ID of the skin, if the player's skin changed, or null if no such
-    /// ID was supplied.</param>
+    /// <param name="skin">What the player wears through skin mods, as the text of a <c>SkinLook</c>, or null if
+    /// that need not be sent.</param>
     /// <param name="crestType">The type of crest that the player has switched to.</param>
     public void AddOtherPlayerSettingUpdateData(
         ushort id,
         Team? team = null,
-        byte? skinId = null,
+        string? skin = null,
         CrestType? crestType = null
     ) {
-        if (!team.HasValue && !skinId.HasValue && !crestType.HasValue) {
+        if (!team.HasValue && skin == null && !crestType.HasValue) {
             return;
         }
 
@@ -736,9 +729,9 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                 playerSettingUpdate.Team = team.Value;
             }
 
-            if (skinId.HasValue) {
+            if (skin != null) {
                 playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Skin);
-                playerSettingUpdate.SkinId = skinId.Value;
+                playerSettingUpdate.Skin = skin;
             }
 
             if (crestType.HasValue) {

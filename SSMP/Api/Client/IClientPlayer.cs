@@ -40,9 +40,9 @@ public interface IClientPlayer {
     Team Team { get; }
 
     /// <summary>
-    /// The ID of the current skin of the player.
+    /// What the player wears through skin mods, as text with a line for each part, empty for the game's own look.
     /// </summary>
-    byte SkinId { get; }
+    string Skin { get; }
 
     /// <summary>
     /// The type of crest the player is using.

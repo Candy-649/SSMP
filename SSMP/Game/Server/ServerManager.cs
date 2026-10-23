@@ -154,11 +154,6 @@ internal abstract class ServerManager : IServerManager {
     /// </summary>
     private readonly IServerCommand _teamCommand;
 
-    /// <summary>
-    /// The skin command.
-    /// </summary>
-    private readonly IServerCommand _skinCommand;
-
     #endregion
 
     #region IServerManager properties
@@ -228,7 +223,6 @@ internal abstract class ServerManager : IServerManager {
         _banCommand = new BanCommand(_banList, this);
         _kickCommand = new KickCommand(this);
         _teamCommand = new TeamCommand(this);
-        _skinCommand = new SkinCommand(this);
         _helpCommand = new HelpCommand(this);
     }
 
@@ -271,7 +265,6 @@ internal abstract class ServerManager : IServerManager {
         CommandManager.RegisterCommand(_banCommand);
         CommandManager.RegisterCommand(_kickCommand);
         CommandManager.RegisterCommand(_teamCommand);
-        CommandManager.RegisterCommand(_skinCommand);
         CommandManager.RegisterCommand(_helpCommand);
     }
 
@@ -286,7 +279,6 @@ internal abstract class ServerManager : IServerManager {
         CommandManager.DeregisterCommand(_banCommand);
         CommandManager.DeregisterCommand(_kickCommand);
         CommandManager.DeregisterCommand(_teamCommand);
-        CommandManager.DeregisterCommand(_skinCommand);
         CommandManager.DeregisterCommand(_helpCommand);
     }
 
@@ -1871,59 +1863,35 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
-    /// Try to update the skin for the player with the given ID.
+    /// Takes in what a player wears through skin mods and tells every other player, wherever they are: each game
+    /// dresses the character of that player, and says what it can't show of it, as soon as it hears. A player who
+    /// joins later hears it with the other players' info. Whether skins show at all is up to each game, by the
+    /// setting of the server, so that it can say why it shows the game's own look.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
-    /// <param name="skinId">The ID of the skin to change the player to.</param>
-    /// <param name="reason">The reason if the skin could not be updated, otherwise null.</param>
-    /// <returns>True if the player's team was updated, false otherwise.</returns>
-    public bool TryUpdatePlayerSkin(ushort id, byte skinId, [MaybeNullWhen(true)] out string reason) {
+    /// <param name="skin">What the player wears, as the text of a SkinLook.</param>
+    private void UpdatePlayerSkin(ushort id, string skin) {
         if (!_playerData.TryGetValue(id, out var playerData)) {
-            Logger.Warn($"Received PlayerSkinUpdate data, but player with ID {id} is not in mapping");
-
-            reason = "Could not find player";
-            return false;
+            Logger.Warn($"Received what player {id} wears, but they are not in the mapping");
+            return;
         }
 
-        Logger.Info($"Received PlayerSkinUpdate data from ({id}, {playerData.Username}) for skin ID: {skinId}");
-
-        if (!ServerSettings.AllowSkins) {
-            Logger.Info("  Skins are not allowed, won't update skin");
-
-            reason = "Unable to change skin";
-            return false;
+        if (playerData.Skin == skin) {
+            return;
         }
 
-        if (playerData.SkinId == skinId) {
-            Logger.Info("  Skins is the same as current, won't update skin");
+        Logger.Info(
+            $"Player ({id}, {playerData.Username}) wears: " +
+            (skin.Length == 0 ? "the game's own look" : skin.Replace('\n', ';'))
+        );
 
-            reason = "Skin is already in use";
-            return false;
-        }
+        playerData.Skin = skin;
 
-        // Update the skin ID in the player data
-        playerData.SkinId = skinId;
-
-        foreach (var idPlayerDataPair in _playerData) {
-            var otherId = idPlayerDataPair.Key;
-
-            if (otherId == id) {
-                _netServer.GetUpdateManagerForClient(id)?.AddPlayerSettingUpdateData(skinId: skinId);
-                continue;
+        foreach (var otherId in _playerData.Keys) {
+            if (otherId != id) {
+                _netServer.GetUpdateManagerForClient(otherId)?.AddOtherPlayerSettingUpdateData(id, skin: skin);
             }
-
-            var otherPd = idPlayerDataPair.Value;
-
-            // Skip sending skin to players not in the same scene
-            if (!string.Equals(otherPd.CurrentScene, playerData.CurrentScene)) {
-                continue;
-            }
-
-            _netServer.GetUpdateManagerForClient(otherId)?.AddOtherPlayerSettingUpdateData(id, skinId: skinId);
         }
-
-        reason = null;
-        return true;
     }
 
     /// <summary>
@@ -2108,7 +2076,7 @@ internal abstract class ServerManager : IServerManager {
                     Id = otherId,
                     Username = otherPd.Username,
                     Team = otherPd.Team,
-                    SkinId = otherPd.SkinId,
+                    Skin = otherPd.Skin,
                     CrestType = otherPd.CrestType,
                     SaveKey = AuthUtil.GetSaveKey(otherPd.AuthKey),
                     Room = otherPd.CurrentScene
@@ -2338,11 +2306,7 @@ internal abstract class ServerManager : IServerManager {
         }
 
         if (playerSettingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Skin)) {
-            if (TryUpdatePlayerSkin(id, playerSettingUpdate.SkinId, out var reason)) {
-                SendMessage(id, $"Skin ID changed to '{playerSettingUpdate.SkinId}'");
-            } else {
-                SendMessage(id, reason);
-            }
+            UpdatePlayerSkin(id, playerSettingUpdate.Skin);
         }
 
         if (playerSettingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {

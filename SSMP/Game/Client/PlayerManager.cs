@@ -11,6 +11,7 @@ using SSMP.Game.Settings;
 using SSMP.Hooks;
 using SSMP.Internals;
 using SSMP.Networking.Client;
+using SSMP.Ui;
 using SSMP.Util;
 using TMProOld;
 using UnityEngine;
@@ -161,7 +162,7 @@ internal class PlayerManager : IPlayerManager {
         _modSettings = modSettings;
         _netClient = netClient;
 
-        _skinManager = new SkinManager();
+        _skinManager = new SkinManager(() => _serverSettings.AllowSkins);
 
         _playerData = playerData;
 
@@ -170,10 +171,9 @@ internal class PlayerManager : IPlayerManager {
     }
 
     /// <summary>
-    /// Initialize the player manager by initializing the skin manager.
+    /// Initialize the player manager.
     /// </summary>
     public void Initialize() {
-        _skinManager.Initialize();
     }
 
     /// <summary>
@@ -499,8 +499,10 @@ internal class PlayerManager : IPlayerManager {
         // Remove name
         RemoveNameFromLocalPlayer();
 
-        // Reset the skin of the local player
-        _skinManager.ResetLocalPlayerSkin();
+        // Nobody else wears anything any more: the art of their skins is let go, and what was said about them may be
+        // said again on the next connection
+        _skinManager.Want([]);
+        _reportedSkinProblems.Clear();
     }
 
     /// <summary>
@@ -581,6 +583,7 @@ internal class PlayerManager : IPlayerManager {
             // the room
             HeroHidden.Reset(child.gameObject);
             HeroRoomFigure.Reset(child.gameObject);
+            _skinManager.Undress(child.gameObject);
             HeroChildEffects.ResetCopies(child.gameObject);
             HeroChildParticles.ResetCopies(child.gameObject);
             HeroDust.Reset(child.gameObject);
@@ -642,8 +645,8 @@ internal class PlayerManager : IPlayerManager {
 
         AddNameToPlayer(playerContainer, playerData.Username, playerData.Team);
 
-        // Let the SkinManager update the skin
-        _skinManager.UpdatePlayerSkin(playerObject, playerData.SkinId);
+        // Dressed in what the player wears through skin mods
+        _skinManager.Dress(playerObject, playerData.Skin);
 
         // Store the player data
         playerData.PlayerContainer = playerContainer;
@@ -690,10 +693,15 @@ internal class PlayerManager : IPlayerManager {
         var spriteAnimator = playerObject.GetComponent<tk2dSpriteAnimator>();
         // Make a smart copy of the sprite animator library so we can
         // modify the animator without having to worry about other player objects
+        var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
         spriteAnimator.Library = CopyUtil.SmartCopySpriteAnimation(
             localPlayer.GetComponent<tk2dSpriteAnimator>().Library,
-            playerObject
+            playerObject,
+            copiedSheets
         );
+
+        // Its own sheets of sprites, so that it can wear a skin of its own
+        _skinManager.RegisterFigure(playerObject, copiedSheets);
     }
 
     /// <summary>
@@ -846,53 +854,97 @@ internal class PlayerManager : IPlayerManager {
     }
 
     /// <summary>
-    /// Callback method for when a player updates their skin.
+    /// What the player's own hero wears through skin mods, as the text that tells the other games.
     /// </summary>
-    /// <param name="self">Whether this update is for the local player.</param>
-    /// <param name="skinId">The ID of the new skin of the player.</param>
-    /// <param name="playerId">The ID of the player that has updated their skin if <paramref name="self"/> is true.
-    /// </param>
-    public void OnPlayerSkinUpdate(bool self, byte skinId, ushort playerId = 0) {
-        if (self) {
-            Logger.Debug($"Received PlayerSkinUpdate for local player: {skinId}");
+    public string LocalSkinLook() => _skinManager.LocalLook();
 
-            _skinManager.UpdateLocalPlayerSkin(skinId);
-            return;
-        }
-
-        Logger.Debug($"Received PlayerSkinUpdate for ID: {playerId}, skin ID: {skinId}");
-
-        if (!_playerData.TryGetValue(playerId, out var playerData)) {
-            Logger.Debug("  Could not find player");
-            return;
-        }
-
-        playerData.SkinId = skinId;
-
-        // If the player is not in the local scene, we don't have to apply the skin update to the player object
-        if (!playerData.IsInLocalScene) {
-            return;
-        }
-
-        if (playerData.PlayerObject == null) {
-            Logger.Warn("Could not update player skin, because player object is null");
-            return;
-        }
-
-        _skinManager.UpdatePlayerSkin(playerData.PlayerObject, skinId);
+    /// <summary>
+    /// Raised when what the player's own hero wears may have changed while playing.
+    /// </summary>
+    public event Action? LocalSkinLookChanged {
+        add => _skinManager.LocalLookChanged += value;
+        remove => _skinManager.LocalLookChanged -= value;
     }
 
     /// <summary>
-    /// Reset the skins of all players.
+    /// What the game said in the chat about what it can't show of the other players, by player, so that it says each
+    /// thing once.
     /// </summary>
-    public void ResetAllPlayerSkins() {
-        // For each registered player, reset their skin
+    private readonly HashSet<string> _reportedSkinProblems = [];
+
+    /// <summary>
+    /// Callback for what the players who were here before this game connected wear, which came with the server's info.
+    /// </summary>
+    public void OnSkinsKnown() {
         foreach (var playerData in _playerData.Values) {
-            _skinManager.ResetPlayerSkin(playerData.PlayerObject);
+            ReportSkinProblems(playerData);
         }
 
-        // Also reset our local players skin
-        _skinManager.ResetLocalPlayerSkin();
+        WantSkins();
+    }
+
+    /// <summary>
+    /// Callback method for when another player says what they wear through skin mods.
+    /// </summary>
+    /// <param name="playerId">The ID of the player.</param>
+    /// <param name="skin">What they wear, as the text of a SkinLook.</param>
+    public void OnPlayerSkinUpdate(ushort playerId, string skin) {
+        if (!_playerData.TryGetValue(playerId, out var playerData)) {
+            Logger.Debug($"Received what player {playerId} wears, but they are not known");
+            return;
+        }
+
+        Logger.Info(
+            $"Player {playerData.Username} wears: " +
+            (skin.Length == 0 ? "the game's own look" : skin.Replace('\n', ';'))
+        );
+
+        playerData.Skin = skin;
+        ReportSkinProblems(playerData);
+        WantSkins();
+
+        if (playerData.IsInLocalScene && playerData.PlayerObject != null) {
+            _skinManager.Dress(playerData.PlayerObject, skin);
+        }
+    }
+
+    /// <summary>
+    /// Callback for a player leaving, whose skins no one may wear any more.
+    /// </summary>
+    public void OnPlayerSkinsChanged() {
+        WantSkins();
+    }
+
+    /// <summary>
+    /// Callback for the server changing whether players can wear skins: every character is dressed again.
+    /// </summary>
+    public void OnSkinsAllowedChanged() {
+        _skinManager.RedrawAll();
+    }
+
+    /// <summary>
+    /// Says what the other players wear, so the art of their skins loads before their characters show.
+    /// </summary>
+    private void WantSkins() {
+        var looks = new List<string>();
+        foreach (var playerData in _playerData.Values) {
+            looks.Add(playerData.Skin);
+        }
+
+        _skinManager.Want(looks);
+    }
+
+    /// <summary>
+    /// Says in the chat what this game can't show of what the given player wears, each thing once: the player sees
+    /// them otherwise than they see themselves, and should know why.
+    /// </summary>
+    private void ReportSkinProblems(ClientPlayerData playerData) {
+        foreach (var problem in _skinManager.Problems(playerData.Username, playerData.Skin)) {
+            if (_reportedSkinProblems.Add($"{playerData.Id}\n{problem}")) {
+                UiManager.InternalChatBox.AddMessage(problem);
+                Logger.Info(problem);
+            }
+        }
     }
 
     /// <summary>

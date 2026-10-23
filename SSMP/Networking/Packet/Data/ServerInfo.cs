@@ -163,9 +163,9 @@ internal class ServerInfo : IPacketData {
         /// </summary>
         public required Team Team { get; init; }
         /// <summary>
-        /// The skin ID of the player.
+        /// What the player wears through skin mods, as the text of a <c>SkinLook</c>, empty for the game's own look.
         /// </summary>
-        public required byte SkinId { get; init; }
+        public required string Skin { get; init; }
         /// <summary>
         /// The current crest type of the player.
         /// </summary>
@@ -184,7 +184,7 @@ internal class ServerInfo : IPacketData {
             packet.Write(Id);
             packet.Write(Username);
             packet.Write((byte) Team);
-            packet.Write(SkinId);
+            packet.Write(Skin);
             packet.Write((byte) CrestType);
             packet.Write(SaveKey);
             packet.Write(Room);
@@ -200,7 +200,7 @@ internal class ServerInfo : IPacketData {
                 Id = packet.ReadUShort(),
                 Username = packet.ReadString(),
                 Team = (Team) packet.ReadByte(),
-                SkinId = packet.ReadByte(),
+                Skin = packet.ReadString(),
                 CrestType = (CrestType) packet.ReadByte(),
                 SaveKey = packet.ReadString(),
                 Room = packet.ReadString()

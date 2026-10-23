@@ -25,9 +25,9 @@ internal class ClientPlayerSettingUpdate : GenericClientData {
     public Team Team { get; set; }
 
     /// <summary>
-    /// The ID of the skin.
+    /// What the player wears through skin mods, as the text of a <c>SkinLook</c>, empty for the game's own look.
     /// </summary>
-    public byte SkinId { get; set; }
+    public string Skin { get; set; } = "";
 
     /// <summary>
     /// The type of crest the player is using.
@@ -36,6 +36,12 @@ internal class ClientPlayerSettingUpdate : GenericClientData {
 
     public ClientPlayerSettingUpdate() {
         UpdateTypes = new HashSet<PlayerSettingUpdateType>();
+
+        // What another player wears, their crest and their team are each said once, when they change, so an update
+        // that the network loses has to come again: otherwise the character of that player kept the look, the crest
+        // or the team it had before, for good. An older one comes again before the newer ones that follow it
+        IsReliable = true;
+        DropReliableDataIfNewerExists = false;
     }
 
     /// <inheritdoc />
@@ -53,7 +59,7 @@ internal class ClientPlayerSettingUpdate : GenericClientData {
         }
 
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Skin)) {
-            packet.Write(SkinId);
+            packet.Write(Skin);
         }
 
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {
@@ -76,7 +82,7 @@ internal class ClientPlayerSettingUpdate : GenericClientData {
         }
 
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Skin)) {
-            SkinId = packet.ReadByte();
+            Skin = packet.ReadString();
         }
 
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {
@@ -92,8 +98,10 @@ internal class ServerPlayerSettingUpdate : IPacketData {
     /// <inheritdoc />
     public bool IsReliable => true;
 
-    /// <inheritdoc />
-    public bool DropReliableDataIfNewerExists => true;
+    /// <summary>
+    /// A newer update need not say what a lost one said: one may say the crest and the other what the player wears.
+    /// </summary>
+    public bool DropReliableDataIfNewerExists => false;
     
     /// <summary>
     /// Set of the types of updates that this packet contains. For example, only a skin update, or a skin and a team
@@ -107,9 +115,9 @@ internal class ServerPlayerSettingUpdate : IPacketData {
     public Team Team { get; set; }
 
     /// <summary>
-    /// The ID of the skin.
+    /// What the player wears through skin mods, as the text of a <c>SkinLook</c>, empty for the game's own look.
     /// </summary>
-    public byte SkinId { get; set; }
+    public string Skin { get; set; } = "";
 
     /// <summary>
     /// The type of crest the player is using.
@@ -129,7 +137,7 @@ internal class ServerPlayerSettingUpdate : IPacketData {
         }
 
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Skin)) {
-            packet.Write(SkinId);
+            packet.Write(Skin);
         }
         
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {
@@ -146,7 +154,7 @@ internal class ServerPlayerSettingUpdate : IPacketData {
         }
 
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Skin)) {
-            SkinId = packet.ReadByte();
+            Skin = packet.ReadString();
         }
         
         if (UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {
