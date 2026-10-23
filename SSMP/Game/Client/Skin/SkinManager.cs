@@ -171,9 +171,9 @@ internal class SkinManager {
             foreach (var wanted in look.Packs) {
                 if (CustomizerPacks.Find(packs, wanted) == null) {
                     problems.Add(Lang.Pick(
-                        $"{username} wears the skin \"{wanted.Name}\", which you don't have, so you see {username} " +
-                        "without it.",
-                        $"{username} 穿着皮肤「{wanted.Name}」，你没装这个皮肤，所以你看到的 {username} 没穿它。"
+                        $"{username} wears the skin \"{wanted.Name}\", which isn't found on this computer, so " +
+                        $"you see {username} without it.",
+                        $"{username} 穿着皮肤「{wanted.Name}」，你这边没找到这个皮肤，所以你看到的 {username} 没穿它。"
                     ));
                 }
             }
@@ -188,10 +188,10 @@ internal class SkinManager {
         }
 
         foreach (var mod in look.Unshown) {
+            // Said of the mod being there, which may dress nothing at all
             problems.Add(Lang.Pick(
-                $"{username} has {mod}, whose skins the co-op mod can't show yet, so you see {username} in the game's " +
-                "own look.",
-                $"{username} 装了 {mod}，它的皮肤联机里还显示不出来，你看到的 {username} 是游戏原本的样子。"
+                $"{username} has {mod}: skins worn through it can't be shown in co-op yet.",
+                $"{username} 装了 {mod}，用它换的皮肤联机里还显示不出来。"
             ));
         }
 
@@ -207,15 +207,40 @@ internal class SkinManager {
         Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copies
     ) {
         var figure = new Figure(figureObject);
+        _figures[figureObject] = figure;
+        AddSlots(figure, copies);
+    }
+
+    /// <summary>
+    /// Takes in more sheets of sprites copied for the character of another player, as it first plays from a library of
+    /// a crest that draws from them, and dresses it again so that they wear what it wears too.
+    /// </summary>
+    public void AddSheets(
+        GameObject figureObject,
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copies
+    ) {
+        if (_figures.TryGetValue(figureObject, out var figure) && AddSlots(figure, copies)) {
+            Draw(figure);
+        }
+    }
+
+    /// <summary>
+    /// Adds an atlas to the character for each material of each of the given copied sheets that it doesn't have yet,
+    /// and starts loading the art of what is worn for atlases that no character had before.
+    /// </summary>
+    /// <returns>Whether any sheet was new to the character.</returns>
+    private bool AddSlots(Figure figure, Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copies) {
         var atlasesBefore = _atlases.Count;
+        var added = false;
 
         foreach (var pair in copies) {
             var copy = pair.Key;
             var original = pair.Value;
-            if (copy.materials == null) {
+            if (copy.materials == null || !figure.Sheets.Add(copy)) {
                 continue;
             }
 
+            added = true;
             var sheet = new SheetCopy(copy);
             for (var i = 0; i < copy.materials.Length; i++) {
                 var own = OwnTexture(original, i);
@@ -244,13 +269,14 @@ internal class SkinManager {
             }
         }
 
-        _figures[figureObject] = figure;
-
         // The first character made says which atlases there are: art can be loaded now for what the other players
-        // wear. The others are copies of the same hero, with the same atlases
+        // wear. The others are copies of the same hero, with the same atlases, until one plays from a library of a
+        // crest that draws from sheets of its own
         if (_atlases.Count > atlasesBefore) {
             LoadWantedArt();
         }
+
+        return added;
 
         static void AddMaterial(Slot slot, Material? material) {
             if (material != null && !slot.Materials.Contains(material)) {
@@ -420,7 +446,9 @@ internal class SkinManager {
                 arts.Add(art);
             }
 
-            if (!ready) {
+            // A character that wears these skins already keeps them while the art of atlases new to it loads, as when
+            // it first plays from a library of a crest; its new atlases show the game's own art until then
+            if (!ready && !SameArts(figure.Wearing, arts)) {
                 arts.Clear();
             }
         }
@@ -487,6 +515,23 @@ internal class SkinManager {
     }
 
     /// <summary>
+    /// Whether two lists of art are the same skins in the same order.
+    /// </summary>
+    private static bool SameArts(List<PackArt> wearing, List<PackArt> arts) {
+        if (wearing.Count != arts.Count) {
+            return false;
+        }
+
+        for (var i = 0; i < arts.Count; i++) {
+            if (wearing[i] != arts[i]) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// The material that draws the given atlas with Player Color's shader, made the first time it is needed.
     /// </summary>
     private static Material ColoredMaterial(Slot slot, Shader shader) {
@@ -516,6 +561,11 @@ internal class SkinManager {
         /// Its atlases.
         /// </summary>
         public readonly List<Slot> Slots = [];
+
+        /// <summary>
+        /// The copied sheets of sprites that its atlases are of.
+        /// </summary>
+        public readonly HashSet<tk2dSpriteCollectionData> Sheets = [];
 
         /// <summary>
         /// What its player wears, as the text it travelled as.
@@ -559,6 +609,17 @@ internal class SkinManager {
 
         public SheetCopy(tk2dSpriteCollectionData copy) {
             Copy = copy;
+
+            // Each sprite goes with the material that it draws with, which says what atlas it is on whether or not the
+            // sheet's numbers of the materials of its sprites were filled in
+            var indexOf = new Dictionary<Material, int>();
+            var materials = copy.materials ?? [];
+            for (var m = 0; m < materials.Length; m++) {
+                if (materials[m] != null && !indexOf.ContainsKey(materials[m])) {
+                    indexOf[materials[m]] = m;
+                }
+            }
+
             var definitions = copy.spriteDefinitions ?? [];
             Material = new Material?[definitions.Length];
             MaterialInst = new Material?[definitions.Length];
@@ -570,8 +631,11 @@ internal class SkinManager {
 
                 Material[i] = definition.material;
                 MaterialInst[i] = definition.materialInst;
-                if (!DefinitionsByMaterial.TryGetValue(definition.materialId, out var list)) {
-                    DefinitionsByMaterial[definition.materialId] = list = [];
+                var materialIndex = definition.material != null && indexOf.TryGetValue(definition.material, out var at)
+                    ? at
+                    : definition.materialId;
+                if (!DefinitionsByMaterial.TryGetValue(materialIndex, out var list)) {
+                    DefinitionsByMaterial[materialIndex] = list = [];
                 }
 
                 list.Add(i);

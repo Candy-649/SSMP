@@ -576,12 +576,18 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     /// <summary>
     /// Add a player setting update to the current packet.
     /// </summary>
-    /// <param name="team">The team that the player would like to switch to, or null, if the team does not need to be
-    /// updated.</param>
+    /// <param name="version">How many updates of the player's settings this game has sent, this one included.</param>
     /// <param name="skin">What the player wears through skin mods, as the text of a <c>SkinLook</c>, or null if
     /// that need not be sent.</param>
-    /// <param name="crestType">The type of crest that the player has switched to.</param>
-    public void AddPlayerSettingUpdate(Team? team = null, string? skin = null, CrestType? crestType = null) {
+    /// <param name="crestType">The type of crest that the player has, or null if that need not be sent.</param>
+    /// <param name="team">The team that the player would like to switch to, or null, if the team does not need to be
+    /// updated.</param>
+    public void AddPlayerSettingUpdate(
+        ushort version,
+        string? skin = null,
+        CrestType? crestType = null,
+        Team? team = null
+    ) {
         if (!team.HasValue && skin == null && !crestType.HasValue) {
             return;
         }
@@ -596,6 +602,7 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
             }
 
             var playerSettingUpdate = (ServerPlayerSettingUpdate) packetData;
+            playerSettingUpdate.Version = version;
 
             if (team.HasValue) {
                 playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Team);

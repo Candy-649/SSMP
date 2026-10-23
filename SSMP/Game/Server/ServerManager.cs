@@ -1843,18 +1843,8 @@ internal abstract class ServerManager : IServerManager {
         // Update the team in the player data
         playerData.Team = team;
 
-        // Broadcast the packet to all players except the player we received the update from
-        foreach (var playerId in _playerData.Keys) {
-            if (id == playerId) {
-                _netServer.GetUpdateManagerForClient(playerId)?.AddPlayerSettingUpdateData(team: team);
-                continue;
-            }
-
-            _netServer.GetUpdateManagerForClient(playerId)?.AddOtherPlayerSettingUpdateData(
-                id,
-                team: team
-            );
-        }
+        // Tell everyone, the player too
+        SendPlayerSettings(playerData, true);
 
         PlayerTeamChangedEvent?.Invoke(playerData, team);
 
@@ -1886,10 +1876,30 @@ internal abstract class ServerManager : IServerManager {
         );
 
         playerData.Skin = skin;
+        SendPlayerSettings(playerData, false);
+    }
 
+    /// <summary>
+    /// Tells every other player all the settings of the given player after one of them changed, numbered, and the
+    /// player themselves their team if asked. Each update says all of them, so the newest that arrives is enough: one
+    /// that was lost and comes again after it is not taken in.
+    /// </summary>
+    /// <param name="playerData">The player.</param>
+    /// <param name="toSelf">Whether to tell the player their team as well.</param>
+    private void SendPlayerSettings(ServerPlayerData playerData, bool toSelf) {
+        var version = ++playerData.SettingVersion;
         foreach (var otherId in _playerData.Keys) {
-            if (otherId != id) {
-                _netServer.GetUpdateManagerForClient(otherId)?.AddOtherPlayerSettingUpdateData(id, skin: skin);
+            var updateManager = _netServer.GetUpdateManagerForClient(otherId);
+            if (otherId != playerData.Id) {
+                updateManager?.AddOtherPlayerSettingUpdateData(
+                    playerData.Id,
+                    version,
+                    playerData.Team,
+                    playerData.Skin,
+                    playerData.CrestType
+                );
+            } else if (toSelf) {
+                updateManager?.AddPlayerSettingUpdateData(version, playerData.Team);
             }
         }
     }
@@ -2297,6 +2307,19 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="playerSettingUpdate">The <see cref="ServerPlayerSettingUpdate"/> packet data.</param>
     private void OnPlayerSettingUpdate(ushort id, ServerPlayerSettingUpdate playerSettingUpdate) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
+            Logger.Warn($"Received a setting update, but player with ID {id} is not in mapping");
+            return;
+        }
+
+        // Each update says all of the player's settings, numbered: one that was lost and came again may arrive after a
+        // newer one, which said all of it already
+        if (playerData.SettingUpdateTaken is { } taken && (short) (playerSettingUpdate.Version - taken) <= 0) {
+            return;
+        }
+
+        playerData.SettingUpdateTaken = playerSettingUpdate.Version;
+
         if (playerSettingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Team)) {
             if (TryUpdatePlayerTeam(id, playerSettingUpdate.Team, out var reason)) {
                 SendMessage(id, $"Team changed to '{playerSettingUpdate.Team}'");
@@ -2310,26 +2333,15 @@ internal abstract class ServerManager : IServerManager {
         }
 
         if (playerSettingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {
-            if (!_playerData.TryGetValue(id, out var playerData)) {
-                Logger.Warn($"Received crest update, but player with ID {id} is not in mapping");
-                return;
-            }
-
             var crestType = playerSettingUpdate.CrestType;
+            if (playerData.CrestType != crestType) {
+                Logger.Info(
+                    $"Received crest update for player: ({id}, {playerData.Username}), " +
+                    $"from '{playerData.CrestType}' to '{crestType}'"
+                );
 
-            Logger.Info(
-                $"Received crest update for player: ({id}, {playerData.Username}), from '{playerData.CrestType}' to '{crestType}'"
-            );
-
-            playerData.CrestType = crestType;
-
-            foreach (var otherId in _playerData.Keys) {
-                if (otherId == id) {
-                    continue;
-                }
-
-                _netServer.GetUpdateManagerForClient(otherId)
-                          ?.AddOtherPlayerSettingUpdateData(id, crestType: crestType);
+                playerData.CrestType = crestType;
+                SendPlayerSettings(playerData, false);
             }
         }
     }

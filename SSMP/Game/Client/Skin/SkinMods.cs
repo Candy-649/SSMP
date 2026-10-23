@@ -85,6 +85,15 @@ internal static class CustomizerPacks {
     /// the same name, or null if there is none.
     /// </summary>
     public static SkinPack? Find(List<SkinPack> packs, SkinPackRef wanted) {
+        // The one in a folder of the same name first, so that the files of every other skin are read only when it
+        // differs
+        foreach (var pack in packs) {
+            if (string.Equals(pack.Name, wanted.Name, StringComparison.OrdinalIgnoreCase)
+                && pack.Fingerprint == wanted.Fingerprint) {
+                return pack;
+            }
+        }
+
         foreach (var pack in packs) {
             if (pack.Fingerprint == wanted.Fingerprint) {
                 return pack;
@@ -218,6 +227,12 @@ internal static class PlayerColorMod {
     private static Texture2D? _noMask;
 
     /// <summary>
+    /// The field in which Player Color keeps the masks it loaded, once looked for, null if it has none.
+    /// </summary>
+    private static FieldInfo? _theirMasks;
+    private static bool _theirMasksLooked;
+
+    /// <summary>
     /// The folder of the masks.
     /// </summary>
     private static string MaskDir => Path.Combine(Application.dataPath, "Mods", "Mask");
@@ -297,17 +312,30 @@ internal static class PlayerColorMod {
     }
 
     /// <summary>
-    /// The mask of the cloak for an atlas of a sheet of sprites, or <see cref="NoMask"/> if it has none.
+    /// The mask of the cloak for an atlas of a sheet of sprites, or <see cref="NoMask"/> if it has none: the one that
+    /// Player Color loaded for the player's own hero if it did, which it keeps for good, else one loaded here once.
     /// </summary>
-    public static Texture2D MaskFor(string sheet, string texture) {
+    public static Texture MaskFor(string sheet, string texture) {
         var key = sheet + "/" + texture;
+        var theirs = LoadedByPlayerColor(key);
+        if (theirs != null) {
+            // One loaded here before Player Color had its own is no longer needed
+            if (Masks.TryGetValue(key, out var own) && own != null) {
+                UnityEngine.Object.Destroy(own);
+            }
+
+            Masks.Remove(key);
+            return theirs;
+        }
+
         if (!Masks.TryGetValue(key, out var mask)) {
             mask = null;
             var path = Path.Combine(MaskDir, sheet, texture + ".png");
             try {
                 if (File.Exists(path)) {
                     var loaded = new Texture2D(2, 2);
-                    if (loaded.LoadImage(File.ReadAllBytes(path))) {
+                    // Not kept readable: it is only drawn with, and a copy in memory as well would double its size
+                    if (loaded.LoadImage(File.ReadAllBytes(path), true)) {
                         loaded.name = "SSMP Player Color mask " + key;
                         mask = loaded;
                     } else {
@@ -322,6 +350,32 @@ internal static class PlayerColorMod {
         }
 
         return mask != null ? mask : NoMask;
+    }
+
+    /// <summary>
+    /// The mask that Player Color loaded for the given atlas, or null if it hasn't: it loads them all when the first
+    /// room loads, unless told not to, and else each the first time the player's own hero draws from its atlas.
+    /// </summary>
+    private static Texture? LoadedByPlayerColor(string key) {
+        var plugin = Plugin;
+        if (plugin == null) {
+            return null;
+        }
+
+        try {
+            if (!_theirMasksLooked) {
+                _theirMasksLooked = true;
+                _theirMasks = plugin.GetType().GetField("atlas2Mask", BindingFlags.NonPublic | BindingFlags.Static);
+            }
+
+            return _theirMasks?.GetValue(null) is Dictionary<string, Texture> masks
+                   && masks.TryGetValue(key, out var mask) && mask != null
+                ? mask
+                : null;
+        } catch (Exception e) {
+            Logger.Warn($"Could not read the masks that Player Color loaded: {e.Message}");
+            return null;
+        }
     }
 
     /// <summary>

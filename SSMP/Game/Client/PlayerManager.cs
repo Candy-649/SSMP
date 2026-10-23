@@ -119,6 +119,11 @@ internal class PlayerManager : IPlayerManager {
     private readonly SkinManager _skinManager;
 
     /// <summary>
+    /// What was copied of the local hero for each character of another player, by the object that draws it.
+    /// </summary>
+    private readonly Dictionary<GameObject, FigureCopies> _figureCopies = new();
+
+    /// <summary>
     /// Reference to the client player data dictionary (<see cref="ClientManager._playerData"/>)
     /// from <see cref="ClientManager"/>.
     /// </summary>
@@ -693,15 +698,59 @@ internal class PlayerManager : IPlayerManager {
         var spriteAnimator = playerObject.GetComponent<tk2dSpriteAnimator>();
         // Make a smart copy of the sprite animator library so we can
         // modify the animator without having to worry about other player objects
+        var copies = new FigureCopies();
+        _figureCopies[playerObject] = copies;
+        var library = localPlayer.GetComponent<tk2dSpriteAnimator>().Library;
+        copies.Libraries.Add(library);
         var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
-        spriteAnimator.Library = CopyUtil.SmartCopySpriteAnimation(
-            localPlayer.GetComponent<tk2dSpriteAnimator>().Library,
-            playerObject,
-            copiedSheets
-        );
+        spriteAnimator.Library = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
 
         // Its own sheets of sprites, so that it can wear a skin of its own
         _skinManager.RegisterFigure(playerObject, copiedSheets);
+    }
+
+    /// <summary>
+    /// The clip that the character of another player plays for a clip of one of the libraries that the local hero's
+    /// crests play instead of its own: the character's own copy, from its own copy of that library, made the first
+    /// time it plays from it. Those libraries draw from sheets of sprites of their own, so a clip played from the
+    /// original drew the character from the local hero's sheets, in the local player's skin and cloak colour.
+    /// </summary>
+    /// <param name="playerObject">The object that draws the character.</param>
+    /// <param name="library">The library of the crest.</param>
+    /// <param name="clip">The clip of that library.</param>
+    /// <returns>The character's copy of the clip, or the clip itself for an object that is no such character.</returns>
+    public tk2dSpriteAnimationClip FigureClip(
+        GameObject playerObject,
+        tk2dSpriteAnimation library,
+        tk2dSpriteAnimationClip clip
+    ) {
+        if (!_figureCopies.TryGetValue(playerObject, out var copies)) {
+            return clip;
+        }
+
+        if (copies.Libraries.Add(library)) {
+            var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
+            CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
+            _skinManager.AddSheets(playerObject, copiedSheets);
+        }
+
+        return copies.Objects.TryGetValue(clip, out var copy) ? (tk2dSpriteAnimationClip) copy : clip;
+    }
+
+    /// <summary>
+    /// What was copied of the local hero for the character of another player: every original with its copy, and the
+    /// libraries of clips copied so far.
+    /// </summary>
+    private sealed class FigureCopies {
+        /// <summary>
+        /// The copies by their originals.
+        /// </summary>
+        public readonly Dictionary<object, object> Objects = new();
+
+        /// <summary>
+        /// The original libraries that were copied.
+        /// </summary>
+        public readonly HashSet<tk2dSpriteAnimation> Libraries = [];
     }
 
     /// <summary>
@@ -900,26 +949,37 @@ internal class PlayerManager : IPlayerManager {
         );
 
         playerData.Skin = skin;
-        ReportSkinProblems(playerData);
-        WantSkins();
 
+        // Dressed first, so that the art of what the character wore before is let go below if nobody wears it
         if (playerData.IsInLocalScene && playerData.PlayerObject != null) {
             _skinManager.Dress(playerData.PlayerObject, skin);
         }
-    }
 
-    /// <summary>
-    /// Callback for a player leaving, whose skins no one may wear any more.
-    /// </summary>
-    public void OnPlayerSkinsChanged() {
+        ReportSkinProblems(playerData);
         WantSkins();
     }
 
     /// <summary>
-    /// Callback for the server changing whether players can wear skins: every character is dressed again.
+    /// Callback for a player leaving, whose skins no one may wear any more, and whose ID a player who joins later may
+    /// get: what was said in the chat about the one who left may be said of that one again.
+    /// </summary>
+    /// <param name="playerId">The ID of the player who left.</param>
+    public void OnPlayerLeftSkins(ushort playerId) {
+        var saidOf = $"{playerId}\n";
+        _reportedSkinProblems.RemoveWhere(said => said.StartsWith(saidOf, StringComparison.Ordinal));
+        WantSkins();
+    }
+
+    /// <summary>
+    /// Callback for the server changing whether players can wear skins: every character is dressed again, and what this
+    /// game can't show of what the players wear, said only once skins are on, is said now.
     /// </summary>
     public void OnSkinsAllowedChanged() {
         _skinManager.RedrawAll();
+
+        foreach (var playerData in _playerData.Values) {
+            ReportSkinProblems(playerData);
+        }
     }
 
     /// <summary>

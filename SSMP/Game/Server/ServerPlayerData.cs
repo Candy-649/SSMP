@@ -48,6 +48,17 @@ internal class ServerPlayerData : IServerPlayer {
 
     /// <inheritdoc />
     public CrestType CrestType { get; set; } = CrestType.Hunter;
+
+    /// <summary>
+    /// How many times the other players were told of a change of this player's settings, which numbers what they are
+    /// told, so that a game takes in none older than one it has (see ServerManager.SendPlayerSettings).
+    /// </summary>
+    public ushort SettingVersion { get; set; }
+
+    /// <summary>
+    /// The number of the last update of their settings taken in from this player's game, or null before the first.
+    /// </summary>
+    public ushort? SettingUpdateTaken { get; set; }
     
     /// <summary>
     /// Whether this player is the host of their current scene.

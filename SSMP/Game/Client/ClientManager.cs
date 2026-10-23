@@ -252,6 +252,27 @@ internal class ClientManager : IClientManager {
     private float _skinLookDueAt = -1f;
 
     /// <summary>
+    /// The crest that this client last told the server the local player wears, or null if none since it connected.
+    /// </summary>
+    private SSMP.Internals.CrestType? _sentCrestType;
+
+    /// <summary>
+    /// How many updates of the player's settings this game sent the server since it connected, which numbers them.
+    /// </summary>
+    private ushort _settingVersion;
+
+    /// <summary>
+    /// The number of the last update of each other player's settings taken in, by their ID. An update numbered no
+    /// higher came again after it was lost, and says less than the one taken in.
+    /// </summary>
+    private readonly Dictionary<ushort, ushort> _settingVersions = new();
+
+    /// <summary>
+    /// The number of the last update of this player's own team taken in, or null if none since it connected.
+    /// </summary>
+    private ushort? _selfSettingVersion;
+
+    /// <summary>
     /// Whether full synchronisation is enabled for the server we are connected to.
     /// </summary>
     private bool _fullSynchronisation;
@@ -863,6 +884,7 @@ internal class ClientManager : IClientManager {
 
         _autoConnect = false;
         _sentCrestId = null;
+        _sentCrestType = null;
 
         _netClient.Disconnect();
         _coopSave.OnLocalDisconnect();
@@ -984,7 +1006,11 @@ internal class ClientManager : IClientManager {
         // Nothing sent before this connection counts for it: the first frame of play sends the crest if nothing else
         // has by then
         _sentCrestId = null;
+        _sentCrestType = null;
         _sentSkinLook = "";
+        _settingVersion = 0;
+        _settingVersions.Clear();
+        _selfSettingVersion = null;
 
         // Update the locally stored server settings
         _serverSettings.SetAllProperties(serverInfo.ServerSettingsUpdate.ServerSettings);
@@ -1085,8 +1111,10 @@ internal class ClientManager : IClientManager {
     private void SendCrest() {
         try {
             var crestId = PlayerData.instance.CurrentCrestID;
-            _netClient.UpdateManager.AddPlayerSettingUpdate(crestType: CrestTypeExt.FromInternal(crestId));
+            var crestType = CrestTypeExt.FromInternal(crestId);
             _sentCrestId = crestId;
+            _sentCrestType = crestType;
+            SendPlayerSettings();
         } catch (Exception e) {
             Logger.Warn($"Could not send the crest of the loaded save: {e.Message}");
         }
@@ -1132,7 +1160,16 @@ internal class ClientManager : IClientManager {
 
         _sentSkinLook = look;
         Logger.Info($"Wearing: {(look.Length == 0 ? "the game's own look" : look.Replace('\n', ';'))}");
-        _netClient.UpdateManager.AddPlayerSettingUpdate(skin: look);
+        SendPlayerSettings();
+    }
+
+    /// <summary>
+    /// Tells the server all of the player's settings that this game tells it, as last sent: what they wear through
+    /// skin mods and their crest. Each update says all of them, numbered, so the newest that arrives is enough; one
+    /// that was lost and comes again after it is not taken in.
+    /// </summary>
+    private void SendPlayerSettings() {
+        _netClient.UpdateManager.AddPlayerSettingUpdate(++_settingVersion, _sentSkinLook, _sentCrestType);
     }
 
     /// <summary>
@@ -1191,6 +1228,7 @@ internal class ClientManager : IClientManager {
             SaveKey = playerConnect.SaveKey
         };
         _playerData[playerConnect.Id] = playerData;
+        _settingVersions.Remove(playerConnect.Id);
 
         UiManager.InternalChatBox.AddMessage(Lang.Pick(
             $"Player '{playerConnect.Username}' connected to the server",
@@ -1247,7 +1285,8 @@ internal class ClientManager : IClientManager {
 
         // Clear the player from the player data mapping
         _playerData.Remove(id);
-        _playerManager.OnPlayerSkinsChanged();
+        _settingVersions.Remove(id);
+        _playerManager.OnPlayerLeftSkins(id);
 
         UiManager.InternalChatBox.AddMessage(
             playerDisconnect.TimedOut
@@ -2100,25 +2139,45 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="settingUpdate">The <see cref="ClientPlayerSettingUpdate"/> packet data.</param>
     private void OnPlayerSettingUpdate(ClientPlayerSettingUpdate settingUpdate) {
-        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Team)) {
-            if (settingUpdate.Self) {
+        // Each update says all of a player's settings, numbered: one that was lost and came again may arrive after a
+        // newer one, which said all of it already
+        if (settingUpdate.Self) {
+            if (_selfSettingVersion is { } taken && (short) (settingUpdate.Version - taken) <= 0) {
+                return;
+            }
+
+            _selfSettingVersion = settingUpdate.Version;
+            if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Team)) {
                 _playerManager.OnPlayerTeamUpdate(true, settingUpdate.Team);
-            } else {
-                _playerManager.OnPlayerTeamUpdate(false, settingUpdate.Team, settingUpdate.Id);
             }
+
+            return;
         }
 
-        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Skin) && !settingUpdate.Self) {
-            _playerManager.OnPlayerSkinUpdate(settingUpdate.Id, settingUpdate.Skin);
+        var id = settingUpdate.Id;
+        if (_settingVersions.TryGetValue(id, out var last) && (short) (settingUpdate.Version - last) <= 0) {
+            return;
         }
 
-        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Crest)) {
-            if (!_playerData.TryGetValue(settingUpdate.Id, out var playerData)) {
-                Logger.Warn($"Received crest update, but player with ID: {settingUpdate.Id} is not in local mapping");
-            } else {
-                Logger.Info($"Received crest update for player: {settingUpdate.Id}, {settingUpdate.CrestType}");
-                playerData.CrestType = settingUpdate.CrestType;
-            }
+        _settingVersions[id] = settingUpdate.Version;
+
+        if (!_playerData.TryGetValue(id, out var playerData)) {
+            Logger.Warn($"Received a setting update, but player with ID: {id} is not in local mapping");
+            return;
+        }
+
+        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Team) && playerData.Team != settingUpdate.Team) {
+            _playerManager.OnPlayerTeamUpdate(false, settingUpdate.Team, id);
+        }
+
+        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Skin) && playerData.Skin != settingUpdate.Skin) {
+            _playerManager.OnPlayerSkinUpdate(id, settingUpdate.Skin);
+        }
+
+        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Crest)
+            && playerData.CrestType != settingUpdate.CrestType) {
+            Logger.Info($"Received crest update for player: {id}, {settingUpdate.CrestType}");
+            playerData.CrestType = settingUpdate.CrestType;
         }
     }
 
@@ -2202,8 +2261,9 @@ internal class ClientManager : IClientManager {
         Logger.Info($"Player's Crest has changed from '{currentCrestId}' to '{crestId}', networking to server");
 
         var crestType = CrestTypeExt.FromInternal(crestId);
-        _netClient.UpdateManager.AddPlayerSettingUpdate(crestType: crestType);
         _sentCrestId = crestId;
+        _sentCrestType = crestType;
+        SendPlayerSettings();
     }
 
     /// <summary>
@@ -2230,7 +2290,8 @@ internal class ClientManager : IClientManager {
                 : $"Player's Crest is '{crestId}' rather than '{sentCrestId}', the one last sent, with no crest " +
                   "equipped to change it, networking to server"
             );
-            _netClient.UpdateManager.AddPlayerSettingUpdate(crestType: crestType);
+            _sentCrestType = crestType;
+            SendPlayerSettings();
         } catch (InvalidOperationException e) {
             Logger.Warn($"Could not send the crest '{crestId}': {e.Message}");
         }

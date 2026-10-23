@@ -22,18 +22,22 @@ internal static class CopyUtil {
     /// <param name="targetObject">The target object to initialize Unity components in.</param>
     /// <param name="copiedSheets">If given, filled with the copied sheets of sprites, each with the original it was
     /// copied from.</param>
+    /// <param name="copies">If given, what was copied for the same object before, by original, which is used again and
+    /// added to: another library of the same hero shares sheets of sprites with the first, and each is copied once.
+    /// </param>
     /// <returns>A copied tk2dSpriteAnimation instance.</returns>
     public static tk2dSpriteAnimation SmartCopySpriteAnimation(
         tk2dSpriteAnimation original,
         GameObject targetObject,
-        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>? copiedSheets = null
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>? copiedSheets = null,
+        Dictionary<object, object>? copies = null
     ) {
         // Keep track of internal references between object in the original objects.
         // Every time we make a copy of an object we add the original object as a key and
         // the new object as a value. Then when we encounter an object in the original that we
         // already made a copy of, we can simply retrieve the value from this dictionary.
         // That way we preserve references between objects from the original.
-        var objectDict = new Dictionary<object, object>();
+        var objectDict = copies ?? new Dictionary<object, object>();
 
         var newSpriteAnimation = targetObject.AddComponent<tk2dSpriteAnimation>();
 

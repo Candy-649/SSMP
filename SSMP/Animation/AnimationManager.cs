@@ -1051,7 +1051,12 @@ internal class AnimationManager {
 
         if (overrideGroup != null) {
             if (AnimationUtil.TryFindClipInOverrideGroup(overrideGroup, clipName, out var overrideGroupClip)) {
-                clip = overrideGroupClip;
+                // The character's own copy, which draws from sheets of its own, in what its player wears
+                clip = _playerManager.FigureClip(
+                    playerObject!,
+                    overrideGroup.Config.heroAnimOverrideLib,
+                    overrideGroupClip!
+                );
                 clipInOverrideGroupLib = true;
                 
                 if (_debugLogAnimations) Logger.Info("Found clip in override group's override animation library");
@@ -1060,7 +1065,11 @@ internal class AnimationManager {
 
         if (configGroup != null && !clipInOverrideGroupLib) {
             if (AnimationUtil.TryFindClipInOverrideGroup(configGroup, clipName, out var configGroupClip)) {
-                clip = configGroupClip;
+                clip = _playerManager.FigureClip(
+                    playerObject!,
+                    configGroup.Config.heroAnimOverrideLib,
+                    configGroupClip!
+                );
                 
                 if (_debugLogAnimations) Logger.Info("Found clip in config group's override animation library");
             }

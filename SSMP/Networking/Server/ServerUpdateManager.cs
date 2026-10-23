@@ -675,15 +675,12 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
-    /// Add a player setting update to the current packet for the receiving player.
+    /// Add a player setting update to the current packet for the receiving player: their team.
     /// </summary>
-    /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.
+    /// <param name="version">How many changes of the player's settings the server has told of, this one included.
     /// </param>
-    public void AddPlayerSettingUpdateData(Team? team = null) {
-        if (!team.HasValue) {
-            return;
-        }
-
+    /// <param name="team">The team of the player.</param>
+    public void AddPlayerSettingUpdateData(ushort version, Team team) {
         lock (Lock) {
             var playerSettingUpdate = FindOrCreatePacketData(
                 ClientUpdatePacketId.PlayerSetting,
@@ -691,32 +688,28 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                 () => new ClientPlayerSettingUpdate { Self = true }
             );
 
-            if (team.HasValue) {
-                playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Team);
-                playerSettingUpdate.Team = team.Value;
-            }
+            playerSettingUpdate.Version = version;
+            playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Team);
+            playerSettingUpdate.Team = team;
         }
     }
 
     /// <summary>
-    /// Add a player setting update to the current packet for another player.
+    /// Add a player setting update to the current packet for another player: all of their settings.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
-    /// <param name="team">An optional team, if the player's team changed, or null if no such team was supplied.
+    /// <param name="version">How many changes of the player's settings the server has told of, this one included.
     /// </param>
-    /// <param name="skin">What the player wears through skin mods, as the text of a <c>SkinLook</c>, or null if
-    /// that need not be sent.</param>
-    /// <param name="crestType">The type of crest that the player has switched to.</param>
+    /// <param name="team">The team of the player.</param>
+    /// <param name="skin">What the player wears through skin mods, as the text of a <c>SkinLook</c>.</param>
+    /// <param name="crestType">The type of crest that the player has.</param>
     public void AddOtherPlayerSettingUpdateData(
         ushort id,
-        Team? team = null,
-        string? skin = null,
-        CrestType? crestType = null
+        ushort version,
+        Team team,
+        string skin,
+        CrestType crestType
     ) {
-        if (!team.HasValue && skin == null && !crestType.HasValue) {
-            return;
-        }
-
         lock (Lock) {
             var playerSettingUpdate = FindOrCreatePacketData(
                 ClientUpdatePacketId.PlayerSetting,
@@ -724,20 +717,13 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
                 () => new ClientPlayerSettingUpdate { Id = id }
             );
 
-            if (team.HasValue) {
-                playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Team);
-                playerSettingUpdate.Team = team.Value;
-            }
-
-            if (skin != null) {
-                playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Skin);
-                playerSettingUpdate.Skin = skin;
-            }
-
-            if (crestType.HasValue) {
-                playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Crest);
-                playerSettingUpdate.CrestType = crestType.Value;
-            }
+            playerSettingUpdate.Version = version;
+            playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Team);
+            playerSettingUpdate.Team = team;
+            playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Skin);
+            playerSettingUpdate.Skin = skin;
+            playerSettingUpdate.UpdateTypes.Add(PlayerSettingUpdateType.Crest);
+            playerSettingUpdate.CrestType = crestType;
         }
     }
 
