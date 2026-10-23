@@ -60,6 +60,21 @@ internal sealed class PauseManager {
     private Hook? _heroControllerDieFromHazardHook;
 
     /// <summary>
+    /// Hook for <c>GameManager.SetPausedState</c>, which the opening backpack pauses the game with.
+    /// </summary>
+    private Hook? _gameManagerSetPausedStateHook;
+
+    /// <summary>
+    /// Hook for <c>GameManager.SetTimeScale(float)</c>, which stops world time for a pause.
+    /// </summary>
+    private Hook? _gameManagerSetTimeScaleHook;
+
+    /// <summary>
+    /// Whether the pause that is being set leaves world time running (see <see cref="GameManagerOnSetPausedState"/>).
+    /// </summary>
+    private bool _keepTimeRunning;
+
+    /// <summary>
     /// Creates a new pause manager.
     /// </summary>
     /// <param name="netClient">The client used to determine multiplayer connection state.</param>
@@ -91,6 +106,16 @@ internal sealed class PauseManager {
             HeroControllerOnDieFromHazard
         );
 
+        _gameManagerSetPausedStateHook = new Hook(
+            typeof(global::GameManager).GetMethod("SetPausedState", InstanceMemberFlags)!,
+            GameManagerOnSetPausedState
+        );
+
+        _gameManagerSetTimeScaleHook = new Hook(
+            typeof(global::GameManager).GetMethod("SetTimeScale", InstanceMemberFlags, null, [typeof(float)], null)!,
+            GameManagerOnSetTimeScale
+        );
+
         EventHooks.HeroControllerDie += HeroControllerDieHook;
     }
 
@@ -110,9 +135,66 @@ internal sealed class PauseManager {
         _heroControllerDieFromHazardHook?.Dispose();
         _heroControllerDieFromHazardHook = null;
 
+        _gameManagerSetPausedStateHook?.Dispose();
+        _gameManagerSetPausedStateHook = null;
+
+        _gameManagerSetTimeScaleHook?.Dispose();
+        _gameManagerSetTimeScaleHook = null;
+
         EventHooks.HeroControllerDie -= HeroControllerDieHook;
 
         IsMultiplayerPauseMenuOpen = false;
+    }
+
+    /// <summary>
+    /// Original <c>GameManager.SetPausedState</c> delegate signature.
+    /// </summary>
+    /// <param name="self">The game manager instance.</param>
+    /// <param name="isPaused">Whether the game is paused or unpaused.</param>
+    private delegate void OrigSetPausedState(global::GameManager self, bool isPaused);
+
+    /// <summary>
+    /// Detour for <c>GameManager.SetPausedState</c>. The backpack pauses the game as it opens
+    /// (<c>GameManager.SetIsInventoryOpen</c>, after it marks the backpack open), which while connected left the local
+    /// character frozen in the middle of a move, such as putting away the map to open the backpack's map, and stopped
+    /// the creatures of a room this game runs for every player in it. Like the pause menu while connected, the backpack
+    /// leaves world time running: the pause is the game's own but for stopping the time.
+    /// </summary>
+    /// <param name="orig">The original vanilla method.</param>
+    /// <param name="self">The game manager instance.</param>
+    /// <param name="isPaused">Whether the game is paused or unpaused.</param>
+    private void GameManagerOnSetPausedState(OrigSetPausedState orig, global::GameManager self, bool isPaused) {
+        if (!isPaused || !_netClient.IsConnected || PlayerData.instance is not { isInventoryOpen: true }) {
+            orig(self, isPaused);
+            return;
+        }
+
+        _keepTimeRunning = true;
+        try {
+            orig(self, isPaused);
+        } finally {
+            _keepTimeRunning = false;
+        }
+    }
+
+    /// <summary>
+    /// Original <c>GameManager.SetTimeScale(float)</c> delegate signature.
+    /// </summary>
+    /// <param name="self">The game manager instance.</param>
+    /// <param name="timeScale">The requested time scale.</param>
+    private delegate void OrigSetTimeScale(global::GameManager self, float timeScale);
+
+    /// <summary>
+    /// Detour for <c>GameManager.SetTimeScale(float)</c>: left out for a pause that leaves world time running (see
+    /// <see cref="GameManagerOnSetPausedState"/>).
+    /// </summary>
+    /// <param name="orig">The original vanilla method.</param>
+    /// <param name="self">The game manager instance.</param>
+    /// <param name="timeScale">The requested time scale.</param>
+    private void GameManagerOnSetTimeScale(OrigSetTimeScale orig, global::GameManager self, float timeScale) {
+        if (!_keepTimeRunning) {
+            orig(self, timeScale);
+        }
     }
 
     /// <summary>
