@@ -708,6 +708,7 @@ internal class PlayerManager : IPlayerManager {
         var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
         spriteAnimator.Library = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
         copies.Libraries[library] = spriteAnimator.Library;
+        copies.CopiedWith[library] = copies.Objects;
         copies.TakeSheets(copiedSheets, ofTheHero: true);
 
         // Its own sheets of sprites, so that it can wear a skin of its own
@@ -733,8 +734,11 @@ internal class PlayerManager : IPlayerManager {
             return clip;
         }
 
+        // A library that a figure of a room played from first was copied as the room's
         FigureLibrary(playerObject, copies, library, ofTheHero: true);
-        return copies.Objects.TryGetValue(clip, out var copy) ? (tk2dSpriteAnimationClip) copy : clip;
+        return copies.CopiedWith.TryGetValue(library, out var objects) && objects.TryGetValue(clip, out var copy)
+            ? (tk2dSpriteAnimationClip) copy
+            : clip;
     }
 
     /// <summary>
@@ -798,8 +802,6 @@ internal class PlayerManager : IPlayerManager {
         }
 
         try {
-            LetGoOfGoneRoomCopies(playerObject, copies);
-
             var roomCopy = new RoomCopy(sheet, null);
             copy = CopyUtil.SmartCopySpriteCollection(sheet, playerObject, roomCopy.Objects);
             var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
@@ -807,13 +809,15 @@ internal class PlayerManager : IPlayerManager {
             copies.RoomCopies.Add(roomCopy);
             copies.TakeSheets(copiedSheets, ofTheHero: false);
             _skinManager.AddSheets(playerObject, copiedSheets);
-            return copy;
         } catch (Exception e) {
             Logger.Warn($"Could not copy the sheet of sprites '{sheet.name}' for the character of another player: " +
                         e.Message);
             copies.Failed.Add(sheet);
             return null;
         }
+
+        LetGoOfGoneRoomCopies(playerObject, copies);
+        return copy;
     }
 
     /// <summary>
@@ -844,31 +848,37 @@ internal class PlayerManager : IPlayerManager {
             var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
             if (ofTheHero) {
                 copy = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
+                copies.CopiedWith[library] = copies.Objects;
             } else {
-                LetGoOfGoneRoomCopies(playerObject, copies);
-
                 var roomCopy = new RoomCopy(library, copies.HeroSheets);
                 copy = CopyUtil.SmartCopySpriteAnimation(library, playerObject, null, roomCopy.Objects);
                 roomCopy.Took(copy, copiedSheets);
                 copies.RoomCopies.Add(roomCopy);
+                copies.CopiedWith[library] = roomCopy.Objects;
             }
 
             copies.Libraries[library] = copy;
             copies.TakeSheets(copiedSheets, ofTheHero);
             _skinManager.AddSheets(playerObject, copiedSheets);
-            return copy;
         } catch (Exception e) {
             Logger.Warn($"Could not copy the library '{library.name}' for the character of another player: " +
                         e.Message);
             copies.Failed.Add(library);
             return null;
         }
+
+        if (!ofTheHero) {
+            LetGoOfGoneRoomCopies(playerObject, copies);
+        }
+
+        return copy;
     }
 
     /// <summary>
     /// Lets go of what was copied for the character of another player from rooms that are gone: their libraries and
     /// sheets of sprites came with the room and went with it, and the next visit brings new ones, which are copied
-    /// anew. The art of skins loaded for their atlases alone goes too.
+    /// anew. The art of skins loaded for their atlases alone goes too. It runs once a new copy has taken its atlases,
+    /// so that the art of an atlas that the new room has as well stays rather than being loaded again.
     /// </summary>
     /// <param name="playerObject">The object that draws the character.</param>
     /// <param name="copies">What was copied for the character.</param>
@@ -904,6 +914,7 @@ internal class PlayerManager : IPlayerManager {
 
             if (roomCopy.Original is tk2dSpriteAnimation library) {
                 copies.Libraries.Remove(library);
+                copies.CopiedWith.Remove(library);
             }
 
             if (roomCopy.Library != null) {
@@ -929,6 +940,12 @@ internal class PlayerManager : IPlayerManager {
         /// The copies of the libraries copied so far, by their originals.
         /// </summary>
         public readonly Dictionary<tk2dSpriteAnimation, tk2dSpriteAnimation> Libraries = new();
+
+        /// <summary>
+        /// What each library was copied with, by its original: <see cref="Objects"/>, or a room's own copies, which
+        /// hold the copies of its clips.
+        /// </summary>
+        public readonly Dictionary<tk2dSpriteAnimation, Dictionary<object, object>> CopiedWith = new();
 
         /// <summary>
         /// The copy of each sheet of sprites copied so far, by its original.

@@ -165,12 +165,16 @@ internal sealed class PackArt {
     /// <summary>
     /// Lets go of the art of the given atlases, loaded or loading, which no character draws any more.
     /// </summary>
-    public void Forget(IEnumerable<(string Sheet, string Texture)> atlases) {
+    /// <returns>Whether this ended the loading: what was still loading was only art let go of now, so the rest is in,
+    /// which the characters waiting for it are not told otherwise.</returns>
+    public bool Forget(IEnumerable<(string Sheet, string Texture)> atlases) {
+        var stopped = false;
         foreach (var (sheet, texture) in atlases) {
             var key = Key(sheet, texture);
             if (_loading.TryGetValue(key, out var request)) {
                 _loading.Remove(key);
                 request.Abort();
+                stopped = true;
             }
 
             if (_textures.TryGetValue(key, out var loaded)) {
@@ -180,6 +184,8 @@ internal sealed class PackArt {
                 }
             }
         }
+
+        return stopped && _loading.Count == 0 && !_destroyed;
     }
 
     /// <summary>

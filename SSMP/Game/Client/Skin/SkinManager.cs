@@ -271,8 +271,18 @@ internal class SkinManager {
             _atlases.Remove(atlas);
         }
 
+        var loaded = false;
         foreach (var art in _art.Values) {
-            art.Forget(unused);
+            loaded |= art.Forget(unused);
+        }
+
+        // As when the last of the art comes in (see OnArtLoaded), after going through the art: dressing may add more
+        if (loaded) {
+            foreach (var other in _figures.Values) {
+                if (other.Look.Length > 0) {
+                    Draw(other);
+                }
+            }
         }
     }
 

@@ -66,9 +66,34 @@ internal static class HeldLook {
     private static readonly Dictionary<GameObject, List<Drawn>> Drawing = new();
 
     /// <summary>
-    /// The renderers that the camera drawing now draws with another material, each with its own.
+    /// The renderers that the camera drawing now draws with another material, each with its own and the other.
     /// </summary>
-    private static readonly List<(Renderer Renderer, Material Own)> Swapped = [];
+    private static readonly List<(Renderer Renderer, Material Own, Material Other)> Swapped = [];
+
+    /// <summary>
+    /// How many cameras are drawing now, one inside another: a camera may draw another as it draws, such as a
+    /// reflection, which draws with what was put on for the first, and only the outermost puts the materials back.
+    /// </summary>
+    private static int _depth;
+
+    /// <summary>
+    /// The frame that <see cref="_depth"/> counts in: a camera that never finished drawing leaves it counted, which
+    /// the next frame forgets.
+    /// </summary>
+    private static int _depthFrame;
+
+    /// <summary>
+    /// Whether each sheet of sprites seen is one that creatures draw a player in, by its instance: a name is made anew
+    /// each time it is asked for.
+    /// </summary>
+    private static readonly Dictionary<int, bool> IsCreatureSheet = new();
+
+    /// <summary>
+    /// The materials of the players' copies made for sprites with keywords or numbers of their own, by sprite and the
+    /// copy's material: a sprite given those draws with a material of its own, made from its sheet's, and so is drawn
+    /// with one made from the copy's.
+    /// </summary>
+    private static readonly Dictionary<(tk2dSprite Sprite, Material Material), Material> KeywordMaterials = new();
 
     /// <summary>
     /// Whether the cameras are watched.
@@ -83,6 +108,26 @@ internal static class HeldLook {
     public static void Look(GameObject figure, bool lookThrough) {
         if (SheetOf == null) {
             return;
+        }
+
+        // The materials made for sprites that are gone
+        if (KeywordMaterials.Count > 0) {
+            List<(tk2dSprite, Material)>? gone = null;
+            foreach (var pair in KeywordMaterials) {
+                if (pair.Key.Sprite == null || pair.Key.Material == null) {
+                    (gone ??= []).Add(pair.Key);
+                }
+            }
+
+            if (gone != null) {
+                foreach (var key in gone) {
+                    if (KeywordMaterials[key] is var material && material != null) {
+                        Object.Destroy(material);
+                    }
+
+                    KeywordMaterials.Remove(key);
+                }
+            }
         }
 
         if (lookThrough || Time.unscaledTime >= _lookThroughAt) {
@@ -105,7 +150,7 @@ internal static class HeldLook {
             }
 
             var sheet = sprite.Collection;
-            if (sheet == null || !CreatureSheets.Contains(sheet.name) ||
+            if (sheet == null || !DrawsCreatures(sheet) ||
                 !sprite.TryGetComponent<Renderer>(out var renderer) || !renderer.enabled) {
                 continue;
             }
@@ -151,7 +196,7 @@ internal static class HeldLook {
         var heroPlace = hero != null ? hero.transform : null;
         foreach (var sprite in Object.FindObjectsByType<tk2dBaseSprite>(FindObjectsSortMode.None)) {
             var sheet = sprite.Collection;
-            if (sheet == null || !CreatureSheets.Contains(sheet.name)) {
+            if (sheet == null || !DrawsCreatures(sheet)) {
                 continue;
             }
 
@@ -163,6 +208,22 @@ internal static class HeldLook {
 
             Candidates.Add(sprite);
         }
+    }
+
+    /// <summary>
+    /// Whether a sheet of sprites is one that creatures draw a player in.
+    /// </summary>
+    private static bool DrawsCreatures(tk2dSpriteCollectionData sheet) {
+        var id = sheet.GetInstanceID();
+        if (!IsCreatureSheet.TryGetValue(id, out var draws)) {
+            if (IsCreatureSheet.Count > 4096) {
+                IsCreatureSheet.Clear();
+            }
+
+            IsCreatureSheet[id] = draws = CreatureSheets.Contains(sheet.name);
+        }
+
+        return draws;
     }
 
     /// <summary>
@@ -193,6 +254,15 @@ internal static class HeldLook {
             Camera.onPreCull -= OnPreCull;
             Camera.onPostRender -= OnPostRender;
             PutBack();
+            _depth = 0;
+
+            foreach (var material in KeywordMaterials.Values) {
+                if (material != null) {
+                    Object.Destroy(material);
+                }
+            }
+
+            KeywordMaterials.Clear();
         }
     }
 
@@ -201,8 +271,16 @@ internal static class HeldLook {
     /// their sheets: each sprite's current picture as the copy would draw it.
     /// </summary>
     private static void OnPreCull(Camera camera) {
-        // What a camera that never finished drawing left behind
-        PutBack();
+        if (_depthFrame != Time.frameCount) {
+            // What a camera that never finished drawing left behind
+            _depthFrame = Time.frameCount;
+            _depth = 0;
+            PutBack();
+        }
+
+        if (_depth++ > 0) {
+            return;
+        }
 
         foreach (var drawn in Drawing.Values) {
             foreach (var (sprite, renderer, original, copy) in drawn) {
@@ -223,26 +301,68 @@ internal static class HeldLook {
                     continue;
                 }
 
-                Swapped.Add((renderer, renderer.sharedMaterial));
+                if (sprite is tk2dSprite keyed &&
+                    (keyed.HasKeywordsDefined || keyed.materialFloats is { Count: > 0 })) {
+                    material = KeywordMaterial(keyed, material);
+                }
+
+                Swapped.Add((renderer, renderer.sharedMaterial, material));
                 renderer.sharedMaterial = material;
             }
         }
     }
 
     /// <summary>
-    /// Puts their own materials back once a camera has drawn.
+    /// The material of a player's copy for a sprite with keywords or numbers of its own, as the sprite makes its own
+    /// from its sheet's (tk2dSprite.UpdateMaterial): the copy's, with the sprite's keywords on and its numbers set.
+    /// It follows the copy's, which changes as the player's skin and colour come in.
     /// </summary>
-    private static void OnPostRender(Camera camera) {
-        PutBack();
+    private static Material KeywordMaterial(tk2dSprite sprite, Material copy) {
+        if (!KeywordMaterials.TryGetValue((sprite, copy), out var material) || material == null) {
+            KeywordMaterials[(sprite, copy)] = material = new Material(copy) {
+                name = copy.name + " (using keywords)"
+            };
+        }
+
+        if (material.shader != copy.shader) {
+            material.shader = copy.shader;
+        }
+
+        material.CopyPropertiesFromMaterial(copy);
+        if (sprite.materialKeywords != null) {
+            foreach (var keyword in sprite.materialKeywords) {
+                if (!material.IsKeywordEnabled(keyword)) {
+                    material.EnableKeyword(keyword);
+                }
+            }
+        }
+
+        if (sprite.materialFloats != null) {
+            foreach (var pair in sprite.materialFloats) {
+                material.SetFloat(pair.Key, pair.Value);
+            }
+        }
+
+        return material;
     }
 
     /// <summary>
-    /// Puts back the materials of the sprites given others, the last first.
+    /// Puts their own materials back once the outermost camera has drawn.
+    /// </summary>
+    private static void OnPostRender(Camera camera) {
+        if (_depth > 0 && --_depth == 0) {
+            PutBack();
+        }
+    }
+
+    /// <summary>
+    /// Puts back the materials of the sprites given others, the last first, unless something else gave a sprite one
+    /// since, as its animation does when its picture changes.
     /// </summary>
     private static void PutBack() {
         for (var i = Swapped.Count - 1; i >= 0; i--) {
-            var (renderer, own) = Swapped[i];
-            if (renderer != null) {
+            var (renderer, own, other) = Swapped[i];
+            if (renderer != null && renderer.sharedMaterial == other) {
                 renderer.sharedMaterial = own;
             }
         }
