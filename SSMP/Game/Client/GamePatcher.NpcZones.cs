@@ -37,7 +37,9 @@ internal partial class GamePatcher {
     private static readonly HashSet<string> PersonalActionNames = [
         nameof(RunFSM), nameof(RunDialogue), nameof(HeroTurnToFace), "HeroLockState", "HeroControllerMethods",
         "AddHeroInputBlocker", nameof(StartRoarEmitter), "PlayerDataIntAdd", "IncrementPlayerDataInt",
-        "DecrementPlayerDataInt", "SavedItemGet", "SavedItemGetV2", "CollectableItemCollect", "CollectableItemTakeV2"
+        "DecrementPlayerDataInt", "SavedItemGet", "SavedItemGetV2", "SavedItemGetDelayed", "CollectableItemCollect",
+        "CollectableItemTake", "CollectableItemTakeV2", "GetQuestReward", "GetQuestRewardV2", "EndQuest",
+        "SetToolUnlocked", "UnlockCrest", "AutoEquipCrestV4"
     ];
 
     /// <summary>
