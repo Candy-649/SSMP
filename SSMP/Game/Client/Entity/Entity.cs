@@ -320,14 +320,24 @@ internal partial class Entity {
     private HashSet<FsmStateAction>? _motionReadsOfTheCopy;
 
     /// <summary>
-    /// Dictionary mapping data types to entity components.
+    /// Dictionary mapping data types to entity components. Made with the entity, as what its constructor does before
+    /// the components are handled asks about them: the saves of the copy ask whether it was told dead (CopyIsGone),
+    /// which threw for a creature with a number in the save whose copy does not run here, every time the game that
+    /// expected to run its room came in (a creature in a fossil, 10-23 logs), and left the rest of the room's
+    /// creatures unmade.
     /// </summary>
-    private readonly Dictionary<EntityComponentType, EntityComponent> _components;
+    private readonly Dictionary<EntityComponentType, EntityComponent> _components = new();
 
     /// <summary>
     /// Unique list of components that require periodic update calls on the host.
     /// </summary>
-    private readonly List<EntityComponent> _updatableComponents;
+    private readonly List<EntityComponent> _updatableComponents = [];
+
+    /// <summary>
+    /// Whether the constructor got to its end. The updates of each frame are hooked half way through it, and one that
+    /// threw after that left them running every frame for an entity that was never finished, failing every time.
+    /// </summary>
+    private readonly bool _made;
 
     /// <summary>
     /// Dictionary mapping FSM actions to their entity action data instances.
@@ -666,12 +676,10 @@ internal partial class Entity {
 
         KeepSavesOfTheCopy();
 
-        _components = new Dictionary<EntityComponentType, EntityComponent>();
         HandleComponents(types);
 
         HandleEnemyDeathEffects();
 
-        _updatableComponents = new List<EntityComponent>();
         foreach (var component in _components.Values) {
             if (component == null) {
                 continue;
@@ -690,6 +698,7 @@ internal partial class Entity {
         }
 
         Object.Client.SetActive(false);
+        _made = true;
     }
 
     /// <summary>
@@ -1767,6 +1776,10 @@ internal partial class Entity {
     /// Callback method for the last thing that happens before a frame is drawn.
     /// </summary>
     private void OnLateUpdate() {
+        if (!_made) {
+            return;
+        }
+
         if (_isControlled) {
             HideTheRoomsOwnCopy();
 
@@ -1837,6 +1850,10 @@ internal partial class Entity {
     /// </summary>
     [SuppressMessage("ReSharper", "CompareOfFloatsByEqualityOperator")]
     private void OnUpdate() {
+        if (!_made) {
+            return;
+        }
+
         if (_putFsmsBackWhereTheyWere) {
             _putFsmsBackWhereTheyWere = false;
             PutHostFsmsBackWhereTheyWere();

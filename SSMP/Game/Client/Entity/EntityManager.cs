@@ -606,15 +606,23 @@ internal class EntityManager {
         var objects = CollectEntityCandidates(scene);
 
         foreach (var obj in objects) {
-            new EntityProcessor {
-                GameObject = obj,
-                IsSceneHost = IsSceneHost,
-                IsSceneHostDetermined = _sceneRoleDetermined,
-                SceneHostEpoch = SceneHostEpoch,
-                KeepsRunning = RunsTheRoom,
-                LateLoad = lateLoad,
-                UseStableSceneId = true
-            }.Process();
+            // One creature that cannot be made leaves the others of the room to be made all the same. What it threw
+            // went out of the handler of the room's change, into the game's own log, which this game does not write
+            // (BepInEx could not start its writer), and the rest of the room went unmade
+            try {
+                new EntityProcessor {
+                    GameObject = obj,
+                    IsSceneHost = IsSceneHost,
+                    IsSceneHostDetermined = _sceneRoleDetermined,
+                    SceneHostEpoch = SceneHostEpoch,
+                    KeepsRunning = RunsTheRoom,
+                    LateLoad = lateLoad,
+                    UseStableSceneId = true
+                }.Process();
+            } catch (Exception e) {
+                var name = obj == null ? "?" : obj.name;
+                Logger.Error($"Could not make the entity of '{name}' in '{scene.name}':\n{e}");
+            }
         }
     }
 
