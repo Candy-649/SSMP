@@ -87,7 +87,9 @@ internal partial class CoopSave {
     private const float LavaSampleLifetime = 1f;
 
     /// <summary>
-    /// How long a place a player last stood safely on stays good for putting someone there, in seconds.
+    /// How long a place a player last stood safely on counts as where they are now, in seconds. Such a place comes
+    /// first for putting someone beside them; an older one still does when there is none newer, as long as the lava
+    /// has not come near it.
     /// </summary>
     private const float LavaSafeSpotLifetime = 3f;
 
@@ -259,19 +261,28 @@ internal partial class CoopSave {
         public Rigidbody2D TargetBody { get; }
 
         /// <summary>
-        /// The part of it that burns, or null if it has none.
+        /// The parts of it that burn: more than one where it carries a spare that stays switched off, as the lava of
+        /// the arena does inside what draws it, ahead of the one that burns.
         /// </summary>
-        public Collider2D? Band { get; set; }
+        public List<Collider2D> Bands { get; } = [];
 
         /// <summary>
-        /// How far above its body the top of the part that burns is, once that part has been seen switched on.
+        /// How far above its body the top of the part that burns is, straight above the body, once that part has
+        /// been seen switched on: for while none of it is.
         /// </summary>
         public float? BandTopOffset { get; set; }
 
         /// <summary>
-        /// How high the top of it was when last seen, for once it is gone with the room it was in.
+        /// How high the top of it was where the local player was when last seen, for once it is gone with the room it
+        /// was in.
         /// </summary>
         public float? LastTop { get; set; }
+
+        /// <summary>
+        /// When it was last seen after nobody, in seconds of game time: places stood on before then, as in a fight
+        /// before the lava starts, are not taken for putting anyone.
+        /// </summary>
+        public float RestedAt { get; set; } = float.NegativeInfinity;
 
         /// <summary>
         /// The listeners through which a burn stops it.
@@ -519,9 +530,8 @@ internal partial class CoopSave {
         targetBody.bodyType = RigidbodyType2D.Kinematic;
         targetBody.gravityScale = 0f;
 
-        var chase = new LavaChase(fsm, body, target, targetBody, SceneUtil.GetCurrentSceneName()) {
-            Band = FindLavaBand(fsm)
-        };
+        var chase = new LavaChase(fsm, body, target, targetBody, SceneUtil.GetCurrentSceneName());
+        chase.Bands.AddRange(FindLavaBands(fsm));
         foreach (var register in fsm.GetComponents<EventRegister>()) {
             if (register != null && Array.IndexOf(LavaStopEvents, register.SubscribedEvent) >= 0) {
                 chase.Stops.Add(register);
@@ -540,16 +550,17 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The part of a lava that burns: the collider of its lava hazard.
+    /// The parts of a lava that burn: the colliders of its lava hazards, switched on or not, since which of them burns
+    /// is only known by which is on. The first one found used to be taken alone, and in the race of the arena that is a
+    /// spare that stays switched off, so the top of the lava was never seen there: every place counted as clear of it,
+    /// and players were put back and stood up right at it, or under it (USER 10-23: "她第二次死亡复活的时候就在岩浆里").
     /// </summary>
-    private static Collider2D? FindLavaBand(PlayMakerFSM fsm) {
+    private static IEnumerable<Collider2D> FindLavaBands(PlayMakerFSM fsm) {
         foreach (var damage in fsm.GetComponentsInChildren<DamageHero>(true)) {
             if (damage.hazardType == GlobalEnums.HazardType.LAVA && damage.TryGetComponent<Collider2D>(out var band)) {
-                return band;
+                yield return band;
             }
         }
-
-        return null;
     }
 
     /// <summary>
@@ -770,22 +781,82 @@ internal partial class CoopSave {
     private static float GetLavaY(LavaChase chase) => chase.Body.transform.position.y;
 
     /// <summary>
-    /// How high the top of the lava is, or null before the part that burns has been seen. Once the lava is gone with
-    /// the room it was in, how high it was when last seen.
+    /// How high the top of the lava is at a place across it, or null before the part that burns has been seen. Once
+    /// the lava is gone with the room it was in, how high it was when last seen.
     /// </summary>
-    private static float? GetLavaTop(LavaChase chase) {
-        if (chase.BandTopOffset is not { } offset) {
-            return null;
+    private static float? GetLavaTop(LavaChase chase, float x) {
+        if (chase.Body == null) {
+            return chase.LastTop;
         }
 
-        return chase.Body != null ? GetLavaY(chase) + offset : chase.LastTop;
+        if (GetBurningTop(chase, x) is { } top) {
+            return top;
+        }
+
+        return chase.BandTopOffset is { } offset ? GetLavaY(chase) + offset : null;
+    }
+
+    /// <summary>
+    /// How high the top of those parts of the lava that burn and are switched on is at a place across them, or null
+    /// with none of them on.
+    /// </summary>
+    private static float? GetBurningTop(LavaChase chase, float x) {
+        float? top = null;
+        foreach (var band in chase.Bands) {
+            if (band == null || !band.enabled || !band.gameObject.activeInHierarchy) {
+                continue;
+            }
+
+            var at = GetTopAt(band, x);
+            if (top is not { } higher || at > higher) {
+                top = at;
+            }
+        }
+
+        return top;
+    }
+
+    /// <summary>
+    /// How high the top of a part that burns is at a place across it. The lava sways, turned by up to 1.5 degrees
+    /// either way about a point far to one side of a part that burns some 135 wide: the box around that part rose up
+    /// to 2.6 above its top, which where the players are is no more than half of one from where it is unturned.
+    /// </summary>
+    private static float GetTopAt(Collider2D band, float x) {
+        if (band is not BoxCollider2D box) {
+            return band.bounds.max.y;
+        }
+
+        var half = box.size / 2f;
+        var transform = box.transform;
+        var top = GetEdgeAt(
+            transform.TransformPoint(box.offset + new Vector2(-half.x, half.y)),
+            transform.TransformPoint(box.offset + new Vector2(half.x, half.y)),
+            x
+        );
+        var bottom = GetEdgeAt(
+            transform.TransformPoint(box.offset + new Vector2(-half.x, -half.y)),
+            transform.TransformPoint(box.offset + new Vector2(half.x, -half.y)),
+            x
+        );
+
+        // Whichever is higher, for a box that is turned upside down
+        return Mathf.Max(top, bottom);
+    }
+
+    /// <summary>
+    /// How high an edge from one point to another is at a place across it, or beyond its ends, at the nearer end.
+    /// </summary>
+    private static float GetEdgeAt(Vector3 from, Vector3 to, float x) {
+        var across = to.x - from.x;
+        var part = Mathf.Abs(across) < 0.001f ? 0.5f : Mathf.Clamp01((x - from.x) / across);
+        return Mathf.Lerp(from.y, to.y, part);
     }
 
     /// <summary>
     /// Whether a place is clear of the lava.
     /// </summary>
     private static bool IsAboveLava(LavaChase chase, Vector2 position) {
-        return GetLavaTop(chase) is not { } top || position.y > top + LavaClearance;
+        return GetLavaTop(chase, position.x) is not { } top || position.y > top + LavaClearance;
     }
 
     /// <summary>
@@ -806,12 +877,17 @@ internal partial class CoopSave {
                 return;
             }
 
-            if (chase.Band is { enabled: true } band && band.gameObject.activeInHierarchy) {
-                chase.BandTopOffset = band.bounds.max.y - GetLavaY(chase);
+            if (GetBurningTop(chase, chase.Body.transform.position.x) is { } top) {
+                chase.BandTopOffset = top - GetLavaY(chase);
             }
 
-            chase.LastTop = GetLavaTop(chase);
+            chase.LastTop = GetLavaTop(chase, hero.transform.position.x);
 
+            if (!IsLavaChasing(chase)) {
+                chase.RestedAt = Time.time;
+            }
+
+            ForgetSpotsOfMembersWhoLeft(chase);
             NoteSafeSpot(hero, chase);
             UpdateOwnPutBackHold(hero, chase);
 
@@ -861,8 +937,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The ground the game puts a player back on, if it is straight below the middle of the local player, no further
-    /// down than their feet and a little more: the nearest solid thing there on the layers the game looks on.
+    /// The ground the game puts a player back on, if it is straight below a place for the middle of a player, no
+    /// further down than the feet of the local player are below their middle and a little more: the nearest solid
+    /// thing there on the layers the game looks on.
     /// </summary>
     private static Collider2D? GetGroundRightBelow(HeroController hero, Vector2 position) {
         var collider = hero.GetComponent<Collider2D>();
@@ -870,7 +947,7 @@ internal partial class CoopSave {
             return null;
         }
 
-        var reach = position.y - collider.bounds.min.y + PutBackGroundSlack;
+        var reach = hero.transform.position.y - collider.bounds.min.y + PutBackGroundSlack;
         var filter = new ContactFilter2D { useTriggers = false };
         filter.SetLayerMask(PutBackGroundLayerMask);
         Physics2D.Raycast(position, Vector2.down, filter, PutBackGroundHits, reach);
@@ -1143,11 +1220,13 @@ internal partial class CoopSave {
         try {
             _burnRedirect = null;
             if (_lavaChase is { } chase && IsLavaChasing(chase) && GetRoomMemberBodies() is { Count: > 0 } members) {
-                if (TryGetMemberSafeSpot(chase, out var spot, out var name)) {
+                if (TryGetMemberSafeSpot(chase, out var spot, out var name, out var age)) {
                     _burnRedirect = spot;
                     _burnRedirectTime = Time.time;
                     MuteLavaStops(chase);
-                    Logger.Info($"Burnt in the chase, so going back beside {name} at {spot}");
+                    Logger.Info(
+                        $"Burnt in the chase, so going back beside {name} at {spot}, where they stood {age:0.0} s ago"
+                    );
                 } else {
                     Logger.Info(
                         $"Burnt in the chase with nowhere safe beside {JoinNames(members.Select(member => member.Username))}, " +
@@ -1164,26 +1243,71 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The safest place beside a member who is on their feet in the room: of the places such members last stood
-    /// safely that are still clear of the lava, the highest. It is a place on the ground, which is what the game needs
-    /// to put a player back on.
+    /// safely that are still clear of the lava, the highest of those stood on a moment ago, or else the newest. A
+    /// player who climbs is in the air for longer than a moment as often as not, and a burn while the only member on
+    /// their feet was went the game's own way, back down to a mark of the room, with the lava set down for everyone
+    /// (USER 10-23: "岩浆赛跑开始的第一次掉进岩浆之后紧接着就是掉进岩浆第二次"). It is a place on the ground, which is
+    /// what the game needs to put a player back on.
     /// </summary>
-    private bool TryGetMemberSafeSpot(LavaChase chase, out Vector2 spot, out string name) {
+    private bool TryGetMemberSafeSpot(LavaChase chase, out Vector2 spot, out string name, out float age) {
         spot = default;
         name = "";
+        age = 0f;
         var found = false;
+        var foundFresh = false;
+        var foundTime = float.NegativeInfinity;
         foreach (var member in GetRoomMemberBodies()) {
             if (_waitingMembers.ContainsKey(member.Id) || !chase.Members.TryGetValue(member.Id, out var known) ||
-                Time.time - known.SafeTime > LavaSafeSpotLifetime || !IsAboveLava(chase, known.SafeSpot) ||
-                found && known.SafeSpot.y <= spot.y) {
+                !IsStillSafe(chase, known)) {
+                continue;
+            }
+
+            var fresh = Time.time - known.SafeTime <= LavaSafeSpotLifetime;
+            var better = !found || fresh && !foundFresh ||
+                         fresh == foundFresh && (fresh ? known.SafeSpot.y > spot.y : known.SafeTime > foundTime);
+            if (!better) {
                 continue;
             }
 
             spot = known.SafeSpot;
             name = member.Username;
+            age = Time.time - known.SafeTime;
             found = true;
+            foundFresh = fresh;
+            foundTime = known.SafeTime;
         }
 
         return found;
+    }
+
+    /// <summary>
+    /// Whether a place a member last stood on safely is still one to put the local player on, as far as this game can
+    /// tell: stood on since the lava started after the players, clear of the lava, over ground that stays and over
+    /// nothing that hurts. Their game looked when they stood there, which can be a while ago now: a floor may have
+    /// broken since, and the game puts a player back on the nearest ground below the place, under the lava if that is
+    /// what is there.
+    /// </summary>
+    private static bool IsStillSafe(LavaChase chase, ChaseMember known) {
+        if (float.IsNegativeInfinity(known.SafeTime) || known.SafeTime < chase.RestedAt ||
+            !IsAboveLava(chase, known.SafeSpot) || IsInOrOverTheRoomsHarm(known.SafeSpot)) {
+            return false;
+        }
+
+        var hero = HeroController.instance;
+        return hero == null ||
+               GetGroundRightBelow(hero, known.SafeSpot) is { } ground && !PersonalPlaces.Contains(ground.gameObject);
+    }
+
+    /// <summary>
+    /// Forgets where the members who are not in the room any more last stood safely in it: one who comes back in by
+    /// another way is nowhere near there.
+    /// </summary>
+    private void ForgetSpotsOfMembersWhoLeft(LavaChase chase) {
+        foreach (var pair in chase.Members) {
+            if (!_playerData.TryGetValue(pair.Key, out var member) || !member.IsInLocalScene) {
+                pair.Value.SafeTime = float.NegativeInfinity;
+            }
+        }
     }
 
     /// <summary>
@@ -1202,7 +1326,7 @@ internal partial class CoopSave {
             return;
         }
 
-        if (TryGetMemberSafeSpot(chase, out var newer, out _)) {
+        if (TryGetMemberSafeSpot(chase, out var newer, out _, out _)) {
             spot = newer;
         } else if (!IsAboveLava(chase, spot)) {
             // The game's own mark, with the lava stopped and set down below it, which is what the burn would have

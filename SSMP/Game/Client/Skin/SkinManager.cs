@@ -215,9 +215,9 @@ internal class SkinManager {
 
         if (look.PlayerColor != null && !PlayerColorMod.CanDraw) {
             problems.Add(Lang.Pick(
-                $"{username} colours their cloak with Player Color, which isn't fully installed here, so you see " +
-                $"{username}'s cloak in its own colour.",
-                $"{username} 用 Player Color 换了斗篷颜色，你这边没装好 Player Color，所以你看到的是原来的颜色。"
+                $"{username} colours their cloak with the mod Player Color, which isn't fully installed here, so " +
+                $"you see {username}'s cloak in its own colour.",
+                $"{username} 用 Player Color 模组换了斗篷颜色，你这边没装好这个模组，所以你看到的是原来的颜色。"
             ));
         }
 

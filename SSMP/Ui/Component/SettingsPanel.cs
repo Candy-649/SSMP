@@ -1008,10 +1008,13 @@ internal class SettingsPanel : IRootedComponent {
             _cloakSwatches[i].Image.color = picked ? full : new Color(full.r, full.g, full.b, 0.3f);
         }
 
+        // Whose the colours are is said on the row, as the row goes by another player's mod: a friend who saw only
+        // "没装全" there asked what it was that was not fully installed (USER 10-23: "斗篷颜色切换识别的是别人的mod，
+        // 最好还是标注一下")
         _cloakStatusText.text = !PlayerColorMod.IsLoaded
-            ? Lang.Pick("Player Color isn't installed", "没装 Player Color")
+            ? Lang.Pick("Player Color mod isn't installed", "没装 Player Color 模组")
             : !canChoose
-                ? Lang.Pick("Not fully installed", "没装全")
+                ? Lang.Pick("Player Color mod isn't fully installed", "Player Color 模组没装全")
                 : wearingSkin
                     ? Lang.Pick("Not on a skin", "穿着皮肤时不变色")
                     : chosen == null
@@ -1022,21 +1025,25 @@ internal class SettingsPanel : IRootedComponent {
 
         if (!PlayerColorMod.IsLoaded) {
             _cloakNoteText.text = Lang.Pick(
-                "With Player Color installed, the cloak can be given a colour here, so that the two of you are told " +
+                "The cloak's colour comes from another mod, Player Color by PDE26jjk, which this mod doesn't " +
+                "include. With it installed, the cloak can be given a colour here, so that the two of you are told " +
                 "apart at a glance.",
-                "装了 Player Color，就能在这里给斗篷换颜色，两个人一眼就分得清。"
+                "斗篷颜色用的是另一个模组 Player Color（作者 PDE26jjk），联机模组里不带它。装了它，就能在这里" +
+                "给斗篷换颜色，两个人一眼就分得清。"
             );
         } else if (!PlayerColorMod.HasMasks) {
             _cloakNoteText.text = Lang.Pick(
-                "Player Color's masks weren't found, so the cloak keeps its colour. They go in Hollow Knight " +
-                "Silksong_Data\\Mods\\Mask in the game's folder.",
-                "没找到 Player Color 的 Mask 文件夹，斗篷变不了色。它要放在游戏目录的 " +
+                "The masks of Player Color, another mod (by PDE26jjk), weren't found, so the cloak keeps its colour. " +
+                "They go in Hollow Knight Silksong_Data\\Mods\\Mask in the game's folder.",
+                "没找到另一个模组 Player Color（作者 PDE26jjk）的 Mask 文件夹，斗篷变不了色。它要放在游戏目录的 " +
                 "Hollow Knight Silksong_Data\\Mods\\Mask 里。"
             );
         } else if (!canChoose) {
             _cloakNoteText.text = Lang.Pick(
-                "Player Color didn't load fully, so the cloak keeps its colour.",
-                "Player Color 没有完整加载，斗篷变不了色。"
+                "Player Color, another mod (by PDE26jjk), didn't load fully, so the cloak keeps its colour. Most " +
+                "likely its file ssmod isn't in BepInEx\\plugins\\PlayerColor.",
+                "另一个模组 Player Color（作者 PDE26jjk）没有完整加载，斗篷变不了色。多半是它的 ssmod 文件" +
+                "没放在 BepInEx\\plugins\\PlayerColor 文件夹里。"
             );
         } else if (wearingSkin) {
             _cloakNoteText.text = Lang.Pick(
@@ -1045,9 +1052,10 @@ internal class SettingsPanel : IRootedComponent {
             );
         } else {
             _cloakNoteText.text = Lang.Pick(
-                "Worn at once, and still the next time the game starts. The other player sees it if they have " +
-                "Player Color too.",
-                "选了马上换上，下次开游戏也还在。队友也装了 Player Color，才看得到你的颜色。"
+                "Worn at once, and still the next time the game starts. The colour is drawn by another mod, Player " +
+                "Color by PDE26jjk: the other player sees it if they have it too.",
+                "选了马上换上，下次开游戏也还在。颜色由另一个模组 Player Color（作者 PDE26jjk）来画，" +
+                "队友也装了它，才看得到你的颜色。"
             );
         }
     }

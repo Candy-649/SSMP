@@ -1892,6 +1892,12 @@ internal partial class CoopSave {
             if (rescue.StandAt is { } standAt) {
                 Logger.Info($"Standing back up beside a member at {standAt}");
                 hero.transform.position = new Vector3(standAt.x, standAt.y, hero.transform.position.z);
+                // The game's own mark goes there with them, as if they had climbed past one: a burn later on with
+                // nowhere safe beside a member puts them back at that mark, which was where they last passed one, the
+                // bottom of the shaft for a player who died there (USER 10-23, 岩浆还是有问题: a spike high up sent
+                // the friend back to the bottom, with the lava set down there for everyone)
+                var mark = playerData.hazardRespawnLocation;
+                playerData.hazardRespawnLocation = new Vector3(standAt.x, standAt.y, mark.z);
                 HoldLavaForOwnPutBack();
             } else if (rescue.ByGrinder) {
                 var safe = playerData.hazardRespawnLocation;

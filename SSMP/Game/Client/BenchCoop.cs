@@ -334,7 +334,9 @@ internal class BenchCoop {
         var originalPosition = self.vectorPosition;
         var basePosition = originalPosition == null || originalPosition.IsNone ? Vector3.zero : originalPosition.Value;
 
-        self.vectorPosition = new FsmVector3 { Value = basePosition + new Vector3(GetSeatOffset(), 0f, 0f) };
+        var offset = GetSeatOffset();
+        self.vectorPosition = new FsmVector3 { Value = basePosition + new Vector3(offset, 0f, 0f) };
+        Logger.Info($"Sitting down on '{self.Fsm?.GameObject?.name}', {offset:+0.00;-0.00} to this player's side");
         try {
             orig(self);
         } finally {
@@ -361,8 +363,13 @@ internal class BenchCoop {
             return;
         }
 
-        MoveHero(hero, GetSeatOffset());
+        var offset = GetSeatOffset();
+        MoveHero(hero, offset);
         _wakeUpPositions[benchId] = hero.transform.position.x;
+        Logger.Info(
+            $"Woke on '{bench.name}' and moved {offset:+0.00;-0.00} to this player's side of it, to " +
+            $"{hero.transform.position.x:0.00}"
+        );
     }
 
     /// <summary>

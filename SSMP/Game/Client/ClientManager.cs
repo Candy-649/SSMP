@@ -224,6 +224,11 @@ internal class ClientManager : IClientManager {
     private readonly Stopwatch _lastPositionStopwatch;
 
     /// <summary>
+    /// How often the position of the local player is sent while it stays the same, in milliseconds.
+    /// </summary>
+    private const int StillPositionEvery = 250;
+
+    /// <summary>
     /// Keeps track of the last updated scale of the local player object.
     /// </summary>
     private Vector3 _lastScale;
@@ -2063,8 +2068,12 @@ internal class ClientManager : IClientManager {
         if (_lastPositionStopwatch.ElapsedMilliseconds > updateRate) {
             var newPosition = heroTransform.position;
 
-            // If the position changed since last check
-            if (newPosition != _lastPosition) {
+            // If the position changed since last check, or was last sent a while ago: a position goes in an update
+            // that is not sent again if it goes missing, nor taken by a game that has not yet seen the player come
+            // into its room, so a player who then stayed where they were was shown where they had been for as long
+            // as they stayed. One who woke on a bench after a death was moved to their side of it as they came into
+            // the room, and sat in its middle for the other player (USER 10-23: "她坐在椅子中间", "还坐在我的座位上")
+            if (newPosition != _lastPosition || _lastPositionStopwatch.ElapsedMilliseconds > StillPositionEvery) {
                 // Update the last position, since it changed
                 _lastPosition = newPosition;
                 // Restart the stopwatch
