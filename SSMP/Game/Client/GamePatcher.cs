@@ -233,6 +233,7 @@ internal partial class GamePatcher {
         AddHook(typeof(CollectableItem), nameof(CollectableItem.IsAtMax), CollectableItemOnIsAtMax);
 
         RegisterPooledEffectHooks();
+        RegisterNpcZoneHooks();
     }
 
     /// <summary>
@@ -391,6 +392,7 @@ internal partial class GamePatcher {
         DisposeNeedolinHooks();
         DisposeCameraCheckHooks();
         DisposeAggressionHooks();
+        DisposeNpcZoneHooks();
 
         _crawlerStopCrawlingHook?.Dispose();
         _crawlerStopCrawlingHook = null;
