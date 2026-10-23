@@ -1428,22 +1428,12 @@ internal partial class CoopSave {
     /// is won while they lie in their cocoon there, as a cocoon that is broken does (USER 10-22: "第2秒看起来已经晚了（，
     /// 可不可以这一次立刻把人复活，不要等3秒了，就像茧被打一样立刻给人家放地上"). The win is what starts the lava of such a
     /// room: two seconds later it shakes, and two more and it rises over where the fight was, where nobody can come
-    /// back for a cocoon. Each game stands up its own player, as for a boss that fell (EndFightOfFallenBoss), and the
-    /// other games take the cocoon away as their game says so (RescueEnd).
+    /// back for a cocoon. Each game stands up its own player, as for a boss that fell (EndFightOfFallenBoss), and
+    /// counts the members who lie in theirs there as standing (see <see cref="StandUpCocoonsIn"/>).
     /// </summary>
     /// <param name="scene">The room of the arena.</param>
     public void OnArenaWon(string scene) {
-        if (_rescue is not { Outcome: RescueOutcome.Waiting, Chase: false } rescue || rescue.Scene != scene ||
-            !HasLavaChase(scene)) {
-            return;
-        }
-
-        Logger.Info(
-            $"The fight in '{scene}', whose win starts the lava there, was won while the local player lay in their " +
-            "cocoon, so they stand up where they lie"
-        );
-        rescue.StandUpNote = FightOverNote;
-        rescue.Outcome = RescueOutcome.Rescued;
+        StandUpCocoonsIn(scene, $"The fight in '{scene}', whose win starts the lava there, was won", FightOverNote);
     }
 
     /// <summary>
@@ -1455,16 +1445,76 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="chase">The lava, which chases.</param>
     private void StandUpBeforeTheLava(LavaChase chase) {
-        if (_rescue is not { Outcome: RescueOutcome.Waiting, Chase: false } rescue || rescue.Scene != chase.Scene) {
+        StandUpCocoonsIn(chase.Scene, $"The lava in '{chase.Scene}' started", LavaRisingNote);
+    }
+
+    /// <summary>
+    /// What a player who lay waiting is told as the start of a lava stands them up.
+    /// </summary>
+    private static string LavaRisingNote => Lang.Pick(
+        "The lava is rising. You are back on your feet.", "岩浆涨起来了，你站起来了。"
+    );
+
+    /// <summary>
+    /// Stands the local player up where they lie, at once, if they lie in their cocoon in the given room, which has a
+    /// lava that chases, and counts the members who lie in theirs there as standing, whom their own games stand up for
+    /// the same (see <see cref="CountCocoonsUp"/>).
+    /// </summary>
+    /// <param name="scene">The room.</param>
+    /// <param name="what">What happened there, for the log.</param>
+    /// <param name="note">What the local player is told as they stand up.</param>
+    private void StandUpCocoonsIn(string scene, string what, string note) {
+        if (!HasLavaChase(scene)) {
             return;
         }
 
-        Logger.Info(
-            $"The lava in '{chase.Scene}' started while the local player lay in their cocoon, so they stand up where " +
-            "they lie"
-        );
-        rescue.StandUpNote = Lang.Pick("The lava is rising. You are back on your feet.", "岩浆涨起来了，你站起来了。");
+        CountCocoonsUp(scene, what);
+        if (_rescue is not { Outcome: RescueOutcome.Waiting, Chase: false } rescue || rescue.Scene != scene) {
+            return;
+        }
+
+        Logger.Info($"{what} while the local player lay in their cocoon there, so they stand up where they lie");
+        rescue.StandUpNote = note;
         rescue.Outcome = RescueOutcome.Rescued;
+    }
+
+    /// <summary>
+    /// Counts the members who lie in their cocoons in the given room as standing from here on, as their own games stand
+    /// them up for what happened there (see <see cref="StandUpCocoonsIn"/>), the way a member whose cocoon was broken
+    /// counts as standing at once (see <see cref="MarkPulledUp"/>). Each game hears of the other's at its own time,
+    /// and in the race of the falling rock the blast as it lands hurts right after the lava starts: a member it killed
+    /// was taken for the last of everyone down while the one in the cocoon stood up, and sent to their bench.
+    /// </summary>
+    /// <param name="scene">The room.</param>
+    /// <param name="what">What happened there, for the log.</param>
+    private void CountCocoonsUp(string scene, string what) {
+        List<ushort>? lying = null;
+        foreach (var pair in _waitingMembers) {
+            if (pair.Value.Scene == scene && _playerData.TryGetValue(pair.Key, out var member) &&
+                member.IsInLocalScene) {
+                (lying ??= []).Add(pair.Key);
+            }
+        }
+
+        foreach (var playerId in lying ?? []) {
+            Logger.Info($"{what} while player {playerId} lay in their cocoon there, so they count as standing");
+            MarkPulledUp(playerId);
+        }
+    }
+
+    /// <summary>
+    /// Counts the members who lie in their cocoons under a lava of this room that chases as standing (see
+    /// <see cref="CountCocoonsUp"/>), before a death of the local player asks whether anyone stands: the lava can have
+    /// started since this game last looked, in the same frame, as the blast of the falling rock hurts right after it.
+    /// </summary>
+    private void CountCocoonsUpUnderTheLava() {
+        try {
+            if (_lavaChase is { } chase && IsLavaChasing(chase)) {
+                CountCocoonsUp(chase.Scene, $"The lava in '{chase.Scene}' started");
+            }
+        } catch (Exception e) {
+            LogLavaChaseError(e);
+        }
     }
 
     /// <summary>

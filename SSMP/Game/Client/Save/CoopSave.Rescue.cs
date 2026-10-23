@@ -848,6 +848,10 @@ internal partial class CoopSave {
 
         _deathPassesNoTime = false;
 
+        // A member who lies in their cocoon under a lava that has just started stands up with it in their own game,
+        // which this game may not have looked at yet
+        CountCocoonsUpUnderTheLava();
+
         // A death that is not lethal - losing a spar with a character, any death in a memory - is laid down like any
         // other. A fight is lost only once every player is down (USER 10-10: "比试就按照所有boss战的标准来"), and
         // until then the room must not hear of it: the character won the spar at the first knock-out and stood there
@@ -2218,6 +2222,14 @@ internal partial class CoopSave {
         _waitingMembers[player.Id] = new WaitingMember(
             chase ? "" : update.Scene, new Vector2(update.Values[0], update.Values[1]), update.Key
         );
+
+        // A death in the chase of a lava says that it has started there, which stands up the local player lying in
+        // their cocoon in that room (StandUpCocoonsIn): this news can come before their own game's lava starts
+        if (chase) {
+            StandUpCocoonsIn(
+                update.Scene, $"{player.Username} died in the chase of the lava in '{update.Scene}'", LavaRisingNote
+            );
+        }
 
         // Everyone went down before hearing that the others had, so each is lying there waiting for someone who cannot
         // come. Everyone down is everyone to their bench in whichever order the news arrives, and this wait ends here.
