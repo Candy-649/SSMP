@@ -590,6 +590,9 @@ internal class PlayerManager : IPlayerManager {
             HeroHidden.Reset(child.gameObject);
             HeroRoomFigure.Reset(child.gameObject);
             _skinManager.Undress(child.gameObject);
+            if (_figureCopies.TryGetValue(child.gameObject, out var copies)) {
+                LetGoOfGoneRoomCopies(child.gameObject, copies);
+            }
             HeroChildEffects.ResetCopies(child.gameObject);
             HeroChildParticles.ResetCopies(child.gameObject);
             HeroDust.Reset(child.gameObject);
@@ -705,6 +708,7 @@ internal class PlayerManager : IPlayerManager {
         var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
         spriteAnimator.Library = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
         copies.Libraries[library] = spriteAnimator.Library;
+        copies.TakeSheets(copiedSheets, ofTheHero: true);
 
         // Its own sheets of sprites, so that it can wear a skin of its own
         _skinManager.RegisterFigure(playerObject, copiedSheets);
@@ -729,7 +733,7 @@ internal class PlayerManager : IPlayerManager {
             return clip;
         }
 
-        FigureLibrary(playerObject, copies, library);
+        FigureLibrary(playerObject, copies, library, ofTheHero: true);
         return copies.Objects.TryGetValue(clip, out var copy) ? (tk2dSpriteAnimationClip) copy : clip;
     }
 
@@ -739,6 +743,8 @@ internal class PlayerManager : IPlayerManager {
     /// drew from this game's sheets of sprites, so the other player showed in the local player's skin and cloak colour
     /// whenever the room showed them by a figure of its own. It now plays from the character's own copy of that library
     /// and draws from the character's own copies of those sheets, which wear what that player wears.
+    /// It is dressed before it is switched on, as Player Color chooses once for each object, by the sheet that it first
+    /// draws from, whether to colour it in the local player's colour.
     /// </summary>
     /// <param name="playerObject">The object that draws the character.</param>
     /// <param name="standIn">The copy of the figure, with every part of it that plays or draws.</param>
@@ -748,37 +754,164 @@ internal class PlayerManager : IPlayerManager {
         }
 
         foreach (var animator in standIn.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
-            if (animator.Library != null) {
-                animator.Library = FigureLibrary(playerObject, copies, animator.Library);
+            if (animator.Library != null &&
+                FigureLibrary(playerObject, copies, animator.Library, ofTheHero: false) is { } library) {
+                animator.Library = library;
             }
         }
 
-        // The picture it shows until its first clip starts
+        // The picture it shows until its first clip starts. A sprite that is switched off only takes the sheet, which
+        // it draws from as it wakes
         foreach (var sprite in standIn.GetComponentsInChildren<tk2dBaseSprite>(true)) {
-            if (sprite.Collection != null && copies.Objects.TryGetValue(sprite.Collection, out var sheet)) {
-                sprite.SetSprite((tk2dSpriteCollectionData) sheet, sprite.spriteId);
+            if (sprite.Collection == null || !copies.Sheets.TryGetValue(sprite.Collection, out var sheet) ||
+                sheet == null) {
+                continue;
+            }
+
+            if (sprite.gameObject.activeInHierarchy) {
+                sprite.SetSprite(sheet, sprite.spriteId);
+            } else {
+                sprite.Collection = sheet;
             }
         }
     }
 
     /// <summary>
-    /// The character's own copy of a library of clips, made the first time it is needed, with the sheets of sprites
-    /// that it draws from dressed in what the player wears.
+    /// The character's own copy of a sheet of sprites, made the first time it is needed and dressed in what the player
+    /// wears; or null for an object that is no such character, or a sheet that could not be copied. A creature that
+    /// holds a player draws them in its own sprites, which are drawn from it while it does
+    /// (see <see cref="HeldLook"/>).
     /// </summary>
-    private tk2dSpriteAnimation FigureLibrary(
+    /// <param name="playerObject">The object that draws the character.</param>
+    /// <param name="sheet">The original sheet.</param>
+    public tk2dSpriteCollectionData? FigureSheet(GameObject playerObject, tk2dSpriteCollectionData sheet) {
+        if (!_figureCopies.TryGetValue(playerObject, out var copies)) {
+            return null;
+        }
+
+        if (copies.Sheets.TryGetValue(sheet, out var copy) && copy != null) {
+            return copy;
+        }
+
+        if (copies.Failed.Contains(sheet)) {
+            return null;
+        }
+
+        try {
+            LetGoOfGoneRoomCopies(playerObject, copies);
+
+            var roomCopy = new RoomCopy(sheet, null);
+            copy = CopyUtil.SmartCopySpriteCollection(sheet, playerObject, roomCopy.Objects);
+            var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
+            roomCopy.Took(null, copiedSheets);
+            copies.RoomCopies.Add(roomCopy);
+            copies.TakeSheets(copiedSheets, ofTheHero: false);
+            _skinManager.AddSheets(playerObject, copiedSheets);
+            return copy;
+        } catch (Exception e) {
+            Logger.Warn($"Could not copy the sheet of sprites '{sheet.name}' for the character of another player: " +
+                        e.Message);
+            copies.Failed.Add(sheet);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// The character's own copy of a library of clips, made the first time it is needed, with the sheets of sprites
+    /// that it draws from dressed in what the player wears; or null for a library that could not be copied, which is
+    /// not tried again. The libraries of the local hero stay loaded, and their copies stay with the character; a
+    /// library of a figure of a room goes with its room, and its copy goes after it (see <see cref="RoomCopy"/>).
+    /// </summary>
+    /// <param name="playerObject">The object that draws the character.</param>
+    /// <param name="copies">What was copied for the character.</param>
+    /// <param name="library">The original library.</param>
+    /// <param name="ofTheHero">Whether it is a library of the local hero.</param>
+    private tk2dSpriteAnimation? FigureLibrary(
         GameObject playerObject,
         FigureCopies copies,
-        tk2dSpriteAnimation library
+        tk2dSpriteAnimation library,
+        bool ofTheHero
     ) {
         if (copies.Libraries.TryGetValue(library, out var copy) && copy != null) {
             return copy;
         }
 
-        var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
-        copy = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
-        copies.Libraries[library] = copy;
-        _skinManager.AddSheets(playerObject, copiedSheets);
-        return copy;
+        if (copies.Failed.Contains(library)) {
+            return null;
+        }
+
+        try {
+            var copiedSheets = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>();
+            if (ofTheHero) {
+                copy = CopyUtil.SmartCopySpriteAnimation(library, playerObject, copiedSheets, copies.Objects);
+            } else {
+                LetGoOfGoneRoomCopies(playerObject, copies);
+
+                var roomCopy = new RoomCopy(library, copies.HeroSheets);
+                copy = CopyUtil.SmartCopySpriteAnimation(library, playerObject, null, roomCopy.Objects);
+                roomCopy.Took(copy, copiedSheets);
+                copies.RoomCopies.Add(roomCopy);
+            }
+
+            copies.Libraries[library] = copy;
+            copies.TakeSheets(copiedSheets, ofTheHero);
+            _skinManager.AddSheets(playerObject, copiedSheets);
+            return copy;
+        } catch (Exception e) {
+            Logger.Warn($"Could not copy the library '{library.name}' for the character of another player: " +
+                        e.Message);
+            copies.Failed.Add(library);
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Lets go of what was copied for the character of another player from rooms that are gone: their libraries and
+    /// sheets of sprites came with the room and went with it, and the next visit brings new ones, which are copied
+    /// anew. The art of skins loaded for their atlases alone goes too.
+    /// </summary>
+    /// <param name="playerObject">The object that draws the character.</param>
+    /// <param name="copies">What was copied for the character.</param>
+    private void LetGoOfGoneRoomCopies(GameObject playerObject, FigureCopies copies) {
+        for (var i = copies.RoomCopies.Count - 1; i >= 0; i--) {
+            var roomCopy = copies.RoomCopies[i];
+            if (roomCopy.Original != null) {
+                continue;
+            }
+
+            copies.RoomCopies.RemoveAt(i);
+
+            var sheets = new List<tk2dSpriteCollectionData>();
+            foreach (var (original, copy) in roomCopy.Sheets) {
+                sheets.Add(copy);
+                if (copies.Sheets.TryGetValue(original, out var kept) && kept == copy) {
+                    copies.Sheets.Remove(original);
+                }
+            }
+
+            _skinManager.RemoveSheets(playerObject, sheets);
+            foreach (var sheet in sheets) {
+                if (sheet != null) {
+                    Object.Destroy(sheet.gameObject);
+                }
+            }
+
+            foreach (var material in roomCopy.Materials) {
+                if (material != null) {
+                    Object.Destroy(material);
+                }
+            }
+
+            if (roomCopy.Original is tk2dSpriteAnimation library) {
+                copies.Libraries.Remove(library);
+            }
+
+            if (roomCopy.Library != null) {
+                Object.Destroy(roomCopy.Library);
+            }
+        }
+
+        copies.Failed.RemoveWhere(original => original == null);
     }
 
     /// <summary>
@@ -787,7 +920,8 @@ internal class PlayerManager : IPlayerManager {
     /// </summary>
     private sealed class FigureCopies {
         /// <summary>
-        /// The copies by their originals.
+        /// The copies of the local hero's libraries and of everything they draw from, by their originals, which stay as
+        /// long as the character: the hero's own art stays loaded.
         /// </summary>
         public readonly Dictionary<object, object> Objects = new();
 
@@ -795,6 +929,112 @@ internal class PlayerManager : IPlayerManager {
         /// The copies of the libraries copied so far, by their originals.
         /// </summary>
         public readonly Dictionary<tk2dSpriteAnimation, tk2dSpriteAnimation> Libraries = new();
+
+        /// <summary>
+        /// The copy of each sheet of sprites copied so far, by its original.
+        /// </summary>
+        public readonly Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> Sheets = new();
+
+        /// <summary>
+        /// The copies of the local hero's own sheets, by their originals, which the libraries of rooms draw from too.
+        /// </summary>
+        public readonly Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> HeroSheets = new();
+
+        /// <summary>
+        /// What was copied from rooms, which goes after its room (see <see cref="LetGoOfGoneRoomCopies"/>).
+        /// </summary>
+        public readonly List<RoomCopy> RoomCopies = [];
+
+        /// <summary>
+        /// The libraries and sheets that could not be copied, which are not tried again.
+        /// </summary>
+        public readonly HashSet<Object> Failed = [];
+
+        /// <summary>
+        /// Notes copied sheets of sprites, each copy with its original.
+        /// </summary>
+        public void TakeSheets(
+            Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copiedSheets,
+            bool ofTheHero
+        ) {
+            foreach (var pair in copiedSheets) {
+                Sheets[pair.Value] = pair.Key;
+                if (ofTheHero) {
+                    HeroSheets[pair.Value] = pair.Key;
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// A library or a sheet of sprites of a room, or of a creature in it, copied for the character of another player,
+    /// with everything that was copied for it alone. What it draws from of the local hero's own sheets it draws from
+    /// the character's copies of them, which stay.
+    /// </summary>
+    private sealed class RoomCopy {
+        /// <summary>
+        /// The original library or sheet, which goes with its room.
+        /// </summary>
+        public readonly Object Original;
+
+        /// <summary>
+        /// Everything copied for it, by original, beginning with the character's copies of the local hero's sheets.
+        /// </summary>
+        public readonly Dictionary<object, object> Objects = new();
+
+        /// <summary>
+        /// The originals that <see cref="Objects"/> began with, which are not its own.
+        /// </summary>
+        private readonly HashSet<object> _shared = [];
+
+        /// <summary>
+        /// The copy of the library, or null for a sheet copied alone.
+        /// </summary>
+        public tk2dSpriteAnimation? Library;
+
+        /// <summary>
+        /// The sheets copied for it alone, with their originals.
+        /// </summary>
+        public readonly List<(tk2dSpriteCollectionData Original, tk2dSpriteCollectionData Copy)> Sheets = [];
+
+        /// <summary>
+        /// The materials copied for it alone.
+        /// </summary>
+        public readonly List<Material> Materials = [];
+
+        public RoomCopy(Object original, Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData>? heroSheets) {
+            Original = original;
+            if (heroSheets == null) {
+                return;
+            }
+
+            foreach (var pair in heroSheets) {
+                Objects[pair.Key] = pair.Value;
+                _shared.Add(pair.Key);
+            }
+        }
+
+        /// <summary>
+        /// Notes what was copied for it alone, and gives the sheets among that, each copy with its original.
+        /// </summary>
+        public void Took(
+            tk2dSpriteAnimation? library,
+            Dictionary<tk2dSpriteCollectionData, tk2dSpriteCollectionData> copiedSheets
+        ) {
+            Library = library;
+            foreach (var pair in Objects) {
+                if (_shared.Contains(pair.Key)) {
+                    continue;
+                }
+
+                if (pair.Key is tk2dSpriteCollectionData original && pair.Value is tk2dSpriteCollectionData copy) {
+                    Sheets.Add((original, copy));
+                    copiedSheets[copy] = original;
+                } else if (pair.Value is Material material) {
+                    Materials.Add(material);
+                }
+            }
+        }
     }
 
     /// <summary>

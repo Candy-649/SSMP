@@ -11,6 +11,7 @@ using SSMP.Fsm;
 using SSMP.Game;
 using SSMP.Game.Client;
 using SSMP.Game.Client.Save;
+using SSMP.Game.Client.Skin;
 using SSMP.Game.Settings;
 using SSMP.Hooks;
 using SSMP.Internals;
@@ -857,6 +858,7 @@ internal class AnimationManager {
         _serverSettings = serverSettings;
 
         HeroRoomFigure.DressCopy = playerManager.DressStandIn;
+        HeldLook.SheetOf = playerManager.FigureSheet;
     }
 
     /// <summary>

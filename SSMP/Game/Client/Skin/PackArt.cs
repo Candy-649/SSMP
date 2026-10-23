@@ -107,19 +107,23 @@ internal sealed class PackArt {
 
         _loading[key] = request;
         request.SendWebRequest().completed += _ => {
-            _loading.Remove(key);
+            // An atlas let go of meanwhile is no longer waited for, or waits for another loading of it
+            var wanted = _loading.TryGetValue(key, out var current) && current == request;
+            if (wanted) {
+                _loading.Remove(key);
+            }
 
             Texture2D? texture = null;
             if (request.result == UnityWebRequest.Result.Success) {
                 texture = DownloadHandlerTexture.GetContent(request);
-            } else if (!_destroyed) {
+            } else if (!_destroyed && wanted) {
                 Logger.Warn($"Could not load '{file}' in the background ({request.error}), loading it at once");
                 texture = LoadNow(file);
             }
 
             request.Dispose();
 
-            if (_destroyed) {
+            if (_destroyed || !wanted) {
                 if (texture != null) {
                     Object.Destroy(texture);
                 }
@@ -156,6 +160,26 @@ internal sealed class PackArt {
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// Lets go of the art of the given atlases, loaded or loading, which no character draws any more.
+    /// </summary>
+    public void Forget(IEnumerable<(string Sheet, string Texture)> atlases) {
+        foreach (var (sheet, texture) in atlases) {
+            var key = Key(sheet, texture);
+            if (_loading.TryGetValue(key, out var request)) {
+                _loading.Remove(key);
+                request.Abort();
+            }
+
+            if (_textures.TryGetValue(key, out var loaded)) {
+                _textures.Remove(key);
+                if (loaded != null) {
+                    Object.Destroy(loaded);
+                }
+            }
+        }
     }
 
     /// <summary>

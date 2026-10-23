@@ -224,6 +224,59 @@ internal class SkinManager {
     }
 
     /// <summary>
+    /// Lets go of copied sheets of sprites of a character, whose originals went with their room: their atlases are no
+    /// longer dressed, and the art of skins for atlases that no character has any more is let go.
+    /// </summary>
+    /// <param name="figureObject">The object that draws the character.</param>
+    /// <param name="copies">The copied sheets, which are destroyed after this.</param>
+    public void RemoveSheets(GameObject figureObject, List<tk2dSpriteCollectionData> copies) {
+        if (copies.Count == 0 || !_figures.TryGetValue(figureObject, out var figure)) {
+            return;
+        }
+
+        figure.Slots.RemoveAll(slot => {
+            if (!copies.Contains(slot.Sheet.Copy)) {
+                return false;
+            }
+
+            if (slot.Colored != null) {
+                Object.Destroy(slot.Colored);
+            }
+
+            return true;
+        });
+        foreach (var copy in copies) {
+            figure.Sheets.Remove(copy);
+        }
+
+        var used = new HashSet<(string Sheet, string Texture)>();
+        foreach (var other in _figures.Values) {
+            foreach (var slot in other.Slots) {
+                used.Add((slot.SheetName, slot.TextureName));
+            }
+        }
+
+        var unused = new List<(string Sheet, string Texture)>();
+        foreach (var atlas in _atlases) {
+            if (!used.Contains(atlas)) {
+                unused.Add(atlas);
+            }
+        }
+
+        if (unused.Count == 0) {
+            return;
+        }
+
+        foreach (var atlas in unused) {
+            _atlases.Remove(atlas);
+        }
+
+        foreach (var art in _art.Values) {
+            art.Forget(unused);
+        }
+    }
+
+    /// <summary>
     /// Adds an atlas to the character for each material of each of the given copied sheets that it doesn't have yet,
     /// and starts loading the art of what is worn for atlases that no character had before.
     /// </summary>

@@ -41,8 +41,8 @@ internal class HeroRoomFigure : AnimationEffect {
     public static readonly HeroRoomFigure Instance = new();
 
     /// <summary>
-    /// Dresses the copy of a figure, made for another player, as that player's character: given the character and the
-    /// copy (see <see cref="PlayerManager.DressStandIn"/>).
+    /// Dresses the copy of a figure, made for another player and still switched off, as that player's character: given
+    /// the character and the copy (see <see cref="PlayerManager.DressStandIn"/>).
     /// </summary>
     internal static Action<GameObject, GameObject>? DressCopy;
 
@@ -699,8 +699,9 @@ internal class HeroRoomFigure : AnimationEffect {
     /// hero.
     /// </summary>
     /// <param name="path">The path of the figure in its room.</param>
+    /// <param name="dress">Dresses the copy as the player it stands in for, while it is still switched off.</param>
     /// <returns>The copy, or null if the room has no such figure.</returns>
-    internal static GameObject? MakeCopy(string path) {
+    internal static GameObject? MakeCopy(string path, Action<GameObject>? dress = null) {
         // A figure in a part of the room that is switched off here would make a copy that never shows. The figure
         // itself may be off, as the room switches it on only for the player it shows.
         var original = ScenePath.Find(path);
@@ -710,7 +711,7 @@ internal class HeroRoomFigure : AnimationEffect {
             return null;
         }
 
-        var copy = MakeFigure(original, out var holder);
+        var copy = MakeFigure(original, out var holder, dress);
         var place = copy.transform;
         var originalPlace = original.transform;
         place.SetParent(originalPlace.parent, false);
@@ -727,8 +728,9 @@ internal class HeroRoomFigure : AnimationEffect {
     /// for <see cref="RoomFigureCopy"/> to put where the figure is from the other player's character.
     /// </summary>
     /// <param name="key">What names the figure in every game (see <see cref="LooseKeyOf"/>).</param>
+    /// <param name="dress">Dresses the copy as the player it stands in for, while it is still switched off.</param>
     /// <returns>The copy, or null if this game has no figure of that thing.</returns>
-    internal static GameObject? MakeLooseCopy(string key) {
+    internal static GameObject? MakeLooseCopy(string key, Action<GameObject>? dress = null) {
         // Every figure the game has loaded is looked through, so the whole key is worked out only for those with the
         // figure's own name; a figure that is the thing itself has no name of its own in the key
         var name = key.Substring(Mathf.Max(key.IndexOf(LooseKeySeparator), key.LastIndexOf('/')) + 1);
@@ -749,7 +751,7 @@ internal class HeroRoomFigure : AnimationEffect {
             return null;
         }
 
-        var copy = MakeFigure(original, out var holder);
+        var copy = MakeFigure(original, out var holder, dress);
         copy.transform.SetParent(null, false);
         return ShowFigure(copy, holder);
     }
@@ -761,7 +763,8 @@ internal class HeroRoomFigure : AnimationEffect {
     /// </summary>
     /// <param name="original">The figure.</param>
     /// <param name="holder">The holder, which <see cref="ShowFigure"/> removes.</param>
-    private static GameObject MakeFigure(GameObject original, out GameObject holder) {
+    /// <param name="dress">Dresses the copy as the player it stands in for, while it is still switched off.</param>
+    private static GameObject MakeFigure(GameObject original, out GameObject holder, Action<GameObject>? dress) {
         holder = new GameObject("Room Figure Holder");
         holder.SetActive(false);
 
@@ -780,6 +783,8 @@ internal class HeroRoomFigure : AnimationEffect {
             }
         }
 
+        // Before anything sees it draw: it is switched on as it goes into the room
+        dress?.Invoke(copy);
         return copy;
     }
 
@@ -1116,13 +1121,12 @@ internal class RoomFigureCopy : MonoBehaviour {
         if (_copy == null || _path != path || _loose) {
             RemoveCopy();
 
-            _copy = HeroRoomFigure.MakeCopy(path);
+            _copy = HeroRoomFigure.MakeCopy(path, Dress);
             if (_copy == null) {
                 Hide();
                 return;
             }
 
-            HeroRoomFigure.DressCopy?.Invoke(gameObject, _copy);
             _animator = _copy.GetComponent<tk2dSpriteAnimator>();
             _path = path;
             _loose = false;
@@ -1174,7 +1178,7 @@ internal class RoomFigureCopy : MonoBehaviour {
 
             // A figure that this game had none of is looked for again only after a while
             var look = key != _missing || Time.unscaledTime >= _missingUntil;
-            _copy = look ? HeroRoomFigure.MakeLooseCopy(key) : null;
+            _copy = look ? HeroRoomFigure.MakeLooseCopy(key, Dress) : null;
             if (_copy == null) {
                 if (look) {
                     _missing = key;
@@ -1186,7 +1190,6 @@ internal class RoomFigureCopy : MonoBehaviour {
             }
 
             _missing = null;
-            HeroRoomFigure.DressCopy?.Invoke(gameObject, _copy);
             _animator = _copy.GetComponent<tk2dSpriteAnimator>();
             _path = key;
             _loose = true;
@@ -1201,6 +1204,13 @@ internal class RoomFigureCopy : MonoBehaviour {
         _shownUntil = Time.unscaledTime + shownFor;
         HeroChildEffects.ShowBodyUnlessHidden(gameObject);
         return true;
+    }
+
+    /// <summary>
+    /// Dresses a copy made for the player as the player's character, while it is still switched off.
+    /// </summary>
+    private void Dress(GameObject copy) {
+        HeroRoomFigure.DressCopy?.Invoke(gameObject, copy);
     }
 
     /// <summary>

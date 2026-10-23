@@ -71,6 +71,29 @@ internal static class CopyUtil {
     }
 
     /// <summary>
+    /// Make a copy of a sheet of sprites alone for the given object, as the sheets of a library are copied (see
+    /// <see cref="SmartCopySpriteAnimation"/>).
+    /// </summary>
+    /// <param name="original">The original sheet.</param>
+    /// <param name="targetObject">The object that the copy is kept under.</param>
+    /// <param name="copies">What was copied for the same object before, by original, which is used again and added
+    /// to.</param>
+    /// <returns>The copy.</returns>
+    public static tk2dSpriteCollectionData SmartCopySpriteCollection(
+        tk2dSpriteCollectionData original,
+        GameObject targetObject,
+        Dictionary<object, object> copies
+    ) {
+        if (copies.TryGetValue(original, out var known)) {
+            return (tk2dSpriteCollectionData) known;
+        }
+
+        var copy = SmartCopySpriteCollectionData(original, targetObject, copies);
+        copies[original] = copy;
+        return copy;
+    }
+
+    /// <summary>
     /// Make a copy of a tk2dSpriteAnimationClip instance, which will preserve internal references in the object.
     /// The targetObject parameter given is used to initialize Unity related components in.
     /// </summary>

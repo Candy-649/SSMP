@@ -1,5 +1,6 @@
 using System;
 using SSMP.Game.Client;
+using SSMP.Game.Client.Skin;
 using SSMP.Internals;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -94,6 +95,11 @@ internal class HeroHidden : AnimationEffect {
         watcher.StartOver(send);
         _watcher = watcher;
     }
+
+    /// <summary>
+    /// Whether the local hero is hidden now, as the other players were last told.
+    /// </summary>
+    internal static bool LocalHeroHidden => _watcher != null && _watcher.IsHidden;
 
     /// <summary>
     /// Notes that the room or a creature just hid the local hero: an FSM that is not the hero's own switched its sprite
@@ -202,6 +208,7 @@ internal class HeroHidden : AnimationEffect {
     public static void Reset(GameObject playerObject) {
         if (playerObject.TryGetComponent<HiddenFigure>(out var figure)) {
             figure.HiddenUntil = 0f;
+            figure.StopLooking();
         }
     }
 }
@@ -246,6 +253,11 @@ internal class HeroHiddenWatcher : MonoBehaviour {
     /// </summary>
     [NonSerialized]
     private bool _hidden;
+
+    /// <summary>
+    /// Whether the other players were last told that the hero is hidden.
+    /// </summary>
+    public bool IsHidden => _hidden;
 
     /// <summary>
     /// When the other players are told again that the hero is still hidden, in unscaled time.
@@ -317,7 +329,8 @@ internal class HeroHiddenWatcher : MonoBehaviour {
 
 /// <summary>
 /// Keeps the figure of another player hidden while the game hides them, for <see cref="HeroHidden"/>, and shows it
-/// again when they have not said for a while that they still are.
+/// again when they have not said for a while that they still are. Meanwhile a creature near them may draw them in its
+/// own sprites, which are drawn in their look (see <see cref="HeldLook"/>).
 /// </summary>
 internal class HiddenFigure : MonoBehaviour {
     /// <summary>
@@ -326,12 +339,44 @@ internal class HiddenFigure : MonoBehaviour {
     [NonSerialized]
     public float HiddenUntil;
 
+    /// <summary>
+    /// When the creatures near the player are looked at again, in unscaled time, or 0 while they are not.
+    /// </summary>
+    [NonSerialized]
+    private float _lookAgainAt;
+
+    /// <summary>
+    /// Stops drawing the creatures near the player in the player's look.
+    /// </summary>
+    public void StopLooking() {
+        if (_lookAgainAt > 0f) {
+            _lookAgainAt = 0f;
+            HeldLook.Stop(gameObject);
+        }
+    }
+
     private void Update() {
-        if (HiddenUntil <= 0f || Time.unscaledTime < HiddenUntil) {
+        if (HiddenUntil <= 0f) {
+            StopLooking();
             return;
         }
 
-        HiddenUntil = 0f;
-        HeroChildEffects.ShowBodyUnlessHidden(gameObject);
+        if (Time.unscaledTime >= HiddenUntil) {
+            HiddenUntil = 0f;
+            StopLooking();
+            HeroChildEffects.ShowBodyUnlessHidden(gameObject);
+            return;
+        }
+
+        if (Time.unscaledTime >= _lookAgainAt) {
+            // The first look takes in the creatures that are there now, as one that catches the player is
+            var first = _lookAgainAt <= 0f;
+            _lookAgainAt = Time.unscaledTime + HeldLook.LookAgainEvery;
+            HeldLook.Look(gameObject, first);
+        }
+    }
+
+    private void OnDisable() {
+        StopLooking();
     }
 }
