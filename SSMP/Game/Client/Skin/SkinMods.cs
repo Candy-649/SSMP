@@ -356,11 +356,8 @@ internal static class PlayerColorMod {
         var key = sheet + "/" + texture;
         var theirs = LoadedByPlayerColor(key);
         if (theirs != null) {
-            // One loaded here before Player Color had its own is no longer needed
-            if (Masks.TryGetValue(key, out var own) && own != null) {
-                UnityEngine.Object.Destroy(own);
-            }
-
+            // One loaded here before Player Color had its own is used no more. It is not destroyed: other characters
+            // may draw with it until they are dressed again, and the game frees it once nothing does
             Masks.Remove(key);
             return theirs;
         }

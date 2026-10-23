@@ -13,6 +13,11 @@ namespace SSMP.Game.Client.Skin;
 /// </summary>
 internal sealed class PackArt {
     /// <summary>
+    /// How the name of each texture loaded here begins, which tells it from the game's own.
+    /// </summary>
+    public const string NamePrefix = "SSMP skin ";
+
+    /// <summary>
     /// The skin.
     /// </summary>
     public readonly SkinPack Pack;
@@ -47,6 +52,19 @@ internal sealed class PackArt {
     /// </summary>
     public Texture2D? Get(string sheet, string texture) =>
         _textures.TryGetValue(Key(sheet, texture), out var loaded) ? loaded : null;
+
+    /// <summary>
+    /// Whether any of the textures loaded here is among the given ones.
+    /// </summary>
+    public bool HoldsAny(HashSet<Texture> textures) {
+        foreach (var texture in _textures.Values) {
+            if (texture != null && textures.Contains(texture)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Starts loading the art of the given atlases that isn't loaded yet, and says whether all of it is in.
@@ -110,7 +128,7 @@ internal sealed class PackArt {
             }
 
             if (texture != null) {
-                texture.name = "SSMP skin " + key;
+                texture.name = NamePrefix + key;
             }
 
             _textures[key] = texture;

@@ -263,9 +263,16 @@ internal class ClientManager : IClientManager {
 
     /// <summary>
     /// The number of the last update of each other player's settings taken in, by their ID. An update numbered no
-    /// higher came again after it was lost, and says less than the one taken in.
+    /// higher came again after it was lost, and says less than the one taken in. Kept after a player leaves: the server
+    /// numbers across all players, so a late update of one who left is older than any of a player who gets their ID.
     /// </summary>
     private readonly Dictionary<ushort, ushort> _settingVersions = new();
+
+    /// <summary>
+    /// The newest update of the settings of each player whose arrival had not come yet, by their ID, taken in when it
+    /// comes: a lost packet that brought the arrival comes again late, after updates that were sent after it.
+    /// </summary>
+    private readonly Dictionary<ushort, ClientPlayerSettingUpdate> _settingsBeforeArrival = new();
 
     /// <summary>
     /// The number of the last update of this player's own team taken in, or null if none since it connected.
@@ -1010,6 +1017,7 @@ internal class ClientManager : IClientManager {
         _sentSkinLook = "";
         _settingVersion = 0;
         _settingVersions.Clear();
+        _settingsBeforeArrival.Clear();
         _selfSettingVersion = null;
 
         // Update the locally stored server settings
@@ -1228,7 +1236,6 @@ internal class ClientManager : IClientManager {
             SaveKey = playerConnect.SaveKey
         };
         _playerData[playerConnect.Id] = playerData;
-        _settingVersions.Remove(playerConnect.Id);
 
         UiManager.InternalChatBox.AddMessage(Lang.Pick(
             $"Player '{playerConnect.Username}' connected to the server",
@@ -1243,6 +1250,12 @@ internal class ClientManager : IClientManager {
             Logger.Warn(
                 $"Exception thrown while invoking PlayerConnect event:\n{e}"
             );
+        }
+
+        // Their settings, if they came before this
+        if (_settingsBeforeArrival.TryGetValue(playerConnect.Id, out var settings)) {
+            _settingsBeforeArrival.Remove(playerConnect.Id);
+            ApplySettings(playerData, settings);
         }
     }
 
@@ -1285,7 +1298,7 @@ internal class ClientManager : IClientManager {
 
         // Clear the player from the player data mapping
         _playerData.Remove(id);
-        _settingVersions.Remove(id);
+        _settingsBeforeArrival.Remove(id);
         _playerManager.OnPlayerLeftSkins(id);
 
         UiManager.InternalChatBox.AddMessage(
@@ -2162,11 +2175,25 @@ internal class ClientManager : IClientManager {
         _settingVersions[id] = settingUpdate.Version;
 
         if (!_playerData.TryGetValue(id, out var playerData)) {
-            Logger.Warn($"Received a setting update, but player with ID: {id} is not in local mapping");
+            // Taken in when their arrival comes, which a lost packet may bring after this
+            _settingsBeforeArrival[id] = settingUpdate;
             return;
         }
 
-        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Team) && playerData.Team != settingUpdate.Team) {
+        ApplySettings(playerData, settingUpdate);
+    }
+
+    /// <summary>
+    /// Takes in the settings of another player that an update says, doing nothing again for those that did not change.
+    /// A team counts only while the server has teams: the server keeps the team that a player had when they were
+    /// switched off, which every update of the player's other settings says again.
+    /// </summary>
+    /// <param name="playerData">The player.</param>
+    /// <param name="settingUpdate">The update.</param>
+    private void ApplySettings(ClientPlayerData playerData, ClientPlayerSettingUpdate settingUpdate) {
+        var id = playerData.Id;
+        if (settingUpdate.UpdateTypes.Contains(PlayerSettingUpdateType.Team) && _serverSettings.TeamsEnabled
+            && playerData.Team != settingUpdate.Team) {
             _playerManager.OnPlayerTeamUpdate(false, settingUpdate.Team, id);
         }
 

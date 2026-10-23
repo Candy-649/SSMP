@@ -38,10 +38,10 @@ internal static class OwnSkin {
     private static readonly Dictionary<string, PackArt> Art = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The art that the loaded sheets were dressed in at some time: the game may still draw with it, so it is never
-    /// destroyed here, only let go of, and the game frees it once nothing draws with it.
+    /// The game's own texture of each atlas that was dressed here, by sheet and material, which its material no longer
+    /// shows.
     /// </summary>
-    private static readonly HashSet<PackArt> Worn = [];
+    private static readonly Dictionary<(tk2dSpriteCollectionData Sheet, int Index), Texture> OwnOf = new();
 
     /// <summary>
     /// The art of the skins that the loaded sheets wear now, in Customizer's order.
@@ -164,6 +164,12 @@ internal static class OwnSkin {
             }
         }
 
+        foreach (var key in new List<(tk2dSpriteCollectionData Sheet, int Index)>(OwnOf.Keys)) {
+            if (key.Sheet == null) {
+                OwnOf.Remove(key);
+            }
+        }
+
         // The copies that other players' characters draw from have names of their own, which no skin has a folder for
         var atlases = new List<LoadedAtlas>();
         foreach (var sheet in Resources.FindObjectsOfTypeAll<tk2dSpriteCollectionData>()) {
@@ -172,8 +178,8 @@ internal static class OwnSkin {
             }
 
             for (var i = 0; i < sheet.materials.Length; i++) {
-                var own = SkinManager.OwnTexture(sheet, i);
-                if (own != null && own.name.Length > 0 && sheet.materials[i] != null) {
+                var own = GameTexture(sheet, i);
+                if (own != null) {
                     atlases.Add(new LoadedAtlas(sheet, i, own));
                 }
             }
@@ -199,8 +205,30 @@ internal static class OwnSkin {
     /// with art of its own, and the game frees what the sheets wore in the menu once nothing draws with it.
     /// </summary>
     public static void LetGo() {
-        _waiting = null;
-        _wearing = [];
+        // A skin chosen as the save started, whose art had not loaded yet: the sheets wear the game's own art again,
+        // which Customizer dresses in that skin as the next room loads, rather than keep the skin chosen before
+        if (_waiting != null) {
+            foreach (var atlas in _waiting.Atlases) {
+                Put(atlas, atlas.Own);
+            }
+
+            _waiting = null;
+        }
+
+        // What the sheets wear is theirs from now on: destroyed if nothing draws with it, else freed by the game once
+        // nothing does
+        if (_wearing.Count > 0) {
+            var drawn = TexturesDrawnWith();
+            foreach (var art in _wearing) {
+                Art.Remove(art.Pack.Dir);
+                if (!art.HoldsAny(drawn)) {
+                    art.Destroy();
+                }
+            }
+
+            _wearing = [];
+        }
+
         LetGoOfUnused();
     }
 
@@ -224,11 +252,6 @@ internal static class OwnSkin {
 
         _waiting = null;
         foreach (var atlas in waiting.Atlases) {
-            // A sheet that the game let go of while the art loaded is gone
-            if (atlas.Sheet == null || atlas.Own == null) {
-                continue;
-            }
-
             Texture? art = null;
             foreach (var pack in waiting.Arts) {
                 art = pack.Get(atlas.SheetName, atlas.TextureName);
@@ -237,20 +260,23 @@ internal static class OwnSkin {
                 }
             }
 
-            var texture = art != null ? art : atlas.Own;
-            var materials = atlas.Sheet.materials;
-            if (materials != null && atlas.Index < materials.Length && materials[atlas.Index] != null) {
-                materials[atlas.Index].mainTexture = texture;
-            }
+            Put(atlas, art != null ? art : atlas.Own);
+        }
 
-            var instances = atlas.Sheet.materialInsts;
-            if (instances != null && atlas.Index < instances.Length && instances[atlas.Index] != null) {
-                instances[atlas.Index].mainTexture = texture;
+        // The art worn before is destroyed once no loaded sheet draws with it, as each one was dressed again; one that
+        // still does, as a skin's folder went, keeps it until the game frees it
+        var stopped = _wearing.FindAll(art => !waiting.Arts.Contains(art));
+        if (stopped.Count > 0) {
+            var drawn = TexturesDrawnWith();
+            foreach (var art in stopped) {
+                Art.Remove(art.Pack.Dir);
+                if (!art.HoldsAny(drawn)) {
+                    art.Destroy();
+                }
             }
         }
 
         _wearing = waiting.Arts;
-        Worn.UnionWith(_wearing);
         LetGoOfUnused();
 
         // An object that wore a skin, which Player Color has no mask for, may wear the game's own art now
@@ -259,8 +285,8 @@ internal static class OwnSkin {
     }
 
     /// <summary>
-    /// Lets go of the art of skins that the loaded sheets neither wear nor wait for: destroyed if it never dressed
-    /// anything, else left for the game to free once nothing draws with it.
+    /// Destroys the art of skins that the loaded sheets neither wear nor wait for, which never dressed anything: art
+    /// that did is let go of where it stops being worn.
     /// </summary>
     private static void LetGoOfUnused() {
         foreach (var dir in new List<string>(Art.Keys)) {
@@ -270,8 +296,83 @@ internal static class OwnSkin {
             }
 
             Art.Remove(dir);
-            if (!Worn.Remove(art)) {
-                art.Destroy();
+            art.Destroy();
+        }
+    }
+
+    /// <summary>
+    /// Has the given atlas of a loaded sheet draw with the given texture, if the game has not let go of either.
+    /// </summary>
+    private static void Put(LoadedAtlas atlas, Texture? texture) {
+        if (atlas.Sheet == null || texture == null) {
+            return;
+        }
+
+        var materials = atlas.Sheet.materials;
+        if (materials != null && atlas.Index < materials.Length && materials[atlas.Index] != null) {
+            materials[atlas.Index].mainTexture = texture;
+        }
+
+        var instances = atlas.Sheet.materialInsts;
+        if (instances != null && atlas.Index < instances.Length && instances[atlas.Index] != null) {
+            instances[atlas.Index].mainTexture = texture;
+        }
+    }
+
+    /// <summary>
+    /// The game's own texture of an atlas of a loaded sheet, or null if it can't be told: the one found the first time
+    /// the atlas was dressed here; else what its material draws with, unless a skin replaced that, as Customizer's art
+    /// has no name and the art loaded here is named after its skin; else the one that the sheet keeps of the atlas.
+    /// </summary>
+    private static Texture? GameTexture(tk2dSpriteCollectionData sheet, int index) {
+        if (OwnOf.TryGetValue((sheet, index), out var known) && known != null) {
+            return known;
+        }
+
+        var material = sheet.materials[index];
+        if (material == null) {
+            return null;
+        }
+
+        var own = IsGameTexture(material.mainTexture) ? material.mainTexture : SkinManager.OwnTexture(sheet, index);
+        if (own == null || !IsGameTexture(own)) {
+            return null;
+        }
+
+        OwnOf[(sheet, index)] = own;
+        return own;
+    }
+
+    /// <summary>
+    /// Whether a texture is one of the game's own: one that a skin put in has no name or is named after the skin.
+    /// </summary>
+    private static bool IsGameTexture(Texture? texture) =>
+        texture != null && texture.name.Length > 0 &&
+        !texture.name.StartsWith(PackArt.NamePrefix, StringComparison.Ordinal);
+
+    /// <summary>
+    /// The textures that the loaded sheets of sprites draw with.
+    /// </summary>
+    private static HashSet<Texture> TexturesDrawnWith() {
+        var drawn = new HashSet<Texture>();
+        foreach (var sheet in Resources.FindObjectsOfTypeAll<tk2dSpriteCollectionData>()) {
+            if (sheet != null) {
+                AddAll(sheet.materials);
+                AddAll(sheet.materialInsts);
+            }
+        }
+
+        return drawn;
+
+        void AddAll(Material[]? materials) {
+            if (materials == null) {
+                return;
+            }
+
+            foreach (var material in materials) {
+                if (material != null && material.mainTexture != null) {
+                    drawn.Add(material.mainTexture);
+                }
             }
         }
     }

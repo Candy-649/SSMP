@@ -61,6 +61,13 @@ internal abstract class ServerManager : IServerManager {
     private readonly ConcurrentDictionary<ushort, ServerPlayerData> _playerData;
 
     /// <summary>
+    /// How many times the players were told of a change of someone's settings. It numbers what they are told, counted
+    /// across all players, so that a game takes in none older than one it has, also of a player who got the ID of one
+    /// who left.
+    /// </summary>
+    private ushort _settingVersion;
+
+    /// <summary>
     /// Dictionary mapping entity keys to their server entity data instances.
     /// </summary>
     private readonly ConcurrentDictionary<ServerEntityKey, ServerEntityData> _entityData;
@@ -1887,7 +1894,7 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="playerData">The player.</param>
     /// <param name="toSelf">Whether to tell the player their team as well.</param>
     private void SendPlayerSettings(ServerPlayerData playerData, bool toSelf) {
-        var version = ++playerData.SettingVersion;
+        var version = ++_settingVersion;
         foreach (var otherId in _playerData.Keys) {
             var updateManager = _netServer.GetUpdateManagerForClient(otherId);
             if (otherId != playerData.Id) {
