@@ -2,12 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
-using System.Reflection;
 using System.Runtime.InteropServices;
 using MonoMod.RuntimeDetour;
 using UnityEngine;
-using UnityEngine.Events;
-using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Util;
@@ -36,11 +33,6 @@ internal static class LoadWatch {
     /// The length of a tick of <see cref="Stopwatch"/>, in milliseconds.
     /// </summary>
     private static readonly double TickMs = 1000.0 / Stopwatch.Frequency;
-
-    /// <summary>
-    /// The binding flags of Unity's own methods that call the handlers of its scene events, and of their fields.
-    /// </summary>
-    private const BindingFlags UnityFlags = BindingFlags.NonPublic | BindingFlags.Static;
 
     /// <summary>
     /// What is known of a change of room that is watched.
@@ -131,11 +123,6 @@ internal static class LoadWatch {
     private static bool _noFreeMemory;
 
     /// <summary>
-    /// The fields behind Unity's scene events, whose handlers are called one at a time while a change is watched.
-    /// </summary>
-    private static FieldInfo? _sceneLoaded, _sceneUnloaded, _activeSceneChanged;
-
-    /// <summary>
     /// The hooks, kept so that they stay in place.
     /// </summary>
     private static readonly List<Hook> Hooks = [];
@@ -156,42 +143,10 @@ internal static class LoadWatch {
                 gameManager.GetMethod(nameof(global::GameManager.FinishedEnteringScene), Type.EmptyTypes),
                 new Action<Action<global::GameManager>, global::GameManager>(OnFinishedEnteringScene)
             ));
-
-            // Unity calls the handlers of its scene events from these, all in one go; while a change is watched they
-            // are called one at a time instead, in the same order, so that each one's time is known
-            _sceneLoaded = HookSceneEvent(
-                "sceneLoaded", "Internal_SceneLoaded",
-                new Action<Action<Scene, LoadSceneMode>, Scene, LoadSceneMode>(OnSceneLoaded)
-            );
-            _sceneUnloaded = HookSceneEvent(
-                "sceneUnloaded", "Internal_SceneUnloaded",
-                new Action<Action<Scene>, Scene>(OnSceneUnloaded)
-            );
-            _activeSceneChanged = HookSceneEvent(
-                "activeSceneChanged", "Internal_ActiveSceneChanged",
-                new Action<Action<Scene, Scene>, Scene, Scene>(OnActiveSceneChanged)
-            );
         } catch (Exception e) {
             _failed = true;
             Logger.Warn($"Changes of room can't be timed: {e}");
         }
-    }
-
-    /// <summary>
-    /// Hooks the method of Unity that calls the handlers of a scene event, if it and the field behind the event are
-    /// there as expected.
-    /// </summary>
-    /// <returns>The field behind the event, or null if the event isn't timed.</returns>
-    private static FieldInfo? HookSceneEvent(string fieldName, string methodName, Delegate hook) {
-        var field = typeof(SceneManager).GetField(fieldName, UnityFlags);
-        var method = typeof(SceneManager).GetMethod(methodName, UnityFlags);
-        if (field == null || method == null || !typeof(Delegate).IsAssignableFrom(field.FieldType)) {
-            Logger.Warn($"The handlers of Unity's '{fieldName}' can't be timed in changes of room");
-            return null;
-        }
-
-        Hooks.Add(new Hook(method, hook));
-        return field;
     }
 
     /// <summary>
@@ -312,80 +267,13 @@ internal static class LoadWatch {
     }
 
     /// <summary>
-    /// Unity calls the handlers of its event of a scene that loaded.
+    /// Counts the time a handler of one of Unity's scene events took in the change of room that is watched, if any:
+    /// <see cref="SceneEventGuard"/> calls them one at a time.
     /// </summary>
-    private static void OnSceneLoaded(Action<Scene, LoadSceneMode> orig, Scene scene, LoadSceneMode mode) {
-        if (HandlersToTime(_sceneLoaded) is { } handlers) {
-            CallTimed(handlers, handler => ((UnityAction<Scene, LoadSceneMode>) handler)(scene, mode));
-        } else {
-            orig(scene, mode);
-        }
-    }
-
-    /// <summary>
-    /// Unity calls the handlers of its event of a scene that unloaded.
-    /// </summary>
-    private static void OnSceneUnloaded(Action<Scene> orig, Scene scene) {
-        if (HandlersToTime(_sceneUnloaded) is { } handlers) {
-            CallTimed(handlers, handler => ((UnityAction<Scene>) handler)(scene));
-        } else {
-            orig(scene);
-        }
-    }
-
-    /// <summary>
-    /// Unity calls the handlers of its event of another scene becoming the active one.
-    /// </summary>
-    private static void OnActiveSceneChanged(Action<Scene, Scene> orig, Scene previous, Scene next) {
-        if (HandlersToTime(_activeSceneChanged) is { } handlers) {
-            CallTimed(handlers, handler => ((UnityAction<Scene, Scene>) handler)(previous, next));
-        } else {
-            orig(previous, next);
-        }
-    }
-
-    /// <summary>
-    /// The handlers of one of Unity's scene events, to be called one at a time while a change of room is watched, in
-    /// the same order as Unity calls them, so that each one's time is known; or null, and Unity calls them itself.
-    /// Another mod's hook or patch on Unity's methods that call them, put in place before SSMP's, is passed over while
-    /// a change is watched; none is known.
-    /// </summary>
-    /// <param name="field">The field behind the event.</param>
-    private static Delegate[]? HandlersToTime(FieldInfo? field) {
-        if (_failed || _change == null || field == null) {
-            return null;
-        }
-
-        try {
-            return (field.GetValue(null) as Delegate)?.GetInvocationList();
-        } catch (Exception e) {
-            Fail(e);
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Calls the handlers of a scene event one at a time, counting each one's time. One that throws stops the rest and
-    /// goes on to Unity, as it does when Unity calls them.
-    /// </summary>
-    /// <param name="handlers">The handlers.</param>
-    /// <param name="call">Calls one handler.</param>
-    private static void CallTimed(Delegate[] handlers, Action<Delegate> call) {
-        foreach (var handler in handlers) {
-            var start = Stopwatch.GetTimestamp();
-            try {
-                call(handler);
-            } finally {
-                CountEventHandler(handler, Stopwatch.GetTimestamp() - start);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Counts the time a handler of a scene event took in the change of room that is watched.
-    /// </summary>
-    private static void CountEventHandler(Delegate handler, long ticks) {
-        if (_change is not { } change) {
+    /// <param name="handler">The handler.</param>
+    /// <param name="ticks">The time it took, in ticks of <see cref="Stopwatch"/>.</param>
+    public static void CountSceneEventHandler(Delegate handler, long ticks) {
+        if (_failed || _change is not { } change) {
             return;
         }
 
