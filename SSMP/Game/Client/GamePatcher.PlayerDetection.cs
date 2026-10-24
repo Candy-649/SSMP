@@ -556,7 +556,7 @@ internal partial class GamePatcher {
     /// <param name="player">The tracked player object to test.</param>
     /// <returns>
     /// <see langword="true"/> when the player is already tracked by the vanilla alert range or one of its colliders
-    /// overlaps the alert range collider; otherwise <see langword="false"/>.
+    /// overlaps one of the switched-on colliders of the alert range; otherwise <see langword="false"/>.
     /// </returns>
     private static bool IsPlayerInsideAlertRange(AlertRange alertRange, GameObject player) {
         if (player == null || !player.activeInHierarchy) {
@@ -567,13 +567,17 @@ internal partial class GamePatcher {
             return true;
         }
 
+        // Every collider of the range, as the game hears its own player in any of them that is switched on. A range
+        // can keep a shape that is switched off beside the one it reaches with: the attack range of the bombers keeps
+        // a switched-off polygon ahead of its box, and the first collider alone was that polygon, so a bomber that
+        // went after the partner never had them in reach and never threw (USER 10-24 "不扔炸弹")
         if (!AlertColliderCache.TryGetValue(alertRange, out var cached)) {
-            cached = new CachedCollider { Collider = alertRange.GetComponent<Collider2D>() };
+            cached = new CachedCollider(alertRange.GetComponents<Collider2D>());
             AlertColliderCache.Add(alertRange, cached);
         }
 
-        var alertCollider = cached.Collider;
-        if (alertCollider == null || !alertCollider.enabled) {
+        var alertColliders = cached.Colliders;
+        if (alertColliders.Length == 0) {
             return false;
         }
 
@@ -582,10 +586,11 @@ internal partial class GamePatcher {
         // Cache alert collider bounds per frame
         if (cached.FrameCount != currentFrame) {
             cached.FrameCount = currentFrame;
-            cached.Bounds = alertCollider.bounds;
+            for (var i = 0; i < alertColliders.Length; i++) {
+                var alertCollider = alertColliders[i];
+                cached.Bounds[i] = alertCollider != null && alertCollider.enabled ? alertCollider.bounds : default;
+            }
         }
-
-        var alertBounds = cached.Bounds;
 
         // Retrieve or create cached player info
         if (!PlayerInfoCache.TryGetValue(player, out var playerInfo)) {
@@ -613,6 +618,31 @@ internal partial class GamePatcher {
             }
         }
 
+        for (var i = 0; i < alertColliders.Length; i++) {
+            var alertCollider = alertColliders[i];
+            if (alertCollider == null || !alertCollider.enabled) {
+                continue;
+            }
+
+            if (IsPlayerInsideAlertCollider(alertCollider, cached.Bounds[i], playerInfo)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a tracked player overlaps one switched-on collider of an alert range.
+    /// </summary>
+    /// <param name="alertCollider">The collider of the alert range.</param>
+    /// <param name="alertBounds">Its bounds, as they were cached this frame.</param>
+    /// <param name="playerInfo">The player's colliders and position, as they were cached this frame.</param>
+    private static bool IsPlayerInsideAlertCollider(
+        Collider2D alertCollider,
+        Bounds alertBounds,
+        CachedPlayerInfo playerInfo
+    ) {
         // Check collider intersections using cached bounds in 2D
         foreach (var playerBounds in playerInfo.ColliderBounds) {
             if (playerBounds.extents is { x: 0f, y: 0f }) {
@@ -744,13 +774,13 @@ internal class BoxedBool {
 }
 
 /// <summary>
-/// A wrapper class for Collider2D references to allow caching them in a ConditionalWeakTable.
+/// A wrapper class for the Collider2D references of an alert range to allow caching them in a ConditionalWeakTable.
 /// </summary>
-internal class CachedCollider {
+internal class CachedCollider(Collider2D[] colliders) {
     /// <summary>
-    /// The cached Collider2D reference, which may be null if none is attached.
+    /// Every collider on the alert range's object, switched on or not; empty if none is attached.
     /// </summary>
-    public Collider2D? Collider;
+    public readonly Collider2D[] Colliders = colliders;
 
     /// <summary>
     /// The frame number when the bounds were last updated.
@@ -758,9 +788,10 @@ internal class CachedCollider {
     public int FrameCount = -1;
 
     /// <summary>
-    /// The cached bounds of the collider.
+    /// The cached bounds of each collider, by its place in <see cref="Colliders"/>; empty bounds for one that was
+    /// switched off.
     /// </summary>
-    public Bounds Bounds;
+    public readonly Bounds[] Bounds = new Bounds[colliders.Length];
 }
 
 /// <summary>

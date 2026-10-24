@@ -129,6 +129,13 @@ internal static partial class EntityFsmActions {
             return false;
         }
 
+        // A creature that fires itself, as one that flies off from a blast, keeps in step by its own positions, as
+        // for SetVelocity2d. The speed given to its copy stayed on it, as nothing there slows it down, and it carried
+        // the copy off while it waited out a knockback, which moves it by its own steps rather than by the positions
+        if (IsObjectInRegistry(selfGameObject)) {
+            return false;
+        }
+
         var rigidBody = selfGameObject.GetComponent<Rigidbody2D>();
         if (rigidBody == null) {
             return false;
