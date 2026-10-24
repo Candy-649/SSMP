@@ -137,7 +137,8 @@ internal partial class CoopSave {
     /// start with.
     /// </summary>
     private static readonly MachineKind[] MachineKinds = [
-        // Controllers that drop boxes and pour chutes in a pattern, which way going by where the players are
+        // Controllers that drop boxes and pour chutes in a pattern, which way going by the player crossing (see
+        // GamePatcher.BoxPassages)
         new(["Grind Plat Control"], "Control", ["Pattern R", "Pattern L", "State 2", "State 3", "State 4"]),
 
         // The boxes: those of a controller drop when it says, the others by themselves. Which of three looks each

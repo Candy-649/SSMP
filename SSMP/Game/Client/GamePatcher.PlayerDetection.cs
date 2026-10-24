@@ -224,7 +224,9 @@ internal partial class GamePatcher {
         // that is the whole of this going wrong and it leaves nothing else behind: whatever asked simply carries on
         // as though the room were empty. One line every few seconds is enough to catch it, and working out whether
         // to write one costs as much as answering the question, so it is only worked out that often.
-        if (!answer && self != null && Time.unscaledTime >= _nextBlindRangeLogTime) {
+        // A range at an end of a passage of dropping boxes says nobody is there, while a player waits in it, whenever
+        // the order goes by the player crossing (see IsBoxPassageEnd)
+        if (!answer && self != null && Time.unscaledTime >= _nextBlindRangeLogTime && !IsBoxPassageEnd(self)) {
             var inside = GetNearestPlayerInsideAlertRange(self);
             if (inside != null && HasLineOfSightToAlertRangeTarget(self, inside)) {
                 _nextBlindRangeLogTime = Time.unscaledTime + BlindRangeLogInterval;
@@ -266,8 +268,9 @@ internal partial class GamePatcher {
         // was told "nobody" instead, every time and on both machines, because nothing ever approves a target for
         // something that is not an enemy. That is silent: the swing lands, the state machine asks whether anyone
         // is near enough to be worth opening for, hears no, and slides back to where it started leaving no mark.
+        // A range at an end of a passage of dropping boxes goes by the player crossing it, while somebody is
         if (!BelongsToAnEnemy(self)) {
-            return IsAnyPlayerInsideAlertRange(self);
+            return TryAnswerBoxPassageEnd(self, out var byCrossing) ? byCrossing : IsAnyPlayerInsideAlertRange(self);
         }
 
         if (EnemyAlertRanges.TryGetValue(self, out var note)) {

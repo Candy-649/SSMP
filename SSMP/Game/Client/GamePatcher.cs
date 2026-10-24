@@ -234,6 +234,7 @@ internal partial class GamePatcher {
 
         RegisterPooledEffectHooks();
         RegisterNpcZoneHooks();
+        RegisterBoxPassageHooks();
     }
 
     /// <summary>
@@ -393,6 +394,7 @@ internal partial class GamePatcher {
         DisposeCameraCheckHooks();
         DisposeAggressionHooks();
         DisposeNpcZoneHooks();
+        DisposeBoxPassageHooks();
 
         _crawlerStopCrawlingHook?.Dispose();
         _crawlerStopCrawlingHook = null;
