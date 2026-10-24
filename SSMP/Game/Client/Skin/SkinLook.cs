@@ -49,7 +49,11 @@ internal sealed class SkinLook {
     public override string ToString() {
         var builder = new StringBuilder();
         foreach (var pack in Packs) {
-            Line("c", pack.Name, pack.Fingerprint);
+            if (pack.DressesHer) {
+                Line("c", pack.Name, pack.Fingerprint, "1");
+            } else {
+                Line("c", pack.Name, pack.Fingerprint);
+            }
         }
 
         if (PlayerColor is { } color) {
@@ -103,7 +107,7 @@ internal sealed class SkinLook {
             var fields = line.Split('\t');
             switch (fields[0]) {
                 case "c" when fields.Length >= 3 && fields[1].Length > 0:
-                    look.Packs.Add(new SkinPackRef(fields[1], fields[2]));
+                    look.Packs.Add(new SkinPackRef(fields[1], fields[2], fields.Length >= 4 && fields[3] == "1"));
                     break;
                 case "p" when fields.Length >= 7:
                     if (TryNumbers(fields, 1, 6, out var numbers)) {
@@ -150,10 +154,12 @@ internal sealed class SkinLook {
 }
 
 /// <summary>
-/// A skin of Silksong Customizer as one game names it to another: the name of its folder, and a fingerprint of its
-/// files that finds it in a game that keeps it in a folder of another name.
+/// A skin of Silksong Customizer as one game names it to another: the name of its folder, a fingerprint of its files
+/// that finds it in a game that keeps it in a folder of another name, and, for a skin worn, whether it dresses the
+/// sheet of Hornet herself, which keeps Player Color off her in the game of the player who wears it, so that a game
+/// that doesn't have the skin keeps it off her too.
 /// </summary>
-internal readonly record struct SkinPackRef(string Name, string Fingerprint);
+internal readonly record struct SkinPackRef(string Name, string Fingerprint, bool DressesHer = false);
 
 /// <summary>
 /// The colour that Player Color gives the cloak of a player, with the saturation and brightness it draws them with.

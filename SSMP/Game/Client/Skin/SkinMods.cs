@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text;
+using System.Text.RegularExpressions;
 using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Configuration;
@@ -34,6 +35,13 @@ internal static class CustomizerPacks {
     /// The fingerprints of the skins found so far, by folder: their files don't change while the game runs.
     /// </summary>
     private static readonly Dictionary<string, string> Fingerprints = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// What Nexus Mods puts after the name of a file it hands out, which the folder it unpacks into keeps: the number of
+    /// the mod, the version, its dots as dashes, and the time of the upload, as in "StarsNSparkles Cohesive
+    /// Colors-653-1-0-1766869339".
+    /// </summary>
+    private static readonly Regex NexusSuffix = new(@"-\d+(?:-[0-9A-Za-z]+)*-\d{9,}$", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// The skins found by the last look through the folders, and when that was.
@@ -82,7 +90,7 @@ internal static class CustomizerPacks {
 
     /// <summary>
     /// The skin on this computer that another game names: the one with the same files, or else the one in a folder of
-    /// the same name, or null if there is none.
+    /// the same name, also without what Nexus Mods puts after it, or null if there is none.
     /// </summary>
     public static SkinPack? Find(List<SkinPack> packs, SkinPackRef wanted) {
         // The one in a folder of the same name first, so that the files of every other skin are read only when it
@@ -106,8 +114,24 @@ internal static class CustomizerPacks {
             }
         }
 
+        // A skin downloaded from Nexus Mods unpacks into a folder named after the file with the mod, the version and the
+        // time after it, which one player keeps and another cuts down to the name: the friend's skin was there, in a
+        // folder of that name with what came after it, and its files differed by two images that the player had
+        // renamed, so neither the files nor the name found it (USER 10-24: "在她那边我穿的就是斗篷换色了")
+        var bare = BareName(wanted.Name);
+        foreach (var pack in packs) {
+            if (string.Equals(BareName(pack.Name), bare, StringComparison.OrdinalIgnoreCase)) {
+                return pack;
+            }
+        }
+
         return null;
     }
+
+    /// <summary>
+    /// The name of a skin's folder without what Nexus Mods puts after the name of the file it came in.
+    /// </summary>
+    private static string BareName(string name) => NexusSuffix.Replace(name.Trim(), "");
 
     /// <summary>
     /// A fingerprint of the art in a skin: the path and size of each of its images, so that the same skin in a folder

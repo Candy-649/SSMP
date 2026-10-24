@@ -20,7 +20,7 @@ internal static class OwnSkin {
     /// <summary>
     /// The name the game gives the sheet of sprites of Hornet herself.
     /// </summary>
-    private const string HornetSheet = "Knight";
+    internal const string HornetSheet = "Knight";
 
     /// <summary>
     /// How the game's names of the sheets of the moves of her crests begin.

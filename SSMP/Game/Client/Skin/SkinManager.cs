@@ -105,7 +105,7 @@ internal class SkinManager {
         if (sheets != null && CustomizerPacks.IsLoaded) {
             foreach (var pack in CustomizerPacks.FindAll()) {
                 if (pack.IsActive && pack.Dresses(sheets)) {
-                    look.Packs.Add(pack.Ref);
+                    look.Packs.Add(pack.Ref with { DressesHer = pack.Dresses(HerSheet) });
                 }
             }
         }
@@ -116,6 +116,11 @@ internal class SkinManager {
 
         return look.ToString();
     }
+
+    /// <summary>
+    /// The sheet of sprites of Hornet herself, whose art Player Color goes by for the whole of her.
+    /// </summary>
+    private static readonly string[] HerSheet = [OwnSkin.HornetSheet];
 
     /// <summary>
     /// The names of the sheets of sprites that the player's own hero draws from, or null while there is no hero: its
@@ -598,12 +603,19 @@ internal class SkinManager {
         // The art of its skins in their order. Until all of it has loaded, the character keeps the game's own art, so
         // that it never shows half of a skin
         var arts = new List<PackArt>();
+
+        // Whether Player Color colours none of the character, as one of the skins it wears dresses Hornet herself and
+        // isn't shown here, where the character shows the game's own look in its place: in the game of its player that
+        // skin keeps the colour off her, so a colour here would show what they never see (USER 10-24: "在她那边我穿的就是
+        // 斗篷换色了")
+        var colourKeptOff = false;
         if (look.Packs.Count > 0) {
             var ready = true;
             var packs = CustomizerPacks.FindAll();
             foreach (var wanted in look.Packs) {
                 var pack = CustomizerPacks.Find(packs, wanted);
                 if (pack == null) {
+                    colourKeptOff |= wanted.DressesHer;
                     continue;
                 }
 
@@ -616,6 +628,7 @@ internal class SkinManager {
             // it first plays from a library of a crest; its new atlases show the game's own art until then
             if (!ready && !SameArts(figure.Wearing, arts)) {
                 arts.Clear();
+                colourKeptOff |= look.Packs.Exists(pack => pack.DressesHer);
             }
         }
 
@@ -641,7 +654,7 @@ internal class SkinManager {
 
         figure.Slashes = slashArt;
 
-        var colorShader = look.PlayerColor != null ? PlayerColorMod.Shader : null;
+        var colorShader = look.PlayerColor != null && !colourKeptOff ? PlayerColorMod.Shader : null;
 
         // An atlas takes the art of the first skin that has it, as Customizer gives it
         var artOfSlot = new Texture?[figure.Slots.Count];
