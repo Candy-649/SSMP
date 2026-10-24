@@ -1328,6 +1328,17 @@ internal partial class GamePatcher {
             return false;
         }
 
+        // An action that puts something where a player is: the marker that a creature aims its throw at, put on the
+        // player it goes after rather than on the player of the game that runs it, as the spear of the thrower went at
+        // that player whoever it faced (USER 10-24 "扔枪的双人boss"). What it moves is not where it looks, and is never
+        // pointed at a player. Nor is anything in a state that does something to the player, like a catch that puts the
+        // caught player and a stand-in of them together, which is about the player caught, not the one gone after
+        if (action is SetPositionToObject or SetPositionToObject2D or SetPositionToObject2DV2 &&
+            (field.Name.Equals("gameObject", StringComparison.Ordinal) ||
+             action.State != null && EntityFsmActions.DealsWithThePlayerIn(action.State))) {
+            return false;
+        }
+
         var variableName = fsmGameObject.Name;
         if (!string.IsNullOrEmpty(variableName)) {
             if (variableName.Equals("Self", StringComparison.OrdinalIgnoreCase)) {

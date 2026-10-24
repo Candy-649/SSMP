@@ -623,6 +623,14 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// Whether an action of a state does something to the player character (see <see cref="DealsWithThePlayer"/>),
+    /// for what points a creature's actions at the player it goes after (GamePatcher.CanRetargetFsmGameObjectField).
+    /// </summary>
+    internal static bool DealsWithThePlayerIn(FsmState state) {
+        return DealsWithThePlayer(state);
+    }
+
+    /// <summary>
     /// Whether an action of a state does something to the player character, checks whether it can be hit or caught,
     /// sends it the event of being wounded or caught, or tells the room about it.
     /// </summary>

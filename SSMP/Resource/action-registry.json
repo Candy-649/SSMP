@@ -1185,15 +1185,18 @@
   },
   {
     "type": "SetPositionToObject",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_where_player": true
   },
   {
     "type": "SetPositionToObject2D",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_where_player": true
   },
   {
     "type": "SetPositionToObject2DV2",
-    "update_field": "everyFrame"
+    "update_field": "everyFrame",
+    "targeted_where_player": true
   },
   {
     "type": "SetPositionToObjectDelay"
