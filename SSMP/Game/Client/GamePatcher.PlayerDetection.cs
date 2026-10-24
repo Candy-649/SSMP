@@ -110,6 +110,12 @@ internal partial class GamePatcher {
         /// When that is next worked out, while a state machine there has not started yet.
         /// </summary>
         public float LocalPlayerRetryAt = float.NegativeInfinity;
+
+        /// <summary>
+        /// Whether it is in a thing that each player has to themselves (see PersonalPlaces.IsThingPart), or null while
+        /// that is not worked out yet.
+        /// </summary>
+        public bool? InPersonalThing;
     }
 
     /// <summary>

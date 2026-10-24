@@ -21,6 +21,10 @@ namespace SSMP.Game.Client;
 /// game's own answer: it lies on the layer of the ranges that look for the player, which meets the player of its own
 /// game and never the partner's figure. So it does also while a hit or touch of the partner is replayed; the partner's
 /// game does the same for them.
+///
+/// So does every range of a thing that each player has to themselves (see PersonalPlaces.IsThingPart), something that
+/// can be fought or not: it runs in each game for that game's player, like a crystal creature that bursts as a player
+/// comes near, and the partner's coming near sets off theirs, in their game.
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
@@ -33,24 +37,43 @@ internal partial class GamePatcher {
     /// <summary>
     /// The kinds of action with which a state machine moves the player or puts something on them, by the objects they
     /// name, with the fields that name objects. Other uses of the player, like reading where they are, are left out:
-    /// silk flies that scatter, platforms that crumble and many more ask about either player as they should.
+    /// silk flies that scatter, platforms that crumble for good and many more ask about either player as they should.
     /// </summary>
     private static readonly Dictionary<Type, FieldInfo[]> PlayerPlacingActionFields = new();
 
     /// <summary>
-    /// Whether an alert range is about the player of this game alone: a range with nothing that can be fought above
-    /// it, asked by a state machine that does something to the player by the global "Hero" variable as soon as it has
-    /// asked it (see <see cref="PlacesThePlayer(PlayMakerFSM, string)"/>). It is worked out once the state machines
-    /// there have started, and again when the range is moved.
+    /// Whether an alert range is about the player of this game alone: a range of what each player has to themselves,
+    /// and a range with nothing that can be fought above it, asked by a state machine that does something to the
+    /// player by the global "Hero" variable as soon as it has asked it (see
+    /// <see cref="PlacesThePlayer(PlayMakerFSM, string)"/>). It is worked out once the state machines there have
+    /// started, and again when the range is moved.
     /// </summary>
     private static bool IsAboutTheLocalPlayer(AlertRange? alertRange) {
-        if (alertRange == null || BelongsToAnEnemy(alertRange) ||
-            !EnemyAlertRanges.TryGetValue(alertRange, out var note)) {
+        if (alertRange == null) {
+            return false;
+        }
+
+        var belongsToAnEnemy = BelongsToAnEnemy(alertRange);
+        if (!EnemyAlertRanges.TryGetValue(alertRange, out var note)) {
             return false;
         }
 
         if (note.AboutTheLocalPlayer is { } known) {
             return known;
+        }
+
+        // Something that each player has to themselves, like a crystal creature that bursts as a player comes near,
+        // answered for either player: the partner coming near burst this game's own as well, which this player then
+        // had to wait for to grow back (USER 10-25, "像黑色晶体一样的虫子也不能共享"). Not the places of the games
+        // that each plays on their own, whose keepers wake for either player like other NPCs
+        if (note.InPersonalThing ??= PersonalPlaces.IsThingPart(alertRange.gameObject)) {
+            note.AboutTheLocalPlayer = true;
+            return true;
+        }
+
+        if (belongsToAnEnemy) {
+            note.AboutTheLocalPlayer = false;
+            return false;
         }
 
         if (Time.unscaledTime < note.LocalPlayerRetryAt) {

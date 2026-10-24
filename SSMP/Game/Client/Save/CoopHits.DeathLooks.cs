@@ -8,9 +8,9 @@ namespace SSMP.Game.Client.Save;
 
 /// <summary>
 /// The deaths of the creatures that each player has to themselves (see PersonalPlaces), the flies that a player
-/// bounces off, which one blow kills. Each game keeps its own, so a fly that the partner bounced off and killed is
-/// still there for this game's player to bounce off, rather than gone for both until one of them is put back at a safe
-/// place (USER 10-23, "本来时间就很赶了还要等"). What the death looked like is no longer the killer's alone: their game
+/// bounces off and kills: those of the lava and those of the snowy peaks (USER 10-24). Each game keeps its own, so a
+/// fly that the partner bounced off and killed is still there for this game's player to bounce off, rather than gone
+/// for both until one of them is put back at a safe place or it flies back in (USER 10-23, "本来时间就很赶了还要等"). What the death looked like is no longer the killer's alone: their game
 /// tells the other games in the room, and those show the body flung away, its sound and what else only shows of it,
 /// while their own creature stays as it is (USER 10-23, "演碎裂特效但是不碎", like a strike of the partner on a pod, see
 /// CoopHits.Bounces). Not on one that is gone there already, and not what only the killer has: the kill in the journal,

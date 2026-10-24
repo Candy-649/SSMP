@@ -40,13 +40,14 @@ internal static class PersonalPlaces {
     /// <summary>
     /// The things that each player has to themselves wherever a room has them, by how their names start, each with
     /// what is under it: the floors that crumble under a player, or under their attack, and come back a moment later,
-    /// and the flies that a player bounces off, which one blow kills. Both games used to break them together, so a
-    /// floor that the partner stood on was gone under this player as well, who then had to wait for it to come back -
-    /// or, where lava rises behind them, fell in - and a fly that the partner bounced off was gone for this player
-    /// too, where lava rises behind them until one of them was put back (USER 10-23, "本来时间就很赶了还要等"). The
-    /// partner's body sets none of them off here, so a floor stays whole here under a partner who is seen to fall
-    /// through it. Floors that stay broken are still shared, since the save keeps them (see
-    /// CoopSave.WorldTriggerKinds).
+    /// the flies that a player bounces off and kills, which come back a moment later too, and the crystal creatures
+    /// that burst as a player comes near and grow back. Both games used to break them together, so a floor that the
+    /// partner stood on was gone under this player as well, who then had to wait for it to come back - or, where lava
+    /// rises behind them, fell in - and a fly that the partner bounced off was gone for this player too, where lava
+    /// rises behind them until one of them was put back (USER 10-23, "本来时间就很赶了还要等"). The partner's body sets
+    /// none of them off here, nor does the partner coming near them (see GamePatcher.IsAboutTheLocalPlayer), so a
+    /// floor stays whole here under a partner who is seen to fall through it. Floors that stay broken are still
+    /// shared, since the save keeps them (see CoopSave.WorldTriggerKinds).
     /// </summary>
     private static readonly string[] Things = [
         "moss_crumble_plat",
@@ -57,9 +58,23 @@ internal static class PersonalPlaces {
         "crumble_plat_peak_",
         "memory_ground_plat",
 
-        // The death of one shows in the others' games, where theirs stays (see CoopHits.DeathLooks)
-        "Bone Goomba Bounce Fly"
+        // The death of one shows in the others' games, where theirs stays (see CoopHits.DeathLooks): the flies of the
+        // lava, and the drifting flies of the snowy peaks, which fly back in about 3 s after they die (USER 10-24,
+        // "雪山那里那种小飞虫也不要共享了")
+        "Bone Goomba Bounce Fly",
+        "Peaks Drifter",
+
+        // The crystal creatures of the peaks, which burst into spikes as a player comes near or strikes them and grow
+        // back a few seconds later (USER 10-25, "像黑色晶体一样的虫子也不能共享"). The partner's bursting theirs shows
+        // nothing here
+        "Crystal Drifter"
     ];
+
+    /// <summary>
+    /// What starts like one of <see cref="Things"/> but is shared all the same: the giant crystal creatures, which
+    /// shoot their spikes again and again and are fought, rather than burst once as a player passes.
+    /// </summary>
+    private static readonly string[] NotThings = ["Crystal Drifter Giant"];
 
     /// <summary>
     /// The loaded rooms that were looked through already, by their handle, each with the instance IDs of what was taken
@@ -71,6 +86,12 @@ internal static class PersonalPlaces {
     /// What was in a place or a thing when its room was looked through, by instance ID.
     /// </summary>
     private static readonly HashSet<int> InPlace = [];
+
+    /// <summary>
+    /// What was in a thing when its room was looked through, by instance ID: the part of <see cref="InPlace"/> that
+    /// came from <see cref="Things"/> rather than <see cref="Places"/>.
+    /// </summary>
+    private static readonly HashSet<int> InThing = [];
 
     /// <summary>
     /// The parts of the places in the loaded rooms, by the handle of the room, with one list for each of
@@ -119,6 +140,36 @@ internal static class PersonalPlaces {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Whether an object is in one of the things that each player has to themselves (see <see cref="Things"/>), the
+    /// floors, flies and creatures of their own, rather than in a place of a game each plays on their own, whose keepers
+    /// and the like may still hear both players.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    public static bool IsThingPart(GameObject gameObject) {
+        LookThrough(gameObject.scene);
+        if (InThing.Count == 0) {
+            return false;
+        }
+
+        for (var current = gameObject.transform; current != null; current = current.parent) {
+            if (InThing.Contains(current.gameObject.GetInstanceID())) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a name is that of one of the things that each player has to themselves (see <see cref="Things"/>), or
+    /// starts like one: what such a thing spawns is called after it.
+    /// </summary>
+    /// <param name="name">The name.</param>
+    public static bool IsThingName(string name) {
+        return IsThing(name);
     }
 
     /// <summary>
@@ -202,13 +253,13 @@ internal static class PersonalPlaces {
                     }
                 }
 
-                TakeDown(place, takenDown, places[index]);
+                TakeDown(place, takenDown, places[index], false);
             }
 
             top.GetComponentsInChildren(true, Parts);
             foreach (var part in Parts) {
                 if (IsThing(part.name)) {
-                    TakeDown(part, takenDown, null);
+                    TakeDown(part, takenDown, null, true);
                 }
             }
         }
@@ -222,11 +273,15 @@ internal static class PersonalPlaces {
     /// <summary>
     /// Takes down an object and everything under it, numbering them as parts of a place when it is one.
     /// </summary>
-    private static void TakeDown(Transform root, List<int> takenDown, List<GameObject>? placeParts) {
+    private static void TakeDown(Transform root, List<int> takenDown, List<GameObject>? placeParts, bool thing) {
         foreach (var part in root.GetComponentsInChildren<Transform>(true)) {
             var id = part.gameObject.GetInstanceID();
             if (InPlace.Add(id)) {
                 takenDown.Add(id);
+            }
+
+            if (thing) {
+                InThing.Add(id);
             }
 
             placeParts?.Add(part.gameObject);
@@ -237,6 +292,12 @@ internal static class PersonalPlaces {
     /// Whether an object of this name is one of <see cref="Things"/>.
     /// </summary>
     private static bool IsThing(string name) {
+        foreach (var start in NotThings) {
+            if (name.StartsWith(start, StringComparison.Ordinal)) {
+                return false;
+            }
+        }
+
         foreach (var start in Things) {
             if (name.StartsWith(start, StringComparison.Ordinal)) {
                 return true;
@@ -258,6 +319,7 @@ internal static class PersonalPlaces {
         LookedThrough.Remove(scene.handle);
         foreach (var id in takenDown) {
             InPlace.Remove(id);
+            InThing.Remove(id);
         }
     }
 }

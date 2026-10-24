@@ -392,6 +392,13 @@ internal partial class GamePatcher {
         CheckHeroPerformanceRegionBase? check,
         bool singReaction
     ) {
+        // A thing that each player has to themselves hears the song of the player of its game alone, as it sees them
+        // alone: the partner's song held this game's crystal creature singing, where it burst at nobody (review of
+        // 0.4.129)
+        if (PersonalPlaces.IsThingPart(target.gameObject)) {
+            return false;
+        }
+
         if (!ignoreRange) {
             return true;
         }

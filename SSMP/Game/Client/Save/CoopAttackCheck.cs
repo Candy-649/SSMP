@@ -525,10 +525,11 @@ internal class CoopAttackCheck {
     }
 
     /// <summary>
-    /// Writes down a thing that came up, unless it is a part of a player.
+    /// Writes down a thing that came up, unless it is a part of a player, or of something that each player has to
+    /// themselves, which comes up in each game for its own player.
     /// </summary>
     private void ComeUp(DamageHero damager, float now) {
-        if (damager == null || IsOfAPlayer(damager.transform)) {
+        if (damager == null || IsOfAPlayer(damager.transform) || IsPersonal(damager.transform)) {
             return;
         }
 
@@ -545,6 +546,25 @@ internal class CoopAttackCheck {
         _here.Add(appearance);
         _unsent.Add(appearance);
         _visitCount++;
+    }
+
+    /// <summary>
+    /// Whether an object is a part of something that each player has to themselves (see PersonalPlaces), or of what
+    /// such a thing spawned, which is called after it: the spikes that a crystal creature bursts into.
+    /// </summary>
+    private static bool IsPersonal(Transform transform) {
+        if (PersonalPlaces.IsThingPart(transform.gameObject)) {
+            return true;
+        }
+
+        Transform? spawned = null;
+        for (var current = transform; current != null; current = current.parent) {
+            if (current.name.Contains("(Clone)")) {
+                spawned = current;
+            }
+        }
+
+        return spawned != null && PersonalPlaces.IsThingName(spawned.name);
     }
 
     /// <summary>
