@@ -8,6 +8,7 @@ using System.Text.RegularExpressions;
 using BepInEx;
 using BepInEx.Bootstrap;
 using BepInEx.Configuration;
+using MonoMod.RuntimeDetour;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -459,6 +460,68 @@ internal static class PlayerColorMod {
                 .GetValue(null) as Shader;
             return shader != null ? shader : Shader.Find("Mod/PlayerColor");
         }
+    }
+
+    /// <summary>
+    /// The hook that has a flash of a sprite leave white behind once it is at nothing, while it is in place.
+    /// </summary>
+    private static Hook? _flashHook;
+
+    /// <summary>
+    /// Has every flash of a sprite leave white behind once it is at nothing, while Player Color is loaded. The game
+    /// leaves the colour of the last flash in place when a flash ends, which its own shaders show nothing of at
+    /// nothing, but Player Color's shader still tints the hero with it: after the orange flashes of hot coals the
+    /// friend's hero stayed yellow, with a pale purple cloak, until the next white flash, which a hit of the needle
+    /// gives as it brings silk (USER 10-24: "被岩块烫过一下之后脸就会一直黄，飞针一下又好了"). White is what the game
+    /// itself leaves once a flash is cancelled.
+    /// </summary>
+    public static void HookFlashes() {
+        if (_flashHook != null || Plugin == null) {
+            return;
+        }
+
+        var method = typeof(SpriteFlash).GetMethod(
+            "SetParams",
+            BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic,
+            null,
+            [typeof(float), typeof(Color)],
+            null
+        );
+        if (method == null) {
+            Logger.Warn("Could not find how the game sets the flash of a sprite, so with Player Color a flash may leave " +
+                        "its colour on the hero");
+            return;
+        }
+
+        try {
+            _flashHook = new Hook(
+                method,
+                (Action<Action<SpriteFlash, float, Color>, SpriteFlash, float, Color>) OnSetFlash
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not hook the flash of sprites, so with Player Color a flash may leave its colour on the " +
+                        $"hero: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Takes away the hook of <see cref="HookFlashes"/>.
+    /// </summary>
+    public static void UnhookFlashes() {
+        _flashHook?.Dispose();
+        _flashHook = null;
+    }
+
+    /// <summary>
+    /// The game sets how strong and in what colour a sprite flashes; a flash at nothing goes in white.
+    /// </summary>
+    private static void OnSetFlash(
+        Action<SpriteFlash, float, Color> orig,
+        SpriteFlash self,
+        float amount,
+        Color colour
+    ) {
+        orig(self, amount, amount > 0f ? colour : Color.white);
     }
 
     /// <summary>

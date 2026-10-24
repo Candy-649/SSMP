@@ -64,10 +64,12 @@ internal class SkinManager {
     }
 
     /// <summary>
-    /// Starts watching the settings of Player Color, which the player can change while playing.
+    /// Starts watching the settings of Player Color, which the player can change while playing, and has flashes leave
+    /// white behind for its shader (<see cref="PlayerColorMod.HookFlashes"/>).
     /// </summary>
     public void RegisterHooks() {
         _stopWatchingPlayerColor ??= PlayerColorMod.OnSettingsChanged(() => LocalLookChanged?.Invoke());
+        PlayerColorMod.HookFlashes();
         OwnSkin.Changed -= OnOwnSkinChanged;
         OwnSkin.Changed += OnOwnSkinChanged;
         SlashSkin.Changed -= OnOwnSkinChanged;
@@ -77,11 +79,12 @@ internal class SkinManager {
     }
 
     /// <summary>
-    /// Stops watching the settings of Player Color.
+    /// Stops watching the settings of Player Color, and leaves flashes to the game again.
     /// </summary>
     public void DeregisterHooks() {
         _stopWatchingPlayerColor?.Invoke();
         _stopWatchingPlayerColor = null;
+        PlayerColorMod.UnhookFlashes();
         OwnSkin.Changed -= OnOwnSkinChanged;
         SlashSkin.Changed -= OnOwnSkinChanged;
         SlashArt.Loaded -= OnSlashArtLoaded;
