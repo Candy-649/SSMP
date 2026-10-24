@@ -68,7 +68,10 @@ internal static class SlashPictures {
             return;
         }
 
-        Waiting.Add(then);
+        if (!Waiting.Contains(then)) {
+            Waiting.Add(then);
+        }
+
         if (_loading.IsValid()) {
             return;
         }
@@ -107,9 +110,33 @@ internal static class SlashPictures {
             var waiting = new List<Action>(Waiting);
             Waiting.Clear();
             foreach (var action in waiting) {
-                action();
+                try {
+                    action();
+                } catch (Exception e) {
+                    Logger.Error($"Could not go on once the slashes in Hornet's art were found: {e}");
+                }
             }
         };
+    }
+
+    /// <summary>
+    /// Has each sprite under an object that shows a slash of the given sheets take the material and the place on its
+    /// atlas that the slash draws with now. A sprite takes them only as its frame changes, and a slash may show the
+    /// same frame for long, or show it again the next time it comes.
+    /// </summary>
+    /// <param name="root">The object.</param>
+    /// <param name="slashesOf">The slash sprites of each sheet, by the sheet that its sprites draw from.</param>
+    public static void Redraw(GameObject root, Dictionary<tk2dSpriteCollectionData, HashSet<int>> slashesOf) {
+        if (slashesOf.Count == 0) {
+            return;
+        }
+
+        foreach (var sprite in root.GetComponentsInChildren<tk2dSprite>(true)) {
+            var sheet = sprite.Collection != null ? sprite.Collection.inst : null;
+            if (sheet != null && slashesOf.TryGetValue(sheet, out var slashes) && slashes.Contains(sprite.spriteId)) {
+                sprite.ForceBuild();
+            }
+        }
     }
 
     /// <summary>
@@ -412,9 +439,10 @@ internal static class SlashSkin {
 
     /// <summary>
     /// The choice as the settings keep it: empty for the slashes of the skin that Hornet wears, <see cref="GameChoice"/>
-    /// for the game's own, or else the name of a skin's folder.
+    /// for the game's own, or else the name of a skin's folder. Empty too while Customizer, whose skins they are, isn't
+    /// loaded: Hornet wears no skin then, and the choice is neither shown nor can be changed.
     /// </summary>
-    public static string Choice => _settings?.SlashSkin ?? "";
+    public static string Choice => OwnSkin.CanChoose ? _settings?.SlashSkin ?? "" : "";
 
     /// <summary>
     /// The skins that slashes can be drawn from: those of Hornet, which have art for her sheets.
@@ -486,9 +514,19 @@ internal static class SlashSkin {
     /// <summary>
     /// Draws the slashes of the local hero's sheets as chosen, once the art of the chosen skin is in, and the rest of
     /// the time as before. Called as the choice changes, as its art comes in, as a hero comes, whose sheets may be new
-    /// ones, and as the menu shows, where the art of the chosen skin's slashes is cut up while there is no hero.
+    /// ones, and as the menu shows, where the art of the chosen skin's slashes is cut up while there is no hero. What
+    /// fails is logged, as this runs among what the game and this mod do as a hero starts.
     /// </summary>
     public static void DressLoaded() {
+        try {
+            Dress();
+        } catch (Exception e) {
+            Logger.Error($"Could not draw the slashes as chosen: {e}");
+        }
+    }
+
+    /// <inheritdoc cref="DressLoaded"/>
+    private static void Dress() {
         ForgetGone();
 
         var hero = HeroController.SilentInstance;
@@ -517,6 +555,7 @@ internal static class SlashSkin {
 
         var dressed = new HashSet<tk2dSpriteDefinition>();
         var used = new HashSet<Material>();
+        var changed = false;
         if (hero != null && (game || art != null)) {
             foreach (var sheet in SlashPictures.HeroSheets(hero)) {
                 var slashes = SlashPictures.Of(sheet.name);
@@ -560,6 +599,8 @@ internal static class SlashSkin {
                         Made[(drawn, index)] = material;
                     }
 
+                    changed |= material.mainTexture != texture || definition.materialInst != material ||
+                               definition.uvs != uvs;
                     material.mainTexture = texture;
                     used.Add(material);
 
@@ -583,6 +624,19 @@ internal static class SlashSkin {
             definition.material = kept.Material;
             definition.materialInst = kept.Inst;
             definition.uvs = kept.Uvs;
+            changed = true;
+        }
+
+        // What of the hero shows a slash now takes the change at once
+        if (hero != null && changed) {
+            var slashesOf = new Dictionary<tk2dSpriteCollectionData, HashSet<int>>();
+            foreach (var sheet in SlashPictures.HeroSheets(hero)) {
+                if (SlashPictures.Of(sheet.name) is { } slashes && SlashPictures.Drawn(sheet) is { } drawn) {
+                    slashesOf[drawn] = slashes;
+                }
+            }
+
+            SlashPictures.Redraw(hero.gameObject, slashesOf);
         }
 
         foreach (var key in new List<(tk2dSpriteCollectionData Sheet, int Index)>(Made.Keys)) {
@@ -846,13 +900,17 @@ internal sealed class SlashPackArt {
         _reading = null;
 
         Texture2D? image = null;
-        if (request.result == UnityWebRequest.Result.Success) {
-            image = DownloadHandlerTexture.GetContent(request);
-        } else {
-            Logger.Warn($"Could not read '{file}': {request.error}");
+        try {
+            if (request.result == UnityWebRequest.Result.Success) {
+                image = DownloadHandlerTexture.GetContent(request);
+            } else {
+                Logger.Warn($"Could not read '{file}': {request.error}");
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not read '{file}': {e.Message}");
+        } finally {
+            request.Dispose();
         }
-
-        request.Dispose();
 
         SlashAtlas? atlas = null;
         if (image != null) {
@@ -1026,13 +1084,14 @@ internal sealed class SlashAtlas {
             }
         }
 
-        var result = new Texture2D(width, cutHeight, format, true) {
+        // Without smaller copies of itself, which the CPU would make as it is cut, mid-game for another player's choice
+        var result = new Texture2D(width, cutHeight, format, false) {
             name = $"{PackArt.NamePrefix}{skin} slashes {sheet}/{texture}",
             wrapMode = TextureWrapMode.Clamp,
             filterMode = image.filterMode
         };
         result.SetPixelData(cut, 0);
-        result.Apply(true, true);
+        result.Apply(false, true);
 
         // Each sprite's place on the new texture: the same pixels, moved
         var uvs = new Dictionary<int, Vector2[]>();

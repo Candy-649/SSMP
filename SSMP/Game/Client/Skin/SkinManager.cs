@@ -721,11 +721,23 @@ internal class SkinManager {
             }
         }
 
-        // The sprite takes the material of its frame only when the frame changes; this one shows the change at once
+        // The sprite takes the material of its frame only when the frame changes; this one shows the change at once, as
+        // does what of the character shows a slash, whose place on its atlas may have changed too
         try {
             var sprite = figure.Object != null ? figure.Object.GetComponent<tk2dSprite>() : null;
             if (sprite != null && sprite.Collection != null) {
                 sprite.ForceBuild();
+            }
+
+            if (figure.Object != null) {
+                var slashesOf = new Dictionary<tk2dSpriteCollectionData, HashSet<int>>();
+                foreach (var slot in figure.Slots) {
+                    if (SlashPictures.Of(slot.SheetName) is { } slashSprites) {
+                        slashesOf[slot.Sheet.Copy] = slashSprites;
+                    }
+                }
+
+                SlashPictures.Redraw(figure.Object, slashesOf);
             }
         } catch (Exception e) {
             Logger.Warn($"Could not redraw a character after dressing it: {e.Message}");
