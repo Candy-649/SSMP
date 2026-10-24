@@ -736,6 +736,42 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Whether a creature that keeps going after a player may turn to another player because one of its ranges finds
+    /// the other inside while the one it keeps stands outside it: once its hold after its last turn is over (see
+    /// <see cref="IsHeldByTime"/>), in the game that runs it, and not while it answers a wound or follows a song or a
+    /// sign. Its ranges ask about the player it keeps alone (see <see cref="KeptTarget"/>), and that player stays kept
+    /// while within its reach, which is the whole of a boss's arena, so a boss whose moves wait for a range stood idle
+    /// beside one player until a roll at one of its moves turned it, seconds later; most of all after a death, which
+    /// turns it to the player still standing (USER 10-24: "这个boss出招会有一段时间的停滞，尤其是有人死了的时候";
+    /// the friend's log: 'Slash Range' said nobody was there while she stood in it, 3 s after she was stood up).
+    /// Cheap to ask, before the range looks for anyone.
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    private static bool MayTurnToOneInside(GameObject owner) {
+        var turns = TurnsOf(owner);
+        return turns != null && !IsHeldByTime(turns, Time.unscaledTime) &&
+               !WoundAnswers.ContainsKey(owner.GetInstanceID()) && _woundedNow != owner &&
+               !Save.SharedDice.PlaysAnotherGame && Entity.Entity.OwnSign == null &&
+               !TryGetSongTarget(owner.GetInstanceID(), out _) && Entity.Entity.RunsCreatureHere(owner);
+    }
+
+    /// <summary>
+    /// Turns a creature to a player that one of its ranges found inside, while the player it kept stood outside it
+    /// (see <see cref="MayTurnToOneInside"/>).
+    /// </summary>
+    /// <param name="owner">The creature.</param>
+    /// <param name="kept">The player it kept going after.</param>
+    /// <param name="inside">The player inside the range.</param>
+    /// <param name="range">The name of the range, for the log.</param>
+    private static void TurnToOneInside(GameObject owner, GameObject kept, GameObject inside, string range) {
+        Logger.Info(
+            $"{owner.name} turned to {DescribePlayer(inside)}, who stood inside its '{range}', while " +
+            $"{DescribePlayer(kept)}, whom it went after, stood outside it"
+        );
+        ApproveEnemyTarget(owner, inside);
+    }
+
+    /// <summary>
     /// Whether a creature keeps going after the player it goes after: while they are in the room and up, for
     /// <see cref="TurnHoldTime"/> after it turned to them (see <see cref="IsHeldByTime"/>) whatever else, and after that
     /// while they are within its reach and it notices them (see <see cref="IsNoticedBy"/>). Worked out no more often than

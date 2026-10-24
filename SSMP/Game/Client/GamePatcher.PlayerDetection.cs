@@ -283,10 +283,20 @@ internal partial class GamePatcher {
         }
 
         // The one rule for every creature, whatever asks (see KeptTarget): while it keeps going after a player, each of
-        // its ranges asks about them alone, with the other player standing nearer or not, and it turns from them only by
-        // its roll or once it no longer keeps them
+        // its ranges asks about them alone, with the other player standing nearer or not, and it turns from them by its
+        // roll, once it no longer keeps them, or once its hold is over and the range finds the other player inside
+        // while the one it keeps stands outside it (see MayTurnToOneInside)
         if (KeptTarget(owner) is { } kept) {
             var keptInside = IsValidTargetForAlertRange(self, kept);
+            if (!keptInside && MayTurnToOneInside(owner)) {
+                var inside = GetNearestPlayerInsideAlertRange(self, kept);
+                if (inside != null && HasLineOfSightToAlertRangeTarget(self, inside)) {
+                    TurnToOneInside(owner, kept, inside, self.name);
+                    NoteRangeAnswer(TurnsOf(owner), true);
+                    return true;
+                }
+            }
+
             NoteRangeAnswer(TurnsOf(owner), keptInside);
             return keptInside;
         }
@@ -521,14 +531,15 @@ internal partial class GamePatcher {
     /// Finds the nearest tracked player that is physically inside the supplied alert range.
     /// </summary>
     /// <param name="alertRange">The alert range to test.</param>
+    /// <param name="except">A player to leave out, if any.</param>
     /// <returns>The nearest valid player inside the alert range, or <see langword="null"/>.</returns>
-    private static GameObject? GetNearestPlayerInsideAlertRange(AlertRange alertRange) {
+    private static GameObject? GetNearestPlayerInsideAlertRange(AlertRange alertRange, GameObject? except = null) {
         GameObject? bestPlayer = null;
         var bestDistance = float.PositiveInfinity;
 
         var players = PlayerTargetRegistry.GetTrackedPlayers();
         foreach (var player in players) {
-            if (player == null) {
+            if (player == null || player == except) {
                 continue;
             }
 
