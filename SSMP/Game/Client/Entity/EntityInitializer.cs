@@ -242,6 +242,14 @@ internal static class EntityInitializer {
         foreach (var flyer in gameObject.GetComponentsInChildren<FlockFlyer>(true)) {
             flyer.enabled = false;
         }
+
+        // A creature that sways where it floats puts itself every few frames about the place where it began, which for
+        // a copy is where the copy was made, and the copy was pulled back to where the scene host has it each time: it
+        // jumped to and fro between the two places, two units apart (USER 10-25, "一种虫子在两个位置反复闪"). Where
+        // the scene host has it carries the sway of the scene host's
+        if (gameObject.TryGetComponent<AmbientSway>(out var sway)) {
+            sway.enabled = false;
+        }
     }
 
     /// <summary>
