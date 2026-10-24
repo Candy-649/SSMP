@@ -80,6 +80,14 @@ internal static partial class EntityFsmActions {
         );
         var throws = ThrownThings.ReadThrows(data);
 
+        // A thing that the game running the creature says again for a player who walked in after it grew there
+        // (Entity.SendGrownPartsAgain), whose throw came here as it happened all the same, is not made twice: the
+        // actions after this one put the thing that is here in its place
+        if (ThrownThings.TryGetNamed(throws, out var already)) {
+            action.storeObject.Value = already;
+            return;
+        }
+
         if (ThrownThings.PrefabToThrow(action, action.gameObject?.Value, throws) is not { } prefab) {
             return;
         }

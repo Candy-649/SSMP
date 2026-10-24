@@ -564,11 +564,21 @@ internal static partial class EntityFsmActions {
     /// (which an empty parent turned into parts dropped loose into the room). A part is named by its path under the
     /// creature, which is the same on the copy; anything else is left to the copy's own variable.
     /// </summary>
-    public static void WriteSubject(EntityNetworkData data, FsmStateAction action) {
+    /// <param name="data">The data that goes with the action.</param>
+    /// <param name="action">The action.</param>
+    /// <param name="loose">A variable whose object is written as one anywhere else, not as a part of the creature,
+    /// whatever its place is now; or null. What a creature grew onto itself is said again after it was put in its
+    /// place (Entity.SendGrownPartsAgain), and what was done to it before then went out while it was still loose.</param>
+    public static void WriteSubject(EntityNetworkData data, FsmStateAction action, FsmGameObject? loose = null) {
         foreach (var variable in SubjectVariables(action)) {
             var subject = variable.Value;
             if (subject == null) {
                 data.Packet.Write((byte) 0);
+                continue;
+            }
+
+            if (loose != null && variable.Name == loose.Name) {
+                data.Packet.Write((byte) 2);
                 continue;
             }
 

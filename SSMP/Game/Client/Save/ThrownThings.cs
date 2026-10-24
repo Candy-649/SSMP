@@ -505,6 +505,11 @@ internal static class ThrownThings {
     /// <param name="data">The data that goes with the action.</param>
     /// <param name="action">The action.</param>
     public static void WriteThrows(EntityNetworkData data, FsmStateAction action) {
+        if (_sayingAgain is { } again) {
+            WriteSaidAgain(data, again.Thing, again.PrefabName);
+            return;
+        }
+
         HostThrows.TryGetValue(action, out var thrown);
         HostThrows.Remove(action);
 
@@ -524,6 +529,79 @@ internal static class ThrownThings {
         if (thrown != null && !hasThrown) {
             ForgetAll(thrown);
         }
+    }
+
+    /// <summary>
+    /// The thing here that already has the one name of a throw, if any: a throw said again (see <see cref="SayAgain"/>)
+    /// of a thing whose throw came here as it happened, which is not made twice.
+    /// </summary>
+    /// <param name="throws">The names of the throw, as they were read with it (see <see cref="ReadThrows"/>).</param>
+    /// <param name="thing">The thing.</param>
+    public static bool TryGetNamed(Throws throws, out GameObject thing) {
+        thing = null!;
+        if (throws.Count != 1 || !ByKey.TryGetValue($"{throws.Prefix}.{throws.First}", out var mark) ||
+            mark == null || !mark.gameObject.activeInHierarchy) {
+            return false;
+        }
+
+        thing = mark.gameObject;
+        return true;
+    }
+
+    /// <summary>
+    /// The thing whose throw is said again, and what it was thrown as, while <see cref="SayAgain"/> lasts; or null.
+    /// </summary>
+    private static (GameObject Thing, string PrefabName)? _sayingAgain;
+
+    /// <summary>
+    /// Has the throw that is written next go out under the name of a thing that this game threw before, rather than
+    /// under the names of what its action threw in this frame: what a creature grew onto itself is said again to a
+    /// player who walks in after it grew (Entity.SendGrownPartsAgain), and their game names its twin as the thing is
+    /// named here.
+    /// </summary>
+    /// <param name="thing">The thing.</param>
+    /// <param name="prefabName">The name of the prefab it was thrown as.</param>
+    /// <returns>What ends it.</returns>
+    public static IDisposable SayAgain(GameObject thing, string prefabName) {
+        _sayingAgain = (thing, prefabName);
+        return new EndsSayingAgain();
+    }
+
+    /// <summary>
+    /// Ends <see cref="SayAgain"/>.
+    /// </summary>
+    private sealed class EndsSayingAgain : IDisposable {
+        public void Dispose() {
+            _sayingAgain = null;
+        }
+    }
+
+    /// <summary>
+    /// Writes the name of a thing thrown before as <see cref="WriteThrows"/> writes the names of a throw, for
+    /// <see cref="ReadThrows"/>: a thing with a name of its own throw, "prefix.number", goes as the one thing of a throw
+    /// of that number; anything else as a throw that names nothing, as the thing has no such name here either.
+    /// </summary>
+    /// <param name="data">The data that goes with the action.</param>
+    /// <param name="thing">The thing.</param>
+    /// <param name="prefabName">The name of the prefab it was thrown as.</param>
+    private static void WriteSaidAgain(EntityNetworkData data, GameObject thing, string prefabName) {
+        string? prefix = null;
+        var number = 0;
+        var target = NoPlayer;
+        if (thing.TryGetComponent<ThrownMark>(out var mark) && mark.Key is { } key) {
+            var dot = key.IndexOf('.');
+            if (dot > 0 && dot == key.LastIndexOf('.') &&
+                int.TryParse(key.Substring(dot + 1), NumberStyles.None, CultureInfo.InvariantCulture, out number)) {
+                prefix = key.Substring(0, dot);
+                target = CodeOf?.Invoke(mark.Target) ?? NoPlayer;
+            }
+        }
+
+        data.Packet.Write(prefix ?? Prefix);
+        data.Packet.Write(prefix != null ? number : 0);
+        data.Packet.Write((byte) (prefix != null ? 1 : 0));
+        data.Packet.Write(target);
+        data.Packet.Write(prefix != null ? prefabName : "");
     }
 
     /// <summary>

@@ -79,6 +79,12 @@ internal class EntityManager {
     private bool _sceneRoleDetermined;
 
     /// <summary>
+    /// Whether another player walked into the scene before the role of this game in it was determined, when nothing
+    /// was sent again for them (see <see cref="OnPlayerEnterScene"/>); cleared as the role is determined.
+    /// </summary>
+    private bool _enteredBeforeRoleDetermined;
+
+    /// <summary>
     /// Whether the server told the client if it is the scene host of the current scene.
     /// </summary>
     public bool IsSceneRoleDetermined => _sceneRoleDetermined;
@@ -215,9 +221,19 @@ internal class EntityManager {
         SceneHostEpoch = sceneHostEpoch;
         Logger.Info($"We are scene host, releasing control of all registered entities (epoch {sceneHostEpoch})");
         IsSceneHost = true;
+
+        // A player who walked in while it was being settled who runs the room was heard of before this game ran it,
+        // when nothing was sent again for them (OnPlayerEnterScene): what the creatures grew onto themselves until now
+        // went nowhere, and goes to them now. By their walking in itself, not by the room the server says they are in,
+        // which can come while they still load, before their walking in, which then sent it all a second time
+        var someoneIsHere = _enteredBeforeRoleDetermined;
+        _enteredBeforeRoleDetermined = false;
         ForEachEntity("release", entity => {
             entity.InitializeHost(sceneHostEpoch);
             entity.SendShownClip();
+            if (someoneIsHere) {
+                entity.SendGrownPartsAgain();
+            }
         });
         _sceneRoleDetermined = true;
         _expectsToRunRoom = false;
@@ -244,6 +260,7 @@ internal class EntityManager {
         }
 
         _spawnsToTell.Clear();
+        _enteredBeforeRoleDetermined = false;
 
         IsSceneHost = false;
         ForEachEntity("take control of", entity => entity.InitializeClient(sceneHostEpoch));
@@ -254,15 +271,22 @@ internal class EntityManager {
 
     /// <summary>
     /// Called when another player walks into the scene of this game. As its scene host, this game sends again how the
-    /// things that move by themselves are moving (<see cref="Entity.SendOwnMotionAgain"/>).
+    /// things that move by themselves are moving (<see cref="Entity.SendOwnMotionAgain"/>), and what the creatures grew
+    /// onto themselves (<see cref="Entity.SendGrownPartsAgain"/>).
     /// </summary>
     public void OnPlayerEnterScene() {
-        if (!_sceneRoleDetermined || !IsSceneHost) {
+        if (!_sceneRoleDetermined) {
+            _enteredBeforeRoleDetermined = true;
+            return;
+        }
+
+        if (!IsSceneHost) {
             return;
         }
 
         foreach (var entity in _entities.Values) {
             entity.SendOwnMotionAgain();
+            entity.SendGrownPartsAgain();
         }
     }
 
@@ -542,6 +566,7 @@ internal class EntityManager {
         if (!_netClient.IsConnected) return;
 
         _sceneRoleDetermined = false;
+        _enteredBeforeRoleDetermined = false;
         SceneHostEpoch = 0;
 
         // The creatures of a room that this game will run are left running from the start. Switched off until the
