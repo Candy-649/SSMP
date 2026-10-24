@@ -2568,6 +2568,11 @@ internal partial class Entity {
             return;
         }
 
+        // Whether it is on, which goes out only as it changes: the server's state of the room keeps what it last
+        // heard, and a value that came there otherwise stayed for good, while this game's creature never changed
+        _lastIsActive = Object.Host != null && (_hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy);
+        _netClient.UpdateManager.UpdateEntityIsActive(Id, _lastIsActive);
+
         foreach (var component in _components.Values.Distinct()) {
             component.SendAgain();
         }
@@ -3183,7 +3188,12 @@ internal partial class Entity {
         SwitchOnWithoutStartingOver(clientActive, resumed);
         SayWhatWasTakenOver();
 
+        // Said as this game takes the creature over, as it is when this game settles to run the room
+        // (InitializeHost): the server kept what the game that ran it before said, and gave that to whoever walked in
+        // next. Flyers that were switched off in both games came on for a player who walked in after the room changed
+        // hands, as the server still had them on (USER 10-24 "凭空多出来了一个怪")
         _lastIsActive = _hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy;
+        _netClient.UpdateManager.UpdateEntityIsActive(Id, _lastIsActive);
 
         foreach (var component in _components.Values) {
             component.InitializeHost(sceneHostEpoch);

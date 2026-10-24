@@ -1103,6 +1103,16 @@ internal abstract class ServerManager : IServerManager {
                 }
             );
 
+            // Who says a creature is on, besides the game that runs its room: flyers that were off in both games came
+            // on for a player from what the server kept, and nothing said who had said they were on (USER 10-24)
+            if (!playerData.IsSceneHost && entityData.IsActive != entityUpdate.IsActive) {
+                Logger.Info(
+                    $"[Room state] ({id}, {playerData.Username}), who does not run '{playerData.CurrentScene}', " +
+                    $"said entity {entityUpdate.Id} is {(entityUpdate.IsActive ? "on" : "off")}, which was " +
+                    $"{DescribeActive(entityData.IsActive)}"
+                );
+            }
+
             entityData.IsActive = entityUpdate.IsActive;
             entityData.HeardAt[HeardActive] = now;
         }
@@ -1447,6 +1457,18 @@ internal abstract class ServerManager : IServerManager {
     private const double RoomSnapshotYieldTime = 1.0;
 
     /// <summary>
+    /// Whether the server has a creature on or off, as it reads in a log line: on, off, or not heard of yet.
+    /// </summary>
+    /// <param name="isActive">What the server keeps of it.</param>
+    private static string DescribeActive(bool? isActive) {
+        return isActive switch {
+            true => "on",
+            false => "off",
+            null => "not heard of yet"
+        };
+    }
+
+    /// <summary>
     /// The shortest stretch without anything arriving from the player whose game runs a room, in seconds, after which
     /// that player is asked for the state of it (see <see cref="OnClientReceiveResumed"/>).
     /// </summary>
@@ -1554,8 +1576,23 @@ internal abstract class ServerManager : IServerManager {
 
         foreach (var update in snapshot.ReliableEntityUpdateList) {
             var data = DataOf(update.Id);
-            if (update.UpdateTypes.Contains(EntityUpdateType.Active) && !HeardJustNow(data, HeardActive)) {
-                data.IsActive = update.IsActive;
+            if (update.UpdateTypes.Contains(EntityUpdateType.Active)) {
+                var yields = HeardJustNow(data, HeardActive);
+
+                // What the state of the room changes of whether a creature is on, or would have changed but for what
+                // was heard just before it, which is what the other players are told next (USER 10-24 "凭空多出来了一个怪")
+                if (data.IsActive != update.IsActive) {
+                    Logger.Info(
+                        $"[Room state] Entity {update.Id} in '{sceneName}' is {(update.IsActive ? "on" : "off")} in " +
+                        $"the state from ({id}, {playerData.Username}); the server had it " +
+                        $"{DescribeActive(data.IsActive)}" +
+                        (yields ? ", heard just before, which is kept" : "")
+                    );
+                }
+
+                if (!yields) {
+                    data.IsActive = update.IsActive;
+                }
             }
 
             if (update.UpdateTypes.Contains(EntityUpdateType.Data)) {
