@@ -187,6 +187,12 @@ internal partial class CoopSave {
         new(["Spike Pendulum Hanging"], "Control", ["Left"]),
         new(["Drifting Snowflake"], "Control", ["Spawn"]),
 
+        // The sauna of a room with a bench, which drips, puffs steam and thickens its fog after a pause it rolls, over
+        // and over: each game had it at its own time, and the players saw the steam come at different times (USER
+        // 10-25, "同步一下"). It hurts nobody; it only looks the same in both games now. The first pause here after
+        // coming in isn't the host's, and its word can come up to some 15 s after that pause is over.
+        new(["Sauna Control"], "FSM", ["Drip Sequence"], sceneName: "Dock_10", holdLimit: 16f),
+
         // The controller of the fight with the two dancers, which the other game follows in every state from the first
         // beat on (see CoopSave.DirectedFights). The start of the fight before that, with the gates, the lights and the
         // beat setting off, each game has by itself.
