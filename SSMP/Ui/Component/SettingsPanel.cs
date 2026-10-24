@@ -130,11 +130,24 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The name of what this player's slashes are drawn from.</summary>
     private readonly Text _slashNameText;
 
-    /// <summary>The background of the button that shows the colour of the cloak.</summary>
-    private readonly Image _cloakTabImage;
+    /// <summary>What goes on the skin's part of the page, which scrolls, and its height set as it is laid out.</summary>
+    private readonly RectTransform _skinContent;
 
-    /// <summary>The box of the colour of the cloak.</summary>
-    private readonly GameObject _cloakSection;
+    /// <summary>
+    /// The rows of the skin's part of the page, laid out from its top as it is drawn (see <see cref="LayOutSkinPage"/>):
+    /// the skin's name and status, the skin, the colour of the cloak's name and status, its colours to press, its strips
+    /// and its code.
+    /// </summary>
+    private readonly RectTransform _skinHeadRow;
+    private readonly RectTransform _skinChoiceRow;
+    private readonly RectTransform _cloakHeadRow;
+    private readonly RectTransform _cloakPresetRow;
+    private readonly RectTransform _hueRow;
+    private readonly RectTransform _lightRow;
+    private readonly RectTransform _codeRow;
+
+    /// <summary>Whether this player wears a skin, which keeps its own colours, as the skin's part last drew it.</summary>
+    private bool _wearingSkin;
 
     /// <summary>The line beside the colour of the cloak that says which it is, or why there is none.</summary>
     private readonly Text _cloakStatusText;
@@ -242,23 +255,11 @@ internal class SettingsPanel : IRootedComponent {
     private const float NoteHeight = 26f;
     private const float SectionGap = 14f;
 
-    /// <summary>
-    /// Where the rows of the skin's part of the page begin, below its top: the skin, the slashes under it, and the
-    /// note that says what they come to.
-    /// </summary>
-    private const float SkinRowTop = 32f;
-    private const float SlashRowTop = 64f;
-    private const float SkinNoteTop = 96f;
+    /// <summary>How tall a row of buttons or of a name and its status is on the skin's part of the page.</summary>
+    private const float RowHeight = 28f;
 
-    /// <summary>
-    /// Where the rows of the cloak's part of the page begin, below its top: the colours to press, the strip of hues,
-    /// the strip of how light, the code, and the note that says what it comes to.
-    /// </summary>
-    private const float CloakPresetTop = 32f;
-    private const float CloakHueTop = 68f;
-    private const float CloakLightTop = 98f;
-    private const float CloakCodeTop = 128f;
-    private const float CloakNoteTop = 164f;
+    /// <summary>How wide the bar at the right of a page that scrolls is, which shows only while it can scroll.</summary>
+    private const float ScrollbarWidth = 6f;
 
     /// <summary>How tall each strip of the cloak's colour is.</summary>
     private const float StripHeight = 22f;
@@ -342,62 +343,44 @@ internal class SettingsPanel : IRootedComponent {
 
         // Where a line said that all of this stays on this computer, buttons now choose between what does, the skin
         // that this player wears, and what the host of the server sets for everyone
-        // The colour of the cloak has a part of its own beside the skin, each as wide as its name
         var ownTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "OwnTab",
             Lang.Pick("MINE ONLY", "只改我这边"),
-            new Vector2(0.02f, 1f),
-            new Vector2(0.265f, 1f),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.33f, 1f),
             WaitingRoomPanel.ReadyOn,
             () => ShowPage(Page.Own),
             out _ownTabImage,
-            out var ownTabLabel
+            out _
         );
         PlaceInRow(ownTab, HeaderHeight + 1f, NoteHeight - 2f);
-        FitLabel(ownTabLabel);
 
         var skinTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "SkinTab",
             Lang.Pick("SKIN", "我的皮肤"),
-            new Vector2(0.275f, 1f),
-            new Vector2(0.455f, 1f),
+            new Vector2(0.35f, 1f),
+            new Vector2(0.53f, 1f),
             WaitingRoomPanel.ReadyOff,
             () => ShowPage(Page.Skin),
             out _skinTabImage,
-            out var skinTabLabel
+            out _
         );
         PlaceInRow(skinTab, HeaderHeight + 1f, NoteHeight - 2f);
-        FitLabel(skinTabLabel);
-
-        var cloakTab = WaitingRoomPanel.CreateButton(
-            GameObject.transform,
-            "CloakTab",
-            Lang.Pick("CLOAK", "斗篷"),
-            new Vector2(0.465f, 1f),
-            new Vector2(0.585f, 1f),
-            WaitingRoomPanel.ReadyOff,
-            () => ShowPage(Page.Cloak),
-            out _cloakTabImage,
-            out var cloakTabLabel
-        );
-        PlaceInRow(cloakTab, HeaderHeight + 1f, NoteHeight - 2f);
-        FitLabel(cloakTabLabel);
 
         var roomTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "RoomTab",
             Lang.Pick("ROOM (HOST)", "整个房间（房主定）"),
-            new Vector2(0.595f, 1f),
-            new Vector2(0.98f, 1f),
+            new Vector2(0.55f, 1f),
+            new Vector2(0.97f, 1f),
             WaitingRoomPanel.ReadyOff,
             () => ShowPage(Page.Room),
             out _roomTabImage,
-            out var roomTabLabel
+            out _
         );
         PlaceInRow(roomTab, HeaderHeight + 1f, NoteHeight - 2f);
-        FitLabel(roomTabLabel);
 
         var nameArea = CreateSection("NameSettings", HeaderHeight + NoteHeight + SectionGap, NameSectionHeight);
         _ownSections.Add(nameArea.gameObject);
@@ -762,17 +745,21 @@ internal class SettingsPanel : IRootedComponent {
             TextAnchor.UpperLeft
         );
 
-        // The skin, laid out like the n of the room's choices: a button either side of the name of the one worn
+        // What this player's Hornet looks like: the skin, the slashes and the colour of the cloak, on one part that
+        // scrolls down where it is taller than the page (USER 10-24: "放不下就滚动向下呐")
         var skinArea = CreateSection("SkinSettings", HeaderHeight + NoteHeight + SectionGap, RoomSectionHeight);
         _skinSection = skinArea.gameObject;
+        _skinContent = CreateScrollingPage(skinArea);
 
+        // The skin, laid out like the n of the room's choices: a button either side of the name of the one worn
+        _skinHeadRow = CreateRow(_skinContent, "SkinHead", RowHeight);
         WaitingRoomPanel.CreateLabel(
-            skinArea,
+            _skinHeadRow,
             "SkinLabel",
             Lang.Pick("SKIN", "皮肤"),
             new Vector2(0.03f, 1f),
             new Vector2(0.40f, 1f),
-            new Vector2(0f, 28f),
+            new Vector2(0f, RowHeight),
             new Vector2(0f, -1f),
             14,
             WaitingRoomPanel.Accent,
@@ -780,20 +767,21 @@ internal class SettingsPanel : IRootedComponent {
         );
 
         _skinStatusText = WaitingRoomPanel.CreateLabel(
-            skinArea,
+            _skinHeadRow,
             "SkinStatus",
             "",
             new Vector2(0.40f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, 28f),
+            new Vector2(0f, RowHeight),
             new Vector2(0f, -1f),
             13,
             Muted,
             TextAnchor.MiddleRight
         );
 
+        _skinChoiceRow = CreateRow(_skinContent, "SkinChoice", RowHeight);
         var skinBack = WaitingRoomPanel.CreateButton(
-            skinArea,
+            _skinChoiceRow,
             "SkinBack",
             "<",
             new Vector2(0.03f, 1f),
@@ -803,24 +791,24 @@ internal class SettingsPanel : IRootedComponent {
             out _,
             out _
         );
-        PlaceInRow(skinBack, SkinRowTop, 28f);
+        PlaceInRow(skinBack, 0f, RowHeight);
         _skinBackButton = skinBack.GetComponent<Button>();
 
         _skinNameText = WaitingRoomPanel.CreateLabel(
-            skinArea,
+            _skinChoiceRow,
             "SkinName",
             "",
             new Vector2(0.13f, 1f),
             new Vector2(0.87f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -SkinRowTop),
+            new Vector2(0f, RowHeight),
+            Vector2.zero,
             16,
             Color.white,
             TextAnchor.MiddleCenter
         );
 
         var skinOn = WaitingRoomPanel.CreateButton(
-            skinArea,
+            _skinChoiceRow,
             "SkinOn",
             ">",
             new Vector2(0.87f, 1f),
@@ -830,34 +818,29 @@ internal class SettingsPanel : IRootedComponent {
             out _,
             out _
         );
-        PlaceInRow(skinOn, SkinRowTop, 28f);
+        PlaceInRow(skinOn, 0f, RowHeight);
         _skinOnButton = skinOn.GetComponent<Button>();
 
-        // What the slashes are drawn from, laid out as the skin under it, with its name on the row: the skin worn, the
+        // What the slashes are drawn from, laid out as the skin over it, with its name on the row: the skin worn, the
         // game's own art, or another skin of Hornet's, whose slashes she wears with the rest of the skin worn
-        _slashRow = new GameObject("SlashRow");
-        var slashRowRect = _slashRow.AddComponent<RectTransform>();
-        slashRowRect.anchorMin = Vector2.zero;
-        slashRowRect.anchorMax = Vector2.one;
-        slashRowRect.offsetMin = Vector2.zero;
-        slashRowRect.offsetMax = Vector2.zero;
-        _slashRow.transform.SetParent(skinArea, false);
+        var slashRow = CreateRow(_skinContent, "SlashRow", RowHeight);
+        _slashRow = slashRow.gameObject;
 
         WaitingRoomPanel.CreateLabel(
-            _slashRow.transform,
+            slashRow,
             "SlashLabel",
             Lang.Pick("SLASH", "刀光"),
             new Vector2(0.03f, 1f),
             new Vector2(0.20f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -SlashRowTop),
+            new Vector2(0f, RowHeight),
+            Vector2.zero,
             14,
             WaitingRoomPanel.Accent,
             TextAnchor.MiddleLeft
         );
 
         var slashBack = WaitingRoomPanel.CreateButton(
-            _slashRow.transform,
+            slashRow,
             "SlashBack",
             "<",
             new Vector2(0.20f, 1f),
@@ -867,23 +850,23 @@ internal class SettingsPanel : IRootedComponent {
             out _,
             out _
         );
-        PlaceInRow(slashBack, SlashRowTop, 28f);
+        PlaceInRow(slashBack, 0f, RowHeight);
 
         _slashNameText = WaitingRoomPanel.CreateLabel(
-            _slashRow.transform,
+            slashRow,
             "SlashName",
             "",
             new Vector2(0.30f, 1f),
             new Vector2(0.87f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -SlashRowTop),
+            new Vector2(0f, RowHeight),
+            Vector2.zero,
             15,
             Color.white,
             TextAnchor.MiddleCenter
         );
 
         var slashOn = WaitingRoomPanel.CreateButton(
-            _slashRow.transform,
+            slashRow,
             "SlashOn",
             ">",
             new Vector2(0.87f, 1f),
@@ -893,55 +876,54 @@ internal class SettingsPanel : IRootedComponent {
             out _,
             out _
         );
-        PlaceInRow(slashOn, SlashRowTop, 28f);
+        PlaceInRow(slashOn, 0f, RowHeight);
 
         _skinNoteText = WaitingRoomPanel.CreateLabel(
-            skinArea,
+            _skinContent,
             "SkinNote",
             "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, RoomSectionHeight - SkinNoteTop),
-            new Vector2(0f, -SkinNoteTop),
+            Vector2.zero,
+            Vector2.zero,
             13,
             Muted,
             TextAnchor.UpperLeft
         );
 
-        // The colour of the cloak, which Player Color draws, on a part of its own: the colours of before, one press
-        // each like the colours of the name, then a strip of every hue, a strip of how light, from black to white, and a
-        // box that takes the code of any colour (USER 10-24: "只能在几个里面换太局限了", "或者加个色盘？色带？")
-        var cloakArea = CreateSection("CloakSettings", HeaderHeight + NoteHeight + SectionGap, RoomSectionHeight);
-        _cloakSection = cloakArea.gameObject;
-
+        // The colour of the cloak, which Player Color draws: the colours of before, one press each like the colours of
+        // the name, then a strip of every hue, a strip of how light, from black to white, and a box that takes the code
+        // of any colour (USER 10-24: "只能在几个里面换太局限了", "或者加个色盘？色带？")
+        _cloakHeadRow = CreateRow(_skinContent, "CloakHead", RowHeight);
         WaitingRoomPanel.CreateLabel(
-            cloakArea,
+            _cloakHeadRow,
             "CloakLabel",
             Lang.Pick("CLOAK", "斗篷颜色"),
             new Vector2(0.03f, 1f),
             new Vector2(0.40f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -1f),
+            new Vector2(0f, RowHeight),
+            Vector2.zero,
             14,
             WaitingRoomPanel.Accent,
             TextAnchor.MiddleLeft
         );
 
         _cloakStatusText = WaitingRoomPanel.CreateLabel(
-            cloakArea,
+            _cloakHeadRow,
             "CloakStatus",
             "",
             new Vector2(0.40f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -1f),
+            new Vector2(0f, RowHeight),
+            Vector2.zero,
             13,
             Muted,
             TextAnchor.MiddleRight
         );
 
+        _cloakPresetRow = CreateRow(_skinContent, "CloakPresets", RowHeight);
         var cloakOwn = WaitingRoomPanel.CreateButton(
-            cloakArea,
+            _cloakPresetRow,
             "CloakOwn",
             Lang.Pick("Own", "原色"),
             new Vector2(0.03f, 1f),
@@ -951,7 +933,7 @@ internal class SettingsPanel : IRootedComponent {
             out _cloakOwnImage,
             out _
         );
-        PlaceInRow(cloakOwn, CloakPresetTop, 28f);
+        PlaceInRow(cloakOwn, 0f, RowHeight);
         _cloakOwnButton = cloakOwn.GetComponent<Button>();
 
         for (var i = 0; i < CloakColours.Length; i++) {
@@ -961,7 +943,7 @@ internal class SettingsPanel : IRootedComponent {
             var left = 0.19f + slot * i;
 
             var swatch = WaitingRoomPanel.CreateButton(
-                cloakArea,
+                _cloakPresetRow,
                 $"Cloak{CloakColours[i].English}",
                 "",
                 new Vector2(left + 0.006f, 1f),
@@ -971,15 +953,16 @@ internal class SettingsPanel : IRootedComponent {
                 out var swatchImage,
                 out _
             );
-            PlaceInRow(swatch, CloakPresetTop, 28f);
+            PlaceInRow(swatch, 0f, RowHeight);
             _cloakSwatches.Add((swatch.GetComponent<Button>(), swatchImage));
         }
 
+        _hueRow = CreateRow(_skinContent, "CloakHueRow", StripHeight);
         _hueStrip = CreateStrip(
-            cloakArea,
+            _hueRow,
             "CloakHue",
             Lang.Pick("Colour", "颜色"),
-            CloakHueTop,
+            0f,
             HueSteps,
             HueTexture(),
             out _hueImage
@@ -991,31 +974,33 @@ internal class SettingsPanel : IRootedComponent {
             wrapMode = TextureWrapMode.Clamp,
             filterMode = FilterMode.Bilinear
         };
+        _lightRow = CreateRow(_skinContent, "CloakLightRow", StripHeight);
         _lightStrip = CreateStrip(
-            cloakArea,
+            _lightRow,
             "CloakLight",
             Lang.Pick("Shade", "深浅"),
-            CloakLightTop,
+            0f,
             LightSteps,
             _lightTexture,
             out _lightImage
         );
         _lightStrip.onValueChanged.AddListener(value => ChooseLightness(value / LightSteps));
 
+        _codeRow = CreateRow(_skinContent, "CloakCodeRow", RowHeight);
         WaitingRoomPanel.CreateLabel(
-            cloakArea,
+            _codeRow,
             "CloakCodeLabel",
             Lang.Pick("Code", "代码"),
             new Vector2(0.03f, 1f),
             new Vector2(0.19f, 1f),
-            new Vector2(0f, 28f),
-            new Vector2(0f, -CloakCodeTop),
+            new Vector2(0f, RowHeight),
+            Vector2.zero,
             13,
             Muted,
             TextAnchor.MiddleLeft
         );
 
-        _cloakCodeField = CreateCodeField(cloakArea, CloakCodeTop);
+        _cloakCodeField = CreateCodeField(_codeRow, 0f);
         _cloakCodeField.onValueChanged.AddListener(text => {
                 // Taken as soon as the six digits of a colour are in
                 if (ReadCode(text, false) is { } colour) {
@@ -1037,20 +1022,20 @@ internal class SettingsPanel : IRootedComponent {
         var chosenRect = chosenSwatch.AddComponent<RectTransform>();
         chosenRect.anchorMin = new Vector2(0.52f, 1f);
         chosenRect.anchorMax = new Vector2(0.62f, 1f);
-        chosenRect.offsetMin = new Vector2(0f, -(CloakCodeTop + 28f));
-        chosenRect.offsetMax = new Vector2(0f, -CloakCodeTop);
-        chosenSwatch.transform.SetParent(cloakArea, false);
+        chosenRect.offsetMin = new Vector2(0f, -RowHeight);
+        chosenRect.offsetMax = Vector2.zero;
+        chosenSwatch.transform.SetParent(_codeRow, false);
         _cloakChosenImage = chosenSwatch.AddComponent<Image>();
         _cloakChosenImage.raycastTarget = false;
 
         _cloakNoteText = WaitingRoomPanel.CreateLabel(
-            cloakArea,
+            _skinContent,
             "CloakNote",
             "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, RoomSectionHeight - CloakNoteTop),
-            new Vector2(0f, -CloakNoteTop),
+            Vector2.zero,
+            Vector2.zero,
             13,
             Muted,
             TextAnchor.UpperLeft
@@ -1058,12 +1043,11 @@ internal class SettingsPanel : IRootedComponent {
 
         Refresh();
 
-        // The art of a skin takes a moment to load, and the page says when Hornet wears it, as the cloak's part does,
-        // whose colour does not show on a skin
+        // The art of a skin takes a moment to load, and the page says when Hornet wears it, and whether the colour of
+        // the cloak shows, which it doesn't on a skin
         OwnSkin.Changed += () => {
-            if (_activeSelf) {
+            if (_activeSelf && _page == Page.Skin) {
                 RefreshSkin();
-                RefreshCloak();
             }
         };
 
@@ -1106,14 +1090,142 @@ internal class SettingsPanel : IRootedComponent {
     }
 
     /// <summary>
-    /// Has the label of a button take a smaller size where its own is too wide for the button, rather than break onto
-    /// a second line that doesn't show: the four tabs share the width of the page.
+    /// Makes a page in a box that scrolls down where what is on it is taller than the box: with the mouse's wheel, by
+    /// dragging the page or the bar at its right, which shows only then, and with a gamepad as it moves onto what is
+    /// out of sight (see <see cref="Util.PadNavigation"/>). The bar has room of its own, so the page is as wide either
+    /// way.
     /// </summary>
-    private static void FitLabel(Text label) {
-        label.resizeTextForBestFit = true;
-        label.resizeTextMinSize = 10;
-        label.resizeTextMaxSize = label.fontSize;
+    /// <param name="box">The box.</param>
+    /// <returns>What goes on the page, across it from its top, whose height is set as it is laid out.</returns>
+    private static RectTransform CreateScrollingPage(Transform box) {
+        var scroll = new GameObject("Scroll");
+        var scrollRect = scroll.AddComponent<RectTransform>();
+        scrollRect.anchorMin = Vector2.zero;
+        scrollRect.anchorMax = Vector2.one;
+        scrollRect.offsetMin = Vector2.zero;
+        scrollRect.offsetMax = Vector2.zero;
+        scroll.transform.SetParent(box, false);
+
+        // Something that the mouse points at all over the page, for the wheel and for dragging, and that draws nothing
+        var pointedAt = scroll.AddComponent<Image>();
+        pointedAt.color = Color.clear;
+
+        var viewport = new GameObject("Viewport");
+        var viewportRect = viewport.AddComponent<RectTransform>();
+        viewportRect.anchorMin = Vector2.zero;
+        viewportRect.anchorMax = Vector2.one;
+        viewportRect.offsetMin = Vector2.zero;
+        viewportRect.offsetMax = new Vector2(-(ScrollbarWidth + 2f), 0f);
+        viewport.AddComponent<RectMask2D>();
+        viewport.transform.SetParent(scroll.transform, false);
+
+        var content = new GameObject("Content");
+        var contentRect = content.AddComponent<RectTransform>();
+        contentRect.anchorMin = new Vector2(0f, 1f);
+        contentRect.anchorMax = new Vector2(1f, 1f);
+        contentRect.pivot = new Vector2(0.5f, 1f);
+        contentRect.anchoredPosition = Vector2.zero;
+        contentRect.sizeDelta = Vector2.zero;
+        content.transform.SetParent(viewport.transform, false);
+
+        var bar = new GameObject("Scrollbar");
+        var barRect = bar.AddComponent<RectTransform>();
+        barRect.anchorMin = new Vector2(1f, 0f);
+        barRect.anchorMax = new Vector2(1f, 1f);
+        barRect.pivot = new Vector2(1f, 0.5f);
+        barRect.sizeDelta = new Vector2(ScrollbarWidth, 0f);
+        barRect.anchoredPosition = Vector2.zero;
+        bar.transform.SetParent(scroll.transform, false);
+        var track = bar.AddComponent<Image>();
+        track.color = new Color(1f, 1f, 1f, 0.08f);
+
+        var slidingArea = new GameObject("Sliding Area");
+        var areaRect = slidingArea.AddComponent<RectTransform>();
+        areaRect.anchorMin = Vector2.zero;
+        areaRect.anchorMax = Vector2.one;
+        areaRect.offsetMin = Vector2.zero;
+        areaRect.offsetMax = Vector2.zero;
+        slidingArea.transform.SetParent(bar.transform, false);
+
+        // Its anchors are set by the bar, by where the page is scrolled to and how much of it shows
+        var handle = new GameObject("Handle");
+        var handleRect = handle.AddComponent<RectTransform>();
+        handleRect.offsetMin = Vector2.zero;
+        handleRect.offsetMax = Vector2.zero;
+        handle.transform.SetParent(slidingArea.transform, false);
+        var handleImage = handle.AddComponent<Image>();
+        var accent = WaitingRoomPanel.Accent;
+        handleImage.color = new Color(accent.r, accent.g, accent.b, 0.5f);
+
+        var scrollbar = bar.AddComponent<Scrollbar>();
+        scrollbar.transition = Selectable.Transition.None;
+        scrollbar.targetGraphic = handleImage;
+        // A gamepad scrolls by moving onto what is out of sight, rather than stopping at the bar on its way
+        scrollbar.navigation = new Navigation { mode = Navigation.Mode.None };
+        scrollbar.direction = Scrollbar.Direction.BottomToTop;
+        scrollbar.handleRect = handleRect;
+
+        var scrollView = scroll.AddComponent<ScrollRect>();
+        scrollView.viewport = viewportRect;
+        scrollView.content = contentRect;
+        scrollView.horizontal = false;
+        scrollView.vertical = true;
+        scrollView.movementType = ScrollRect.MovementType.Clamped;
+        scrollView.scrollSensitivity = 25f;
+        scrollView.verticalScrollbar = scrollbar;
+        scrollView.verticalScrollbarVisibility = ScrollRect.ScrollbarVisibility.AutoHide;
+        return contentRect;
     }
+
+    /// <summary>
+    /// Makes a row across a page that scrolls, as tall as given; where it sits is set as the page is laid out.
+    /// </summary>
+    private static RectTransform CreateRow(Transform page, string name, float height) {
+        var row = new GameObject(name);
+        var rect = row.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(1f, 1f);
+        rect.pivot = new Vector2(0.5f, 1f);
+        rect.sizeDelta = new Vector2(0f, height);
+        row.transform.SetParent(page, false);
+        return rect;
+    }
+
+    /// <summary>
+    /// Lays the rows of the skin's part of the page out from its top, each under the one before: the slashes only where
+    /// there are skins to draw them from, and each note as tall as its text; the page is as tall as all of them.
+    /// </summary>
+    private void LayOutSkinPage() {
+        var top = 0f;
+        PlaceRow(_skinHeadRow, ref top, RowHeight, 4f);
+        PlaceRow(_skinChoiceRow, ref top, RowHeight, 4f);
+        if (_slashRow.activeSelf) {
+            PlaceRow((RectTransform) _slashRow.transform, ref top, RowHeight, 4f);
+        }
+
+        PlaceRow(_skinNoteText.rectTransform, ref top, NoteHeightOf(_skinNoteText), 10f);
+        PlaceRow(_cloakHeadRow, ref top, RowHeight, 3f);
+        PlaceRow(_cloakPresetRow, ref top, RowHeight, 8f);
+        PlaceRow(_hueRow, ref top, StripHeight, 8f);
+        PlaceRow(_lightRow, ref top, StripHeight, 8f);
+        PlaceRow(_codeRow, ref top, RowHeight, 8f);
+        PlaceRow(_cloakNoteText.rectTransform, ref top, NoteHeightOf(_cloakNoteText), 0f);
+        _skinContent.sizeDelta = new Vector2(0f, top + 4f);
+    }
+
+    /// <summary>
+    /// Puts a row at a depth below the top of its page, as tall as given, and moves the depth under it with a gap.
+    /// </summary>
+    private static void PlaceRow(RectTransform row, ref float top, float height, float gap) {
+        row.offsetMin = new Vector2(row.offsetMin.x, -(top + height));
+        row.offsetMax = new Vector2(row.offsetMax.x, -top);
+        top += height + gap;
+    }
+
+    /// <summary>
+    /// How tall a note is with its text, at the width it has.
+    /// </summary>
+    private static float NoteHeightOf(Text note) => Mathf.Ceil(note.preferredHeight) + 2f;
 
     /// <summary>
     /// Makes a strip that a value is chosen on, in the given number of steps from its left end to its right, under a
@@ -1567,11 +1679,6 @@ internal class SettingsPanel : IRootedComponent {
                 ? Lang.Pick("Game's own", "游戏原版")
                 : Lang.Pick("As the skin", "跟着皮肤");
 
-        var noteTop = slashChoices ? SkinNoteTop : SlashRowTop;
-        var noteRect = _skinNoteText.rectTransform;
-        noteRect.anchoredPosition = new Vector2(0f, -noteTop);
-        noteRect.sizeDelta = new Vector2(0f, RoomSectionHeight - noteTop);
-
         // What it comes to, as the notes of the other choices
         if (!canChoose) {
             _skinNoteText.text = Lang.Pick(
@@ -1604,21 +1711,25 @@ internal class SettingsPanel : IRootedComponent {
                 "选了马上换上，下次开游戏也还是它。队友装了同一个皮肤，才看得到你穿的。"
             );
         }
+
+        // The colour of the cloak under it, which a skin keeps its own colours over, and the page laid out for what
+        // the notes say
+        _wearingSkin = current != null;
+        RefreshCloak();
+        LayOutSkinPage();
     }
 
     /// <summary>
-    /// Draws the colour of the cloak that this player chose, while that part of the page is shown.
+    /// Draws the colour of the cloak that this player chose, while the skin's part of the page is shown.
     /// </summary>
     private void RefreshCloak() {
-        if (_page != Page.Cloak) {
+        if (_page != Page.Skin) {
             return;
         }
 
         var canChoose = PlayerColorMod.CanChoose;
         var chosen = canChoose ? PlayerColorMod.ChosenColour() : null;
-
-        // A skin keeps its own colours
-        var wearingSkin = OwnSkin.CanChoose && OwnSkin.Current(OwnSkin.Choices()) != null;
+        var wearingSkin = _wearingSkin;
 
         _cloakOwnButton.interactable = canChoose;
         _cloakOwnImage.color = canChoose && chosen == null ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
@@ -1791,18 +1902,15 @@ internal class SettingsPanel : IRootedComponent {
     private void Refresh() {
         _ownTabImage.color = _page == Page.Own ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         _skinTabImage.color = _page == Page.Skin ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
-        _cloakTabImage.color = _page == Page.Cloak ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         _roomTabImage.color = _page == Page.Room ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         foreach (var section in _ownSections) {
             section.SetActive(_page == Page.Own);
         }
 
         _skinSection.SetActive(_page == Page.Skin);
-        _cloakSection.SetActive(_page == Page.Cloak);
         _roomSection.SetActive(_page == Page.Room);
         RefreshRoom();
         RefreshSkin();
-        RefreshCloak();
 
         var bold = _modSettings.BoldOwnName;
         _boldImage.color = bold ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
@@ -1948,11 +2056,8 @@ internal class SettingsPanel : IRootedComponent {
         /// <summary>The choices that change only how this player's own game draws things.</summary>
         Own,
 
-        /// <summary>The skin that this player's own Hornet wears.</summary>
+        /// <summary>What this player's own Hornet looks like: her skin, her slashes and the colour of her cloak.</summary>
         Skin,
-
-        /// <summary>The colour of the cloak of this player's own Hornet.</summary>
-        Cloak,
 
         /// <summary>The choices of the room, which the host makes for everyone.</summary>
         Room
