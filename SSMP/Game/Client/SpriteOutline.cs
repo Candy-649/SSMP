@@ -64,9 +64,10 @@ internal abstract class SpriteOutline : MonoBehaviour {
     private Mesh? _mesh;
 
     /// <summary>
-    /// The material of the sprite the copies last took the texture of.
+    /// The material of the sprite the copies last took the texture of, and that texture.
     /// </summary>
     private Material? _spriteMaterial;
+    private Texture? _texture;
 
     /// <summary>
     /// The sorting layer and order of the sprite that the copies were last drawn by.
@@ -211,11 +212,16 @@ internal abstract class SpriteOutline : MonoBehaviour {
             }
         }
 
+        // The texture is looked at every frame, not only when the material changes: Player Color draws the hero with one
+        // material of its own, whose texture it changes when a frame lies on another atlas, so the copies kept the
+        // atlas they took first and drew pieces of it around her in the flat colour (USER 10-24: her outline showed as
+        // blue shards, "很像之前unity渲染抛出error的时候")
         var spriteMaterial = SpriteRenderer != null ? SpriteRenderer.sharedMaterial : null;
-        if (spriteMaterial != _spriteMaterial) {
+        var texture = spriteMaterial != null ? spriteMaterial.mainTexture : null;
+        if (spriteMaterial != _spriteMaterial || texture != _texture) {
             _spriteMaterial = spriteMaterial;
+            _texture = texture;
 
-            var texture = spriteMaterial != null ? spriteMaterial.mainTexture : null;
             foreach (var material in _materials) {
                 material.mainTexture = texture;
             }

@@ -135,7 +135,7 @@ internal static class CustomizerPacks {
 
     /// <summary>
     /// A fingerprint of the art in a skin: the path and size of each of its images, so that the same skin in a folder
-    /// of another name has the same one.
+    /// of another name has the same one. An image switched off by ".off" after its name counts as the image it was.
     /// </summary>
     public static string FingerprintOf(string dir) {
         if (Fingerprints.TryGetValue(dir, out var known)) {
@@ -144,8 +144,16 @@ internal static class CustomizerPacks {
 
         var lines = new List<string>();
         try {
-            foreach (var file in Directory.EnumerateFiles(dir, "*.png", SearchOption.AllDirectories)) {
-                var relative = file.Substring(dir.Length).TrimStart('\\', '/').Replace('\\', '/').ToLowerInvariant();
+            foreach (var file in Directory.EnumerateFiles(dir, "*", SearchOption.AllDirectories)) {
+                // The same skin with one of its images switched off, as the image of the title screen was here, had
+                // another fingerprint, so the game of a player who has it all on didn't know it (USER 10-24: "这次换我这边
+                // 认不出来了")
+                var name = file.EndsWith(".off", StringComparison.OrdinalIgnoreCase) ? file[..^4] : file;
+                if (!name.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) {
+                    continue;
+                }
+
+                var relative = name.Substring(dir.Length).TrimStart('\\', '/').Replace('\\', '/').ToLowerInvariant();
                 lines.Add($"{relative}|{new FileInfo(file).Length}");
             }
         } catch (Exception e) {
