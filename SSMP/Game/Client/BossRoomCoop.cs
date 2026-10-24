@@ -53,11 +53,6 @@ internal partial class BossRoomCoop {
     private const float StartCheckTime = 15f;
 
     /// <summary>
-    /// How often, in seconds, the scene is searched for FSMs that start rooms.
-    /// </summary>
-    private const float ScanInterval = 5f;
-
-    /// <summary>
     /// How often, in seconds, the triggers of a room are searched again while none were found.
     /// </summary>
     private const float RegionResolveInterval = 1f;
@@ -212,6 +207,37 @@ internal partial class BossRoomCoop {
     private Hook? _setVariableHook;
 
     /// <summary>
+    /// Hook that hears an FSM being made as its object wakes, or made afresh from its template (see
+    /// <see cref="OnFsmMade"/>).
+    /// </summary>
+    private Hook? _fsmInitHook;
+
+    /// <summary>
+    /// Hook that hears an FSM being made before its object wakes, which SSMP has the game do for creatures.
+    /// </summary>
+    private Hook? _fsmPreprocessHook;
+
+    /// <summary>
+    /// The FSMs made since the scene was searched, which <see cref="ScanScene"/> looks at in the next update.
+    /// </summary>
+    private readonly List<PlayMakerFSM> _madeFsms = [];
+
+    /// <summary>
+    /// Whether the scene was searched for FSMs that start rooms since it loaded (see <see cref="ScanScene"/>).
+    /// </summary>
+    private bool _sceneScanned;
+
+    /// <summary>
+    /// FSMs made in a boss room too soon after it was read to have it read again then, each with when it can be.
+    /// </summary>
+    private readonly List<(Fsm Fsm, float ReadAt)> _roomFsmsToRead = [];
+
+    /// <summary>
+    /// Whether an FSM that could not be looked at was written down in this scene, so that it is said once.
+    /// </summary>
+    private bool _scanFailureSaid;
+
+    /// <summary>
     /// Whether this class sends an event to a gate itself, which the hooks let through.
     /// </summary>
     private bool _bypassGates;
@@ -252,11 +278,6 @@ internal partial class BossRoomCoop {
     /// The steps of <see cref="OnHeroControllerUpdate"/> of every frame, each with its name, made once.
     /// </summary>
     private (Action Step, string Name)[]? _frameSteps;
-
-    /// <summary>
-    /// When the scene is searched for FSMs that start rooms next, in unscaled seconds.
-    /// </summary>
-    private float _nextScanTime;
 
     /// <summary>
     /// When the local player can hear again that a teammate waits for them, in unscaled seconds.
@@ -327,6 +348,14 @@ internal partial class BossRoomCoop {
             typeof(SetPlayerDataVariable).GetMethod("OnEnter", InstanceFlags | BindingFlags.DeclaredOnly, null, Type.EmptyTypes, null),
             new Action<Action<SetPlayerDataVariable>, SetPlayerDataVariable>(OnSetPlayerDataVariableEnter)
         );
+        _fsmInitHook = CreateHook(
+            typeof(PlayMakerFSM).GetMethod("Init", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<PlayMakerFSM>, PlayMakerFSM>(OnFsmMade)
+        );
+        _fsmPreprocessHook = CreateHook(
+            typeof(PlayMakerFSM).GetMethod(nameof(PlayMakerFSM.Preprocess), InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<PlayMakerFSM>, PlayMakerFSM>(OnFsmMade)
+        );
         RegisterDialogueHooks();
         RegisterEventHooks();
         RegisterWaitHooks();
@@ -350,6 +379,12 @@ internal partial class BossRoomCoop {
 
         _setVariableHook?.Dispose();
         _setVariableHook = null;
+
+        _fsmInitHook?.Dispose();
+        _fsmInitHook = null;
+
+        _fsmPreprocessHook?.Dispose();
+        _fsmPreprocessHook = null;
 
         DeregisterDialogueHooks();
         DeregisterEventHooks();
@@ -955,6 +990,10 @@ internal partial class BossRoomCoop {
             foreach (var (step, name) in _holdSteps) {
                 RunUpdateStep(step, name);
             }
+        } else if (_sceneScanned) {
+            // What is made while no room waits is not kept: the scene is searched again once rooms wait again
+            _sceneScanned = false;
+            _madeFsms.Clear();
         }
 
         foreach (var (step, name) in _frameSteps) {
@@ -1008,47 +1047,127 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Searches the scene for FSMs with triggers that start rooms, every so often.
+    /// Searches the scene for FSMs with triggers that start rooms: all of it once, in the first update after it loads,
+    /// and then only the FSMs made since, which <see cref="OnFsmMade"/> keeps.
+    ///
+    /// The whole scene was searched again every 5 s, going through every FSM of the game, switched off or not, those
+    /// kept from room to room among them, to find the few that came meanwhile: 54 to 74 ms each time on a computer that
+    /// had slowed down, a stutter every 5 s (USER 10-24 "我感觉卡的很"). The game makes an FSM as its object first
+    /// wakes, or afresh from its template (PlayMakerFSM.Init, from Awake and SetFsmTemplate), and SSMP has it made
+    /// earlier for creatures (Preprocess); nothing else calls either. A thing that comes switched off is looked at
+    /// when it wakes, as it starts nothing before.
     /// </summary>
     private void ScanScene() {
-        if (Time.unscaledTime < _nextScanTime) {
+        if (!_sceneScanned) {
+            _sceneScanned = true;
+            _madeFsms.Clear();
+            foreach (var playMakerFsm in Object.FindObjectsByType<PlayMakerFSM>(
+                         FindObjectsInactive.Include,
+                         FindObjectsSortMode.None
+                     )) {
+                TryScanFsm(playMakerFsm);
+            }
+
             return;
         }
 
-        _nextScanTime = Time.unscaledTime + ScanInterval;
-        foreach (var playMakerFsm in Object.FindObjectsByType<PlayMakerFSM>(
-                     FindObjectsInactive.Include,
-                     FindObjectsSortMode.None
-                 )) {
-            // FSMs that never woke up haven't loaded their actions yet. Those already looked at are passed over first,
-            // before the name of their scene is read, which is a new string each time
-            var fsm = playMakerFsm.Fsm;
-            if (fsm == null || fsm.Owner == null || _scannedFsms.Contains(fsm)) {
+        if (_madeFsms.Count > 0) {
+            // By index, as what is looked at may make more of them
+            for (var i = 0; i < _madeFsms.Count; i++) {
+                var playMakerFsm = _madeFsms[i];
+                if (playMakerFsm != null) {
+                    TryScanFsm(playMakerFsm);
+                }
+            }
+
+            _madeFsms.Clear();
+        }
+
+        // Once the second is over in which a boss room is not read again (BossRoomCoop.Events: GetBossRoom), the room is
+        // read again for what was made in it meanwhile. The search every 5 s came to such a thing seconds later, by when
+        // it was always over; looked at in the next update, it nearly never is
+        for (var i = _roomFsmsToRead.Count - 1; i >= 0; i--) {
+            var (fsm, readAt) = _roomFsmsToRead[i];
+            if (Time.unscaledTime < readAt) {
                 continue;
             }
 
-            // Only rooms start fights. What is kept from room to room - the hero, the menus, the inventory - was looked
-            // at again in every room, and much of it was never switched on: PlayMaker complains about every state of
-            // such an FSM that it is asked for, so every room that loaded wrote a few hundred errors, each with an
-            // exception, to the game's log
-            var scene = playMakerFsm.gameObject.scene;
-            if (scene.handle == _keptObjectsScene) {
-                continue;
+            _roomFsmsToRead.RemoveAt(i);
+            if (fsm.GameObject != null) {
+                GetBossRoom(fsm);
             }
+        }
+    }
 
-            if (scene.name == "DontDestroyOnLoad") {
-                _keptObjectsScene = scene.handle;
-                continue;
+    /// <summary>
+    /// Looks at an FSM as <see cref="ScanFsm"/> does, keeping what it throws to itself: the search is done once, and the
+    /// FSMs after one that threw were otherwise never looked at in the scene.
+    /// </summary>
+    /// <param name="playMakerFsm">The FSM.</param>
+    private void TryScanFsm(PlayMakerFSM playMakerFsm) {
+        try {
+            ScanFsm(playMakerFsm);
+        } catch (Exception e) {
+            // Said once a scene: what throws for one FSM usually throws for many
+            if (!_scanFailureSaid) {
+                _scanFailureSaid = true;
+                Logger.Error(
+                    $"Could not look at FSM '{playMakerFsm.FsmName}' of '{playMakerFsm.name}' for what starts rooms, " +
+                    $"and the room is looked at without it:\n{e}"
+                );
             }
+        }
+    }
 
-            _scannedFsms.Add(fsm);
+    /// <summary>
+    /// Looks at an FSM of the scene for triggers that start rooms, and at the boss room it belongs to, once.
+    /// </summary>
+    /// <param name="playMakerFsm">The FSM.</param>
+    private void ScanFsm(PlayMakerFSM playMakerFsm) {
+        // Those already looked at are passed over first, before the name of their scene is read, which is a new string
+        // each time
+        var fsm = playMakerFsm.Fsm;
+        if (fsm == null || _scannedFsms.Contains(fsm)) {
+            return;
+        }
 
-            if (GetInfo(fsm).StartTriggers.Count > 0) {
-                _startFsms.Add(fsm);
-            }
+        // Only rooms start fights. What is kept from room to room - the hero, the menus, the inventory - was looked at
+        // again in every room, and much of it was never switched on: PlayMaker complains about every state of such an
+        // FSM that it is asked for, so every room that loaded wrote a few hundred errors, each with an exception, to the
+        // game's log
+        var scene = playMakerFsm.gameObject.scene;
+        if (scene.handle == _keptObjectsScene) {
+            return;
+        }
 
-            // Reads boss rooms before their fights start, instead of when the first event arrives
-            GetBossRoom(fsm);
+        if (scene.name == "DontDestroyOnLoad") {
+            _keptObjectsScene = scene.handle;
+            return;
+        }
+
+        _scannedFsms.Add(fsm);
+
+        if (GetInfo(fsm).StartTriggers.Count > 0) {
+            _startFsms.Add(fsm);
+        }
+
+        // Reads boss rooms before their fights start, instead of when the first event arrives. A room read less than a
+        // second ago is read for it when that second is over (see ScanScene)
+        if (GetBossRoom(fsm) is { } room && !room.AwakeFsms.Contains(fsm)) {
+            _roomFsmsToRead.Add((fsm, room.NextAnalysisTime));
+        }
+    }
+
+    /// <summary>
+    /// Keeps an FSM that the game has just made for <see cref="ScanScene"/>, once the scene was searched: until then
+    /// the search finds it. It is looked at in the next update rather than now, as an object woken by being made is
+    /// put in its place only after it woke.
+    /// </summary>
+    private void OnFsmMade(Action<PlayMakerFSM> orig, PlayMakerFSM self) {
+        orig(self);
+
+        if (_sceneScanned) {
+            _madeFsms.Add(self);
         }
     }
 
@@ -1819,7 +1938,10 @@ internal partial class BossRoomCoop {
         ClearEventStarts();
         ClearCatchUps();
         _lastHeroPosition = null;
-        _nextScanTime = 0f;
+        _sceneScanned = false;
+        _madeFsms.Clear();
+        _roomFsmsToRead.Clear();
+        _scanFailureSaid = false;
     }
 
     /// <summary>
