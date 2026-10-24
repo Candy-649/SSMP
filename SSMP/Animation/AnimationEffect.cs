@@ -58,10 +58,65 @@ internal abstract class AnimationEffect : IAnimationEffect {
     /// animation for that player.
     /// </summary>
     /// <param name="playerObject">The player to be hidden.</param>
-    protected static void HidePlayer(GameObject playerObject) {
+    internal static void HidePlayer(GameObject playerObject) {
+        var animator = playerObject.GetComponent<tk2dSpriteAnimator>();
+        var sprite = playerObject.GetComponent<tk2dSprite>();
+        if (animator == null || sprite == null) {
+            return;
+        }
+
         // "hide" the player (assign a very small texture)
-        playerObject.GetComponent<tk2dSpriteAnimator>().Stop();
-        playerObject.GetComponent<tk2dSprite>().SetSprite("wall_puff0004");
+        animator.Stop();
+
+        // A character that has played nothing yet draws from no sheet of sprites at all, as one just put in the room
+        // whose first animation is held back because they lie in their cocoon, and the sprite was looked up in that
+        // missing sheet (USER 10-24 log: hiding the body of a player found in their cocoon threw). The sheet is then
+        // taken from the character's own clips
+        var sheet = sprite.Collection != null ? sprite.Collection : SheetWithSprite(animator.Library, HiddenSpriteName);
+        if (sheet == null) {
+            return;
+        }
+
+        sprite.SetSprite(sheet, HiddenSpriteName);
+    }
+
+    /// <summary>
+    /// The sprite that a hidden player shows: a frame of a puff too small to be seen.
+    /// </summary>
+    private const string HiddenSpriteName = "wall_puff0004";
+
+    /// <summary>
+    /// The first sheet of sprites that a clip of the given library draws from which holds a sprite of the given name, or
+    /// null if none does.
+    /// </summary>
+    /// <param name="library">The library of clips.</param>
+    /// <param name="spriteName">The name of the sprite.</param>
+    private static tk2dSpriteCollectionData? SheetWithSprite(tk2dSpriteAnimation? library, string spriteName) {
+        if (library == null || library.clips == null) {
+            return null;
+        }
+
+        tk2dSpriteCollectionData? looked = null;
+        foreach (var clip in library.clips) {
+            if (clip?.frames == null) {
+                continue;
+            }
+
+            foreach (var frame in clip.frames) {
+                var sheet = frame?.spriteCollection;
+                // The frames of a clip mostly draw from one sheet, which is asked once
+                if (sheet == null || sheet == looked) {
+                    continue;
+                }
+
+                looked = sheet;
+                if (sheet.GetSpriteIdByName(spriteName, -1) != -1) {
+                    return sheet;
+                }
+            }
+        }
+
+        return null;
     }
 
     /// <summary>

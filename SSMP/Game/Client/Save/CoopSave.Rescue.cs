@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
+using SSMP.Animation;
 using SSMP.Hooks;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -72,12 +73,6 @@ internal partial class CoopSave {
     /// one looking at it.
     /// </summary>
     private const string ReturnCurrencyStateName = "Return Currency";
-
-    /// <summary>
-    /// The sprite the mod already uses elsewhere to take a player off the screen without touching anything else about
-    /// them. It is a stray one-pixel sprite out of the game's own collection.
-    /// </summary>
-    private const string HiddenSpriteName = "wall_puff0004";
 
     /// <summary>
     /// The clip played on a body that was taken off the screen to bring it back, for the case where the player it
@@ -2621,28 +2616,22 @@ internal partial class CoopSave {
                 return;
             }
 
-            var animator = body.GetComponent<tk2dSpriteAnimator>();
-            if (animator == null) {
-                return;
-            }
-
             if (hidden) {
-                var sprite = body.GetComponent<tk2dSprite>();
-                if (sprite == null) {
-                    return;
-                }
-
-                animator.Stop();
-                sprite.SetSprite(HiddenSpriteName);
-
                 // Nothing should come looking for someone who is lying in a cocoon. Off the list, nothing chooses
                 // them from here on; an enemy that had already chosen them is let go of them as well, as one is
                 // when this game's own player goes down. Left holding them, it kept them for as long as they lay in
                 // its sight, which is all of the wait: a boss went on striking the cocoon of the member it had
-                // been fighting while the player still standing was right there.
+                // been fighting while the player still standing was right there. Done before their body is hidden,
+                // so that it holds whatever becomes of that.
                 PlayerTargetRegistry.UnregisterRemotePlayer(body);
                 GamePatcher.ForgetPlayerAsTarget(body);
 
+                AnimationEffect.HidePlayer(body);
+                return;
+            }
+
+            var animator = body.GetComponent<tk2dSpriteAnimator>();
+            if (animator == null) {
                 return;
             }
 
