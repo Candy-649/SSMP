@@ -18,9 +18,14 @@ namespace SSMP.Game.Client.Skin;
 /// </summary>
 internal static class OwnSkin {
     /// <summary>
-    /// The sheet of sprites of Hornet herself: a skin with art for it is a skin of hers.
+    /// The name the game gives the sheet of sprites of Hornet herself.
     /// </summary>
-    private static readonly HashSet<string> HornetSheet = new(StringComparer.Ordinal) { "Knight" };
+    private const string HornetSheet = "Knight";
+
+    /// <summary>
+    /// How the game's names of the sheets of the moves of her crests begin.
+    /// </summary>
+    private const string CrestMoveSheetPrefix = "Hornet CrestWeapon";
 
     /// <summary>
     /// The file that makes Customizer dress the game with a skin.
@@ -74,12 +79,25 @@ internal static class OwnSkin {
     public static List<SkinPack> Choices() {
         var choices = new List<SkinPack>();
         foreach (var pack in CustomizerPacks.FindAll()) {
-            if (pack.Dresses(HornetSheet)) {
+            if (pack.SheetNames().Exists(IsHornetSheet)) {
                 choices.Add(pack);
             }
         }
 
         return choices;
+    }
+
+    /// <summary>
+    /// Whether a sheet of sprites is one that Hornet herself is drawn from: her own, or one of the moves of her crests,
+    /// which the game draws whole, Hornet and the slash together, on sheets of their own. These are what the figure of
+    /// another player counts as its body (SheetRole.Body). A skin with art for any of them is a skin of hers and is
+    /// worn alone of those: Customizer takes each sheet from the first skin that has it. A skin that redraws the slashes
+    /// of some crests alone was left out of the choice when only her own sheet counted, and switched on beside another
+    /// skin it put Hornet back in the game's own look in those moves (USER 10-24: "它会在出刀光的时候把角色换回初始大黄蜂").
+    /// </summary>
+    /// <param name="sheet">The name of the sheet, as Customizer names its folder.</param>
+    private static bool IsHornetSheet(string sheet) {
+        return sheet == HornetSheet || sheet.StartsWith(CrestMoveSheetPrefix, StringComparison.Ordinal);
     }
 
     /// <summary>
