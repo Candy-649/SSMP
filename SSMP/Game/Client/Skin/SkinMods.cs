@@ -338,10 +338,64 @@ internal static class PlayerColorMod {
     public static Color? KeptColour() => Setting<Color>("Color2")?.Value;
 
     /// <summary>
+    /// Whether a colour chosen while it moved waits to be written to Player Color's file, and whether Player Color wrote
+    /// its file at every change of a setting before this held that back (see <see cref="ChooseMoving"/>).
+    /// </summary>
+    private static bool _unsaved;
+    private static bool _savedOnSet;
+
+    /// <summary>
     /// Has Player Color draw the player's own cloak in the given colour from now on, or in its own colour for null.
     /// They are Player Color's own settings, which it saves at once for the next start and which its own window shows.
     /// </summary>
     public static void Choose(Color? colour) {
+        Settle();
+        Set(colour);
+    }
+
+    /// <summary>
+    /// Has Player Color draw the player's own cloak in a colour that is still moving, as along a strip of colours: it
+    /// draws it at once, and the colour is written to its file once it settles (see <see cref="Settle"/>). Its file
+    /// was written again at every step of the way, many times a second as a strip slid along.
+    /// </summary>
+    public static void ChooseMoving(Color colour) {
+        var config = Plugin?.Config;
+        if (config != null && !_unsaved) {
+            _savedOnSet = config.SaveOnConfigSet;
+            config.SaveOnConfigSet = false;
+            _unsaved = true;
+        }
+
+        Set(colour);
+    }
+
+    /// <summary>
+    /// Writes a colour chosen while it moved to Player Color's file, once it has settled, and has Player Color write its
+    /// file at each change again, as it did.
+    /// </summary>
+    public static void Settle() {
+        if (!_unsaved) {
+            return;
+        }
+
+        _unsaved = false;
+        var config = Plugin?.Config;
+        if (config == null) {
+            return;
+        }
+
+        try {
+            config.SaveOnConfigSet = _savedOnSet;
+            config.Save();
+        } catch (Exception e) {
+            Logger.Warn($"Could not save the colour of the cloak in Player Color: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Sets Player Color's settings for the given colour, or for the cloak's own colour for null.
+    /// </summary>
+    private static void Set(Color? colour) {
         var use = Setting<bool>("UseOverrideMaterial");
         var target = Setting<Color>("Color2");
         if (use == null || target == null) {

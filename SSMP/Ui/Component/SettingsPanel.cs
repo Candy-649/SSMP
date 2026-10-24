@@ -170,15 +170,21 @@ internal class SettingsPanel : IRootedComponent {
     /// The strip of every hue that the cloak may be given and the strip of how light it is, from black to white, with
     /// the picture of each; that of the second is drawn again for each hue.
     /// </summary>
-    private readonly Slider _hueStrip;
+    private readonly ColourStrip _hueStrip;
     private readonly RawImage _hueImage;
-    private readonly Slider _lightStrip;
+    private readonly ColourStrip _lightStrip;
     private readonly RawImage _lightImage;
     private readonly Texture2D _lightTexture;
     private readonly Color32[] _lightPixels = new Color32[LightTexels];
 
     /// <summary>The hue and saturation that the strip of how light the cloak is was last drawn for.</summary>
     private (float Hue, float Saturation)? _lightDrawnFor;
+
+    /// <summary>
+    /// What the controls of the colour of the cloak were last linked for, for a gamepad: where the colour chosen is in
+    /// the row of colours, and whether the row of the slashes is over them.
+    /// </summary>
+    private (int Pressed, bool OverSlashes)? _linkedFor;
 
     /// <summary>The box that takes the code of a colour, and the swatch beside it of the colour chosen.</summary>
     private readonly InputField _cloakCodeField;
@@ -274,13 +280,6 @@ internal class SettingsPanel : IRootedComponent {
 
     /// <summary>How tall each strip of the cloak's colour is.</summary>
     private const float StripHeight = 22f;
-
-    /// <summary>
-    /// The steps that each strip moves in, by a press of a gamepad's stick or along it with the mouse: five degrees of
-    /// hue, and a twentieth of the way from black to white. Player Color saves the colour at each.
-    /// </summary>
-    private const int HueSteps = 72;
-    private const int LightSteps = 20;
 
     /// <summary>How many colours each strip is drawn with, from one end to the other.</summary>
     private const int HueTexels = 128;
@@ -976,11 +975,10 @@ internal class SettingsPanel : IRootedComponent {
             "CloakHue",
             Lang.Pick("Colour", "颜色"),
             0f,
-            HueSteps,
             HueTexture(),
             out _hueImage
         );
-        _hueStrip.onValueChanged.AddListener(value => ChooseHue(value / HueSteps));
+        _hueStrip.onValueChanged.AddListener(ChooseHue);
 
         _lightTexture = new Texture2D(LightTexels, 1, TextureFormat.RGBA32, false) {
             name = "SSMP cloak lightness",
@@ -993,11 +991,13 @@ internal class SettingsPanel : IRootedComponent {
             "CloakLight",
             Lang.Pick("Shade", "深浅"),
             0f,
-            LightSteps,
             _lightTexture,
             out _lightImage
         );
-        _lightStrip.onValueChanged.AddListener(value => ChooseLightness(value / LightSteps));
+        _lightStrip.onValueChanged.AddListener(ChooseLightness);
+
+        // Player Color writes its file once a colour moved along a strip settles, rather than at every step of the way
+        _hueStrip.Settled = _lightStrip.Settled = PlayerColorMod.Settle;
 
         _codeRow = CreateRow(_skinContent, "CloakCodeRow", RowHeight);
         WaitingRoomPanel.CreateLabel(
@@ -1253,23 +1253,21 @@ internal class SettingsPanel : IRootedComponent {
     private static float NoteHeightOf(Text note) => Mathf.Ceil(note.preferredHeight) + 2f;
 
     /// <summary>
-    /// Makes a strip that a value is chosen on, in the given number of steps from its left end to its right, under a
-    /// label at the left of its row: by a press of the mouse on it or a drag along it, or by pushing the stick of a
-    /// gamepad left or right while it is selected, as up and down move to the rows above and below.
+    /// Makes a strip that a value from 0 at its left end to 1 at its right is chosen on, under a label at the left of
+    /// its row: by a press of the mouse on it or a drag along it, or by holding the stick of a gamepad left or right
+    /// while it is selected (see <see cref="ColourStrip"/>), as up and down move to the rows above and below.
     /// </summary>
     /// <param name="parent">What it is in.</param>
     /// <param name="name">Its name.</param>
     /// <param name="label">What its label says.</param>
     /// <param name="top">How far below the top of what it is in it is.</param>
-    /// <param name="steps">How many steps it has.</param>
     /// <param name="texture">Its picture, one row of colours, the first at its left end and the last at its right.</param>
     /// <param name="image">What draws its picture.</param>
-    private static Slider CreateStrip(
+    private static ColourStrip CreateStrip(
         Transform parent,
         string name,
         string label,
         float top,
-        int steps,
         Texture texture,
         out RawImage image
     ) {
@@ -1330,14 +1328,14 @@ internal class SettingsPanel : IRootedComponent {
         lineImage.color = Color.white;
         lineImage.raycastTarget = false;
 
-        var slider = strip.AddComponent<Slider>();
+        var slider = strip.AddComponent<ColourStrip>();
         slider.transition = Selectable.Transition.None;
         slider.targetGraphic = image;
         slider.navigation = new Navigation { mode = Navigation.Mode.Vertical };
         slider.direction = Slider.Direction.LeftToRight;
         slider.minValue = 0f;
-        slider.maxValue = steps;
-        slider.wholeNumbers = true;
+        slider.maxValue = 1f;
+        slider.wholeNumbers = false;
         slider.handleRect = markerRect;
         return slider;
     }
@@ -1557,7 +1555,7 @@ internal class SettingsPanel : IRootedComponent {
     private void ChooseFromStrips() {
         var colour = FromHsl(_hue, _saturation, _lightness);
         _stripColour = colour;
-        PlayerColorMod.Choose(colour);
+        PlayerColorMod.ChooseMoving(colour);
         RefreshCloak();
     }
 
@@ -1664,6 +1662,13 @@ internal class SettingsPanel : IRootedComponent {
     /// <param name="pressed">Where the colour chosen is in the row of colours, the cloak's own first: the strip of hues
     /// goes up to it.</param>
     private void LinkCloakControls(int pressed) {
+        // Linked again only when what they link to changes, and not at every frame of a strip moving
+        if (_linkedFor is { } linked && linked.Pressed == pressed && linked.OverSlashes == _slashRow.activeSelf) {
+            return;
+        }
+
+        _linkedFor = (pressed, _slashRow.activeSelf);
+
         // Over the colours, the row of the slashes, or of the skin where there are no slashes to choose
         Selectable overLeft = _slashRow.activeSelf ? _slashBackButton : _skinBackButton;
         Selectable overRight = _slashRow.activeSelf ? _slashOnButton : _skinOnButton;
@@ -1829,8 +1834,8 @@ internal class SettingsPanel : IRootedComponent {
         LinkCloakControls(named >= 0 ? named + 1 : 0);
 
         _hueStrip.interactable = _lightStrip.interactable = canChoose;
-        _hueStrip.SetValueWithoutNotify(Mathf.Round(_hue * HueSteps));
-        _lightStrip.SetValueWithoutNotify(Mathf.Round(_lightness * LightSteps));
+        _hueStrip.SetValueWithoutNotify(_hue);
+        _lightStrip.SetValueWithoutNotify(_lightness);
         _hueImage.color = _lightImage.color = canChoose ? Color.white : new Color(1f, 1f, 1f, 0.3f);
         DrawLightStrip();
 
