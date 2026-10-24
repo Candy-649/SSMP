@@ -20,10 +20,15 @@ namespace SSMP.Game.Client.Skin;
 /// slashes of those moves. Hornet plays her own clips on her own object, and her slashes and the like are objects of
 /// their own that play clips named as effects ("SlashEffect", "Wanderer RecoilStab Efct", "SlashEffect_Glow").
 ///
-/// So a sprite counts as a slash when a clip named as an effect draws it, unless a clip of Hornet's own draws it as
-/// well and its own name doesn't say it is an effect: a crest with no slash for a move has its effect clip show one of
-/// Hornet's frames. A sprite that no clip of the hero draws counts when its own name says it is an effect. Read from
-/// the game's own clips and sheets, which a skin draws its art over, sprite for sprite.
+/// So a sprite counts as a slash when its own name says it is an effect, or when a clip of an effect draws it and no
+/// clip of Hornet's own does: a crest with no slash for a move has its effect clip show one of Hornet's frames. A clip
+/// is an effect's when it is named as one, and also when it is the first clip of an object on Hornet that is named as
+/// an effect or hangs under one so named, and that has no flash of its own the way her body does: the silk of a bind,
+/// of crafting tools and of the needle's other skills, a flash as a move starts, the burst of a strike. Its versions,
+/// the clips of the same library that draw nothing but the kinds of picture that it draws most of, are an effect's as
+/// well. Read from the game's own clips and sheets, which a skin draws its art over, sprite for sprite. Those named so
+/// alone left out the silk of a bind and the rest, which then kept the game's own look under a skin's slashes (USER
+/// 10-24, "那个刀光有一部分没有覆盖…比如说敷丝之类的").
 /// </summary>
 internal static class SlashPictures {
     /// <summary>
@@ -264,7 +269,8 @@ internal static class SlashPictures {
             return null;
         }
 
-        // The sprites that clips named as effects draw, and those that Hornet's own clips draw, by sheet
+        // The sprites that clips of effects draw, and those that Hornet's own clips draw, by sheet
+        var effectClips = EffectClips(hero);
         var asEffect = new Dictionary<tk2dSpriteCollectionData, HashSet<int>>();
         var asHer = new Dictionary<tk2dSpriteCollectionData, HashSet<int>>();
         foreach (var library in HeroLibraries(hero)) {
@@ -273,7 +279,7 @@ internal static class SlashPictures {
                     continue;
                 }
 
-                var drawnBy = NamedAsEffect(clip.name, true) ? asEffect : asHer;
+                var drawnBy = NamedAsEffect(clip.name, true) || effectClips.Contains(clip) ? asEffect : asHer;
                 foreach (var frame in clip.frames) {
                     var sheet = frame?.spriteCollection;
                     if (sheet == null) {
@@ -312,8 +318,7 @@ internal static class SlashPictures {
 
                 var byEffect = effects != null && effects.Contains(i);
                 var byHer = hers != null && hers.Contains(i);
-                var named = NamedAsEffect(definition.name, false);
-                if (!(byEffect ? !byHer || named : !byHer && named)) {
+                if (!NamedAsEffect(definition.name, false) && !(byEffect && !byHer)) {
                     continue;
                 }
 
@@ -343,6 +348,153 @@ internal static class SlashPictures {
         _bySheet = bySheet;
         Logger.Info($"Found {count} slash sprites on {bySheet.Count} sheets of Hornet's art, on {onAtlas.Count} atlases");
         return bySheet;
+    }
+
+    /// <summary>
+    /// The clips of effects on Hornet that aren't named as effects (see the class): the first clip of each object on
+    /// her that is named as an effect or hangs under one so named, and has no flash of its own, and the versions of
+    /// that clip in its library, which draw nothing but the kinds of picture that it draws most of.
+    /// </summary>
+    private static HashSet<tk2dSpriteAnimationClip> EffectClips(HeroController hero) {
+        var effectClips = new HashSet<tk2dSpriteAnimationClip>();
+        var firsts = new List<(tk2dSpriteAnimationClip[] Clips, HashSet<string> Kinds)>();
+        var definitionsOf = new Dictionary<tk2dSpriteCollectionData, tk2dSpriteDefinition[]?>();
+        var own = hero.GetComponent<tk2dSpriteAnimator>();
+        foreach (var part in hero.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
+            if (part == own || part.Library == null || part.Library.clips is not { } clips ||
+                part.GetComponent<SpriteFlash>() != null || !HangsUnderEffect(part.transform, hero.transform)) {
+                continue;
+            }
+
+            var id = part.DefaultClipId;
+            if (id < 0 || id >= clips.Length || clips[id] is not { frames.Length: > 0 } first ||
+                !effectClips.Add(first)) {
+                continue;
+            }
+
+            firsts.Add((clips, KindsDrawnMostly(first, definitionsOf)));
+        }
+
+        foreach (var (clips, kinds) in firsts) {
+            if (kinds.Count == 0) {
+                continue;
+            }
+
+            foreach (var clip in clips) {
+                if (clip is { frames.Length: > 0 } && !effectClips.Contains(clip) &&
+                    !NamedAsEffect(clip.name, true) && DrawsOnly(clip, kinds, definitionsOf)) {
+                    effectClips.Add(clip);
+                }
+            }
+        }
+
+        return effectClips;
+    }
+
+    /// <summary>
+    /// Whether an object, or one it hangs under below the hero, is named as an effect.
+    /// </summary>
+    private static bool HangsUnderEffect(Transform part, Transform hero) {
+        for (var current = part; current != null && current != hero; current = current.parent) {
+            if (NamedAsEffect(current.name, true)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The kinds of picture that a clip draws more than half of on the sheets it draws them from: the name of a picture
+    /// without the number at its end. A clip of the silk of a bind draws the silk's pictures, and may show one frame of
+    /// some other kind, like a frame of Hornet herself, which is not what it is about. Sheets go by the sprites they
+    /// are drawn with, which two sheets may share.
+    /// </summary>
+    private static HashSet<string> KindsDrawnMostly(
+        tk2dSpriteAnimationClip clip,
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteDefinition[]?> definitionsOf
+    ) {
+        var drawn = new Dictionary<string, (HashSet<(tk2dSpriteDefinition[], int)> Pictures,
+            HashSet<tk2dSpriteDefinition[]> Sheets)>(StringComparer.Ordinal);
+        foreach (var frame in clip.frames) {
+            if (frame?.spriteCollection is not { } sheet || DefinitionsOf(sheet, definitionsOf) is not { } definitions ||
+                KindOf(definitions, frame.spriteId) is not { } kind) {
+                continue;
+            }
+
+            if (!drawn.TryGetValue(kind, out var pictures)) {
+                drawn[kind] = pictures = ([], []);
+            }
+
+            pictures.Pictures.Add((definitions, frame.spriteId));
+            pictures.Sheets.Add(definitions);
+        }
+
+        var kinds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var pair in drawn) {
+            var all = 0;
+            foreach (var definitions in pair.Value.Sheets) {
+                foreach (var definition in definitions) {
+                    if (definition?.name is { } name && KindOf(name) == pair.Key) {
+                        all++;
+                    }
+                }
+            }
+
+            if (pair.Value.Pictures.Count * 2 > all) {
+                kinds.Add(pair.Key);
+            }
+        }
+
+        return kinds;
+    }
+
+    /// <summary>
+    /// Whether every frame of a clip shows a picture of the given kinds.
+    /// </summary>
+    private static bool DrawsOnly(
+        tk2dSpriteAnimationClip clip,
+        HashSet<string> kinds,
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteDefinition[]?> definitionsOf
+    ) {
+        foreach (var frame in clip.frames) {
+            if (frame?.spriteCollection is not { } sheet || DefinitionsOf(sheet, definitionsOf) is not { } definitions ||
+                KindOf(definitions, frame.spriteId) is not { } kind || !kinds.Contains(kind)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// The sprites that a sheet is drawn with, looked up once a read: setting a sheet up may fail, and says so.
+    /// </summary>
+    private static tk2dSpriteDefinition[]? DefinitionsOf(
+        tk2dSpriteCollectionData sheet,
+        Dictionary<tk2dSpriteCollectionData, tk2dSpriteDefinition[]?> definitionsOf
+    ) {
+        if (!definitionsOf.TryGetValue(sheet, out var definitions)) {
+            var drawn = Drawn(sheet);
+            definitions = drawn != null ? drawn.spriteDefinitions : null;
+            definitionsOf[sheet] = definitions;
+        }
+
+        return definitions;
+    }
+
+    /// <summary>
+    /// The kind of a picture of a sheet (see <see cref="KindsDrawnMostly"/>), or null for one that isn't there.
+    /// </summary>
+    private static string? KindOf(tk2dSpriteDefinition[] definitions, int id) {
+        return id >= 0 && id < definitions.Length && definitions[id]?.name is { } name ? KindOf(name) : null;
+    }
+
+    /// <summary>
+    /// The kind of a picture by its name: the name without the number at its end.
+    /// </summary>
+    private static string KindOf(string name) {
+        return name.TrimEnd('0', '1', '2', '3', '4', '5', '6', '7', '8', '9');
     }
 
     /// <summary>
