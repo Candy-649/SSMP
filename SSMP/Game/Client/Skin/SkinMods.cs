@@ -308,6 +308,12 @@ internal static class PlayerColorMod {
     }
 
     /// <summary>
+    /// The colour that Player Color keeps for the player's own cloak, whether or not it draws the cloak in it now, or
+    /// null if it hasn't made its settings.
+    /// </summary>
+    public static Color? KeptColour() => Setting<Color>("Color2")?.Value;
+
+    /// <summary>
     /// Has Player Color draw the player's own cloak in the given colour from now on, or in its own colour for null.
     /// They are Player Color's own settings, which it saves at once for the next start and which its own window shows.
     /// </summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using SSMP.Api.Server;
 using SSMP.Game.Client;
 using SSMP.Game.Client.Skin;
@@ -129,6 +130,12 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The name of what this player's slashes are drawn from.</summary>
     private readonly Text _slashNameText;
 
+    /// <summary>The background of the button that shows the colour of the cloak.</summary>
+    private readonly Image _cloakTabImage;
+
+    /// <summary>The box of the colour of the cloak.</summary>
+    private readonly GameObject _cloakSection;
+
     /// <summary>The line beside the colour of the cloak that says which it is, or why there is none.</summary>
     private readonly Text _cloakStatusText;
 
@@ -141,6 +148,38 @@ internal class SettingsPanel : IRootedComponent {
 
     /// <summary>The swatch of each colour of <see cref="CloakColours"/>, in the same order.</summary>
     private readonly List<(Button Button, Image Image)> _cloakSwatches = [];
+
+    /// <summary>
+    /// The strip of every hue that the cloak may be given and the strip of how light it is, from black to white, with
+    /// the picture of each; that of the second is drawn again for each hue.
+    /// </summary>
+    private readonly Slider _hueStrip;
+    private readonly RawImage _hueImage;
+    private readonly Slider _lightStrip;
+    private readonly RawImage _lightImage;
+    private readonly Texture2D _lightTexture;
+    private readonly Color32[] _lightPixels = new Color32[LightTexels];
+
+    /// <summary>The hue and saturation that the strip of how light the cloak is was last drawn for.</summary>
+    private (float Hue, float Saturation)? _lightDrawnFor;
+
+    /// <summary>The box that takes the code of a colour, and the swatch beside it of the colour chosen.</summary>
+    private readonly InputField _cloakCodeField;
+    private readonly Image _cloakChosenImage;
+
+    /// <summary>
+    /// The hue, saturation and lightness of the colour of the cloak, as the strips show it, each from 0 to 1. They are
+    /// kept apart from the colour, which has no hue while it is grey, black or white: a strip moved there keeps the hue
+    /// it had.
+    /// </summary>
+    private float _hue;
+    private float _saturation = 1f;
+    private float _lightness = 0.5f;
+
+    /// <summary>
+    /// The colour that the strips show, as Player Color keeps it; a colour chosen elsewhere moves them to it.
+    /// </summary>
+    private Color32? _stripColour;
 
     /// <summary>
     /// The colours that the cloak may be given, by their names: far apart, so that two players who chose two of them
@@ -204,13 +243,36 @@ internal class SettingsPanel : IRootedComponent {
     private const float SectionGap = 14f;
 
     /// <summary>
-    /// Where the rows of the skin's part of the page begin, below its top: the skin, the slashes under it, the note
-    /// that says what they come to, and the colour of the cloak.
+    /// Where the rows of the skin's part of the page begin, below its top: the skin, the slashes under it, and the
+    /// note that says what they come to.
     /// </summary>
     private const float SkinRowTop = 32f;
     private const float SlashRowTop = 64f;
     private const float SkinNoteTop = 96f;
-    private const float CloakLabelTop = 133f;
+
+    /// <summary>
+    /// Where the rows of the cloak's part of the page begin, below its top: the colours to press, the strip of hues,
+    /// the strip of how light, the code, and the note that says what it comes to.
+    /// </summary>
+    private const float CloakPresetTop = 32f;
+    private const float CloakHueTop = 68f;
+    private const float CloakLightTop = 98f;
+    private const float CloakCodeTop = 128f;
+    private const float CloakNoteTop = 164f;
+
+    /// <summary>How tall each strip of the cloak's colour is.</summary>
+    private const float StripHeight = 22f;
+
+    /// <summary>
+    /// The steps that each strip moves in, by a press of a gamepad's stick or along it with the mouse: five degrees of
+    /// hue, and a twentieth of the way from black to white. Player Color saves the colour at each.
+    /// </summary>
+    private const int HueSteps = 72;
+    private const int LightSteps = 20;
+
+    /// <summary>How many colours each strip is drawn with, from one end to the other.</summary>
+    private const int HueTexels = 128;
+    private const int LightTexels = 64;
 
     /// <summary>
     /// How much room the choices about this player's own name take: a row of switches over a row of colours.
@@ -280,44 +342,62 @@ internal class SettingsPanel : IRootedComponent {
 
         // Where a line said that all of this stays on this computer, buttons now choose between what does, the skin
         // that this player wears, and what the host of the server sets for everyone
+        // The colour of the cloak has a part of its own beside the skin, each as wide as its name
         var ownTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "OwnTab",
             Lang.Pick("MINE ONLY", "只改我这边"),
-            new Vector2(0.03f, 1f),
-            new Vector2(0.33f, 1f),
+            new Vector2(0.02f, 1f),
+            new Vector2(0.265f, 1f),
             WaitingRoomPanel.ReadyOn,
             () => ShowPage(Page.Own),
             out _ownTabImage,
-            out _
+            out var ownTabLabel
         );
         PlaceInRow(ownTab, HeaderHeight + 1f, NoteHeight - 2f);
+        FitLabel(ownTabLabel);
 
         var skinTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "SkinTab",
             Lang.Pick("SKIN", "我的皮肤"),
-            new Vector2(0.35f, 1f),
-            new Vector2(0.53f, 1f),
+            new Vector2(0.275f, 1f),
+            new Vector2(0.455f, 1f),
             WaitingRoomPanel.ReadyOff,
             () => ShowPage(Page.Skin),
             out _skinTabImage,
-            out _
+            out var skinTabLabel
         );
         PlaceInRow(skinTab, HeaderHeight + 1f, NoteHeight - 2f);
+        FitLabel(skinTabLabel);
+
+        var cloakTab = WaitingRoomPanel.CreateButton(
+            GameObject.transform,
+            "CloakTab",
+            Lang.Pick("CLOAK", "斗篷"),
+            new Vector2(0.465f, 1f),
+            new Vector2(0.585f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => ShowPage(Page.Cloak),
+            out _cloakTabImage,
+            out var cloakTabLabel
+        );
+        PlaceInRow(cloakTab, HeaderHeight + 1f, NoteHeight - 2f);
+        FitLabel(cloakTabLabel);
 
         var roomTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
             "RoomTab",
             Lang.Pick("ROOM (HOST)", "整个房间（房主定）"),
-            new Vector2(0.55f, 1f),
-            new Vector2(0.97f, 1f),
+            new Vector2(0.595f, 1f),
+            new Vector2(0.98f, 1f),
             WaitingRoomPanel.ReadyOff,
             () => ShowPage(Page.Room),
             out _roomTabImage,
-            out _
+            out var roomTabLabel
         );
         PlaceInRow(roomTab, HeaderHeight + 1f, NoteHeight - 2f);
+        FitLabel(roomTabLabel);
 
         var nameArea = CreateSection("NameSettings", HeaderHeight + NoteHeight + SectionGap, NameSectionHeight);
         _ownSections.Add(nameArea.gameObject);
@@ -821,42 +901,47 @@ internal class SettingsPanel : IRootedComponent {
             "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, CloakLabelTop - 3f - SkinNoteTop),
+            new Vector2(0f, RoomSectionHeight - SkinNoteTop),
             new Vector2(0f, -SkinNoteTop),
             13,
             Muted,
             TextAnchor.UpperLeft
         );
 
-        // The colour of the cloak, which Player Color draws: one press on a colour, like the colours of the name
+        // The colour of the cloak, which Player Color draws, on a part of its own: the colours of before, one press
+        // each like the colours of the name, then a strip of every hue, a strip of how light, from black to white, and a
+        // box that takes the code of any colour (USER 10-24: "只能在几个里面换太局限了", "或者加个色盘？色带？")
+        var cloakArea = CreateSection("CloakSettings", HeaderHeight + NoteHeight + SectionGap, RoomSectionHeight);
+        _cloakSection = cloakArea.gameObject;
+
         WaitingRoomPanel.CreateLabel(
-            skinArea,
+            cloakArea,
             "CloakLabel",
             Lang.Pick("CLOAK", "斗篷颜色"),
             new Vector2(0.03f, 1f),
             new Vector2(0.40f, 1f),
             new Vector2(0f, 28f),
-            new Vector2(0f, -CloakLabelTop),
+            new Vector2(0f, -1f),
             14,
             WaitingRoomPanel.Accent,
             TextAnchor.MiddleLeft
         );
 
         _cloakStatusText = WaitingRoomPanel.CreateLabel(
-            skinArea,
+            cloakArea,
             "CloakStatus",
             "",
             new Vector2(0.40f, 1f),
             new Vector2(0.97f, 1f),
             new Vector2(0f, 28f),
-            new Vector2(0f, -CloakLabelTop),
+            new Vector2(0f, -1f),
             13,
             Muted,
             TextAnchor.MiddleRight
         );
 
         var cloakOwn = WaitingRoomPanel.CreateButton(
-            skinArea,
+            cloakArea,
             "CloakOwn",
             Lang.Pick("Own", "原色"),
             new Vector2(0.03f, 1f),
@@ -866,7 +951,7 @@ internal class SettingsPanel : IRootedComponent {
             out _cloakOwnImage,
             out _
         );
-        PlaceInRow(cloakOwn, CloakLabelTop + 31f, 28f);
+        PlaceInRow(cloakOwn, CloakPresetTop, 28f);
         _cloakOwnButton = cloakOwn.GetComponent<Button>();
 
         for (var i = 0; i < CloakColours.Length; i++) {
@@ -876,7 +961,7 @@ internal class SettingsPanel : IRootedComponent {
             var left = 0.19f + slot * i;
 
             var swatch = WaitingRoomPanel.CreateButton(
-                skinArea,
+                cloakArea,
                 $"Cloak{CloakColours[i].English}",
                 "",
                 new Vector2(left + 0.006f, 1f),
@@ -886,18 +971,86 @@ internal class SettingsPanel : IRootedComponent {
                 out var swatchImage,
                 out _
             );
-            PlaceInRow(swatch, CloakLabelTop + 31f, 28f);
+            PlaceInRow(swatch, CloakPresetTop, 28f);
             _cloakSwatches.Add((swatch.GetComponent<Button>(), swatchImage));
         }
 
+        _hueStrip = CreateStrip(
+            cloakArea,
+            "CloakHue",
+            Lang.Pick("Colour", "颜色"),
+            CloakHueTop,
+            HueSteps,
+            HueTexture(),
+            out _hueImage
+        );
+        _hueStrip.onValueChanged.AddListener(value => ChooseHue(value / HueSteps));
+
+        _lightTexture = new Texture2D(LightTexels, 1, TextureFormat.RGBA32, false) {
+            name = "SSMP cloak lightness",
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Bilinear
+        };
+        _lightStrip = CreateStrip(
+            cloakArea,
+            "CloakLight",
+            Lang.Pick("Shade", "深浅"),
+            CloakLightTop,
+            LightSteps,
+            _lightTexture,
+            out _lightImage
+        );
+        _lightStrip.onValueChanged.AddListener(value => ChooseLightness(value / LightSteps));
+
+        WaitingRoomPanel.CreateLabel(
+            cloakArea,
+            "CloakCodeLabel",
+            Lang.Pick("Code", "代码"),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.19f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -CloakCodeTop),
+            13,
+            Muted,
+            TextAnchor.MiddleLeft
+        );
+
+        _cloakCodeField = CreateCodeField(cloakArea, CloakCodeTop);
+        _cloakCodeField.onValueChanged.AddListener(text => {
+                // Taken as soon as the six digits of a colour are in
+                if (ReadCode(text, false) is { } colour) {
+                    ChooseCode(colour);
+                }
+            }
+        );
+        _cloakCodeField.onEndEdit.AddListener(text => {
+                if (ReadCode(text, true) is { } colour) {
+                    ChooseCode(colour);
+                }
+
+                // Whatever is left in the box, it shows the code of the colour chosen again
+                RefreshCloak();
+            }
+        );
+
+        var chosenSwatch = new GameObject("CloakChosen");
+        var chosenRect = chosenSwatch.AddComponent<RectTransform>();
+        chosenRect.anchorMin = new Vector2(0.52f, 1f);
+        chosenRect.anchorMax = new Vector2(0.62f, 1f);
+        chosenRect.offsetMin = new Vector2(0f, -(CloakCodeTop + 28f));
+        chosenRect.offsetMax = new Vector2(0f, -CloakCodeTop);
+        chosenSwatch.transform.SetParent(cloakArea, false);
+        _cloakChosenImage = chosenSwatch.AddComponent<Image>();
+        _cloakChosenImage.raycastTarget = false;
+
         _cloakNoteText = WaitingRoomPanel.CreateLabel(
-            skinArea,
+            cloakArea,
             "CloakNote",
             "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, RoomSectionHeight - (CloakLabelTop + 63f)),
-            new Vector2(0f, -(CloakLabelTop + 63f)),
+            new Vector2(0f, RoomSectionHeight - CloakNoteTop),
+            new Vector2(0f, -CloakNoteTop),
             13,
             Muted,
             TextAnchor.UpperLeft
@@ -905,10 +1058,12 @@ internal class SettingsPanel : IRootedComponent {
 
         Refresh();
 
-        // The art of a skin takes a moment to load, and the page says when Hornet wears it
+        // The art of a skin takes a moment to load, and the page says when Hornet wears it, as the cloak's part does,
+        // whose colour does not show on a skin
         OwnSkin.Changed += () => {
-            if (_activeSelf && _page == Page.Skin) {
+            if (_activeSelf) {
                 RefreshSkin();
+                RefreshCloak();
             }
         };
 
@@ -948,6 +1103,187 @@ internal class SettingsPanel : IRootedComponent {
         var rect = button.GetComponent<RectTransform>();
         rect.offsetMin = new Vector2(0f, -(top + height));
         rect.offsetMax = new Vector2(0f, -top);
+    }
+
+    /// <summary>
+    /// Has the label of a button take a smaller size where its own is too wide for the button, rather than break onto
+    /// a second line that doesn't show: the four tabs share the width of the page.
+    /// </summary>
+    private static void FitLabel(Text label) {
+        label.resizeTextForBestFit = true;
+        label.resizeTextMinSize = 10;
+        label.resizeTextMaxSize = label.fontSize;
+    }
+
+    /// <summary>
+    /// Makes a strip that a value is chosen on, in the given number of steps from its left end to its right, under a
+    /// label at the left of its row: by a press of the mouse on it or a drag along it, or by pushing the stick of a
+    /// gamepad left or right while it is selected, as up and down move to the rows above and below.
+    /// </summary>
+    /// <param name="parent">What it is in.</param>
+    /// <param name="name">Its name.</param>
+    /// <param name="label">What its label says.</param>
+    /// <param name="top">How far below the top of what it is in it is.</param>
+    /// <param name="steps">How many steps it has.</param>
+    /// <param name="texture">Its picture, one row of colours, the first at its left end and the last at its right.</param>
+    /// <param name="image">What draws its picture.</param>
+    private static Slider CreateStrip(
+        Transform parent,
+        string name,
+        string label,
+        float top,
+        int steps,
+        Texture texture,
+        out RawImage image
+    ) {
+        WaitingRoomPanel.CreateLabel(
+            parent,
+            name + "Label",
+            label,
+            new Vector2(0.03f, 1f),
+            new Vector2(0.19f, 1f),
+            new Vector2(0f, StripHeight),
+            new Vector2(0f, -top),
+            13,
+            Muted,
+            TextAnchor.MiddleLeft
+        );
+
+        var strip = new GameObject(name);
+        var rect = strip.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.19f, 1f);
+        rect.anchorMax = new Vector2(0.97f, 1f);
+        rect.offsetMin = new Vector2(0f, -(top + StripHeight));
+        rect.offsetMax = new Vector2(0f, -top);
+        strip.transform.SetParent(parent, false);
+
+        // From the middle of the first colour to the middle of the last, so that each end shows its own
+        image = strip.AddComponent<RawImage>();
+        image.texture = texture;
+        var half = 0.5f / texture.width;
+        image.uvRect = new Rect(half, 0f, 1f - 2f * half, 1f);
+
+        // The marker that says where on the strip the value is: a light line in a dark one, which shows on any colour
+        var area = new GameObject("Area");
+        var areaRect = area.AddComponent<RectTransform>();
+        areaRect.anchorMin = Vector2.zero;
+        areaRect.anchorMax = Vector2.one;
+        areaRect.offsetMin = Vector2.zero;
+        areaRect.offsetMax = Vector2.zero;
+        area.transform.SetParent(strip.transform, false);
+
+        var marker = new GameObject("Marker");
+        var markerRect = marker.AddComponent<RectTransform>();
+        markerRect.anchorMin = new Vector2(0f, 0f);
+        markerRect.anchorMax = new Vector2(0f, 1f);
+        markerRect.sizeDelta = new Vector2(6f, 6f);
+        marker.transform.SetParent(area.transform, false);
+        var markerImage = marker.AddComponent<Image>();
+        markerImage.color = new Color(0f, 0f, 0f, 0.85f);
+        markerImage.raycastTarget = false;
+
+        var line = new GameObject("Line");
+        var lineRect = line.AddComponent<RectTransform>();
+        lineRect.anchorMin = Vector2.zero;
+        lineRect.anchorMax = Vector2.one;
+        lineRect.offsetMin = new Vector2(2f, 2f);
+        lineRect.offsetMax = new Vector2(-2f, -2f);
+        line.transform.SetParent(marker.transform, false);
+        var lineImage = line.AddComponent<Image>();
+        lineImage.color = Color.white;
+        lineImage.raycastTarget = false;
+
+        var slider = strip.AddComponent<Slider>();
+        slider.transition = Selectable.Transition.None;
+        slider.targetGraphic = image;
+        slider.navigation = new Navigation { mode = Navigation.Mode.Vertical };
+        slider.direction = Slider.Direction.LeftToRight;
+        slider.minValue = 0f;
+        slider.maxValue = steps;
+        slider.wholeNumbers = true;
+        slider.handleRect = markerRect;
+        return slider;
+    }
+
+    /// <summary>
+    /// Makes the box that takes the code of a colour, such as #7A3CFF, in the row at the given depth.
+    /// </summary>
+    private static InputField CreateCodeField(Transform parent, float top) {
+        var box = new GameObject("CloakCode");
+        var rect = box.AddComponent<RectTransform>();
+        rect.anchorMin = new Vector2(0.19f, 1f);
+        rect.anchorMax = new Vector2(0.49f, 1f);
+        rect.offsetMin = new Vector2(0f, -(top + 28f));
+        rect.offsetMax = new Vector2(0f, -top);
+        box.transform.SetParent(parent, false);
+
+        var background = box.AddComponent<Image>();
+        background.sprite = Resources.TextureManager.InputFieldBg.Neutral;
+        background.type = Image.Type.Sliced;
+
+        var placeholder = CreateBoxText(box.transform, "Placeholder", new Color(1f, 1f, 1f, 0.5f));
+        placeholder.text = "#7A3CFF";
+        var text = CreateBoxText(box.transform, "Text", Color.white);
+
+        var field = box.AddComponent<InputField>();
+        field.targetGraphic = background;
+        field.placeholder = placeholder;
+        field.textComponent = text;
+        field.characterLimit = 7;
+        field.lineType = InputField.LineType.SingleLine;
+
+        // Only what a code is made of, in capitals: a # at the start and the digits of base sixteen
+        field.onValidateInput += (_, index, added) => added == '#'
+            ? index == 0 ? '#' : '\0'
+            : Uri.IsHexDigit(added)
+                ? char.ToUpperInvariant(added)
+                : '\0';
+
+        // As the mod's other boxes: a gamepad that moves onto it doesn't start typing, and the caret can be found
+        field.shouldActivateOnSelect = false;
+        field.caretWidth = 2;
+        return field;
+    }
+
+    /// <summary>
+    /// Makes a line of text across a box, a little in from its sides, drawn even where it is taller than the box.
+    /// </summary>
+    private static Text CreateBoxText(Transform box, string name, Color colour) {
+        var textObject = new GameObject(name);
+        var rect = textObject.AddComponent<RectTransform>();
+        rect.anchorMin = Vector2.zero;
+        rect.anchorMax = Vector2.one;
+        rect.offsetMin = new Vector2(5f, 0f);
+        rect.offsetMax = new Vector2(-5f, 0f);
+        textObject.transform.SetParent(box, false);
+
+        var text = textObject.AddComponent<Text>();
+        text.font = Resources.FontManager.UIFontRegular;
+        text.fontSize = 15;
+        text.alignment = TextAnchor.MiddleCenter;
+        text.color = colour;
+        text.verticalOverflow = VerticalWrapMode.Overflow;
+        text.supportRichText = false;
+        return text;
+    }
+
+    /// <summary>
+    /// The picture of the strip of hues: every hue at its fullest, red at both ends.
+    /// </summary>
+    private static Texture2D HueTexture() {
+        var texture = new Texture2D(HueTexels, 1, TextureFormat.RGBA32, false) {
+            name = "SSMP cloak hues",
+            wrapMode = TextureWrapMode.Clamp,
+            filterMode = FilterMode.Bilinear
+        };
+        var pixels = new Color32[HueTexels];
+        for (var i = 0; i < HueTexels; i++) {
+            pixels[i] = FromHsl((float) i / (HueTexels - 1), 1f, 0.5f);
+        }
+
+        texture.SetPixels32(pixels);
+        texture.Apply(false, true);
+        return texture;
     }
 
     /// <summary>
@@ -1021,11 +1357,17 @@ internal class SettingsPanel : IRootedComponent {
         var choices = new List<string> { "", SlashSkin.GameChoice };
         var packs = SlashSkin.Choices();
         foreach (var pack in packs) {
-            choices.Add(pack.Name);
+            if (!choices.Exists(name => string.Equals(name, pack.Name, StringComparison.OrdinalIgnoreCase))) {
+                choices.Add(pack.Name);
+            }
         }
 
         var chosen = SlashSkin.ChosenPack(packs);
-        taken = SlashSkin.Choice == SlashSkin.GameChoice ? 1 : chosen != null ? 2 + packs.IndexOf(chosen) : 0;
+        taken = SlashSkin.Choice == SlashSkin.GameChoice
+            ? 1
+            : chosen != null
+                ? choices.FindIndex(name => string.Equals(name, chosen.Name, StringComparison.OrdinalIgnoreCase))
+                : 0;
         return choices;
     }
 
@@ -1039,6 +1381,159 @@ internal class SettingsPanel : IRootedComponent {
 
         PlayerColorMod.Choose(colour);
         Refresh();
+    }
+
+    /// <summary>
+    /// Gives the cloak the hue at a place on the strip of hues, as light as it is. A grey has no hue to change, so it
+    /// takes the hue at its fullest.
+    /// </summary>
+    /// <param name="hue">The hue, from 0 to 1.</param>
+    private void ChooseHue(float hue) {
+        if (!PlayerColorMod.CanChoose) {
+            return;
+        }
+
+        _hue = hue;
+        if (_saturation < 0.05f) {
+            _saturation = 1f;
+        }
+
+        ChooseFromStrips();
+    }
+
+    /// <summary>
+    /// Makes the cloak as light as a place on the strip of how light it is, from black to white, in its hue.
+    /// </summary>
+    /// <param name="lightness">How light, from 0 to 1.</param>
+    private void ChooseLightness(float lightness) {
+        if (!PlayerColorMod.CanChoose) {
+            return;
+        }
+
+        _lightness = lightness;
+        ChooseFromStrips();
+    }
+
+    /// <summary>
+    /// Has the cloak drawn in the colour that the strips show.
+    /// </summary>
+    private void ChooseFromStrips() {
+        var colour = FromHsl(_hue, _saturation, _lightness);
+        _stripColour = colour;
+        PlayerColorMod.Choose(colour);
+        RefreshCloak();
+    }
+
+    /// <summary>
+    /// Has the cloak drawn in a colour typed as a code, unless it already is.
+    /// </summary>
+    private void ChooseCode(Color colour) {
+        if (!PlayerColorMod.CanChoose) {
+            return;
+        }
+
+        if (PlayerColorMod.ChosenColour() is { } chosen && SameColour(chosen, colour)) {
+            return;
+        }
+
+        PlayerColorMod.Choose(colour);
+        RefreshCloak();
+    }
+
+    /// <summary>
+    /// The colour of a code, such as #7A3CFF or 7A3CFF; with short ones too, such as #73F for #7733FF, once the code
+    /// is all typed.
+    /// </summary>
+    /// <param name="text">The code.</param>
+    /// <param name="shortToo">Whether a code of three digits is taken too.</param>
+    /// <returns>The colour, or null for a code of none.</returns>
+    private static Color? ReadCode(string text, bool shortToo) {
+        var digits = text.Trim().TrimStart('#');
+        if (shortToo && digits.Length == 3) {
+            digits = $"{digits[0]}{digits[0]}{digits[1]}{digits[1]}{digits[2]}{digits[2]}";
+        }
+
+        if (digits.Length != 6 ||
+            !uint.TryParse(digits, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var value)) {
+            return null;
+        }
+
+        return (Color) new Color32((byte) (value >> 16), (byte) (value >> 8), (byte) value, 255);
+    }
+
+    /// <summary>
+    /// Whether two colours are the same as Player Color saves them, in bytes.
+    /// </summary>
+    private static bool SameColour(Color one, Color other) {
+        Color32 a = one;
+        Color32 b = other;
+        return a.r == b.r && a.g == b.g && a.b == b.b;
+    }
+
+    /// <summary>
+    /// Moves the strips to a colour, unless they show it: to its hue, saturation and lightness, keeping the hue they
+    /// had for a colour that has none.
+    /// </summary>
+    private void FollowColour(Color colour) {
+        if (_stripColour is { } shown && SameColour(shown, colour)) {
+            return;
+        }
+
+        _stripColour = colour;
+        var max = Mathf.Max(colour.r, Mathf.Max(colour.g, colour.b));
+        var min = Mathf.Min(colour.r, Mathf.Min(colour.g, colour.b));
+        var chroma = max - min;
+        _lightness = (max + min) / 2f;
+        if (chroma <= 0f) {
+            _saturation = 0f;
+            return;
+        }
+
+        _saturation = Mathf.Clamp01(chroma / (1f - Mathf.Abs(2f * _lightness - 1f)));
+        var sector = max == colour.r
+            ? Mathf.Repeat((colour.g - colour.b) / chroma, 6f)
+            : max == colour.g
+                ? (colour.b - colour.r) / chroma + 2f
+                : (colour.r - colour.g) / chroma + 4f;
+        _hue = sector / 6f;
+    }
+
+    /// <summary>
+    /// The colour of a hue, saturation and lightness, each from 0 to 1: black at no lightness, white at the most, and
+    /// the hue at its fullest halfway.
+    /// </summary>
+    private static Color FromHsl(float hue, float saturation, float lightness) {
+        var chroma = (1f - Mathf.Abs(2f * lightness - 1f)) * saturation;
+        var sector = Mathf.Repeat(hue, 1f) * 6f;
+        var second = chroma * (1f - Mathf.Abs(sector % 2f - 1f));
+        var (r, g, b) = sector switch {
+            < 1f => (chroma, second, 0f),
+            < 2f => (second, chroma, 0f),
+            < 3f => (0f, chroma, second),
+            < 4f => (0f, second, chroma),
+            < 5f => (second, 0f, chroma),
+            _ => (chroma, 0f, second)
+        };
+        var light = lightness - chroma / 2f;
+        return new Color(r + light, g + light, b + light, 1f);
+    }
+
+    /// <summary>
+    /// Draws the strip of how light the cloak is in its hue and saturation, from black to white, unless it is drawn so.
+    /// </summary>
+    private void DrawLightStrip() {
+        if (_lightDrawnFor is { } drawn && Mathf.Approximately(drawn.Hue, _hue) &&
+            Mathf.Approximately(drawn.Saturation, _saturation)) {
+            return;
+        }
+
+        _lightDrawnFor = (_hue, _saturation);
+        for (var i = 0; i < LightTexels; i++) {
+            _lightPixels[i] = FromHsl(_hue, _saturation, (float) i / (LightTexels - 1));
+        }
+
+        _lightTexture.SetPixels32(_lightPixels);
+        _lightTexture.Apply(false);
     }
 
     /// <summary>
@@ -1075,7 +1570,7 @@ internal class SettingsPanel : IRootedComponent {
         var noteTop = slashChoices ? SkinNoteTop : SlashRowTop;
         var noteRect = _skinNoteText.rectTransform;
         noteRect.anchoredPosition = new Vector2(0f, -noteTop);
-        noteRect.sizeDelta = new Vector2(0f, CloakLabelTop - 3f - noteTop);
+        noteRect.sizeDelta = new Vector2(0f, RoomSectionHeight - noteTop);
 
         // What it comes to, as the notes of the other choices
         if (!canChoose) {
@@ -1109,17 +1604,21 @@ internal class SettingsPanel : IRootedComponent {
                 "选了马上换上，下次开游戏也还是它。队友装了同一个皮肤，才看得到你穿的。"
             );
         }
-
-        RefreshCloak(current != null);
     }
 
     /// <summary>
-    /// Draws the colour of the cloak that this player chose.
+    /// Draws the colour of the cloak that this player chose, while that part of the page is shown.
     /// </summary>
-    /// <param name="wearingSkin">Whether this player wears a skin, which keeps its own colours.</param>
-    private void RefreshCloak(bool wearingSkin) {
+    private void RefreshCloak() {
+        if (_page != Page.Cloak) {
+            return;
+        }
+
         var canChoose = PlayerColorMod.CanChoose;
         var chosen = canChoose ? PlayerColorMod.ChosenColour() : null;
+
+        // A skin keeps its own colours
+        var wearingSkin = OwnSkin.CanChoose && OwnSkin.Current(OwnSkin.Choices()) != null;
 
         _cloakOwnButton.interactable = canChoose;
         _cloakOwnImage.color = canChoose && chosen == null ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
@@ -1139,6 +1638,31 @@ internal class SettingsPanel : IRootedComponent {
             Color full = swatch;
             _cloakSwatches[i].Image.color = picked ? full : new Color(full.r, full.g, full.b, 0.3f);
         }
+
+        // The strips stand at the colour that Player Color keeps, also while the cloak keeps its own colour, so that
+        // moving one goes on from the colour last chosen
+        var kept = canChoose ? PlayerColorMod.KeptColour() : null;
+        if (kept is { } keptColour) {
+            FollowColour(keptColour);
+        }
+
+        _hueStrip.interactable = _lightStrip.interactable = canChoose;
+        _hueStrip.SetValueWithoutNotify(Mathf.Round(_hue * HueSteps));
+        _lightStrip.SetValueWithoutNotify(Mathf.Round(_lightness * LightSteps));
+        _hueImage.color = _lightImage.color = canChoose ? Color.white : new Color(1f, 1f, 1f, 0.3f);
+        DrawLightStrip();
+
+        // The code of the colour chosen, and the colour itself beside it, faded while the cloak keeps its own; not
+        // while the box is typed into
+        _cloakCodeField.interactable = canChoose;
+        if (!_cloakCodeField.isFocused) {
+            _cloakCodeField.SetTextWithoutNotify(chosen is { } code ? "#" + ColorUtility.ToHtmlStringRGB(code) : "");
+        }
+
+        var shownColour = chosen ?? kept;
+        _cloakChosenImage.color = shownColour is { } shown
+            ? chosen != null ? shown : new Color(shown.r, shown.g, shown.b, 0.3f)
+            : Color.clear;
 
         // Whose the colours are is said on the row, as the row goes by another player's mod: a friend who saw only
         // "没装全" there asked what it was that was not fully installed (USER 10-23: "斗篷颜色切换识别的是别人的mod，
@@ -1267,15 +1791,18 @@ internal class SettingsPanel : IRootedComponent {
     private void Refresh() {
         _ownTabImage.color = _page == Page.Own ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         _skinTabImage.color = _page == Page.Skin ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+        _cloakTabImage.color = _page == Page.Cloak ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         _roomTabImage.color = _page == Page.Room ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         foreach (var section in _ownSections) {
             section.SetActive(_page == Page.Own);
         }
 
         _skinSection.SetActive(_page == Page.Skin);
+        _cloakSection.SetActive(_page == Page.Cloak);
         _roomSection.SetActive(_page == Page.Room);
         RefreshRoom();
         RefreshSkin();
+        RefreshCloak();
 
         var bold = _modSettings.BoldOwnName;
         _boldImage.color = bold ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
@@ -1423,6 +1950,9 @@ internal class SettingsPanel : IRootedComponent {
 
         /// <summary>The skin that this player's own Hornet wears.</summary>
         Skin,
+
+        /// <summary>The colour of the cloak of this player's own Hornet.</summary>
+        Cloak,
 
         /// <summary>The choices of the room, which the host makes for everyone.</summary>
         Room
