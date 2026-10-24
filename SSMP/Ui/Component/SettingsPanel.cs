@@ -130,6 +130,10 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The name of what this player's slashes are drawn from.</summary>
     private readonly Text _slashNameText;
 
+    /// <summary>The buttons that draw the slashes from the choice before and after the one taken.</summary>
+    private readonly Button _slashBackButton;
+    private readonly Button _slashOnButton;
+
     /// <summary>What goes on the skin's part of the page, which scrolls, and its height set as it is laid out.</summary>
     private readonly RectTransform _skinContent;
 
@@ -179,6 +183,13 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The box that takes the code of a colour, and the swatch beside it of the colour chosen.</summary>
     private readonly InputField _cloakCodeField;
     private readonly Image _cloakChosenImage;
+
+    /// <summary>
+    /// Whether a code is being typed into the box, and the colour that the cloak was drawn in as it began, or null for
+    /// its own, which the escape key goes back to.
+    /// </summary>
+    private bool _codeTyping;
+    private Color? _colourBeforeCode;
 
     /// <summary>
     /// The hue, saturation and lightness of the colour of the cloak, as the strips show it, each from 0 to 1. They are
@@ -851,6 +862,7 @@ internal class SettingsPanel : IRootedComponent {
             out _
         );
         PlaceInRow(slashBack, 0f, RowHeight);
+        _slashBackButton = slashBack.GetComponent<Button>();
 
         _slashNameText = WaitingRoomPanel.CreateLabel(
             slashRow,
@@ -877,6 +889,7 @@ internal class SettingsPanel : IRootedComponent {
             out _
         );
         PlaceInRow(slashOn, 0f, RowHeight);
+        _slashOnButton = slashOn.GetComponent<Button>();
 
         _skinNoteText = WaitingRoomPanel.CreateLabel(
             _skinContent,
@@ -1002,6 +1015,11 @@ internal class SettingsPanel : IRootedComponent {
 
         _cloakCodeField = CreateCodeField(_codeRow, 0f);
         _cloakCodeField.onValueChanged.AddListener(text => {
+                if (!_codeTyping) {
+                    _codeTyping = true;
+                    _colourBeforeCode = PlayerColorMod.CanChoose ? PlayerColorMod.ChosenColour() : null;
+                }
+
                 // Taken as soon as the six digits of a colour are in
                 if (ReadCode(text, false) is { } colour) {
                     ChooseCode(colour);
@@ -1009,9 +1027,16 @@ internal class SettingsPanel : IRootedComponent {
             }
         );
         _cloakCodeField.onEndEdit.AddListener(text => {
-                if (ReadCode(text, true) is { } colour) {
+                // The escape key takes back what was typed, and the colour with it, also where there was no code before
+                if (_cloakCodeField.wasCanceled) {
+                    if (_codeTyping && PlayerColorMod.CanChoose) {
+                        PlayerColorMod.Choose(_colourBeforeCode);
+                    }
+                } else if (ReadCode(text, true) is { } colour) {
                     ChooseCode(colour);
                 }
+
+                _codeTyping = false;
 
                 // Whatever is left in the box, it shows the code of the colour chosen again
                 RefreshCloak();
@@ -1334,7 +1359,7 @@ internal class SettingsPanel : IRootedComponent {
         background.type = Image.Type.Sliced;
 
         var placeholder = CreateBoxText(box.transform, "Placeholder", new Color(1f, 1f, 1f, 0.5f));
-        placeholder.text = "#7A3CFF";
+        placeholder.text = "#RRGGBB";
         var text = CreateBoxText(box.transform, "Text", Color.white);
 
         var field = box.AddComponent<InputField>();
@@ -1631,6 +1656,50 @@ internal class SettingsPanel : IRootedComponent {
     }
 
     /// <summary>
+    /// Links the controls of the colour of the cloak for a gamepad by hand, up and down from the colours to press to the
+    /// strips and the code. Unity's own choice goes by how far the middle of each control is, and the middle of a strip
+    /// as wide as the row is far from the colours at its left: down from those went past both strips to the code, a box
+    /// that a gamepad can't type into (review of 6f65520). Left and right on a strip, which lead nowhere, move it.
+    /// </summary>
+    /// <param name="pressed">Where the colour chosen is in the row of colours, the cloak's own first: the strip of hues
+    /// goes up to it.</param>
+    private void LinkCloakControls(int pressed) {
+        // Over the colours, the row of the slashes, or of the skin where there are no slashes to choose
+        Selectable overLeft = _slashRow.activeSelf ? _slashBackButton : _skinBackButton;
+        Selectable overRight = _slashRow.activeSelf ? _slashOnButton : _skinOnButton;
+
+        var row = new List<Selectable>(_cloakSwatches.Count + 1) { _cloakOwnButton };
+        foreach (var swatch in _cloakSwatches) {
+            row.Add(swatch.Button);
+        }
+
+        for (var i = 0; i < row.Count; i++) {
+            row[i].navigation = new Navigation {
+                mode = Navigation.Mode.Explicit,
+                selectOnLeft = i > 0 ? row[i - 1] : null,
+                selectOnRight = i < row.Count - 1 ? row[i + 1] : null,
+                selectOnUp = i < row.Count / 2 ? overLeft : overRight,
+                selectOnDown = _hueStrip
+            };
+        }
+
+        _hueStrip.navigation = new Navigation {
+            mode = Navigation.Mode.Explicit,
+            selectOnUp = row[Mathf.Clamp(pressed, 0, row.Count - 1)],
+            selectOnDown = _lightStrip
+        };
+        _lightStrip.navigation = new Navigation {
+            mode = Navigation.Mode.Explicit,
+            selectOnUp = _hueStrip,
+            selectOnDown = _cloakCodeField
+        };
+        _cloakCodeField.navigation = new Navigation {
+            mode = Navigation.Mode.Explicit,
+            selectOnUp = _lightStrip
+        };
+    }
+
+    /// <summary>
     /// Draws the strip of how light the cloak is in its hue and saturation, from black to white, unless it is drawn so.
     /// </summary>
     private void DrawLightStrip() {
@@ -1756,6 +1825,8 @@ internal class SettingsPanel : IRootedComponent {
         if (kept is { } keptColour) {
             FollowColour(keptColour);
         }
+
+        LinkCloakControls(named >= 0 ? named + 1 : 0);
 
         _hueStrip.interactable = _lightStrip.interactable = canChoose;
         _hueStrip.SetValueWithoutNotify(Mathf.Round(_hue * HueSteps));
@@ -1998,8 +2069,8 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>Shows the panel, with the choices of the room as they stand now.</summary>
     public void Show() {
         _activeSelf = true;
-        Refresh();
         GameObject.SetActive(_componentGroup.IsActive());
+        Refresh();
         ShowPreviewWithPage();
     }
 
