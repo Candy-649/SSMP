@@ -123,6 +123,12 @@ internal class SettingsPanel : IRootedComponent {
     private readonly Button _skinBackButton;
     private readonly Button _skinOnButton;
 
+    /// <summary>The row of what this player's slashes are drawn from, hidden where there is no skin to choose.</summary>
+    private readonly GameObject _slashRow;
+
+    /// <summary>The name of what this player's slashes are drawn from.</summary>
+    private readonly Text _slashNameText;
+
     /// <summary>The line beside the colour of the cloak that says which it is, or why there is none.</summary>
     private readonly Text _cloakStatusText;
 
@@ -198,6 +204,15 @@ internal class SettingsPanel : IRootedComponent {
     private const float SectionGap = 14f;
 
     /// <summary>
+    /// Where the rows of the skin's part of the page begin, below its top: the skin, the slashes under it, the note
+    /// that says what they come to, and the colour of the cloak.
+    /// </summary>
+    private const float SkinRowTop = 32f;
+    private const float SlashRowTop = 64f;
+    private const float SkinNoteTop = 96f;
+    private const float CloakLabelTop = 133f;
+
+    /// <summary>
     /// How much room the choices about this player's own name take: a row of switches over a row of colours.
     /// </summary>
     private const float NameSectionHeight = 68f;
@@ -242,6 +257,7 @@ internal class SettingsPanel : IRootedComponent {
         Func<string> username
     ) {
         _modSettings = modSettings;
+        SlashSkin.Start(modSettings);
         _preview = SittingPreview.Create(menu, modSettings, username);
         GameObject = new GameObject("SettingsPanel");
         var rect = GameObject.AddComponent<RectTransform>();
@@ -707,7 +723,7 @@ internal class SettingsPanel : IRootedComponent {
             out _,
             out _
         );
-        PlaceInRow(skinBack, 35f, 28f);
+        PlaceInRow(skinBack, SkinRowTop, 28f);
         _skinBackButton = skinBack.GetComponent<Button>();
 
         _skinNameText = WaitingRoomPanel.CreateLabel(
@@ -717,7 +733,7 @@ internal class SettingsPanel : IRootedComponent {
             new Vector2(0.13f, 1f),
             new Vector2(0.87f, 1f),
             new Vector2(0f, 28f),
-            new Vector2(0f, -35f),
+            new Vector2(0f, -SkinRowTop),
             16,
             Color.white,
             TextAnchor.MiddleCenter
@@ -734,8 +750,70 @@ internal class SettingsPanel : IRootedComponent {
             out _,
             out _
         );
-        PlaceInRow(skinOn, 35f, 28f);
+        PlaceInRow(skinOn, SkinRowTop, 28f);
         _skinOnButton = skinOn.GetComponent<Button>();
+
+        // What the slashes are drawn from, laid out as the skin under it, with its name on the row: the skin worn, the
+        // game's own art, or another skin of Hornet's, whose slashes she wears with the rest of the skin worn
+        _slashRow = new GameObject("SlashRow");
+        var slashRowRect = _slashRow.AddComponent<RectTransform>();
+        slashRowRect.anchorMin = Vector2.zero;
+        slashRowRect.anchorMax = Vector2.one;
+        slashRowRect.offsetMin = Vector2.zero;
+        slashRowRect.offsetMax = Vector2.zero;
+        _slashRow.transform.SetParent(skinArea, false);
+
+        WaitingRoomPanel.CreateLabel(
+            _slashRow.transform,
+            "SlashLabel",
+            Lang.Pick("SLASH", "刀光"),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.20f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -SlashRowTop),
+            14,
+            WaitingRoomPanel.Accent,
+            TextAnchor.MiddleLeft
+        );
+
+        var slashBack = WaitingRoomPanel.CreateButton(
+            _slashRow.transform,
+            "SlashBack",
+            "<",
+            new Vector2(0.20f, 1f),
+            new Vector2(0.30f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => StepSlashes(-1),
+            out _,
+            out _
+        );
+        PlaceInRow(slashBack, SlashRowTop, 28f);
+
+        _slashNameText = WaitingRoomPanel.CreateLabel(
+            _slashRow.transform,
+            "SlashName",
+            "",
+            new Vector2(0.30f, 1f),
+            new Vector2(0.87f, 1f),
+            new Vector2(0f, 28f),
+            new Vector2(0f, -SlashRowTop),
+            15,
+            Color.white,
+            TextAnchor.MiddleCenter
+        );
+
+        var slashOn = WaitingRoomPanel.CreateButton(
+            _slashRow.transform,
+            "SlashOn",
+            ">",
+            new Vector2(0.87f, 1f),
+            new Vector2(0.97f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => StepSlashes(1),
+            out _,
+            out _
+        );
+        PlaceInRow(slashOn, SlashRowTop, 28f);
 
         _skinNoteText = WaitingRoomPanel.CreateLabel(
             skinArea,
@@ -743,8 +821,8 @@ internal class SettingsPanel : IRootedComponent {
             "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, 52f),
-            new Vector2(0f, -67f),
+            new Vector2(0f, CloakLabelTop - 3f - SkinNoteTop),
+            new Vector2(0f, -SkinNoteTop),
             13,
             Muted,
             TextAnchor.UpperLeft
@@ -758,7 +836,7 @@ internal class SettingsPanel : IRootedComponent {
             new Vector2(0.03f, 1f),
             new Vector2(0.40f, 1f),
             new Vector2(0f, 28f),
-            new Vector2(0f, -121f),
+            new Vector2(0f, -CloakLabelTop),
             14,
             WaitingRoomPanel.Accent,
             TextAnchor.MiddleLeft
@@ -771,7 +849,7 @@ internal class SettingsPanel : IRootedComponent {
             new Vector2(0.40f, 1f),
             new Vector2(0.97f, 1f),
             new Vector2(0f, 28f),
-            new Vector2(0f, -121f),
+            new Vector2(0f, -CloakLabelTop),
             13,
             Muted,
             TextAnchor.MiddleRight
@@ -788,7 +866,7 @@ internal class SettingsPanel : IRootedComponent {
             out _cloakOwnImage,
             out _
         );
-        PlaceInRow(cloakOwn, 153f, 28f);
+        PlaceInRow(cloakOwn, CloakLabelTop + 31f, 28f);
         _cloakOwnButton = cloakOwn.GetComponent<Button>();
 
         for (var i = 0; i < CloakColours.Length; i++) {
@@ -808,7 +886,7 @@ internal class SettingsPanel : IRootedComponent {
                 out var swatchImage,
                 out _
             );
-            PlaceInRow(swatch, 153f, 28f);
+            PlaceInRow(swatch, CloakLabelTop + 31f, 28f);
             _cloakSwatches.Add((swatch.GetComponent<Button>(), swatchImage));
         }
 
@@ -818,8 +896,8 @@ internal class SettingsPanel : IRootedComponent {
             "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, RoomSectionHeight - 185f),
-            new Vector2(0f, -185f),
+            new Vector2(0f, RoomSectionHeight - (CloakLabelTop + 63f)),
+            new Vector2(0f, -(CloakLabelTop + 63f)),
             13,
             Muted,
             TextAnchor.UpperLeft
@@ -920,6 +998,38 @@ internal class SettingsPanel : IRootedComponent {
     }
 
     /// <summary>
+    /// Draws this player's slashes from the choice before or after the one taken: the skin worn, the game's own art,
+    /// then each skin of Hornet's.
+    /// </summary>
+    /// <param name="step">One to go to the next, minus one to go back.</param>
+    private void StepSlashes(int step) {
+        if (!OwnSkin.CanChoose) {
+            return;
+        }
+
+        var choices = SlashChoices(out var at);
+        var next = ((at + step) % choices.Count + choices.Count) % choices.Count;
+        SlashSkin.Choose(choices[next]);
+        Refresh();
+    }
+
+    /// <summary>
+    /// What the slashes can be drawn from, as the settings keep each: the skin worn, the game's own art, then each skin
+    /// of Hornet's on this computer; with the place of the one taken, the skin worn when the one taken is not here.
+    /// </summary>
+    private static List<string> SlashChoices(out int taken) {
+        var choices = new List<string> { "", SlashSkin.GameChoice };
+        var packs = SlashSkin.Choices();
+        foreach (var pack in packs) {
+            choices.Add(pack.Name);
+        }
+
+        var chosen = SlashSkin.ChosenPack(packs);
+        taken = SlashSkin.Choice == SlashSkin.GameChoice ? 1 : chosen != null ? 2 + packs.IndexOf(chosen) : 0;
+        return choices;
+    }
+
+    /// <summary>
     /// Has the cloak drawn in the given colour, or in its own for null.
     /// </summary>
     private void ChooseCloak(Color? colour) {
@@ -951,6 +1061,22 @@ internal class SettingsPanel : IRootedComponent {
                 ? Lang.Pick("Putting it on...", "换装中…")
                 : Lang.Pick($"{choices.Count} installed", $"装了 {choices.Count} 个");
 
+        // The slashes, with nothing to choose from where no skin of Hornet's is here; the note then takes their room
+        var slashChoices = canChoose && choices.Count > 0;
+        _slashRow.SetActive(slashChoices);
+        var slashPack = slashChoices ? SlashSkin.ChosenPack(choices) : null;
+        var gameSlashes = slashChoices && SlashSkin.Choice == SlashSkin.GameChoice;
+        _slashNameText.text = slashPack != null
+            ? slashPack.Name
+            : gameSlashes
+                ? Lang.Pick("Game's own", "游戏原版")
+                : Lang.Pick("As the skin", "跟着皮肤");
+
+        var noteTop = slashChoices ? SkinNoteTop : SlashRowTop;
+        var noteRect = _skinNoteText.rectTransform;
+        noteRect.anchoredPosition = new Vector2(0f, -noteTop);
+        noteRect.sizeDelta = new Vector2(0f, CloakLabelTop - 3f - noteTop);
+
         // What it comes to, as the notes of the other choices
         if (!canChoose) {
             _skinNoteText.text = Lang.Pick(
@@ -968,7 +1094,13 @@ internal class SettingsPanel : IRootedComponent {
             _skinNoteText.text = Lang.Pick(
                 $"Several skins are switched on, and Hornet wears \"{current!.Name}\", the first. Choose one here " +
                 "to keep it alone.",
-                $"有几个皮肤同时开着，穿的是排在前面的「{current!.Name}」。在这里选一下，就只开选中的那个。"
+                $"有几个皮肤同时开着，穿的是排在前面的「{current!.Name}」。在这里选一下就只开它。"
+            );
+        } else if (slashPack != null) {
+            _skinNoteText.text = Lang.Pick(
+                "Worn at once, and still the next time the game starts. The other player sees them if they have the " +
+                "same skins.",
+                "选了马上换上，下次开游戏也还是它们。队友也装了这些皮肤，才看得到你穿的。"
             );
         } else {
             _skinNoteText.text = Lang.Pick(

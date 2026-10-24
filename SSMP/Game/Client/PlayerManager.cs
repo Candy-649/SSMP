@@ -180,6 +180,7 @@ internal class PlayerManager : IPlayerManager {
         _netClient = netClient;
 
         _skinManager = new SkinManager(() => _serverSettings.AllowSkins);
+        SlashSkin.Start(modSettings);
 
         _playerData = playerData;
 

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using SSMP.Game.Client.Skin;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -287,6 +288,10 @@ internal static class CopyUtil {
         tk2dSpriteDefinition original,
         Dictionary<object, object> objectDict
     ) {
+        // A slash of the local hero's that draws from art of its own (see SlashSkin) is copied as the game has it, so
+        // that the character of another player draws it as that player wears it
+        var (material, materialInst, uvs) = SlashSkin.Original(original);
+
         var newSpriteDefinition = new tk2dSpriteDefinition {
             name = original.name,
             boundsData = SmartCopyArray(original.boundsData, objectDict),
@@ -295,11 +300,11 @@ internal static class CopyUtil {
             positions = SmartCopyArray(original.positions, objectDict),
             normals = SmartCopyArray(original.normals, objectDict),
             tangents = SmartCopyArray(original.tangents, objectDict),
-            uvs = SmartCopyArray(original.uvs, objectDict),
+            uvs = SmartCopyArray(uvs, objectDict),
             normalizedUvs = SmartCopyArray(original.normalizedUvs, objectDict),
             indices = SmartCopyArray(original.indices, objectDict),
-            material = SmartCopyMaterial(original.material, objectDict),
-            materialInst = SmartCopyMaterial(original.materialInst, objectDict),
+            material = SmartCopyMaterial(material, objectDict),
+            materialInst = SmartCopyMaterial(materialInst, objectDict),
             materialId = original.materialId,
             sourceTextureGUID = original.sourceTextureGUID,
             extractRegion = original.extractRegion,
@@ -333,7 +338,7 @@ internal static class CopyUtil {
     /// <param name="objectDict">Dictionary containing references between objects in the original instance and
     /// the copied instance.</param>
     /// <returns>A copied Material instance.</returns>
-    private static Material? SmartCopyMaterial(Material original, Dictionary<object, object> objectDict) {
+    private static Material? SmartCopyMaterial(Material? original, Dictionary<object, object> objectDict) {
         // First check whether the given material is null, because then we can return null as well
         if (original == null) {
             return null;

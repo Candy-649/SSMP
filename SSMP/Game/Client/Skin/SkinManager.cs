@@ -70,6 +70,10 @@ internal class SkinManager {
         _stopWatchingPlayerColor ??= PlayerColorMod.OnSettingsChanged(() => LocalLookChanged?.Invoke());
         OwnSkin.Changed -= OnOwnSkinChanged;
         OwnSkin.Changed += OnOwnSkinChanged;
+        SlashSkin.Changed -= OnOwnSkinChanged;
+        SlashSkin.Changed += OnOwnSkinChanged;
+        SlashArt.Loaded -= OnSlashArtLoaded;
+        SlashArt.Loaded += OnSlashArtLoaded;
     }
 
     /// <summary>
@@ -79,6 +83,8 @@ internal class SkinManager {
         _stopWatchingPlayerColor?.Invoke();
         _stopWatchingPlayerColor = null;
         OwnSkin.Changed -= OnOwnSkinChanged;
+        SlashSkin.Changed -= OnOwnSkinChanged;
+        SlashArt.Loaded -= OnSlashArtLoaded;
     }
 
     /// <summary>
@@ -106,6 +112,7 @@ internal class SkinManager {
 
         look.PlayerColor = PlayerColorMod.LocalLook();
         look.Unshown.AddRange(SkinModPlugins.Unshown());
+        look.Slash = SlashSkin.LocalLook();
 
         return look.ToString();
     }
@@ -132,22 +139,10 @@ internal class SkinManager {
             return null;
         }
 
+        // Its own library, those of its crests, which it plays from in place of its own, and those of its parts
         var sheets = new HashSet<string>(StringComparer.Ordinal);
-        AddSheetsOf(library, sheets);
-
-        // The libraries of its crests, which it plays from in place of its own
-        foreach (var groups in new[] { hero.configs, hero.specialConfigs }) {
-            if (groups == null) {
-                continue;
-            }
-
-            foreach (var group in groups) {
-                AddSheetsOf(group?.Config != null ? group.Config.heroAnimOverrideLib : null, sheets);
-            }
-        }
-
-        foreach (var part in hero.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
-            AddSheetsOf(part.Library, sheets);
+        foreach (var heroLibrary in SlashPictures.HeroLibraries(hero)) {
+            AddSheetsOf(heroLibrary, sheets);
         }
 
         foreach (var sprite in hero.GetComponentsInChildren<tk2dBaseSprite>(true)) {
@@ -211,6 +206,16 @@ internal class SkinManager {
                     ));
                 }
             }
+        }
+
+        if (look.Slash?.Pack is { } slashes &&
+            CustomizerPacks.Find(CustomizerPacks.FindAll(), slashes) == null) {
+            problems.Add(Lang.Pick(
+                $"{username}'s slashes come from the skin \"{slashes.Name}\", which isn't found on this computer, so " +
+                $"you see them as the rest of what {username} wears.",
+                $"{username} 的刀光用的是皮肤「{slashes.Name}」，你这边没找到这个皮肤，所以你看到的是 {username} " +
+                "身上皮肤自带的刀光。"
+            ));
         }
 
         if (look.PlayerColor != null && !PlayerColorMod.CanDraw) {
@@ -282,6 +287,10 @@ internal class SkinManager {
 
             if (slot.Colored != null) {
                 Object.Destroy(slot.Colored);
+            }
+
+            if (slot.Slashes != null) {
+                Object.Destroy(slot.Slashes);
             }
 
             return true;
@@ -474,8 +483,9 @@ internal class SkinManager {
     /// </summary>
     private void LoadWantedArt() {
         var keep = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var slashPacks = new List<SkinPack>();
 
-        if (_skinsAllowed() && _atlases.Count > 0) {
+        if (_skinsAllowed()) {
             var looks = new List<string>(_wanted);
             foreach (var figure in _figures.Values) {
                 if (figure.Look.Length > 0) {
@@ -485,16 +495,39 @@ internal class SkinManager {
 
             var packs = looks.Count > 0 ? CustomizerPacks.FindAll() : [];
             foreach (var text in looks) {
-                foreach (var wanted in SkinLook.Parse(text).Packs) {
-                    var pack = CustomizerPacks.Find(packs, wanted);
-                    if (pack == null || !keep.Add(pack.Dir)) {
-                        continue;
-                    }
+                var look = SkinLook.Parse(text);
 
-                    ArtOf(pack).Load(_atlases);
+                // The art of the skins worn, once the first character says which atlases there are
+                if (_atlases.Count > 0) {
+                    foreach (var wanted in look.Packs) {
+                        var pack = CustomizerPacks.Find(packs, wanted);
+                        if (pack == null || !keep.Add(pack.Dir)) {
+                            continue;
+                        }
+
+                        ArtOf(pack).Load(_atlases);
+                    }
+                }
+
+                // The skins that the slashes are drawn from, whose slashes are cut up as soon as can be, in the menu too
+                if (look.Slash?.Pack is { } wantedSlashes &&
+                    CustomizerPacks.Find(packs, wantedSlashes) is { } slashPack && !slashPacks.Contains(slashPack)) {
+                    slashPacks.Add(slashPack);
                 }
             }
         }
+
+        if (slashPacks.Count > 0 && !SlashPictures.IsRead) {
+            SlashPictures.ReadSoon(LoadWantedArt);
+        }
+
+        if (SlashPictures.IsRead) {
+            foreach (var slashPack in slashPacks) {
+                SlashArt.Of(slashPack).Load();
+            }
+        }
+
+        var slashesGone = SlashArt.KeepForOthers(slashPacks);
 
         var gone = new List<PackArt>();
         foreach (var art in _art.Values) {
@@ -503,7 +536,7 @@ internal class SkinManager {
             }
         }
 
-        if (gone.Count == 0) {
+        if (gone.Count == 0 && slashesGone.Count == 0) {
             return;
         }
 
@@ -515,7 +548,8 @@ internal class SkinManager {
 
         // A character that still drew with art that is gone, as its skin is no longer there, draws its own again
         foreach (var figure in _figures.Values) {
-            if (figure.Wearing.Exists(art => gone.Contains(art))) {
+            if (figure.Wearing.Exists(art => gone.Contains(art)) ||
+                figure.Slashes != null && slashesGone.Contains(figure.Slashes)) {
                 Draw(figure);
             }
         }
@@ -531,6 +565,17 @@ internal class SkinManager {
         }
 
         return art;
+    }
+
+    /// <summary>
+    /// Dresses the characters again once all the art of the skin of someone's slashes has loaded.
+    /// </summary>
+    private void OnSlashArtLoaded() {
+        foreach (var figure in _figures.Values) {
+            if (figure.Look.Length > 0) {
+                Draw(figure);
+            }
+        }
     }
 
     /// <summary>
@@ -575,6 +620,26 @@ internal class SkinManager {
         }
 
         figure.Wearing = arts;
+
+        // The slashes, drawn from another skin than the rest, or from the game's own art, when the player chose so (see
+        // SlashSkin): until all the art of that skin is in, they are drawn as the rest
+        SlashPackArt? slashArt = null;
+        var gameSlashes = false;
+        if (look.Slash is { } slashes) {
+            if (slashes.Pack is { } wantedSlashes) {
+                var pack = CustomizerPacks.Find(CustomizerPacks.FindAll(), wantedSlashes);
+                if (pack != null && SlashPictures.IsRead) {
+                    var art = SlashArt.Of(pack);
+                    if (art.Load()) {
+                        slashArt = art;
+                    }
+                }
+            } else {
+                gameSlashes = true;
+            }
+        }
+
+        figure.Slashes = slashArt;
 
         var colorShader = look.PlayerColor != null ? PlayerColorMod.Shader : null;
 
@@ -630,6 +695,30 @@ internal class SkinManager {
             }
 
             slot.Sheet.Use(slot.Index, colored);
+
+            // Its slash sprites draw with a material of their own: from the game's own atlas, or from the slashes cut out
+            // of the skin they are drawn from, each at its place there
+            Texture? slashTexture = null;
+            Dictionary<int, Vector2[]>? slashPlaces = null;
+            if (gameSlashes) {
+                slashTexture = slot.Own;
+            } else if (slashArt != null && slot.TextureName.Length > 0 &&
+                       slashArt.Get(slot.SheetName, slot.TextureName) is { } slashAtlas) {
+                slashTexture = slashAtlas.Texture;
+                slashPlaces = slashAtlas.Uvs;
+            }
+
+            var slashSprites = slashTexture != null ? SlashPictures.Of(slot.SheetName) : null;
+            if (slashSprites != null && slot.Materials.Count > 0) {
+                if (slot.Slashes == null) {
+                    slot.Slashes = new Material(slot.Materials[0]) {
+                        name = $"SSMP slashes {slot.SheetName}/{slot.TextureName}"
+                    };
+                }
+
+                slot.Slashes.mainTexture = slashTexture;
+                slot.Sheet.UseSlashes(slot.Index, slashSprites, slot.Slashes, slashPlaces);
+            }
         }
 
         // The sprite takes the material of its frame only when the frame changes; this one shows the change at once
@@ -712,6 +801,11 @@ internal class SkinManager {
         /// </summary>
         public List<PackArt> Wearing = [];
 
+        /// <summary>
+        /// The art of the skin that its slashes are drawn from now, or null for none.
+        /// </summary>
+        public SlashPackArt? Slashes;
+
         public Figure(GameObject figureObject) {
             Object = figureObject;
         }
@@ -738,6 +832,11 @@ internal class SkinManager {
         public readonly Material?[] MaterialInst;
 
         /// <summary>
+        /// Where each sprite sat on its atlas as it was copied, which a slash moved to art of its own takes back.
+        /// </summary>
+        public readonly Vector2[]?[] Uvs;
+
+        /// <summary>
         /// The sprites by the material they draw with.
         /// </summary>
         public readonly Dictionary<int, List<int>> DefinitionsByMaterial = new();
@@ -758,6 +857,7 @@ internal class SkinManager {
             var definitions = copy.spriteDefinitions ?? [];
             Material = new Material?[definitions.Length];
             MaterialInst = new Material?[definitions.Length];
+            Uvs = new Vector2[]?[definitions.Length];
             for (var i = 0; i < definitions.Length; i++) {
                 var definition = definitions[i];
                 if (definition == null) {
@@ -766,6 +866,7 @@ internal class SkinManager {
 
                 Material[i] = definition.material;
                 MaterialInst[i] = definition.materialInst;
+                Uvs[i] = definition.uvs;
                 var materialIndex = definition.material != null && indexOf.TryGetValue(definition.material, out var at)
                     ? at
                     : definition.materialId;
@@ -790,6 +891,43 @@ internal class SkinManager {
                 var definition = definitions[i];
                 definition.material = material != null ? material : Material[i];
                 definition.materialInst = material != null ? material : MaterialInst[i];
+                if (Uvs[i] != null) {
+                    definition.uvs = Uvs[i];
+                }
+            }
+        }
+
+        /// <summary>
+        /// Makes the given slash sprites of the given material draw with the given one (see SlashSkin): at the given
+        /// places on its texture, or for null where they sit on the game's own atlas. A sprite with no place given
+        /// draws as the rest.
+        /// </summary>
+        public void UseSlashes(
+            int materialIndex,
+            HashSet<int> slashes,
+            Material material,
+            Dictionary<int, Vector2[]>? places
+        ) {
+            if (!DefinitionsByMaterial.TryGetValue(materialIndex, out var list)) {
+                return;
+            }
+
+            var definitions = Copy.spriteDefinitions;
+            foreach (var i in list) {
+                if (!slashes.Contains(i)) {
+                    continue;
+                }
+
+                Vector2[]? place = null;
+                if (places != null && !places.TryGetValue(i, out place)) {
+                    continue;
+                }
+
+                definitions[i].material = material;
+                definitions[i].materialInst = material;
+                if (place != null) {
+                    definitions[i].uvs = place;
+                }
             }
         }
     }
@@ -832,6 +970,11 @@ internal class SkinManager {
         /// The material that draws it with Player Color's shader, once one was needed.
         /// </summary>
         public Material? Colored;
+
+        /// <summary>
+        /// The material that draws its slash sprites from the art they are drawn from, once one was needed.
+        /// </summary>
+        public Material? Slashes;
 
         /// <summary>
         /// What it is drawn for, which says whether Player Color's shader draws it.

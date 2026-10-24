@@ -157,6 +157,20 @@ internal class ModSettings : IModSettings {
     }
 
     /// <summary>
+    /// What this player's own slashes are drawn from (Game.Client.Skin.SlashSkin): empty for the skin that Hornet wears,
+    /// "*" for the game's own art, or else the name of the folder of a skin of Silksong Customizer. Only the look of
+    /// this player's own slashes, which the other players see if they have the same skin.
+    /// </summary>
+    public string SlashSkin {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(SlashSkin));
+        }
+    } = "";
+
+    /// <summary>
     /// Set of addon names for addons that are disabled by the user.
     /// </summary>
     // ReSharper disable once AutoPropertyCanBeMadeGetOnly.Global

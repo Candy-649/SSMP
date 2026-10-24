@@ -27,7 +27,7 @@ internal class SittingPreview : MonoBehaviour {
     /// <summary>
     /// The address under which the game loads its hero.
     /// </summary>
-    private const string HeroAddress = "Hero_Hornet";
+    internal const string HeroAddress = "Hero_Hornet";
 
     /// <summary>
     /// The clip of sitting down.

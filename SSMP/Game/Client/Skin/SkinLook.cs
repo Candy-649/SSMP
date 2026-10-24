@@ -33,9 +33,15 @@ internal sealed class SkinLook {
     public List<string> Unshown { get; } = [];
 
     /// <summary>
+    /// What the player's slashes are drawn from when not from the skins they wear (see <see cref="SlashSkin"/>), or
+    /// null to draw them as the rest.
+    /// </summary>
+    public SlashLook? Slash { get; set; }
+
+    /// <summary>
     /// Whether this is the game's own look.
     /// </summary>
-    public bool IsEmpty => Packs.Count == 0 && PlayerColor == null && Unshown.Count == 0;
+    public bool IsEmpty => Packs.Count == 0 && PlayerColor == null && Unshown.Count == 0 && Slash == null;
 
     /// <summary>
     /// The text that this look travels as.
@@ -60,6 +66,14 @@ internal sealed class SkinLook {
 
         foreach (var mod in Unshown) {
             Line("u", mod);
+        }
+
+        if (Slash is { } slash) {
+            if (slash.Pack is { } pack) {
+                Line("s", pack.Name, pack.Fingerprint);
+            } else {
+                Line("s");
+            }
         }
 
         return builder.ToString();
@@ -103,6 +117,11 @@ internal sealed class SkinLook {
                     break;
                 case "u" when fields.Length >= 2 && fields[1].Length > 0:
                     look.Unshown.Add(fields[1]);
+                    break;
+                case "s":
+                    look.Slash = new SlashLook(
+                        fields.Length >= 3 && fields[1].Length > 0 ? new SkinPackRef(fields[1], fields[2]) : null
+                    );
                     break;
             }
         }
