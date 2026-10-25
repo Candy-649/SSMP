@@ -46,9 +46,14 @@ internal partial class CoopSave {
     /// <summary>
     /// The source of the short invulnerability of a player who was just pulled back up, so that the hit that killed
     /// them cannot land again in the same instant on half the health. While it lasts, what the room hurts with takes
-    /// no health either (see <see cref="TryRevive"/>).
+    /// no health either (see <see cref="TryRevive"/>), and the cold does not build up (<see cref="OnTickFrost"/>).
     /// </summary>
     private static readonly object RescueInvulnerability = new();
+
+    /// <summary>
+    /// Whether a player who was just pulled back up is in the short while after it in which nothing builds up on them.
+    /// </summary>
+    private static bool _rescueHoldsBuildup;
 
     /// <summary>
     /// How long that invulnerability lasts, in seconds.
@@ -549,6 +554,30 @@ internal partial class CoopSave {
             typeof(DamageHero).GetMethod("SendHeroDamagedEvent", InstanceFlags, null, Type.EmptyTypes, null),
             new Action<Action<DamageHero>, DamageHero>(OnHurtSourceTold)
         );
+        _frostTickHook = CreateHook(
+            typeof(HeroController).GetMethod("TickFrostEffect", InstanceFlags, null, [typeof(bool)], null),
+            new Action<Action<HeroController, bool>, HeroController, bool>(OnTickFrost)
+        );
+    }
+
+    /// <summary>
+    /// The hook on the cold building up on the player, each frame.
+    /// </summary>
+    private Hook? _frostTickHook;
+
+    /// <summary>
+    /// Keeps the cold from building up on a player in the short while after a rescue, the way the game itself holds it
+    /// while a player binds or is put back at a safe place: where it is cold it neither builds nor bites then, and
+    /// where it is warm it goes down as before. The two seconds that took no health let it fill up all the same, so a
+    /// player pulled up in freezing water froze again a moment after they ended (USER 10-25 "复活掉冰水里和死了貌似没什么
+    /// 区别", "这两秒锁血也不导致任何积蓄条增加"). The cold is the one thing that builds up on a player: maggots and
+    /// poison are on or off.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The hero controller.</param>
+    /// <param name="canTick">Whether the game lets the cold build up this frame.</param>
+    private static void OnTickFrost(Action<HeroController, bool> orig, HeroController self, bool canTick) {
+        orig(self, canTick && !_rescueHoldsBuildup);
     }
 
     /// <summary>
@@ -1964,6 +1993,7 @@ internal partial class CoopSave {
             // hit then goes all the way the game takes it - the dark, the way back to the safe place, the floors
             // that come back with it - without the health. (USER 10-18)
             hero.SetTakeNoDamage();
+            _rescueHoldsBuildup = true;
             MonoBehaviourUtil.Instance.StartCoroutine(EndRescueInvulnerability(hero));
 
             if (!IsHeroTakenByGame(hero)) {
@@ -2145,12 +2175,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Takes the short invulnerability of a rescue away again, and with it the hits of the room that take no health.
+    /// Takes the short invulnerability of a rescue away again, and with it the hits of the room that take no health and
+    /// the hold on the cold.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     private static IEnumerator EndRescueInvulnerability(HeroController hero) {
         yield return new WaitForSeconds(RescueInvulnerabilityTime);
 
+        _rescueHoldsBuildup = false;
         if (hero != null) {
             hero.RemoveInvulnerabilitySource(RescueInvulnerability);
             hero.EndTakeNoDamage();
