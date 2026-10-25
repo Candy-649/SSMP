@@ -195,6 +195,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private DateTime _lastReceiveTime;
 
     /// <summary>
+    /// How long nothing has arrived from the other side, in seconds.
+    /// </summary>
+    public double QuietSeconds => (DateTime.UtcNow - _lastReceiveTime).TotalSeconds;
+
+    /// <summary>
     /// Whether this quiet stretch has already been reported, so that a link which goes quiet says so once rather
     /// than on every pass of the send loop.
     /// </summary>

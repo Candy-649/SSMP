@@ -208,6 +208,24 @@ internal class ClientManager : IClientManager {
     private ulong _hostSteamId;
 
     /// <summary>
+    /// How long nothing may come from the host, after Steam says they left the lobby of the connection, before the game
+    /// they hosted is taken as over, in seconds. Longer than the stalls of Steam's own lock, which has held back what
+    /// arrived for over a second.
+    /// </summary>
+    private const float HostLeftQuietSeconds = 3f;
+
+    /// <summary>
+    /// How long the host's game is watched after Steam says they left, in seconds. A game that went on sending all that
+    /// time is still there, and from then on only the wait for anything to arrive ends it.
+    /// </summary>
+    private const float HostLeftWatchSeconds = 10f;
+
+    /// <summary>
+    /// Whether the host's game is being watched after Steam said they left the lobby of the connection.
+    /// </summary>
+    private bool _watchingHostLeft;
+
+    /// <summary>
     /// The username that was last used to connect with.
     /// </summary>
     private string? _username;
@@ -2235,25 +2253,70 @@ internal class ClientManager : IClientManager {
     /// gone, which their server says in a message of its own as it closes - a message that once never came, while
     /// this game went on as if connected (USER 10-22 "离开并没有正常断开连接"). Steam says so whichever way their game
     /// went, a crash among them.
+    ///
+    /// Not believed on its own, though: Steam once said the host left while her game went on sending and taking
+    /// everything as before, and she never left the lobby (USER 10-25 "明明刚才还有看到我朋友在动，下一秒就断开连接了").
+    /// A game that is gone stops sending, so the game they hosted is over once nothing more comes from it.
     /// </summary>
     /// <param name="lobby">The lobby.</param>
     /// <param name="member">The member who left.</param>
     private void OnLobbyMemberLeft(CSteamID lobby, CSteamID member) {
         if (!_netClient.IsConnected || _hostSteamId == 0 || member.m_SteamID != _hostSteamId ||
-            lobby != _connectionLobby) {
+            lobby != _connectionLobby || _watchingHostLeft) {
             return;
         }
 
-        Logger.Info($"The host ({_hostSteamId}) left the Steam lobby {lobby}, so the game they hosted is over");
-        UiManager.InternalChatBox.AddMessage(Lang.Pick(
-            "You are disconnected from the server (the host left)",
-            "你和服务器断开了（房主离开了）"
-        ));
+        Logger.Info(
+            $"Steam says the host ({_hostSteamId}) left the Steam lobby {lobby}; the game they hosted is taken as " +
+            $"over if nothing comes from them for {HostLeftQuietSeconds:F0}s"
+        );
+        _watchingHostLeft = true;
+        MonoBehaviourUtil.Instance.StartCoroutine(WatchHostAfterLeaving(lobby, _hostSteamId));
+    }
 
-        _uiManager.ReturnToMainMenuFromGame();
+    /// <summary>
+    /// Ends the game joined through a lobby that Steam says its host left, once nothing has come from the host for
+    /// <see cref="HostLeftQuietSeconds"/>, or lets it go on if their game goes on sending.
+    /// </summary>
+    /// <param name="lobby">The lobby.</param>
+    /// <param name="host">The Steam ID of its host.</param>
+    private System.Collections.IEnumerator WatchHostAfterLeaving(CSteamID lobby, ulong host) {
+        var watchUntil = Time.realtimeSinceStartup + HostLeftWatchSeconds;
+        try {
+            while (Time.realtimeSinceStartup < watchUntil) {
+                // Ended some other way meanwhile, like by the goodbye of the host's server
+                if (!_netClient.IsConnected || _hostSteamId != host || _connectionLobby != lobby) {
+                    yield break;
+                }
 
-        // As for a server that closes: the host's game knows already
-        InternalDisconnect();
+                var quiet = _netClient.UpdateManager.QuietSeconds;
+                if (quiet >= HostLeftQuietSeconds) {
+                    Logger.Info(
+                        $"Nothing has come from the host for {quiet:F1}s since Steam said they left the Steam lobby " +
+                        $"{lobby}, so the game they hosted is over"
+                    );
+                    UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                        "You are disconnected from the server (the host left)",
+                        "你和服务器断开了（房主离开了）"
+                    ));
+
+                    _uiManager.ReturnToMainMenuFromGame();
+
+                    // As for a server that closes: the host's game knows already
+                    InternalDisconnect();
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            Logger.Info(
+                $"Steam said the host left the Steam lobby {lobby}, but their game went on sending for " +
+                $"{HostLeftWatchSeconds:F0}s, so this game goes on with it"
+            );
+        } finally {
+            _watchingHostLeft = false;
+        }
     }
 
     /// <summary>
