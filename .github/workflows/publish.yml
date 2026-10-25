@@ -1,0 +1,96 @@
+name: Publish to npm
+
+# Publishes a version of the npm package when its tag, v<version>, is pushed, which installer/release-npm.ps1 does:
+# GitHub builds the plugin from the tagged commit, stages the package with installer/pack-npm.ps1 as the release PC
+# does, publishes it with npm's trusted publishing, and has the mainland mirror copy it. npm takes the publish from
+# this workflow of this repository alone (OIDC), so no login, token or 2FA prompt is needed anywhere: the package's
+# settings on npmjs.com name Candy-649 / SSMP / publish.yml as its trusted publisher, with npm publish allowed
+# (USER 10-25: "这个npm login还有老是要让我打开网页认证好烦啊"). A version that npm has already, like one published
+# by hand before the GitHub release made its tag, is left alone.
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+
+permissions:
+  contents: read
+  # The short-lived token that npm's trusted publishing takes in place of a login
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+
+    steps:
+      # The repository keeps LF; the package's batch files and texts are CRLF, as on the PC that packs by hand
+      - name: Line endings
+        run: git config --global core.autocrlf true
+
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Look for the version on npm
+        id: npm
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.Substring(1)
+          $there = $null
+          try {
+            $there = (Invoke-RestMethod "https://registry.npmjs.org/silksong-coop-mod/$version" -TimeoutSec 30).version
+          } catch { }
+          if ($there -eq $version) {
+            Write-Host "silksong-coop-mod@$version is on npm already, so there is nothing to publish"
+            "published=true" >> $env:GITHUB_OUTPUT
+          } else {
+            "published=false" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Setup .NET
+        if: steps.npm.outputs.published == 'false'
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 9.x
+
+      - name: Setup Node
+        if: steps.npm.outputs.published == 'false'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Trusted publishing needs npm 11.5.1 or later
+      - name: Update npm
+        if: steps.npm.outputs.published == 'false'
+        run: npm install -g npm@11
+
+      # BepInEx's own release archive, which pack-npm.ps1 checks against the hash it pins
+      - name: Fetch the BepInEx loader
+        if: steps.npm.outputs.published == 'false'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist-assets | Out-Null
+          Invoke-WebRequest 'https://github.com/BepInEx/BepInEx/releases/download/v5.4.23.4/BepInEx_win_x64_5.4.23.4.zip' -OutFile 'dist-assets/BepInEx_win_x64_5.4.23.4.zip'
+
+      - name: Stage the package
+        if: steps.npm.outputs.published == 'false'
+        shell: pwsh
+        run: ./installer/pack-npm.ps1
+
+      - name: Check the staged version against the tag
+        if: steps.npm.outputs.published == 'false'
+        shell: pwsh
+        run: |
+          $version = (Get-Content dist-npm/package.json -Raw | ConvertFrom-Json).version
+          if ("v$version" -ne '${{ github.ref_name }}') {
+            throw "The tag is ${{ github.ref_name }}, but the staged package is $version"
+          }
+
+      - name: Publish
+        if: steps.npm.outputs.published == 'false'
+        working-directory: dist-npm
+        run: npm publish --access public
+
+      - name: Have the mainland mirror copy it
+        if: steps.npm.outputs.published == 'false'
+        shell: pwsh
+        run: ./installer/sync-mirror.ps1
