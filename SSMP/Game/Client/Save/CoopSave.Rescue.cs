@@ -1097,18 +1097,15 @@ internal partial class CoopSave {
 
             // Every press of the pad button is written down as it happens, whatever comes of it. A wait that ended
             // with no line in it could not be told apart from a player who never pressed anything, and a player who
-            // pressed the way out and was not let out cannot tell us whether the press never reached the game,
-            // arrived while the chat had the keys, or came too early to count.
+            // pressed the way out and was not let out cannot tell us whether the press never reached the game or came
+            // too early to count. The chat no longer takes it: the gamepad goes on playing while the chat is open,
+            // and only the keyboard types into it (see ChatHeldKeys).
             var padButtonDown = IsPadButtonDown(_modSettings.Keybinds.CoopLeave, out var pad);
             if (padButtonDown && !padButtonWasDown) {
                 var into = Time.unscaledTime - waiting.StartTime;
                 Logger.Info(
                     $"The pad button that gives up on the wait went down on '{pad}' {into:0.0}s into it, " +
-                    (!_modSettings.Keybinds.Enabled
-                        ? "while the chat has the keys of this mod switched off"
-                        : into < LeaveKeyDeadTime
-                            ? "too early into the wait to count"
-                            : "with the keys of this mod listening")
+                    (into < LeaveKeyDeadTime ? "too early into the wait to count" : "with the keys of this mod listening")
                 );
             }
 

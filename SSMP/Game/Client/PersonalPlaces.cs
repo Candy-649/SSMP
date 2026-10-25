@@ -59,9 +59,9 @@ internal static class PersonalPlaces {
         "crumble_plat_peak_",
         "memory_ground_plat",
 
-        // The death of one shows in the others' games, where theirs stays (see CoopHits.DeathLooks): the flies of the
-        // lava race (see ThingRooms), and the drifting flies of the snowy peaks, of 4 health, which fly back in about
-        // 3 s after they die (USER 10-24, "雪山那里那种小飞虫也不要共享了")
+        // The flies of the lava race (see ThingRooms), and the drifting flies of the snowy peaks, of 4 health, which
+        // fly back in about 3 s after they die (USER 10-24, "雪山那里那种小飞虫也不要共享了"). The partner's killing
+        // theirs shows nothing here (USER 10-25, the look of it shown on this game's own was taken out: "删掉吧")
         "Bone Goomba Bounce Fly",
         "Peaks Drifter",
 
@@ -116,6 +116,33 @@ internal static class PersonalPlaces {
     /// The objects of the room being looked through.
     /// </summary>
     private static readonly List<Transform> Parts = [];
+
+    /// <summary>
+    /// A thing that a player strikes (one of <see cref="Things"/> with health: a fly or a crystal creature), with where
+    /// it was as its room was looked through, before anything in the room had moved.
+    /// </summary>
+    public readonly struct StruckThing {
+        /// <summary>
+        /// The thing.
+        /// </summary>
+        public readonly GameObject Thing;
+
+        /// <summary>
+        /// Where it was as its room was looked through.
+        /// </summary>
+        public readonly Vector3 Start;
+
+        public StruckThing(GameObject thing, Vector3 start) {
+            Thing = thing;
+            Start = start;
+        }
+    }
+
+    /// <summary>
+    /// The things of the loaded rooms that a player strikes, by the handle of the room (see <see cref="StruckThing"/>),
+    /// for HarpoonWatch to say where they were.
+    /// </summary>
+    private static readonly Dictionary<int, List<StruckThing>> StruckThings = [];
 
     static PersonalPlaces() {
         // A room is looked through as it loads, before its things have started. One that was loaded before anything
@@ -227,6 +254,30 @@ internal static class PersonalPlaces {
     }
 
     /// <summary>
+    /// Finds the things of the loaded rooms that a player strikes (see <see cref="StruckThing"/>) that are near a point
+    /// now, or were as their room loaded: one that died is put far away until it comes back.
+    /// </summary>
+    /// <param name="at">The point.</param>
+    /// <param name="distance">How near.</param>
+    /// <param name="into">The list to fill, emptied first.</param>
+    public static void FindStruckThingsNear(Vector2 at, float distance, List<StruckThing> into) {
+        into.Clear();
+        var most = distance * distance;
+        foreach (var things in StruckThings.Values) {
+            foreach (var thing in things) {
+                if (thing.Thing == null) {
+                    continue;
+                }
+
+                if (((Vector2) thing.Thing.transform.position - at).sqrMagnitude <= most ||
+                    ((Vector2) thing.Start - at).sqrMagnitude <= most) {
+                    into.Add(thing);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// Takes down what is in the places and things of a room, once per loaded room.
     /// </summary>
     private static void LookThrough(Scene scene) {
@@ -272,8 +323,17 @@ internal static class PersonalPlaces {
 
             top.GetComponentsInChildren(true, Parts);
             foreach (var part in Parts) {
-                if (IsThing(part.name, room)) {
-                    TakeDown(part, takenDown, null, true);
+                if (!IsThing(part.name, room)) {
+                    continue;
+                }
+
+                TakeDown(part, takenDown, null, true);
+                if (part.TryGetComponent<HealthManager>(out _)) {
+                    if (!StruckThings.TryGetValue(scene.handle, out var struck)) {
+                        StruckThings[scene.handle] = struck = [];
+                    }
+
+                    struck.Add(new StruckThing(part.gameObject, part.position));
                 }
             }
         }
@@ -326,6 +386,7 @@ internal static class PersonalPlaces {
     /// </summary>
     private static void Forget(Scene scene) {
         PlaceParts.Remove(scene.handle);
+        StruckThings.Remove(scene.handle);
         if (!LookedThrough.TryGetValue(scene.handle, out var takenDown)) {
             return;
         }

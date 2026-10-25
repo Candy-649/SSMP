@@ -532,7 +532,6 @@ internal partial class CoopHits {
 
         RegisterThrownHooks();
         RegisterBounceHooks();
-        RegisterDeathLookHooks();
         RegisterSignalHooks();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += WatchKnocks;
     }
@@ -656,8 +655,9 @@ internal partial class CoopHits {
             return;
         }
 
+        // The death of a creature that each player has to themselves, which games of 0.4.121 to 0.4.130 still send:
+        // nothing of it is shown any more (USER 10-25, "这个播一下死掉的样子貌似也没有在正常工作，删掉吧")
         if (update.Kind == CoopHitKind.DeathLook) {
-            ShowDeathLook(update);
             return;
         }
 
@@ -1046,7 +1046,7 @@ internal partial class CoopHits {
         }
 
         // Nor one that each player has to themselves, like a fly to bounce off: the partner's is in their game, and
-        // its death shows here as it looked (see ShowDeathLook)
+        // nothing of what they do to it shows here
         if (isRemote && responder is Component personal && PersonalPlaces.Contains(personal.gameObject)) {
             return IHitResponder.Response.None;
         }

@@ -232,8 +232,10 @@ internal enum CoopHitKind : byte {
 
     /// <summary>
     /// A creature of the room that each player has to themselves (see PersonalPlaces), found by its path, that died in
-    /// the sender's game, whose death the other game shows on its own creature, which stays as it is there.
+    /// the sender's game, whose death the other game showed on its own creature, which stayed as it was there.
     /// <see cref="CoopHitUpdate.Hit"/> holds the way its body was flung. Appended at the end, like the ones before.
+    /// Sent by 0.4.121 to 0.4.130 only: since 0.4.131 nothing sends it, and one that comes is left alone (USER 10-25,
+    /// "这个播一下死掉的样子貌似也没有在正常工作，删掉吧"). Kept so that what a game of those versions sends still reads.
     /// </summary>
     DeathLook
 }

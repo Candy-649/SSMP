@@ -137,6 +137,10 @@ internal class ChatBox : IChatBox {
         // cutscene without skipping it.
         HookCutsceneInput("CutsceneInput");
         HookCutsceneInput("StagCutsceneInput");
+
+        // While the chat is open the keyboard types into it and the gamepad goes on playing, and what was held as it
+        // opened stays held (see ChatHeldKeys)
+        ChatHeldKeys.Register();
     }
 
     /// <summary>
@@ -256,8 +260,9 @@ internal class ChatBox : IChatBox {
     /// </summary>
     /// <returns>True if the chat can be opened, otherwise false.</returns>
     private bool CanOpenChat() {
+        // A charging needle used to keep it shut, as switching off every key let go of the charge and loosed it. The
+        // attack key held for it now stays held while the chat is open (see ChatHeldKeys), so the charge keeps
         if (!IsGameStateValid()) return false;
-        if (IsHeroCharging()) return false;
         if (IsInventoryOpen()) return false;
         if (IsGodHomeMenuOpen()) return false;
         if (IsAnyInputFieldFocused()) return false;
@@ -287,15 +292,6 @@ internal class ChatBox : IChatBox {
     }
 
     /// <summary>
-    /// Check whether the hero (Hornet) is charging their nail (Needle).
-    /// </summary>
-    /// <returns>True if the hero is charging their nail, otherwise false.</returns>
-    private static bool IsHeroCharging() {
-        var hero = HeroController.instance;
-        return hero != null && hero.cState.nailCharging;
-    }
-
-    /// <summary>
     /// Check whether any input field is currently focused.
     /// </summary>
     /// <returns>True if any input field is focused, otherwise false.</returns>
@@ -322,13 +318,14 @@ internal class ChatBox : IChatBox {
 
         InputHandler.Instance.StopMouseInput();
         InputHandler.Instance.PreventPause();
-        SetEnabledHeroActions(false);
+        SetEnabledMenuActions(false);
 
-        // The keys of this mod are switched off for the same reason the game's own actions are: a letter typed into
-        // the chat is otherwise also a key press. Typing "ok" pressed the key that gives up on being pulled back up
-        // after a death, and a "j" asked the other player for a two-player save. Switching off the whole set rather
-        // than the two keys by name means a key added later cannot be forgotten here.
-        _modSettings.Keybinds.Enabled = false;
+        // The keyboard presses no key of the game or of this mod while it types into the chat, as a letter typed into
+        // it would otherwise also be a key press: typing "ok" pressed the key that gives up on being pulled back up
+        // after a death, and a "j" asked the other player for a two-player save. Every key of the keyboard is left
+        // out, so that a key added later cannot be forgotten here. The gamepad, which types nothing, goes on playing,
+        // and what was held as the chat opened stays held until it closes (see ChatHeldKeys)
+        ChatHeldKeys.Open(InputHandler.Instance.inputActions);
     }
 
     /// <summary>
@@ -346,8 +343,8 @@ internal class ChatBox : IChatBox {
         InputHandler.Instance.EnableMouseInput();
         InputHandler.Instance.inputActions.Pause.ClearInputState();
         InputHandler.Instance.AllowPause();
-        SetEnabledHeroActions(true);
-        _modSettings.Keybinds.Enabled = true;
+        SetEnabledMenuActions(true);
+        ChatHeldKeys.Close();
     }
 
     /// <summary>
@@ -857,37 +854,20 @@ internal class ChatBox : IChatBox {
     #region Game State Checks
 
     /// <summary>
-    /// Set the 'Enabled' property of hero actions. This is used to ensure that input is completely disabled during
-    /// chat text input.
+    /// Switches the game's actions that move through menus or open the backpack on or off, on the keyboard and the
+    /// gamepad alike: off while the chat is open, so that nothing opens over it. The actions that play the game stay on
+    /// (see ChatHeldKeys).
     /// </summary>
     /// <param name="enabled">Whether the actions should be enabled or not.</param>
-    private static void SetEnabledHeroActions(bool enabled) {
+    private static void SetEnabledMenuActions(bool enabled) {
         var inputHandler = InputHandler.Instance;
         if (inputHandler?.inputActions == null) return;
 
         var actions = inputHandler.inputActions;
-        actions.Left.Enabled = enabled;
-        actions.Right.Enabled = enabled;
-        actions.Up.Enabled = enabled;
-        actions.Down.Enabled = enabled;
         actions.MenuSubmit.Enabled = enabled;
         actions.MenuCancel.Enabled = enabled;
         actions.MenuExtra.enabled = enabled;
         actions.MenuSuper.enabled = enabled;
-        actions.RsUp.Enabled = enabled;
-        actions.RsDown.Enabled = enabled;
-        actions.RsLeft.Enabled = enabled;
-        actions.RsRight.Enabled = enabled;
-        actions.Jump.Enabled = enabled;
-        actions.Evade.Enabled = enabled;
-        actions.Dash.Enabled = enabled;
-        actions.SuperDash.Enabled = enabled;
-        actions.DreamNail.Enabled = enabled;
-        actions.Attack.Enabled = enabled;
-        actions.Cast.Enabled = enabled;
-        actions.QuickMap.Enabled = enabled;
-        actions.QuickCast.Enabled = enabled;
-        actions.Taunt.Enabled = enabled;
         actions.PaneRight.Enabled = enabled;
         actions.PaneLeft.Enabled = enabled;
         actions.OpenInventory.Enabled = enabled;
