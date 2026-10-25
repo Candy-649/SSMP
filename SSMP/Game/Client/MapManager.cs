@@ -366,7 +366,7 @@ internal class MapManager : IMapManager {
             return;
         }
 
-        var colour = PlayerManager.OwnNameColour(_modSettings);
+        var colour = PlayerManager.OwnOutlineColour(_modSettings);
 
         if (_ownOutline != null && _ownOutline.transform.parent == head.transform) {
             _ownOutline.SetColour(colour);

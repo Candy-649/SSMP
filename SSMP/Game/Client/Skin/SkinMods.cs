@@ -335,9 +335,46 @@ internal static class PlayerColorMod {
     /// The colour that Player Color draws the player's own cloak in, or null while it leaves the cloak in its own.
     /// </summary>
     public static Color? ChosenColour() {
-        var use = Setting<bool>("UseOverrideMaterial");
-        var colour = Setting<Color>("Color2");
-        return use is { Value: true } && colour != null ? colour.Value : null;
+        return FindColourSettings() && _useSetting!.Value ? _colourSetting!.Value : null;
+    }
+
+    /// <summary>
+    /// Whether Player Color has made its settings of the cloak's colour, which a colour for it is chosen in: not while
+    /// it isn't installed, nor where it stopped loading before it made them.
+    /// </summary>
+    public static bool HasColourSettings => FindColourSettings();
+
+    /// <summary>
+    /// Player Color's settings of whether it draws the player's own cloak in a colour and of that colour, once found,
+    /// and when to look for them again while they aren't, in unscaled time.
+    /// </summary>
+    private static ConfigEntry<bool>? _useSetting;
+    private static ConfigEntry<Color>? _colourSetting;
+    private static float _lookForSettingsAt;
+
+    /// <summary>
+    /// Finds Player Color's settings of the cloak's colour, which it makes once, and keeps them, as the outline of the
+    /// player's own hero asks for the colour at every frame (see PlayerManager.OwnOutlineColour). Until they are made,
+    /// they are looked for at most once a second.
+    /// </summary>
+    /// <returns>Whether both were found.</returns>
+    private static bool FindColourSettings() {
+        if (_useSetting != null && _colourSetting != null) {
+            return true;
+        }
+
+        if (Time.unscaledTime < _lookForSettingsAt) {
+            return false;
+        }
+
+        _useSetting ??= Setting<bool>("UseOverrideMaterial");
+        _colourSetting ??= Setting<Color>("Color2");
+        if (_useSetting != null && _colourSetting != null) {
+            return true;
+        }
+
+        _lookForSettingsAt = Time.unscaledTime + 1f;
+        return false;
     }
 
     /// <summary>

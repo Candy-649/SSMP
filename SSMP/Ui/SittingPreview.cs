@@ -189,7 +189,7 @@ internal class SittingPreview : MonoBehaviour {
         }
 
         if (_outline != null) {
-            _outline.SetColour(PlayerManager.OwnNameColour(_modSettings));
+            _outline.SetColour(PlayerManager.OwnOutlineColour(_modSettings));
             _outline.SetLit(_modSettings.OutlineOwnHeroInFights);
         }
     }
@@ -234,6 +234,11 @@ internal class SittingPreview : MonoBehaviour {
                 ShowName(username);
             }
         }
+
+        // Her outline may follow the colour of the cloak, which is chosen on the page while she sits there
+        if (_outline != null) {
+            _outline.SetColour(PlayerManager.OwnOutlineColour(_modSettings));
+        }
     }
 
     /// <summary>
@@ -270,7 +275,7 @@ internal class SittingPreview : MonoBehaviour {
         animator.AnimationCompleted = (sitting, _) => sitting.Play(RestClips[Random.Range(0, RestClips.Length)]);
         animator.Play(SitClip);
 
-        _outline = OwnFigureOutline.Attach(figure, PlayerManager.OwnNameColour(_modSettings), Reach);
+        _outline = OwnFigureOutline.Attach(figure, PlayerManager.OwnOutlineColour(_modSettings), Reach);
 
         _name = PlayerManager.CreateUsername(_rig).GetComponent<TextMeshPro>();
         ShowName(_username());

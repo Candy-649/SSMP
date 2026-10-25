@@ -100,6 +100,18 @@ internal class PlayerManager : IPlayerManager {
         OwnNameColours.TryGetValue(modSettings.OwnNameColour ?? "", out var colour) ? colour : OwnNameColours["yellow"];
 
     /// <summary>
+    /// The colour of this player's own outlines, of their head on the map and of their hero in fights: the colour that
+    /// they chose for their cloak in Player Color, where they chose to follow it and didn't keep the cloak's own - also
+    /// while a skin keeps the cloak from showing it - or else the colour of their name.
+    /// </summary>
+    /// <param name="modSettings">The settings of this machine.</param>
+    /// <returns>The colour.</returns>
+    internal static Color OwnOutlineColour(ModSettings modSettings) =>
+        modSettings.OutlineInCloakColour && Skin.PlayerColorMod.ChosenColour() is { } cloak
+            ? new Color(cloak.r, cloak.g, cloak.b, 1f)
+            : OwnNameColour(modSettings);
+
+    /// <summary>
     /// How wide the black edge around a name is normally, and how wide it is when the name is drawn heavier.
     ///
     /// The edge does more than the weight of the letters does: the font is a thin one, and against a busy dark

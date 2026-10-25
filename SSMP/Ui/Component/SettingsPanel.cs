@@ -90,6 +90,29 @@ internal class SettingsPanel : IRootedComponent {
     /// <summary>The label of the button of the outline in a fight.</summary>
     private readonly Text _fightOutlineText;
 
+    /// <summary>
+    /// The button that has the outlines take the colour of the cloak, shown only where Player Color is installed.
+    /// </summary>
+    private readonly GameObject _outlineCloakButton;
+
+    /// <summary>The background of the button that has the outlines take the colour of the cloak.</summary>
+    private readonly Image _outlineCloakImage;
+
+    /// <summary>The label of the button that has the outlines take the colour of the cloak.</summary>
+    private readonly Text _outlineCloakText;
+
+    /// <summary>The note under the outline buttons, which says what they outline and in what colour.</summary>
+    private readonly Text _outlineNoteText;
+
+    /// <summary>
+    /// The page of this player's own choices, which scrolls down where it is taller than the panel, and the boxes of
+    /// the outlines and of enemies on it, laid out as the outlines take a row more or less (see
+    /// <see cref="LayOutOwnPage"/>).
+    /// </summary>
+    private readonly RectTransform _ownContent;
+    private readonly RectTransform _mapArea;
+    private readonly RectTransform _enemyArea;
+
     /// <summary>This player's Hornet, who sits on the bottom of the menu while this page is open.</summary>
     private readonly SittingPreview _preview;
 
@@ -291,9 +314,15 @@ internal class SettingsPanel : IRootedComponent {
     private const float NameSectionHeight = 68f;
 
     /// <summary>
-    /// How much room the choices about outlines take: two switches over a line or two saying what they do.
+    /// How much room the choices about outlines take: two switches over a line or two saying what they do, and with
+    /// Player Color installed a row of <see cref="OutlineRowStep"/> more, for the switch of the cloak's colour.
     /// </summary>
     private const float MapSectionHeight = 74f;
+
+    /// <summary>
+    /// How far each row of switches of the outlines lies below the one above it.
+    /// </summary>
+    private const float OutlineRowStep = 34f;
 
     /// <summary>
     /// How much room the choices about enemies take: a switch over a line or two saying what it does.
@@ -392,8 +421,13 @@ internal class SettingsPanel : IRootedComponent {
         );
         PlaceInRow(roomTab, HeaderHeight + 1f, NoteHeight - 2f);
 
-        var nameArea = CreateSection("NameSettings", HeaderHeight + NoteHeight + SectionGap, NameSectionHeight);
-        _ownSections.Add(nameArea.gameObject);
+        // This player's own choices, on a part that scrolls down where it is taller than the page, as the outlines take
+        // a row more where the colour of the cloak can be followed (USER 10-24: "放不下就滚动向下呐")
+        var ownArea = CreateSection("OwnSettings", HeaderHeight + NoteHeight + SectionGap, RoomSectionHeight);
+        _ownSections.Add(ownArea.gameObject);
+        _ownContent = CreateScrollingPage(ownArea);
+
+        var nameArea = CreateSection("NameSettings", 0f, NameSectionHeight, _ownContent);
 
         WaitingRoomPanel.CreateLabel(
             nameArea,
@@ -483,12 +517,8 @@ internal class SettingsPanel : IRootedComponent {
             _swatches[colourName] = swatch;
         }
 
-        var mapArea = CreateSection(
-            "MapSettings",
-            HeaderHeight + NoteHeight + SectionGap + NameSectionHeight + SectionGap,
-            MapSectionHeight
-        );
-        _ownSections.Add(mapArea.gameObject);
+        var mapArea = CreateSection("MapSettings", NameSectionHeight + SectionGap, MapSectionHeight, _ownContent);
+        _mapArea = (RectTransform) mapArea;
 
         WaitingRoomPanel.CreateLabel(
             mapArea,
@@ -539,18 +569,34 @@ internal class SettingsPanel : IRootedComponent {
         );
         PlaceInRow(fightOutlineButton, 1f, 28f);
 
-        WaitingRoomPanel.CreateLabel(
+        // A row under them, where Player Color is installed: the outlines may take the colour that it gives the
+        // cloak (USER 10-25: "加一个按钮在高光这里，如果玩家装了player color这个mod，就显示这个按钮")
+        _outlineCloakButton = WaitingRoomPanel.CreateButton(
+            mapArea,
+            "OutlineCloakButton",
+            "",
+            new Vector2(0.32f, 1f),
+            new Vector2(0.97f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => {
+                _modSettings.OutlineInCloakColour = !_modSettings.OutlineInCloakColour;
+                _modSettings.Save();
+                Refresh();
+            },
+            out _outlineCloakImage,
+            out _outlineCloakText
+        );
+        PlaceInRow(_outlineCloakButton, OutlineRowStep + 1f, 28f);
+
+        // Placed as the page is laid out, under the one row of buttons or the two
+        _outlineNoteText = WaitingRoomPanel.CreateLabel(
             mapArea,
             "OutlineNote",
-            Lang.Pick(
-                "In the colour above: your map head (with the compass) and your Hornet in fights beside the other " +
-                "player.",
-                "用上面选的颜色：戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
-            ),
+            "",
             new Vector2(0.03f, 1f),
             new Vector2(0.97f, 1f),
-            new Vector2(0f, MapSectionHeight - 34f),
-            new Vector2(0f, -34f),
+            new Vector2(0f, MapSectionHeight - OutlineRowStep),
+            new Vector2(0f, -OutlineRowStep),
             13,
             Muted,
             TextAnchor.UpperLeft
@@ -558,10 +604,11 @@ internal class SettingsPanel : IRootedComponent {
 
         var enemyArea = CreateSection(
             "EnemySettings",
-            HeaderHeight + NoteHeight + SectionGap + NameSectionHeight + SectionGap + MapSectionHeight + SectionGap,
-            EnemySectionHeight
+            NameSectionHeight + SectionGap + MapSectionHeight + SectionGap,
+            EnemySectionHeight,
+            _ownContent
         );
-        _ownSections.Add(enemyArea.gameObject);
+        _enemyArea = (RectTransform) enemyArea;
 
         WaitingRoomPanel.CreateLabel(
             enemyArea,
@@ -1088,10 +1135,11 @@ internal class SettingsPanel : IRootedComponent {
     /// Makes the box that one group of choices is laid out in, across the panel at the given depth from its top.
     /// </summary>
     /// <param name="name">The name of the box.</param>
-    /// <param name="top">How far below the top of the panel the box begins.</param>
+    /// <param name="top">How far below the top of the panel, or of the page it goes on, the box begins.</param>
     /// <param name="height">How tall the box is.</param>
+    /// <param name="page">The page that it goes on, or null for the panel itself.</param>
     /// <returns>The transform to put the choices under.</returns>
-    private Transform CreateSection(string name, float top, float height) {
+    private Transform CreateSection(string name, float top, float height, Transform? page = null) {
         var section = new GameObject(name);
         var sectionRect = section.AddComponent<RectTransform>();
         sectionRect.anchorMin = new Vector2(0f, 1f);
@@ -1099,9 +1147,32 @@ internal class SettingsPanel : IRootedComponent {
         sectionRect.pivot = new Vector2(0.5f, 1f);
         sectionRect.anchoredPosition = new Vector2(0f, -top);
         sectionRect.sizeDelta = new Vector2(0f, height);
-        section.transform.SetParent(GameObject.transform, false);
+        section.transform.SetParent(page != null ? page : GameObject.transform, false);
 
         return section.transform;
+    }
+
+    /// <summary>
+    /// Lays the page of this player's own choices out: the switch of the cloak's colour under the outline switches
+    /// only where Player Color is installed, the note of the outlines as tall as its text under the switches, the box
+    /// of enemies under it, and the page as tall as all of them, which scrolls where that is taller than the panel.
+    /// </summary>
+    /// <param name="cloakShown">Whether the switch of the cloak's colour shows.</param>
+    private void LayOutOwnPage(bool cloakShown) {
+        _outlineCloakButton.SetActive(cloakShown);
+
+        var noteTop = cloakShown ? 2f * OutlineRowStep : OutlineRowStep;
+        var noteHeight = NoteHeightOf(_outlineNoteText);
+        var note = _outlineNoteText.rectTransform;
+        note.anchoredPosition = new Vector2(note.anchoredPosition.x, -noteTop);
+        note.sizeDelta = new Vector2(note.sizeDelta.x, noteHeight);
+
+        var mapHeight = Mathf.Max(MapSectionHeight, noteTop + noteHeight);
+        _mapArea.sizeDelta = new Vector2(_mapArea.sizeDelta.x, mapHeight);
+
+        var enemyTop = NameSectionHeight + SectionGap + mapHeight + SectionGap;
+        _enemyArea.anchoredPosition = new Vector2(_enemyArea.anchoredPosition.x, -enemyTop);
+        _ownContent.sizeDelta = new Vector2(0f, enemyTop + EnemySectionHeight);
     }
 
     /// <summary>
@@ -1889,9 +1960,13 @@ internal class SettingsPanel : IRootedComponent {
                 "没放在 BepInEx\\plugins\\PlayerColor 文件夹里。"
             );
         } else if (wearingSkin) {
+            // The author on this note too, which is the one that a player who wears a skin sees (USER 10-25: "某个版本
+            // 开始player color的原作者名字没了")
             _cloakNoteText.text = Lang.Pick(
-                "A skin keeps its own colours. The colour chosen shows on the game's own look, and is kept for it.",
-                "穿着皮肤时斗篷不变色，换回“原样”才看得到；选的颜色会留着。"
+                "A skin keeps its own colours. The colour chosen shows on the game's own look, and is kept for it. " +
+                "The colour is drawn by another mod, Player Color by PDE26jjk.",
+                "穿着皮肤时斗篷不变色，换回“原样”才看得到；选的颜色会留着。颜色由另一个模组 Player Color（作者 " +
+                "PDE26jjk）来画。"
             );
         } else {
             _cloakNoteText.text = Lang.Pick(
@@ -2012,6 +2087,39 @@ internal class SettingsPanel : IRootedComponent {
             ? Lang.Pick("FIGHTS: ON", "战斗中：开")
             : Lang.Pick("FIGHTS: OFF", "战斗中：关");
 
+        // The outlines in the colour chosen for the cloak, where Player Color is installed and has made its settings,
+        // which they keep the name's colour for while the cloak keeps its own; whose mod that is goes on the note, as it
+        // isn't this one
+        var cloakShown = PlayerColorMod.HasColourSettings;
+        var inCloak = cloakShown && _modSettings.OutlineInCloakColour;
+        _outlineCloakImage.color = inCloak ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+        _outlineCloakText.text = inCloak
+            ? Lang.Pick("CLOAK'S COLOUR: ON", "跟斗篷同色：开")
+            : Lang.Pick("CLOAK'S COLOUR: OFF", "跟斗篷同色：关");
+        var outlinesInCloak = inCloak && PlayerColorMod.ChosenColour() != null;
+        _outlineNoteText.text = !cloakShown
+            ? Lang.Pick(
+                "In the colour above: your map head (with the compass) and your Hornet in fights beside the other " +
+                "player.",
+                "用上面选的颜色：戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
+            )
+            : inCloak
+                ? Lang.Pick(
+                    "In the colour you chose for your cloak in Player Color, another mod (by PDE26jjk), or in the " +
+                    "colour above while you keep the cloak's own: your map head (with the compass) and your Hornet " +
+                    "in fights beside the other player.",
+                    "用你给斗篷选的颜色（来自另一个模组 Player Color，作者 PDE26jjk；斗篷选的是原色时用上面选的颜色）：" +
+                    "戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
+                )
+                : Lang.Pick(
+                    "In the colour above, or in the colour you chose for your cloak in Player Color, another mod " +
+                    "(by PDE26jjk): your map head (with the compass) and your Hornet in fights beside the other " +
+                    "player.",
+                    "用上面选的颜色，也可以跟斗篷同色，用你给斗篷选的颜色（来自另一个模组 Player Color，作者 " +
+                    "PDE26jjk）：戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
+                );
+        LayOutOwnPage(cloakShown);
+
         var healthBars = _modSettings.ShowEnemyHealthBars;
         _healthBarsImage.color = healthBars ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         _healthBarsText.text = healthBars
@@ -2025,8 +2133,8 @@ internal class SettingsPanel : IRootedComponent {
 
             // The one in use is shown at its full strength and the rest are faded. A tick or an outline would need
             // a colour of its own, and a colour laid over a row of colours is the one thing that cannot be read. In
-            // use means by the name or by an outline, which take the same colour.
-            var picked = (coloured || outlined || fightOutlined) &&
+            // use means by the name or by an outline, which take the same colour unless they take the cloak's.
+            var picked = (coloured || (outlined || fightOutlined) && !outlinesInCloak) &&
                          string.Equals(pair.Key, _modSettings.OwnNameColour, StringComparison.OrdinalIgnoreCase);
             pair.Value.color = picked ? colour : new Color(colour.r, colour.g, colour.b, 0.3f);
         }
@@ -2089,7 +2197,14 @@ internal class SettingsPanel : IRootedComponent {
     /// <inheritdoc />
     public void SetGroupActive(bool groupActive) {
         if (GameObject == null) return;
-        GameObject.SetActive(_activeSelf && groupActive);
+        var shown = _activeSelf && groupActive;
+        GameObject.SetActive(shown);
+
+        // Drawn again now that it is in the canvas, where its notes are measured at the scale they are drawn at
+        if (shown) {
+            Refresh();
+        }
+
         ShowPreviewWithPage();
     }
 

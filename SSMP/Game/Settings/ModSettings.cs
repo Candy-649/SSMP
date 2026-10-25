@@ -143,6 +143,21 @@ internal class ModSettings : IModSettings {
     } = true;
 
     /// <summary>
+    /// Whether to draw this player's own outlines - of their head on the map and of their hero in fights - in the
+    /// colour they chose for their cloak in Player Color, another mod, rather than in <see cref="OwnNameColour"/>, which
+    /// they keep while they keep the cloak's own colour. Offered only where Player Color is installed (USER 10-25: "好想玩
+    /// 联机那个高光跟随player color的颜色呀").
+    /// </summary>
+    public bool OutlineInCloakColour {
+        get;
+        set {
+            if (field == value) return;
+            field = value;
+            ChangedEvent?.Invoke(nameof(OutlineInCloakColour));
+        }
+    }
+
+    /// <summary>
     /// Whether to draw the health bars of creatures that were hurt: above their heads, and along the bottom of the
     /// screen for a boss (see Ui.EnemyHealthBars). Only on this machine, like the name settings. Off unless a player
     /// switches them on, as the game itself has none (USER 10-13: 血条最好默认关).
