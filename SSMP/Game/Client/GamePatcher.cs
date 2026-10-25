@@ -5,6 +5,7 @@ using HutongGames.PlayMaker.Actions;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
+using SSMP.Animation.Effects;
 using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Game.Client.Entity;
@@ -537,8 +538,10 @@ internal partial class GamePatcher {
             return true;
         }
 
+        // The local hero's harpoon needle too, which the game lets go of into the room where a throw ends and which
+        // strikes from there, as when it bounces off what it can't pierce
         var rootObject = root.gameObject;
-        return rootObject.CompareTag("Player");
+        return rootObject.CompareTag("Player") || HeroHarpoon.IsLocalNeedle(root);
     }
 
     /// <summary>

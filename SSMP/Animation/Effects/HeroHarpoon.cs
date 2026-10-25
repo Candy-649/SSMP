@@ -292,6 +292,14 @@ internal class HeroHarpoon : AnimationEffect {
     }
 
     /// <summary>
+    /// Whether a transform is the local hero's needle, which the game lets go of into the room where a throw ends: what
+    /// strikes from it there is the local player's own.
+    /// </summary>
+    internal static bool IsLocalNeedle(Transform transform) {
+        return _needle != null && transform == _needle;
+    }
+
+    /// <summary>
     /// Notes a clip that the local needle plays, which goes with the next word of it.
     /// </summary>
     internal static void OnLocalClip(tk2dSpriteAnimationClip clip, float clipStartTime, float overrideFps) {
