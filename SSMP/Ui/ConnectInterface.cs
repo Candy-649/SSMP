@@ -80,14 +80,14 @@ internal class ConnectInterface {
     private const float GameTooOldNoteHeight = 60f;
 
     /// <summary>
-    /// How far the name and version of the mod are in from the bottom right corner of the menu, and the size of the
-    /// line that they are on, whose bottom right corner is there.
+    /// How far the name and version of the mod are in from the right edge of the menu's frame and up from its bottom
+    /// edge, of which 6 units are its border, in the strip along its bottom; and the size of their letters.
     /// </summary>
-    private const float VersionLabelMargin = 24f;
+    private const float VersionLabelRightInset = 18f;
 
-    private const float VersionLabelWidth = 600f;
+    private const float VersionLabelBottomInset = 7f;
 
-    private const float VersionLabelHeight = 30f;
+    private const int VersionLabelFontSize = 18;
 
     /// <summary>
     /// Spacing between the header and the glowing notch.
@@ -830,9 +830,9 @@ internal class ConnectInterface {
         // Build UI from top to bottom
         CreateHeader(connectGroup, ref currentY);
         CreateGameTooOldNote(connectGroup);
-        CreateVersionLabel(connectGroup);
         _glowingNotch = CreateNotch(ref currentY);
         _backgroundPanel = CreateBackgroundPanel(ref currentY);
+        CreateVersionLabel(_backgroundPanel.transform);
 
         _usernameInput = CreateUsernameSection(ref currentY);
         var tabElements = CreateTabButtons(ref currentY);
@@ -1075,21 +1075,32 @@ internal class ConnectInterface {
     }
 
     /// <summary>
-    /// The name and version of the mod at the bottom right of the menu, as npm names its package, so that a player can
-    /// say which one they have (USER 10-25: "版本字段在联机界面显示吧，可以显示在右下角之类的，标注
-    /// silksong-coop-mod@0.4.132之类的").
+    /// The name and version of the mod, as npm names its package, at the bottom right of the menu's frame, in the strip
+    /// along its bottom, so that a player can say which one they have (USER 10-25: "版本字段在联机界面显示吧，可以显示在
+    /// 右下角之类的，标注silksong-coop-mod@0.4.132之类的"; it was at the bottom right of the screen, then: "我版本号让你
+    /// 放在联机界面的那个UI里面（，不是放在整个屏幕的右下角！").
     /// </summary>
-    private static void CreateVersionLabel(ComponentGroup parent) {
-        var label = new TextComponent(
-            parent,
-            new Vector2(1920f - VersionLabelMargin, VersionLabelMargin),
-            new Vector2(VersionLabelWidth, VersionLabelHeight),
-            new Vector2(1f, 0f),
+    /// <param name="frame">The frame of the menu, with which it shows and hides; what is put on it later is drawn over
+    /// it.</param>
+    private static void CreateVersionLabel(Transform frame) {
+        var label = WaitingRoomPanel.CreateLabel(
+            frame,
+            "Mod Version",
             $"{ModVersion.PackageName}@{ModVersion.Short}",
-            UiManager.SubTextFontSize,
-            alignment: TextAnchor.LowerRight
+            new Vector2(0f, 0f),
+            new Vector2(1f, 0f),
+            new Vector2(
+                -2f * VersionLabelRightInset,
+                ConnectInterfaceHelpers.PanelFooterHeight - VersionLabelBottomInset
+            ),
+            new Vector2(0f, ConnectInterfaceHelpers.PanelFooterHeight),
+            VersionLabelFontSize,
+            new Color(1f, 1f, 1f, 0.6f),
+            TextAnchor.LowerRight
         );
-        label.SetColor(new Color(1f, 1f, 1f, 0.6f));
+        label.horizontalOverflow = HorizontalWrapMode.Overflow;
+        label.verticalOverflow = VerticalWrapMode.Overflow;
+        label.raycastTarget = false;
     }
 
     /// <summary>
@@ -2782,8 +2793,12 @@ internal class ConnectInterface {
                 ConnectionFailedReason.IOException => ErrorInternal,
             ConnectionFailedReason.TimedOut when waitedForHost => ErrorHostNeverAnswered,
             ConnectionFailedReason.TimedOut => ErrorTimeout,
+            // On one line with the reason, and a reason given in both languages in the one this player reads: a host's
+            // reason for turning a game of another version away ran on below the menu's frame, over the version of the
+            // mod at its bottom
             ConnectionFailedReason.Other =>
-                Lang.Pick("Failed to connect:", "连接失败：") + $"\n{((ConnectionFailedMessageResult) result).Message}",
+                Lang.Pick("Failed to connect: ", "连接失败：") +
+                ModVersion.InReadersLanguage(((ConnectionFailedMessageResult) result).Message),
             _ => ErrorUnknown
         };
     }

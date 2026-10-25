@@ -75,6 +75,38 @@ internal static class ModVersion {
           $"Different mod versions: the host runs {Short}, you run {joining}. Both update to the newest one, then join.";
 
     /// <summary>
+    /// A message given in both languages, a line in Chinese and a line in English, as a host gives its reason for
+    /// turning a game of another version away (RejectionForJoining), in the language that this player reads; any other
+    /// message as it is. Both lines ran on below the frame of the menu.
+    /// </summary>
+    public static string InReadersLanguage(string message) {
+        var lines = message.Split('\n');
+        if (lines.Length != 2) {
+            return message;
+        }
+
+        var firstInChinese = HasChinese(lines[0]);
+        if (firstInChinese == HasChinese(lines[1])) {
+            return message;
+        }
+
+        return firstInChinese == Lang.IsChinese ? lines[0] : lines[1];
+    }
+
+    /// <summary>
+    /// Whether a line has Chinese characters in it.
+    /// </summary>
+    private static bool HasChinese(string line) {
+        foreach (var c in line) {
+            if (c is >= '\u4E00' and <= '\u9FFF') {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// What a joining player is told where the host named no version, as one from before this check doesn't.
     /// </summary>
     public static string HostOlder() => Lang.Pick(

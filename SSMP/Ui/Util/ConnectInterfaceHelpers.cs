@@ -33,9 +33,16 @@ internal static class ConnectInterfaceHelpers {
     private const float PanelWidth = 450f;
 
     /// <summary>
-    /// The height of the background panel.
+    /// The height of the strip along the bottom of the background panel, below everything else on it, where the name
+    /// and version of the mod are (see ConnectInterface.CreateVersionLabel): the text that says how a connection went
+    /// takes the panel down to the bottom edge that it had without the strip.
     /// </summary>
-    private const float PanelHeight = 600f;
+    public const float PanelFooterHeight = 30f;
+
+    /// <summary>
+    /// The height of the background panel, with the strip along its bottom.
+    /// </summary>
+    private const float PanelHeight = 600f + PanelFooterHeight;
 
     /// <summary>
     /// The width of the border of the background panel.
