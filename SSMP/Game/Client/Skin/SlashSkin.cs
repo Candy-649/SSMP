@@ -347,6 +347,13 @@ internal static class SlashPictures {
         _onAtlas = onAtlas;
         _bySheet = bySheet;
         Logger.Info($"Found {count} slash sprites on {bySheet.Count} sheets of Hornet's art, on {onAtlas.Count} atlases");
+
+        try {
+            AtlasSlashPictures.Read(hero);
+        } catch (Exception e) {
+            Logger.Warn($"Could not find the pictures of the hero's attacks on atlases: {e.Message}");
+        }
+
         return bySheet;
     }
 
@@ -575,6 +582,7 @@ internal static class SlashSkin {
     /// </summary>
     public static void Start(ModSettings settings) {
         _settings ??= settings;
+        AtlasSlashes.Start();
         if (_started) {
             return;
         }

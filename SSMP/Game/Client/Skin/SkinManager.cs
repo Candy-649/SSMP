@@ -61,6 +61,24 @@ internal class SkinManager {
 
     public SkinManager(Func<bool> skinsAllowed) {
         _skinsAllowed = skinsAllowed;
+
+        // The pictures of the attacks drawn from atlases go by the same looks
+        AtlasSlashes.LocalLookText = LocalLook;
+        AtlasSlashes.LookOfCharacter = figureObject =>
+            _skinsAllowed() && _figures.TryGetValue(figureObject, out var figure) ? figure.Look : "";
+        AtlasSlashes.LooksOfOthers = () => {
+            var looks = new List<string>();
+            if (_skinsAllowed()) {
+                looks.AddRange(_wanted);
+                foreach (var figure in _figures.Values) {
+                    if (figure.Look.Length > 0) {
+                        looks.Add(figure.Look);
+                    }
+                }
+            }
+
+            return looks;
+        };
     }
 
     /// <summary>
@@ -99,16 +117,27 @@ internal class SkinManager {
 
     /// <summary>
     /// What the player's own hero wears, as the text that tells the other games. The skins of Customizer count only
-    /// once the hero is there, as only those with art for the hero's sheets change how the player looks.
+    /// once the hero is there, as only those with art for the hero's sheets change how the player looks, or with images
+    /// of the pages of atlases that its attacks draw from (see AtlasSlashes), which CustomizerT2D dresses: a skin of
+    /// those alone counts too.
     /// </summary>
     public string LocalLook() {
         var look = new SkinLook();
 
         var sheets = HeroSheets();
-        if (sheets != null && CustomizerPacks.IsLoaded) {
+        var customizer = CustomizerPacks.IsLoaded;
+        if (sheets != null && (customizer || CustomizerT2D.IsLoaded)) {
             foreach (var pack in CustomizerPacks.FindAll()) {
-                if (pack.IsActive && pack.Dresses(sheets)) {
-                    look.Packs.Add(pack.Ref with { DressesHer = pack.Dresses(HerSheet) });
+                if (!pack.IsActive) {
+                    continue;
+                }
+
+                // Without Customizer, a skin with art for the hero's sheets dresses none of them here, and listed it
+                // would dress the character in the other games: it isn't worn then, its attack images neither
+                var dressesSheets = pack.Dresses(sheets);
+                if (customizer ? dressesSheets || AtlasSlashes.DrawsAttacks(pack)
+                        : !dressesSheets && AtlasSlashes.DrawsAttacks(pack)) {
+                    look.Packs.Add(pack.Ref with { DressesHer = customizer && pack.Dresses(HerSheet) });
                 }
             }
         }
@@ -450,6 +479,7 @@ internal class SkinManager {
 
         figure.Look = look;
         Draw(figure);
+        AtlasSlashes.Refresh();
     }
 
     /// <summary>
@@ -472,6 +502,7 @@ internal class SkinManager {
         }
 
         LoadWantedArt();
+        AtlasSlashes.Refresh();
     }
 
     /// <summary>
@@ -483,6 +514,7 @@ internal class SkinManager {
         }
 
         LoadWantedArt();
+        AtlasSlashes.Refresh();
     }
 
     /// <summary>

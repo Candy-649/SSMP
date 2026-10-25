@@ -88,6 +88,7 @@ internal static class HeroCopies {
     public static void DressCopy(GameObject character, GameObject copy) {
         try {
             Dress?.Invoke(character, copy);
+            Game.Client.Skin.AtlasSlashes.Track(copy, character);
         } catch (Exception e) {
             if (!_dressFailed) {
                 _dressFailed = true;

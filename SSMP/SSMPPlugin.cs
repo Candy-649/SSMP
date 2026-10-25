@@ -9,6 +9,7 @@ namespace SSMP;
 /// BepInEx Plugin class for SSMP.
 /// </summary>
 [BepInAutoPlugin(id: "ssmp")]
+[BepInDependency(Game.Client.Skin.CustomizerT2D.PluginGuid, BepInDependency.DependencyFlags.SoftDependency)]
 public partial class SSMPPlugin : BaseUnityPlugin {
     /// <summary>
     /// The game manager instance for the mod.
@@ -37,6 +38,9 @@ public partial class SSMPPlugin : BaseUnityPlugin {
 
         PluginBackups.Tidy();
         StackOverflowRecovery.Apply();
+
+        // Before CustomizerT2D starts, which chooses its skins then (see CustomizerT2D)
+        Game.Client.Skin.CustomizerT2D.Hook();
 
         // Register the event to initialize SSMP once we enter the main menu.
         EventHooks.UIManagerUIGoToMainMenu += Initialize;
