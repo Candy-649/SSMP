@@ -74,7 +74,7 @@ internal class LobbyBrowserPanel : IRootedComponent {
         headerRect.pivot = new Vector2(0.5f, 1f);
         headerRect.anchoredPosition = Vector2.zero;
         headerRect.sizeDelta = new Vector2(0f, HeaderHeight);
-        var headerText = header.AddComponent<Text>();
+        var headerText = header.AddComponent<WrappingText>();
         headerText.text = Lang.Pick("PUBLIC LOBBIES", "公开房间");
         headerText.font = Resources.FontManager.UIFontRegular;
         headerText.fontSize = 18;
@@ -126,7 +126,7 @@ internal class LobbyBrowserPanel : IRootedComponent {
         emptyRect.anchorMax = new Vector2(0.5f, 0.5f);
         emptyRect.pivot = new Vector2(0.5f, 0.5f);
         emptyRect.sizeDelta = new Vector2(size.x - 60f, 80f);
-        _emptyText = emptyObj.AddComponent<Text>();
+        _emptyText = emptyObj.AddComponent<WrappingText>();
         _emptyText.text = Lang.Pick(
             "No public lobbies found.\nClick Refresh to check again.",
             "没有找到公开房间。\n点刷新再看一次。"
@@ -183,7 +183,7 @@ internal class LobbyBrowserPanel : IRootedComponent {
         btnTextRect.anchorMax = Vector2.one;
         btnTextRect.offsetMin = Vector2.zero;
         btnTextRect.offsetMax = Vector2.zero;
-        var textComp = btnText.AddComponent<Text>();
+        var textComp = btnText.AddComponent<WrappingText>();
         textComp.text = text;
         textComp.font = Resources.FontManager.UIFontRegular;
         textComp.fontSize = 16;
@@ -269,7 +269,7 @@ internal class LobbyBrowserPanel : IRootedComponent {
         nameRect.anchorMax = new Vector2(0.5f, 1f);
         nameRect.offsetMin = new Vector2(15f, 0f);
         nameRect.offsetMax = Vector2.zero;
-        var nameText = nameObj.AddComponent<Text>();
+        var nameText = nameObj.AddComponent<WrappingText>();
         nameText.text = BreakStringAtUppercase(lobby.Name, 2);
         nameText.font = Resources.FontManager.UIFontRegular;
         nameText.fontSize = 16;
@@ -284,7 +284,7 @@ internal class LobbyBrowserPanel : IRootedComponent {
         typeRect.anchorMax = new Vector2(0.7f, 1f);
         typeRect.offsetMin = Vector2.zero;
         typeRect.offsetMax = Vector2.zero;
-        var typeText = typeObj.AddComponent<Text>();
+        var typeText = typeObj.AddComponent<WrappingText>();
         typeText.text = lobby.LobbyType == PublicLobbyType.Matchmaking
             ? Lang.Pick("MATCH\nMAKING", "自动\n匹配")
             : "STEAM";
@@ -310,7 +310,7 @@ internal class LobbyBrowserPanel : IRootedComponent {
         btnTextRect.anchorMax = Vector2.one;
         btnTextRect.offsetMin = Vector2.zero;
         btnTextRect.offsetMax = Vector2.zero;
-        var btnTextComp = btnText.AddComponent<Text>();
+        var btnTextComp = btnText.AddComponent<WrappingText>();
         btnTextComp.text = Lang.Pick("JOIN", "加入");
         btnTextComp.font = Resources.FontManager.UIFontRegular;
         btnTextComp.fontSize = 14;

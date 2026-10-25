@@ -570,7 +570,8 @@ internal class SettingsPanel : IRootedComponent {
         PlaceInRow(fightOutlineButton, 1f, 28f);
 
         // A row under them, where Player Color is installed: the outlines may take the colour that it gives the
-        // cloak (USER 10-25: "加一个按钮在高光这里，如果玩家装了player color这个mod，就显示这个按钮")
+        // cloak (USER 10-25: "加一个按钮在高光这里，如果玩家装了player color这个mod，就显示这个按钮"), and the
+        // name with them ("还有名字颜色没有跟随皮肤")
         _outlineCloakButton = WaitingRoomPanel.CreateButton(
             mapArea,
             "OutlineCloakButton",
@@ -579,7 +580,7 @@ internal class SettingsPanel : IRootedComponent {
             new Vector2(0.97f, 1f),
             WaitingRoomPanel.ReadyOff,
             () => {
-                _modSettings.OutlineInCloakColour = !_modSettings.OutlineInCloakColour;
+                _modSettings.ColourFromCloak = !_modSettings.ColourFromCloak;
                 _modSettings.Save();
                 Refresh();
             },
@@ -2087,16 +2088,16 @@ internal class SettingsPanel : IRootedComponent {
             ? Lang.Pick("FIGHTS: ON", "战斗中：开")
             : Lang.Pick("FIGHTS: OFF", "战斗中：关");
 
-        // The outlines in the colour chosen for the cloak, where Player Color is installed and has made its settings,
-        // which they keep the name's colour for while the cloak keeps its own; whose mod that is goes on the note, as it
-        // isn't this one
+        // The outlines and the name in the colour chosen for the cloak, where Player Color is installed and has made its
+        // settings, which they keep the colour picked for the name for while the cloak keeps its own; whose mod that is
+        // goes on the note, as it isn't this one
         var cloakShown = PlayerColorMod.HasColourSettings;
-        var inCloak = cloakShown && _modSettings.OutlineInCloakColour;
+        var inCloak = cloakShown && _modSettings.ColourFromCloak;
         _outlineCloakImage.color = inCloak ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
         _outlineCloakText.text = inCloak
             ? Lang.Pick("CLOAK'S COLOUR: ON", "跟斗篷同色：开")
             : Lang.Pick("CLOAK'S COLOUR: OFF", "跟斗篷同色：关");
-        var outlinesInCloak = inCloak && PlayerColorMod.ChosenColour() != null;
+        var followsCloak = inCloak && PlayerColorMod.ChosenColour() != null;
         _outlineNoteText.text = !cloakShown
             ? Lang.Pick(
                 "In the colour above: your map head (with the compass) and your Hornet in fights beside the other " +
@@ -2105,18 +2106,18 @@ internal class SettingsPanel : IRootedComponent {
             )
             : inCloak
                 ? Lang.Pick(
-                    "In the colour you chose for your cloak in Player Color, another mod (by PDE26jjk), or in the " +
-                    "colour above while you keep the cloak's own: your map head (with the compass) and your Hornet " +
-                    "in fights beside the other player.",
-                    "用你给斗篷选的颜色（来自另一个模组 Player Color，作者 PDE26jjk；斗篷选的是原色时用上面选的颜色）：" +
-                    "戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
+                    "In the colour you chose for your cloak in Player Color, another mod (by PDE26jjk), as is your " +
+                    "name, or in the colour above while you keep the cloak's own: your map head (with the compass) " +
+                    "and your Hornet in fights beside the other player.",
+                    "名字的颜色和描边都用你给斗篷选的颜色（来自另一个模组 Player Color，作者 PDE26jjk；斗篷选的是原色时" +
+                    "用上面选的颜色）：戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
                 )
                 : Lang.Pick(
-                    "In the colour above, or in the colour you chose for your cloak in Player Color, another mod " +
-                    "(by PDE26jjk): your map head (with the compass) and your Hornet in fights beside the other " +
-                    "player.",
-                    "用上面选的颜色，也可以跟斗篷同色，用你给斗篷选的颜色（来自另一个模组 Player Color，作者 " +
-                    "PDE26jjk）：戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。"
+                    "In the colour above: your map head (with the compass) and your Hornet in fights beside the other " +
+                    "player. With the cloak's colour on, these and your name take the colour you chose for your cloak " +
+                    "in Player Color, another mod (by PDE26jjk).",
+                    "用上面选的颜色：戴着罗盘时描地图上你的头像；队友在你画面里、有人在打怪时描你的大黄蜂。打开“跟斗篷" +
+                    "同色”，名字的颜色和描边就都改用你给斗篷选的颜色（来自另一个模组 Player Color，作者 PDE26jjk）。"
                 );
         LayOutOwnPage(cloakShown);
 
@@ -2133,8 +2134,8 @@ internal class SettingsPanel : IRootedComponent {
 
             // The one in use is shown at its full strength and the rest are faded. A tick or an outline would need
             // a colour of its own, and a colour laid over a row of colours is the one thing that cannot be read. In
-            // use means by the name or by an outline, which take the same colour unless they take the cloak's.
-            var picked = (coloured || (outlined || fightOutlined) && !outlinesInCloak) &&
+            // use means by the name or by an outline, which take it together, unless they take the cloak's.
+            var picked = !followsCloak && (coloured || outlined || fightOutlined) &&
                          string.Equals(pair.Key, _modSettings.OwnNameColour, StringComparison.OrdinalIgnoreCase);
             pair.Value.color = picked ? colour : new Color(colour.r, colour.g, colour.b, 0.3f);
         }

@@ -143,17 +143,19 @@ internal class ModSettings : IModSettings {
     } = true;
 
     /// <summary>
-    /// Whether to draw this player's own outlines - of their head on the map and of their hero in fights - in the
-    /// colour they chose for their cloak in Player Color, another mod, rather than in <see cref="OwnNameColour"/>, which
-    /// they keep while they keep the cloak's own colour. Offered only where Player Color is installed (USER 10-25: "好想玩
-    /// 联机那个高光跟随player color的颜色呀").
+    /// Whether this player's own colour - of their name, where they colour it, and of their outlines, of their head on
+    /// the map and of their hero in fights - is the colour they chose for their cloak in Player Color, another mod,
+    /// rather than <see cref="OwnNameColour"/>, which it stays while they keep the cloak's own colour. Offered only
+    /// where Player Color is installed (USER 10-25: "好想玩联机那个高光跟随player color的颜色呀", then of the name:
+    /// "还有名字颜色没有跟随皮肤"). Kept in the file under the name it had while it was the outlines' alone.
     /// </summary>
-    public bool OutlineInCloakColour {
+    [JsonProperty("OutlineInCloakColour")]
+    public bool ColourFromCloak {
         get;
         set {
             if (field == value) return;
             field = value;
-            ChangedEvent?.Invoke(nameof(OutlineInCloakColour));
+            ChangedEvent?.Invoke(nameof(ColourFromCloak));
         }
     }
 

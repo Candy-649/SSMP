@@ -114,7 +114,7 @@ internal class TextComponent : Component, ITextComponent {
         Vector2 pivot,
         bool wrap
     ) {
-        var textObj = GameObject.AddComponent<Text>();
+        var textObj = GameObject.AddComponent<WrappingText>();
         
         textObj.supportRichText = true;
         textObj.text = text;

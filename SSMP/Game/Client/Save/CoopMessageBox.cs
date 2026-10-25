@@ -1,6 +1,7 @@
 using System;
 using System.Reflection;
 using GlobalEnums;
+using SSMP.Ui.Util;
 using SSMP.Util;
 using UnityEngine;
 using UnityEngine.Events;
@@ -149,7 +150,7 @@ internal static class CoopMessageBox {
     /// </summary>
     public static void SetText(int shown, string text) {
         if (IsOpen && shown == _shown && _text != null) {
-            _text.text = text;
+            _text.text = ChineseLineBreaks.MarkFor(_text, text);
         }
     }
 
@@ -176,7 +177,8 @@ internal static class CoopMessageBox {
         }
 
         _shown++;
-        _text!.text = text;
+        // Broken where Chinese breaks a line, as the mod's own texts are (see Ui.Component.WrappingText)
+        _text!.text = ChineseLineBreaks.MarkFor(_text, text);
         _firstLabel!.text = ButtonLabel(firstLabel ?? OkLabel());
         _firstKeepsOpen = firstKeepsOpen;
         _onFirst = onFirst;

@@ -145,7 +145,7 @@ internal class FightOutline {
             return;
         }
 
-        var colour = PlayerManager.OwnOutlineColour(_modSettings);
+        var colour = PlayerManager.OwnColour(_modSettings);
         if (_outline == null || _outline.transform.parent != hero.transform) {
             Remove();
 

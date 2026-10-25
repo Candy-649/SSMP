@@ -282,7 +282,7 @@ internal class WaitingRoomPanel : IRootedComponent {
         rect.anchoredPosition = anchoredPosition;
         rect.sizeDelta = sizeDelta;
 
-        var textComponent = obj.AddComponent<Text>();
+        var textComponent = obj.AddComponent<WrappingText>();
         textComponent.text = text;
         textComponent.font = Resources.FontManager.UIFontRegular;
         textComponent.fontSize = fontSize;
@@ -323,7 +323,7 @@ internal class WaitingRoomPanel : IRootedComponent {
         textRect.anchorMax = Vector2.one;
         textRect.offsetMin = Vector2.zero;
         textRect.offsetMax = Vector2.zero;
-        label = textObj.AddComponent<Text>();
+        label = textObj.AddComponent<WrappingText>();
         label.text = text;
         label.font = Resources.FontManager.UIFontRegular;
         label.fontSize = 15;

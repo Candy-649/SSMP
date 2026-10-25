@@ -153,7 +153,7 @@ internal class ButtonComponent : Component, IButtonComponent {
         // Create the text component in the button
         var textObject = new GameObject();
         textObject.AddComponent<RectTransform>().sizeDelta = size;
-        _text = textObject.AddComponent<Text>();
+        _text = textObject.AddComponent<WrappingText>();
         _text.text = text;
         _text.font = font;
         _text.fontSize = fontSize;

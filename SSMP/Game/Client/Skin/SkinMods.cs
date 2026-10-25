@@ -353,9 +353,16 @@ internal static class PlayerColorMod {
     private static float _lookForSettingsAt;
 
     /// <summary>
+    /// Raised as the colour that Player Color draws the player's own cloak in changes, or whether it draws it in one -
+    /// on this mod's page of the skin, in Player Color's own window or from its file - once its settings were found
+    /// (see <see cref="ChosenColour"/>), which they are before anything is drawn in that colour.
+    /// </summary>
+    public static event Action? ColourChanged;
+
+    /// <summary>
     /// Finds Player Color's settings of the cloak's colour, which it makes once, and keeps them, as the outline of the
-    /// player's own hero asks for the colour at every frame (see PlayerManager.OwnOutlineColour). Until they are made,
-    /// they are looked for at most once a second.
+    /// player's own hero asks for the colour at every frame (see PlayerManager.OwnColour), and hears each change of
+    /// them (see <see cref="ColourChanged"/>). Until they are made, they are looked for at most once a second.
     /// </summary>
     /// <returns>Whether both were found.</returns>
     private static bool FindColourSettings() {
@@ -367,14 +374,34 @@ internal static class PlayerColorMod {
             return false;
         }
 
-        _useSetting ??= Setting<bool>("UseOverrideMaterial");
-        _colourSetting ??= Setting<Color>("Color2");
+        if (_useSetting == null && Setting<bool>("UseOverrideMaterial") is { } use) {
+            _useSetting = use;
+            use.SettingChanged += OnColourSettingChanged;
+        }
+
+        if (_colourSetting == null && Setting<Color>("Color2") is { } colour) {
+            _colourSetting = colour;
+            colour.SettingChanged += OnColourSettingChanged;
+        }
+
         if (_useSetting != null && _colourSetting != null) {
             return true;
         }
 
         _lookForSettingsAt = Time.unscaledTime + 1f;
         return false;
+    }
+
+    /// <summary>
+    /// Passes a change of Player Color's settings of the cloak's colour on, without letting anything that hears it stop
+    /// the change itself, which runs in Player Color's setting.
+    /// </summary>
+    private static void OnColourSettingChanged(object sender, EventArgs e) {
+        try {
+            ColourChanged?.Invoke();
+        } catch (Exception exception) {
+            Logger.Warn($"Could not follow the colour of the cloak in Player Color: {exception}");
+        }
     }
 
     /// <summary>

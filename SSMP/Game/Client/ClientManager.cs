@@ -437,6 +437,7 @@ internal class ClientManager : IClientManager {
 
         _playerManager = new PlayerManager(serverSettings, modSettings, netClient, _playerData);
         _modSettings.ChangedEvent += OnModSettingChanged;
+        Skin.PlayerColorMod.ColourChanged += OnCloakColourChanged;
         _animationManager = new AnimationManager(netClient, _playerManager, serverSettings, _playerData);
         _mapManager = new MapManager(netClient, serverSettings, modSettings);
 
@@ -1758,7 +1759,20 @@ internal class ClientManager : IClientManager {
     private void OnModSettingChanged(string settingName) {
         if (settingName is nameof(Settings.ModSettings.BoldOwnName)
             or nameof(Settings.ModSettings.ColourOwnName)
-            or nameof(Settings.ModSettings.OwnNameColour)) {
+            or nameof(Settings.ModSettings.OwnNameColour)
+            or nameof(Settings.ModSettings.ColourFromCloak)) {
+            _playerManager.RedrawOwnName();
+        }
+    }
+
+    /// <summary>
+    /// Callback for when the colour that Player Color draws this player's cloak in changed, which the name over their
+    /// own head takes where they chose so. It changes at every step of a strip of colours dragged on the settings page,
+    /// and in the menu there is no head: the hero is only asked for where there is one, as asking where there is none
+    /// looks through the whole scene for it.
+    /// </summary>
+    private void OnCloakColourChanged() {
+        if (_modSettings.ColourFromCloak && _modSettings.ColourOwnName && HeroController.UnsafeInstance != null) {
             _playerManager.RedrawOwnName();
         }
     }

@@ -299,7 +299,7 @@ internal class LobbyConfigPanel : IRootedComponent {
         rect.anchoredPosition = new Vector2(pos.x, pos.y - height / 2f);
         rect.sizeDelta = new Vector2(width, height);
 
-        var txt = go.AddComponent<Text>();
+        var txt = go.AddComponent<WrappingText>();
         txt.text = text;
         txt.font = Resources.FontManager.UIFontRegular;
         txt.fontSize = fontSize;
@@ -332,7 +332,7 @@ internal class LobbyConfigPanel : IRootedComponent {
         textRect.anchorMax = Vector2.one;
         textRect.offsetMin = Vector2.zero;
         textRect.offsetMax = Vector2.zero;
-        var txt = textGo.AddComponent<Text>();
+        var txt = textGo.AddComponent<WrappingText>();
         txt.text = text;
         txt.font = Resources.FontManager.UIFontRegular;
         txt.fontSize = 14;

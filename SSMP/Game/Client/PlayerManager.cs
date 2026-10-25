@@ -91,8 +91,9 @@ internal class PlayerManager : IPlayerManager {
     internal static readonly string[] OwnNameColourNames = ["yellow", "green", "cyan", "orange", "red"];
 
     /// <summary>
-    /// The colour this player picked for their own name, which also marks their head on the map and their hero in a
-    /// fight: yellow when the setting names none of the colours.
+    /// The colour this player picked from the row of colours for their own name, which also marks their head on the map
+    /// and their hero in a fight unless they follow their cloak's (see <see cref="OwnColour"/>): yellow when the setting
+    /// names none of the colours.
     /// </summary>
     /// <param name="modSettings">The settings of this machine.</param>
     /// <returns>The colour.</returns>
@@ -100,14 +101,15 @@ internal class PlayerManager : IPlayerManager {
         OwnNameColours.TryGetValue(modSettings.OwnNameColour ?? "", out var colour) ? colour : OwnNameColours["yellow"];
 
     /// <summary>
-    /// The colour of this player's own outlines, of their head on the map and of their hero in fights: the colour that
-    /// they chose for their cloak in Player Color, where they chose to follow it and didn't keep the cloak's own - also
-    /// while a skin keeps the cloak from showing it - or else the colour of their name.
+    /// The colour of this player's own marks - their name, where they colour it, and their outlines, of their head on
+    /// the map and of their hero in fights: the colour that they chose for their cloak in Player Color, where they chose
+    /// to follow it and didn't keep the cloak's own - also while a skin keeps the cloak from showing it - or else the
+    /// colour they picked for their name.
     /// </summary>
     /// <param name="modSettings">The settings of this machine.</param>
     /// <returns>The colour.</returns>
-    internal static Color OwnOutlineColour(ModSettings modSettings) =>
-        modSettings.OutlineInCloakColour && Skin.PlayerColorMod.ChosenColour() is { } cloak
+    internal static Color OwnColour(ModSettings modSettings) =>
+        modSettings.ColourFromCloak && Skin.PlayerColorMod.ChosenColour() is { } cloak
             ? new Color(cloak.r, cloak.g, cloak.b, 1f)
             : OwnNameColour(modSettings);
 
@@ -1504,9 +1506,8 @@ internal class PlayerManager : IPlayerManager {
         textMeshObject.outlineWidth = modSettings.BoldOwnName ? BoldNameOutline : NameOutline;
         textMeshObject.fontStyle = modSettings.BoldOwnName ? FontStyles.Bold : FontStyles.Normal;
 
-        if (modSettings.ColourOwnName &&
-            OwnNameColours.TryGetValue(modSettings.OwnNameColour ?? "", out var colour)) {
-            textMeshObject.color = colour;
+        if (modSettings.ColourOwnName) {
+            textMeshObject.color = OwnColour(modSettings);
         }
     }
 
