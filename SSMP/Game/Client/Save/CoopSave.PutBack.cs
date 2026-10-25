@@ -46,33 +46,66 @@ internal partial class CoopSave {
     ];
 
     /// <summary>
-    /// The local player was put back at the last safe place. If another game runs the room, it is told, to bring back
-    /// what the game brings back for its own player (see <see cref="OnPutBack"/>).
+    /// The local player was put back at the last safe place, or stood up there after a rescue: the other games of the
+    /// room are told where. The one that runs the room brings back what the game brings back for its own player as it
+    /// puts them back (see <see cref="OnPutBack"/>), which a stand-up isn't, and each turns the passages of dropping
+    /// boxes near there to the player (see GamePatcher.BoxPassages).
     /// </summary>
-    private void TellRoomOfPutBack() {
-        if (_checkedMembers.Count == 0 || IsSceneHost?.Invoke() != false ||
-            !GetCheckedMembers().Exists(member => member.IsInLocalScene)) {
+    /// <param name="position">Where the player was put.</param>
+    /// <param name="stoodUp">Whether they stood up there after a rescue, rather than being put back by the game.</param>
+    private void TellRoomOfPutBack(UnityEngine.Vector3 position, bool stoodUp) {
+        if (_checkedMembers.Count == 0 || !GetCheckedMembers().Exists(member => member.IsInLocalScene)) {
             return;
         }
 
-        // To each member in the room, of whom the one whose game runs it takes it
         SendToRoomMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.PutBack,
-            Scene = SceneUtil.GetCurrentSceneName()
+            Scene = SceneUtil.GetCurrentSceneName(),
+            Values = stoodUp ? [position.x, position.y, 1f] : [position.x, position.y]
         });
     }
 
     /// <summary>
-    /// A member in the room was put back at the last safe place in their game. This game runs the room, so its
-    /// creatures that are dead or out come back, and those that lost health get it back, as for its own player. A
-    /// living one that the game would send back to where it started or switch off stays as it is (see
-    /// <see cref="KeepsCreatureInPlace"/>), and gets its health back if the game gives it that on the way.
+    /// The local player stood back up at the safe place of the room after a rescue, where the game would have put them
+    /// back had the hit not taken the last of their health: the passages of dropping boxes near there turn to them,
+    /// here and in the other games of the room, as for a put-back (USER 10-25, "只要有人掉血了回到安全点就把机关调到
+    /// 她的位置"). Nothing else that a put-back brings back comes back for it.
+    /// </summary>
+    /// <param name="place">Where they stood up.</param>
+    private void NoteStandUpAtSafePlace(UnityEngine.Vector3 place) {
+        try {
+            TellRoomOfPutBack(place, true);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
+        try {
+            GamePatcher.NoteBoxPutBack(SceneUtil.GetCurrentSceneName(), place.x, "the local player");
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+    }
+
+    /// <summary>
+    /// A member in the room was put back at the last safe place in their game. The passages of dropping boxes near
+    /// there turn to them. If this game runs the room, its creatures that are dead or out come back, and those that
+    /// lost health get it back, as for its own player. A living one that the game would send back to where it started
+    /// or switch off stays as it is (see <see cref="KeepsCreatureInPlace"/>), and gets its health back if the game
+    /// gives it that on the way.
     /// </summary>
     /// <param name="player">The player the update came from.</param>
     /// <param name="update">The update.</param>
     private void OnPutBack(ClientPlayerData player, CoopSaveUpdate update) {
-        if (!_checkedMembers.Contains(player.Id) || update.Scene != SceneUtil.GetCurrentSceneName() ||
-            IsSceneHost?.Invoke() != true) {
+        if (!_checkedMembers.Contains(player.Id) || update.Scene != SceneUtil.GetCurrentSceneName()) {
+            return;
+        }
+
+        if (update.Values.Count > 0) {
+            GamePatcher.NoteBoxPutBack(update.Scene, update.Values[0], player.Username);
+        }
+
+        // A stand-up after a rescue brings nothing else back
+        if (IsSceneHost?.Invoke() != true || update.Values.Count > 2 && update.Values[2] != 0f) {
             return;
         }
 

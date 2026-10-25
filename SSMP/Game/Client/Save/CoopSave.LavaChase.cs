@@ -1356,9 +1356,17 @@ internal partial class CoopSave {
         orig(self);
 
         // And the game that runs the room, if it is another's, brings back what the game brings back for the player
-        // it put back (see CoopSave.PutBack)
+        // it put back (see CoopSave.PutBack), and the passages of dropping boxes near there turn to the player, in
+        // every game of the room (see GamePatcher.BoxPassages)
+        var position = self.transform.position;
         try {
-            TellRoomOfPutBack();
+            TellRoomOfPutBack(position, false);
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
+        try {
+            GamePatcher.NoteBoxPutBack(SceneUtil.GetCurrentSceneName(), position.x, "the local player");
         } catch (Exception e) {
             LogInteractionError(e);
         }

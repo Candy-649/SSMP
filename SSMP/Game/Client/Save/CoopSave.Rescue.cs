@@ -1907,6 +1907,7 @@ internal partial class CoopSave {
                     $"Standing back up at {safe} instead of {hero.transform.position}, where a grinder caught them"
                 );
                 hero.transform.position = safe;
+                NoteStandUpAtSafePlace(safe);
             } else if (IsInOrOverTheRoomsHarm(hero.transform.position)) {
                 var safe = playerData.hazardRespawnLocation;
                 Logger.Info(
@@ -1914,6 +1915,7 @@ internal partial class CoopSave {
                     "spikes, a drop or sand that pulls players under"
                 );
                 hero.transform.position = safe;
+                NoteStandUpAtSafePlace(safe);
             }
 
             // Once the player stands where they will play on from, so that the camera locks to the area they are in
