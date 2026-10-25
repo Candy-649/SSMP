@@ -742,7 +742,8 @@ internal class AnimationManager {
         { AnimationClip.MinigameView, MinigameView.Instance },
 
         // The needle that the harpoon throws, the threads it draws and the spark of a needle striking a wall
-        { AnimationClip.HeroHarpoon, HeroHarpoon.Instance }
+        { AnimationClip.HeroHarpoon, HeroHarpoon.Instance },
+        { AnimationClip.HeroHit, HeroHit.Instance }
     };
 
     #endregion
@@ -1405,6 +1406,7 @@ internal class AnimationManager {
         HeroRoomFigure.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroRoomFigure, effectInfo));
         HeroDust.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroDust, effectInfo));
         HeroHarpoon.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHarpoon, effectInfo));
+        HeroHit.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHit, effectInfo));
         BeamShot.Watch(hc, OnToolMessage);
         if (hc.silkSpecialFSM != null) {
             TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));

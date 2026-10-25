@@ -820,5 +820,8 @@ internal enum AnimationClip {
     MinigameView,
 
     // The needle that the harpoon throws, the threads it draws and the spark of a needle striking a wall
-    HeroHarpoon
+    HeroHarpoon,
+
+    // The streak of light that the game draws across the hero as they are hit
+    HeroHit
 }
