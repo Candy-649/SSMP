@@ -38,10 +38,11 @@ internal static class PersonalPlaces {
     ];
 
     /// <summary>
-    /// The things that each player has to themselves wherever a room has them, by how their names start, each with
-    /// what is under it: the floors that crumble under a player, or under their attack, and come back a moment later,
-    /// the flies that a player bounces off and kills, which come back a moment later too, and the crystal creatures
-    /// that burst as a player comes near and grow back. Both games used to break them together, so a floor that the
+    /// The things that each player has to themselves wherever a room has them, or only in the rooms of
+    /// <see cref="ThingRooms"/>, by how their names start, each with what is under it: the floors that crumble under a
+    /// player, or under their attack, and come back a moment later, the flies that a player bounces off and kills, which
+    /// come back a moment later too, and the crystal creatures that burst as a player comes near and grow back. Other
+    /// small flies are shared like any creature. Both games used to break them together, so a floor that the
     /// partner stood on was gone under this player as well, who then had to wait for it to come back - or, where lava
     /// rises behind them, fell in - and a fly that the partner bounced off was gone for this player too, where lava
     /// rises behind them until one of them was put back (USER 10-23, "本来时间就很赶了还要等"). The partner's body sets
@@ -59,8 +60,8 @@ internal static class PersonalPlaces {
         "memory_ground_plat",
 
         // The death of one shows in the others' games, where theirs stays (see CoopHits.DeathLooks): the flies of the
-        // lava, and the drifting flies of the snowy peaks, which fly back in about 3 s after they die (USER 10-24,
-        // "雪山那里那种小飞虫也不要共享了")
+        // lava race (see ThingRooms), and the drifting flies of the snowy peaks, of 4 health, which fly back in about
+        // 3 s after they die (USER 10-24, "雪山那里那种小飞虫也不要共享了")
         "Bone Goomba Bounce Fly",
         "Peaks Drifter",
 
@@ -75,6 +76,17 @@ internal static class PersonalPlaces {
     /// shoot their spikes again and again and are fought, rather than burst once as a player passes.
     /// </summary>
     private static readonly string[] NotThings = ["Crystal Drifter Giant"];
+
+    /// <summary>
+    /// The one room that some of <see cref="Things"/> are things in, by how their names start; anywhere else they are
+    /// shared like any creature. The flies of the lava race, where lava rises behind the players, are each player's own
+    /// there alone: the same flies in another room, where they come back on their own 2.5 s after they die and have
+    /// no lava behind them, are shared, like all the other small flies but the 4-health flies of the snowy peaks
+    /// (USER 10-25, "不是所有的都要不同步，有很多不属于4血小飞虫的小飞虫还是要同步的").
+    /// </summary>
+    private static readonly Dictionary<string, string> ThingRooms = new() {
+        ["Bone Goomba Bounce Fly"] = "Abyss_09"
+    };
 
     /// <summary>
     /// The loaded rooms that were looked through already, by their handle, each with the instance IDs of what was taken
@@ -165,11 +177,12 @@ internal static class PersonalPlaces {
 
     /// <summary>
     /// Whether a name is that of one of the things that each player has to themselves (see <see cref="Things"/>), or
-    /// starts like one: what such a thing spawns is called after it.
+    /// starts like one, in a room: what such a thing spawns is called after it.
     /// </summary>
     /// <param name="name">The name.</param>
-    public static bool IsThingName(string name) {
-        return IsThing(name);
+    /// <param name="scene">The room of the object with the name.</param>
+    public static bool IsThingName(string name, Scene scene) {
+        return IsThing(name, scene.name);
     }
 
     /// <summary>
@@ -225,7 +238,8 @@ internal static class PersonalPlaces {
         LookedThrough[scene.handle] = takenDown;
 
         // What is kept across rooms is in none of them
-        if (scene.name == "DontDestroyOnLoad") {
+        var room = scene.name;
+        if (room == "DontDestroyOnLoad") {
             return;
         }
 
@@ -258,7 +272,7 @@ internal static class PersonalPlaces {
 
             top.GetComponentsInChildren(true, Parts);
             foreach (var part in Parts) {
-                if (IsThing(part.name)) {
+                if (IsThing(part.name, room)) {
                     TakeDown(part, takenDown, null, true);
                 }
             }
@@ -289,9 +303,9 @@ internal static class PersonalPlaces {
     }
 
     /// <summary>
-    /// Whether an object of this name is one of <see cref="Things"/>.
+    /// Whether an object of this name in this room is one of <see cref="Things"/>.
     /// </summary>
-    private static bool IsThing(string name) {
+    private static bool IsThing(string name, string room) {
         foreach (var start in NotThings) {
             if (name.StartsWith(start, StringComparison.Ordinal)) {
                 return false;
@@ -300,7 +314,7 @@ internal static class PersonalPlaces {
 
         foreach (var start in Things) {
             if (name.StartsWith(start, StringComparison.Ordinal)) {
-                return true;
+                return !ThingRooms.TryGetValue(start, out var onlyRoom) || onlyRoom == room;
             }
         }
 

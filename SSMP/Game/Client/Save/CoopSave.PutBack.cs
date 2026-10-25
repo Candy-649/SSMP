@@ -11,13 +11,14 @@ namespace SSMP.Game.Client.Save;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Creatures that the game sets right as the player is put back at the last safe place after a hazard: spitters come
-/// back to life, spiked flyers go back to where they started with their health filled, and spitters that the player is
-/// put back above switch themselves off. Only the game that runs the room runs its creatures, so only its own player's
-/// put-backs reached them: a player of another game who fell found the creatures they had used up gone, and a fall of
-/// the player whose game runs the room sent the spiked flyers back and switched the spitters off under the others.
-/// The flies that a player bounces off, which also come back, are each player's own since 10-23 (see PersonalPlaces):
-/// each game brings back its own for its own player, as the game does.
+/// Creatures that the game sets right as the player is put back at the last safe place after a hazard: flies to bounce
+/// on and spitters come back to life, spiked flyers go back to where they started with their health filled, and
+/// spitters that the player is put back above switch themselves off. Only the game that runs the room runs its
+/// creatures, so only its own player's put-backs reached them: a player of another game who fell found the creatures
+/// they had used up gone, and a fall of the player whose game runs the room sent the spiked flyers back and switched
+/// the spitters off under the others. What each player has to themselves (see PersonalPlaces), like the flies to
+/// bounce on of the lava race since 10-23, is left out: each game brings back its own for its own player, as the game
+/// does.
 ///
 /// The user decided (10-11) to go about them the way the grinders went (see CoopSave.PacedMachines):
 /// - A creature that is dead or out comes back, and one that lost health gets it back, whichever player of the room is
@@ -31,7 +32,9 @@ internal partial class CoopSave {
     /// The creatures that the game sets right as the player is put back, each named by what its objects are called.
     /// </summary>
     private static readonly PutBackKind[] PutBackKinds = [
-        // The flies that a player bounces off are each player's own (see PersonalPlaces and BringBackOwnThings)
+        // Flies that the player bounces on: one that died waits for it to come back, one that lost health gets it back.
+        // Those of the lava race are each player's own (see PersonalPlaces and BringBackOwnThings)
+        new(["Bone Goomba Bounce Fly"], "Control", "HAZARD RELOAD", ["Die", "Wait For Hazard", "Idle"], null, false),
 
         // Spiked flyers: one that died comes back where it started, and the event sends a living one back there too,
         // where it gets its health back (Activate)
@@ -81,7 +84,8 @@ internal partial class CoopSave {
             if (playMakerFsm == null || !playMakerFsm.isActiveAndEnabled ||
                 FindPutBackKind(playMakerFsm.gameObject.name, playMakerFsm.FsmName) is not { } kind ||
                 playMakerFsm.Fsm is not { Started: true } fsm ||
-                !IsPartOfRoom(playMakerFsm.gameObject.scene.name, update.Scene)) {
+                !IsPartOfRoom(playMakerFsm.gameObject.scene.name, update.Scene) ||
+                PersonalPlaces.Contains(playMakerFsm.gameObject)) {
                 continue;
             }
 

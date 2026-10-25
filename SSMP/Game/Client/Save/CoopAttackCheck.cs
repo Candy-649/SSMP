@@ -564,7 +564,7 @@ internal class CoopAttackCheck {
             }
         }
 
-        return spawned != null && PersonalPlaces.IsThingName(spawned.name);
+        return spawned != null && PersonalPlaces.IsThingName(spawned.name, spawned.gameObject.scene);
     }
 
     /// <summary>
