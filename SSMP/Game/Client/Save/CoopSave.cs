@@ -497,6 +497,14 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a pole that bent as far as it goes for both still throws the local
+        // player off once they hang on it
+        try {
+            UpdatePendingPoleThrow();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also while another member is gone, so that the members who are in keep in step with each other
         if (checkedPartner != null) {
             UpdateInteractions();
@@ -1019,6 +1027,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.RingHold:
                 OnRingHold(player, update);
+                break;
+            case CoopSaveUpdateKind.RopePush:
+                OnRopePushed(player, update);
                 break;
             case CoopSaveUpdateKind.CogHold:
                 OnCogHold(player, update);

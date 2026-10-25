@@ -13,10 +13,9 @@ namespace SSMP.Animation.Effects;
 /// 的特效，我这边看队友的样子好像简陋一点"). The ring that the local player's harpoon struck last is watched, and what it
 /// shows is said on change, again while it is held and for a moment after, as animation updates can be lost. The other
 /// games show the same on that ring as a look only: its FSM, its sounds, the shake of the screen and what it tells what
-/// it hangs from stay with the player who holds it (what a ring pulls down goes by CoopSave.PullRings). A ring that a
-/// player holds in their own game shows only their own hold there. A ring on a pole that bends or on a rope that swings
-/// shows the hold, not the bending or the swinging. Rings that carry the player along a rail or up and down move in that
-/// player's game only, and show nothing of the hold elsewhere.
+/// it hangs from stay with the player who holds it (what a ring pulls down, the bend of a pole and the swing of a rope go
+/// by CoopSave.PullRings). A ring that a player holds in their own game shows only their own hold there. Rings that carry
+/// the player along a rail or up and down move in that player's game only, and show nothing of the hold elsewhere.
 /// </summary>
 internal static class HarpoonRingLook {
     /// <summary>

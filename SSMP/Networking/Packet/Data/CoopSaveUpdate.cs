@@ -886,9 +886,11 @@ internal enum CoopSaveUpdateKind : byte {
     HelloDeclined,
 
     /// <summary>
-    /// The player took hold of a ring that pulls something down, or let go of it (see CoopSave.PullRings): ObjectPath
-    /// names what the ring hangs from in Scene, and StateName says "Left" for letting go. The other games hold it for
-    /// them until the last player who holds it there let go.
+    /// The player took hold of a ring that pulls something down or bends a pole, or let go of it (see
+    /// CoopSave.PullRings): ObjectPath names what the ring hangs from in Scene, and StateName says "Left" for letting
+    /// go, and for hooking the ring of a pole that the hook set bending in the sender's game "CONNECT L" or
+    /// "CONNECT R", the way it bends. The other games hold it for them until the last player who holds it there let
+    /// go.
     /// </summary>
     RingHold,
 
@@ -924,5 +926,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// them and 0 once it let go. The same cog stops in the other games too until the last player it holds there is
     /// let go. Appended at the end, like every kind.
     /// </summary>
-    CogHold
+    CogHold,
+
+    /// <summary>
+    /// The sender pushed a rope that a ring hangs from in their game: their needle hooked the ring, or they took hold
+    /// of it or let go of it (see CoopSave.PullRings). <see cref="CoopSaveUpdate.Scene"/> and
+    /// <see cref="CoopSaveUpdate.ObjectPath"/> name the rope, and <see cref="CoopSaveUpdate.Values"/> hold the push,
+    /// across and up, the way it pushed there. The other games push it the same way. Appended at the end, like every
+    /// kind.
+    /// </summary>
+    RopePush
 }

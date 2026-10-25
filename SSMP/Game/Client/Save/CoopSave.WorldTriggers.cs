@@ -513,6 +513,15 @@ internal partial class CoopSave {
         } catch (Exception e) {
             Logger.Warn($"Could not send what went off here to {player.Username}, who came in: {e.Message}");
         }
+
+        // And the rings that the local player holds here (see CoopSave.PullRings)
+        try {
+            if (_checkedMembers.Contains(player.Id) && GetCurrentMarker() is { } marker && IsMember(player, marker)) {
+                SendRingHoldsTo(player);
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not send the rings held here to {player.Username}, who came in: {e.Message}");
+        }
     }
 
     /// <summary>

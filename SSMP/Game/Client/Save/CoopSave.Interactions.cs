@@ -465,13 +465,16 @@ internal partial class CoopSave {
             return;
         }
 
-        // The chain of a pull switch whose ring the local player let go of while a member still holds it here stays
-        // held (see CoopSave.PullRings)
+        // The chain of a pull switch, or a pole that bends, whose ring the local player let go of while a member still
+        // holds it here stays held, and a pole that bent as far as it goes for members alone throws nobody off here
+        // (see CoopSave.PullRings)
         try {
-            if (OnRingProxySwitch(self, toState)) {
+            if (OnRingProxySwitch(self, toState) || OnRingPoleSwitch(self, toState)) {
                 MachineSwitchToStateField?.SetValue(self, null);
                 return;
             }
+
+            toState = RedirectPoleThrow(self, toState);
         } catch (Exception e) {
             LogInteractionError(e);
         }
