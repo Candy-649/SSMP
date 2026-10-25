@@ -573,10 +573,11 @@ internal class HeroDust : AnimationEffect {
     /// Makes dust from the game's own, switched off, at a place, without what on it makes sound, makes noise that
     /// creatures hear, or shakes the camera or the controller. It is made rather than taken from the game's pool, so
     /// that none of that goes missing from the local hero's own dust; its end, which would put it back in the pool,
-    /// destroys it.
+    /// destroys it. The spark of another player's harpoon striking a wall is made this way too (see
+    /// <see cref="HeroHarpoon"/>).
     /// </summary>
     /// <returns>The dust, or null if there is no such dust.</returns>
-    private static GameObject? MakeDust(GameObject? prefab, Vector3 position) {
+    internal static GameObject? MakeDust(GameObject? prefab, Vector3 position) {
         if (prefab == null) {
             return null;
         }

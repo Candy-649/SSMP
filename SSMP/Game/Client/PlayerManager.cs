@@ -609,6 +609,7 @@ internal class PlayerManager : IPlayerManager {
             HeroChildEffects.ResetCopies(child.gameObject);
             HeroChildParticles.ResetCopies(child.gameObject);
             HeroDust.Reset(child.gameObject);
+            HeroHarpoon.Reset(child.gameObject);
             ImbuedNail.Stop(child.gameObject);
             ThrownTool.RemoveCopies(child.gameObject);
 

@@ -106,7 +106,17 @@ internal class HeroPartClips : AnimationEffect {
     ) {
         orig(self, clip, clipStartTime, overrideFps);
 
-        if (_send == null || clip == null) {
+        if (clip == null) {
+            return;
+        }
+
+        // The needle of the harpoon, whose clips go with where it is (see HeroHarpoon)
+        if (ReferenceEquals(self, HeroHarpoon.LocalAnimator)) {
+            HeroHarpoon.OnLocalClip(clip, clipStartTime, overrideFps);
+            return;
+        }
+
+        if (_send == null) {
             return;
         }
 

@@ -817,5 +817,8 @@ internal enum AnimationClip {
     HeroDust,
 
     // What the round of a game that each player plays on their own shows, for the players who watch it
-    MinigameView
+    MinigameView,
+
+    // The needle that the harpoon throws, the threads it draws and the spark of a needle striking a wall
+    HeroHarpoon
 }

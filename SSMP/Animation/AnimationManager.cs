@@ -739,7 +739,10 @@ internal class AnimationManager {
         { AnimationClip.HeroDust, HeroDust.Instance },
 
         // What the round of a game that each player plays on their own shows, for the players who watch it
-        { AnimationClip.MinigameView, MinigameView.Instance }
+        { AnimationClip.MinigameView, MinigameView.Instance },
+
+        // The needle that the harpoon throws, the threads it draws and the spark of a needle striking a wall
+        { AnimationClip.HeroHarpoon, HeroHarpoon.Instance }
     };
 
     #endregion
@@ -1401,6 +1404,7 @@ internal class AnimationManager {
         HeroHidden.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHidden, effectInfo));
         HeroRoomFigure.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroRoomFigure, effectInfo));
         HeroDust.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroDust, effectInfo));
+        HeroHarpoon.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHarpoon, effectInfo));
         BeamShot.Watch(hc, OnToolMessage);
         if (hc.silkSpecialFSM != null) {
             TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));
