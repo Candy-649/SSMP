@@ -615,9 +615,21 @@ internal class ConnectInterface {
     private CSteamID _waitingRoomLobbyId;
 
     /// <summary>
-    /// Whether the local player is the one hosting the waiting room, who alone has a lobby to invite to.
+    /// How teammates get into the waiting room: <see cref="WaitingRoomEntry.Joined"/> for a player who joined someone
+    /// else's game, any other for the host.
     /// </summary>
-    private bool _waitingRoomHosting;
+    private WaitingRoomEntry _waitingRoomEntry;
+
+    /// <summary>
+    /// The lobby ID or the port that teammates join the room with, shown in it, for a host whose room isn't a Steam
+    /// lobby.
+    /// </summary>
+    private string _waitingRoomEntryDetail = "";
+
+    /// <summary>
+    /// Whether the local player is the one hosting the waiting room.
+    /// </summary>
+    private bool WaitingRoomHosting => _waitingRoomEntry != WaitingRoomEntry.Joined;
 
     /// <summary>
     /// Whether the local player has said they are ready to choose a save.
@@ -734,13 +746,9 @@ internal class ConnectInterface {
     public event Action<string, int, string, TransportType, string?>? ConnectButtonPressed;
 
     /// <summary>
-    /// Fired when the user attempts to start hosting a server.
+    /// Raised to start hosting without opening the save selection, so the host waits for their teammate first. Every
+    /// way of hosting does this: a Steam lobby, a lobby ID and a direct IP connection.
     /// Parameters: address, port, username, transportType, fallbackAddress
-    /// </summary>
-    public event Action<string, int, string, TransportType, string?>? StartHostButtonPressed;
-
-    /// <summary>
-    /// Raised to start hosting without opening the save selection, so the host waits for their teammate first.
     /// </summary>
     public event Action<string, int, string, TransportType, string?>? StartHostWithoutSavePressed;
 
@@ -763,6 +771,11 @@ internal class ConnectInterface {
     /// Raised when a host gives up waiting, so the server they opened is closed again.
     /// </summary>
     public event Action? StopWaitingRoomHostingEvent;
+
+    /// <summary>
+    /// Raised when a player who joined someone else's game leaves its waiting room, so they disconnect from it.
+    /// </summary>
+    public event Action? LeaveJoinedRoomEvent;
 
     #endregion
 
@@ -865,6 +878,18 @@ internal class ConnectInterface {
                 }
             }
         );
+        _waitingRoomPanel.SetOnCopy(() => {
+                if (_waitingRoomEntry != WaitingRoomEntry.LobbyId) {
+                    return;
+                }
+
+                GUIUtility.systemCopyBuffer = _waitingRoomEntryDetail;
+                ShowFeedback(
+                    Color.green,
+                    Lang.Pick($"Copied the lobby ID {_waitingRoomEntryDetail}.", $"已复制房间 ID：{_waitingRoomEntryDetail}")
+                );
+            }
+        );
         _waitingRoomPanel.SetOnReady(() => {
                 _waitingRoomLocalReady = !_waitingRoomLocalReady;
                 WaitingRoomReadyToggled?.Invoke(_waitingRoomLocalReady);
@@ -872,9 +897,19 @@ internal class ConnectInterface {
             }
         );
         _waitingRoomPanel.SetOnLeave(() => {
+                var hosting = WaitingRoomHosting;
                 HideWaitingRoom();
-                ShowFeedback(Color.yellow, Lang.Pick("Stopped waiting. Your game is closed again.", "已停止等待。你的游戏重新关上了。"));
-                StopWaitingRoomHostingEvent?.Invoke();
+
+                if (hosting) {
+                    ShowFeedback(Color.yellow, Lang.Pick("Stopped waiting. Your game is closed again.", "已停止等待。你的游戏重新关上了。"));
+                    StopWaitingRoomHostingEvent?.Invoke();
+                    return;
+                }
+
+                // Hiding the room alone left a player who joined connected, still listed in the host's room and never
+                // ready
+                ShowFeedback(Color.yellow, Lang.Pick("You left the lobby.", "已离开房间。"));
+                LeaveJoinedRoomEvent?.Invoke();
             }
         );
 
@@ -1506,12 +1541,21 @@ internal class ConnectInterface {
     }
 
     /// <summary>
-    /// Shows the waiting room for a host that just opened their game, listing only themselves to begin with.
+    /// Shows the waiting room for the host of a Steam lobby that just opened their game.
     /// </summary>
     /// <param name="lobbyId">The lobby that people are invited to.</param>
     private void ShowWaitingRoom(CSteamID lobbyId) {
         _waitingRoomLobbyId = lobbyId;
-        OpenWaitingRoom(hosting: true, [_usernameInput.GetInput()]);
+        ShowHostWaitingRoom(WaitingRoomEntry.SteamLobby, "");
+    }
+
+    /// <summary>
+    /// Shows the waiting room for a host that just opened their game, listing only themselves to begin with.
+    /// </summary>
+    /// <param name="entry">How teammates get in.</param>
+    /// <param name="entryDetail">The lobby ID or the port that they get in with, shown in the room.</param>
+    private void ShowHostWaitingRoom(WaitingRoomEntry entry, string entryDetail) {
+        OpenWaitingRoom(entry, entryDetail, [_usernameInput.GetInput()]);
     }
 
     /// <summary>
@@ -1523,15 +1567,16 @@ internal class ConnectInterface {
     public void ShowJoinWaitingRoom(IReadOnlyList<string> others) {
         var players = new List<string> { _usernameInput.GetInput() };
         players.AddRange(others);
-        OpenWaitingRoom(hosting: false, players);
+        OpenWaitingRoom(WaitingRoomEntry.Joined, "", players);
     }
 
     /// <summary>
     /// Puts the waiting room on screen with the given players, nobody ready yet.
     /// </summary>
-    private void OpenWaitingRoom(bool hosting, List<string> players) {
+    private void OpenWaitingRoom(WaitingRoomEntry entry, string entryDetail, List<string> players) {
         _waitingRoomActive = true;
-        _waitingRoomHosting = hosting;
+        _waitingRoomEntry = entry;
+        _waitingRoomEntryDetail = entryDetail;
         _waitingRoomLocalReady = false;
         _waitingRoomProceeded = false;
         _waitingRoomReadyNames.Clear();
@@ -1561,7 +1606,7 @@ internal class ConnectInterface {
             );
         }
 
-        _waitingRoomPanel.SetRoom(members, _waitingRoomLocalReady, _waitingRoomHosting);
+        _waitingRoomPanel.SetRoom(members, _waitingRoomLocalReady, _waitingRoomEntry, _waitingRoomEntryDetail);
 
         if (_waitingRoomProceeded || members.Count < 2) {
             return;
@@ -1574,7 +1619,7 @@ internal class ConnectInterface {
         }
 
         _waitingRoomProceeded = true;
-        if (_waitingRoomHosting) {
+        if (WaitingRoomHosting) {
             // Put away rather than torn down, because backing out of the save menu has to come back here: the game
             // is still hosted and the teammate is still connected at that point
             SuspendWaitingRoom();
@@ -1609,7 +1654,8 @@ internal class ConnectInterface {
     /// </summary>
     private void HideWaitingRoom() {
         _waitingRoomActive = false;
-        _waitingRoomHosting = false;
+        _waitingRoomEntry = WaitingRoomEntry.Joined;
+        _waitingRoomEntryDetail = "";
         _waitingRoomLocalReady = false;
         _waitingRoomProceeded = false;
         _waitingRoomLobbyId = default;
@@ -1671,6 +1717,13 @@ internal class ConnectInterface {
         }
 
         _waitingRoomPlayers.Add(username);
+
+        // A ready said before they came reached nobody, so they hear it now: a host who readied while alone was never
+        // ready for the teammate who joined, whose save menu then never opened
+        if (_waitingRoomLocalReady) {
+            WaitingRoomReadyToggled?.Invoke(true);
+        }
+
         RefreshWaitingRoom();
     }
 
@@ -1912,10 +1965,11 @@ internal class ConnectInterface {
 
             // Hosting starts here, but the save is not chosen until the waiting room says everyone is in. Going
             // straight into the save selection was what made the old flow so strange: the game loaded before anyone
-            // could join, and there was nowhere obvious to invite them from.
+            // could join, and there was nowhere obvious to invite them from. The room opens first, so that hosting
+            // that fails to start closes it again (OnHostStartFailed).
             ShowFeedback(Color.yellow, Lang.Pick("Steam lobby created. Opening your game...", "Steam 房间已创建。正在打开你的游戏……"));
-            StartHostWithoutSavePressed?.Invoke("0.0.0.0", 0, username, TransportType.SteamRelay, null);
             ShowWaitingRoom(steamLobbyId);
+            StartHostWithoutSavePressed?.Invoke("0.0.0.0", 0, username, TransportType.SteamRelay, null);
         }
     }
 
@@ -1993,24 +2047,19 @@ internal class ConnectInterface {
             yield break;
         }
 
-        // For private lobbies, show invite code in ChatBox so it's easily shareable. Green is written out as a
-        // number, because the chat's TextMeshPro knows only a handful of colours by name and lime is not one of them
-        if (visibility == LobbyVisibility.Private) {
-            UiManager.InternalChatBox.AddMessage(
-                $"<color=yellow>[Private Lobby]</color> Invite code: <color=#00FF00>{lobbyId}</color>"
-            );
-            ShowFeedback(Color.green, Lang.Pick("Private lobby created!", "私人房间已创建！"));
-        } else {
-            UiManager.InternalChatBox.AddMessage(
-                $"<color=yellow>[Public Lobby]</color> Lobby name: <color=#00FF00>{lobbyName}</color>, invite code: <color=#00FF00>{lobbyId}</color>"
-            );
-            ShowFeedback(Color.green, Lang.Pick($"Lobby: {lobbyId}", $"房间：{lobbyId}"));
-        }
+        ShowFeedback(Color.green, visibility == LobbyVisibility.Private
+            ? Lang.Pick("Private lobby created!", "私人房间已创建！")
+            : Lang.Pick("Public lobby created!", "公开房间已创建！"));
 
         // Pass the pre-bound socket to the transport layer before hosting
         HolePunchEncryptedTransportServer.PreBoundSocket = holePunchSocket;
 
-        StartHostButtonPressed?.Invoke("0.0.0.0", actualPort, username, TransportType.HolePunch, null);
+        // The same waiting room as a Steam lobby's, which shows the lobby ID to send and copies it: hosting starts
+        // now, and the save is chosen once both players are ready. Hosting went straight into the save menu before,
+        // with the ID in an English line of the chat, while whoever joined waited in their room for a host who never
+        // came to one to say they were ready.
+        ShowHostWaitingRoom(WaitingRoomEntry.LobbyId, lobbyId);
+        StartHostWithoutSavePressed?.Invoke("0.0.0.0", actualPort, username, TransportType.HolePunch, null);
     }
 
     /// <summary>
@@ -2239,7 +2288,9 @@ internal class ConnectInterface {
 
         SaveConnectionSettings(null, port, username);
 
-        StartHostButtonPressed?.Invoke("", port, username, TransportType.Udp, null);
+        // The waiting room, with the port to give out, as for the other ways of hosting
+        ShowHostWaitingRoom(WaitingRoomEntry.DirectIp, port.ToString());
+        StartHostWithoutSavePressed?.Invoke("", port, username, TransportType.Udp, null);
     }
 
     #endregion
@@ -2416,6 +2467,12 @@ internal class ConnectInterface {
         var waitedForHost = _waitingForHost;
         _waitingForHost = false;
 
+        // The host's own game could not connect to the server it opened, which is stopped now: only a host has a
+        // waiting room up while connecting, as whoever joins gets theirs once connected
+        if (_waitingRoomActive) {
+            HideWaitingRoom();
+        }
+
         // If we have a fallback connection to try, we do so now
         if (!string.IsNullOrEmpty(fallbackAddress) &&
             TryParseConnectionData(fallbackAddress, out var address, out var port)) {
@@ -2461,6 +2518,25 @@ internal class ConnectInterface {
         // open over the game or anywhere else, and the join looked as if it had never ended
         var message = GetFailureMessage(result, waitedForHost);
         ShowFeedback(Color.red, message, stays: true);
+    }
+
+    /// <summary>
+    /// Hosting could not start, so the waiting room that it opened closes and the player is told why.
+    /// </summary>
+    /// <param name="port">The port that hosting was to run on.</param>
+    /// <param name="exception">What starting it threw.</param>
+    public void OnHostStartFailed(int port, Exception exception) {
+        if (_waitingRoomActive) {
+            HideWaitingRoom();
+        }
+
+        // Taken by another program, or by the ports that Windows keeps back for itself
+        var portUnusable = exception is SocketException {
+            SocketErrorCode: SocketError.AddressAlreadyInUse or SocketError.AccessDenied
+        };
+        ShowFeedback(Color.red, portUnusable
+            ? Lang.Pick($"Could not host: port {port} can't be used. Try another port.", $"没能开房：端口 {port} 用不了，换一个端口再试。")
+            : Lang.Pick("Could not host.", "没能开房。"), stays: true);
     }
 
     #endregion

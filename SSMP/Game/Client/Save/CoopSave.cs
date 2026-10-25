@@ -1574,7 +1574,8 @@ internal partial class CoopSave {
 
         var slot = button.SaveSlotIndex;
         if (_uiManager.IsSelectingHostSave) {
-            if (!_uiManager.StartHostBeforeSave()) {
+            // Hosting started in the waiting room, before the save menu opened, and stopped if the connection was lost
+            if (!_uiManager.IsHostingBeforeSave) {
                 ShowMessage(Lang.Pick("Could not open your game.", "没能开好你的游戏。"));
                 return false;
             }

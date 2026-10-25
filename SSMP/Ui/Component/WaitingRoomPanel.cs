@@ -24,6 +24,23 @@ internal readonly struct WaitingRoomMember {
 }
 
 /// <summary>
+/// How the host's teammates get into the room, which decides what the room offers for bringing them in.
+/// </summary>
+internal enum WaitingRoomEntry {
+    /// <summary>The local player joined someone else's game and brings nobody in.</summary>
+    Joined,
+
+    /// <summary>A Steam lobby, which Steam's invite dialog invites to and friends join from Steam.</summary>
+    SteamLobby,
+
+    /// <summary>A lobby of the matchmaking tab, which teammates join with its lobby ID.</summary>
+    LobbyId,
+
+    /// <summary>A server that teammates connect to with the host's IP and port.</summary>
+    DirectIp
+}
+
+/// <summary>
 /// The screen both players wait on before either of them chooses a save, listing who is in and who has said they are
 /// ready.
 ///
@@ -54,10 +71,20 @@ internal class WaitingRoomPanel : IRootedComponent {
     /// <summary>The label of the ready button, which says what pressing it does next.</summary>
     private readonly Text _readyText;
 
-    /// <summary>The button that opens Steam's invite dialog, which only the host has anyone to invite with.</summary>
+    /// <summary>The button that opens Steam's invite dialog, which only the host of a Steam lobby has.</summary>
     private readonly GameObject _inviteButton;
 
+    /// <summary>
+    /// The line under the status line that says what teammates join with, the lobby ID or the port, for a host whose
+    /// room isn't a Steam lobby.
+    /// </summary>
+    private readonly Text _entryText;
+
+    /// <summary>The button that copies the lobby ID, in the place of the invite button, for the host of a lobby ID.</summary>
+    private readonly GameObject _copyButton;
+
     private Action? _onInvite;
+    private Action? _onCopy;
     private Action? _onReady;
     private Action? _onLeave;
 
@@ -74,12 +101,13 @@ internal class WaitingRoomPanel : IRootedComponent {
     private const float Padding = 15f;
     private const float HeaderHeight = 32f;
     private const float StatusHeight = 26f;
+    private const float EntryHeight = 26f;
     private const float ButtonAreaHeight = 58f;
 
     /// <summary>
     /// How many players the list shows before it runs into the buttons under it. Six take the room the choices about
     /// this player's own name had before they moved to the settings page, so the panel is as tall as before, to within
-    /// 2, and the feedback text under it stays where it was.
+    /// 2, and the feedback text under it stays where it was. Five, under the line of a lobby ID or a port.
     /// </summary>
     private const int ListRows = 6;
 
@@ -140,6 +168,20 @@ internal class WaitingRoomPanel : IRootedComponent {
             TextAnchor.MiddleCenter
         );
 
+        // Shown only for a lobby ID or a port, with the list moved down under it
+        _entryText = CreateLabel(
+            GameObject.transform,
+            "Entry",
+            "",
+            new Vector2(0f, 1f),
+            new Vector2(1f, 1f),
+            new Vector2(0f, EntryHeight),
+            new Vector2(0f, -HeaderHeight - StatusHeight),
+            16,
+            Accent,
+            TextAnchor.MiddleCenter
+        );
+
         var listObj = new GameObject("List");
         _content = listObj.AddComponent<RectTransform>();
         _content.anchorMin = new Vector2(0f, 0f);
@@ -165,6 +207,18 @@ internal class WaitingRoomPanel : IRootedComponent {
             new Vector2(0.35f, 0.88f),
             new Color(0.2f, 0.35f, 0.55f, 1f),
             () => _onInvite?.Invoke(),
+            out _,
+            out _
+        );
+
+        _copyButton = CreateButton(
+            buttonArea.transform,
+            "CopyButton",
+            Lang.Pick("COPY ID", "复制房间 ID"),
+            new Vector2(0.02f, 0.12f),
+            new Vector2(0.35f, 0.88f),
+            new Color(0.2f, 0.35f, 0.55f, 1f),
+            () => _onCopy?.Invoke(),
             out _,
             out _
         );
@@ -202,7 +256,7 @@ internal class WaitingRoomPanel : IRootedComponent {
         Object.DontDestroyOnLoad(GameObject);
         GameObject.SetActive(false);
 
-        SetRoom([], localReady: false, hosting: true);
+        SetRoom([], localReady: false, WaitingRoomEntry.Joined, "");
     }
 
     /// <summary>
@@ -288,6 +342,9 @@ internal class WaitingRoomPanel : IRootedComponent {
     /// <summary>Sets what happens when the host asks to invite someone.</summary>
     public void SetOnInvite(Action callback) => _onInvite = callback;
 
+    /// <summary>Sets what happens when the host asks to copy the lobby ID.</summary>
+    public void SetOnCopy(Action callback) => _onCopy = callback;
+
     /// <summary>Sets what happens when the local player says they are ready, or takes it back.</summary>
     public void SetOnReady(Action callback) => _onReady = callback;
 
@@ -299,13 +356,32 @@ internal class WaitingRoomPanel : IRootedComponent {
     /// </summary>
     /// <param name="members">Everyone in, the local player included.</param>
     /// <param name="localReady">Whether the local player has said they are ready.</param>
-    /// <param name="hosting">Whether the local player is hosting, who alone has a lobby to invite to.</param>
-    public void SetRoom(IReadOnlyList<WaitingRoomMember> members, bool localReady, bool hosting) {
+    /// <param name="entry">How teammates get in, which is <see cref="WaitingRoomEntry.Joined"/> for a player who
+    /// joined someone else's game.</param>
+    /// <param name="entryDetail">The lobby ID for <see cref="WaitingRoomEntry.LobbyId"/>, the port for
+    /// <see cref="WaitingRoomEntry.DirectIp"/>.</param>
+    public void SetRoom(
+        IReadOnlyList<WaitingRoomMember> members,
+        bool localReady,
+        WaitingRoomEntry entry,
+        string entryDetail
+    ) {
         foreach (var row in _rows) {
             Object.Destroy(row);
         }
 
         _rows.Clear();
+
+        _entryText.text = entry switch {
+            WaitingRoomEntry.LobbyId => Lang.Pick($"Lobby ID: {entryDetail}", $"房间 ID：{entryDetail}"),
+            WaitingRoomEntry.DirectIp => Lang.Pick($"Port: {entryDetail}", $"端口：{entryDetail}"),
+            _ => ""
+        };
+        var entryShown = _entryText.text.Length > 0;
+        _entryText.gameObject.SetActive(entryShown);
+        _content.offsetMax = new Vector2(
+            -Padding, -HeaderHeight - StatusHeight - 4f - (entryShown ? EntryHeight : 0f)
+        );
 
         var y = -2f;
         foreach (var member in members) {
@@ -313,7 +389,8 @@ internal class WaitingRoomPanel : IRootedComponent {
             y -= RowHeight + RowSpacing;
         }
 
-        _inviteButton.SetActive(hosting);
+        _inviteButton.SetActive(entry == WaitingRoomEntry.SteamLobby);
+        _copyButton.SetActive(entry == WaitingRoomEntry.LobbyId);
         _readyImage.color = localReady ? ReadyOn : ReadyOff;
         _readyText.text = localReady
             ? Lang.Pick("CANCEL READY", "取消准备")
@@ -331,12 +408,21 @@ internal class WaitingRoomPanel : IRootedComponent {
         // fragments reads like one in English and like nothing at all in Chinese, and it is how the other half of
         // this panel ended up half-translated.
         _statusText.text = alone
-            ? hosting
-                ? Lang.Pick(
+            ? entry switch {
+                WaitingRoomEntry.SteamLobby => Lang.Pick(
                     "Waiting for your teammate. Invite them, or have them join your lobby.",
                     "正在等队友。邀请他们，或者让他们自己进你的房间。"
-                )
-                : Lang.Pick("Waiting for your teammate.", "正在等队友。")
+                ),
+                WaitingRoomEntry.LobbyId => Lang.Pick(
+                    "Waiting for your teammate. Send them the lobby ID.",
+                    "正在等队友。把房间 ID 发给他们。"
+                ),
+                WaitingRoomEntry.DirectIp => Lang.Pick(
+                    "Waiting for your teammate. Give them your IP and this port.",
+                    "正在等队友。把你的 IP 和这个端口告诉他们。"
+                ),
+                _ => Lang.Pick("Waiting for your teammate.", "正在等队友。")
+            }
             : waitingOn == 0
                 ? Lang.Pick("Everyone is ready. Choose your saves.", "都准备好了，挑存档吧。")
                 : localReady

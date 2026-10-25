@@ -1039,6 +1039,10 @@ internal class ClientManager : IClientManager {
         // Relay the addon order from the server info to the addon manager
         _addonManager.UpdateNetworkedAddonOrder(serverInfo.AddonOrder);
 
+        // Each connection starts without one: kept from a join that ended before both were ready, it made the host's
+        // next room a joining player's room, whose save menu went back by disconnecting the host
+        _openSaveAfterReady = null;
+
         if (!_autoConnect) {
             if (_fullSynchronisation) {
                 // Full sync currently does not serialize CurrentSave in ServerInfo.

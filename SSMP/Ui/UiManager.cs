@@ -279,8 +279,8 @@ internal class UiManager : IUiManager {
     private static GameManager? _returningManager;
 
     /// <summary>
-    /// Whether the save slot selection is open for hosting, where the chosen save loads before the server starts and
-    /// before any other player can connect.
+    /// Whether the save slot selection is open for hosting, which the host reaches from the waiting room with their
+    /// game open already.
     /// </summary>
     public bool IsSelectingHostSave { get; private set; }
 
@@ -574,13 +574,11 @@ internal class UiManager : IUiManager {
 
         // Choosing a save deliberately leaves the slot selection marked active, so that the menu cannot be reopened
         // while the game loads it. Nothing cleared it afterwards, so hosting again after coming back here did nothing
-        // whatsoever: the host press found the selection still active, and so neither opened the save menu nor kept
-        // the action that starts the server. No message either, because there was no failure - only a press that
-        // quietly led nowhere.
+        // whatsoever: the save menu found the selection still active and never opened. No message either, because
+        // there was no failure - only a press that quietly led nowhere.
         _isSlotSelectionActive = false;
         IsSelectingHostSave = false;
         _hostStartedBeforeSave = false;
-        _startPendingHost = null;
     }
 
     #endregion
@@ -693,11 +691,11 @@ internal class UiManager : IUiManager {
     /// Registers callbacks for interface button events.
     /// </summary>
     private void RegisterInterfaceCallbacks() {
-        _connectInterface.StartHostButtonPressed += OnStartHostRequested;
         _connectInterface.ConnectButtonPressed += OnConnectRequested;
         _connectInterface.StartHostWithoutSavePressed += StartHostWithoutSave;
         _connectInterface.HostSaveSelectionRequested += OpenHostSaveSelection;
         _connectInterface.StopWaitingRoomHostingEvent += StopHostBeforeSave;
+        _connectInterface.LeaveJoinedRoomEvent += () => RequestClientDisconnectEvent?.Invoke();
         _connectInterface.JoinSaveSelectionRequested += () => BothReadyEvent?.Invoke();
         _connectInterface.WaitingRoomReadyToggled += ready => ReadyToggledEvent?.Invoke(ready);
 
@@ -707,73 +705,16 @@ internal class UiManager : IUiManager {
     }
 
     /// <summary>
-    /// Starts the hosting that the save slot selection is open for, or null outside that selection.
-    /// </summary>
-    private Action? _startPendingHost;
-
-    /// <summary>
-    /// Whether hosting started before the chosen save loaded, which a two-player save does to wait for its partner.
+    /// Whether hosting started before the chosen save loaded. Every host opens their game in the waiting room before
+    /// choosing a save, and a two-player save waits in the menu for its partner on it.
     /// </summary>
     private bool _hostStartedBeforeSave;
 
     /// <summary>
-    /// Handles host button press by opening save selection.
+    /// Whether hosting runs while the save menu is open for hosting, so a two-player save can wait there for its
+    /// partner.
     /// </summary>
-    private void OnStartHostRequested(
-        string address,
-        int port,
-        string username,
-        TransportType transportType,
-        string? fallbackAddress
-    ) {
-        if (!_isSlotSelectionActive) {
-            IsSelectingHostSave = true;
-            _hostStartedBeforeSave = false;
-            _startPendingHost = () => {
-                RequestServerStartHostEvent?.Invoke(address, port, username, transportType, fallbackAddress);
-                RequestClientConnectEvent?.Invoke(LocalhostAddress, port, username, transportType, true, null);
-            };
-        }
-
-        OpenSaveSlotSelection(saveSelected => {
-            IsSelectingHostSave = false;
-            var startHost = _startPendingHost;
-            _startPendingHost = null;
-
-            if (!saveSelected) {
-                HostSaveSelectionClosedEvent?.Invoke();
-                StopHostBeforeSave();
-                return;
-            }
-
-            // A two-player save already started hosting while it waited for its partner
-            if (_hostStartedBeforeSave) {
-                _hostStartedBeforeSave = false;
-                HostSaveLoadedEvent?.Invoke();
-                return;
-            }
-
-            startHost?.Invoke();
-        });
-    }
-
-    /// <summary>
-    /// Starts hosting before the chosen save loads, so a two-player save can wait in the menu for its partner.
-    /// </summary>
-    /// <returns>Whether hosting runs now.</returns>
-    public bool StartHostBeforeSave() {
-        if (_hostStartedBeforeSave) {
-            return true;
-        }
-
-        if (!IsSelectingHostSave || _startPendingHost == null) {
-            return false;
-        }
-
-        _hostStartedBeforeSave = true;
-        _startPendingHost();
-        return true;
-    }
+    public bool IsHostingBeforeSave => _hostStartedBeforeSave;
 
     /// <summary>
     /// Stops hosting that started before the save loaded, for when the player stops waiting for their partner.
@@ -806,9 +747,19 @@ internal class UiManager : IUiManager {
         // The same state the save menu uses when a two-player save hosts before loading, so that choosing the save
         // later does not try to start a second server
         _hostStartedBeforeSave = true;
-        _startPendingHost = null;
 
-        RequestServerStartHostEvent?.Invoke(address, port, username, transportType, fallbackAddress);
+        try {
+            RequestServerStartHostEvent?.Invoke(address, port, username, transportType, fallbackAddress);
+        } catch (Exception e) {
+            // Like a port of direct IP that another program has. Left as it was, the state above kept every later
+            // press from hosting, and the waiting room waited on a server that never ran.
+            Logger.Error($"Could not start hosting on port {port}:\n{e}");
+            _hostStartedBeforeSave = false;
+            RequestServerStopHostEvent?.Invoke();
+            _connectInterface.OnHostStartFailed(port, e);
+            return;
+        }
+
         RequestClientConnectEvent?.Invoke(LocalhostAddress, port, username, transportType, true, null);
     }
 
@@ -826,9 +777,9 @@ internal class UiManager : IUiManager {
             IsSelectingHostSave = false;
 
             if (!saveSelected) {
-                // Deliberately not stopping the hosting that the waiting room started, unlike the older save menu
-                // above: the game stays open and the teammate stays connected, and this event puts the host back on
-                // the waiting room so a mis-press does not cost them the lobby.
+                // Deliberately not stopping the hosting that the waiting room started: the game stays open and the
+                // teammate stays connected, and this event puts the host back on the waiting room so a mis-press does
+                // not cost them the lobby.
                 HostSaveSelectionClosedEvent?.Invoke();
                 return;
             }
