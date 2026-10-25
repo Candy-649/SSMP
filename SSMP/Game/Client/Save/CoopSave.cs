@@ -999,6 +999,7 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.WaitingRoomReady:
                 // Handled by the menu rather than here: at this point neither player has a save loaded, so there is
                 // nothing about a two-player save to act on yet
+                Logger.Info($"[Room] {player.Username} is {(update.Part != 0 ? "ready" : "not ready")}");
                 _uiManager.OnPartnerReadyChanged(player.Username, update.Part != 0);
                 break;
             case CoopSaveUpdateKind.Hello:
@@ -2105,6 +2106,7 @@ internal partial class CoopSave {
             return;
         }
 
+        Logger.Info($"[Room] Telling {_playerData.Count} player(s) this player is {(ready ? "ready" : "not ready")}");
         foreach (var other in _playerData.Values) {
             Send(new CoopSaveUpdate {
                 TargetId = other.Id,

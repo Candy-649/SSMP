@@ -1326,7 +1326,13 @@ internal class UiManager : IUiManager {
 
         var actions = InputHandler.Instance.inputActions;
         if (actions.Pause.IsPressed) {
-            HandlePauseKey();
+            // Not out of a waiting room, which is left with its own button, as the back button doesn't leave it either:
+            // the pause key left the room up, the game hosted or joined, and a host who then started a save from the
+            // game's own menu went into it while whoever had joined waited for them to be ready, forever
+            if (!_connectInterface.IsInWaitingRoom) {
+                HandlePauseKey();
+            }
+
             return;
         }
 

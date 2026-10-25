@@ -5,6 +5,7 @@ using SSMP.Networking.Chunk;
 using SSMP.Networking.Packet;
 using SSMP.Networking.Packet.Connection;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 
 namespace SSMP.Networking.Client;
 
@@ -71,12 +72,13 @@ internal class ClientConnectionManager : ConnectionManager {
         // Create the connection packet that will be chunk-transported to the server.
         var connectionPacket = new ServerConnectionPacket();
 
-        // Set the client info data in the connection packet
+        // Set the client info data in the connection packet, with the version of the mod among the addons, which the
+        // host checks (see ModVersion)
         connectionPacket.SetSendingPacketData(
             ServerConnectionPacketId.ClientInfo, new ClientInfo {
                 Username = username,
                 AuthKey = authKey,
-                AddonData = addonData
+                AddonData = [..addonData, ModVersion.AsAddon()]
             }
         );
 

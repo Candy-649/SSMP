@@ -80,6 +80,16 @@ internal class ConnectInterface {
     private const float GameTooOldNoteHeight = 60f;
 
     /// <summary>
+    /// How far the name and version of the mod are in from the bottom right corner of the menu, and the size of the
+    /// line that they are on, whose bottom right corner is there.
+    /// </summary>
+    private const float VersionLabelMargin = 24f;
+
+    private const float VersionLabelWidth = 600f;
+
+    private const float VersionLabelHeight = 30f;
+
+    /// <summary>
     /// Spacing between the header and the glowing notch.
     /// </summary>
     private const float HeaderToNotchSpacing = 45f;
@@ -820,6 +830,7 @@ internal class ConnectInterface {
         // Build UI from top to bottom
         CreateHeader(connectGroup, ref currentY);
         CreateGameTooOldNote(connectGroup);
+        CreateVersionLabel(connectGroup);
         _glowingNotch = CreateNotch(ref currentY);
         _backgroundPanel = CreateBackgroundPanel(ref currentY);
 
@@ -1061,6 +1072,24 @@ internal class ConnectInterface {
             wrap: true
         );
         note.SetColor(Color.red);
+    }
+
+    /// <summary>
+    /// The name and version of the mod at the bottom right of the menu, as npm names its package, so that a player can
+    /// say which one they have (USER 10-25: "版本字段在联机界面显示吧，可以显示在右下角之类的，标注
+    /// silksong-coop-mod@0.4.132之类的").
+    /// </summary>
+    private static void CreateVersionLabel(ComponentGroup parent) {
+        var label = new TextComponent(
+            parent,
+            new Vector2(1920f - VersionLabelMargin, VersionLabelMargin),
+            new Vector2(VersionLabelWidth, VersionLabelHeight),
+            new Vector2(1f, 0f),
+            $"{ModVersion.PackageName}@{ModVersion.Short}",
+            UiManager.SubTextFontSize,
+            alignment: TextAnchor.LowerRight
+        );
+        label.SetColor(new Color(1f, 1f, 1f, 0.6f));
     }
 
     /// <summary>
@@ -1541,6 +1570,12 @@ internal class ConnectInterface {
     }
 
     /// <summary>
+    /// Whether a waiting room is up, also behind the settings page, which the pause key doesn't leave (see
+    /// UiManager.CheckKeyBinds).
+    /// </summary>
+    public bool IsInWaitingRoom => _waitingRoomActive;
+
+    /// <summary>
     /// Shows the waiting room for the host of a Steam lobby that just opened their game.
     /// </summary>
     /// <param name="lobbyId">The lobby that people are invited to.</param>
@@ -1712,7 +1747,15 @@ internal class ConnectInterface {
     /// </summary>
     /// <param name="username">The name of the player that joined.</param>
     public void OnPlayerJoined(string username) {
-        if (!_waitingRoomActive || _waitingRoomPlayers.Contains(username)) {
+        // Past the room, choosing a save or playing, so ready for whoever joins now, who waits in a room of their own
+        // for everyone in it to be ready: they waited for this player forever, as one who joined again after dropping
+        // out did (USER 10-25: "如果有三个玩家，两个玩家先点准备，进游戏了，第三个玩家就会卡住吗？")
+        if (!_waitingRoomActive) {
+            WaitingRoomReadyToggled?.Invoke(true);
+            return;
+        }
+
+        if (_waitingRoomPlayers.Contains(username)) {
             return;
         }
 
@@ -2740,7 +2783,7 @@ internal class ConnectInterface {
             ConnectionFailedReason.TimedOut when waitedForHost => ErrorHostNeverAnswered,
             ConnectionFailedReason.TimedOut => ErrorTimeout,
             ConnectionFailedReason.Other =>
-                $"Failed to connect:\n{((ConnectionFailedMessageResult) result).Message}",
+                Lang.Pick("Failed to connect:", "连接失败：") + $"\n{((ConnectionFailedMessageResult) result).Message}",
             _ => ErrorUnknown
         };
     }

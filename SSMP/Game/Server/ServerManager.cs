@@ -1970,6 +1970,9 @@ internal abstract class ServerManager : IServerManager {
     private void HandleInvalidLoginAddons(ServerInfo serverInfo) {
         serverInfo.ConnectionResult = ServerConnectionResult.InvalidAddons;
         serverInfo.AddonData.AddRange(AddonManager.GetNetworkedAddonData());
+        // With the version of the mod, by which the player's game tells this host from one that turned it away for the
+        // version that it sent among its addons, as one from before the check of the version does
+        serverInfo.AddonData.Add(ModVersion.AsAddon());
     }
 
     /// <summary>
@@ -2038,6 +2041,21 @@ internal abstract class ServerManager : IServerManager {
                 serverInfo.ConnectionRejectedMessage = "Invalid username";
                 return;
             }
+        }
+
+        // The version of the mod that the player runs, which their game sends among its addons and which is taken out
+        // of them for the check of the addons below. Before the old session of a player who comes back is replaced, as
+        // a game of another version doesn't come in at all (see ModVersion)
+        var joiningVersion = ModVersion.TakeFrom(clientInfo.AddonData);
+        if (joiningVersion != ModVersion.Short) {
+            Logger.Info(
+                $"  Client runs mod version {joiningVersion ?? "(none said: older than 0.4.133)"}, this host runs " +
+                $"{ModVersion.Short}, rejected connection"
+            );
+
+            serverInfo.ConnectionResult = ServerConnectionResult.RejectedOther;
+            serverInfo.ConnectionRejectedMessage = ModVersion.RejectionForJoining(joiningVersion);
+            return;
         }
 
         // If this is the same player reconnecting, clear the old session before we evaluate username collisions

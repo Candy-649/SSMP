@@ -56,6 +56,12 @@ internal class NetClient : INetClient {
     /// </summary>
     public ClientConnectionStatus ConnectionStatus { get; private set; } = ClientConnectionStatus.NotConnected;
 
+    /// <summary>
+    /// The update packets that came while the connection was being made, with their slices taken out, which are handled
+    /// once the server accepts it (see HandleUpdatePacket). Used under the connection lock.
+    /// </summary>
+    private readonly List<ClientUpdatePacket> _cameBeforeAccepted = [];
+
     /// <inheritdoc />
     public bool IsConnected => ConnectionStatus == ClientConnectionStatus.Connected;
 
@@ -233,6 +239,7 @@ internal class NetClient : INetClient {
             transportToDisconnect = _transport;
             _transport = null;
             _leftoverData = null;
+            _cameBeforeAccepted.Clear();
         }
 
         try {
@@ -331,11 +338,34 @@ internal class NetClient : INetClient {
             _chunkSender.ProcessReceivedData((SliceAckData) sliceAckData);
         }
 
-        // Then, if we are already connected to a server,
-        // we let the packet manager handle the rest of the packet data
-        if (ConnectionStatus == ClientConnectionStatus.Connected) {
-            _packetManager.HandleClientUpdatePacket(clientUpdatePacket);
+        // Then the packet manager handles the rest of the packet data once the server accepted the connection: what came
+        // while the connection was still being made is kept until then, and handled first, in the order it came. The
+        // server sent it for this connection and its packets are acknowledged already, so it is never sent again: it
+        // used to be dropped, as a host's word that they were ready was, sent as this player joined, who then waited
+        // in the waiting room for it forever (USER 10-25)
+        List<ClientUpdatePacket>? cameBefore = null;
+        lock (_connectionLock) {
+            switch (ConnectionStatus) {
+                case ClientConnectionStatus.Connecting:
+                    _cameBeforeAccepted.Add(clientUpdatePacket);
+                    return;
+                case ClientConnectionStatus.Connected when _cameBeforeAccepted.Count > 0:
+                    cameBefore = [.._cameBeforeAccepted];
+                    _cameBeforeAccepted.Clear();
+                    break;
+                case ClientConnectionStatus.NotConnected:
+                    return;
+            }
         }
+
+        if (cameBefore != null) {
+            Logger.Info($"Taking in {cameBefore.Count} packet(s) of data that came while connecting");
+            foreach (var packet in cameBefore) {
+                _packetManager.HandleClientUpdatePacket(packet);
+            }
+        }
+
+        _packetManager.HandleClientUpdatePacket(clientUpdatePacket);
     }
 
     private void OnServerInfoReceived(ServerInfo serverInfo) {
@@ -358,6 +388,21 @@ internal class NetClient : INetClient {
                     } catch (Exception e) {
                         Logger.Error($"Error in ConnectEvent: {e}");
                     }
+                }
+            );
+            return;
+        }
+
+        // A host that turned this game away for its addons and named no version of the mod among its own runs one from
+        // before the check of the version, which counted the version that this game sent as an addon it doesn't have.
+        // Taken out of the host's addons either way, as it isn't one
+        if (serverInfo.ConnectionResult == ServerConnectionResult.InvalidAddons &&
+            ModVersion.TakeFrom(serverInfo.AddonData) == null) {
+            Logger.Info($"The host runs a version of the mod older than this one ({ModVersion.Short})");
+            HandleConnectFailed(
+                new ConnectionFailedMessageResult {
+                    Reason = ConnectionFailedReason.Other,
+                    Message = ModVersion.HostOlder()
                 }
             );
             return;
