@@ -20,8 +20,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// "飞针到之后会下拉的拉环没有同步"). Now each game sends its own player taking hold and letting go, and the other games
 /// hold the ring for them the same way, a moment later: what it hangs from is held while any player holds the ring
 /// here, and let go once the last of them did, like a plate that several players stand on (see OnPlateTouch). What the
-/// ring itself shows of a hold - its own animation and the sounds of the grab - is the holder's alone. Rings that carry
-/// a player along a rail or up and down are not these.
+/// ring itself shows of a hold shows to the other players as a look (see HarpoonRingLook); the sounds of the grab are the
+/// holder's alone. Rings that carry a player along a rail or up and down are not these.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>

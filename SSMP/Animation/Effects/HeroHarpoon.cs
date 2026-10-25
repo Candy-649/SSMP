@@ -32,7 +32,10 @@ internal class HeroHarpoon : AnimationEffect {
     /// </summary>
     private enum Kind : byte {
         Needle,
-        RingThread
+        RingThread,
+
+        // What the ring that the needle struck shows of the hold (see HarpoonRingLook)
+        RingLook
     }
 
     /// <summary>
@@ -145,6 +148,11 @@ internal class HeroHarpoon : AnimationEffect {
     private static float _lookAgainAt;
 
     /// <summary>
+    /// Whether showing another player's hold of a ring threw, which is logged once.
+    /// </summary>
+    private static bool _ringLookFailed;
+
+    /// <summary>
     /// The local hero, its needle, the needle's thread and the harpoon FSM.
     /// </summary>
     private static Transform? _hero;
@@ -242,6 +250,7 @@ internal class HeroHarpoon : AnimationEffect {
             Logger.Warn("The hero's harpoon needle has no thread or no animator to show to other players");
         }
 
+        HarpoonRingLook.Forget();
         _saidOn = false;
         _threadWasOn = false;
         _goneSaidUntil = 0f;
@@ -321,6 +330,9 @@ internal class HeroHarpoon : AnimationEffect {
         try {
             WatchNeedle();
             WatchRingThread();
+            if (_fsm != null) {
+                HarpoonRingLook.WatchLocal(_fsm, body => _send!(WithKind(Kind.RingLook, body)));
+            }
         } catch (Exception e) {
             _failed = true;
             Logger.Error($"Watching the harpoon's needle to show it to other players threw, so it stops:\n{e}");
@@ -471,6 +483,16 @@ internal class HeroHarpoon : AnimationEffect {
     }
 
     /// <summary>
+    /// Effect info of a kind, with what is said of it after.
+    /// </summary>
+    private static byte[] WithKind(Kind kind, byte[] body) {
+        var info = new byte[body.Length + 1];
+        info[0] = (byte) kind;
+        body.CopyTo(info, 1);
+        return info;
+    }
+
+    /// <summary>
     /// Writes the local thread to a ring to effect info, with how long ago it started.
     /// </summary>
     private static byte[] WriteRingThread(float since) {
@@ -506,6 +528,17 @@ internal class HeroHarpoon : AnimationEffect {
                     break;
                 case Kind.RingThread:
                     PlayRingThread(playerObject, reader);
+                    break;
+                case Kind.RingLook:
+                    try {
+                        HarpoonRingLook.Play(reader);
+                    } catch (Exception e) when (e is not IOException) {
+                        if (!_ringLookFailed) {
+                            _ringLookFailed = true;
+                            Logger.Warn($"Could not show another player's hold of a ring: {e}");
+                        }
+                    }
+
                     break;
             }
         } catch (IOException) {
