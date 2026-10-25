@@ -219,12 +219,13 @@ under the GNU LGPL 2.1 - see ``LICENSE``. Built from https://github.com/Candy-64
     Write-Host "  Staged $PackageName@$semver in:" -ForegroundColor Green
     Write-Host "      $((Resolve-Path $OutDir).Path)" -ForegroundColor Green
     Write-Host ""
-    # GitHub publishes it, with npm's trusted publishing, once release-npm.ps1 pushes its tag, and has the mainland
-    # mirror copy it (.github/workflows/publish.yml): no npm login or 2FA prompt. The mirror says it follows npm in
-    # real time, and usually does within seconds, but it missed 0.4.82 for 21 hours, until a sync was asked for by
-    # hand (2026-10-08), and the other player's updater only reaches the mirror, so the workflow asks for one.
+    # GitHub publishes it, with npm's trusted publishing, once release-npm.ps1 pushes its tag, has the mainland mirror
+    # copy it and puts the zip on a GitHub Release (.github/workflows/publish.yml): no npm login or 2FA prompt. The
+    # mirror says it follows npm in real time, and usually does within seconds, but it missed 0.4.82 for 21 hours,
+    # until a sync was asked for by hand (2026-10-08), and the other player's updater only reaches the mirror, so the
+    # workflow asks for one.
     $releaseScript = Join-Path $PSScriptRoot 'release-npm.ps1'
-    Write-Host "  Nothing has been published. When you are ready, have GitHub publish it, with no npm login:" -ForegroundColor Yellow
+    Write-Host "  Nothing has been published. When you are ready, have GitHub publish it on npm and GitHub, with no login:" -ForegroundColor Yellow
     Write-Host "      pwsh -NoProfile -ExecutionPolicy Bypass -File $releaseScript" -ForegroundColor Yellow
     Write-Host ""
     Write-Host "  Publishing is public and cannot be undone after 72 hours, and the name stays taken either way." -ForegroundColor Yellow

@@ -1,12 +1,15 @@
-name: Publish to npm
+name: Publish to npm and GitHub
 
-# Publishes a version of the npm package when its tag, v<version>, is pushed, which installer/release-npm.ps1 does:
-# GitHub builds the plugin from the tagged commit, stages the package with installer/pack-npm.ps1 as the release PC
-# does, publishes it with npm's trusted publishing, and has the mainland mirror copy it. npm takes the publish from
-# this workflow of this repository alone (OIDC), so no login, token or 2FA prompt is needed anywhere: the package's
-# settings on npmjs.com name Candy-649 / SSMP / publish.yml as its trusted publisher, with npm publish allowed
-# (USER 10-25: "这个npm login还有老是要让我打开网页认证好烦啊"). A version that npm has already, like one published
-# by hand before the GitHub release made its tag, is left alone.
+# Publishes a version when its tag, v<version>, is pushed, which installer/release-npm.ps1 does: GitHub builds the
+# plugin from the tagged commit, stages the package with installer/pack-npm.ps1 as the release PC does, publishes it
+# with npm's trusted publishing, has the mainland mirror copy it, and puts the same files on a GitHub Release as a zip
+# with the installer and the updater (installer/upload-github.ps1). npm takes the publish from this workflow of this
+# repository alone (OIDC), so no login, token or 2FA prompt is needed anywhere: the package's settings on npmjs.com
+# name Candy-649 / SSMP / publish.yml as its trusted publisher, with npm publish allowed (USER 10-25: "这个npm login还有
+# 老是要让我打开网页认证好烦啊"). The GitHub release comes with npm rather than after the two players have played the
+# version (USER 10-25: "github和npm这样不能合并吗", then chose that): the updater in every package reads npm alone, so
+# npm reaches every player already, and the test is held for Nexus Mods. A version that npm has already, like one
+# published by hand, is left alone, its GitHub release too, which upload-github.ps1 then makes by hand.
 
 on:
   push:
@@ -14,7 +17,8 @@ on:
       - 'v[0-9]+.[0-9]+.[0-9]+'
 
 permissions:
-  contents: read
+  # The release on GitHub and its zip
+  contents: write
   # The short-lived token that npm's trusted publishing takes in place of a login
   id-token: write
 
@@ -29,6 +33,10 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@v7
+        with:
+          # The token of this run may write to the repository, for the release, so it is not left in the checkout's
+          # git settings, where the build could read it. Nothing here pushes
+          persist-credentials: false
 
       - name: Look for the version on npm
         id: npm
@@ -86,6 +94,7 @@ jobs:
           }
 
       - name: Publish
+        id: publish
         if: steps.npm.outputs.published == 'false'
         working-directory: dist-npm
         run: npm publish --access public
@@ -94,3 +103,15 @@ jobs:
         if: steps.npm.outputs.published == 'false'
         shell: pwsh
         run: ./installer/sync-mirror.ps1
+
+      # The files that npm took, as a zip on a GitHub Release, with the token GitHub gives this run, which can release
+      # in this repository only. Once npm has the version this runs whether or not the mirror's step went well. A
+      # rerun of the workflow skips every step then, this one too, so a release this failed to make is finished by
+      # running installer/upload-github.ps1 by hand. installer/release-npm.ps1 looks for the run line below to tell
+      # whether a tag's commit releases on GitHub
+      - name: Put the zip on GitHub Releases
+        if: ${{ !cancelled() && steps.publish.outcome == 'success' }}
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: ./installer/upload-github.ps1

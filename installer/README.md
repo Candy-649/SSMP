@@ -43,6 +43,25 @@ explanation instead, and is Chinese on purpose.
 **`INSTALL.txt` is the only place that describes how to play.** The script used to print a short version of it too,
 which went stale twice while the flow changed. If the flow changes again, change `INSTALL.txt` and nothing else.
 
+## Publishing a version
+
+`pack-npm.ps1` stages it in `dist-npm/` and `pack-nexus.ps1` zips that stage for the mod page. Then come two steps,
+both run by the repository's owner:
+
+1. `release-npm.ps1` pushes the tag `v<version>` at the commit stamped into the staged `SSMP.dll`, and GitHub runs
+   `.github/workflows/publish.yml` for it: it builds that commit, publishes it on npm with trusted publishing (no
+   login, token or 2FA prompt), has the mainland mirror copy it and puts the zip on a GitHub Release with
+   `upload-github.ps1`. The script waits until npm, the mirror and GitHub have the version. The players update with
+   `UPDATE.bat`, which reads npm.
+2. After the two players have played it, `upload-nexus.ps1` puts the zip on the mod page.
+
+A tag at an older commit, whose workflow doesn't make the GitHub release, leaves `upload-github.ps1` to the second
+step.
+
+```
+pwsh -NoProfile -ExecutionPolicy Bypass -File installer/release-npm.ps1
+```
+
 ## Putting a release on the mod page
 
 `pack-npm.ps1` stages a version in `dist-npm/`, and `pack-nexus.ps1` zips that stage into `dist-nexus/` for Nexus
@@ -70,7 +89,9 @@ repository. The page's first file is uploaded on the website; the API only adds 
 GitHub can carry what Nexus Mods refuses, so its release gets the npm package itself: `upload-github.ps1` zips the
 files of the stage that npm ships into `dist-github/` under one top folder, with the installer and the updater and
 without `package.json` and the npm `README.md`, and puts it on a GitHub Release of `Candy-649/SSMP`, tagged
-`v<version>` at the commit stamped into the staged `SSMP.dll`. Push that commit first, then run it after `npm publish`:
+`v<version>` at the commit stamped into the staged `SSMP.dll`. The publish workflow runs it right after npm takes the
+version, on the stage it published. By hand, it finishes a release the workflow didn't make, such as a version
+published on npm by hand or a run that failed after npm: push the commit first, then run it once npm has the version:
 
 ```
 pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-github.ps1
@@ -84,7 +105,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-github.ps1
 It borrows the login git already has for github.com from git's credential helper (Git Credential Manager), the way
 git asks for it before a push, or takes `GITHUB_TOKEN` when that is set. The token is never printed, and is kept only
 in git's credential store, where a push keeps it too. The owner has a second GitHub account, so the script stops
-before changing anything when the login belongs to another account, and says how to make git forget it.
+before changing anything when the login belongs to another account, and says how to make git forget it. In GitHub
+Actions it takes the token GitHub gives the run, as `GITHUB_TOKEN`, which can release in that repository only and
+can't be asked whose it is, so there it checks the repository instead of the account.
 `SSMP_GITHUB_API_URL` points the script at a stand-in of the API for testing; git's login only goes to GitHub itself or
 to a stand-in on this machine. None of these files is shipped to players.
 

@@ -4,8 +4,8 @@
 #
 # It talks to the GitHub REST API (https://docs.github.com/en/rest/releases) with the login that git already uses for
 # github.com: the token is asked from git's credential helper (Git Credential Manager on Windows), the way git asks for
-# it before a push, so there is no second key to make or keep. GITHUB_TOKEN, when set, is used instead. The token is
-# never printed, never written anywhere and never put into a URL.
+# it before a push, so there is no second key to make or keep. GITHUB_TOKEN, when set, is used instead, as it is in
+# GitHub Actions. The token is never printed, never written anywhere and never put into a URL.
 #
 # In order, it:
 #   1. reads the version from the stage's package.json and the commit from its SSMP.dll, which pack-npm.ps1 stamps
@@ -15,7 +15,8 @@
 #      checks the zip itself: the installer, the updater, the loader and the plugin are in it, and its SSMP.dll is the
 #      staged one;
 #   3. checks that the login belongs to the repository's owner: the owner has a second GitHub account, and Git
-#      Credential Manager has handed out the wrong one before;
+#      Credential Manager has handed out the wrong one before. In GitHub Actions it checks that the run is one of the
+#      repository instead, as the token GitHub gives a run can't be asked whose it is and releases in that one only;
 #   4. stops without uploading when the release of this version already has the zip, or when a newer version is
 #      already released, so running it again is safe;
 #   5. stops without uploading when GitHub does not have the commit, which has to be pushed first, or when the tag is
@@ -23,7 +24,10 @@
 #   6. makes the release as a draft first, uploads the zip to it and only then publishes it, so a public release never
 #      exists without its zip. A draft left by a failed run is picked up and finished by the next run.
 #
-# Releasing is public, so it is run by the repository's owner, after npm publish, never by a build.
+# Releasing is public. .github/workflows/publish.yml runs this right after it publishes the version on npm, on the
+# stage it published, with the token GitHub gives that run (USER 10-25 chose to have the GitHub release come with npm
+# rather than after the two players have played the version). The repository's owner runs it by hand to finish a
+# release that the workflow did not make: a version published on npm by hand, or a run that failed after npm.
 #
 # Console output is English for the same reason install.ps1's is: Windows PowerShell 5.1 reads a UTF-8 file without
 # a BOM as ANSI and turns anything else into mojibake. The Chinese release notes are read from a UTF-8 file at run
@@ -177,6 +181,9 @@ function Invoke-GitHub([string] $Method, [string] $Url, $Body, [int[]] $Allow = 
 
 function Get-Owner { return $Repo.Split('/')[0] }
 
+# Whether this runs in GitHub Actions, as .github/workflows/publish.yml runs it: GitHub sets GITHUB_ACTIONS there
+function Test-InActions { return $env:GITHUB_ACTIONS -eq 'true' }
+
 # Whether the login may be sent to an address: GitHub's own host for it, or this machine when the API is a stand-in
 # on it (SSMP_GITHUB_API_URL)
 function Test-LoginHost([Uri] $uri, [string] $gitHubHost) {
@@ -185,6 +192,9 @@ function Test-LoginHost([Uri] $uri, [string] $gitHubHost) {
 }
 
 function Get-SignInHint {
+    if (Test-InActions) {
+        return "`n      Check that the workflow gives this step GITHUB_TOKEN and the permission contents: write."
+    }
     if ($env:GITHUB_TOKEN) {
         return "`n      Check GITHUB_TOKEN, or clear it to use the login git has."
     }
@@ -232,8 +242,13 @@ function Invoke-GitCredential([string] $action, [string[]] $fields) {
 
 function Get-Token {
     if ($env:GITHUB_TOKEN) {
-        $script:TokenSource = 'in GITHUB_TOKEN'
+        $script:TokenSource = if (Test-InActions) { 'of this run of GitHub Actions' } else { 'in GITHUB_TOKEN' }
         return @{ Token = $env:GITHUB_TOKEN.Trim(); FromGit = $false }
+    }
+    # There is no git login to borrow on a machine of GitHub's
+    if (Test-InActions) {
+        throw ('This run of GitHub Actions gives this step no GITHUB_TOKEN. Nothing was done.' +
+               "`n      Give the step the token of the run: GITHUB_TOKEN: " + '${{ github.token }}')
     }
     $owner = Get-Owner
     if (-not (Test-LoginHost ([Uri]$ApiBase) 'api.github.com')) {
@@ -263,6 +278,15 @@ function Get-Token {
 # The login must be the repository owner's. Nothing is changed on GitHub before this passes.
 function Confirm-Account($login) {
     $owner = Get-Owner
+    # The token that GitHub gives a run of Actions answers 403 to /user, and it releases only in the repository whose
+    # workflow runs, which no second account of the owner's comes into: that repository is what is checked there
+    if (Test-InActions) {
+        if ($env:GITHUB_REPOSITORY -ne $Repo) {
+            throw ("This run of GitHub Actions is of $($env:GITHUB_REPOSITORY), not $Repo, which its token can't " +
+                   "release in. Nothing was done.")
+        }
+        return "GitHub Actions of $Repo"
+    }
     $user = (Invoke-GitHub GET '/user').Data
     $name = [string]$user.login
     if ($name -ne $owner) {
@@ -593,7 +617,8 @@ try {
         Write-Ok "Commit $($stage.Sha.Substring(0, 7)) is on GitHub; tag $tag will be made at it"
     }
 
-    # Drafts are listed only to a login that can push, which the account check made sure of
+    # Drafts are listed only to a login that can push, which the account check made sure of (in GitHub Actions, the
+    # workflow's permission contents: write)
     $all = @((Invoke-GitHub GET "/repos/$Repo/releases?per_page=100").Data)
     $draft = $all | Where-Object { $_.draft -and [string]$_.tag_name -eq $tag } | Select-Object -First 1
     $fields = @{ name = $title; body = $notes; target_commitish = $stage.Sha; draft = $true }
@@ -640,21 +665,29 @@ try {
 } catch {
     Write-Host ""
     Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
+    # A rerun of the workflow skips every step once npm has the version, this one too, so in GitHub Actions what
+    # finishes the release is a run of this script on the owner's PC (review)
+    $again = if (Test-InActions) { 'Running installer/upload-github.ps1 on the PC' } else { 'Running this again' }
     if ($publishing -and $NoAnswer) {
-        Write-Host "  No answer came to publishing, so the release may be public anyway. Run this again: it stops" `
+        Write-Host "  No answer came to publishing, so the release may be public anyway. $again stops" `
             -ForegroundColor Yellow
         Write-Host "  at a published release with the zip, and finishes the draft if it is still one." `
             -ForegroundColor Yellow
     } elseif ($draftId) {
-        Write-Host "  A draft release of $tag is on GitHub, which only the owner can see. Running this again" `
+        Write-Host "  A draft release of $tag is on GitHub, which only the owner can see. $again" `
             -ForegroundColor Yellow
         Write-Host "  finishes it." -ForegroundColor Yellow
     } elseif ($Wrote -and $NoAnswer) {
         Write-Host "  No answer came to the draft, so it may have been made all the same, which only the owner can" `
             -ForegroundColor Yellow
-        Write-Host "  see. Running this again finishes it." -ForegroundColor Yellow
+        Write-Host "  see. $again finishes it." -ForegroundColor Yellow
+    } elseif (Test-InActions) {
+        Write-Host "  Nothing was put on GitHub. $again puts it there." -ForegroundColor Yellow
     } else {
         Write-Host "  Nothing was put on GitHub." -ForegroundColor Yellow
+    }
+    if (Test-InActions) {
+        Write-Host "  Running this workflow again doesn't, as npm has the version now." -ForegroundColor Yellow
     }
     exit 1
 }
