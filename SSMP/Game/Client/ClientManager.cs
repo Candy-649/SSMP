@@ -1593,14 +1593,16 @@ internal class ClientManager : IClientManager {
             return;
         }
 
-        OnPlayerEnterScene(enterSceneData);
+        OnPlayerEnterScene(enterSceneData, true);
     }
 
     /// <summary>
     /// Callback method for when another player enters our scene.
     /// </summary>
     /// <param name="enterSceneData">The ClientPlayerEnterScene packet data.</param>
-    private void OnPlayerEnterScene(ClientPlayerEnterScene enterSceneData) {
+    /// <param name="cameIn">Whether they just came into the scene, which their game loaded for it, rather than were in
+    /// it already as this game came in or without this game having heard of them.</param>
+    private void OnPlayerEnterScene(ClientPlayerEnterScene enterSceneData, bool cameIn = false) {
         // Read ID from player data
         var id = enterSceneData.Id;
 
@@ -1638,7 +1640,7 @@ internal class ClientManager : IClientManager {
         _arenaCoop.OnPlayerEnterScene();
         _bossRoomCoop.OnPlayerEnterScene();
         _entityManager.OnPlayerEnterScene();
-        _coopSave.OnPlayerEnterScene(playerData);
+        _coopSave.OnPlayerEnterScene(playerData, cameIn);
 
         try {
             PlayerEnterSceneEvent?.Invoke(playerData);

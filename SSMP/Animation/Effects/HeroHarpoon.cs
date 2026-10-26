@@ -309,6 +309,15 @@ internal class HeroHarpoon : AnimationEffect {
     }
 
     /// <summary>
+    /// Whether a transform is the local hero's needle or a part of it, wherever the needle is. Its striker is the local
+    /// player's own, although the game doesn't count its hits as the hero's: it sets the striker up the first time it
+    /// strikes, which is out in the room where a throw ended, away from the hero.
+    /// </summary>
+    internal static bool IsLocalNeedlePart(Transform transform) {
+        return _needle != null && transform.IsChildOf(_needle);
+    }
+
+    /// <summary>
     /// Notes a clip that the local needle plays, which goes with the next word of it.
     /// </summary>
     internal static void OnLocalClip(tk2dSpriteAnimationClip clip, float clipStartTime, float overrideFps) {

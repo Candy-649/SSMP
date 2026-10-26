@@ -688,6 +688,13 @@ internal partial class CoopSave {
 
         // Nobody stands on a trap plate of a room they left, should their getting off it never have come
         ForgetTrapPlatesOf(player.Id);
+
+        // The heat lamps are whole for them when they come back, as the room loads anew (see CoopSave.HeatLamps)
+        try {
+            RestoreHeatLamps(player, false);
+        } catch (Exception e) {
+            Logger.Warn($"Could not bring back the heat lamps as {player.Username} left: {e.Message}");
+        }
     }
 
     /// <summary>

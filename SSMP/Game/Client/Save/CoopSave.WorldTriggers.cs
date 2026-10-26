@@ -484,7 +484,18 @@ internal partial class CoopSave {
     /// had them rescue stayed cowering in their game, and the conversation that follows was lost to them.
     /// </summary>
     /// <param name="player">The player who walked in.</param>
-    internal void OnPlayerEnterScene(ClientPlayerData player) {
+    /// <param name="cameIn">Whether they just came in, which their game loaded the room for, rather than were here
+    /// already as this game came in or without this game having heard of them.</param>
+    internal void OnPlayerEnterScene(ClientPlayerData player, bool cameIn) {
+        // The heat lamps are whole in their game, which just loaded the room (see CoopSave.HeatLamps)
+        if (cameIn) {
+            try {
+                RestoreHeatLamps(player, true);
+            } catch (Exception e) {
+                Logger.Warn($"Could not bring back the heat lamps for {player.Username}, who came in: {e.Message}");
+            }
+        }
+
         try {
             if (!_checkedMembers.Contains(player.Id) || GetCurrentMarker() is not { } marker ||
                 !IsMember(player, marker)) {

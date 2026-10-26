@@ -11,6 +11,7 @@ using HutongGames.PlayMaker;
 using Mono.Cecil.Cil;
 using MonoMod.Cil;
 using MonoMod.RuntimeDetour;
+using SSMP.Animation.Effects;
 using SSMP.Animation.Effects.Tools;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
@@ -99,6 +100,16 @@ internal partial class CoopHits {
         typeof(Lever),
         typeof(Lever_tk2d),
         typeof(SuspendedPlatformCut)
+    ];
+
+    /// <summary>
+    /// The types of objects that take no other hit for a moment after one, with the field that their hit method reads to
+    /// tell: when the last hit came, or when that moment ends. A replayed hit counted in the partner's game, so it goes
+    /// past that moment here (see <see cref="LetReplaysPastHitPause"/>).
+    /// </summary>
+    private static readonly (Type Type, string Field)[] HitPauseFields = [
+        (typeof(HitResponse), "lastHitTime"),
+        (typeof(Breakable), "hitCooldownEndTime")
     ];
 
     /// <summary>
@@ -423,6 +434,15 @@ internal partial class CoopHits {
                     nameof(IHitResponder.Hit), InstanceFlags | BindingFlags.DeclaredOnly, null, [typeof(HitInstance)], null
                 ),
                 SkipRangeCheckWhileReplaying
+            );
+        }
+
+        foreach (var (type, field) in HitPauseFields) {
+            AddILHook(
+                type.GetMethod(
+                    nameof(IHitResponder.Hit), InstanceFlags | BindingFlags.DeclaredOnly, null, [typeof(HitInstance)], null
+                ),
+                il => LetReplaysPastHitPause(il, type, field)
             );
         }
 
@@ -817,6 +837,29 @@ internal partial class CoopHits {
     }
 
     /// <summary>
+    /// IL hook for the hit method of an object that takes no other hit for a moment after one (see
+    /// <see cref="HitPauseFields"/>), which lets a replayed hit through that moment. The hit counted in the partner's
+    /// game, so it counts here too: two hits that came a moment apart there can arrive closer together here, or in one
+    /// frame after a slow one, and the second was turned away (USER 10-26: a lamp struck twice by one throw of the
+    /// needle). A replayed hit still starts that moment here, so a hit of the local player right after it is turned
+    /// away, and is then not sent either.
+    /// </summary>
+    private void LetReplaysPastHitPause(ILContext il, Type type, string field) {
+        try {
+            var c = new ILCursor(il);
+            if (!c.TryGotoNext(MoveType.After, i => i.MatchLdfld(type, field))) {
+                Logger.Warn($"Could not find the moment after a hit in {type.Name}#{il.Method.Name}");
+                return;
+            }
+
+            // When the last hit came, or when the moment after it ends, as long ago as can be for a replayed hit
+            c.EmitDelegate<Func<double, double>>(time => _isReplaying ? double.NegativeInfinity : time);
+        } catch (Exception e) {
+            Logger.Error($"Could not change the moment after a hit in {type.Name}#{il.Method.Name}:\n{e}");
+        }
+    }
+
+    /// <summary>
     /// Hook for <see cref="HeroController.AddSilk(int, bool, SilkSpool.SilkAddSource, bool)"/>, which keeps a replayed
     /// hit, or the copy of a swing of the partner, from giving the local player silk.
     /// </summary>
@@ -993,29 +1036,42 @@ internal partial class CoopHits {
                 return responder.Hit(hit);
             }
 
+            // The local player's own hit: one that the game counts as the hero's, or one of the needle that a throw
+            // left in the room, which the game doesn't (USER 10-26: a lamp that the needle struck broke in the game of
+            // the player who threw it only)
+            var own = hit.IsHeroDamage || HeroHarpoon.IsLocalNeedlePart(damager.transform);
+
             // A tink that tells a state machine of the room of being struck is no longer the hitter's alone: the bell
             // that it knocks away fell on in the other game
-            if (component is TinkEffect tink && hit.IsHeroDamage &&
+            if (component is TinkEffect tink && own &&
                 TinkFsmField?.GetValue(tink) is PlayMakerFSM told && told != null) {
                 return HitRoomTink(tink, told, hit);
             }
 
             if (IsPersonal(component.GetType())) {
-                return hit.IsHeroDamage ? HitAsLocal(responder, hit) : responder.Hit(hit);
+                return own ? HitAsLocal(responder, hit) : responder.Hit(hit);
             }
 
             // The update is made before the hit, since a hit can break the object and move its parts. An object that
             // lets the attack go on through it says it was not hit, and it still answered when one of its state
             // machines moved on to another state. A thing that a creature threw goes after the player who struck it.
-            var update = hit.IsHeroDamage ? CreateUpdate(component, hit) : null;
+            var update = own ? CreateUpdate(component, hit) : null;
             GameObject? before = null;
             var turned = update != null ? TurnThrownToLocalPlayer(component.gameObject, out before) : null;
             var response = default(IHitResponder.HitResponse);
             int[] dice = [];
             var hitName = update != null ? NextHitName() : null;
+
+            // Something that breaks, struck itself or through the part that passes its hits on to it, answers a hit in
+            // the moment after another one without counting it. The partner's game counts every hit it is sent (see
+            // LetReplaysPastHitPause), so only one that counted here goes, or one that moved a state machine on.
+            var breakable = responder as Breakable ?? (responder as HitResponse)?.passHitToBreakable;
+            var wasBroken = breakable != null && breakable.isBroken;
+            var hitsLeft = breakable != null ? breakable.hitsLeft : 0;
             var answered = AnswersAttack(
                 () => dice = SharedDice.Record(() => response = responder.Hit(hit)), hitName
-            ) || response.response != IHitResponder.Response.None;
+            ) || response.response != IHitResponder.Response.None &&
+                (breakable == null || wasBroken || breakable.isBroken || breakable.hitsLeft != hitsLeft);
             if (update != null && answered && _netClient.IsConnected) {
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
                 SendToRoomMembers(update);
@@ -1398,15 +1454,15 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Whether an attack is the local player's own: a part of their character, a thing of a tool they threw or set, or
-    /// an attack that a skill of theirs left in the world. The game knows the last by the attack itself, which says
-    /// that the player is its source, and that is also what makes a hit of it the player's (see
-    /// <see cref="HitInstance.IsHeroDamage"/>).
+    /// Whether an attack is the local player's own: a part of their character, a thing of a tool they threw or set, the
+    /// needle that a throw of theirs left in the room, or an attack that a skill of theirs left in the world. The game
+    /// knows the last by the attack itself, which says that the player is its source, and that is also what makes a hit
+    /// of it the player's (see <see cref="HitInstance.IsHeroDamage"/>).
     /// </summary>
     private static bool IsLocalAttack(Collider2D attack) {
         var hero = HeroController.SilentInstance;
         if (hero != null && attack.transform.IsChildOf(hero.transform) ||
-            LocalToolComponent.IsLocalTool(attack.gameObject)) {
+            LocalToolComponent.IsLocalTool(attack.gameObject) || HeroHarpoon.IsLocalNeedlePart(attack.transform)) {
             return true;
         }
 
