@@ -41,9 +41,10 @@ internal static class PersonalPlaces {
     /// The things that each player has to themselves wherever a room has them, or only in the rooms of
     /// <see cref="ThingRooms"/>, by how their names start, each with what is under it: the floors that crumble under a
     /// player, or under their attack, and come back a moment later, the flies that a player bounces off and kills, which
-    /// come back a moment later too, and the crystal creatures that burst as a player comes near and grow back. Other
-    /// small flies are shared like any creature. Both games used to break them together, so a floor that the
-    /// partner stood on was gone under this player as well, who then had to wait for it to come back - or, where lava
+    /// come back a moment later too, the crystal creatures that burst as a player comes near and grow back, and the
+    /// floating ice crystals that a player bounces off and shatters, which form again. Other small flies are shared like
+    /// any creature. Both games used to break them together, so a floor that the partner stood on was gone under this
+    /// player as well, who then had to wait for it to come back - or, where lava
     /// rises behind them, fell in - and a fly that the partner bounced off was gone for this player too, where lava
     /// rises behind them until one of them was put back (USER 10-23, "本来时间就很赶了还要等"). The partner's body sets
     /// none of them off here, nor does the partner coming near them (see GamePatcher.IsAboutTheLocalPlayer), so a
@@ -68,7 +69,12 @@ internal static class PersonalPlaces {
         // The crystal creatures of the peaks, which burst into spikes as a player comes near or strikes them and grow
         // back a few seconds later (USER 10-25, "像黑色晶体一样的虫子也不能共享"). The partner's bursting theirs shows
         // nothing here
-        "Crystal Drifter"
+        "Crystal Drifter",
+
+        // The ice crystals that float on the icy water of the peaks, which a player can't stand on but strikes from
+        // above to bounce off, and which form again a few seconds after they shatter (USER 10-26, "那个冰水上的冰块共享，
+        // 改成不要共享", "一种可以下劈但是无法站立的场景物体"). A strike of the partner shattered them here too
+        "Float Crystal"
     ];
 
     /// <summary>
