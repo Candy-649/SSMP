@@ -870,6 +870,18 @@ internal class UiManager : IUiManager {
     /// <summary>
     /// Returns to the main menu once a scene that is still loading has loaded, because the game doesn't wait for it and
     /// would load both at once, like when the connection is lost while the hero goes through a door.
+    ///
+    /// The game itself goes back to the menu only from its pause menu, with the world standing still, its menus no
+    /// longer taking input, and no room load under way or about to start. This way back comes at any moment, so it
+    /// stops the world and the menus the same way first. While the world went on, a hero falling as the other player
+    /// left went through the exit at the foot of the room while the screen faded (USER 10-26 "一直显示加载"): the next
+    /// room began to load behind the menu's own scene, and the menu's way there took away the game manager that was to
+    /// show it. Unity starts nothing after a scene load that waits to be shown, not even the clean-up the menu's way
+    /// waits for, so the menu never came.
+    ///
+    /// A room that the game loads ahead, as for a death or a ride, waits to be shown the same way, so those are ended
+    /// first, as the game ends them before it changes rooms. The game never saves on its way to the menu while one is
+    /// loaded ahead - its own quit is hidden then, and its emergency way back goes without saving - and nor does this.
     /// </summary>
     /// <param name="save">Whether to save the game before returning to menu</param>
     private IEnumerator ReturnToMainMenuAfterSceneLoad(bool save) {
@@ -879,7 +891,52 @@ internal class UiManager : IUiManager {
             yield return null;
         }
 
-        yield return GM.ReturnToMainMenu(save);
+        Logger.Info("Going back to the main menu with the world and the menus stopped, as from the game's pause menu");
+        var timeScale = TimeManager.TimeScale;
+        GM.SetTimeScale(0f);
+        GM.inputHandler.StopUIInput();
+
+        if (ScenePreloader.HasPendingOperations) {
+            Logger.Info("Ending the rooms loaded ahead, and going back without saving, as the game does then");
+            save = false;
+            yield return EndRoomsLoadedAhead();
+        }
+
+        bool? saved = null;
+        yield return GM.ReturnToMainMenu(save, ok => saved = ok);
+
+        // The game stays where it is when its save fails, as it was
+        if (save && saved == false) {
+            Logger.Info("The save failed, so the game stays where it is");
+            GM.inputHandler.StartUIInput();
+            GM.SetTimeScale(timeScale);
+        }
+    }
+
+    /// <summary>
+    /// Ends the rooms that the game loaded ahead the way it does before it changes rooms: shows each, then unloads it.
+    /// A failure is written down, and the way back to the main menu goes on, as the game's own room change does.
+    /// </summary>
+    private static IEnumerator EndRoomsLoadedAhead() {
+        var ending = ScenePreloader.ForceEndPendingOperations();
+        while (true) {
+            try {
+                if (!ending.MoveNext()) {
+                    break;
+                }
+            } catch (Exception e) {
+                Logger.Error($"Could not show a room that was loaded ahead:\n{e}");
+                yield break;
+            }
+
+            yield return ending.Current;
+        }
+
+        try {
+            ScenePreloader.Cleanup();
+        } catch (Exception e) {
+            Logger.Error($"Could not unload a room that was loaded ahead:\n{e}");
+        }
     }
 
     /// <summary>
