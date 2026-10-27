@@ -11,6 +11,11 @@ namespace SSMP.Game.Client.Entity.Component;
 /// came out could not be hit there, and one that hid could. It goes as a state rather than by doing the FSM's action
 /// again, because a player who walks in later has the copy start over from its first states, which is where most of
 /// them hide.
+/// Every creature has it, whether or not it has a collider as the room loads. One drawn by tk2d gets the collider of the
+/// picture it shows, made the first time it shows a picture that has one, and a boss whose first picture had none went
+/// without its layer: a wound of the scene client's player that the copy answered at once took it into the boss's
+/// stagger there, which put the copy on a layer that nothing hits, and the boss coming out of it was never told there,
+/// so that player could not hit it for the rest of the fight (USER 10-27, "二阶段有bug，只有一个人能打到").
 internal class LayerComponent : EntityComponent {
     /// <summary>
     /// The layer that was last sent, or -1 if none was sent yet.

@@ -1041,10 +1041,12 @@ internal partial class Entity {
                 Object,
                 collider
             );
-
-            // What the collider can be hit by goes with the layer it is on
-            _components[EntityComponentType.Layer] = new LayerComponent(_netClient, Id, Object);
         }
+
+        // What a collider of the creature can be hit by goes with the layer it is on, and so for one that has no collider
+        // yet as the room loads: a creature drawn by tk2d gets the collider of the picture it shows, the first time it
+        // shows a picture that has one (see LayerComponent)
+        _components[EntityComponentType.Layer] = new LayerComponent(_netClient, Id, Object);
 
         var hostBody = Object.Host.GetComponent<Rigidbody2D>();
         if (hostBody != null) {
