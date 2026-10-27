@@ -71,6 +71,80 @@ internal static class ScenePath {
     }
 
     /// <summary>
+    /// The objects found by <see cref="FindByUniqueName"/>, by scene and name. What wasn't found is looked for again
+    /// each time, since an object can be in a place left out of the search, or share its name, for a moment only.
+    /// </summary>
+    private static readonly Dictionary<string, Transform> UniqueNames = new();
+
+    /// <summary>
+    /// Finds the one object of a loaded scene that has the name a path ends in, wherever it is in the scene: for an
+    /// object that this game has somewhere else than the game that named it. Null for a path that names one of several
+    /// siblings of the same name, and when the scene has no object of that name or more than one.
+    /// </summary>
+    /// <param name="path">The path of the object in its scene.</param>
+    /// <param name="sceneName">The name of the scene to look in.</param>
+    /// <param name="leftOut">Whether an object, given with its name, is not to be looked at, nor anything under it.
+    /// </param>
+    /// <returns>The object, or null.</returns>
+    public static GameObject? FindByUniqueName(string path, string sceneName, Func<Transform, string, bool> leftOut) {
+        ParseSegment(path.Substring(path.LastIndexOf('/') + 1), out var name, out var index);
+        if (index != 0) {
+            return null;
+        }
+
+        // Looked for again once it is gone or called something else
+        var key = sceneName + "\n" + name;
+        if (UniqueNames.TryGetValue(key, out var known) && known != null && known.name == name) {
+            return known.gameObject;
+        }
+
+        Transform? found = null;
+        var count = 0;
+        for (var sceneIndex = 0; sceneIndex < SceneManager.sceneCount && count < 2; sceneIndex++) {
+            var scene = SceneManager.GetSceneAt(sceneIndex);
+            if (!scene.isLoaded || scene.name != sceneName) {
+                continue;
+            }
+
+            foreach (var root in scene.GetRootGameObjects()) {
+                Look(root.transform);
+            }
+        }
+
+        if (count != 1 || found == null) {
+            UniqueNames.Remove(key);
+            return null;
+        }
+
+        UniqueNames[key] = found;
+        return found.gameObject;
+
+        void Look(Transform transform) {
+            // The name is made anew on each ask, so it is asked once
+            var ownName = transform.name;
+            if (count > 1 || leftOut(transform, ownName)) {
+                return;
+            }
+
+            if (ownName == name) {
+                found = transform;
+                count++;
+            }
+
+            for (var i = 0; i < transform.childCount; i++) {
+                Look(transform.GetChild(i));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Forgets what <see cref="FindByUniqueName"/> found, as a room is left.
+    /// </summary>
+    public static void ForgetUniqueNames() {
+        UniqueNames.Clear();
+    }
+
+    /// <summary>
     /// Gets the name of an object, followed by the number of earlier siblings with the same name if there are any.
     /// </summary>
     private static string GetIndexedName(Transform transform) {

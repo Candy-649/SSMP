@@ -174,6 +174,15 @@ internal partial class CoopSave {
         new(["Spike Floor"], "Control", ["Attack Delay"], sceneName: "Cradle_03", holdLimit: 20f),
         new(["Rubble Field"], "FSM", ["Set Attack", "Set Attack Long"], sceneName: "Cradle_03"),
 
+        // The spear that a fight sets going by itself for one part of the fight, which aims at a player and drops on
+        // them over and over until the fight stops it; its round starts as it aims, and it aims again in the same round
+        // when the aim comes too close to where the last spear fell. The other spears of the fight go when the creature
+        // tells them to (see ToldParts). The scene client's fight never got that far before (USER 10-27).
+        new(
+            ["Ward Boss Spear Auto"], "Control", ["Aim Hero"], sceneName: "Ward_02_boss", wholeNames: true,
+            againFromStateNames: ["Retry"]
+        ),
+
         // Bolts like those of the fight elsewhere, which a player near sets zapping, or a controller of theirs that
         // tells them to in turn as a player comes. The controller has the same name before its own, but no round.
         new(["Zap Worm Lightning"], "Control", ["Antic"]),
@@ -413,6 +422,14 @@ internal partial class CoopSave {
         }
 
         if (Array.IndexOf(kind.RoundStateNames, toState.Name) < 0 || !IsMemberInRoom()) {
+            return MachineStep.None;
+        }
+
+        // Going into the start of the round again within it is neither told nor held: the two games try again as many
+        // times as their own players' places have them try, and a word for each try came to more drops in one game
+        // than in the other (review, 10-27)
+        if (kind.AgainFromStateNames is { } againFrom && fsm.ActiveState is { } from &&
+            Array.IndexOf(againFrom, from.Name) >= 0) {
             return MachineStep.None;
         }
 
@@ -1310,7 +1327,8 @@ internal partial class CoopSave {
             bool wholeNames = false,
             bool showsParts = false,
             bool partsTold = false,
-            float? holdLimit = null
+            float? holdLimit = null,
+            string[]? againFromStateNames = null
         ) {
             NamePrefixes = namePrefixes;
             FsmName = fsmName;
@@ -1322,7 +1340,15 @@ internal partial class CoopSave {
             ShowsParts = showsParts;
             PartsTold = partsTold;
             HoldLimit = holdLimit;
+            AgainFromStateNames = againFromStateNames;
         }
+
+        /// <summary>
+        /// The states from which a machine of this kind goes into the start of its round again within the same round,
+        /// like a spear that aims again when its aim came too close to the spear before: that starts no round. Null for
+        /// a kind with none.
+        /// </summary>
+        public string[]? AgainFromStateNames { get; }
 
         /// <summary>
         /// How long a machine of this kind waits for the scene host's word before it starts its round by itself, in

@@ -527,24 +527,7 @@ internal static partial class EntityFsmActions {
         }
 
         foreach (var field in GetSubjectFields(action.GetType())) {
-            // What it aims at and where it spawns something stay the copy's own
-            if (field.Name is "target" or "spawnPoint" or "SpawnPoint") {
-                continue;
-            }
-
-            var value = field.GetValue(action);
-            var owner = value switch {
-                FsmOwnerDefault ownerDefault => ownerDefault,
-                FsmEventTarget {
-                    target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM
-                } eventTarget => eventTarget.gameObject,
-                _ => null
-            };
-
-            var variable = owner != null
-                ? owner.OwnerOption == OwnerDefaultOption.SpecifyGameObject ? owner.GameObject : null
-                : value as FsmGameObject;
-            if (variable is { UseVariable: true }) {
+            if (SubjectVariable(action, field) is { } variable) {
                 variables.Add(variable);
             }
         }
@@ -553,9 +536,103 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// The variable that holds the object an action works on through one of its subject fields (see
+    /// <see cref="GetSubjectFields"/>), or null for a field that names its owner or an object directly, or that names
+    /// what it aims at or where it spawns something, which stay the copy's own.
+    /// </summary>
+    private static FsmGameObject? SubjectVariable(FsmStateAction action, FieldInfo field) {
+        if (field.Name is "target" or "spawnPoint" or "SpawnPoint") {
+            return null;
+        }
+
+        var value = field.GetValue(action);
+        var owner = value switch {
+            FsmOwnerDefault ownerDefault => ownerDefault,
+            FsmEventTarget {
+                target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM
+            } eventTarget => eventTarget.gameObject,
+            _ => null
+        };
+
+        var variable = owner != null
+            ? owner.OwnerOption == OwnerDefaultOption.SpecifyGameObject ? owner.GameObject : null
+            : value as FsmGameObject;
+        return variable is { UseVariable: true } ? variable : null;
+    }
+
+    /// <summary>
+    /// Whether an action works on objects that it is given in variables, which <see cref="WriteSubject"/> names for the
+    /// other game.
+    /// </summary>
+    public static bool HasSubjectVariables(FsmStateAction action) => SubjectVariables(action).Count > 0;
+
+    /// <summary>
+    /// A part of the room that an action of a creature this game runs worked on, as it was named before the action ran
+    /// (see <see cref="NoteRoomSubjects"/>).
+    /// </summary>
+    private readonly struct RoomSubject(FsmGameObject variable, GameObject subject, string sceneName, string path) {
+        public readonly FsmGameObject Variable = variable;
+        public readonly GameObject Subject = subject;
+        public readonly string SceneName = sceneName;
+        public readonly string Path = path;
+    }
+
+    /// <summary>
+    /// The parts of the room that the actions now running are about to work on, named before each ran, by action.
+    /// </summary>
+    private static readonly Dictionary<FsmStateAction, List<RoomSubject>> RoomSubjectsBefore = new();
+
+    /// <summary>
+    /// Names the parts of the room that an action of a creature this game runs is about to work on, before it runs, for
+    /// <see cref="WriteSubject"/>, which names them once the action has run.
+    ///
+    /// What the action tells a part of the room to do can move that part before the action is over. A creature's FSM
+    /// that tells another FSM something has it go through what that sets off then and there, and the spears that a
+    /// boss sends at the player leave their rack the moment they are told to: named after that, by where they had gone,
+    /// none of them was found in the other game, whose spears were still in the rack, and the boss never threw a spear
+    /// there (USER 10-27: "boss始终没有使用操纵矛啊之类的技能"). Both games have the part where it was before the action.
+    /// </summary>
+    /// <param name="action">The action, about to run.</param>
+    /// <returns>Whether anything was named, to be forgotten with <see cref="ForgetRoomSubjects"/> once it has run.</returns>
+    public static bool NoteRoomSubjects(FsmStateAction action) {
+        // An action that sets off itself again before it is over keeps what was named before the first
+        if (action.Fsm == null || RoomSubjectsBefore.ContainsKey(action) ||
+            ReadsWithoutActing.Contains(action.GetType().Name)) {
+            return false;
+        }
+
+        List<RoomSubject>? noted = null;
+        foreach (var field in GetSubjectFields(action.GetType())) {
+            var variable = SubjectVariable(action, field);
+            var subject = variable?.Value;
+            if (variable == null || subject == null || !TryGetScenePath(subject, out var sceneName, out var path)) {
+                continue;
+            }
+
+            noted ??= [];
+            noted.Add(new RoomSubject(variable, subject, sceneName, path));
+        }
+
+        if (noted == null) {
+            return false;
+        }
+
+        RoomSubjectsBefore[action] = noted;
+        return true;
+    }
+
+    /// <summary>
+    /// Forgets what <see cref="NoteRoomSubjects"/> named for an action once it has run.
+    /// </summary>
+    public static void ForgetRoomSubjects(FsmStateAction action) {
+        RoomSubjectsBefore.Remove(action);
+    }
+
+    /// <summary>
     /// Writes, ahead of an action's own data, which objects the action worked on when they are held in variables: for
     /// each, 0 for none, 1 and its path for a part of the creature, 3 and its scene and path for a part of the room
-    /// itself, 2 for an object anywhere else.
+    /// itself, 4 and its scene and path for a part of the room named before the action ran (see
+    /// <see cref="NoteRoomSubjects"/>), 2 for an object anywhere else.
     ///
     /// The creature's FSM fills such variables in while it runs - which spray to use, which of its parts to light, which
     /// of them an event is for - and the scene client's copy never runs, so there the variable stayed empty and the
@@ -570,6 +647,7 @@ internal static partial class EntityFsmActions {
     /// whatever its place is now; or null. What a creature grew onto itself is said again after it was put in its
     /// place (Entity.SendGrownPartsAgain), and what was done to it before then went out while it was still loose.</param>
     public static void WriteSubject(EntityNetworkData data, FsmStateAction action, FsmGameObject? loose = null) {
+        RoomSubjectsBefore.TryGetValue(action, out var before);
         foreach (var variable in SubjectVariables(action)) {
             var subject = variable.Value;
             if (subject == null) {
@@ -579,6 +657,14 @@ internal static partial class EntityFsmActions {
 
             if (loose != null && variable.Name == loose.Name) {
                 data.Packet.Write((byte) 2);
+                continue;
+            }
+
+            // A part of the room is named where it was before the action ran (see NoteRoomSubjects)
+            if (NamedBefore(before, variable, subject) is { } named) {
+                data.Packet.Write((byte) 4);
+                data.Packet.Write(named.SceneName);
+                data.Packet.Write(named.Path);
                 continue;
             }
 
@@ -602,6 +688,24 @@ internal static partial class EntityFsmActions {
             data.Packet.Write((byte) 1);
             data.Packet.Write(path);
         }
+    }
+
+    /// <summary>
+    /// What <see cref="NoteRoomSubjects"/> named the object that a variable holds before the action ran, or null when
+    /// it named none: nothing of the room, or the variable holds something else by now.
+    /// </summary>
+    private static RoomSubject? NamedBefore(List<RoomSubject>? before, FsmGameObject variable, GameObject subject) {
+        if (before == null) {
+            return null;
+        }
+
+        foreach (var named in before) {
+            if (ReferenceEquals(named.Variable, variable) && ReferenceEquals(named.Subject, subject)) {
+                return named;
+            }
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -651,8 +755,56 @@ internal static partial class EntityFsmActions {
                     }
 
                     break;
+                case 4:
+                    var noteScene = data.Packet.ReadString();
+                    var notePath = data.Packet.ReadString();
+
+                    // A part of the room that both games have, named before the action ran, which is somewhere else
+                    // here than it was in the scene host's game - a spear still on its way back to its rack here, told
+                    // again there - is found by its name, if nothing else of the room is called that. Only such a part:
+                    // anything else named by its place after the action may have no part of the room of its own here,
+                    // like a part that a copy let go of, which is still under the copy. Left to the copy's own variable
+                    // if it isn't found.
+                    var noted = ScenePath.Find(notePath, noteScene);
+                    if (noted == null) {
+                        noted = ScenePath.FindByUniqueName(
+                            notePath, noteScene,
+                            (transform, name) => name.Contains("(Clone)") || Entity.IsEntityObject(transform.gameObject)
+                        );
+                        SayFoundByName(action, notePath, noted);
+                    }
+
+                    if (noted != null) {
+                        variable.Value = noted;
+                    }
+
+                    break;
             }
         }
+    }
+
+    /// <summary>
+    /// The paths of parts of the room that were not where the scene host named them, said once a room each (see
+    /// <see cref="SayFoundByName"/>).
+    /// </summary>
+    private static readonly HashSet<string> SaidFoundByName = [];
+
+    /// <summary>
+    /// Says in the log, once a room for each, that a part of the room named before an action of the scene host's ran
+    /// was not where it was named here, and whether it was found by its name.
+    /// </summary>
+    private static void SayFoundByName(FsmStateAction action, string path, GameObject? found) {
+        if (!SaidFoundByName.Add(path)) {
+            return;
+        }
+
+        var owner = action.Fsm?.GameObject;
+        Logger.Info(
+            $"[Room parts] '{path}', which '{(owner == null ? "?" : owner.name)}'s {action.GetType().Name} in " +
+            $"'{action.State?.Name}' works on, is not there here: " + (found == null
+                ? "nothing else of the room has its name alone, so the copy keeps its own"
+                : $"found by its name at '{ScenePath.Get(found.transform)}'") + " (said once a room)"
+        );
     }
 
     /// <summary>
@@ -679,20 +831,40 @@ internal static partial class EntityFsmActions {
         sceneName = string.Empty;
         path = string.Empty;
 
+        if (!IsRoomPart(gameObject)) {
+            return false;
+        }
+
+        sceneName = gameObject.scene.name;
+        path = ScenePath.Get(gameObject.transform);
+        return true;
+    }
+
+    /// <summary>
+    /// Whether an object is something the room itself is made of, which both games have under the same scene and path
+    /// (see <see cref="TryGetScenePath"/>).
+    /// </summary>
+    public static bool IsRoomPart(GameObject gameObject) {
         var scene = gameObject.scene;
-        if (!scene.IsValid() || scene.name == "DontDestroyOnLoad") {
+        if (!scene.IsValid() || !scene.isLoaded || scene.name == "DontDestroyOnLoad") {
             return false;
         }
 
         for (var current = gameObject.transform; current != null; current = current.parent) {
-            if (current.name.Contains("(Clone)") || EntityProcessor.IsRegistered(current.gameObject)) {
+            if (IsLeftOutOfTheRoom(current)) {
                 return false;
             }
         }
 
-        sceneName = scene.name;
-        path = ScenePath.Get(gameObject.transform);
         return true;
+    }
+
+    /// <summary>
+    /// Whether an object, and so everything under it, is left out of what the room itself is made of: made while
+    /// playing, or a creature kept in step (see <see cref="TryGetScenePath"/>).
+    /// </summary>
+    private static bool IsLeftOutOfTheRoom(Transform transform) {
+        return transform.name.Contains("(Clone)") || EntityProcessor.IsRegistered(transform.gameObject);
     }
 
     /// <summary>
@@ -813,6 +985,8 @@ internal static partial class EntityFsmActions {
         SaidStillGivingOff.Clear();
         SaidLeftAtOnce.Clear();
         SaidReplayFailed.Clear();
+        SaidFoundByName.Clear();
+        ScenePath.ForgetUniqueNames();
     }
 
     /// <summary>

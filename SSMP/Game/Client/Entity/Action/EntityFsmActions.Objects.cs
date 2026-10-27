@@ -361,17 +361,22 @@ internal static partial class EntityFsmActions {
         // updates say.
         var fromOutside = PathFromOwner(action.Fsm.GameObject, gameObject) == null && !IsObjectInRegistry(gameObject);
 
+        // A creature that puts itself somewhere in the room puts the room's own creature there here, and the copy stays
+        // at the top (Entity.ObjectToPutUnder)
         var parent = action.parent.Value;
-        gameObject.transform.parent = parent != null ? parent.transform : null;
+        var moved = Entity.ObjectToPutUnder(gameObject, parent, data != null);
+        if (moved != null) {
+            moved.transform.parent = parent != null ? parent.transform : null;
 
-        if (action.resetLocalPosition.Value) {
-            gameObject.transform.localPosition = Vector3.zero;
-        } else if (hostPlace is { } place && parent != null && fromOutside) {
-            gameObject.transform.localPosition = place;
-        }
+            if (action.resetLocalPosition.Value) {
+                moved.transform.localPosition = Vector3.zero;
+            } else if (hostPlace is { } place && parent != null && fromOutside) {
+                moved.transform.localPosition = place;
+            }
 
-        if (action.resetLocalRotation.Value) {
-            gameObject.transform.localRotation = Quaternion.identity;
+            if (action.resetLocalRotation.Value) {
+                moved.transform.localRotation = Quaternion.identity;
+            }
         }
 
         if (parent == null) {
@@ -390,14 +395,18 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
-    private static void ApplyNetworkDataFromAction(EntityNetworkData data, SetTransformParent action) {
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, SetTransformParent action) {
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
             return;
         }
 
         var parent = action.parent.Value;
-        gameObject.transform.SetParent(parent != null ? parent.transform : null, action.worldPositionStays.Value);
+        var moved = Entity.ObjectToPutUnder(gameObject, parent, data != null);
+        if (moved != null) {
+            moved.transform.SetParent(parent != null ? parent.transform : null, action.worldPositionStays.Value);
+        }
+
         if (parent == null) {
             SayIfStillGivingOff(gameObject, action);
             LetOutIntoTheWorld(gameObject);
@@ -514,7 +523,11 @@ internal static partial class EntityFsmActions {
             return;
         }
 
-        var parent = gameObject.transform.parent;
+        // The copy of a creature stays at the top of its scene, and its parent is that of the room's own creature,
+        // which is put where the scene host's puts itself (Entity.ObjectToPutUnder)
+        if (!Entity.TryGetRoomParent(gameObject, out var parent)) {
+            parent = gameObject.transform.parent;
+        }
         if (parent == null) {
             action.storeResult.Value = null;
             return;

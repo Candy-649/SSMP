@@ -368,6 +368,45 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// The entity that each action of the room's own creatures that works on objects held in variables is sent for
+    /// (see <see cref="NoteRoomSubjects"/>).
+    /// </summary>
+    private static readonly ConditionalWeakTable<FsmStateAction, Entity> SubjectActions = new();
+
+    /// <summary>
+    /// Names the parts of the room that an action about to run works on, if it is one of a creature that this game runs
+    /// and sends to the other game (see <see cref="EntityFsmActions.NoteRoomSubjects"/>).
+    /// </summary>
+    /// <param name="action">The action, about to run.</param>
+    /// <returns>Whether anything was named, to be forgotten once the action has run.</returns>
+    internal static bool NoteRoomSubjects(FsmStateAction action) {
+        if (!SubjectActions.TryGetValue(action, out var entity) || entity._isControlled) {
+            return false;
+        }
+
+        // Done before the game's own action, which nothing here may keep from running
+        try {
+            return EntityFsmActions.NoteRoomSubjects(action);
+        } catch (Exception e) {
+            if (!_saidNotingFailed) {
+                _saidNotingFailed = true;
+                var owner = action.Fsm?.GameObject;
+                SSMP.Logging.Logger.Warn(
+                    $"Could not name what '{(owner == null ? "?" : owner.name)}'s {action.GetType().Name} works on " +
+                    $"before it ran, so it is named after it ran (said once): {e.Message}"
+                );
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Whether <see cref="NoteRoomSubjects"/> has said in the log that it failed.
+    /// </summary>
+    private static bool _saidNotingFailed;
+
+    /// <summary>
     /// Set of FSM action types that have been hooked to prevent duplicate hooks.
     /// </summary>
     private readonly HashSet<Type> _hookedTypes;
@@ -774,6 +813,10 @@ internal partial class Entity {
                     or SpawnObjectFromGlobalPoolOverTimeV2 or SendEventByName or SendEventByNameV2
                     or SendEventByNameOnExit or SendEventToRegister or SendEventToRegisterV2) {
                     ThrowingActions.AddOrUpdate(action, this);
+                }
+
+                if (EntityFsmActions.HasSubjectVariables(action)) {
+                    SubjectActions.AddOrUpdate(action, this);
                 }
 
                 if (_hookedTypes.Add(action.GetType())) {
@@ -3284,6 +3327,90 @@ internal partial class Entity {
     /// The entities, by the room's own object of each.
     /// </summary>
     private static readonly Dictionary<GameObject, Entity> EntitiesByRoomObject = new();
+
+    /// <summary>
+    /// What a replay that puts an object under a parent - one of the room's own objects, or none for the top of its
+    /// scene - is to put there: the object itself, or for the copy of a creature, the room's own creature, as the scene
+    /// host's creature put itself there, while the copy stays at the top of its scene. Null when nothing is to be put
+    /// anywhere: the copy's first states set up, which say nothing of where the scene host's creature is now.
+    ///
+    /// Rooms count what is under their own objects. A fight counts the husks in the folder they come back to as they
+    /// fall, and goes on once all four are back; the husks leave the folder as they come in. Here the room's own husks
+    /// slept in the folder all along, while the copies were put in and taken out: the folder never held four at the
+    /// right time, so this game's fight never went on to its next part, nor to anything after it (USER 10-27: "转阶段
+    /// 出场的很慢", "是清完小怪还要等很久"). Now the room's own creature comes and goes in this game as the scene host's
+    /// does in its own, and the room counts the same in both. The copy is carried to where it is told it is, in the
+    /// world, from the top of its scene; one put under something of the room before is brought back up.
+    /// </summary>
+    /// <param name="gameObject">The object the replay puts somewhere.</param>
+    /// <param name="parent">Where it puts it, or null for the top of its scene.</param>
+    /// <param name="live">Whether the replay is of what the scene host's creature did just now, rather than of the
+    /// first states of the copy as it is set up.</param>
+    internal static GameObject? ObjectToPutUnder(GameObject gameObject, GameObject? parent, bool live) {
+        // A copy that hangs under the copy of another creature goes where its own replays say, and so does one put
+        // under another creature. A creature that this game took over by now is left where it runs, whatever came late
+        // from the game that ran it before.
+        if (!EntitiesByCopy.TryGetValue(gameObject, out var entity) || entity._hasParent || !entity._isControlled ||
+            parent != null && !EntityFsmActions.IsRoomPart(parent)) {
+            return gameObject;
+        }
+
+        if (gameObject.transform.parent != null) {
+            gameObject.transform.SetParent(null, true);
+        }
+
+        if (!live || entity.Object.Host == null) {
+            return null;
+        }
+
+        // Whether it belongs to a fight goes by where the room has the creature, which is worked out before the room's
+        // own creature first goes anywhere else, as it never did before: out of its fight, it would be woken as the
+        // local player comes near, outside the rules of fights
+        entity.WakesInAFight();
+
+        if (!entity._saidPutUnder) {
+            entity._saidPutUnder = true;
+            SSMP.Logging.Logger.Info(
+                $"[Room parts] The room's own '{entity.Object.Host.name}' ({entity.Id}) goes where the scene host's " +
+                $"puts itself, first {(parent == null ? "to the top of its scene" : $"under '{parent.name}'")}, and " +
+                "its copy stays at the top (said once)"
+            );
+        }
+
+        return entity.Object.Host;
+    }
+
+    /// <summary>
+    /// Whether <see cref="ObjectToPutUnder"/> said in the log that the room's own creature goes where the scene host's
+    /// puts itself.
+    /// </summary>
+    private bool _saidPutUnder;
+
+    /// <summary>
+    /// The parent of the room's own creature whose copy an object is, which is where the scene host's creature put
+    /// itself (see <see cref="ObjectToPutUnder"/>), for what the copy is asked of its parent.
+    /// </summary>
+    /// <param name="copy">The object.</param>
+    /// <param name="parent">The parent of the room's own creature, or null for none.</param>
+    /// <returns>Whether the object is the copy of a creature whose parent is that of the room's own creature.</returns>
+    internal static bool TryGetRoomParent(GameObject copy, out Transform? parent) {
+        parent = null;
+        if (!EntitiesByCopy.TryGetValue(copy, out var entity) || entity._hasParent || entity.Object.Host == null) {
+            return false;
+        }
+
+        parent = entity.Object.Host.transform.parent;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether an object is the room's own object of an entity or its copy, looked up rather than gone through entity
+    /// by entity, for going through a whole room (see ScenePath.FindByUniqueName).
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    internal static bool IsEntityObject(GameObject gameObject) {
+        return EntitiesByCopy.ContainsKey(gameObject) || EntitiesByRoomObject.ContainsKey(gameObject);
+    }
 
     /// <summary>
     /// The entity whose copy an object is, or is a part of, or null for anything else.

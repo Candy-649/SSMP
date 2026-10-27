@@ -120,14 +120,23 @@ internal static class FsmActionHooks {
     /// <param name="orig">The original method.</param>
     /// <param name="self">The instance on which it was called.</param>
     private static void OnActionEntered(Action<FsmStateAction> orig, FsmStateAction self) {
-        orig(self);
-
         // Types that inherit a hooked "OnEnter" without being registered themselves come through here too
         if (!TypeEvents.TryGetValue(self.GetType(), out var fsmActionHook)) {
+            orig(self);
             return;
         }
 
-        fsmActionHook.InvokeEvent(self);
+        // The parts of the room it works on are named for the other game before it runs, as it can move them
+        // (EntityFsmActions.NoteRoomSubjects)
+        var noted = Entity.NoteRoomSubjects(self);
+        try {
+            orig(self);
+            fsmActionHook.InvokeEvent(self);
+        } finally {
+            if (noted) {
+                EntityFsmActions.ForgetRoomSubjects(self);
+            }
+        }
     }
 
     /// <summary>
