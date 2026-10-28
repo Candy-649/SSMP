@@ -191,6 +191,118 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    // A creature that bursts apart as it dies flings the pieces it carries, all the children of one of its parts, and
+    // they fall where the world lets them. The pieces of a copy are made not to move by themselves when the copy is
+    // built, like every body under it, and the fling was not done here at all: the pieces that a boss bursts into hung
+    // in the air together where it died, its whole body in the sky (USER 10-28, "这怪尸体在天上"). What the fling did
+    // to each piece in the game that runs the creature - where it put it, how fast it sent it off, and whether it now
+    // moves by itself - is sent, and the piece here is given the same and left to fall by itself.
+
+    #region FlingObjects
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FlingObjects action) {
+        return WriteFlungPieces(data, action, action.containerObject.Value);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, FlingObjects action) {
+        ReadFlungPieces(data, action.containerObject.Value);
+    }
+
+    #endregion
+
+    #region FlingObjectsV2
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FlingObjectsV2 action) {
+        return WriteFlungPieces(data, action, action.containerObject.Value);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, FlingObjectsV2 action) {
+        ReadFlungPieces(data, action.containerObject.Value);
+    }
+
+    #endregion
+
+    /// <summary>
+    /// Writes what a fling of all the children of an object did to each child it flings, the ones with a body of
+    /// their own, if nothing else keeps that child in step: which child it is, where it is under the object, how fast
+    /// it goes and the kind of body it has.
+    /// </summary>
+    private static bool WriteFlungPieces(EntityNetworkData data, FsmStateAction action, GameObject? container) {
+        if (container == null) {
+            return false;
+        }
+
+        var transform = container.transform;
+        ushort count = 0;
+        for (var i = 0; i < transform.childCount && i <= ushort.MaxValue; i++) {
+            var piece = transform.GetChild(i).gameObject;
+            if (piece.GetComponent<Rigidbody2D>() != null && IsKeptInStepByReplays(piece, action)) {
+                count++;
+            }
+        }
+
+        if (count == 0) {
+            return false;
+        }
+
+        data.Packet.Write(count);
+        for (var i = 0; i < transform.childCount && i <= ushort.MaxValue; i++) {
+            var piece = transform.GetChild(i).gameObject;
+            var body = piece.GetComponent<Rigidbody2D>();
+            if (body == null || !IsKeptInStepByReplays(piece, action)) {
+                continue;
+            }
+
+            var place = piece.transform.localPosition;
+            data.Packet.Write((ushort) i);
+            data.Packet.Write(place.x);
+            data.Packet.Write(place.y);
+            data.Packet.Write(place.z);
+            data.Packet.Write(body.linearVelocity.x);
+            data.Packet.Write(body.linearVelocity.y);
+            data.Packet.Write((byte) body.bodyType);
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Gives each child of an object that a fling went to what it did to the child in the game that runs the creature
+    /// (see <see cref="WriteFlungPieces"/>). The replay that sets up a creature's first states has nothing to go on and
+    /// leaves them alone.
+    /// </summary>
+    private static void ReadFlungPieces(EntityNetworkData? data, GameObject? container) {
+        if (data == null) {
+            return;
+        }
+
+        var count = data.Packet.ReadUShort();
+        for (var i = 0; i < count; i++) {
+            var index = data.Packet.ReadUShort();
+            var place = new Vector3(data.Packet.ReadFloat(), data.Packet.ReadFloat(), data.Packet.ReadFloat());
+            var velocity = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
+            var bodyType = (RigidbodyType2D) data.Packet.ReadByte();
+
+            if (container == null || index >= container.transform.childCount) {
+                continue;
+            }
+
+            var piece = container.transform.GetChild(index);
+            var body = piece.GetComponent<Rigidbody2D>();
+            if (body == null) {
+                continue;
+            }
+
+            piece.localPosition = place;
+            body.bodyType = bodyType;
+            body.linearVelocity = velocity;
+        }
+    }
+
     #region AddForce2d
 
     // A push only moves the object in the next step of physics, so the push itself is sent rather than a speed
