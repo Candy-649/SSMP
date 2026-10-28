@@ -232,6 +232,7 @@ public static class SteamManager {
             _lobbyMatchListCallback = CallResult<LobbyMatchList_t>.Create(OnLobbyMatchList);
             _lobbyEnterCallback = CallResult<LobbyEnter_t>.Create(OnLobbyEnter);
             _lobbyChatUpdateCallback = Callback<LobbyChatUpdate_t>.Create(OnLobbyChatUpdate);
+            _personaStateChangeCallback = Callback<PersonaStateChange_t>.Create(OnPersonaStateChange);
 
             // The game takes Steam's messages every frame, and the mod only while the game takes none. Not being able
             // to hook the game's taking, as after an update of the game that changed it, is no reason to go without
@@ -393,66 +394,127 @@ public static class SteamManager {
     }
 
     /// <summary>
-    /// What the player is told when none of their Steam friends is online to be invited (see
-    /// <see cref="OpenInviteDialog(CSteamID)"/>).
+    /// Fired when Steam shows one of the player's friends online after an invite found none, so that the note saying
+    /// it found none can go: Steam's word on who is online can be behind, and it showed a friend who had been online
+    /// all day as offline, under a note that stayed (USER 10-28: "她那边显示steam好友都不在线的那个提示，但是实际上我
+    /// 在线"). Fired once for each such invite, on the thread that Steam's messages are taken on.
     /// </summary>
-    public static string NoFriendOnlineMessage => Lang.Pick(
-        "None of your Steam friends is online right now; they can be invited once they are.",
-        "你的 Steam 好友现在都不在线，上线后才能邀请。"
-    );
+    public static event Action? FriendOnlineAfterAllEvent;
+
+    /// <summary>
+    /// Whether the last invite found no friend online to be invited, and Steam has shown none online since.
+    /// </summary>
+    private static volatile bool _inviteFoundNoFriend;
+
+    /// <summary>
+    /// What hears of a friend's state changing on Steam, for an invite that found none online (see
+    /// <see cref="FriendOnlineAfterAllEvent"/>).
+    /// </summary>
+    private static Callback<PersonaStateChange_t>? _personaStateChangeCallback;
 
     /// <summary>
     /// Opens the Steam overlay invite dialog to invite friends to the current lobby.
     /// Works for all lobby types (Public, Friends Only, Private).
     /// </summary>
-    /// <returns>Whether the invite dialog was opened (see <see cref="OpenInviteDialog(CSteamID)"/>).</returns>
-    public static bool OpenInviteDialog() {
+    /// <returns>Null when the invite dialog opened, or what the player is told instead (see
+    /// <see cref="OpenInviteDialog(CSteamID)"/>).</returns>
+    public static string? OpenInviteDialog() {
         if (!IsInitialized) {
             Logger.Warn("Cannot open invite dialog: Steam is not initialized");
-            return false;
+            return Lang.Pick("Steam is not available.", "Steam 用不了。");
         }
 
         if (CurrentLobbyId == NilLobbyId) {
             Logger.Warn("Cannot open invite dialog: Not in a lobby");
-            return false;
+            return Lang.Pick("Cannot invite: no Steam lobby is open.", "没法邀请：当前没有打开的 Steam 房间。");
         }
 
         return OpenInviteDialog(CurrentLobbyId);
     }
 
     /// <summary>
-    /// Opens Steam's dialog for inviting friends to a lobby, or Steam's friends list instead while none of the
-    /// player's friends is online. Opened with no friend online, the dialog listed no one, under a search box that
+    /// Opens Steam's dialog for inviting friends to a lobby, or Steam's friends list instead while Steam shows none of
+    /// the player's friends online. Opened with no friend online, the dialog listed no one, under a search box that
     /// found no one either, and a player recording how to invite the other one could not tell what had gone wrong
     /// (USER 2026-10-21: "一打开这个界面我都懵了"; they chose to be shown the friends list then).
     /// </summary>
     /// <param name="lobbyId">The lobby to invite friends to.</param>
-    /// <returns>Whether the invite dialog was opened, rather than the friends list.</returns>
-    public static bool OpenInviteDialog(CSteamID lobbyId) {
-        if (!IsAnyFriendOnline()) {
-            Logger.Info("Steam: no friend is online to be invited, so the friends list opens instead");
+    /// <returns>Null when the invite dialog opened, or, when the friends list opened instead, what the player is told
+    /// of why.</returns>
+    public static string? OpenInviteDialog(CSteamID lobbyId) {
+        var whyNoFriend = WhyNoFriendToInvite(out var said);
+        _inviteFoundNoFriend = whyNoFriend != null;
+        if (whyNoFriend != null) {
+            Logger.Info($"Steam: no friend shows online to be invited ({said}), so the friends list opens instead");
             SteamFriends.ActivateGameOverlay("Friends");
-            return false;
+            return whyNoFriend;
         }
 
-        Logger.Info($"Opening Steam invite dialog for lobby: {lobbyId}");
+        Logger.Info($"Opening Steam invite dialog for lobby: {lobbyId} ({said})");
         SteamFriends.ActivateGameOverlayInviteDialog(lobbyId);
-        return true;
+        return null;
     }
 
     /// <summary>
-    /// Whether any of the player's Steam friends is online, in any state but offline.
+    /// Why Steam shows none of the player's friends online to be invited, in words for the player, or null while it
+    /// shows one in any state but offline. Steam that isn't logged on lists no friends at all, and a player who shows
+    /// as offline on it themselves is told so, rather than that their friends are away; what Steam said goes to the
+    /// log, as nothing told which it was when it showed an online friend as offline (USER 10-28).
     /// </summary>
-    private static bool IsAnyFriendOnline() {
+    /// <param name="said">What Steam said, for the log.</param>
+    private static string? WhyNoFriendToInvite(out string said) {
+        var loggedOn = SteamUser.BLoggedOn();
+        var ownState = SteamFriends.GetPersonaState();
+        // -1 while Steam isn't logged on
         var count = SteamFriends.GetFriendCount(EFriendFlags.k_EFriendFlagImmediate);
+        var online = 0;
         for (var i = 0; i < count; i++) {
             var friend = SteamFriends.GetFriendByIndex(i, EFriendFlags.k_EFriendFlagImmediate);
             if (SteamFriends.GetFriendPersonaState(friend) != EPersonaState.k_EPersonaStateOffline) {
-                return true;
+                online++;
             }
         }
 
-        return false;
+        said = $"logged on {loggedOn}, own state {ownState}, {online} of {count} friends online";
+        if (online > 0) {
+            return null;
+        }
+
+        if (!loggedOn || count < 0) {
+            return Lang.Pick(
+                "Steam isn't connected right now; friends can be invited once it is.",
+                "Steam 现在没连上，连上后才能邀请好友。"
+            );
+        }
+
+        if (ownState == EPersonaState.k_EPersonaStateOffline) {
+            return Lang.Pick(
+                "You show as offline on Steam; friends can be invited once you're online.",
+                "你在 Steam 上是离线状态，改成在线后才能邀请好友。"
+            );
+        }
+
+        return Lang.Pick(
+            "Steam shows none of your friends online right now; they can be invited once it does.",
+            "Steam 显示你的好友现在都不在线，上线后才能邀请。"
+        );
+    }
+
+    /// <summary>
+    /// A friend's state changed on Steam, or the player's own: after an invite that found no friend online, says so
+    /// once Steam shows one.
+    /// </summary>
+    private static void OnPersonaStateChange(PersonaStateChange_t callback) {
+        const EPersonaChange stateChanges = EPersonaChange.k_EPersonaChangeComeOnline |
+                                            EPersonaChange.k_EPersonaChangeStatus;
+        if (!_inviteFoundNoFriend || !IsInitialized || (callback.m_nChangeFlags & stateChanges) == 0 ||
+            WhyNoFriendToInvite(out var said) != null) {
+            return;
+        }
+
+        _inviteFoundNoFriend = false;
+        Logger.Info($"Steam: a friend shows online now, after the invite found none ({said})");
+        FriendOnlineAfterAllEvent?.Invoke();
     }
 
     /// <summary>

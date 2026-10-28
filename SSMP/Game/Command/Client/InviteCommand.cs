@@ -39,8 +39,7 @@ internal class InviteCommand : IClientCommand, ICommandWithDescription {
 
         UiManager.InternalChatBox.AddMessage(
             SteamManager.OpenInviteDialog()
-                ? Lang.Pick("Opening Steam invite dialog...", "正在打开 Steam 邀请窗口……")
-                : SteamManager.NoFriendOnlineMessage
+            ?? Lang.Pick("Opening Steam invite dialog...", "正在打开 Steam 邀请窗口……")
         );
     }
 }

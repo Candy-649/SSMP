@@ -704,6 +704,13 @@ internal class ConnectInterface {
     private bool _isMatchmakingFeedbackActive;
 
     /// <summary>
+    /// Whether the message shown is the one saying why Steam had no friend to invite, which stays until a player
+    /// joins the room or Steam shows a friend online after all: it said the partner was offline while they were in
+    /// the room (USER 10-28: "她那边显示steam好友都不在线的那个提示，但是实际上我在线").
+    /// </summary>
+    private bool _isNoInviteNoteShown;
+
+    /// <summary>
     /// Whether this player has joined a Steam lobby and waits for its host's game to answer. What is shown meanwhile
     /// says so, and opening the friends list does not put anything else in its place.
     /// </summary>
@@ -883,10 +890,15 @@ internal class ConnectInterface {
                 }
 
                 // Steam's own invite dialog, so the host never has to go looking for the overlay themselves, or the
-                // friends list while no friend is online to be invited
-                if (!SteamManager.OpenInviteDialog(_waitingRoomLobbyId)) {
-                    ShowFeedback(Color.yellow, SteamManager.NoFriendOnlineMessage, stays: true);
+                // friends list while Steam shows no friend online to be invited
+                var whyNoFriend = SteamManager.OpenInviteDialog(_waitingRoomLobbyId);
+                if (whyNoFriend == null) {
+                    HideNoInviteNote();
+                    return;
                 }
+
+                ShowFeedback(Color.yellow, whyNoFriend, stays: true);
+                _isNoInviteNoteShown = true;
             }
         );
         _waitingRoomPanel.SetOnCopy(() => {
@@ -1031,6 +1043,34 @@ internal class ConnectInterface {
         SteamManager.LobbyJoinedEvent += OnLobbyJoined;
         // Steam's answers come on the thread that runs its callbacks; the screen is changed on the game's own
         SteamManager.LobbyJoinFailedEvent += response => ThreadUtil.RunActionOnMainThread(() => OnLobbyJoinFailed(response));
+        SteamManager.FriendOnlineAfterAllEvent += () => ThreadUtil.RunActionOnMainThread(OnFriendOnlineAfterAll);
+    }
+
+    /// <summary>
+    /// Steam shows a friend online after an invite found none: the note saying it found none gives way to one saying
+    /// that they can be invited now.
+    /// </summary>
+    private void OnFriendOnlineAfterAll() {
+        if (!_isNoInviteNoteShown) {
+            return;
+        }
+
+        ShowFeedback(
+            Color.green,
+            Lang.Pick("A friend shows online on Steam now and can be invited.", "Steam 上有好友在线了，现在可以邀请了。")
+        );
+    }
+
+    /// <summary>
+    /// Takes away the note saying why Steam had no friend to invite, if it is still shown.
+    /// </summary>
+    private void HideNoInviteNote() {
+        if (!_isNoInviteNoteShown) {
+            return;
+        }
+
+        _isNoInviteNoteShown = false;
+        _feedbackText.SetActive(false);
     }
 
     /// <summary>
@@ -1771,6 +1811,9 @@ internal class ConnectInterface {
         }
 
         _waitingRoomPlayers.Add(username);
+
+        // Someone came, so whatever Steam said of friends to invite is past
+        HideNoInviteNote();
 
         // A ready said before they came reached nobody, so they hear it now: a host who readied while alone was never
         // ready for the teammate who joined, whose save menu then never opened
@@ -2623,7 +2666,9 @@ internal class ConnectInterface {
             return true;
         }
 
+        // What is wrong with the name is shown in place of whatever was
         _feedbackHideCoroutine = newCoroutine;
+        _isNoInviteNoteShown = false;
         return false;
     }
 
@@ -2660,6 +2705,7 @@ internal class ConnectInterface {
     /// being made and something will follow it, or why one failed.</param>
     private void ShowFeedback(Color color, string message, bool stays = false) {
         _isMatchmakingFeedbackActive = false;
+        _isNoInviteNoteShown = false;
         _feedbackHideCoroutine = ConnectInterfaceHelpers.SetFeedbackText(
             _feedbackText,
             color,
@@ -2758,6 +2804,7 @@ internal class ConnectInterface {
         }
 
         _isMatchmakingFeedbackActive = true;
+        _isNoInviteNoteShown = false;
         _feedbackText.SetText(message);
         _feedbackText.SetColor(color);
         _feedbackText.SetActive(true);
