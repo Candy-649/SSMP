@@ -142,7 +142,15 @@ internal class DamageHeroComponent : EntityComponent {
                 _clientDamageHeroes[i].gameObject != null) {
                 _clientDamageHeroes[i].damageDealt = damageDealt;
                 _clientDamageHeroes[i].enabled = enabled;
-                _clientDamageHeroes[i].gameObject.SetActive(active);
+
+                // The same goes for the copy, which is there when the other game says the creature is
+                // (Entity.UpdateIsActive). What is sent here of the body is only whether it is switched on itself, not
+                // whether it is in the room: one in a group of the room that the story had switched off is on by
+                // itself and gone. Switched on from here, the copy of whoever walked in came on at full health where
+                // the creature waits, while the game that ran the room had none (10-28 logs, every walk-in).
+                if (_clientDamageHeroes[i].gameObject != GameObject.Client) {
+                    _clientDamageHeroes[i].gameObject.SetActive(active);
+                }
             }
         }
     }
