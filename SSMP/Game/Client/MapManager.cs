@@ -320,6 +320,11 @@ internal class MapManager : IMapManager {
 
         // Update the position of the player icon
         transform.localPosition = unityPosition;
+
+        // While the map is shown, the head is put at the edge of what is shown if this place is outside it
+        if (mapObject.TryGetComponent<MapHeadPointer>(out var pointer)) {
+            pointer.SetPlace(new Vector2(position.X, position.Y));
+        }
     }
 
     /// <summary>
@@ -463,6 +468,9 @@ internal class MapManager : IMapManager {
 
         // Set the position of the player icon
         mapIcon.transform.localPosition = unityPosition;
+
+        // Outside what the map shows, the head waits at its edge with the game's arrow pointing to it
+        MapHeadPointer.Attach(mapIcon, gameMap, new Vector2(position.X, position.Y));
 
         // Remove the bob effect when walking with the map
         Object.Destroy(mapIcon.LocateMyFSM("Mapwalk Bob"));
