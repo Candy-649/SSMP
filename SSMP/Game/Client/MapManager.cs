@@ -340,6 +340,15 @@ internal class MapManager : IMapManager {
     private void OnPositionCompass(GameMap gameMap) {
         // Otherwise, we have opened the map
         _displayingIcons = true;
+
+        // A head that was said to be shown while this game had no map yet, in the menu as the player joined, is made
+        // now: it is otherwise only made when its player moves, and one standing still was not on the map
+        foreach (var (id, mapEntry) in _mapEntries) {
+            if (mapEntry.HasMapIcon && mapEntry.GameObject == null) {
+                CreatePlayerIcon(id, mapEntry.Position);
+            }
+        }
+
         UpdateMapIconsActive();
 
         OutlineOwnIcon(gameMap);

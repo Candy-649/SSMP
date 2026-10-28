@@ -876,6 +876,35 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
+    /// Tells a player who just joined which of the players already here show their head on the map, and where. A head
+    /// is only said when it comes up or goes, and its place when it moves, so one that came up before the player joined
+    /// was never said to them: a player who came back after losing the connection never saw the other's head again
+    /// until the other took off their compass and put it back on.
+    /// </summary>
+    /// <param name="joinerId">The ID of the player who joined.</param>
+    private void SendMapIconsToJoiner(ushort joinerId) {
+        var updateManager = _netServer.GetUpdateManagerForClient(joinerId);
+        if (updateManager == null) {
+            return;
+        }
+
+        var placesShown = InternalServerSettings.AlwaysShowMapIcons ||
+                          InternalServerSettings.OnlyBroadcastMapIconWithCompass;
+
+        foreach (var (otherId, otherPd) in _playerData) {
+            if (otherId == joinerId || !otherPd.HasMapIcon) {
+                continue;
+            }
+
+            updateManager.UpdatePlayerMapIcon(otherId, true);
+
+            if (placesShown && otherPd.MapPosition != null) {
+                updateManager.UpdatePlayerMapPosition(otherId, otherPd.MapPosition);
+            }
+        }
+    }
+
+    /// <summary>
     /// Callback method for when a player map update is received from a player.
     /// </summary>
     /// <param name="id">The ID of the player.</param>
@@ -2174,6 +2203,8 @@ internal abstract class ServerManager : IServerManager {
             _authorizedList
         );
         _playerData[netServerClient.Id] = playerData;
+
+        SendMapIconsToJoiner(netServerClient.Id);
 
         try {
             PlayerConnectEvent?.Invoke(playerData);
