@@ -546,6 +546,12 @@ internal partial class CoopHits {
                 OnNailHitEnemy
             )
         );
+        AddHook(
+            typeof(DamageEnemies).GetMethod(
+                "DoDamage", InstanceFlags, null, [typeof(GameObject), typeof(bool)], null
+            ),
+            new Func<Func<DamageEnemies, GameObject, bool, bool>, DamageEnemies, GameObject, bool, bool>(OnDoDamage)
+        );
 
         // Hooked by the game patcher, before the tink's own rewritten method that calls it (GamePatcher)
         GamePatcher.HitInDirectionDetour = OnSendHitInDirection;
@@ -941,6 +947,82 @@ internal partial class CoopHits {
         }
 
         orig(self, target, hit);
+    }
+
+    /// <summary>
+    /// Has a copy of the partner's attack strike without the crest of this game's player. The game works out what the
+    /// crest does to a strike of the hero from the one hero it knows, this game's own (DamageEnemies.DoDamage): the
+    /// critical hits of the wanderer's crest, the rage of the beast's, the combo of the hunter's and the strength a
+    /// taunt leaves - and a copy of the partner's swing is a strike of the hero to it. So the partner's swings landed
+    /// this player's critical hits here, with their flash and their sound, where the partner had none, and used up a
+    /// critical hit or the strength of a taunt that this player had waiting (USER 10-29: "我朋友用猎手纹章，在我这里打出了
+    /// 漫游者纹章的暴击效果，音效和特效。但是我朋友那边就没有"). While the copy works out its strike they are taken off this
+    /// player and put back right after: nothing else runs in between, as the strike is only kept for later then. What
+    /// the partner's own crest did to their strike is shown from their game (<see cref="ShowCrestLooks"/>).
+    /// </summary>
+    private static bool OnDoDamage(
+        Func<DamageEnemies, GameObject, bool, bool> orig,
+        DamageEnemies self,
+        GameObject target,
+        bool isFirstHit
+    ) {
+        var hero = HeroController.instance;
+        if (hero == null || !RemoteAttackComponent.IsRemoteAttack(self.gameObject)) {
+            return orig(self, target, isFirstHit);
+        }
+
+        var wanderer = hero.WandererState;
+        var warrior = hero.warriorState;
+        var hunter = hero.hunterUpgState;
+        var taunt = hero.silkTauntEffectTimeLeft;
+        try {
+            var noCritical = wanderer;
+            noCritical.QueuedNextHitCritical = false;
+            noCritical.CriticalHitsLocked = true;
+            hero.WandererState = noCritical;
+            hero.warriorState.IsInRageMode = false;
+            hero.hunterUpgState.CurrentMeterHits = 0;
+            hero.silkTauntEffectTimeLeft = 0f;
+
+            return orig(self, target, isFirstHit);
+        } finally {
+            hero.WandererState = wanderer;
+            hero.warriorState = warrior;
+            hero.hunterUpgState = hunter;
+            hero.silkTauntEffectTimeLeft = taunt;
+        }
+    }
+
+    /// <summary>
+    /// Shows what the crest of the player who struck gave a hit of theirs that the game shows only as the enemy takes
+    /// the hit (HealthManager.TakeDamage), and so never in the other game, where the enemy takes no hit: the flash of a
+    /// critical hit, which carries its sound, and the flash of a combo of the hunter's crest, placed and turned as the
+    /// game places them. The rage of the beast's crest shows with the rest of the hit already (ReceiveHitEffect). The
+    /// short freeze of a critical hit is the feel of the game of the player who struck, and the larger combo flash of
+    /// the upgraded crest's full meter goes by a meter that only their game knows (USER 10-29: "那我触发暴击，她那边能
+    /// 看到吗").
+    /// </summary>
+    /// <param name="healthManager">The enemy that was hit.</param>
+    /// <param name="hit">The hit, with its source placed here.</param>
+    private static void ShowCrestLooks(HealthManager healthManager, HitInstance hit) {
+        var enemy = healthManager.transform;
+        var at = enemy.TransformPoint(healthManager.effectOrigin);
+
+        var critical = hit.CriticalHit ? GlobalSettings.Gameplay.WandererCritEffect : null;
+        if (critical != null) {
+            global::Extensions.SetRotation2D(
+                critical.Spawn(at).transform,
+                hit.GetOverriddenDirection(enemy, default)
+            );
+        }
+
+        var combo = hit.HunterCombo ? GlobalSettings.Gameplay.HunterComboDamageEffect : null;
+        if (combo != null) {
+            var flash = combo.Spawn(at).transform;
+            var direction = DirectionUtils.GetCardinalDirection(hit.GetActualDirection(enemy, default));
+            global::Extensions.SetRotation2D(flash, direction switch { 0 => 0f, 2 => 180f, _ => 90f });
+            flash.localScale = combo.transform.localScale;
+        }
     }
 
     /// <summary>
@@ -3038,14 +3120,18 @@ internal partial class CoopHits {
             }
         }
 
+        PlaceAroundEnemy(ref source, healthManager.transform);
+        hit.Source = GetHitSource(source);
+
+        // Shown as the enemy takes the hit, whether it has an effect of its own or not (HealthManager.TakeDamage)
+        ShowCrestLooks(healthManager, hit);
+
         // The game leaves this one without an effect itself
         var receiver = healthManager.hitEffectReceiver;
         if (receiver == null || hit.AttackType == AttackTypes.RuinsWater) {
             return;
         }
 
-        PlaceAroundEnemy(ref source, healthManager.transform);
-        hit.Source = GetHitSource(source);
         receiver.ReceiveHitEffect(hit);
     }
 
