@@ -257,6 +257,27 @@ internal partial class CoopSave {
         /// long as anything is holding them, so a frame count that has stopped moving means whatever held it is gone.
         /// </summary>
         public int HeldFrame { get; set; } = Time.frameCount;
+
+        /// <summary>
+        /// Where the body of the player went down, which it keeps while they lie here.
+        /// </summary>
+        public Vector2 LyingAt { get; set; }
+
+        /// <summary>
+        /// The speed of the current the player lay in, which is taken off them while they lie and given back if they
+        /// stand up where they lay: a current tells a player of itself only as they come into it (ConveyorZone).
+        /// </summary>
+        public float? Current { get; set; }
+
+        /// <summary>
+        /// Whether the log has said that the body of the player had a speed while they lay here, which it says once.
+        /// </summary>
+        public bool SaidSpeed { get; set; }
+
+        /// <summary>
+        /// Whether the log has said that the body of the player went away from where it went down, which it says once.
+        /// </summary>
+        public bool SaidDrift { get; set; }
     }
 
     /// <summary>
@@ -558,6 +579,75 @@ internal partial class CoopSave {
             typeof(HeroController).GetMethod("TickFrostEffect", InstanceFlags, null, [typeof(bool)], null),
             new Action<Action<HeroController, bool>, HeroController, bool>(OnTickFrost)
         );
+        _lyingBodyHook = CreateHook(
+            typeof(HeroController).GetMethod("FixedUpdate", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<HeroController>, HeroController>(OnHeroFixedUpdate)
+        );
+    }
+
+    /// <summary>
+    /// The hook on the step of physics of the player.
+    /// </summary>
+    private Hook? _lyingBodyHook;
+
+    /// <summary>
+    /// Keeps the body of the local player still while they lie waiting to be pulled up, as the game keeps the body of a
+    /// player it has marked dead still: in every step of physics it takes all speed off it (HeroController.FixedUpdate).
+    /// A player lying down is not marked dead (see <see cref="GoDown"/>), so going down took their speed off once, and
+    /// any speed that reached the body after that stayed on it for the whole wait - and a body lying down passes
+    /// through walls. The user was carried along the floor at about 30 a second and out of the room, with the camera
+    /// after them, and stood up out there when the friend pulled them up (USER 10-29: "我刚刚死的时候视角飘到很远的地方去了",
+    /// "为什么这些推力躺下了还在发作"; the friend's log had the body going right for the whole wait, and stopping as it
+    /// was stood up).
+    ///
+    /// What moved the body that time is not in the logs, so the log says once what speed was taken off, and once if the
+    /// body went away from where it went down all the same, which a speed given after this step or a push that moves
+    /// the body itself would do.
+    /// </summary>
+    /// <param name="orig">The original method.</param>
+    /// <param name="self">The hero controller.</param>
+    private void OnHeroFixedUpdate(Action<HeroController> orig, HeroController self) {
+        orig(self);
+
+        if (_rescue is not { } lying || self.cState.dead || self.rb2d == null) {
+            return;
+        }
+
+        var speed = self.rb2d.linearVelocity;
+        if (speed.sqrMagnitude >= 0.0001f) {
+            self.rb2d.linearVelocity = Vector2.zero;
+            if (!lying.SaidSpeed) {
+                lying.SaidSpeed = true;
+                Logger.Info(
+                    $"The body of the player lying down had a speed of {speed}, taken off as the game does for a " +
+                    $"dead body: {DescribeLyingBody(self)}"
+                );
+            }
+        }
+
+        var drift = Vector2.Distance(self.rb2d.position, lying.LyingAt);
+        if (drift > LyingDriftLimit && !lying.SaidDrift) {
+            lying.SaidDrift = true;
+            Logger.Info(
+                $"The body of the player lying down is {drift:0.00} from where they went down at {lying.LyingAt}: " +
+                DescribeLyingBody(self)
+            );
+        }
+    }
+
+    /// <summary>
+    /// How far the body of a player lying down goes from where it went down before the log says so.
+    /// </summary>
+    private const float LyingDriftLimit = 1f;
+
+    /// <summary>
+    /// What could be moving the body of a player lying down, for the log.
+    /// </summary>
+    private static string DescribeLyingBody(HeroController hero) {
+        return $"at {hero.rb2d.position}, state {hero.hero_state}, recoiling {hero.cState.recoiling}, in a current " +
+               $"{hero.cState.inConveyorZone}, on a belt {hero.cState.onConveyor}, sprinting {hero.cState.isSprinting}, " +
+               $"dashing {hero.cState.dashing}, control taken {hero.controlReqlinquished}, parent " +
+               $"{(hero.transform.parent == null ? "none" : hero.transform.parent.name)}";
     }
 
     /// <summary>
@@ -1230,8 +1320,13 @@ internal partial class CoopSave {
         PlayerData.instance.disablePause = true;
 
         hero.StopTilemapTest();
-        hero.cState.onConveyor = false;
-        hero.cState.onConveyorV = false;
+
+        // Off whatever carries the player along, the game's own way: a belt, and a current, which moves the body itself
+        // rather than its speed and so goes on past anything that only stops the speed (HeroController.FixedUpdate),
+        // even for a body the game marked dead
+        rescue.LyingAt = hero.rb2d.position;
+        rescue.Current = hero.cState.inConveyorZone ? hero.conveyorSpeed : null;
+        hero.ConveyorReset();
         hero.rb2d.linearVelocity = Vector2.zero;
         hero.CancelRecoilHorizontal();
         hero.AffectedByGravity(false);
@@ -1787,6 +1882,14 @@ internal partial class CoopSave {
         // drawn shut around the player only reveals the plates.
         OpenTheDarknessAroundTheHero();
         SayWhatTheDeathLeftSwitchedOn("with the screen just given back");
+
+        // What the room's hazards still do to the player ends in the black, as it does on the game's own way back from
+        // a hazard (HeroController.HazardRespawnReset): the figure of the player that a hazard puts up, and a hazard
+        // that holds on to that figure, go on until the game says that, or says the player died, which the room is not
+        // told here. The friend, killed by a shock, went on being shocked for the whole wait, with the screen shaking
+        // (USER 10-29: "她后来死了一直在被电"). Not as the player goes down: a hazard that kills hears of its hit just
+        // before, and starts holding on only in the frame after
+        EventRegister.SendEvent(EventRegisterEvents.HazardRespawnReset, null);
     }
 
     /// <summary>
@@ -1887,6 +1990,13 @@ internal partial class CoopSave {
             hero.renderer.enabled = true;
             hero.heroBox.HeroBoxNormal();
 
+            // Back on the player's own layer, as the game's own way back to a safe place puts them
+            // (HeroController.HazardRespawnReset). Lava, spikes or a shock that the player lives through first moves
+            // them to a layer that the ground does not hold up (HeroController.DieFromHazard), and a death that comes
+            // in the middle of that leaves them there: the friend, pulled up after a shock, fell through the floor and
+            // went on falling for good (10-29, her log)
+            hero.gameObject.layer = PlayerLayer;
+
             // The hit box of the player answers to two things: the collider that HeroBoxNormal switches back on, and
             // one switch shared by the whole game that a death turns on and only the loading of a room ever turns off
             // again. Leaving it on makes a player who was pulled back up unable to be touched by anything at all
@@ -1942,6 +2052,10 @@ internal partial class CoopSave {
                 );
                 hero.transform.position = safe;
                 NoteStandUpAtSafePlace(safe);
+            } else if (rescue.Current is { } current) {
+                // Back in the current they lay in and never left, which going down took off them
+                hero.cState.inConveyorZone = true;
+                hero.SetConveyorSpeed(current);
             }
 
             // Once the player stands where they will play on from, so that the camera locks to the area they are in
