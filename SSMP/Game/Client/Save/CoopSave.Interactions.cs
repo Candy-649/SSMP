@@ -106,10 +106,12 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Mechanisms that another member used while the local copy couldn't replay it, like while the local hero was using
-    /// them, with the state that their change of the world starts in and the name of who used them, for messages. They
+    /// them, with the state that their change of the world starts in, the name of who used them, for messages, and the
+    /// updates of the uses, whose flags of the player data wait with them (see <see cref="OnMechanismUsed"/>). They
     /// replay once the local copy can, unless the local player uses them too.
     /// </summary>
-    private readonly Dictionary<Fsm, (string StateName, string Name)> _pendingReplays = new();
+    private readonly Dictionary<Fsm, (string StateName, string Name, List<CoopSaveUpdate> Updates)> _pendingReplays =
+        new();
 
     /// <summary>
     /// Mechanisms that the local player used whose change of the world still runs, with its states, whose flags of the
@@ -432,6 +434,12 @@ internal partial class CoopSave {
         }
 
         _mechanisms.Clear();
+
+        // What uses that still waited set goes into the save all the same
+        foreach (var pending in _pendingReplays.Values) {
+            ApplyWaitedFlags(pending.Updates);
+        }
+
         _pendingReplays.Clear();
         _localInteractions.Clear();
         _remoteInteractions.Clear();
@@ -686,7 +694,9 @@ internal partial class CoopSave {
         bool isEnd
     ) {
         _localInteractions[fsm] = interaction;
-        _pendingReplays.Remove(fsm);
+        if (_pendingReplays.Remove(fsm, out var waited)) {
+            ApplyWaitedFlags(waited.Updates);
+        }
         if (!isEnd) {
             _capturedMechanisms[fsm] = worldStates;
         }
@@ -915,9 +925,17 @@ internal partial class CoopSave {
 
         // Whether the local save had the mechanism done already only shows before the flags of the partner are in
         var done = IsMechanismDone(fsm, mechanism);
-        ApplyInteractionFlags(update);
         _remoteInteractions.TryAdd(fsm, (update.Key, player.Username));
+
+        // A use that came again while one waits waits with it, flags and all
+        if (_pendingReplays.TryGetValue(fsm, out var waiting)) {
+            waiting.Updates.Add(update);
+            return;
+        }
+
         if (_localInteractions.TryGetValue(fsm, out var local)) {
+            ApplyInteractionFlags(update);
+
             // Both players used it. A player who used it after the use of the other had arrived gets the payment back
             // in their own game, so only uses that crossed on the way are settled here
             if (update.PartCount != InteractionAfterPartner) {
@@ -927,24 +945,30 @@ internal partial class CoopSave {
             return;
         }
 
-        if (_replays.ContainsKey(fsm) || _pendingReplays.ContainsKey(fsm)) {
+        if (_replays.ContainsKey(fsm)) {
+            ApplyInteractionFlags(update);
             return;
         }
 
         if (done) {
+            ApplyInteractionFlags(update);
             Logger.Info($"Mechanism '{fsm.Name}' that {player.Username} used was done in the local save already");
             return;
         }
 
         if (CanReplay(fsm, mechanism)) {
+            ApplyInteractionFlags(update);
             Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by {player.Username} on {target.name}");
             StartReplay(fsm, update.StateName, states);
             return;
         }
 
-        // The replay waits for the local copy. It is queued before the prompt closes, because closing it can take the
-        // mechanism back to its idle state at once
-        _pendingReplays[fsm] = (update.StateName, player.Username);
+        // The replay waits for the local copy, and the flags of the partner wait with it, to be written as it plays: a
+        // mechanism that comes back to rest looks at them and goes away as one done long ago, without what it does to
+        // the world. The toll of a tube that this player had open as the partner paid went away as its prompt closed,
+        // and the tube it unlocks never came (USER 10-29: "它解锁了电梯之后我这边装置没了，但是电梯也没出来"). It is
+        // queued before the prompt closes, because closing it can take the mechanism back to its idle state at once
+        _pendingReplays[fsm] = (update.StateName, player.Username, new List<CoopSaveUpdate> { update });
         if (!TryClosePrompt(fsm, player.Username)) {
             Logger.Info($"The use of mechanism '{fsm.Name}' by {player.Username} waits for the local copy");
         }
@@ -960,8 +984,10 @@ internal partial class CoopSave {
                 if (fsm.Owner == null || GetMechanism(fsm) is not { } mechanism ||
                     !mechanism.WorldStarts.TryGetValue(pair.Value.StateName, out var states)) {
                     _pendingReplays.Remove(fsm);
+                    ApplyWaitedFlags(pair.Value.Updates);
                 } else if (CanReplay(fsm, mechanism)) {
                     _pendingReplays.Remove(fsm);
+                    ApplyWaitedFlags(pair.Value.Updates);
                     Logger.Info($"Replaying the use of mechanism '{fsm.Name}' by {pair.Value.Name}, which waited");
                     StartReplay(fsm, pair.Value.StateName, states);
                 } else {
@@ -1450,6 +1476,17 @@ internal partial class CoopSave {
         }
 
         return changed;
+    }
+
+    /// <summary>
+    /// Sets the flags of the player data of the partner's uses of a mechanism that waited for their replay, in the
+    /// order the uses came in.
+    /// </summary>
+    /// <param name="updates">The updates of the uses.</param>
+    private void ApplyWaitedFlags(List<CoopSaveUpdate> updates) {
+        foreach (var update in updates) {
+            ApplyInteractionFlags(update);
+        }
     }
 
     /// <summary>
