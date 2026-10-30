@@ -1171,11 +1171,15 @@ internal partial class CoopHits {
             if (update != null && answered && _netClient.IsConnected) {
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
                 SendToRoomMembers(update);
-                NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder} ({DescribeMoves(component)})");
+                NoteTraffic(
+                    update.Scene, update.Path,
+                    $"sent a hit on {update.Responder} {DescribeStriker(damager)} ({DescribeMoves(component)})"
+                );
             } else if (update != null && !answered) {
                 NoteTraffic(
                     update.Scene, update.Path,
-                    $"hit its {update.Responder}, which did not answer: not sent ({DescribeMoves(component)})"
+                    $"hit its {update.Responder} {DescribeStriker(damager)}, which did not answer: not sent " +
+                    $"({DescribeMoves(component)})"
                 );
                 TurnThrownBack(turned, before);
             }
@@ -1550,7 +1554,7 @@ internal partial class CoopHits {
             SendToRoomMembers(update);
             NoteTraffic(
                 update.Scene, update.Path,
-                $"sent a touch of {attack.name} through {update.Responder} ({DescribeMoves(receiver)})"
+                $"sent a touch through {update.Responder} {DescribeStriker(attack)} ({DescribeMoves(receiver)})"
             );
         }
     }
@@ -1649,6 +1653,25 @@ internal partial class CoopHits {
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Which attack of the local player struck and where it was, and where the player stood, for the notes of what went
+    /// between the games. An attack that a thing took from where it could not have touched it shows by these (USER 10-30:
+    /// a wall counted a hit that came while both players fought in a room of their own, far from it).
+    /// </summary>
+    private static string DescribeStriker(Component attack) {
+        var hero = HeroController.SilentInstance;
+        return $"by '{attack.name}' at {FormatPlace(attack.transform.position)}" +
+               (hero != null ? $", this player at {FormatPlace(hero.transform.position)}" : "");
+    }
+
+    /// <summary>
+    /// A place in a room as text, to a tenth.
+    /// </summary>
+    private static string FormatPlace(Vector3 position) {
+        var culture = System.Globalization.CultureInfo.InvariantCulture;
+        return $"({position.x.ToString("0.0", culture)}, {position.y.ToString("0.0", culture)})";
     }
 
     /// <summary>
