@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using SSMP.Networking.Packet.Data;
 using Logger = SSMP.Logging.Logger;
 
@@ -37,9 +38,20 @@ internal partial class CoopSave {
     ];
 
     /// <summary>
-    /// What each member's own player has had of what lets the characters leave, by the member, as their game last said.
+    /// What each member's own player has had of what lets the characters leave, by their name, as their game said, for
+    /// the whole session: also while they are away, as a leaving that came while one of them dropped out for a moment
+    /// would be on at the next check and done (<see cref="_departuresDone"/>), gone from them for good. What a player
+    /// has had only grows in the game, so a member is taken to have had what any message of theirs said they had: a
+    /// message resent late, or from a game that started anew, never takes it back.
     /// </summary>
-    private readonly Dictionary<ushort, Dictionary<string, bool>> _memberDepartureReadiness = new();
+    private readonly Dictionary<string, Dictionary<string, bool>> _memberDepartureReadiness = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// The fields of the flags of <see cref="Departures"/> by name, which the hold writes directly: through
+    /// PlayerData.SetBool a mechanism being used or a talk going on at that moment would take the leaving for its own
+    /// (CoopSave.Interactions, RecordInteractionFlag).
+    /// </summary>
+    private static readonly Dictionary<string, FieldInfo?> DepartureFields = new(StringComparer.Ordinal);
 
     /// <summary>
     /// What the local player has had of it, as the local game last sent it, or null before it sent anything since the
@@ -92,11 +104,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets what a member that left had: their game no longer says, so they hold nothing back until it does again.
+    /// A member left: what they had is kept for the session (see <see cref="_memberDepartureReadiness"/>), and the local
+    /// game's goes to them again once they are back.
     /// </summary>
     /// <param name="id">The ID of the member.</param>
     private void ForgetDepartureReadinessOf(ushort id) {
-        _memberDepartureReadiness.Remove(id);
         _departureReadinessSentTo.Remove(id);
     }
 
@@ -148,12 +160,19 @@ internal partial class CoopSave {
             return;
         }
 
-        var readiness = new Dictionary<string, bool>();
-        for (var i = 0; i < update.FlagNames.Count && i < update.FlagValues.Count; i++) {
-            readiness[update.FlagNames[i]] = update.FlagValues[i] != 0;
+        // The first word of theirs this session: the local game's goes back to them, in case theirs came before they
+        // took the local game's
+        if (!_memberDepartureReadiness.TryGetValue(player.Username, out var readiness)) {
+            readiness = new Dictionary<string, bool>(StringComparer.Ordinal);
+            _memberDepartureReadiness[player.Username] = readiness;
+            _departureReadinessSentTo.Remove(player.Id);
         }
 
-        _memberDepartureReadiness[player.Id] = readiness;
+        for (var i = 0; i < update.FlagNames.Count && i < update.FlagValues.Count; i++) {
+            var name = update.FlagNames[i];
+            readiness[name] = update.FlagValues[i] != 0 || (readiness.TryGetValue(name, out var had) && had);
+        }
+
         Logger.Info(
             $"[Departures] {player.Username} has had: " +
             string.Join(", ", readiness.Select(pair => $"{pair.Key}={pair.Value}"))
@@ -204,10 +223,9 @@ internal partial class CoopSave {
                 waiting.Add("this player");
             }
 
-            foreach (var id in _checkedMembers) {
-                if (_memberDepartureReadiness.TryGetValue(id, out var readiness) &&
-                    readiness.TryGetValue(ready, out var had) && !had) {
-                    waiting.Add(_playerData.TryGetValue(id, out var member) ? member.Username : $"player {id}");
+            foreach (var member in _memberDepartureReadiness) {
+                if (member.Value.TryGetValue(ready, out var had) && !had) {
+                    waiting.Add(member.Key);
                 }
             }
 
@@ -215,7 +233,16 @@ internal partial class CoopSave {
                 continue;
             }
 
-            playerData.SetBool(left, false);
+            if (!DepartureFields.TryGetValue(left, out var field)) {
+                field = typeof(PlayerData).GetField(left, BindingFlags.Instance | BindingFlags.Public);
+                DepartureFields[left] = field;
+            }
+
+            if (field == null || field.FieldType != typeof(bool)) {
+                continue;
+            }
+
+            field.SetValue(playerData, false);
             Logger.Info(
                 $"[Departures] {left} put back off after {when}: {JoinNames(waiting)} did not have {ready} yet, " +
                 "and the character leaves only once everyone did"

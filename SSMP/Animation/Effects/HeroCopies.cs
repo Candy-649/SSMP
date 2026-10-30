@@ -95,7 +95,22 @@ internal static class HeroCopies {
                 Logger.Error($"Could not dress '{copy.name}' as the character of another player:\n{e}");
             }
         }
+
+        // The embers and their sound of the element of that player's needle, rather than of the local one's
+        try {
+            Tools.ImbuedNail.SetCopyParts(copy, character);
+        } catch (Exception e) {
+            if (!_imbueFailed) {
+                _imbueFailed = true;
+                Logger.Error($"Could not give '{copy.name}' the element of another player's needle:\n{e}");
+            }
+        }
     }
+
+    /// <summary>
+    /// Whether giving a copy the element of another player's needle threw, which is only logged once.
+    /// </summary>
+    private static bool _imbueFailed;
 
     /// <summary>
     /// The holder that copies are made in, switched off and kept from room to room.

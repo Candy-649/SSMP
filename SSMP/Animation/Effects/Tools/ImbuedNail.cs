@@ -216,6 +216,35 @@ internal static class ImbuedNail {
     }
 
     /// <summary>
+    /// Switches what a copy of one of the local hero's objects has for each element of the needle (the parts of its
+    /// HeroNailImbuementEffects) to the element of the needle of the player whose it is, while the copy is still off.
+    /// The game never switches those parts off again when a slash ends, so a copy made after the local player's own
+    /// slash with an element came with them on, and their sound played as the copy woke, before the slash had started
+    /// and could switch them (see <see cref="OnEffectEnable"/>).
+    /// </summary>
+    /// <param name="copy">The copy, still off.</param>
+    /// <param name="character">The character of the player whose it is.</param>
+    public static void SetCopyParts(GameObject copy, GameObject character) {
+        if (EffectElementField == null || EffectObjectsField == null) {
+            return;
+        }
+
+        var element = ElementOf(character);
+        foreach (var effect in copy.GetComponentsInChildren<HeroNailImbuementEffect>(true)) {
+            if (EffectElementField.GetValue(effect) is not NailElements partElement ||
+                EffectObjectsField.GetValue(effect) is not GameObject[] parts) {
+                continue;
+            }
+
+            foreach (var part in parts) {
+                if (part != null) {
+                    part.SetActive(partElement == element);
+                }
+            }
+        }
+    }
+
+    /// <summary>
     /// A part of a charged slash that switches on what goes with one element of the needle as the slash starts
     /// (HeroNailImbuementEffect): the embers or the poison on it, and the sound of them. It goes by the needle of the
     /// local hero, so on the copy of the local hero's charged slash that shows another player's, it showed and sounded
