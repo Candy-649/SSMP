@@ -206,9 +206,12 @@ internal enum CoopHitKind : byte {
     ObjectHurtPlayer,
 
     /// <summary>
-    /// A pod or a balloon of the room that the sender's player struck, found like a tink, which the other game shows
+    /// A pod or a balloon of the room that the sender's player struck, found like a tink, which the other game showed
     /// struck the same way without flinging or shutting anything there. <see cref="CoopHitUpdate.Hit"/> holds how it
     /// was struck, the way a pod swings and where the player was across. Appended at the end, like the ones before.
+    /// Sent by 0.4.96 to 0.4.137 only: since 0.4.138 nothing sends it, and one that comes is left alone (USER 10-30,
+    /// "直接去掉样子同步，在任何地方都不要留样子同步但是各用各的了"). Kept so that what a game of those versions sends still
+    /// reads.
     /// </summary>
     BounceLook,
 

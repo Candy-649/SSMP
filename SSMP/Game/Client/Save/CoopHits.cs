@@ -53,9 +53,14 @@ internal partial class CoopHits {
     /// <summary>
     /// The kinds of objects of the room that are there for the player who hits them: they fling that player off them,
     /// heal or pay them, or ring or spark against their weapon, where their own game has them. A hit on one is not
-    /// sent, and the copy of the partner's attack leaves the one here alone, so each player has their own. What a
-    /// strike on a pod or a balloon looks like goes to the others still (see <see cref="ShowBounceLook"/>). Every other
-    /// object of the room takes the partner's hits as replays of them (see <see cref="IsRoomObject"/>).
+    /// sent, and the copy of the partner's attack leaves the one here alone, so each player has their own, and nothing
+    /// of the partner's strikes on theirs shows here: how a strike on a pod or a balloon looked was shown in the other
+    /// game from 0.4.96 to 0.4.137, a pod or a flower that bounced there while the one here stayed as it was (USER
+    /// 10-30, "直接去掉样子同步，在任何地方都不要留样子同步但是各用各的了"). The bells of a music box are shared all the
+    /// same (see CoopSave.PodSequences). Every other object of the room takes the partner's hits as replays of them
+    /// (see <see cref="IsRoomObject"/>). The pods and the balloons, with the things of <see cref="PersonalPlaces"/>, are
+    /// what was made each player's own so that playing together is not too hard, which a switch may share again later
+    /// (USER 10-30, "我计划后面加个按键可以一键打开这些为了不要太难而改成各用各的物品的同步").
     /// </summary>
     private static readonly Type[] PersonalTypes = [
         typeof(BounceBalloon),
@@ -619,7 +624,6 @@ internal partial class CoopHits {
         GamePatcher.HitInDirectionDetour = OnSendHitInDirection;
 
         RegisterThrownHooks();
-        RegisterBounceHooks();
         RegisterSignalHooks();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += WatchKnocks;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += ReleaseHeldReplays;
@@ -649,7 +653,6 @@ internal partial class CoopHits {
         _releasingReplays.Clear();
         _knockWatches.Clear();
         DeregisterThrownHooks();
-        OpenShownShutPods();
         _isReplaying = false;
         _hitContext = HitContext.None;
         ReplayedRanges.Clear();
@@ -742,8 +745,10 @@ internal partial class CoopHits {
             return;
         }
 
+        // A strike of the partner on a pod or a balloon, which games of 0.4.96 to 0.4.137 still send for this game to
+        // show: nothing of what each player has to themselves shows here any more (USER 10-30, "直接去掉样子同步，在任何
+        // 地方都不要留样子同步但是各用各的了")
         if (update.Kind == CoopHitKind.BounceLook) {
-            ShowBounceLook(update);
             return;
         }
 

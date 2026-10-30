@@ -16,6 +16,12 @@ namespace SSMP.Game.Client;
 /// Whatever is under something that was taken down counts too, like what those fleas make for themselves. Every part of
 /// a place is numbered in the order it was taken down, which is the same in every game, since every game loads the same
 /// room the same way: that is how one game tells another which part of a place it means.
+///
+/// The things of <see cref="Things"/> and the pods and balloons (see CoopHits.PersonalTypes) are what was made each
+/// player's own so that playing together is not too hard, and nothing of what the partner does to theirs shows here
+/// (USER 10-30, "直接去掉样子同步，在任何地方都不要留样子同步但是各用各的了"). A switch may share them all again later
+/// (USER 10-30, "我计划后面加个按键可以一键打开这些为了不要太难而改成各用各的物品的同步"). A round of a place shows to a
+/// player who watches it instead of playing (see <see cref="MinigameMirror"/>).
 /// </summary>
 internal static class PersonalPlaces {
     /// <summary>
