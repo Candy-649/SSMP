@@ -31,16 +31,6 @@ internal partial class CoopSave {
     private const string SavedFlagName = "Activated";
 
     /// <summary>
-    /// The tag of the player's attacks, which the things that break listen for when they are touched.
-    /// </summary>
-    private const string NailAttackTag = "Nail Attack";
-
-    /// <summary>
-    /// The event by which a state machine goes on by itself once a state is done.
-    /// </summary>
-    private const string FinishedEventName = "FINISHED";
-
-    /// <summary>
     /// How long a break of the partner waits for the thing here to stand still between hits, in seconds. The walls and
     /// the vines are done with a hit or with their own break well within it, so one that is not standing still by then
     /// is stuck, and is shown broken all the same.
@@ -144,8 +134,11 @@ internal partial class CoopSave {
             return;
         }
 
+        // One that has not started yet is left to take its saved value, which has the partner's break, as its saved
+        // item starts (PersistentItem.Start), as both do when their object comes on; its actions are not loaded
+        // before it starts, and loading them early breaks it
         var fsm = FSMUtility.FindFSMWithPersistentBool(item.GetComponents<PlayMakerFSM>());
-        if (fsm == null || collapsing.Contains(fsm) || _waitingBreaks.ContainsKey(fsm) ||
+        if (fsm == null || fsm.Fsm is not { Started: true } || collapsing.Contains(fsm) || _waitingBreaks.ContainsKey(fsm) ||
             fsm.FsmVariables.FindFsmBool(SavedFlagName) is not { Value: false } || IsMechanismReplayed(fsm.Fsm) ||
             FindBrokenState(fsm) is not { } found) {
             return;
@@ -170,59 +163,28 @@ internal partial class CoopSave {
     /// and the replay of that hit sets it here.
     /// </summary>
     private static (FsmState Look, FsmState Broken)? FindBrokenState(PlayMakerFSM fsm) {
+        if (!HitMachines.CountsHits(fsm)) {
+            return null;
+        }
+
         (FsmState Look, FsmState Broken)? found = null;
-        var listens = false;
-        var counts = false;
         foreach (var state in fsm.FsmStates) {
-            listens |= ListensForHits(state);
             foreach (var action in state.Actions) {
-                if (!action.Enabled) {
+                if (!action.Enabled || action is not BoolTest { boolVariable.Name: SavedFlagName, isTrue: { } isTrue } ||
+                    HitMachines.FindTarget(fsm, state, isTrue.Name) is not { } to) {
                     continue;
                 }
 
-                switch (action) {
-                    case IntAdd { everyFrame: false } or IntOperator { everyFrame: false }:
-                        counts = true;
-                        break;
-                    case BoolTest { boolVariable.Name: SavedFlagName, isTrue: { } isTrue }:
-                        var to = FindTarget(fsm, state, isTrue.Name);
-                        if (to == null) {
-                            break;
-                        }
-
-                        // Looked at in two places: not one of these
-                        if (found is { } other && (other.Look != state || other.Broken != to)) {
-                            return null;
-                        }
-
-                        found = (state, to);
-                        break;
+                // Looked at in two places: not one of these
+                if (found is { } other && (other.Look != state || other.Broken != to)) {
+                    return null;
                 }
+
+                found = (state, to);
             }
         }
 
-        return listens && counts ? found : null;
-    }
-
-    /// <summary>
-    /// The state that an event takes a state machine to from a state, by a transition of that state, or null.
-    /// </summary>
-    private static FsmState? FindTarget(PlayMakerFSM fsm, FsmState state, string eventName) {
-        var transition = Array.Find(state.Transitions, t => t.EventName == eventName);
-        return transition == null ? null : transition.ToFsmState ?? fsm.Fsm.GetState(transition.ToState);
-    }
-
-    /// <summary>
-    /// Whether a state waits for the player's hits: by the damage that they deal, or by their touch.
-    /// </summary>
-    private static bool ListensForHits(FsmState state) {
-        foreach (var action in state.Actions) {
-            if (action.Enabled && action is ReceivedDamageBase or Trigger2dEvent { collideTag.Value: NailAttackTag }) {
-                return true;
-            }
-        }
-
-        return false;
+        return found;
     }
 
     /// <summary>
@@ -230,21 +192,7 @@ internal partial class CoopSave {
     /// loaded: whether it gets there by itself, once each state on the way is done, without first waiting for a hit.
     /// </summary>
     private static bool IsOnWayTo(PlayMakerFSM fsm, FsmState from, FsmState look) {
-        var seen = new HashSet<FsmState> { from };
-        var state = from;
-        while (FindTarget(fsm, state, FinishedEventName) is { } next && seen.Add(next)) {
-            if (next == look) {
-                return true;
-            }
-
-            if (ListensForHits(next)) {
-                return false;
-            }
-
-            state = next;
-        }
-
-        return false;
+        return HitMachines.FindOnWay(fsm, from, state => state == look || HitMachines.ListensForHits(state)) == look;
     }
 
     /// <summary>
@@ -265,8 +213,8 @@ internal partial class CoopSave {
                     continue;
                 }
 
-                // Not started yet, or on its way to its look at the flag: set, the look takes it to being broken, as in
-                // a room that loads it so
+                // On its way to its look at the flag, as it is while it starts, or stopped: set, the look takes it to
+                // being broken, as in a room that loads it so
                 var state = fsm.Fsm.ActiveState;
                 if (state == null || state != look && IsOnWayTo(fsm, state, look)) {
                     flag.Value = true;
@@ -280,7 +228,7 @@ internal partial class CoopSave {
                 }
 
                 var waited = now - since;
-                if (!ListensForHits(state) && waited < BreakWaitTime) {
+                if (!HitMachines.ListensForHits(state) && waited < BreakWaitTime) {
                     continue;
                 }
 

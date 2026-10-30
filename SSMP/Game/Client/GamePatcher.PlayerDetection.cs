@@ -218,6 +218,16 @@ internal partial class GamePatcher {
             return replayed;
         }
 
+        // A piece of the world that looks at a strike of this game's player asks about that player alone, as in a game
+        // with one player. A vine that is cut from one side only calls a strike off while somebody stands in the room
+        // behind it, and the partner standing anywhere in that room called off every strike of the player in front of
+        // it, who could cut it only once the partner came up to it (USER 10-30, "我不在门附近我朋友的攻击就没有用"). What
+        // the range says here goes to the partner with the strike, and their replay goes by it. The end of a passage of
+        // dropping boxes keeps to the way that it is set for (see TryAnswerBoxPassageEnd), whoever asks.
+        if (Save.CoopHits.IsMakingLocalStrike && !BelongsToAnEnemy(self) && !IsBoxPassageEnd(self)) {
+            return orig(self);
+        }
+
         var answer = AnswerWhetherAPlayerIsInAlertRange(self);
 
         // Said out loud when the answer is no while somebody is plainly standing there and can be seen, because
@@ -576,8 +586,9 @@ internal partial class GamePatcher {
     /// <param name="alertRange">The alert range to test against.</param>
     /// <param name="player">The tracked player object to test.</param>
     /// <returns>
-    /// <see langword="true"/> when the player is already tracked by the vanilla alert range or one of its colliders
-    /// overlaps one of the switched-on colliders of the alert range; otherwise <see langword="false"/>.
+    /// <see langword="true"/> when the player is already tracked by the vanilla alert range or their body (see
+    /// <see cref="PlayerTargetRegistry.GetPlayerColliders"/>) overlaps one of the switched-on colliders of the alert
+    /// range; otherwise <see langword="false"/>.
     /// </returns>
     private static bool IsPlayerInsideAlertRange(AlertRange alertRange, GameObject player) {
         if (player == null || !player.activeInHierarchy) {

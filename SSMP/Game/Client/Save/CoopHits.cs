@@ -171,18 +171,6 @@ internal partial class CoopHits {
     private static readonly Queue<(float Time, string Scene, string Path, string Text)> Traffic = new();
 
     /// <summary>
-    /// When a hit or touch of the partner on each object that could not be replayed may next be written down, by the
-    /// scene and path of the object, so that swinging at one cannot fill the log.
-    /// </summary>
-    private static readonly Dictionary<string, float> NextNotReplayedLogTime = new();
-
-    /// <summary>
-    /// The shortest time between two lines about a hit or touch on the same object that could not be replayed, in
-    /// seconds.
-    /// </summary>
-    private const float NotReplayedLogInterval = 30f;
-
-    /// <summary>
     /// The longest time that the entity is carried on for when it takes a strike or touch of the partner from where
     /// their copy was, in seconds, so that a stalled network cannot throw it across the room.
     /// </summary>
@@ -237,6 +225,68 @@ internal partial class CoopHits {
     /// Whether a hit or touch of the partner is being replayed.
     /// </summary>
     private bool _isReplaying;
+
+    /// <summary>
+    /// How long a replay of the partner's hit or touch waits at most for a thing that counts hits to wait for hits again,
+    /// in seconds (see <see cref="HoldReplay"/>). The walls and the vines are back within a few tenths of a second after
+    /// a hit; one that is not by then won't be, and the replay is made all the same.
+    /// </summary>
+    private const float HeldReplayTime = 1f;
+
+    /// <summary>
+    /// The replays of the partner's hits and touches that wait for a thing that counts hits to wait for hits again, in
+    /// the order that they came, with the object and when each came (see <see cref="HoldReplay"/>).
+    /// </summary>
+    private readonly List<(CoopHitUpdate Update, GameObject Target, float Since)> _heldReplays = [];
+
+    /// <summary>
+    /// The replays that waited, taken out of <see cref="_heldReplays"/> to be gone through while those that still wait
+    /// go back into it (see <see cref="ReleaseHeldReplays"/>).
+    /// </summary>
+    private readonly List<(CoopHitUpdate Update, GameObject Target, float Since)> _releasingReplays = [];
+
+    /// <summary>
+    /// The test for a state that waits for hits, kept so that it is not made anew each time it is handed on.
+    /// </summary>
+    private static readonly Func<FsmState, bool> ListensForHitsTest = HitMachines.ListensForHits;
+
+    /// <summary>
+    /// How deep the hits and touches of the local player's attacks on objects of the room that are being made go (see
+    /// <see cref="IsMakingLocalStrike"/>).
+    /// </summary>
+    private static int _localStrikeDepth;
+
+    /// <summary>
+    /// Whether a hit or touch of the local player's attack on an object of the room is being made, or what goes to the
+    /// partner with it is being written. A piece of the world that asks then whether a player is near asks about the
+    /// player who struck, as in a game with one player (see GamePatcher.OnAlertRangeIsHeroInRange), and the partner's
+    /// replay goes by what it said there.
+    /// </summary>
+    public static bool IsMakingLocalStrike => _localStrikeDepth > 0;
+
+    /// <summary>
+    /// Marks a hit or touch of the local player's attack as being made while it lasts (see
+    /// <see cref="IsMakingLocalStrike"/>).
+    /// </summary>
+    private readonly struct LocalStrike : IDisposable {
+        /// <summary>
+        /// Whether this one marks anything: only a strike of the local player does.
+        /// </summary>
+        private readonly bool _marks;
+
+        public LocalStrike(bool marks) {
+            _marks = marks;
+            if (marks) {
+                _localStrikeDepth++;
+            }
+        }
+
+        public void Dispose() {
+            if (_marks) {
+                _localStrikeDepth--;
+            }
+        }
+    }
 
     /// <summary>
     /// Whose hit is being processed, for the knockback that it causes.
@@ -572,6 +622,7 @@ internal partial class CoopHits {
         RegisterBounceHooks();
         RegisterSignalHooks();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent += WatchKnocks;
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent += ReleaseHeldReplays;
     }
 
     /// <summary>
@@ -593,6 +644,9 @@ internal partial class CoopHits {
         _hooks.Clear();
         _partnerPushes.Clear();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= WatchKnocks;
+        MonoBehaviourUtil.Instance.OnLateUpdateEvent -= ReleaseHeldReplays;
+        _heldReplays.Clear();
+        _releasingReplays.Clear();
         _knockWatches.Clear();
         DeregisterThrownHooks();
         OpenShownShutPods();
@@ -704,6 +758,17 @@ internal partial class CoopHits {
             return;
         }
 
+        ReplayHit(update);
+    }
+
+    /// <summary>
+    /// Replays a hit of the partner's attack on the local copy of the object of the room that it hit, through the same
+    /// part that took it in their game.
+    /// </summary>
+    /// <param name="update">The hit.</param>
+    /// <param name="waited">For a replay that waited for its thing to wait for hits again, how long it waited, in
+    /// seconds; null for one that has just come (see <see cref="HoldReplay"/>).</param>
+    private void ReplayHit(CoopHitUpdate update, float? waited = null) {
         var type = typeof(IHitResponder).Assembly.GetType(update.Responder);
         if (type == null || !typeof(IHitResponder).IsAssignableFrom(type)) {
             NotReplayed(update, "hit", "that kind of object is unknown here");
@@ -741,6 +806,10 @@ internal partial class CoopHits {
             return;
         }
 
+        if (waited == null && HoldReplay(update, target)) {
+            return;
+        }
+
         if (!TryReadHit(update.Hit, out var hit, out var source)) {
             Logger.Warn($"Could not read a hit of the partner on {update.Path}");
             return;
@@ -773,8 +842,105 @@ internal partial class CoopHits {
         }
 
         NoteReplayed(
-            update, "hit", response.response != IHitResponder.Response.None || answered, DescribeMoves(component)
+            update, "hit", response.response != IHitResponder.Response.None || answered, DescribeMoves(component),
+            waited
         );
+    }
+
+    /// <summary>
+    /// Keeps a replay of the partner's hit or touch on a thing that counts hits for later, while the thing does not wait
+    /// for hits but comes back to it by itself, as it does while it plays the last hit that it took. The hit counted in
+    /// the partner's game, so it counts here too, once the thing waits for hits again: two hits that came a moment apart
+    /// there arrive together here after a lost packet, or the partner's hit comes right after one of this player's own,
+    /// and a vine took the first and turned the second away in one game only. It opened in one game and stood in the
+    /// other (USER 10-29, "两边没有同时破墙，我都进去了，她还在外面打门"). The same as <see cref="LetReplaysPastHitPause"/>
+    /// does for the game's own breakable things. A replay that comes while others for the same thing wait, waits behind
+    /// them.
+    /// </summary>
+    /// <returns>Whether the replay waits.</returns>
+    private bool HoldReplay(CoopHitUpdate update, GameObject target) {
+        if (!IsHeld(target) && !IsBetweenHits(target)) {
+            return false;
+        }
+
+        _heldReplays.Add((update, target, Time.unscaledTime));
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a replay for an object waits (see <see cref="HoldReplay"/>).
+    /// </summary>
+    private bool IsHeld(GameObject target) {
+        foreach (var held in _heldReplays) {
+            if (held.Target == target) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a state machine of an object that counts hits does not wait for one right now, but comes back to waiting
+    /// by itself, as it does while it plays the last hit that it took.
+    /// </summary>
+    private static bool IsBetweenHits(GameObject target) {
+        foreach (var fsm in target.GetComponents<PlayMakerFSM>()) {
+            if (fsm != null && fsm.isActiveAndEnabled && fsm.Fsm is { Started: true, ActiveState: { } state } &&
+                !HitMachines.ListensForHits(state) && HitMachines.CountsHits(fsm) &&
+                HitMachines.FindOnWay(fsm, state, ListensForHitsTest) != null) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Makes the replays that waited, in the order that they came, each once its thing waits for hits again or once it
+    /// waited long enough (see <see cref="HoldReplay"/>). One whose object is gone is not made: its room went away
+    /// while it waited.
+    /// </summary>
+    private void ReleaseHeldReplays() {
+        if (_heldReplays.Count == 0) {
+            return;
+        }
+
+        _releasingReplays.AddRange(_heldReplays);
+        _heldReplays.Clear();
+        var now = Time.unscaledTime;
+        try {
+            foreach (var held in _releasingReplays) {
+                var update = held.Update;
+                var what = update.Kind == CoopHitKind.ObjectTouch ? "touch" : "hit";
+                try {
+                    if (held.Target == null) {
+                        NoteTraffic(
+                            update.Scene, update.Path,
+                            $"got a {what} through {update.Responder}, not replayed: the object went away while it waited"
+                        );
+                        continue;
+                    }
+
+                    // Behind another for the same thing that still waits, or the thing is still between hits
+                    var waited = now - held.Since;
+                    if (waited < HeldReplayTime && (IsHeld(held.Target) || IsBetweenHits(held.Target))) {
+                        _heldReplays.Add(held);
+                        continue;
+                    }
+
+                    if (update.Kind == CoopHitKind.ObjectTouch) {
+                        ReplayTouch(update, waited);
+                    } else {
+                        ReplayHit(update, waited);
+                    }
+                } catch (Exception e) {
+                    Logger.Warn($"Could not replay a {what} of the partner that waited, on {update.Path}:\n{e}");
+                }
+            }
+        } finally {
+            _releasingReplays.Clear();
+        }
     }
 
     /// <summary>
@@ -1151,6 +1317,8 @@ internal partial class CoopHits {
             // The update is made before the hit, since a hit can break the object and move its parts. An object that
             // lets the attack go on through it says it was not hit, and it still answered when one of its state
             // machines moved on to another state. A thing that a creature threw goes after the player who struck it.
+            // While both are made, a piece of the world asks about this player alone (see IsMakingLocalStrike).
+            using var strike = new LocalStrike(own);
             var update = own ? CreateUpdate(component, hit) : null;
             GameObject? before = null;
             var turned = update != null ? TurnThrownToLocalPlayer(component.gameObject, out before) : null;
@@ -1541,7 +1709,9 @@ internal partial class CoopHits {
     /// <param name="callback">For a receiver that hears more than one kind of touch, which it was.</param>
     private void OnLocalAttackTouch(Component receiver, Collider2D attack, Action touch, string? callback = null) {
         // The update is made before the touch, since a touch can break the object and move its parts. A thing that a
-        // creature threw goes after the player who touched it.
+        // creature threw goes after the player who touched it. While both are made, a piece of the world asks about
+        // this player alone (see IsMakingLocalStrike).
+        using var strike = new LocalStrike(true);
         var update = HasMembers ? CreateTouchUpdate(receiver, attack, callback: callback) : null;
         GameObject? before = null;
         var turned = update != null ? TurnThrownToLocalPlayer(receiver.gameObject, out before) : null;
@@ -1657,8 +1827,8 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Which attack of the local player struck and where it was, and where the player stood, for the notes of what went
-    /// between the games. An attack that a thing took from where it could not have touched it shows by these (USER 10-30:
-    /// a wall counted a hit that came while both players fought in a room of their own, far from it).
+    /// between the games. A hit that a thing took from far off shows by these (USER 10-30: a wall counted a hit while
+    /// both players fought on another part of its room, 80 away; a thrown tool of the partner's had flown that far).
     /// </summary>
     private static string DescribeStriker(Component attack) {
         var hero = HeroController.SilentInstance;
@@ -3479,7 +3649,10 @@ internal partial class CoopHits {
     /// Replays a touch of the partner's attack on the local copy of the object of the room that it touched, through
     /// the same component that told the object of it in their game.
     /// </summary>
-    private void ReplayTouch(CoopHitUpdate update) {
+    /// <param name="update">The touch.</param>
+    /// <param name="waited">For a replay that waited for its thing to wait for hits again, how long it waited, in
+    /// seconds; null for one that has just come (see <see cref="HoldReplay"/>).</param>
+    private void ReplayTouch(CoopHitUpdate update, float? waited = null) {
         var typeName = update.Responder;
         string? callback = null;
         var proxyName = typeof(PlayMakerUnity2DProxy).FullName + ".";
@@ -3517,6 +3690,13 @@ internal partial class CoopHits {
             return;
         }
 
+        // An attack coming into the thing strikes it; one staying in it or going out of it does not
+        var strikes = receiver is PlayMakerTriggerEnter2D ||
+                      receiver is PlayMakerUnity2DProxy && callback != ProxyStay && callback != ProxyExit;
+        if (waited == null && strikes && HoldReplay(update, target)) {
+            return;
+        }
+
         if (!TryReadTouch(update.Hit, out var touch)) {
             Logger.Warn($"Could not read a touch of the partner on {update.Path}");
             return;
@@ -3541,50 +3721,56 @@ internal partial class CoopHits {
             ReplayedRanges.Clear();
         }
 
-        NoteReplayed(update, "touch", answered, DescribeMoves(receiver));
+        NoteReplayed(update, "touch", answered, DescribeMoves(receiver), waited);
     }
 
     /// <summary>
     /// Notes a hit or touch of the partner that was replayed, and whether the object answered it here. The partner's
     /// game sends only what was answered there, so one that is not answered here means that the object here is not
-    /// where it is there, or that a check of it came out another way. That is not written down at once: both players
-    /// cutting the same grass does it all the time. <see cref="CoopStateCheck"/> shows it with a difference that lasts.
+    /// where it is there, or that a check of it came out another way. Both players cutting the same grass does it all
+    /// the time; <see cref="CoopStateCheck"/> shows it with a difference that lasts.
     /// </summary>
     /// <param name="update">The hit or touch.</param>
     /// <param name="what">What kind of thing it is, as a word.</param>
     /// <param name="answered">Whether the object answered it here.</param>
     /// <param name="moves">What it did to the state machines here (see <see cref="DescribeMoves"/>), or null.</param>
-    private static void NoteReplayed(CoopHitUpdate update, string what, bool answered, string? moves = null) {
+    /// <param name="waited">For a replay that waited for its thing to wait for hits again, how long it waited, in
+    /// seconds (see <see cref="HoldReplay"/>), or null.</param>
+    private static void NoteReplayed(
+        CoopHitUpdate update,
+        string what,
+        bool answered,
+        string? moves = null,
+        float? waited = null
+    ) {
         var did = string.IsNullOrEmpty(moves) ? "" : $" ({moves})";
+        var late = waited is { } time
+            ? $" after waiting {time.ToString("0.00", System.Globalization.CultureInfo.InvariantCulture)} s for " +
+              "the object to take hits again"
+            : "";
         NoteTraffic(
             update.Scene,
             update.Path,
             answered
-                ? $"got a {what} through {update.Responder}, replayed{did}"
-                : $"got a {what} through {update.Responder}, replayed, but the object did not answer it here{did}"
+                ? $"got a {what} through {update.Responder}, replayed{late}{did}"
+                : $"got a {what} through {update.Responder}, replayed{late}, but the object did not answer it " +
+                  $"here{did}"
         );
     }
 
     /// <summary>
-    /// Notes a hit or touch of the partner that could not be replayed, and writes it down, once in a while for each
-    /// object.
+    /// Notes a hit or touch of the partner that could not be replayed.
     /// </summary>
     private static void NotReplayed(CoopHitUpdate update, string what, string reason) {
         NoteTraffic(update.Scene, update.Path, $"got a {what} through {update.Responder}, not replayed: {reason}");
-
-        var key = ThrownThings.IsPath(update.Path) ? "#thrown" : update.Scene + "/" + update.Path;
-        if (NextNotReplayedLogTime.TryGetValue(key, out var next) && Time.unscaledTime < next) {
-            return;
-        }
-
-        NextNotReplayedLogTime[key] = Time.unscaledTime + NotReplayedLogInterval;
-        Logger.Info(
-            $"[Hits] The partner's {what} on {update.Path} in {update.Scene} through {update.Responder}: {reason}"
-        );
     }
 
     /// <summary>
-    /// Notes a hit or touch on an object of the room that went between the games.
+    /// Notes a hit or touch on an object of the room that went between the games, and writes it into the log: every
+    /// strike on a thing of the room, what it struck and what it did there, in the game that struck and in the game
+    /// that replayed it. These were written before only once the two games had come out apart for long enough, and a
+    /// door that one game counted one strike fewer on, while the saves of both already had it broken, left nothing in
+    /// the log of either (USER 10-30, "日志还是回到每刀劈在什么上面都记比较好").
     /// </summary>
     private static void NoteTraffic(string scene, string path, string text) {
         if (Traffic.Count >= TrafficCapacity) {
@@ -3592,6 +3778,7 @@ internal partial class CoopHits {
         }
 
         Traffic.Enqueue((Time.unscaledTime, scene, path, text));
+        Logger.Info($"[Strikes] {scene} '{path}': {text}");
     }
 
     /// <summary>

@@ -20,7 +20,8 @@ internal static class PlayerTargetRegistry {
     private static readonly List<GameObject> TrackedPlayersCache = [];
 
     /// <summary>
-    /// Cached collider arrays per remote player root GameObject to avoid dynamic allocations.
+    /// The colliders of each player's body, kept per player object to avoid dynamic allocations (see
+    /// <see cref="GetPlayerColliders"/>).
     /// </summary>
     private static readonly Dictionary<GameObject, Collider2D[]> PlayerCollidersCache = new();
 
@@ -30,7 +31,7 @@ internal static class PlayerTargetRegistry {
     /// <param name="playerObject">The remote player root object.</param>
     public static void RegisterRemotePlayer(GameObject playerObject) {
         RemotePlayerObjects.Add(playerObject);
-        PlayerCollidersCache[playerObject] = playerObject.GetComponentsInChildren<Collider2D>(true);
+        PlayerCollidersCache[playerObject] = playerObject.GetComponents<Collider2D>();
     }
 
     /// <summary>
@@ -55,7 +56,14 @@ internal static class PlayerTargetRegistry {
     }
 
     /// <summary>
-    /// Gets cached colliders for the player GameObject to avoid dynamic GetComponentsInChildren allocations.
+    /// The colliders of a player's body, by which they stand in a range: those of the player object itself. The game's
+    /// ranges see the player by the player's layer, which only the body of the hero is on; its attacks, its hurt box
+    /// and its pusher are on layers that the ranges do not see. The partner's figure carries a copy of the hero's body
+    /// box on itself. With every collider under the hero counted, the tip of a slash counted as the player standing
+    /// there: a vine that is cut from one side only called off the strikes of a player who stood against it on the
+    /// side it is cut from, as the slash reached into the room behind it, where a strike counts as one from behind
+    /// (USER 10-30, "我朋友打了那个门两三下，那个门都是不可打的状态"), and a creature took a player who swung near it for one
+    /// standing in its reach.
     /// </summary>
     public static Collider2D[] GetPlayerColliders(GameObject player) {
         if (PlayerCollidersCache.TryGetValue(player, out var colliders)) {
@@ -63,7 +71,7 @@ internal static class PlayerTargetRegistry {
         }
 
         // Fallback (e.g. local player or un-cached remote player)
-        colliders = player.GetComponentsInChildren<Collider2D>(true);
+        colliders = player.GetComponents<Collider2D>();
         PlayerCollidersCache[player] = colliders;
         return colliders;
     }
