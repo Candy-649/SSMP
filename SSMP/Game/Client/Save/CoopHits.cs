@@ -273,6 +273,18 @@ internal partial class CoopHits {
     private readonly Dictionary<Fsm, FsmState?> _statesBefore = new();
 
     /// <summary>
+    /// The counts of each state machine in <see cref="_statesBefore"/>, its numbers as they were when it first changed
+    /// state, for writing down what the hit or touch counted (see <see cref="DescribeMoves"/>).
+    /// </summary>
+    private readonly Dictionary<Fsm, int[]> _countsBefore = new();
+
+    /// <summary>
+    /// The state machines that the last hit or touch made through <see cref="AnswersAttack"/> moved on to another state,
+    /// with the state each was in before and its counts then (see <see cref="DescribeMoves"/>).
+    /// </summary>
+    private readonly List<(Fsm Fsm, FsmState? From, int[]? Counts)> _lastMoves = [];
+
+    /// <summary>
     /// Whether a hit or touch of the local player's attack is being made, while the states are written down.
     /// </summary>
     private bool _watchingStates;
@@ -760,7 +772,9 @@ internal partial class CoopHits {
             }
         }
 
-        NoteReplayed(update, "hit", response.response != IHitResponder.Response.None || answered);
+        NoteReplayed(
+            update, "hit", response.response != IHitResponder.Response.None || answered, DescribeMoves(component)
+        );
     }
 
     /// <summary>
@@ -1157,9 +1171,12 @@ internal partial class CoopHits {
             if (update != null && answered && _netClient.IsConnected) {
                 update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
                 SendToRoomMembers(update);
-                NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder}");
+                NoteTraffic(update.Scene, update.Path, $"sent a hit on {update.Responder} ({DescribeMoves(component)})");
             } else if (update != null && !answered) {
-                NoteTraffic(update.Scene, update.Path, $"hit its {update.Responder}, which did not answer: not sent");
+                NoteTraffic(
+                    update.Scene, update.Path,
+                    $"hit its {update.Responder}, which did not answer: not sent ({DescribeMoves(component)})"
+                );
                 TurnThrownBack(turned, before);
             }
 
@@ -1531,7 +1548,10 @@ internal partial class CoopHits {
         } else if (update != null && _netClient.IsConnected) {
             update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
             SendToRoomMembers(update);
-            NoteTraffic(update.Scene, update.Path, $"sent a touch of {attack.name} through {update.Responder}");
+            NoteTraffic(
+                update.Scene, update.Path,
+                $"sent a touch of {attack.name} through {update.Responder} ({DescribeMoves(receiver)})"
+            );
         }
     }
 
@@ -1559,6 +1579,7 @@ internal partial class CoopHits {
     private void OnSwitchState(Action<Fsm, FsmState> orig, Fsm self, FsmState toState) {
         if (_watchingStates && !_statesBefore.ContainsKey(self)) {
             _statesBefore[self] = self.ActiveState;
+            _countsBefore[self] = ReadCounts(self);
         }
 
         // A step of the way that the partner's sign took it there, or that the local player's sign takes it, which
@@ -1583,6 +1604,8 @@ internal partial class CoopHits {
     /// under from then on (see <see cref="RollByHitName"/>), or null for none.</param>
     private bool AnswersAttack(Action attack, string? hitName = null) {
         _statesBefore.Clear();
+        _countsBefore.Clear();
+        _lastMoves.Clear();
         _watchingStates = true;
         try {
             attack();
@@ -1592,22 +1615,91 @@ internal partial class CoopHits {
 
         var answered = false;
         foreach (var pair in _statesBefore) {
+            var counts = _countsBefore.TryGetValue(pair.Key, out var before) ? before : null;
             if (pair.Key.ActiveState == pair.Value) {
+                // Back where it was, which turns the attack down. Written down all the same if it counted on the way.
+                if (counts != null && CountsChanged(pair.Key, counts)) {
+                    _lastMoves.Add((pair.Key, pair.Value, counts));
+                }
+
                 continue;
             }
 
             answered = true;
-            if (hitName == null) {
-                break;
-            }
-
-            if (pair.Key.FsmComponent is { } machine && machine != null && IsRoomObject(machine)) {
+            _lastMoves.Add((pair.Key, pair.Value, counts));
+            if (hitName != null && pair.Key.FsmComponent is { } machine && machine != null && IsRoomObject(machine)) {
                 RollByHitName(machine.gameObject, hitName);
             }
         }
 
         _statesBefore.Clear();
+        _countsBefore.Clear();
         return answered;
+    }
+
+    /// <summary>
+    /// Whether any of the numbers of a state machine differ from the given ones (see <see cref="ReadCounts"/>).
+    /// </summary>
+    private static bool CountsChanged(Fsm fsm, int[] counts) {
+        var variables = fsm.Variables.IntVariables;
+        for (var i = 0; i < counts.Length && i < variables.Length; i++) {
+            if (variables[i].Value != counts[i]) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The numbers that a state machine keeps, in the order of its variables.
+    /// </summary>
+    private static int[] ReadCounts(Fsm fsm) {
+        var variables = fsm.Variables.IntVariables;
+        if (variables.Length == 0) {
+            return [];
+        }
+
+        var counts = new int[variables.Length];
+        for (var i = 0; i < variables.Length; i++) {
+            counts[i] = variables[i].Value;
+        }
+
+        return counts;
+    }
+
+    /// <summary>
+    /// What the last hit or touch made through <see cref="AnswersAttack"/> did, for the notes of what went between the
+    /// games: each state machine that it moved on, or whose numbers it changed, from which state to which, with the
+    /// numbers that it changed, like "breakable_wall_v2 Idle -> Hit, Hits 4 -> 3". For one that did neither, the states
+    /// that the state machines of the object stayed in. A wall that the two games count apart shows by these which hit
+    /// counted in one game only.
+    /// </summary>
+    /// <param name="target">The object that was hit or touched.</param>
+    private string DescribeMoves(Component target) {
+        var text = new System.Text.StringBuilder();
+        foreach (var (fsm, from, counts) in _lastMoves) {
+            text.Append(text.Length > 0 ? "; " : "").Append(fsm.Name).Append(' ').Append(from?.Name ?? "(none)")
+                .Append(" -> ").Append(fsm.ActiveStateName);
+            var variables = fsm.Variables.IntVariables;
+            for (var i = 0; counts != null && i < counts.Length && i < variables.Length; i++) {
+                if (variables[i].Value != counts[i]) {
+                    text.Append(", ").Append(variables[i].Name).Append(' ').Append(counts[i]).Append(" -> ")
+                        .Append(variables[i].Value);
+                }
+            }
+        }
+
+        if (text.Length > 0 || target == null) {
+            return text.ToString();
+        }
+
+        foreach (var machine in target.GetComponents<PlayMakerFSM>()) {
+            text.Append(text.Length > 0 ? ", " : "no state machine moved: ").Append(machine.FsmName).Append(" in '")
+                .Append(machine.ActiveStateName).Append('\'');
+        }
+
+        return text.Length > 0 ? text.ToString() : "no state machine moved";
     }
 
     /// <summary>
@@ -3426,7 +3518,7 @@ internal partial class CoopHits {
             ReplayedRanges.Clear();
         }
 
-        NoteReplayed(update, "touch", answered);
+        NoteReplayed(update, "touch", answered, DescribeMoves(receiver));
     }
 
     /// <summary>
@@ -3435,13 +3527,18 @@ internal partial class CoopHits {
     /// where it is there, or that a check of it came out another way. That is not written down at once: both players
     /// cutting the same grass does it all the time. <see cref="CoopStateCheck"/> shows it with a difference that lasts.
     /// </summary>
-    private static void NoteReplayed(CoopHitUpdate update, string what, bool answered) {
+    /// <param name="update">The hit or touch.</param>
+    /// <param name="what">What kind of thing it is, as a word.</param>
+    /// <param name="answered">Whether the object answered it here.</param>
+    /// <param name="moves">What it did to the state machines here (see <see cref="DescribeMoves"/>), or null.</param>
+    private static void NoteReplayed(CoopHitUpdate update, string what, bool answered, string? moves = null) {
+        var did = string.IsNullOrEmpty(moves) ? "" : $" ({moves})";
         NoteTraffic(
             update.Scene,
             update.Path,
             answered
-                ? $"got a {what} through {update.Responder}, replayed"
-                : $"got a {what} through {update.Responder}, replayed, but the object did not answer it here"
+                ? $"got a {what} through {update.Responder}, replayed{did}"
+                : $"got a {what} through {update.Responder}, replayed, but the object did not answer it here{did}"
         );
     }
 

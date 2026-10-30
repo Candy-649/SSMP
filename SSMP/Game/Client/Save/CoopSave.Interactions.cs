@@ -894,15 +894,13 @@ internal partial class CoopSave {
             ApplyInteractionFlags(update);
             AddInteractionItems(update);
 
-            var loadedScenes = GetLoadedSceneNames();
-            var loadedItems = new HashSet<string>(StringComparer.Ordinal);
+            // Those that are loaded are found by their keys, also one saved under another scene than its own
+            var keys = new HashSet<string>(StringComparer.Ordinal);
             for (var i = 0; i < update.ItemIds.Count && i < update.ItemScenes.Count; i++) {
-                if (loadedScenes.Contains(update.ItemScenes[i].ToLowerInvariant())) {
-                    loadedItems.Add(GetItemKey(update.ItemScenes[i], update.ItemIds[i]));
-                }
+                keys.Add(GetItemKey(update.ItemScenes[i], update.ItemIds[i]));
             }
 
-            OverrideLoadedItems(loadedItems);
+            OverrideLoadedItems(keys);
         } catch (Exception e) {
             LogInteractionError(e);
         }

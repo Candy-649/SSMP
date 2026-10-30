@@ -505,6 +505,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that a wall they broke shows broken here once it stands still
+        try {
+            ShowWaitingBreaks();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also while another member is gone, so that the members who are in keep in step with each other
         if (checkedPartner != null) {
             UpdateInteractions();

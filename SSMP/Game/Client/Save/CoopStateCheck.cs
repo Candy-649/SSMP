@@ -1057,15 +1057,28 @@ internal class CoopStateCheck {
     }
 
     /// <summary>
-    /// Whether a saved object of the world is set. This reads what the object last worked out, which the game and the
-    /// two-player save keep up to date, rather than making it work its value out again, which runs its own code.
+    /// Whether a saved object of the world is set, as the object shows it: whether a breakable object is broken, and
+    /// otherwise the flag of its state machine where that is what the object saves, without running any code of the
+    /// object to work its value out. Any other object goes by what it last worked out, which can be from before it
+    /// changed: the two-player save stops asking an object once both saves have it set.
     /// </summary>
     private static string ReadItem(PersistentBoolItem item) {
         if (item == null) {
             return "(gone)";
         }
 
-        return item.ItemData is { Value: true } ? "set" : "not set";
+        bool set;
+        if (item.TryGetComponent<Breakable>(out var breakable)) {
+            set = breakable.isBroken;
+        } else if (!CoopSave.KeepsValueInComponent(item) &&
+                   FSMUtility.FindFSMWithPersistentBool(item.GetComponents<PlayMakerFSM>()) is { } fsm && fsm != null &&
+                   fsm.FsmVariables.FindFsmBool("Activated") is { } flag) {
+            set = flag.Value;
+        } else {
+            set = item.ItemData is { Value: true };
+        }
+
+        return set ? "set" : "not set";
     }
 
     /// <summary>

@@ -134,6 +134,7 @@ internal partial class CoopSave {
         _worldChangeDropsTold.Clear();
         _loadedWorldItems.Clear();
         _knownWorldItems.Clear();
+        _waitingBreaks.Clear();
         _loadedWorldItemsDirty = true;
         _savedWorldItemsDirty = true;
         _nextWorldChangeTime = 0f;
@@ -411,8 +412,7 @@ internal partial class CoopSave {
             return;
         }
 
-        var loadedScenes = GetLoadedSceneNames();
-        var loadedItems = new HashSet<string>(StringComparer.Ordinal);
+        var addedItems = new HashSet<string>(StringComparer.Ordinal);
         var items = 0;
         var flags = 0;
 
@@ -422,19 +422,22 @@ internal partial class CoopSave {
 
             // The partner has it now, so the local game doesn't send it back
             _knownWorldItems.Add(GetItemKey(scene, id));
-            if (AddWorldItem(scene, id, loadedScenes, loadedItems, ref flags)) {
+            if (AddWorldItem(scene, id, addedItems, ref flags)) {
                 items++;
             }
         }
 
-        OverrideLoadedItems(loadedItems);
+        OverrideLoadedItems(addedItems);
 
         // Only here, and not in OverrideLoadedItems itself: a whole save merged when the two players pair up goes
         // through that same method, and would bring down everything the partner ever collapsed at once
-        ReplayLoadedCollapses(loadedItems);
+        var collapsing = ReplayLoadedCollapses(addedItems);
 
         var older = new List<string>();
         flags += ApplyInteractionFlags(update, older);
+
+        // After the flags, which a thing shown broken may look at, as it would in a room that loads with them
+        FollowPartnerBreaks(addedItems, collapsing);
 
         var bosses = AddBossScenes(update.Names);
 
@@ -460,10 +463,12 @@ internal partial class CoopSave {
     /// The save already carries the change, but a saved object only looks the part once its room is loaded again, so
     /// without this the rock hangs in the air here and is simply gone the next time the player walks in.
     /// </summary>
-    /// <param name="keys">The keys of the objects in loaded scenes that the partner set.</param>
-    private static void ReplayLoadedCollapses(HashSet<string> keys) {
+    /// <param name="keys">The keys of the objects that the partner set.</param>
+    /// <returns>The state machines that were brought down.</returns>
+    private static HashSet<PlayMakerFSM> ReplayLoadedCollapses(HashSet<string> keys) {
+        var collapsing = new HashSet<PlayMakerFSM>();
         if (keys.Count == 0) {
-            return;
+            return collapsing;
         }
 
         foreach (var item in UnityEngine.Object.FindObjectsByType<PersistentBoolItem>(
@@ -486,11 +491,14 @@ internal partial class CoopSave {
 
                 try {
                     fsm.SendEvent(CollapseEventName);
+                    collapsing.Add(fsm);
                 } catch (Exception e) {
                     Logger.Warn($"Could not bring down '{id}' the way the partner did: {e.Message}");
                 }
             }
         }
+
+        return collapsing;
     }
 
     /// <summary>

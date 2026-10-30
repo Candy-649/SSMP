@@ -744,22 +744,21 @@ internal partial class CoopSave {
             );
         }
 
-        var loadedScenes = GetLoadedSceneNames();
-        var loadedItems = new HashSet<string>(StringComparer.Ordinal);
+        var addedItems = new HashSet<string>(StringComparer.Ordinal);
         var items = 0;
         var flags = 0;
 
         foreach (var (_, parts) in states) {
             foreach (var part in parts) {
                 for (var i = 0; i < part.ItemIds.Count && i < part.ItemScenes.Count; i++) {
-                    if (AddWorldItem(part.ItemScenes[i], part.ItemIds[i], loadedScenes, loadedItems, ref flags)) {
+                    if (AddWorldItem(part.ItemScenes[i], part.ItemIds[i], addedItems, ref flags)) {
                         items++;
                     }
                 }
             }
         }
 
-        OverrideLoadedItems(loadedItems);
+        OverrideLoadedItems(addedItems);
         var memberWishes = states
             .Select(state => state.Parts
                 .SelectMany(part => part.WishNames.Zip(part.WishValues, (name, value) => (name, value)))
@@ -785,17 +784,12 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="scene">The scene of the object.</param>
     /// <param name="id">The ID of the object.</param>
-    /// <param name="loadedScenes">The names of the loaded scenes in lower case.</param>
-    /// <param name="loadedItems">The keys of the added objects in loaded scenes, which this adds to.</param>
+    /// <param name="addedItems">The keys of the added objects, which this adds to. Those that are loaded are found by
+    /// them (see <see cref="OverrideLoadedItems"/>), wherever they are: an object can be saved under another scene than
+    /// the one it stands in, like a wall at the end of a room that is saved under the room it leads to.</param>
     /// <param name="flags">The number of player data flags that were set, which this adds to.</param>
     /// <returns>Whether the object was added.</returns>
-    private bool AddWorldItem(
-        string scene,
-        string id,
-        HashSet<string> loadedScenes,
-        HashSet<string> loadedItems,
-        ref int flags
-    ) {
+    private bool AddWorldItem(string scene, string id, HashSet<string> addedItems, ref int flags) {
         var playerData = PlayerData.instance;
         var sceneData = SceneData.instance;
         var key = GetItemKey(scene, id);
@@ -811,9 +805,7 @@ internal partial class CoopSave {
             IsSemiPersistent = false
         });
 
-        if (loadedScenes.Contains(scene.ToLowerInvariant())) {
-            loadedItems.Add(key);
-        }
+        addedItems.Add(key);
 
         if (_worldPlayerData!.TryGetValue(key, out var names)) {
             var boolNames = GetPlayerDataBoolNames();
@@ -953,20 +945,9 @@ internal partial class CoopSave {
     private static string GetItemKey(string scene, string id) => scene.ToLowerInvariant() + "\n" + id;
 
     /// <summary>
-    /// The names of the loaded scenes in lower case.
-    /// </summary>
-    private static HashSet<string> GetLoadedSceneNames() {
-        var names = new HashSet<string>(StringComparer.Ordinal);
-        for (var i = 0; i < UnityEngine.SceneManagement.SceneManager.sceneCount; i++) {
-            names.Add(UnityEngine.SceneManagement.SceneManager.GetSceneAt(i).name.ToLowerInvariant());
-        }
-
-        return names;
-    }
-
-    /// <summary>
-    /// Makes the saved objects of the loaded scenes that the partner changed keep that change. They still look the old
-    /// way until the player enters the scene again, and without this they would save the old way when the player leaves.
+    /// Makes the loaded saved objects that the partner changed keep that change, whichever scene they are saved under.
+    /// They still look the old way until the player enters the scene again, and without this they would save the old way
+    /// when the player leaves.
     /// A dial is put that way instead, since it turns both ways: an override would have it save as turned whichever way
     /// it stood from then on (see CoopSave.DialDoors).
     /// </summary>
