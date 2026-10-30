@@ -17,7 +17,9 @@ namespace SSMP.Game.Client.Save;
 /// Such a character now leaves only once every member has had it: until then the flag of the leaving stays off in
 /// every game, and the first time that passes after the last of them had it lets them go for everyone. Each game sends
 /// the others what its own player has had (<see cref="CoopSaveUpdateKind.DepartureReadiness"/>), and holds the flag off
-/// as long as any player it knows of has not had it. A member whose game has not said yet holds nothing back.
+/// as long as any player it knows of has not had it. A member whose game has not said yet holds nothing back. A leaving
+/// that a save already had when the saves were checked is done and stays (<see cref="_departuresDone"/>): only one that
+/// comes while the members play together is held back.
 ///
 /// Only characters that are gone for good: one that moves on to another place keeps what they sell and say there, and
 /// held back they would stand in both places at once. The list is every leaving in GameManager.TimePasses that a
@@ -51,12 +53,42 @@ internal partial class CoopSave {
     private readonly HashSet<ushort> _departureReadinessSentTo = [];
 
     /// <summary>
-    /// Forgets what the members had, for a new check, after which every game sends it again.
+    /// The characters that had already left when the saves were last checked, in any of them: their leaving is done
+    /// and stays, however many members had not had what lets it. Players may have walked through what the leaving
+    /// left behind and taken it (USER 10-30: "可是这个剧情机械师已经走了，我们都捡到它的遗物了，它还能回来吗"), and a
+    /// character back from it would stand next to what of theirs the players hold. Only a leaving that comes while the
+    /// members play together is held back.
+    /// </summary>
+    private readonly HashSet<string> _departuresDone = new(StringComparer.Ordinal);
+
+    /// <summary>
+    /// Forgets what the members had, for a new session, after which every game sends it again.
     /// </summary>
     private void ResetDepartures() {
         _memberDepartureReadiness.Clear();
         _sentDepartureReadiness = null;
         _departureReadinessSentTo.Clear();
+        _departuresDone.Clear();
+    }
+
+    /// <summary>
+    /// After a check: what the local player has had goes to every member again, and every character that has left by
+    /// now in the save that the check agreed on stays gone (<see cref="_departuresDone"/>).
+    /// </summary>
+    private void OnDeparturesChecked() {
+        _sentDepartureReadiness = null;
+        _departureReadinessSentTo.Clear();
+
+        var playerData = PlayerData.instance;
+        if (playerData == null) {
+            return;
+        }
+
+        foreach (var (left, _) in Departures) {
+            if (playerData.GetBool(left) && _departuresDone.Add(left)) {
+                Logger.Info($"[Departures] {left} was already on at the check: that leaving is done and stays");
+            }
+        }
     }
 
     /// <summary>
@@ -156,13 +188,14 @@ internal partial class CoopSave {
 
     /// <inheritdoc cref="HoldDepartures" />
     private void HoldDeparturesNow(string when) {
+        // Only between checks of a session: before the first one, nothing says yet which leavings are done
         var playerData = PlayerData.instance;
-        if (playerData == null || GetCurrentMarker() == null) {
+        if (playerData == null || GetCurrentMarker() == null || _knownStoryValues == null) {
             return;
         }
 
         foreach (var (left, ready) in Departures) {
-            if (!playerData.GetBool(left)) {
+            if (_departuresDone.Contains(left) || !playerData.GetBool(left)) {
                 continue;
             }
 

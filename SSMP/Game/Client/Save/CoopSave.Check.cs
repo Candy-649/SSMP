@@ -517,11 +517,8 @@ internal partial class CoopSave {
         RememberWishes();
         RememberStoryFlags();
 
-        // The check may have brought a character's leaving from another save; what the local player has had goes to
-        // every member again
-        _sentDepartureReadiness = null;
-        _departureReadinessSentTo.Clear();
-        HoldDepartures("the check");
+        // What the local player has had goes to every member again, and a character that left before stays gone
+        OnDeparturesChecked();
         SendPendingWishTurnIns(members);
         AskAboutWishesRead(members);
         TellRoomLayoutAfterCheck(members);
