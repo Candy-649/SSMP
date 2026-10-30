@@ -1,7 +1,9 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
 
 namespace SSMP.Animation.Effects.Tools;
@@ -11,7 +13,8 @@ namespace SSMP.Animation.Effects.Tools;
 /// colour of the element with embers or bubbles around them, and each slash takes the tint of the element with a burst
 /// of it on the slash. The thrower's game sends when the element comes and goes; the slashes carry it themselves. Only
 /// the look goes: the loop of sound around the hero is left out, and the partner's slashes do no more to the enemies
-/// here than they did before.
+/// here than they did before. A charged slash goes by the element of the needle of the player whose it is, as it shows
+/// here (<see cref="OnEffectEnable"/>, <see cref="OnExtraSlashEnable"/>).
 /// </summary>
 internal static class ImbuedNail {
     private const BindingFlags Flags = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
@@ -20,6 +23,34 @@ internal static class ImbuedNail {
     /// The looks of the elements, on the hero's own handling of them, by the element.
     /// </summary>
     private static readonly FieldInfo? ConfigsField = typeof(HeroNailImbuement).GetField("nailConfigs", Flags);
+
+    /// <summary>
+    /// The element that a part of a charged slash is for, what it switches on for it, and whether it has started,
+    /// before which it switches nothing (HeroNailImbuementEffect).
+    /// </summary>
+    private static readonly FieldInfo? EffectElementField =
+        typeof(HeroNailImbuementEffect).GetField("nailElement", Flags);
+
+    /// <inheritdoc cref="EffectElementField" />
+    private static readonly FieldInfo? EffectObjectsField =
+        typeof(HeroNailImbuementEffect).GetField("activateObjects", Flags);
+
+    /// <inheritdoc cref="EffectElementField" />
+    private static readonly FieldInfo? EffectStartedField =
+        typeof(HeroNailImbuementEffect).GetField("hasStarted", Flags);
+
+    /// <summary>
+    /// The sprites of a charged slash that take the tint of the element of the needle, and its damagers, which take the
+    /// element itself (HeroExtraNailSlash).
+    /// </summary>
+    private static readonly FieldInfo? TintSpritesField = typeof(HeroExtraNailSlash).GetField("tintSprites", Flags);
+
+    /// <inheritdoc cref="TintSpritesField" />
+    private static readonly FieldInfo? TintTk2dSpritesField =
+        typeof(HeroExtraNailSlash).GetField("tintTk2dSprites", Flags);
+
+    /// <inheritdoc cref="TintSpritesField" />
+    private static readonly FieldInfo? DamagersField = typeof(HeroExtraNailSlash).GetField("damagers", Flags);
 
     /// <summary>
     /// Whether the embers or bubbles around a hero follow the local hero rather than their target.
@@ -174,6 +205,97 @@ internal static class ImbuedNail {
         }
 
         config.ExtraSlashAudio.SpawnAndPlayOneShot(slash.transform.position);
+    }
+
+    /// <summary>
+    /// The element of the needle of the player whose character this is, as it shows here, or none.
+    /// </summary>
+    /// <param name="playerObject">The character of the player.</param>
+    public static NailElements ElementOf(GameObject playerObject) {
+        return Imbued.TryGetValue(playerObject.GetInstanceID(), out var imbued) ? imbued.Element : NailElements.None;
+    }
+
+    /// <summary>
+    /// A part of a charged slash that switches on what goes with one element of the needle as the slash starts
+    /// (HeroNailImbuementEffect): the embers or the poison on it, and the sound of them. It goes by the needle of the
+    /// local hero, so on the copy of the local hero's charged slash that shows another player's, it showed and sounded
+    /// the element of the local player's needle and never that of the player whose slash it was (USER 10-30: "我擦火刀
+    /// 好像听到我朋友挥刀也有火刀的声音了"). On such a copy it goes by the element of that player's needle instead.
+    /// </summary>
+    public static void OnEffectEnable(Action<HeroNailImbuementEffect> orig, HeroNailImbuementEffect self) {
+        var character = HeroCopies.CharacterOf?.Invoke(self.transform);
+        if (character == null || EffectElementField == null || EffectObjectsField == null ||
+            EffectStartedField == null) {
+            orig(self);
+            return;
+        }
+
+        // As the game's own: nothing until it has started, as it switches its parts once more then
+        if (EffectStartedField.GetValue(self) is not true) {
+            return;
+        }
+
+        var element = ElementOf(character);
+        var on = EffectElementField.GetValue(self) is NailElements partElement && partElement == element;
+        if (EffectObjectsField.GetValue(self) is not GameObject[] parts) {
+            return;
+        }
+
+        foreach (var part in parts) {
+            if (part != null) {
+                part.SetActive(on);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A charged slash taking on the element of the needle as it starts (HeroExtraNailSlash): the tint of the element on
+    /// its sprites, and the element on its blows. It goes by the needle of the local hero, so the copy that shows another
+    /// player's charged slash took the tint of the local player's element (see <see cref="OnEffectEnable"/>). On such a
+    /// copy it takes the tint of that player's element instead, or none, and its blows take no element, as the blows of
+    /// the partner's slashes do no more here than they did before.
+    /// </summary>
+    public static void OnExtraSlashEnable(Action<HeroExtraNailSlash> orig, HeroExtraNailSlash self) {
+        var character = HeroCopies.CharacterOf?.Invoke(self.transform);
+        if (character == null) {
+            orig(self);
+            return;
+        }
+
+        var element = ElementOf(character);
+        var config = GetConfig(element);
+        var tint = config != null ? config.NailTintColor : Color.white;
+        if (TintSpritesField?.GetValue(self) is SpriteRenderer[] sprites) {
+            foreach (var sprite in sprites) {
+                if (sprite != null) {
+                    sprite.color = tint;
+                }
+            }
+        }
+
+        if (TintTk2dSpritesField?.GetValue(self) is tk2dBaseSprite[] tk2dSprites) {
+            foreach (var sprite in tk2dSprites) {
+                if (sprite != null) {
+                    sprite.color = tint;
+                }
+            }
+        }
+
+        if (DamagersField?.GetValue(self) is DamageEnemies[] damagers) {
+            foreach (var damager in damagers) {
+                if (damager != null) {
+                    damager.NailElement = NailElements.None;
+                    damager.NailImbuement = null;
+                }
+            }
+        }
+
+        var hero = HeroController.SilentInstance;
+        var ownElement = hero != null ? hero.NailImbuement.CurrentElement : NailElements.None;
+        Logger.Info(
+            $"[Imbued] Charged slash '{self.name}' of '{character.name}' shows that player's needle with " +
+            $"{element}; this player's own needle has {ownElement}"
+        );
     }
 
     /// <summary>

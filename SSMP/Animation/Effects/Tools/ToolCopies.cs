@@ -287,6 +287,14 @@ internal static class ToolCopies {
             new Action<Action<HeroNailImbuement, NailElements>, HeroNailImbuement, NailElements>(OnImbue)
         );
         AddHook(
+            typeof(HeroNailImbuementEffect).GetMethod("OnEnable", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<HeroNailImbuementEffect>, HeroNailImbuementEffect>(ImbuedNail.OnEffectEnable)
+        );
+        AddHook(
+            typeof(HeroExtraNailSlash).GetMethod("OnEnable", InstanceFlags, null, Type.EmptyTypes, null),
+            new Action<Action<HeroExtraNailSlash>, HeroExtraNailSlash>(ImbuedNail.OnExtraSlashEnable)
+        );
+        AddHook(
             typeof(Fsm).GetMethod("OnTriggerEnter2D", InstanceFlags, null, [typeof(Collider2D)], null),
             new Action<Action<Fsm, Collider2D>, Fsm, Collider2D>(OnFsmTrigger)
         );
