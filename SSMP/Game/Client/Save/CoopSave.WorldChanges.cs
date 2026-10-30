@@ -436,6 +436,9 @@ internal partial class CoopSave {
         var older = new List<string>();
         flags += ApplyInteractionFlags(update, older);
 
+        // A character's leaving from a game that did not know yet that someone here has not had what lets it
+        HoldDepartures($"a change from {player.Username}");
+
         // After the flags, which a thing shown broken may look at, as it would in a room that loads with them
         FollowPartnerBreaks(addedItems, collapsing);
 

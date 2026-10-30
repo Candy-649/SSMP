@@ -113,6 +113,7 @@ internal partial class CoopSave {
         _knownStoryValues = null;
         _knownBossScenes = null;
         _nextStoryFlagTime = 0f;
+        ResetDepartures();
     }
 
     /// <summary>
@@ -195,6 +196,10 @@ internal partial class CoopSave {
         _nextStoryFlagTime = Time.unscaledTime + StoryFlagInterval;
 
         try {
+            // Before the flags are compared: a character's leaving that a player has not had yet never goes out
+            SendDepartureReadiness();
+            HoldDepartures("a look at the story flags");
+
             var fields = GetStoryFields();
             CoopSaveUpdate? update = null;
             for (var i = 0; i < fields.Length && i < _knownStoryValues.Length; i++) {

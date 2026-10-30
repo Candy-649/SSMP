@@ -851,6 +851,9 @@ internal partial class CoopSave {
         }
 
         orig(self);
+
+        // A character that time let go here, while another member has not had what lets it yet (CoopSave.Departures)
+        HoldDepartures("time passed");
     }
 
     /// <summary>

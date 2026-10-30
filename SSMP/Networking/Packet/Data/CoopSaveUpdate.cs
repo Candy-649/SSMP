@@ -935,5 +935,13 @@ internal enum CoopSaveUpdateKind : byte {
     /// across and up, the way it pushed there. The other games push it the same way. Appended at the end, like every
     /// kind.
     /// </summary>
-    RopePush
+    RopePush,
+
+    /// <summary>
+    /// What the sender's player has had of what lets a character leave for good (see CoopSave.Departures):
+    /// <see cref="CoopSaveUpdate.FlagNames"/> name the flags of the sender's own save, and
+    /// <see cref="CoopSaveUpdate.FlagValues"/> hold them, 1 for had. A character leaves only once every member had it.
+    /// Appended at the end, like every kind.
+    /// </summary>
+    DepartureReadiness
 }

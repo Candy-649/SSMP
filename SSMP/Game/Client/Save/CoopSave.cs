@@ -837,6 +837,7 @@ internal partial class CoopSave {
         ResetWishConfirm();
         _checkedMembers.Remove(id);
         _memberChecks.Remove(id);
+        ForgetDepartureReadinessOf(id);
 
         // What they held down here lets go, also as the last of them leaves: the end of the check forgets who stands
         // on a plate or hangs on a ring, but lets go of neither, which then stayed held for good
@@ -1026,6 +1027,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.WorldChange:
                 OnWorldChange(player, update);
+                break;
+            case CoopSaveUpdateKind.DepartureReadiness:
+                OnDepartureReadiness(player, update);
                 break;
             case CoopSaveUpdateKind.Interaction:
                 OnInteraction(player, update);
