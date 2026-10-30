@@ -114,6 +114,16 @@ internal partial class CoopSave {
     private readonly Dictionary<string, int> _deliveredWishes = new(StringComparer.Ordinal);
 
     /// <summary>
+    /// The wishes that the local player completed during this session, with the packed state of each wish right after
+    /// and when. A completion of the partner's that comes for one of them while it is still so, within the time that a
+    /// dialogue of the partner's going on meanwhile can take to come (see WishTogetherTime), was made at the same time:
+    /// each player paid and was rewarded by their own turn-in. Taken for a wish that the save had completed long before,
+    /// both players heard that the other had turned in a wish that they had long completed (USER 10-30,
+    /// "我们一起完成的时候会显示xxx完成的这个祈愿你早就完成了").
+    /// </summary>
+    private readonly Dictionary<string, (int Packed, float Time)> _wishesCompletedHere = new(StringComparer.Ordinal);
+
+    /// <summary>
     /// The completions from dialogue of the partner that the local save took during this session, with the packed state
     /// of each wish that came with them. What the same dialogue changes afterwards comes with that state again, and
     /// counts if it matches.
@@ -1105,6 +1115,7 @@ internal partial class CoopSave {
         FinishSummon(HeroController.instance);
         _brokenDeliveries.Clear();
         _deliveredWishes.Clear();
+        _wishesCompletedHere.Clear();
         _appliedPartnerCompletions.Clear();
         _questsByName.Clear();
     }

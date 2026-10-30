@@ -50,6 +50,13 @@ internal partial class CoopSave {
     private const float WishTalkMaxTime = 600f;
 
     /// <summary>
+    /// How long, in seconds, after the local player completed a wish a completion of the partner's for it counts as
+    /// made at the same time (see _wishesCompletedHere): as long as a dialogue of the partner's that went on meanwhile can
+    /// take to come.
+    /// </summary>
+    private const float WishTogetherTime = WishTalkMaxTime + WishTalkEndDelay;
+
+    /// <summary>
     /// How long, in seconds, the character that the partner talks to stays locked for the local player at most.
     /// </summary>
     private const float PartnerTalkTimeout = 300f;
@@ -1672,6 +1679,12 @@ internal partial class CoopSave {
             // What throws here must not stop the action of the game that ends the wish, which would keep the hero
             // without control
             try {
+                if (PlayerData.instance is { } playerData) {
+                    _wishesCompletedHere[self.name] = (
+                        PackCompletion(playerData.QuestCompletionData.GetData(self.name)), Time.unscaledTime
+                    );
+                }
+
                 AddTalkWish(self);
                 if (_boardCompletionDepth > 0) {
                     RecordBoardReward(self);
@@ -1852,6 +1865,7 @@ internal partial class CoopSave {
             var brokenApplies = false;
             var turnedInHere = false;
             var deliveredHere = false;
+            var completedHere = false;
             var changed = 0;
             var accepted = 0;
             var completed = 0;
@@ -1891,6 +1905,18 @@ internal partial class CoopSave {
                 // A delivery that the local player turned in at the same time was paid and rewarded with that turn-in
                 deliveredHere |= isCompletion && before.IsCompleted &&
                                  _deliveredWishes.TryGetValue(name, out var delivered) && delivered == packedBefore;
+
+                // A wish that the local player completed at the same time, in their own dialogue or at their own
+                // board, was paid and rewarded there, as the partner's was in their game
+                if (isCompletion && before.IsCompleted && _wishesCompletedHere.TryGetValue(name, out var done) &&
+                    done.Packed == packedBefore && Time.unscaledTime - done.Time <= WishTogetherTime) {
+                    _wishesCompletedHere.Remove(name);
+                    completedHere = true;
+                    Logger.Info(
+                        $"'{name}' was completed here too, {Time.unscaledTime - done.Time:0.0} s before the turn-in of " +
+                        $"{player.Username} came: each paid and was rewarded by their own"
+                    );
+                }
 
                 // A delivery whose item broke for the local player is rewarded when the partner delivers it, also when
                 // the break completed it without a reward, as long as the wish stayed as the break left it
@@ -2004,6 +2030,14 @@ internal partial class CoopSave {
                         $"{player.Username} turned in the same delivery at the same time. You paid your copy and got the " +
                         "reward once, with your own turn-in.",
                         $"{player.Username} 和你同时交了同一份托运。你出了自己那份，奖励只按你自己那次算一次。"
+                    )
+                );
+            } else if (completedHere) {
+                Chat(
+                    Lang.Pick(
+                        $"{player.Username} turned in the same wish at the same time. You each paid your own copy and got " +
+                        "your own reward.",
+                        $"{player.Username} 和你同时交了同一个愿望。你们各自出了自己那份，也各自拿到了奖励。"
                     )
                 );
             } else if (anyCompleted) {
