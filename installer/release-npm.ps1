@@ -45,10 +45,18 @@ function Write-Step($text) { Write-Host ""; Write-Host "==> $text" -ForegroundCo
 function Write-Ok($text) { Write-Host "    $text" -ForegroundColor Green }
 function Write-Note($text) { Write-Host "    $text" }
 
+# A query string no cache has seen, so that a registry's own answer comes back, as update.ps1 and sync-mirror.ps1 ask.
+# The mirror's answers go through a cache that keeps them 5 minutes (public, max-age=300) and doesn't heed a
+# Cache-Control: no-cache of the request: for 0.4.138 this waited 5 minutes on the old newest version and said the
+# mirror did not have it, while the workflow's own look had found it there
+function Get-Fresh([string] $url) {
+    return "$($url)?t=$([DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())"
+}
+
 # The version that a registry serves as the newest, or $null when it can't be asked
 function Get-Latest([string] $registry) {
     try {
-        $answer = Invoke-RestMethod "$registry/$PackageName/latest" -TimeoutSec 20 -Headers @{ 'Cache-Control' = 'no-cache' }
+        $answer = Invoke-RestMethod (Get-Fresh "$registry/$PackageName/latest") -TimeoutSec 20 -Headers @{ 'Cache-Control' = 'no-cache' }
         return [string]$answer.version
     } catch {
         return $null
@@ -58,7 +66,7 @@ function Get-Latest([string] $registry) {
 # Whether npm has a version at all, newest or not
 function Test-OnNpm([string] $version) {
     try {
-        return [string](Invoke-RestMethod "$Npm/$PackageName/$version" -TimeoutSec 20).version -eq $version
+        return [string](Invoke-RestMethod (Get-Fresh "$Npm/$PackageName/$version") -TimeoutSec 20).version -eq $version
     } catch {
         return $false
     }
