@@ -121,23 +121,25 @@ internal static class EntitySpawner {
     /// <param name="spawnedType">The type of the spawned entity.</param>
     /// <param name="clientObject">The client game object from the spawning entity.</param>
     /// <param name="clientFsms">The list of client FSMs from the spawning entity.</param>
+    /// <param name="madeAt">Where the game that runs the room made it, or null when it did not say.</param>
     /// <returns>The game object for the spawned entity, or null if the spawning entity spawns nothing of that type.
     /// </returns>
     public static GameObject? SpawnEntityGameObject(
-        EntityType spawningType, 
+        EntityType spawningType,
         EntityType spawnedType,
         GameObject clientObject,
-        List<PlayMakerFSM> clientFsms
+        List<PlayMakerFSM> clientFsms,
+        Vector3? madeAt
     ) {
-        // Where a thrown thing is put until the first position of it arrives from the game that threw it.
+        // Where the game that runs the room made it, so that what it sets up as it starts - a pivot it hangs from, a
+        // range it leaves behind - is where it is in that game (EntitySpawn.Position).
         //
-        // This was the origin of the world, which is a real place in the room and usually one both players can see.
-        // Every throw therefore put the thing at that corner for as long as it took a position to cross the border,
-        // and the thing then jumped from there to where it really was. Standing it next to a creature of the kind
-        // that throws it is not exactly right - there may be several of them in a room and this is whichever one was
-        // found first - but it is wrong by the width of a room at the very worst instead of by wherever the corner
-        // happens to be, and the first position puts it right either way.
-        var startPosition = clientObject != null ? clientObject.transform.position : Vector3.zero;
+        // Without that, next to a creature of the kind that spawns it: not exactly right - there may be several of
+        // them in a room and this is whichever one was found first - but wrong by the width of a room at the very
+        // worst instead of by wherever the origin of the world happens to be, which every throw once stood at until
+        // its first position came. The first position puts the creature itself right either way, but not what it set
+        // up where it stood.
+        var startPosition = madeAt ?? (clientObject != null ? clientObject.transform.position : Vector3.zero);
 
         // It is looked for among what the spawning creature's own FSMs spawn, which is where the game that
         // spawned it made sure it would be found (CanSpawn)

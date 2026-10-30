@@ -12,6 +12,7 @@ using MonoMod.RuntimeDetour;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
+using Math_Vector3 = SSMP.Math.Vector3;
 using Object = UnityEngine.Object;
 
 #pragma warning disable CS8604 // Possible null reference argument.
@@ -110,13 +111,15 @@ internal class EntityManager {
     /// this game turns out to be the one. Told at once, the server could file it under the room this game was in
     /// before: it takes what a game sends in a fixed order, and a spawn comes before walking into a room.
     /// </summary>
-    private readonly List<(ushort Id, EntityType SpawningType, EntityType SpawnedType)> _spawnsToTell = [];
+    private readonly List<(ushort Id, EntityType SpawningType, EntityType SpawnedType, Math_Vector3? Position)>
+        _spawnsToTell = [];
 
     /// <summary>
     /// The entities that this game told the server were spawned in this room, which the state of the room it sends again
     /// names too (see <see cref="MakeRoomSnapshot"/>).
     /// </summary>
-    private readonly List<(ushort Id, EntityType SpawningType, EntityType SpawnedType)> _spawnsTold = [];
+    private readonly List<(ushort Id, EntityType SpawningType, EntityType SpawnedType, Math_Vector3? Position)>
+        _spawnsTold = [];
 
     /// <summary>
     /// Gets all currently registered active entities.
@@ -238,9 +241,9 @@ internal class EntityManager {
         _sceneRoleDetermined = true;
         _expectsToRunRoom = false;
 
-        foreach (var (id, spawningType, spawnedType) in _spawnsToTell) {
+        foreach (var (id, spawningType, spawnedType, position) in _spawnsToTell) {
             Logger.Info($"Notifying server of {spawningType} spawning entity ({spawnedType}) with ID {id}");
-            TellSpawn(id, spawningType, spawnedType);
+            TellSpawn(id, spawningType, spawnedType, position);
         }
 
         _spawnsToTell.Clear();
@@ -296,9 +299,11 @@ internal class EntityManager {
     /// <param name="id">The ID of the spawned entity.</param>
     /// <param name="spawningType">The type of what spawned it, or the room.</param>
     /// <param name="spawnedType">The type of the spawned entity.</param>
-    internal void TellSpawn(ushort id, EntityType spawningType, EntityType spawnedType) {
-        _spawnsTold.Add((id, spawningType, spawnedType));
-        _netClient.UpdateManager.SetEntitySpawn(id, spawningType, spawnedType);
+    /// <param name="position">Where it was made, or null for one that the room made (see EntitySpawn.Position).
+    /// </param>
+    internal void TellSpawn(ushort id, EntityType spawningType, EntityType spawnedType, Math_Vector3? position) {
+        _spawnsTold.Add((id, spawningType, spawnedType, position));
+        _netClient.UpdateManager.SetEntitySpawn(id, spawningType, spawnedType, position);
     }
 
     /// <summary>
@@ -320,11 +325,12 @@ internal class EntityManager {
 
         // The latest of them, as many as the state of a room carries
         for (var i = System.Math.Max(0, _spawnsTold.Count - byte.MaxValue); i < _spawnsTold.Count; i++) {
-            var (id, spawningType, spawnedType) = _spawnsTold[i];
+            var (id, spawningType, spawnedType, position) = _spawnsTold[i];
             snapshot.EntitySpawnList.Add(new EntitySpawn {
                 Id = id,
                 SpawningType = spawningType,
-                SpawnedType = spawnedType
+                SpawnedType = spawnedType,
+                Position = position
             });
         }
 
@@ -402,8 +408,16 @@ internal class EntityManager {
     /// <summary>
     /// Attempts to spawn a networked entity. No-ops if the ID is already registered (assumed spawned by action).
     /// </summary>
-    public void SpawnEntity(ushort id, EntityType spawningType, EntityType spawnedType) {
-        Logger.Info($"Trying to spawn entity with ID {id} with types: {spawningType}, {spawnedType}");
+    /// <param name="id">The ID of the entity.</param>
+    /// <param name="spawningType">The type of what spawned it, or the room.</param>
+    /// <param name="spawnedType">The type of the spawned entity.</param>
+    /// <param name="position">Where the game that runs the room made it, or null when it did not say (see
+    /// EntitySpawn.Position).</param>
+    public void SpawnEntity(ushort id, EntityType spawningType, EntityType spawnedType, Math_Vector3? position) {
+        Logger.Info(
+            $"Trying to spawn entity with ID {id} with types: {spawningType}, {spawnedType}" +
+            (position != null ? $", made at ({position.X:0.00}, {position.Y:0.00}) in the scene host's game" : "")
+        );
 
         if (_entities.ContainsKey(id)) {
             Logger.Info($"  Entity with ID {id} already exists, assuming it has been spawned by action");
@@ -416,12 +430,14 @@ internal class EntityManager {
         if (spawningType == EntityType.Room) {
             spawnedObject = _roomCreatures.Make(spawnedType);
         } else {
+            Vector3? madeAt = position != null ? new Vector3(position.X, position.Y, position.Z) : null;
             foreach (var templateEntity in _entities.Values.Where(e => e.Type == spawningType)) {
                 spawnedObject = EntitySpawner.SpawnEntityGameObject(
                     spawningType,
                     spawnedType,
                     templateEntity.Object.Client,
-                    templateEntity.GetClientFsms()
+                    templateEntity.GetClientFsms(),
+                    madeAt
                 );
                 if (spawnedObject != null) {
                     break;
@@ -750,6 +766,11 @@ internal class EntityManager {
             return true;
         }
 
+        // Where it was made, before anything of its own moves it: the other games make theirs there, so that what it
+        // sets up as it starts is where it is here (EntitySpawn.Position)
+        var made = details.GameObject.transform.position;
+        var position = new Math_Vector3(made.x, made.y, made.z);
+
         var processor = new EntityProcessor {
             GameObject = details.GameObject,
             IsSceneHost = IsSceneHost,
@@ -763,14 +784,14 @@ internal class EntityManager {
 
         var topLevel = processor.Entities[0];
         if (!_sceneRoleDetermined) {
-            _spawnsToTell.Add((topLevel.Id, entry.Type, topLevel.Type));
+            _spawnsToTell.Add((topLevel.Id, entry.Type, topLevel.Type, position));
             return true;
         }
 
         Logger.Info(
-            $"Notifying server of entity ({details.Action.Fsm.GameObject.name}, {entry.Type}) spawning entity ({details.GameObject.name}, {topLevel.Type}) with ID {topLevel.Id}"
+            $"Notifying server of entity ({details.Action.Fsm.GameObject.name}, {entry.Type}) spawning entity ({details.GameObject.name}, {topLevel.Type}) with ID {topLevel.Id}, made at {made}"
         );
-        TellSpawn(topLevel.Id, entry.Type, topLevel.Type);
+        TellSpawn(topLevel.Id, entry.Type, topLevel.Type, position);
 
         return true;
     }

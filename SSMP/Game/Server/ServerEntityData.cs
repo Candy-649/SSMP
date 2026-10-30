@@ -21,6 +21,11 @@ internal class ServerEntityData {
     /// The type of the entity that was spawned.
     /// </summary>
     public EntityType SpawnedType { get; set; }
+    /// <summary>
+    /// Where the game that ran the room made the spawned entity, for the games that walk in later (see
+    /// EntitySpawn.Position).
+    /// </summary>
+    public Vector3? SpawnPosition { get; set; }
 
     /// <summary>
     /// The last position of the entity.

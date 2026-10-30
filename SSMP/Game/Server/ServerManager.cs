@@ -625,7 +625,8 @@ internal abstract class ServerManager : IServerManager {
                     var entitySpawn = new EntitySpawn {
                         Id = entityKey.EntityId,
                         SpawningType = entityData.SpawningType,
-                        SpawnedType = entityData.SpawnedType
+                        SpawnedType = entityData.SpawnedType,
+                        Position = entityData.SpawnPosition
                     };
 
                     entitySpawnList.Add(entitySpawn);
@@ -973,6 +974,7 @@ internal abstract class ServerManager : IServerManager {
         entityData.Spawned = true;
         entityData.SpawningType = entitySpawn.SpawningType;
         entityData.SpawnedType = entitySpawn.SpawnedType;
+        entityData.SpawnPosition = entitySpawn.Position;
 
         SendDataInSameScene(
             id,
@@ -981,7 +983,8 @@ internal abstract class ServerManager : IServerManager {
                 _netServer.GetUpdateManagerForClient(otherId)?.SetEntitySpawn(
                     entitySpawn.Id,
                     entitySpawn.SpawningType,
-                    entitySpawn.SpawnedType
+                    entitySpawn.SpawnedType,
+                    entitySpawn.Position
                 );
             }
         );
@@ -1585,6 +1588,7 @@ internal abstract class ServerManager : IServerManager {
             data.Spawned = true;
             data.SpawningType = spawn.SpawningType;
             data.SpawnedType = spawn.SpawnedType;
+            data.SpawnPosition = spawn.Position;
         }
 
         foreach (var update in snapshot.EntityUpdateList) {

@@ -320,7 +320,8 @@ internal class RoomCreatures {
 
         var entity = processor.Entities[0];
         Logger.Info($"Notifying server of the room making entity ({creature.name}, {entity.Type}) with ID {entity.Id}");
-        _entityManager.TellSpawn(entity.Id, EntityType.Room, entity.Type);
+        // Every game makes such a creature where the room makes it (Make), so where this one was made is not told
+        _entityManager.TellSpawn(entity.Id, EntityType.Room, entity.Type, null);
     }
 
     /// <summary>

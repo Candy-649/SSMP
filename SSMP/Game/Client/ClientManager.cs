@@ -1404,7 +1404,9 @@ internal class ClientManager : IClientManager {
                 Logger.Info(
                     $"Updating already in scene spawned entity with ID: {entitySpawn.Id}, types: {entitySpawn.SpawningType}, {entitySpawn.SpawnedType}"
                 );
-                _entityManager.SpawnEntity(entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType);
+                _entityManager.SpawnEntity(
+                    entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType, entitySpawn.Position
+                );
             }
 
             foreach (var entityUpdate in alreadyInScene.EntityUpdateList) {
@@ -1554,7 +1556,9 @@ internal class ClientManager : IClientManager {
         Entity.Entity.FromRoomState = true;
         try {
             foreach (var entitySpawn in roomState.EntitySpawnList) {
-                _entityManager.SpawnEntity(entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType);
+                _entityManager.SpawnEntity(
+                    entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType, entitySpawn.Position
+                );
             }
 
             foreach (var entityUpdate in roomState.EntityUpdateList) {
@@ -1842,7 +1846,9 @@ internal class ClientManager : IClientManager {
             return;
         }
 
-        _entityManager.SpawnEntity(entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType);
+        _entityManager.SpawnEntity(
+            entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType, entitySpawn.Position
+        );
     }
 
     /// <summary>

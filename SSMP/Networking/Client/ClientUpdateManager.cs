@@ -217,14 +217,16 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     /// <param name="id">The ID of the entity.</param>
     /// <param name="spawningType">The type of the entity that spawned the new entity.</param>
     /// <param name="spawnedType">The type of the entity that was spawned.</param>
-    public void SetEntitySpawn(ushort id, EntityType spawningType, EntityType spawnedType) {
+    /// <param name="position">Where it was made, or null for one that the room made (see EntitySpawn.Position).</param>
+    public void SetEntitySpawn(ushort id, EntityType spawningType, EntityType spawnedType, Math.Vector3? position) {
         lock (Lock) {
             var entitySpawnCollection = GetOrCreateCollection<EntitySpawn>(ServerUpdatePacketId.EntitySpawn);
             entitySpawnCollection.DataInstances.Add(
                 new EntitySpawn {
                     Id = id,
                     SpawningType = spawningType,
-                    SpawnedType = spawnedType
+                    SpawnedType = spawnedType,
+                    Position = position
                 }
             );
         }
