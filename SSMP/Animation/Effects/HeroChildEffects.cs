@@ -129,6 +129,26 @@ internal class HeroChildEffects : AnimationEffect {
     private static readonly byte[] LocalMask = new byte[MaskLength];
 
     /// <summary>
+    /// Which places in <see cref="Paths"/> hold parts that go by the clips of the character instead, the needles of a
+    /// super jump (see <see cref="SuperJumpNeedles"/>): they are neither watched nor sent, and the changes of the other
+    /// parts leave their copies be. Their places stay, so that their copies go with the rest as a character leaves the
+    /// room.
+    /// </summary>
+    private static readonly bool[] ByCharacterClips = MarkByCharacterClips();
+
+    /// <summary>
+    /// Marks the places of the parts that go by the clips of the character (see <see cref="ByCharacterClips"/>).
+    /// </summary>
+    private static bool[] MarkByCharacterClips() {
+        var marks = new bool[Paths.Length];
+        for (var i = 0; i < Paths.Length; i++) {
+            marks[i] = Array.IndexOf(SuperJumpNeedles.Paths, Paths[i]) >= 0;
+        }
+
+        return marks;
+    }
+
+    /// <summary>
     /// Starts watching the parts of the local hero, which may be a new hero or the same one again.
     ///
     /// This runs when the game first asks for the hero, which can be while the hero is still being made: one of its
@@ -146,6 +166,10 @@ internal class HeroChildEffects : AnimationEffect {
         // its hits: it bounced off nothing and struck nothing it has to strike itself, like the partner's cocoon.
         var heroTransform = hero.gameObject.transform;
         for (var i = 0; i < Paths.Length; i++) {
+            if (ByCharacterClips[i]) {
+                continue;
+            }
+
             var part = heroTransform.Find(Paths[i]);
             if (part == null) {
                 Logger.Warn($"The hero has no part '{Paths[i]}' to show to other players");
@@ -187,6 +211,10 @@ internal class HeroChildEffects : AnimationEffect {
         }
 
         var changed = effectInfo[0];
+        if (ByCharacterClips[changed]) {
+            return;
+        }
+
         var on = effectInfo[1] == 1;
         var part = GetCopy(playerObject, Paths[changed], on);
         if (part != null) {
@@ -206,7 +234,7 @@ internal class HeroChildEffects : AnimationEffect {
         // that stays on until it is switched off is on here too, but a part that ends by itself is only ever started by
         // its own change: it may already have ended here while it is still showing there.
         for (var i = 0; i < Paths.Length; i++) {
-            if (i == changed) {
+            if (i == changed || ByCharacterClips[i]) {
                 continue;
             }
 

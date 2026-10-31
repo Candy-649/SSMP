@@ -1093,16 +1093,18 @@ internal class AnimationManager {
         if (_debugLogAnimations) Logger.Info($"  playing clip: {clipName}");
         if (startTime <= 0f) {
             spriteAnimator.PlayFromFrame(clip, frame);
-            return true;
+        } else {
+            // A clip that plays once stays on its last frame after its end, where a time past the end would show its
+            // first frame until the next update
+            if (clip.wrapMode == tk2dSpriteAnimationClip.WrapMode.Once && clip.fps > 0f && clip.frames.Length > 0) {
+                startTime = Mathf.Min(startTime, (clip.frames.Length - 0.01f) / clip.fps);
+            }
+
+            spriteAnimator.Play(clip, startTime, 0f);
         }
 
-        // A clip that plays once stays on its last frame after its end, where a time past the end would show its first
-        // frame until the next update
-        if (clip.wrapMode == tk2dSpriteAnimationClip.WrapMode.Once && clip.fps > 0f && clip.frames.Length > 0) {
-            startTime = Mathf.Min(startTime, (clip.frames.Length - 0.01f) / clip.fps);
-        }
-
-        spriteAnimator.Play(clip, startTime, 0f);
+        // The needles of a super jump come out and go by what the character starts (see SuperJumpNeedles)
+        SuperJumpNeedles.OnCharacterClip(playerObject!, id, clipName);
         return true;
     }
 
