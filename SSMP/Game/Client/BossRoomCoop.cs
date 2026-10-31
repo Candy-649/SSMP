@@ -479,6 +479,12 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        // TEMPORARY debug: another player sent every player to where a late dream starts
+        if (update.Kind == BossRoomUpdateKind.DebugTravel) {
+            OnDebugTravel(update);
+            return;
+        }
+
         if (SceneManager.GetActiveScene().name != update.SceneName) {
             return;
         }
@@ -1009,7 +1015,8 @@ internal partial class BossRoomCoop {
             (SwitchOffUsedChallengeSpots, nameof(SwitchOffUsedChallengeSpots)),
             (DeliverToldChallenges, nameof(DeliverToldChallenges)),
             (ShowHeartRecords, nameof(ShowHeartRecords)),
-            (ShowHeartEndTexts, nameof(ShowHeartEndTexts))
+            (ShowHeartEndTexts, nameof(ShowHeartEndTexts)),
+            (UpdateDebugTravel, nameof(UpdateDebugTravel))
         ];
 
         if (IsHoldActive()) {

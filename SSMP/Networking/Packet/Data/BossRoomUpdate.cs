@@ -241,5 +241,11 @@ internal enum BossRoomUpdateKind : byte {
     /// A player's challenge told the object of the room that plays its intro something, which the other players in the
     /// scene tell their own, with all that it told so far.
     /// </summary>
-    ChallengeTold
+    ChallengeTold,
+
+    /// <summary>
+    /// TEMPORARY debug: a player sent every player to the place where one of the late dreams starts (chat commands /1,
+    /// /2 and /3). The other players hear about it in any scene.
+    /// </summary>
+    DebugTravel
 }
