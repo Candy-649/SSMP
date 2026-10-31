@@ -823,5 +823,14 @@ internal enum AnimationClip {
     HeroHarpoon,
 
     // The streak of light that the game draws across the hero as they are hit
-    HeroHit
+    HeroHit,
+
+    /// <summary>
+    /// Grinding into what the down attack of the Architect crest landed on
+    /// </summary>
+    DrillGrind,
+    /// <summary>
+    /// Grinding into what the fully charged down attack of the Architect crest landed on
+    /// </summary>
+    DrillGrindCharged
 }

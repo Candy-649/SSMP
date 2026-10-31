@@ -638,7 +638,9 @@ internal class AnimationManager {
         { "Tool Straight Pin ", AnimationClip.ToolStraightPin  },
         { "Tool Threefold Pin", AnimationClip.ToolThreefoldPin },
         { "Tool Long Pin", AnimationClip.ToolLongpin },
-        { "Tool Tacks", AnimationClip.ToolTacks }
+        { "Tool Tacks", AnimationClip.ToolTacks },
+        { "Drill Grind", AnimationClip.DrillGrind },
+        { "Drill Grind Charged", AnimationClip.DrillGrindCharged }
     };
 
     /// <summary>
@@ -650,7 +652,9 @@ internal class AnimationManager {
         { AnimationClip.UpSlash, new Slash(SlashBase.SlashType.Up) },
         { AnimationClip.WallSlash, new Slash(SlashBase.SlashType.Wall) },
         { AnimationClip.DownSpike, new DownSpike() }, // Hunter Crest down slash
-        { AnimationClip.DownSpikeCharged, new DownSpike() }, // Architect Crest charged down slash
+        { AnimationClip.DownSpikeCharged, new DownSpike(true) }, // Architect Crest charged down slash
+        { AnimationClip.DrillGrind, new DrillGrind(false) },
+        { AnimationClip.DrillGrindCharged, new DrillGrind(true) },
         { AnimationClip.V3DownSlash, new Slash(SlashBase.SlashType.Down) },
         { AnimationClip.DownSlash, new Slash(SlashBase.SlashType.Down) },
         { AnimationClip.DownSlashAlt, new Slash(SlashBase.SlashType.DownAlt) },

@@ -488,7 +488,7 @@ internal abstract class SlashBase : ParryableEffect {
     /// <param name="configGroup">The config group for the crest.</param>
     /// <param name="gameObjectName">The name of the game object that has the component.</param>
     /// <returns>A nullable NailSlash component.</returns>
-    private NailSlash? GetNailSlashInCrestObjectFromName(HeroController.ConfigGroup configGroup, string gameObjectName) {
+    protected NailSlash? GetNailSlashInCrestObjectFromName(HeroController.ConfigGroup configGroup, string gameObjectName) {
         var nailSlashObj = GetGameObjectInCrestObjectFromName(configGroup, gameObjectName);
         if (nailSlashObj == null) {
             return null;

@@ -10,6 +10,28 @@ namespace SSMP.Animation.Effects;
 /// Abstract base class for the animation effect of down spikes.
 /// </summary>
 internal class DownSpike : SlashBase {
+    /// <summary>
+    /// The drill of the fully charged down attack of the Architect crest, which is a drill of its own: the hero's
+    /// 'Crest Attacks' FSM starts 'Attacks/Toolmaster/DownSlash New Charged' for it (in 'Drill Charged') and
+    /// 'DownSlash New' for the uncharged one (in 'Drill Uncharged').
+    /// </summary>
+    internal const string ChargedDrillName = "DownSlash New Charged";
+
+    /// <summary>
+    /// The drill of the uncharged down attack of the Architect crest (see <see cref="ChargedDrillName"/>).
+    /// </summary>
+    internal const string DrillName = "DownSlash New";
+
+    /// <summary>
+    /// Whether this is the fully charged down attack, which the Architect crest drills with its own drill.
+    /// </summary>
+    private readonly bool _charged;
+
+    /// <param name="charged">Whether this is the fully charged down attack.</param>
+    public DownSpike(bool charged = false) {
+        _charged = charged;
+    }
+
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         if (effectInfo == null || effectInfo.Length < 1) {
@@ -31,6 +53,22 @@ internal class DownSpike : SlashBase {
         } else {
             Play(playerObject, SlashType.DownSpike, crestType, slashEffects);
         }
+    }
+
+    /// <inheritdoc/>
+    protected override NailAttackBase? GetNailAttackBase(
+        SlashType type,
+        CrestType crestType,
+        bool isInBeastRageMode,
+        HeroController.ConfigGroup configGroup,
+        HeroController.ConfigGroup? overrideGroup
+    ) {
+        // The charged one was shown with the drill of the uncharged one
+        if (_charged && crestType == CrestType.Architect) {
+            return GetNailSlashInCrestObjectFromName(configGroup, ChargedDrillName);
+        }
+
+        return base.GetNailAttackBase(type, crestType, isInBeastRageMode, configGroup, overrideGroup);
     }
 
     /// <inheritdoc/>
