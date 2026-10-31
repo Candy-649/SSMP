@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using SSMP.Internals;
@@ -52,11 +53,11 @@ internal class ThrownTool : BaseAttackTool {
                 case ToolMessageKind.Break:
                     var how = reader.ReadByte();
                     if (Copies.TryGetValue(key, out var broken) && broken != null) {
+                        ToolCopyRules.GetState(broken.PrefabName)?.Break(broken.gameObject, how);
                         Logger.Info(
                             $"[Tools] The copy of the partner's '{broken.PrefabName}' ({key.Item2}) breaks ({how}) as " +
-                            "the partner's did"
+                            $"the partner's did; {DescribePictures(broken.gameObject)}"
                         );
-                        ToolCopyRules.GetState(broken.PrefabName)?.Break(broken.gameObject, how);
                     }
 
                     break;
@@ -64,7 +65,7 @@ internal class ThrownTool : BaseAttackTool {
                     if (Copies.TryGetValue(key, out var copy) && copy != null) {
                         Logger.Info(
                             $"[Tools] The copy of the partner's '{copy.PrefabName}' ({key.Item2}) goes, as the " +
-                            "partner's is gone"
+                            $"partner's is gone; it was drawn as {DescribePictures(copy.gameObject)}"
                         );
                         Object.Destroy(copy.gameObject);
                     }
@@ -160,6 +161,31 @@ internal class ThrownTool : BaseAttackTool {
             $"{place.y:0.00}, z {place.z:0.000}), scale ({spawn.Scale.x:0.00}, {spawn.Scale.y:0.00}), turned " +
             $"{spawn.Snapshot.Rotation:0}, poisoned: {spawn.Poisoned}; {DescribePictures(copy)}"
         );
+        SayPicturesLater(copy, $"The copy of the partner's '{spawn.PrefabName}' ({key.Item2})");
+    }
+
+    /// <summary>
+    /// How long after it comes out a copy is described again: a mod that colours what is drawn, like Player Color,
+    /// chooses the material of an object as it is first drawn, after it came out.
+    /// </summary>
+    private const float DescribedAgainAfter = 0.3f;
+
+    /// <summary>
+    /// Says again what the pictures of a copy are drawn from, a moment after it came out, if it is still there. The
+    /// spike ball looked wrong only some of the times it was thrown (USER 10-31: "刺团并不是每次都花的，而是某几次
+    /// 花"), so a throw that looks wrong is told apart from the others by what it was drawn with.
+    /// </summary>
+    /// <param name="copy">The copy.</param>
+    /// <param name="what">What it is, as the log names it.</param>
+    internal static void SayPicturesLater(GameObject copy, string what) {
+        MonoBehaviourUtil.Instance.StartCoroutine(SayLater());
+
+        IEnumerator SayLater() {
+            yield return new WaitForSeconds(DescribedAgainAfter);
+            if (copy != null && copy.activeInHierarchy) {
+                Logger.Info($"[Tools] {what} a moment later: {DescribePictures(copy)}");
+            }
+        }
     }
 
     /// <summary>
@@ -263,7 +289,8 @@ internal class ThrownTool : BaseAttackTool {
         var place = copy.transform.position;
         Logger.Info(
             $"[Tools] The copy of the partner's '{copy.PrefabName}' ({key.Item2}) goes to '{state}' of " +
-            $"'{fsm.FsmName}' as the partner's did, at ({place.x:0.00}, {place.y:0.00})"
+            $"'{fsm.FsmName}' as the partner's did, at ({place.x:0.00}, {place.y:0.00}); " +
+            DescribePictures(copy.gameObject)
         );
     }
 

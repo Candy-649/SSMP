@@ -851,6 +851,9 @@ internal static class ToolCopies {
                     $"({place.x:0.00}, {place.y:0.00}, z {place.z:0.000}), turned " +
                     $"{spawned.transform.eulerAngles.z:0}; {ThrownTool.DescribePictures(spawned)}"
                 );
+                ThrownTool.SayPicturesLater(
+                    spawned, $"The partner's '{prefab.name}' let out by the copy of their '{copy.PrefabName}'"
+                );
             } else if (owner != null) {
                 // Only something that can be touched can be set off; a sound or a puff of dust is left unmarked
                 if (spawned.GetComponentInChildren<Collider2D>(true) != null && IsLocalToolSpawner(owner)) {
