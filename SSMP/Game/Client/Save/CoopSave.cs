@@ -294,6 +294,7 @@ internal partial class CoopSave {
         RegisterPodSequenceHooks();
         RegisterShownPartHooks();
         RegisterRoomLayoutHooks();
+        RegisterWorldRumbleHooks();
         ToldParts.RegisterHooks();
         WishDrops.RegisterHooks();
         ToldParts.IsFollowedInEveryState = machine =>
@@ -1030,6 +1031,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.DepartureReadiness:
                 OnDepartureReadiness(player, update);
+                break;
+            case CoopSaveUpdateKind.WorldRumble:
+                OnWorldRumble(player, update);
                 break;
             case CoopSaveUpdateKind.Interaction:
                 OnInteraction(player, update);

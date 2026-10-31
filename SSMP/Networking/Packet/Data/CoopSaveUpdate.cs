@@ -943,5 +943,13 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.FlagValues"/> hold them, 1 for had. A character leaves only once every member had it.
     /// Appended at the end, like every kind.
     /// </summary>
-    DepartureReadiness
+    DepartureReadiness,
+
+    /// <summary>
+    /// The world shakes in the sender's game, the scene host's, as it does now and then once it is bound in thread
+    /// (see CoopSave.WorldRumbles). <see cref="CoopSaveUpdate.Scene"/> names the room and
+    /// <see cref="CoopSaveUpdate.Amounts"/> holds the dice it shook with. The other games in the room shake with it, and
+    /// not by themselves. Appended at the end, like every kind.
+    /// </summary>
+    WorldRumble
 }
