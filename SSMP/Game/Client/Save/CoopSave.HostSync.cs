@@ -515,13 +515,18 @@ internal partial class CoopSave {
 
     /// <summary>
     /// What keeps the host's game from taking its save now, or nothing: the menu, a room change or a load, in which
-    /// the objects of the room that taking the save puts into the scene data come and go, the game writing a save of
-    /// its own from the same data, and the moment before waking in the last act, which the game sets up as the save
-    /// loads. Not a cutscene, a talk, a death, a player down or the pause menu, which it used to wait through too,
-    /// for a moment that the game could save in, like <see cref="CopySave"/> (USER 10-22: someone stuck on the wait for
-    /// the host's save; "就不能无论什么动画都不等待吗"). A host held on the bench at the start of a session can pause,
-    /// a host who started a new game watches its opening, and a host whose partner dropped plays on to the next bench,
-    /// where they could talk or go down as the partner comes back.
+    /// the objects of the room that taking the save puts into the scene data come and go, and the game writing a save
+    /// of its own from the same data. Not a cutscene, a talk, a death, a player down or the pause menu, which it used
+    /// to wait through too, for a moment that the game could save in, like <see cref="CopySave"/> (USER 10-22: someone
+    /// stuck on the wait for the host's save; "就不能无论什么动画都不等待吗"). A host held on the bench at the start of a
+    /// session can pause, a host who started a new game watches its opening, and a host whose partner dropped plays on
+    /// to the next bench, where they could talk or go down as the partner comes back.
+    ///
+    /// Nor the start of the last act, until the host wakes in it: the game sets the act up as the save loads, from the
+    /// menu, before any room (GameManager.StartAct3 in RunContinueGame), and the host wakes only once the scene of their
+    /// waking plays out, which the start of the session holds back until everyone has arrived. Waiting for it, the host
+    /// waited for the joining player, who waited for the host's save, for good (USER 10-31: "卡在接收存档了"). A player
+    /// who joins then wakes in the last act as the host does, from the start (their merged save has it queued).
     ///
     /// What the host's game writes after the save is taken reaches the joining player at the check of their arrival
     /// if it is a story flag, a wish or an object of the world, and the rest at their next join. That is little: a
@@ -544,7 +549,7 @@ internal partial class CoopSave {
         }
 
         var playerData = PlayerData.instance;
-        if (playerData == null || playerData.IsAct3IntroQueued || IsGameSaving() || gameManager.IsInSceneTransition ||
+        if (playerData == null || IsGameSaving() || gameManager.IsInSceneTransition ||
             gameManager.GameState is GameState.LOADING or GameState.ENTERING_LEVEL or GameState.EXITING_LEVEL) {
             return HostSaveWait.Busy;
         }
