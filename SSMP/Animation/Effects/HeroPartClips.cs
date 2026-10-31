@@ -29,7 +29,17 @@ internal class HeroPartClips : AnimationEffect {
     private static readonly string[] Paths = [
         "Tool Effects/Tool Hornet",
         "Tool Effects/Tool Hornet Poison Screw Attack",
-        "Tool Effects/WebShot Effects/Gun Sprite"
+        "Tool Effects/WebShot Effects/Gun Sprite",
+
+        // What the hero's FSMs play on the other watched parts, which the copies did not play: what shows on both
+        // sides of the hero while the jump that the thrown needle pulls them up by charges is not switched off as the
+        // jump is let go, it plays its end and goes, and on the other players' screens it stayed until the whole
+        // jump was over (USER 10-31 "蓄力松手之后原本织针会消失，但是联机那个织针没有正常消失"); the glow of the
+        // syringe tool goes from its wind-up to its hit by its clips the same way
+        "Effects/Super Jump Antic Effect L",
+        "Effects/Super Jump Antic Effect R",
+        "Tool Effects/Syringe Glow",
+        "Tool Effects/Syringe Glow poison"
     ];
 
     /// <summary>
