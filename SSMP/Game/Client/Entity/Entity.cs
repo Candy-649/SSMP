@@ -534,7 +534,20 @@ internal partial class Entity {
                 )
             };
 
-            DestroyManagedChildren(Object.Client);
+            // The shell that a creature lets out as it dies is made as the creature first wakes, and a copy made while
+            // the creature was asleep made its own later, after the creatures in it were taken out of the copy: a
+            // jellyfish that bursts into small ones let out five more of its own in the game of the copy, besides the
+            // copies of the scene host's five (USER 10-31 "生成的小水母没有同步"). It is made now, and what in it is a
+            // creature of its own goes with the rest below
+            MakeShellsNow(Object.Client);
+            var takenOut = new List<string>();
+            DestroyManagedChildren(Object.Client, takenOut);
+            if (takenOut.Count > 0) {
+                SSMP.Logging.Logger.Info(
+                    $"[Copies] The copy of '{hostObject.name}' ({id}, {type}) holds none of the creatures in it, which " +
+                    $"are copied by themselves: {string.Join(", ", takenOut)}"
+                );
+            }
 
             _hasParent = false;
         } else {
@@ -745,12 +758,29 @@ internal partial class Entity {
     /// Recursively go through the non-registered children as well.
     /// </summary>
     /// <param name="root">The root game object to start searching for children.</param>
-    private void DestroyManagedChildren(GameObject root) {
+    /// <param name="takenOut">The names of the children destroyed, for the log.</param>
+    private static void DestroyManagedChildren(GameObject root, List<string> takenOut) {
         foreach (var child in root.GetChildren()) {
             if (EntityRegistry.TryGetEntry(child, out _)) {
+                takenOut.Add(child.name);
                 UnityEngine.Object.Destroy(child);
             } else {
-                DestroyManagedChildren(child);
+                DestroyManagedChildren(child, takenOut);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Makes the shells that a copy lets out as it dies, as the game makes them when the creature first wakes, unless
+    /// they are made already (see EntityManager.ExpandDeathEffects). Those that come from the pool of the room can't be
+    /// made this early, and are made by the game as it lets them out.
+    /// </summary>
+    private static void MakeShellsNow(GameObject copy) {
+        foreach (var deathEffects in copy.GetComponentsInChildren<EnemyDeathEffects>(true)) {
+            try {
+                deathEffects.PreInstantiate();
+            } catch (Exception) {
+                // A shell from the pool of the room, which holds nothing until it is let out
             }
         }
     }
