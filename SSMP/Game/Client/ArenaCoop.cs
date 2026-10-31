@@ -272,6 +272,18 @@ internal partial class ArenaCoop {
     private readonly HashSet<GameObject> _putBackEnemies = [];
 
     /// <summary>
+    /// When each enemy of a wave that started was last seen with its collider on, in unscaled time, looked at every
+    /// <see cref="TouchLookEvery"/> seconds while its battle runs (see <see cref="NoteTouchableEnemies"/>).
+    /// </summary>
+    private readonly Dictionary<GameObject, float> _touchableAt = new();
+
+    /// <summary>
+    /// How often the enemies of a running battle are looked at for whether they can be touched, in seconds: far more
+    /// often than one that digs into the ground comes up again.
+    /// </summary>
+    private const float TouchLookEvery = 0.2f;
+
+    /// <summary>
     /// The arena that this game is changing for another player, or null.
     /// </summary>
     private BattleScene? _remoteTarget;
@@ -1146,6 +1158,8 @@ internal partial class ArenaCoop {
             return;
         }
 
+        NoteTouchableEnemies(battleScene, state);
+
         var enemies = GetCurrentEnemies(battleScene);
         if (state.QuietSince == null || enemies != state.WatchedEnemies) {
             state.WatchedEnemies = enemies;
@@ -1153,18 +1167,54 @@ internal partial class ArenaCoop {
             return;
         }
 
-        if (Time.unscaledTime - state.QuietSince.Value < QuietBattleReportDelay) {
+        var quietFrom = state.QuietSince.Value;
+        if (Time.unscaledTime - quietFrom < QuietBattleReportDelay) {
             return;
         }
 
         state.QuietSince = Time.unscaledTime;
-        SayWhatTheWavesAreDoing(battleScene, state, enemies);
+        SayWhatTheWavesAreDoing(battleScene, state, enemies, quietFrom);
+    }
+
+    /// <summary>
+    /// Notes, every <see cref="TouchLookEvery"/> seconds, which enemies of the waves that started can be touched now,
+    /// for telling an enemy that nothing can ever reach from one that only is out of reach for a while: one that digs
+    /// into the ground cannot be touched while it is down there, and looked at only once the battle had been quiet for
+    /// half a minute, one caught under the ground was taken for one that never comes up. It was put back where its
+    /// wave called it out and shown there in the middle of its digging (USER 10-31 log, 17:36:56 and 17:37:26).
+    /// </summary>
+    private void NoteTouchableEnemies(BattleScene battleScene, ArenaState state) {
+        var now = Time.unscaledTime;
+        if (now < state.NextTouchLookAt || IsFollower() || WavesField!.GetValue(battleScene) is not IList waves) {
+            return;
+        }
+
+        state.NextTouchLookAt = now + TouchLookEvery;
+        for (var waveNumber = 0; waveNumber <= state.Wave && waveNumber < waves.Count; waveNumber++) {
+            if (waves[waveNumber] is not BattleWave wave || wave == null) {
+                continue;
+            }
+
+            // By index rather than by the transform's enumerator, which is made anew each time
+            var waveTransform = wave.transform;
+            for (var i = 0; i < waveTransform.childCount; i++) {
+                var child = waveTransform.GetChild(i);
+                if (child.TryGetComponent<Collider2D>(out var touched) && touched.enabled &&
+                    child.gameObject.activeInHierarchy) {
+                    _touchableAt[child.gameObject] = now;
+                }
+            }
+        }
     }
 
     /// <summary>
     /// Writes down what every enemy of the waves that started is doing, one line each.
     /// </summary>
-    private void SayWhatTheWavesAreDoing(BattleScene battleScene, ArenaState state, int enemies) {
+    /// <param name="battleScene">The battle.</param>
+    /// <param name="state">Its co-op state.</param>
+    /// <param name="enemies">How many enemies it has left.</param>
+    /// <param name="quietFrom">Since when no enemy of it died, in unscaled time.</param>
+    private void SayWhatTheWavesAreDoing(BattleScene battleScene, ArenaState state, int enemies, float quietFrom) {
         Logger.Warn(
             $"Arena '{state.Path}' has been on wave {state.Wave} with {enemies} enemy(s) left for " +
             $"{QuietBattleReportDelay:0} seconds without one dying, as " +
@@ -1207,7 +1257,7 @@ internal partial class ArenaCoop {
                     $"{(body == null ? "no body" : body.bodyType + $", going {body.linearVelocity}")}"
                 );
 
-                PutBackAnEnemyNobodyCanReach(child, health, seen, touched, body);
+                PutBackAnEnemyNobodyCanReach(child, health, seen, touched, body, quietFrom);
             }
         }
     }
@@ -1277,25 +1327,44 @@ internal partial class ArenaCoop {
     /// touching the ground, so it can never come down either. It stays alive, it stays counted, and every player is
     /// then shut in a room with a battle that no amount of fighting can finish. This is not a guess about what an
     /// enemy is waiting for: an enemy of a wave that started, still has its health, has gone half a minute without a
-    /// single enemy in the battle dying, and has no collider, is one that nothing in the game will ever reach.
+    /// single enemy in the battle dying, and has had no collider all that time, is one that nothing in the game will
+    /// ever reach. All that time, not only as it is looked at: one that digs into the ground has none while it is down
+    /// there, and comes up again (see <see cref="NoteTouchableEnemies"/>).
     /// It is given back the body its wave gave it - seen, touchable, standing still - in the place it stood when its
     /// wave called it out, and only once. Nothing else about it is touched, and only the game that runs the enemies
     /// does this.
     /// </summary>
+    /// <param name="child">The enemy.</param>
+    /// <param name="health">Its health.</param>
+    /// <param name="seen">Its renderer.</param>
+    /// <param name="touched">Its collider.</param>
+    /// <param name="body">Its body.</param>
+    /// <param name="quietFrom">Since when no enemy of its battle died, in unscaled time.</param>
     private void PutBackAnEnemyNobodyCanReach(
         Transform child,
         HealthManager? health,
         Renderer? seen,
         Collider2D? touched,
-        Rigidbody2D? body
+        Rigidbody2D? body,
+        float quietFrom
     ) {
         if (IsFollower() || health == null || health.hp <= 0 || !child.gameObject.activeInHierarchy) {
             return;
         }
 
-        if (touched == null || touched.enabled || !_putBackEnemies.Add(child.gameObject)) {
+        if (touched == null || touched.enabled || _putBackEnemies.Contains(child.gameObject)) {
             return;
         }
+
+        if (_touchableAt.TryGetValue(child.gameObject, out var touchableAt) && touchableAt >= quietFrom) {
+            Logger.Warn(
+                $"      '{child.name}' cannot be touched now, but could {Time.unscaledTime - touchableAt:0.0} s ago, " +
+                "so it is left as it is"
+            );
+            return;
+        }
+
+        _putBackEnemies.Add(child.gameObject);
 
         Logger.Warn(
             $"      putting '{child.name}' back together: it is alive and counts, but nothing can touch it, so this " +
@@ -1632,6 +1701,7 @@ internal partial class ArenaCoop {
         _owedWaveStarts.Clear();
         _waveEnemyPlaces.Clear();
         _putBackEnemies.Clear();
+        _touchableAt.Clear();
         _remoteTarget = null;
     }
 
@@ -1695,6 +1765,12 @@ internal partial class ArenaCoop {
         /// The time since which the number of enemies has not changed, or null if the battle is not running.
         /// </summary>
         public float? QuietSince;
+
+        /// <summary>
+        /// When the enemies of the waves that started are next looked at for whether they can be touched, in unscaled
+        /// time (see <see cref="ArenaCoop.NoteTouchableEnemies"/>).
+        /// </summary>
+        public float NextTouchLookAt;
 
         /// <summary>
         /// The gates that the start of the battle closed while the local player was not locked in, which close once
