@@ -366,6 +366,7 @@ internal static partial class EntityFsmActions {
         var parent = action.parent.Value;
         var moved = Entity.ObjectToPutUnder(gameObject, parent, data != null);
         if (moved != null) {
+            LetGoParts.NoteLetGo(moved, parent);
             moved.transform.parent = parent != null ? parent.transform : null;
 
             if (action.resetLocalPosition.Value) {
@@ -404,6 +405,7 @@ internal static partial class EntityFsmActions {
         var parent = action.parent.Value;
         var moved = Entity.ObjectToPutUnder(gameObject, parent, data != null);
         if (moved != null) {
+            LetGoParts.NoteLetGo(moved, parent);
             moved.transform.SetParent(parent != null ? parent.transform : null, action.worldPositionStays.Value);
         }
 

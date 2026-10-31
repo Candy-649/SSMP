@@ -78,7 +78,7 @@ internal class DamageHeroComponent : EntityComponent {
         var changed = false;
         for (var i = 0; i < _hostDamageHeroes.Length; i++) {
             var damageHero = _hostDamageHeroes[i];
-            if (damageHero == null || damageHero.gameObject == null) {
+            if (damageHero == null || damageHero.gameObject == null || RunsByItself(damageHero, GameObject.Host)) {
                 continue;
             }
 
@@ -104,12 +104,55 @@ internal class DamageHeroComponent : EntityComponent {
         };
         data.Packet.Write((byte) _hostDamageHeroes.Length);
         foreach (var damageHero in _hostDamageHeroes) {
+            var flags = (byte) 0;
+            if (damageHero != null && damageHero.gameObject != null) {
+                if (damageHero.gameObject.activeSelf) {
+                    flags |= ActiveFlag;
+                }
+
+                if (damageHero.enabled) {
+                    flags |= EnabledFlag;
+                }
+
+                if (RunsByItself(damageHero, GameObject.Host)) {
+                    flags |= RunsByItselfFlag;
+                }
+            }
+
             data.Packet.Write((byte) (damageHero != null ? damageHero.damageDealt : 0));
-            data.Packet.Write(damageHero != null && damageHero.gameObject != null && damageHero.gameObject.activeSelf);
-            data.Packet.Write(damageHero != null && damageHero.enabled);
+            data.Packet.Write(flags);
         }
 
         SendData(data);
+    }
+
+    /// <summary>
+    /// The flag of an entry that says its object is switched on.
+    /// </summary>
+    private const byte ActiveFlag = 1;
+
+    /// <summary>
+    /// The flag of an entry that says its damage is switched on.
+    /// </summary>
+    private const byte EnabledFlag = 2;
+
+    /// <summary>
+    /// The flag of an entry that says it is on a part that the creature let go of and that runs by itself (see
+    /// <see cref="RunsByItself"/>).
+    /// </summary>
+    private const byte RunsByItselfFlag = 4;
+
+    /// <summary>
+    /// Whether a damage component is on a part that the creature let go of into the room and that runs a state machine
+    /// of its own, which each game runs as the creature tells it (see LetGoParts): what it switches is its own business
+    /// there, and it is not switched from here. The spires that a coral brute raises let go of it as they wake, and
+    /// their hurting parts, switched on in the other game as the host's rose, were never switched off there when the
+    /// brute died before its spires sank, and hurt for good where nothing was drawn (USER 10-31: "我朋友被看不到的
+    /// 珊瑚打到了"). A part let go of that runs nothing of its own, like a thing a creature flings on a chain, is
+    /// switched only by the creature, and goes on following from here.
+    /// </summary>
+    private static bool RunsByItself(DamageHero damageHero, GameObject? creature) {
+        return LetGoParts.RunsByItself(damageHero.transform, creature);
     }
 
     /// <inheritdoc />
@@ -121,10 +164,18 @@ internal class DamageHeroComponent : EntityComponent {
         var length = data.Packet.ReadByte();
         for (var i = 0; i < length; i++) {
             var damageDealt = data.Packet.ReadByte();
-            var active = data.Packet.ReadBool();
-            var enabled = data.Packet.ReadBool();
+            var flags = data.Packet.ReadByte();
+            var active = (flags & ActiveFlag) != 0;
+            var enabled = (flags & EnabledFlag) != 0;
+
+            // A part that either game's creature let go of and that runs by itself goes by itself there
+            if ((flags & RunsByItselfFlag) != 0) {
+                continue;
+            }
+
             if (i < _hostDamageHeroes.Length && _hostDamageHeroes[i] != null &&
-                _hostDamageHeroes[i].gameObject != null) {
+                _hostDamageHeroes[i].gameObject != null &&
+                !RunsByItself(_hostDamageHeroes[i], GameObject.Host)) {
                 _hostDamageHeroes[i].damageDealt = damageDealt;
                 _hostDamageHeroes[i].enabled = enabled;
 
@@ -139,7 +190,8 @@ internal class DamageHeroComponent : EntityComponent {
             }
 
             if (i < _clientDamageHeroes.Length && _clientDamageHeroes[i] != null &&
-                _clientDamageHeroes[i].gameObject != null) {
+                _clientDamageHeroes[i].gameObject != null &&
+                !RunsByItself(_clientDamageHeroes[i], GameObject.Client)) {
                 _clientDamageHeroes[i].damageDealt = damageDealt;
                 _clientDamageHeroes[i].enabled = enabled;
 

@@ -296,6 +296,7 @@ internal partial class CoopSave {
         RegisterRoomLayoutHooks();
         RegisterWorldRumbleHooks();
         ToldParts.RegisterHooks();
+        Entity.LetGoParts.RegisterHooks();
         WishDrops.RegisterHooks();
         ToldParts.IsFollowedInEveryState = machine =>
             FindMachineKind(machine.gameObject, machine.FsmName) is { IsDirector: true };

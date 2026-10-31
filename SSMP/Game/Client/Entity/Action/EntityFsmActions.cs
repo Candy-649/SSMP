@@ -632,7 +632,8 @@ internal static partial class EntityFsmActions {
     /// Writes, ahead of an action's own data, which objects the action worked on when they are held in variables: for
     /// each, 0 for none, 1 and its path for a part of the creature, 3 and its scene and path for a part of the room
     /// itself, 4 and its scene and path for a part of the room named before the action ran (see
-    /// <see cref="NoteRoomSubjects"/>), 2 for an object anywhere else.
+    /// <see cref="NoteRoomSubjects"/>), 5 and its place under the creature for a part that the creature let go of into
+    /// the room (see <see cref="LetGoParts"/>), 2 for an object anywhere else.
     ///
     /// The creature's FSM fills such variables in while it runs - which spray to use, which of its parts to light, which
     /// of them an event is for - and the scene client's copy never runs, so there the variable stayed empty and the
@@ -657,6 +658,15 @@ internal static partial class EntityFsmActions {
 
             if (loose != null && variable.Name == loose.Name) {
                 data.Packet.Write((byte) 2);
+                continue;
+            }
+
+            // A part that the creature let go of into the room is named by its place under the creature, where the
+            // copy has its own (see LetGoParts). Named by its place in the room, it was another creature's part in the
+            // other game where several of one name stood there
+            if (LetGoParts.PlaceOf(action.Fsm.GameObject, subject) is { } letGoPlace) {
+                data.Packet.Write((byte) 5);
+                data.Packet.Write(letGoPlace);
                 continue;
             }
 
@@ -776,6 +786,28 @@ internal static partial class EntityFsmActions {
 
                     if (noted != null) {
                         variable.Value = noted;
+                    }
+
+                    break;
+                case 5:
+                    var letGoPlace = data.Packet.ReadString();
+                    var letGoCreature = action.Fsm?.GameObject;
+                    if (letGoCreature == null) {
+                        break;
+                    }
+
+                    // The copy's own part that had that place under it. One that the copy's variable already holds is
+                    // kept, let go of or not: parts of one name, let go of one after another, share a place, and the
+                    // place alone finds another of them
+                    var letGoHeld = variable.Value;
+                    if (letGoHeld != null && (LetGoParts.PlaceOf(letGoCreature, letGoHeld) == letGoPlace ||
+                                              PathFromOwner(letGoCreature, letGoHeld) == letGoPlace)) {
+                        break;
+                    }
+
+                    // Else left to what the copy's variable holds, if the copy has no part from there
+                    if (LetGoParts.Find(letGoCreature, letGoPlace) is { } ownPart) {
+                        variable.Value = ownPart;
                     }
 
                     break;
@@ -987,6 +1019,7 @@ internal static partial class EntityFsmActions {
         SaidReplayFailed.Clear();
         SaidFoundByName.Clear();
         ScenePath.ForgetUniqueNames();
+        LetGoParts.Forget();
     }
 
     /// <summary>
