@@ -1,28 +1,24 @@
 using System.Collections;
-using System.Diagnostics.CodeAnalysis;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
-using Object = UnityEngine.Object;
 
 namespace SSMP.Animation.Effects;
 
 /// <summary>
-/// Animation effect for the death of the player.
+/// Animation effect for the death of the player. The character plays the death clip that comes with it, and a death by
+/// frost also shows the frost growing over them and their frozen figure, as their own game does.
+///
+/// Nothing else is drawn on the character. The rest of what the game plays over a dying hero closes the screen of the
+/// player who died, and the cocoon that a death leaves is shown by the two-player save where the player lies, with the
+/// spiders that fall from it as it appears. This effect used to switch on the hero's 'Low Health Leak' around the
+/// character for four seconds, a part that the game itself never plays, and to let the spiders of a cocoon fall where
+/// the character stood four seconds later. A partner pulled up within those seconds fought on with both around them
+/// (USER 10-31: "像碎片从她身上飞出来", "可是她后来打小水母的时候身上还有那个特效").
 /// </summary>
 internal class Death : AnimationEffect {
-    /// <summary>
-    /// Name of the game object for the death particles.
-    /// </summary>
-    private const string DeathParticleObjectName = "Low Health Leak";
-
-    /// <summary>
-    /// Cached game object for the death particles.
-    /// </summary>
-    private static GameObject? _deathParticles;
-
     /// <inheritdoc/>
     public override byte[] GetEffectInfo() {
         var frosted = HeroController.instance.cState.isFrostDeath;
@@ -53,11 +49,7 @@ internal class Death : AnimationEffect {
 
         if (byFrost) {
             MonoBehaviourUtil.Instance.StartCoroutine(PlayFrostDeath(playerObject));
-            return;
         }
-
-        // Otherwise just play the normal animation
-        MonoBehaviourUtil.Instance.StartCoroutine(PlayDeath(playerObject, nonLethal));
     }
 
     /// <summary>
@@ -131,112 +123,8 @@ internal class Death : AnimationEffect {
 
         frostDeath.transform.localPosition = playerObject.transform.position + new Vector3(0.11f, 0, -0.18f);
 
-        // Fade out and play particles
+        // Fade out
         yield return new WaitForSeconds(frostedDuration);
         frostDeath.AddComponent<SimpleFadeOut>();
-        SpawnCocoonParticles(frostDeath);
-    }
-
-    /// <summary>
-    /// Plays the normal death animation.
-    /// </summary>
-    /// <param name="playerObject">The GameObject representing the player.</param>
-    /// <param name="nonLethal">Whether the death left no cocoon behind, so none is spun here either.</param>
-    private static IEnumerator PlayDeath(GameObject playerObject, bool nonLethal) {
-        // Get/create a death particle system
-        if (!CreateParticles(playerObject, out var particles)) {
-            yield break;
-        }
-
-        // Enable the system by turning on emission
-        var particleSystem = particles.GetComponent<ParticleSystem>();
-        var emission = particleSystem.emission;
-        emission.enabled = true;
-        
-        // Refresh particle system
-        particles.SetActive(false);
-        particles.SetActive(true);
-
-        // Disable leak particle emission after time, then spawn black particles
-        yield return new WaitForSeconds(4);
-        emission.enabled = false;
-
-        // A death that was not lethal leaves nothing behind to be opened, so the spinning of a cocoon over it would
-        // be telling the other player something that is not true - they would go looking for a cocoon that is not
-        // there, and for a player who is already back on their feet
-        if (nonLethal) {
-            yield break;
-        }
-
-        SpawnCocoonParticles(playerObject);
-    }
-
-    /// <summary>
-    /// Spawns the particle system that is created when a player hits their cocoon.
-    /// </summary>
-    /// <param name="playerObject">The player object to spawn the particles on</param>
-    private static void SpawnCocoonParticles(GameObject playerObject) {
-        // Get the cocoon prefab
-        var manager = GameManager.instance.GetSceneManager().GetComponent<CustomSceneManager>();
-        var localCocoon = manager.heroCorpsePrefab;
-
-        // Find the particle systems inside of it
-        var localCocoonParticles = localCocoon
-                                   .FindGameObjectInChildren("Core")?
-                                   .FindGameObjectInChildren("Pt Spider Fall");
-        if (localCocoonParticles == null) {
-            Logger.Info("No particles");
-            return;
-        }
-
-        // Spawn the particles
-        EffectUtils.SpawnGlobalPoolObject(localCocoonParticles, playerObject.transform, 10f);
-    }
-
-    /// <summary>
-    /// Attempts to locate and bind the 'Low Health Leak' GameObject to the specified player object.
-    /// </summary>
-    /// <param name="playerObject">The player's object.</param>
-    /// <param name="deathParticles">The player's 'Low Health Leak' object, or null if not found.</param>
-    /// <returns>true if the 'Low Health Leak' GameObject is successfully found and bound; otherwise, false.</returns>
-    private static bool CreateParticles(
-        GameObject playerObject, 
-        [MaybeNullWhen(false)] out GameObject deathParticles
-    ) {
-        // Find the reference object
-        // The hero of an earlier load is destroyed, which ??= takes for one that is still there, as it only checks
-        // for no object at all
-        if (_deathParticles == null && HeroController.UnsafeInstance is var hero && hero != null) {
-            _deathParticles = hero.gameObject.FindGameObjectInChildren(DeathParticleObjectName);
-        }
-
-        if (_deathParticles == null) {
-            Logger.Warn("Could not find local Bind Effects object in hero object");
-            deathParticles = null;
-            return false;
-        }
-
-        // Find the existing particles for the player object
-        deathParticles = playerObject.FindGameObjectInChildren(DeathParticleObjectName);
-
-        // If not found, make it!
-        if (deathParticles == null) {
-            deathParticles = HeroCopies.Make(_deathParticles, playerObject.transform);
-            deathParticles.transform.SetParentReset(playerObject.transform);
-            deathParticles.transform.SetLocalPositionZ(0.2f);
-            deathParticles.name = DeathParticleObjectName;
-            
-            // Add timer to turn off
-            var deactivator = deathParticles.AddComponent<DeactivateAfterDelay>();
-            deactivator.time = 4f;
-
-            // Ensure the particle system turns on automatically
-            var particleSystem = deathParticles.GetComponent<ParticleSystem>();
-            var main = particleSystem.main;
-            main.playOnAwake = true;
-        }
-
-        // Particles were found or created!
-        return true;
     }
 }
