@@ -64,6 +64,12 @@ internal partial class BossRoomCoop {
     private Hook? _regainControlHook;
 
     /// <summary>
+    /// Hook for leaving the animation of a local player alone that a creature starts over for the player whom another
+    /// game's challenge took (see ChallengeSpots).
+    /// </summary>
+    private Hook? _startControlToIdleHook;
+
+    /// <summary>
     /// Registers the hooks for boss rooms that wait for every player.
     /// </summary>
     private void RegisterWaitHooks() {
@@ -76,6 +82,12 @@ internal partial class BossRoomCoop {
                 typeof(HeroController).GetMethod("RegainControl", InstanceFlags, null, Type.EmptyTypes, null),
                 new Action<Action<HeroController>, HeroController>(OnRegainControl)
             );
+
+        // Starting it over without arguments goes through the overload with one
+        _startControlToIdleHook = CreateHook(
+            typeof(HeroAnimationController).GetMethod("StartControlToIdle", InstanceFlags, null, [typeof(bool)], null),
+            new Action<Action<HeroAnimationController, bool>, HeroAnimationController, bool>(OnStartControlToIdle)
+        );
     }
 
     /// <summary>
@@ -84,6 +96,9 @@ internal partial class BossRoomCoop {
     private void DeregisterWaitHooks() {
         _regainControlHook?.Dispose();
         _regainControlHook = null;
+
+        _startControlToIdleHook?.Dispose();
+        _startControlToIdleHook = null;
     }
 
     /// <summary>
@@ -98,6 +113,11 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        // Nor does the boss of a room whose challenge another player made give back what it never took here
+        if (IsGiveBackForTheChallenger(!self.controlReqlinquished && self.acceptingInput)) {
+            return;
+        }
+
         orig(self, allowInput);
         ForgetTakenControl();
     }
@@ -106,12 +126,29 @@ internal partial class BossRoomCoop {
     /// Notices when the game gives control back to the local player through the overload without arguments.
     /// </summary>
     private void OnRegainControl(Action<HeroController> orig, HeroController self) {
-        if (PlayerTargetRegistry.IsPlayerDown(self.gameObject)) {
+        if (PlayerTargetRegistry.IsPlayerDown(self.gameObject) ||
+            IsGiveBackForTheChallenger(!self.controlReqlinquished && self.acceptingInput)) {
             return;
         }
 
         orig(self);
         ForgetTakenControl();
+    }
+
+    /// <summary>
+    /// Leaves the animation of the local player's figure alone when the boss of a room whose challenge another player
+    /// made starts it over while the figure runs on its own, as it does for the player whom the challenge took.
+    /// </summary>
+    private void OnStartControlToIdle(
+        Action<HeroAnimationController, bool> orig,
+        HeroAnimationController self,
+        bool forcePlay
+    ) {
+        if (IsGiveBackForTheChallenger(self.controlEnabled && HeroController.instance is { controlReqlinquished: false })) {
+            return;
+        }
+
+        orig(self, forcePlay);
     }
 
     /// <summary>

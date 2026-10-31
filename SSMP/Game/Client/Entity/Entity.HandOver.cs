@@ -17,11 +17,17 @@ namespace SSMP.Game.Client.Entity;
 /// them, playing their part of the challenge, giving them back - is played here on the local player, who is the one
 /// it was talking to. Everywhere else such replays are kept off the local player (EntityFsmActions), because they were
 /// about the other game's player.
+///
+/// A challenge at the spot of a boss room hands the player over the same way: the room's own intro of the challenge
+/// holds them while it tells the boss to rise, and the boss gives them back once its fight begins (see
+/// BossRoomCoop.ChallengeSpots). The copy's boss gave back nobody, and the player who challenged stood frozen all
+/// through the fight until something hit them.
 /// </summary>
 internal partial class Entity {
     /// <summary>
     /// How long a creature that a talk handed the local player over to has to give them back, in seconds, before this
-    /// game does it itself. The knight's challenge takes about four.
+    /// game does it itself. The knight's challenge takes about four, a boss told to rise by the intro of a challenge
+    /// about six.
     /// </summary>
     private const float HandOverGiveBackTime = 15f;
 
@@ -29,6 +35,11 @@ internal partial class Entity {
     /// The creature that a talk handed the local player over to, or null.
     /// </summary>
     private static Entity? _handedOverTo;
+
+    /// <summary>
+    /// What handed the local player over, for the log.
+    /// </summary>
+    private static string _handedOverBy = "talk";
 
     /// <summary>
     /// When the local player was handed over, in unscaled seconds.
@@ -111,8 +122,10 @@ internal partial class Entity {
     /// </summary>
     /// <param name="npc">The character of the copy that the talk went through, which is done talking once the player
     /// is given back, or null for one that switches itself off.</param>
-    private void HandOverTheLocalPlayer(PlayMakerNPC? npc = null) {
+    /// <param name="by">What handed the player over, for the log.</param>
+    private void HandOverTheLocalPlayer(PlayMakerNPC? npc = null, string by = "talk") {
         _handedOverTo = this;
+        _handedOverBy = by;
         _handedOverSince = Time.unscaledTime;
         _handedOverNpc = npc;
         if (!_handOverWatched) {
@@ -120,7 +133,26 @@ internal partial class Entity {
             MonoBehaviourUtil.Instance.OnUpdateEvent += WatchHandOver;
         }
 
-        SSMP.Logging.Logger.Info($"The talk handed the local player over to the copy of entity {Id}");
+        SSMP.Logging.Logger.Info($"The {by} handed the local player over to the copy of entity {Id}");
+    }
+
+    /// <summary>
+    /// Hands the local player over to the creature that an object of the room told something while the local player's
+    /// own challenge holds them, like the intro of a challenge telling the boss to rise: what the creature then does to
+    /// "the player" is played on them, which gives them back once its fight begins, and they are given back here in time
+    /// if it never does (WatchHandOver). Each time it is told something, the time it has starts again. Nothing is done
+    /// in the game that runs the creature, whose own FSMs give the player back there.
+    /// </summary>
+    /// <param name="told">The object that was told: the creature's own object in the room, its copy, or a part of one
+    /// of them.</param>
+    /// <param name="by">What handed the player over, for the log.</param>
+    internal static void HandOverTheLocalPlayerTo(GameObject told, string by) {
+        if (FindByPart(told) is not { _isControlled: true } entity || entity.Object.Client == null ||
+            HeroController.instance is not { controlReqlinquished: true }) {
+            return;
+        }
+
+        entity.HandOverTheLocalPlayer(null, by);
     }
 
     /// <summary>
@@ -147,22 +179,33 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Ends a hand-over once the player has control again, and gives it back to them if the creature never did.
+    /// Ends a hand-over once the player has control again, and gives it back to them if the creature never did, or if
+    /// its copy went away while the scene stays, which gives back nobody. A scene that is changing takes and gives back
+    /// control itself.
     /// </summary>
     private static void WatchHandOver() {
         var hero = HeroController.instance;
-        var over = _handedOverTo == null || hero == null || !hero.controlReqlinquished ||
-                   _handedOverTo.Object.Client == null;
-        if (!over && Time.unscaledTime - _handedOverSince >= HandOverGiveBackTime) {
-            SSMP.Logging.Logger.Info(
-                $"The copy of entity {_handedOverTo!.Id} did not give the local player back within " +
-                $"{HandOverGiveBackTime:0}s of the talk that handed them over, so they are given back here"
-            );
-            try {
-                hero!.RegainControl();
-                hero.StartAnimationControl();
-            } catch (Exception e) {
-                SSMP.Logging.Logger.Warn($"Could not give the local player back after a talk: {e.Message}");
+        var copyGone = _handedOverTo == null || _handedOverTo.Object.Client == null;
+        var over = hero == null || !hero.controlReqlinquished;
+        if (!over && (copyGone || Time.unscaledTime - _handedOverSince >= HandOverGiveBackTime)) {
+            if (copyGone && global::GameManager.instance is { IsInSceneTransition: true }) {
+                SSMP.Logging.Logger.Info(
+                    $"The copy that the {_handedOverBy} handed the local player over to went away with the scene"
+                );
+            } else {
+                SSMP.Logging.Logger.Info(
+                    (copyGone
+                        ? $"The copy that the {_handedOverBy} handed the local player over to went away"
+                        : $"The copy of entity {_handedOverTo!.Id} did not give the local player back within " +
+                          $"{HandOverGiveBackTime:0}s of the {_handedOverBy} that handed them over") +
+                    ", so they are given back here"
+                );
+                try {
+                    hero!.RegainControl();
+                    hero.StartAnimationControl();
+                } catch (Exception e) {
+                    SSMP.Logging.Logger.Warn($"Could not give the local player back after a hand-over: {e.Message}");
+                }
             }
 
             over = true;

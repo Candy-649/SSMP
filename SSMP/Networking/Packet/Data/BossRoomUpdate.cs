@@ -235,5 +235,11 @@ internal enum BossRoomUpdateKind : byte {
     /// The end of the boss of a memory showed its words in a player's game, which a player who was not in the memory
     /// reads later. The other players hear about it in any scene.
     /// </summary>
-    HeartEndText
+    HeartEndText,
+
+    /// <summary>
+    /// A player's challenge told the object of the room that plays its intro something, which the other players in the
+    /// scene tell their own, with all that it told so far.
+    /// </summary>
+    ChallengeTold
 }

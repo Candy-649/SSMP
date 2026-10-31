@@ -517,6 +517,9 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.ChallengeUsed:
                 OnChallengeUsed(update);
                 break;
+            case BossRoomUpdateKind.ChallengeTold:
+                OnChallengeTold(update);
+                break;
         }
     }
 
@@ -585,7 +588,8 @@ internal partial class BossRoomCoop {
             (IsHoldActive()
                 ? TryHoldStoryStart(self, activeState, eventName) ||
                   TryHoldDialogueEnd(self, activeState, eventName) || TryHoldFightGate(self, activeState, eventName) ||
-                  TryHoldStart(self, activeState, eventName) || TryHoldEventStart(self, activeState, eventName)
+                  TryHoldStart(self, activeState, eventName) || TryHoldEventStart(self, activeState, eventName) ||
+                  TryHoldChallenge(self, activeState, eventName)
                 : _sharedDialogues.Count > 0 && TryHoldDialogueEnd(self, activeState, eventName))) {
             return;
         }
@@ -1003,6 +1007,7 @@ internal partial class BossRoomCoop {
             (CheckStartedRooms, nameof(CheckStartedRooms)),
             (() => ClosePendingGates(_stepFrom, _stepTo), nameof(ClosePendingGates)),
             (SwitchOffUsedChallengeSpots, nameof(SwitchOffUsedChallengeSpots)),
+            (DeliverToldChallenges, nameof(DeliverToldChallenges)),
             (ShowHeartRecords, nameof(ShowHeartRecords)),
             (ShowHeartEndTexts, nameof(ShowHeartEndTexts))
         ];

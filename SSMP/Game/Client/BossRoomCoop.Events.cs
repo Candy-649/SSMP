@@ -142,7 +142,13 @@ internal partial class BossRoomCoop {
         orig(self, eventTarget, fsmEvent);
 
         if (_networkSender != null || fsmEvent?.Name is not { } eventName || eventTarget == null ||
-            eventTarget.target == FsmEventTarget.EventTarget.Self || !IsFollower()) {
+            eventTarget.target == FsmEventTarget.EventTarget.Self || !_netClient.IsConnected) {
+            return;
+        }
+
+        // Some challenges are told to every game, and set the boss going in the scene host's (see ChallengeSpots)
+        NoteChallengeTell(self, eventTarget, eventName);
+        if (!IsFollower()) {
             return;
         }
 

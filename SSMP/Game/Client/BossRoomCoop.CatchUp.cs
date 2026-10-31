@@ -414,27 +414,47 @@ internal partial class BossRoomCoop {
             return false;
         }
 
-        var hero = heroController.col2d != null
-            ? Rect.MinMaxRect(
-                heroController.col2d.bounds.min.x,
-                heroController.col2d.bounds.min.y,
-                heroController.col2d.bounds.max.x,
-                heroController.col2d.bounds.max.y
-            )
-            : new Rect((Vector2) heroController.transform.position, Vector2.zero);
+        return IsOutsideGates(GetBody(heroController, heroController.transform.position), gates, point);
+    }
+
+    /// <summary>
+    /// Whether a figure that takes up the given space stands in one of the given gates, or on its side away from a point
+    /// inside of the room, or less than a margin inside of it. A gate only blocks the way at its own height, so one
+    /// above or below the figure doesn't count.
+    /// </summary>
+    private static bool IsOutsideGates(Rect body, List<Collider2D> gates, Vector2 inside, float margin = 0f) {
         foreach (var gate in gates) {
-            if (gate == null || GetWorldBounds(gate) is not { } bounds || hero.yMax < bounds.yMin ||
-                hero.yMin > bounds.yMax) {
+            if (gate == null || GetWorldBounds(gate) is not { } bounds || body.yMax < bounds.yMin ||
+                body.yMin > bounds.yMax) {
                 continue;
             }
 
-            if ((point.x > bounds.xMax && hero.xMin <= bounds.xMax) ||
-                (point.x < bounds.xMin && hero.xMax >= bounds.xMin)) {
+            if ((inside.x > bounds.xMax && body.xMin <= bounds.xMax + margin) ||
+                (inside.x < bounds.xMin && body.xMax >= bounds.xMin - margin)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Gets the space that a player's figure takes up at a position: that of the local player's collider, moved there,
+    /// as every player's figure is the same. Without a collider, the point itself.
+    /// </summary>
+    private static Rect GetBody(HeroController heroController, Vector2 position) {
+        if (heroController.col2d == null) {
+            return new Rect(position, Vector2.zero);
+        }
+
+        var bounds = heroController.col2d.bounds;
+        var offset = position - (Vector2) heroController.transform.position;
+        return Rect.MinMaxRect(
+            bounds.min.x + offset.x,
+            bounds.min.y + offset.y,
+            bounds.max.x + offset.x,
+            bounds.max.y + offset.y
+        );
     }
 
     /// <summary>
