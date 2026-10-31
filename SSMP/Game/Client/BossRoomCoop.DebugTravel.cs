@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using GlobalEnums;
 using SSMP.Networking.Packet.Data;
 using SSMP.Ui;
@@ -159,8 +160,12 @@ internal partial class BossRoomCoop {
     /// </summary>
     private void UpdateDebugTravel() {
         if (_debugTravelPlace != 0) {
+            LeaveStaleBench();
             if (Time.unscaledTime > _debugTravelUntil) {
-                Logger.Info($"Debug: the local player could not go to dream place {_debugTravelPlace} in time");
+                Logger.Info(
+                    $"Debug: the local player could not go to dream place {_debugTravelPlace} in time: " +
+                    DescribeWhyNotFree()
+                );
                 UiManager.InternalChatBox.AddMessage(Lang.Pick(
                     "Debug: you couldn't be sent, as you were busy. Type the command again.",
                     "调试：你一直在忙，没能传送过去，再输一次命令。"
@@ -197,6 +202,73 @@ internal partial class BossRoomCoop {
         }
 
         PlaceAtDream(HeroController.instance, door.transform);
+    }
+
+    /// <summary>
+    /// Gets the local player up from a bench that the game takes them to sit on while they move about. A save that /0
+    /// turned into the third act while its player sat on a bench kept them sitting there for good, as only getting up
+    /// from a bench clears it and the third act starts at none: the trips waited for them to get up, and the needolin
+    /// did nothing (USER 10-31: "/1失败了", "而且弹琴键点不了"). /0 gets them up now; this is for the saves it turned before.
+    /// </summary>
+    private static void LeaveStaleBench() {
+        var hero = HeroController.instance;
+        var playerData = PlayerData.instance;
+        if (hero == null || playerData is not { atBench: true } || !hero.acceptingInput || hero.controlReqlinquished) {
+            return;
+        }
+
+        playerData.atBench = false;
+        Logger.Info("Debug: the game took the local player to sit on a bench while they moved about; got them up from it");
+    }
+
+    /// <summary>
+    /// What keeps the local player from being free to go (see IsLocalHeroFree), for the log.
+    /// </summary>
+    private static string DescribeWhyNotFree() {
+        var hero = HeroController.instance;
+        if (hero == null) {
+            return "no hero";
+        }
+
+        var reasons = new List<string>();
+        if (!hero.acceptingInput) {
+            reasons.Add("not taking input");
+        }
+
+        if (hero.controlReqlinquished) {
+            reasons.Add("control taken");
+        }
+
+        if (hero.cState.dead) {
+            reasons.Add("dead");
+        }
+
+        if (PlayerTargetRegistry.IsPlayerDown(hero.gameObject)) {
+            reasons.Add("down");
+        }
+
+        var playerData = PlayerData.instance;
+        if (playerData == null) {
+            reasons.Add("no player data");
+        } else {
+            if (playerData.disablePause) {
+                reasons.Add("pausing switched off");
+            }
+
+            if (playerData.atBench) {
+                reasons.Add("on a bench");
+            }
+        }
+
+        if (IsDialogueRunning() == true) {
+            reasons.Add("in a talk");
+        }
+
+        if (global::GameManager.instance is { IsInSceneTransition: true }) {
+            reasons.Add("changing rooms");
+        }
+
+        return reasons.Count > 0 ? string.Join(", ", reasons) : "free";
     }
 
     /// <summary>

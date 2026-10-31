@@ -118,6 +118,11 @@ internal class DebugThirdActCommand : IClientCommand, ICommandWithDescription {
         gameManager.StartBlackThreadWorld();
         playerData.CompletedEndings |= ThirdActEnding;
         playerData.LastCompletedEnding = ThirdActEnding;
+
+        // The third act starts at no bench (GameManager.StartAct3), and only getting up from one clears this: a save
+        // turned while sitting on a bench was taken by the game to sit for good there, with no needolin, and the debug
+        // trips to the dreams waited for the player to get up (USER 10-31: "/1失败了", "而且弹琴键点不了")
+        playerData.atBench = false;
         Logger.Info("Debug: turned the save into the third act the way the game's ending does; saving and going to the menu");
         Chat(Lang.Pick(
             "Debug: the save is in the third act now. Saving and going back to the main menu: load this save again, " +

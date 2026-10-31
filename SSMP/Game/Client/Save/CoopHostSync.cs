@@ -293,6 +293,12 @@ internal static class CoopHostSync {
     private const string FirstCrest = "Hunter";
 
     /// <summary>
+    /// The kind of the place where a save wakes that is a bench (PlayerData.respawnType): 0 is a marker of a room,
+    /// which is where the game has a save wake at the start of the last act (GameManager.StartAct3).
+    /// </summary>
+    private const int BenchRespawn = 1;
+
+    /// <summary>
     /// Flags of arrivals that each player sees for themselves (CoopSave.Arrivals): one the host had first is still
     /// the joining player's to see.
     /// </summary>
@@ -394,6 +400,7 @@ internal static class CoopHostSync {
             FindAhead(_host, _client, _report);
 
             MergeFields();
+            LeaveBench();
             var takenByHost = MergeWorld();
             MergeQuests();
             MergeJournal();
@@ -456,6 +463,23 @@ internal static class CoopHostSync {
 
         private IEnumerable<string> List(string merge) {
             return _data.Fields.TryGetValue(merge, out var names) ? names : [];
+        }
+
+        /// <summary>
+        /// Gets the joining player up from the bench their save was written on, when they wake where the host's save
+        /// wakes and that is no bench. The merge takes the place where the host's save wakes (respawnScene,
+        /// respawnMarkerName, respawnType), and only getting up from a bench clears atBench, so a player who saved on a
+        /// bench and woke where the host's save did at the start of the last act was taken by the game to sit for good:
+        /// the needolin did nothing, and nothing that waits for a player free to move went ahead (USER 10-31, trying
+        /// the dreams: "/1失败了", "而且弹琴键点不了").
+        /// </summary>
+        private void LeaveBench() {
+            if (Int(_merged, "respawnType") == BenchRespawn || !Bool(_merged, "atBench")) {
+                return;
+            }
+
+            _merged["atBench"] = false;
+            _report.HostFields++;
         }
 
         /// <summary>
