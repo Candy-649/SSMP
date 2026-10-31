@@ -1799,7 +1799,8 @@ internal abstract class ServerManager : IServerManager {
         update.PlayerId = id;
 
         if (update.Kind is BossRoomUpdateKind.Waiting or BossRoomUpdateKind.WaitingAtStory or
-            BossRoomUpdateKind.StartedStory or BossRoomUpdateKind.LeftStory or BossRoomUpdateKind.HeartEndRecord) {
+            BossRoomUpdateKind.StartedStory or BossRoomUpdateKind.LeftStory or BossRoomUpdateKind.HeartEndRecord or
+            BossRoomUpdateKind.HeartEndText) {
             foreach (var otherId in _playerData.Keys) {
                 if (otherId != id) {
                     _netServer.GetUpdateManagerForClient(otherId)?.AddBossRoomUpdateData(update);

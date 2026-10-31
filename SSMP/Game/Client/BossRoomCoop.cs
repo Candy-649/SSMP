@@ -474,6 +474,11 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        if (update.Kind == BossRoomUpdateKind.HeartEndText) {
+            OnHeartEndText(update);
+            return;
+        }
+
         if (SceneManager.GetActiveScene().name != update.SceneName) {
             return;
         }
@@ -760,6 +765,7 @@ internal partial class BossRoomCoop {
         if (toState != null && _netClient.IsConnected) {
             MarkFightBegan(self, toState.Name);
             NoteChallengeSpotUse(self);
+            NoteHeartEndState(self, toState);
         }
 
         TellSceneHostRoomStarted(self, fromState, toState);
@@ -997,7 +1003,8 @@ internal partial class BossRoomCoop {
             (CheckStartedRooms, nameof(CheckStartedRooms)),
             (() => ClosePendingGates(_stepFrom, _stepTo), nameof(ClosePendingGates)),
             (SwitchOffUsedChallengeSpots, nameof(SwitchOffUsedChallengeSpots)),
-            (ShowHeartRecords, nameof(ShowHeartRecords))
+            (ShowHeartRecords, nameof(ShowHeartRecords)),
+            (ShowHeartEndTexts, nameof(ShowHeartEndTexts))
         ];
 
         if (IsHoldActive()) {

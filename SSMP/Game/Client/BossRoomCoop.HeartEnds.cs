@@ -49,10 +49,191 @@ internal partial class BossRoomCoop {
         typeof(TestGameObjectActivator).GetField("playerDataTest", InstanceFlags);
 
     /// <summary>
+    /// The variable of the end of a memory that names the room it sends the player back to.
+    /// </summary>
+    private const string ReturnSceneVariableName = "Return Scene";
+
+    /// <summary>
+    /// Which templates of RunFSM actions are the end of the boss of a memory.
+    /// </summary>
+    private static readonly Dictionary<FsmTemplate, bool> HeartEndTemplates = new();
+
+    /// <summary>
+    /// The FSM that the action running a template runs.
+    /// </summary>
+    private static readonly FieldInfo? RunFsmField = typeof(RunFSMAction).GetField("runFsm", InstanceFlags);
+
+    /// <summary>
     /// The records from the ends of other players' memories whose objects in the loaded rooms are still to be looked at
     /// again, once the local player is free to move.
     /// </summary>
     private readonly HashSet<string> _heartRecordsToShow = [];
+
+    /// <summary>
+    /// The FSMs of the ends of memories that run in this game, until they show their words, which go to the other
+    /// players.
+    /// </summary>
+    private readonly HashSet<Fsm> _heartEndRuns = [];
+
+    /// <summary>
+    /// The memories whose end another player's game played while the local player was not in them, and which gave the
+    /// local player a record they did not have: the words of such an end are shown to them too.
+    /// </summary>
+    private readonly HashSet<string> _missedHeartEnds = [];
+
+    /// <summary>
+    /// The words of the ends of memories that the local player missed, still to be shown once they are free to move.
+    /// </summary>
+    private readonly Queue<BossRoomUpdate> _heartEndTexts = new();
+
+    /// <summary>
+    /// Whether the local player rested on a bench since the words of a missed end came.
+    /// </summary>
+    private bool _restedSinceHeartEndText;
+
+    /// <summary>
+    /// Notes the end of the boss of a memory that this game plays, and tells the other players its words once it shows
+    /// them, so that one who was not in the memory reads them too.
+    /// </summary>
+    private void NoteHeartEndState(Fsm fsm, FsmState state) {
+        if (PlaysHeartEnd(state)) {
+            var scene = SceneManager.GetActiveScene().name;
+            Logger.Info($"'{GetPath(fsm)}' plays the end of the boss of the memory '{scene}' in this game");
+            foreach (var action in state.Actions ?? []) {
+                if (action is RunFSM run && RunFsmField?.GetValue(run) is Fsm runFsm) {
+                    _heartEndRuns.Add(runFsm);
+                }
+            }
+
+            // The local player sees this end themselves
+            var wasMissed = _missedHeartEnds.Remove(scene);
+            if (wasMissed || _heartEndTexts.Any(words => words.SceneName == scene)) {
+                Logger.Info($"The local player sees the end of '{scene}' themselves, so its words aren't shown again");
+                var others = _heartEndTexts.Where(words => words.SceneName != scene).ToList();
+                _heartEndTexts.Clear();
+                others.ForEach(_heartEndTexts.Enqueue);
+            }
+
+            return;
+        }
+
+        if (_heartEndRuns.Count == 0 || !_heartEndRuns.Contains(fsm)) {
+            return;
+        }
+
+        foreach (var action in state.Actions ?? []) {
+            if (action is not RunDialogueBase dialogue) {
+                continue;
+            }
+
+            _heartEndRuns.Remove(fsm);
+            if (!_isFullSynchronisation()) {
+                return;
+            }
+
+            // An exception here would leave PlayMaker's stack of running FSMs out of step for the rest of the frame
+            try {
+                var update = CreateDialogueUpdate(fsm, state.Name, dialogue);
+                update.Kind = BossRoomUpdateKind.HeartEndText;
+                update.SceneName = SceneManager.GetActiveScene().name;
+                update.EventName = fsm.Variables.FindFsmString(ReturnSceneVariableName)?.Value ?? "";
+                Logger.Info(
+                    "Telling every other player the words of the end of the boss of a memory " +
+                    $"('{update.DialogueSheet}', '{update.DialogueKey}', back to '{update.EventName}')"
+                );
+                _netClient.UpdateManager.SetBossRoomUpdate(update);
+            } catch (Exception e) {
+                Logger.Warn($"Could not tell the other players the words of the end of a memory:\n{e}");
+            }
+
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Keeps the words of the end of a memory that another player's game played, for a local player who missed it, to
+    /// show them once they are free to move.
+    /// </summary>
+    private void OnHeartEndText(BossRoomUpdate update) {
+        if (!_missedHeartEnds.Remove(update.SceneName)) {
+            Logger.Info(
+                $"Not showing the words of the end of the memory '{update.SceneName}': the local player was in it, or " +
+                "had its records before"
+            );
+            return;
+        }
+
+        Logger.Info($"Keeping the words of the end of the memory '{update.SceneName}' to show to the local player");
+        _heartEndTexts.Enqueue(update);
+        ShowHeartEndTexts();
+    }
+
+    /// <summary>
+    /// Shows the words of the ends of memories that the local player missed, the way dialogue that another player
+    /// shares is shown. Reading takes control from them, which a creature's hit would take back, so the words wait for a
+    /// calm place: the room the memory sends its players back to, where a player who died in it stands, or wherever
+    /// the local player is free to move once they rested on a bench.
+    /// </summary>
+    private void ShowHeartEndTexts() {
+        if (_heartEndTexts.Count == 0) {
+            return;
+        }
+
+        if (!_restedSinceHeartEndText && PlayerData.instance is { atBench: true }) {
+            Logger.Info("The local player rests on a bench, so the words of a missed memory's end show once they get up");
+            _restedSinceHeartEndText = true;
+        }
+
+        // Only into an empty queue of shared dialogue, which a change of scene empties: words still waiting here are kept
+        if (_shownDialogue != null || _dialogueQueue.Count > 0 || !IsLocalHeroFree()) {
+            return;
+        }
+
+        var scene = SceneManager.GetActiveScene().name;
+        var due = _heartEndTexts
+            .Where(words => words.SceneName != scene && (_restedSinceHeartEndText || words.EventName == scene))
+            .ToList();
+        if (due.Count == 0) {
+            return;
+        }
+
+        var kept = _heartEndTexts.Where(words => !due.Contains(words)).ToList();
+        _heartEndTexts.Clear();
+        kept.ForEach(_heartEndTexts.Enqueue);
+        _restedSinceHeartEndText = false;
+
+        foreach (var words in due) {
+            Logger.Info($"Showing the words of the end of the memory '{words.SceneName}' to the local player");
+
+            // As dialogue of no object of this room: reading it answers nobody. In a box of its own, as it shows over the
+            // room rather than over the black screen of the end
+            _dialogueQueue.Enqueue(new BossRoomUpdate {
+                SceneName = scene,
+                Kind = BossRoomUpdateKind.DialogueStarted,
+                Path = "",
+                FsmName = "",
+                FromState = HeartEndTemplateName + "\n" + words.SceneName + "\n" + words.DialogueKey,
+                DialogueSheet = words.DialogueSheet,
+                DialogueKey = words.DialogueKey,
+                DialogueText = words.DialogueText,
+                HideDecorators = false,
+                TextAlignment = -1,
+                OffsetY = 0f
+            });
+        }
+
+        ShowNextDialogue();
+    }
+
+    /// <summary>
+    /// Forgets the ends of memories that the local player missed, on going back to the main menu: they belong to the
+    /// save that was being played.
+    /// </summary>
+    private void ClearMissedHeartEnds() {
+        _missedHeartEnds.Clear();
+        _heartEndTexts.Clear();
+        _restedSinceHeartEndText = false;
+    }
 
     /// <summary>
     /// Shares a write of the end of the boss of a memory with every other player, wherever they are. A write whose value
@@ -99,6 +280,14 @@ internal partial class BossRoomCoop {
             $"Another player shared '{name}' of the end of the boss of a memory in '{update.SceneName}'" +
             (source.Length > 0 ? $", which goes by the local player's own '{source}'" : "")
         );
+
+        // A player for whom its boss was not beaten yet misses its end, unless their own game plays it too, which takes
+        // the mark away: one dying in the memory as it ends never sees it, though they are still in its scene
+        var isInMemory = SceneManager.GetActiveScene().name == update.SceneName;
+        if (source.Length == 0 && !playerData.GetBool(name) && _missedHeartEnds.Add(update.SceneName)) {
+            Logger.Info($"The local player had not seen the end of '{update.SceneName}' before, so its words are kept");
+        }
+
         _applyingRecord = true;
         try {
             playerData.SetBool(name, true);
@@ -107,7 +296,7 @@ internal partial class BossRoomCoop {
         }
 
         // A player in the same memory plays its end in their own game
-        if (SceneManager.GetActiveScene().name != update.SceneName) {
+        if (!isInMemory) {
             _heartRecordsToShow.Add(name);
             ShowHeartRecords();
         }
@@ -160,10 +349,12 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Forgets the records still to be shown, as the next room shows them by itself when it loads.
+    /// Forgets the records still to be shown, as the next room shows them by itself when it loads, and the ends of the
+    /// room left behind. The words of missed ends are kept: they are shown wherever the player goes.
     /// </summary>
     private void ClearHeartRecords() {
         _heartRecordsToShow.Clear();
+        _heartEndRuns.Clear();
     }
 
     /// <summary>
@@ -186,8 +377,16 @@ internal partial class BossRoomCoop {
     /// </summary>
     private static bool PlaysHeartEnd(FsmState state) {
         foreach (var action in state.Actions ?? []) {
-            if (action is RunFSM { fsmTemplateControl.fsmTemplate: { } template } &&
-                template.name == HeartEndTemplateName) {
+            if (action is not RunFSM { fsmTemplateControl.fsmTemplate: { } template }) {
+                continue;
+            }
+
+            // Asked on every change of state, and the name of an asset is a new string each time it is read
+            if (!HeartEndTemplates.TryGetValue(template, out var isHeartEnd)) {
+                HeartEndTemplates[template] = isHeartEnd = template.name == HeartEndTemplateName;
+            }
+
+            if (isHeartEnd) {
                 return true;
             }
         }

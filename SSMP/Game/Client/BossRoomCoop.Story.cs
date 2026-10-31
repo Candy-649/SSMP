@@ -604,6 +604,7 @@ internal partial class BossRoomCoop {
         _storyWaits.Clear();
         _storyStarts.Clear();
         _storyReportNumbers.Clear();
+        ClearMissedHeartEnds();
     }
 
     /// <summary>

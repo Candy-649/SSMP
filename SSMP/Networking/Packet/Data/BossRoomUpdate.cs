@@ -229,5 +229,11 @@ internal enum BossRoomUpdateKind : byte {
     /// The end of the boss of a memory wrote a record in a player's game, which the other players write too. They hear
     /// about it in any scene.
     /// </summary>
-    HeartEndRecord
+    HeartEndRecord,
+
+    /// <summary>
+    /// The end of the boss of a memory showed its words in a player's game, which a player who was not in the memory
+    /// reads later. The other players hear about it in any scene.
+    /// </summary>
+    HeartEndText
 }
