@@ -665,12 +665,6 @@ internal class ClientManager : IClientManager {
         _commandManager.RegisterCommand(new MemoryCommand());
         _commandManager.RegisterCommand(new CoopSaveCommand(_coopSave));
         _commandManager.RegisterCommand(new CopyCommand(_coopSave));
-
-        // TEMPORARY debug commands for trying the late dreams, to be taken out again once they are tried
-        _commandManager.RegisterCommand(new DebugThirdActCommand(_uiManager, _netClient));
-        for (var place = 1; place <= 3; place++) {
-            _commandManager.RegisterCommand(new DebugDreamCommand(_bossRoomCoop, place));
-        }
     }
 
     /// <summary>
