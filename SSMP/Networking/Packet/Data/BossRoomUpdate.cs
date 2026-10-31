@@ -218,5 +218,10 @@ internal enum BossRoomUpdateKind : byte {
     /// A player stopped waiting at a story scene that the game sets in several rooms without it starting, for example
     /// because they left its room. The other players hear about it in any scene.
     /// </summary>
-    LeftStory
+    LeftStory,
+
+    /// <summary>
+    /// A player used the challenge spot of a boss room, which the other players in the scene switch off.
+    /// </summary>
+    ChallengeUsed
 }

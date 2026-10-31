@@ -502,6 +502,9 @@ internal partial class BossRoomCoop {
             case BossRoomUpdateKind.BossEvents:
                 OnBossEvents(update);
                 break;
+            case BossRoomUpdateKind.ChallengeUsed:
+                OnChallengeUsed(update);
+                break;
         }
     }
 
@@ -525,6 +528,7 @@ internal partial class BossRoomCoop {
         }
 
         TellBossEventsToNewPlayer();
+        TellUsedChallengeSpotsToNewPlayer();
         ShareDialoguesWithNewPlayers();
     }
 
@@ -748,6 +752,7 @@ internal partial class BossRoomCoop {
         // A boss fight that began doesn't wait for players anymore
         if (toState != null && _netClient.IsConnected) {
             MarkFightBegan(self, toState.Name);
+            NoteChallengeSpotUse(self);
         }
 
         TellSceneHostRoomStarted(self, fromState, toState);
@@ -983,7 +988,8 @@ internal partial class BossRoomCoop {
             (UpdateCatchUps, nameof(UpdateCatchUps)),
             (UpdateRoomWaits, nameof(UpdateRoomWaits)),
             (CheckStartedRooms, nameof(CheckStartedRooms)),
-            (() => ClosePendingGates(_stepFrom, _stepTo), nameof(ClosePendingGates))
+            (() => ClosePendingGates(_stepFrom, _stepTo), nameof(ClosePendingGates)),
+            (SwitchOffUsedChallengeSpots, nameof(SwitchOffUsedChallengeSpots))
         ];
 
         if (IsHoldActive()) {
@@ -1937,6 +1943,7 @@ internal partial class BossRoomCoop {
         ClearDialogues();
         ClearEventStarts();
         ClearCatchUps();
+        ClearChallengeSpots();
         _lastHeroPosition = null;
         _sceneScanned = false;
         _madeFsms.Clear();
