@@ -52,12 +52,20 @@ internal class ThrownTool : BaseAttackTool {
                 case ToolMessageKind.Break:
                     var how = reader.ReadByte();
                     if (Copies.TryGetValue(key, out var broken) && broken != null) {
+                        Logger.Info(
+                            $"[Tools] The copy of the partner's '{broken.PrefabName}' ({key.Item2}) breaks ({how}) as " +
+                            "the partner's did"
+                        );
                         ToolCopyRules.GetState(broken.PrefabName)?.Break(broken.gameObject, how);
                     }
 
                     break;
                 case ToolMessageKind.End:
                     if (Copies.TryGetValue(key, out var copy) && copy != null) {
+                        Logger.Info(
+                            $"[Tools] The copy of the partner's '{copy.PrefabName}' ({key.Item2}) goes, as the " +
+                            "partner's is gone"
+                        );
                         Object.Destroy(copy.gameObject);
                     }
 
@@ -146,6 +154,39 @@ internal class ThrownTool : BaseAttackTool {
         }
 
         Copies[key] = marker;
+        var place = copy.transform.position;
+        Logger.Info(
+            $"[Tools] The copy of the partner's '{spawn.PrefabName}' ({key.Item2}) comes out at ({place.x:0.00}, " +
+            $"{place.y:0.00}, z {place.z:0.000}), scale ({spawn.Scale.x:0.00}, {spawn.Scale.y:0.00}), turned " +
+            $"{spawn.Snapshot.Rotation:0}, poisoned: {spawn.Poisoned}; {DescribePictures(copy)}"
+        );
+    }
+
+    /// <summary>
+    /// What each picture of a copy of a partner's thing is drawn from: the frame, its sheet, and the texture and shader
+    /// of its material. A picture drawn from the wrong sheet or texture is a broken look, and nothing else can tell
+    /// afterwards which it was (USER 10-31: "这个渲染问题实际上是道具刺团上出现的").
+    /// </summary>
+    internal static string DescribePictures(GameObject copy) {
+        var parts = new List<string>();
+        foreach (var sprite in copy.GetComponentsInChildren<tk2dBaseSprite>(true)) {
+            try {
+                var material = sprite.TryGetComponent<Renderer>(out var renderer) ? renderer.sharedMaterial : null;
+                var texture = material != null ? material.mainTexture : null;
+                var sheet = sprite.Collection;
+                parts.Add(
+                    $"'{(sprite.gameObject == copy ? "itself" : sprite.name)}' shows " +
+                    $"'{sprite.CurrentSprite?.name ?? "nothing"}' of '{(sheet != null ? sheet.name : "no sheet")}' on " +
+                    (texture != null ? $"'{texture.name}' {texture.width}x{texture.height}" : "no texture") +
+                    $" with '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
+                    (sprite.gameObject.activeInHierarchy ? "" : " (off)")
+                );
+            } catch (Exception e) {
+                parts.Add($"'{sprite.name}' could not be read ({e.GetType().Name})");
+            }
+        }
+
+        return parts.Count == 0 ? "no pictures" : string.Join("; ", parts);
     }
 
     /// <summary>
@@ -188,6 +229,12 @@ internal class ThrownTool : BaseAttackTool {
         snapshot.ApplyTo(copy.gameObject);
         fsm.Fsm.SetState(state);
         snapshot.ApplyTo(copy.gameObject);
+
+        var place = copy.transform.position;
+        Logger.Info(
+            $"[Tools] The copy of the partner's '{copy.PrefabName}' ({key.Item2}) goes to '{state}' of " +
+            $"'{fsm.FsmName}' as the partner's did, at ({place.x:0.00}, {place.y:0.00})"
+        );
     }
 
     /// <summary>

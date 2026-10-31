@@ -845,6 +845,12 @@ internal static class ToolCopies {
                 var poisoned = copy!.Poisoned;
                 spawned.AddComponentIfNotPresent<RemoteToolCopy>().Poisoned = poisoned;
                 PrepareCopy(spawned, poisoned);
+                var place = spawned.transform.position;
+                Logger.Info(
+                    $"[Tools] The copy of the partner's '{copy.PrefabName}' lets out its own '{prefab!.name}' at " +
+                    $"({place.x:0.00}, {place.y:0.00}, z {place.z:0.000}), turned " +
+                    $"{spawned.transform.eulerAngles.z:0}; {ThrownTool.DescribePictures(spawned)}"
+                );
             } else if (owner != null) {
                 // Only something that can be touched can be set off; a sound or a puff of dust is left unmarked
                 if (spawned.GetComponentInChildren<Collider2D>(true) != null && IsLocalToolSpawner(owner)) {
