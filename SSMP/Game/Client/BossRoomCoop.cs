@@ -467,6 +467,13 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        // What the end of the boss of a memory wrote is written wherever the player is: one who died in the memory is
+        // out of it, and never sees its end
+        if (update.Kind == BossRoomUpdateKind.HeartEndRecord) {
+            OnHeartEndRecord(update);
+            return;
+        }
+
         if (SceneManager.GetActiveScene().name != update.SceneName) {
             return;
         }
@@ -817,7 +824,7 @@ internal partial class BossRoomCoop {
     /// get that progress otherwise.
     /// </summary>
     private void ShareRecord(string name, Fsm? fsm) {
-        if (fsm == null || !IsCoopActive()) {
+        if (fsm == null || TryShareHeartEnd(name, fsm) || !IsCoopActive()) {
             return;
         }
 
@@ -989,7 +996,8 @@ internal partial class BossRoomCoop {
             (UpdateRoomWaits, nameof(UpdateRoomWaits)),
             (CheckStartedRooms, nameof(CheckStartedRooms)),
             (() => ClosePendingGates(_stepFrom, _stepTo), nameof(ClosePendingGates)),
-            (SwitchOffUsedChallengeSpots, nameof(SwitchOffUsedChallengeSpots))
+            (SwitchOffUsedChallengeSpots, nameof(SwitchOffUsedChallengeSpots)),
+            (ShowHeartRecords, nameof(ShowHeartRecords))
         ];
 
         if (IsHoldActive()) {
@@ -1944,6 +1952,7 @@ internal partial class BossRoomCoop {
         ClearEventStarts();
         ClearCatchUps();
         ClearChallengeSpots();
+        ClearHeartRecords();
         _lastHeroPosition = null;
         _sceneScanned = false;
         _madeFsms.Clear();

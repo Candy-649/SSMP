@@ -223,5 +223,11 @@ internal enum BossRoomUpdateKind : byte {
     /// <summary>
     /// A player used the challenge spot of a boss room, which the other players in the scene switch off.
     /// </summary>
-    ChallengeUsed
+    ChallengeUsed,
+
+    /// <summary>
+    /// The end of the boss of a memory wrote a record in a player's game, which the other players write too. They hear
+    /// about it in any scene.
+    /// </summary>
+    HeartEndRecord
 }
