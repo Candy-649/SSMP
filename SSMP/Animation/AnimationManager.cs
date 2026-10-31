@@ -728,10 +728,8 @@ internal class AnimationManager {
         { AnimationClip.ToolTacks, new Tacks() },
         { AnimationClip.ToolThrown, new ThrownTool() },
 
-        // Parts of the hero that the game switches on and off, what they play and start, and what the hero says as it
-        // taunts
+        // Parts of the hero that the game switches on and off, and what they play and start
         { AnimationClip.HeroChildEffect, HeroChildEffects.Instance },
-        { AnimationClip.TauntVoice, new TauntVoice() },
         { AnimationClip.HeroPartClip, HeroPartClips.Instance },
         { AnimationClip.HeroChildParticle, HeroChildParticles.Instance },
 
@@ -915,6 +913,7 @@ internal class AnimationManager {
         ToolCopies.Install();
         ToolCopies.MessageReady += OnToolMessage;
         MonoBehaviourUtil.Instance.OnUpdateEvent += ToolCopies.Tick;
+        MonoBehaviourUtil.Instance.OnUpdateEvent += PartsByClips.Tick;
     }
 
     /// <summary>
@@ -934,6 +933,7 @@ internal class AnimationManager {
         ToolItemManager.BoundAttackToolUsed -= AttackToolUsed;
         ToolCopies.MessageReady -= OnToolMessage;
         MonoBehaviourUtil.Instance.OnUpdateEvent -= ToolCopies.Tick;
+        MonoBehaviourUtil.Instance.OnUpdateEvent -= PartsByClips.Tick;
 
         // Remove listener for benching
         var eventRegister = HeroController.SilentInstance?.gameObject.GetComponents<EventRegister>().FirstOrDefault(r => r.SubscribedEvent == "BENCHREST START");
@@ -1004,8 +1004,17 @@ internal class AnimationManager {
     /// <param name="frame">The frame that the animation should play from.</param>
     /// <param name="crestType">The type of crest the player is using.</param>
     /// <param name="startTime">How far into the clip to start it, in seconds, or 0 to start it at the frame.</param>
+    /// <param name="alreadyGoing">Whether the player has been in the clip for a while, as for a player who comes into
+    /// the room: what comes once as the clip starts, like a burst or the voice of a taunt, is not shown then.</param>
     /// <returns>Whether a clip was started on the player's figure.</returns>
-    public bool UpdatePlayerAnimation(ushort id, int clipId, int frame, CrestType crestType, float startTime = 0f) {
+    public bool UpdatePlayerAnimation(
+        ushort id,
+        int clipId,
+        int frame,
+        CrestType crestType,
+        float startTime = 0f,
+        bool alreadyGoing = false
+    ) {
         var playerObject = _playerManager.GetPlayerObject(id);
         if (!playerObject) {
             return false;
@@ -1094,6 +1103,9 @@ internal class AnimationManager {
             return false;
         }
 
+        // How late the clip is for what comes with it, before the clip's own start is kept within its length below
+        var lateBy = alreadyGoing ? float.PositiveInfinity : startTime;
+
         if (_debugLogAnimations) Logger.Info($"  playing clip: {clipName}");
         if (startTime <= 0f) {
             spriteAnimator.PlayFromFrame(clip, frame);
@@ -1107,8 +1119,10 @@ internal class AnimationManager {
             spriteAnimator.Play(clip, startTime, 0f);
         }
 
-        // The needles of a super jump come out and go by what the character starts (see SuperJumpNeedles)
-        SuperJumpNeedles.OnCharacterClip(playerObject!, id, clipName);
+        // The parts of the hero that come with the moves of the character come out and go by what it starts, and its
+        // taunts say their voice (see PartsByClips)
+        PartsByClips.OnCharacterClip(playerObject!, id, clipName, clip, crestType, lateBy);
+        TauntVoice.OnCharacterClip(playerObject!, id, clipName, crestType, lateBy);
         return true;
     }
 
@@ -1423,11 +1437,6 @@ internal class AnimationManager {
         HeroHarpoon.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHarpoon, effectInfo));
         HeroHit.Watch(hc, effectInfo => SendSubAnimation(AnimationClip.HeroHit, effectInfo));
         BeamShot.Watch(hc, OnToolMessage);
-        if (hc.silkSpecialFSM != null) {
-            TauntVoice.Hook(hc.silkSpecialFSM, effectInfo => SendSubAnimation(AnimationClip.TauntVoice, effectInfo));
-        } else {
-            Logger.Warn("Unable to find Silk Skill FSM to hook the taunt.");
-        }
 
         // Find bind FSM
         var heroFsms = hc.GetComponents<PlayMakerFSM>();

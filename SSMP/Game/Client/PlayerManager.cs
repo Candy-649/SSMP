@@ -621,7 +621,7 @@ internal class PlayerManager : IPlayerManager {
                 LetGoOfGoneRoomCopies(child.gameObject, copies);
             }
             HeroChildEffects.ResetCopies(child.gameObject);
-            SuperJumpNeedles.Reset(child.gameObject);
+            PartsByClips.Reset(child.gameObject);
             HeroChildParticles.ResetCopies(child.gameObject);
             HeroDust.Reset(child.gameObject);
             HeroHarpoon.Reset(child.gameObject);

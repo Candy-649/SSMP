@@ -798,6 +798,9 @@ internal enum AnimationClip {
     BindInterrupt,
     Bench,
     HeroChildEffect,
+
+    // The voice of a taunt, which goes by the clips of the taunt now (see TauntVoice) and is no longer sent; kept, so
+    // that the IDs after it stay the same
     TauntVoice,
 
     // A message about a thing that a tool threw or spawned, with what happened to it in the effect info

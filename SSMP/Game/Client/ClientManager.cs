@@ -1640,7 +1640,13 @@ internal class ClientManager : IClientManager {
             enterSceneData.Position,
             enterSceneData.Scale
         );
-        _animationManager.UpdatePlayerAnimation(id, enterSceneData.AnimationClipId, 0, playerData.CrestType);
+        _animationManager.UpdatePlayerAnimation(
+            id,
+            enterSceneData.AnimationClipId,
+            0,
+            playerData.CrestType,
+            alreadyGoing: true
+        );
         _animationManager.OnPlayerEnterScene(id);
 
         // Whether the game hides them or shows them by a figure of the room is heard only after they come in, and the

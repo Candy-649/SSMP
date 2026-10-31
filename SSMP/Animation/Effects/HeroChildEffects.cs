@@ -129,10 +129,10 @@ internal class HeroChildEffects : AnimationEffect {
     private static readonly byte[] LocalMask = new byte[MaskLength];
 
     /// <summary>
-    /// Which places in <see cref="Paths"/> hold parts that go by the clips of the character instead, the needles of a
-    /// super jump (see <see cref="SuperJumpNeedles"/>): they are neither watched nor sent, and the changes of the other
-    /// parts leave their copies be. Their places stay, so that their copies go with the rest as a character leaves the
-    /// room.
+    /// Which places in <see cref="Paths"/> hold parts that go by the clips of the character instead, like the needles
+    /// and threads of a super jump (see <see cref="PartsByClips"/>): they are neither watched nor sent, and the changes
+    /// of the other parts leave their copies be. Their places stay, so that their copies go with the rest as a
+    /// character leaves the room.
     /// </summary>
     private static readonly bool[] ByCharacterClips = MarkByCharacterClips();
 
@@ -142,7 +142,7 @@ internal class HeroChildEffects : AnimationEffect {
     private static bool[] MarkByCharacterClips() {
         var marks = new bool[Paths.Length];
         for (var i = 0; i < Paths.Length; i++) {
-            marks[i] = Array.IndexOf(SuperJumpNeedles.Paths, Paths[i]) >= 0;
+            marks[i] = Array.IndexOf(PartsByClips.Paths, Paths[i]) >= 0;
         }
 
         return marks;
@@ -297,7 +297,7 @@ internal class HeroChildEffects : AnimationEffect {
     /// <summary>
     /// Switches a copied part on from its start, the way the game switches its own part on.
     /// </summary>
-    private static void Restart(GameObject part) {
+    internal static void Restart(GameObject part) {
         part.SetActive(false);
         part.SetActive(true);
 
@@ -311,7 +311,7 @@ internal class HeroChildEffects : AnimationEffect {
     /// <summary>
     /// Whether a part switches itself off when it is done, rather than being switched off by the game.
     /// </summary>
-    private static bool EndsByItself(GameObject part) {
+    internal static bool EndsByItself(GameObject part) {
         return part.GetComponent<DeactivateAfter2dtkAnimation>() ||
                part.GetComponent<DeactivateAfterDelay>() ||
                part.GetComponent<DisableAfterTime>() ||

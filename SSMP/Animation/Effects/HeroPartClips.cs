@@ -33,7 +33,7 @@ internal class HeroPartClips : AnimationEffect {
 
         // What the hero's FSMs play on the other watched parts, which the copies did not play: the glow of the
         // syringe tool goes from its wind-up to its hit by its clips. The needles at the sides of a charging super
-        // jump, which end by a clip too, go by the clips of the character instead (see SuperJumpNeedles)
+        // jump, which end by a clip too, go by the clips of the character instead (see PartsByClips)
         "Tool Effects/Syringe Glow",
         "Tool Effects/Syringe Glow poison"
     ];
