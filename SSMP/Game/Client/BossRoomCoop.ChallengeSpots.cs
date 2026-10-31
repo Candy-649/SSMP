@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
@@ -20,7 +21,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// nothing, and only a hit gave it back. A spot that a player used is now switched off in the games of the other
 /// players in the scene as well, and in the game of a player who comes into the scene later. The game of the player
 /// who used it tells them; their own fight does not say so in every room, as one room's fight neither closes gates nor
-/// shows a title.
+/// shows a title. Nothing keeps that room's start in step, so its challenge plays out in the game of the player who made
+/// it alone, and the other games keep their spot to start their own part.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
@@ -117,6 +119,14 @@ internal partial class BossRoomCoop {
             // The local player used it as well
             if (spot.GetComponent<Collider2D>() is not { enabled: true }) {
                 _challengeSpotsToSwitchOff.RemoveAt(i);
+                continue;
+            }
+
+            // A challenge reaches the fight of the other games only in a room whose fight start is kept in step between
+            // the games, which takes a state that closes its gates or shows the title of its boss. In a room without
+            // one the challenge plays its part of the fight in the game of the player who made it alone, so the spot
+            // stays, as this game could not start its own part otherwise.
+            if (GetBossRoom(fsm) is not { } room || !room.BaseFightStates.Values.Any(states => states.Count > 0)) {
                 continue;
             }
 
