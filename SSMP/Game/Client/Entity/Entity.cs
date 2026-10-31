@@ -1155,6 +1155,21 @@ internal partial class Entity {
         if (spritePaths.Count > 0) {
             _components[EntityComponentType.Tint] = new TintComponent(_netClient, Id, Object, spritePaths);
         }
+
+        // What the third act does to the creature, which the game rolls (see BlackThreadComponent)
+        var hostBlackThread = Object.Host.GetComponent<BlackThreadState>();
+        var clientBlackThread = Object.Client.GetComponent<BlackThreadState>();
+        if (hostBlackThread != null && clientBlackThread != null) {
+            _components[EntityComponentType.BlackThread] = new BlackThreadComponent(
+                _netClient,
+                Id,
+                Object,
+                new HostClientPair<BlackThreadState> {
+                    Host = hostBlackThread,
+                    Client = clientBlackThread
+                }
+            );
+        }
     }
 
     /// <summary>

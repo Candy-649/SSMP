@@ -168,5 +168,11 @@ internal enum EntityComponentType : ushort {
     /// Which of the parts that the creature's FSMs dress it in are switched on, for a player who walks in after the
     /// creature switched them and for the game that takes it over (see <see cref="PartsComponent"/>).
     /// </summary>
-    Parts
+    Parts,
+
+    /// <summary>
+    /// What the third act does to the creature: whether it turns, whether it turned, its attack, and its strikes (see
+    /// <see cref="BlackThreadComponent"/>).
+    /// </summary>
+    BlackThread
 }

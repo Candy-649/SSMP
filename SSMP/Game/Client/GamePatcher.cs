@@ -191,6 +191,7 @@ internal partial class GamePatcher {
         RegisterDetectionHooks();
         RegisterNeedolinHooks();
         RegisterCameraCheckHooks();
+        RegisterBlackThreadHooks();
 
         _crawlerStopCrawlingHook = TryCreateHook(
             typeof(Crawler),
@@ -393,6 +394,7 @@ internal partial class GamePatcher {
         DisposeDetectionHooks();
         DisposeNeedolinHooks();
         DisposeCameraCheckHooks();
+        DisposeBlackThreadHooks();
         DisposeAggressionHooks();
         DisposeNpcZoneHooks();
         DisposeBoxPassageHooks();
