@@ -453,6 +453,19 @@ internal static class ToolCopies {
         } catch (Exception e) {
             Logger.Warn($"Could not send the '{tracked.PrefabName}' of the local player to the partner: {e.Message}");
         }
+
+        // What the thing is drawn with on the screen of the one who threw it, as its copy is said on the other screen:
+        // the one poisoned spike ball of an evening stayed red there rather than turning purple (USER 11-01, of the
+        // partner's recording: "确实就那一个带毒，但是确实没有紫色的贴图")
+        try {
+            Logger.Info(
+                $"[Tools] This player's '{tracked.PrefabName}' ({id}) is out, poisoned: " +
+                $"{Gameplay.PoisonPouchTool.IsEquipped}; {ThrownTool.DescribePictures(tracked.gameObject)}"
+            );
+            ThrownTool.SayPicturesLater(tracked.gameObject, $"This player's '{tracked.PrefabName}' ({id})");
+        } catch (Exception e) {
+            Logger.Warn($"Could not say what the '{tracked.PrefabName}' of the local player is drawn with: {e.Message}");
+        }
     }
 
     /// <summary>

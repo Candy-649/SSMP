@@ -171,11 +171,12 @@ internal class ThrownTool : BaseAttackTool {
     private const float DescribedAgainAfter = 0.3f;
 
     /// <summary>
-    /// Says again what the pictures of a copy are drawn from, a moment after it came out, if it is still there. The
-    /// spike ball looked wrong only some of the times it was thrown (USER 10-31: "刺团并不是每次都花的，而是某几次
-    /// 花"), so a throw that looks wrong is told apart from the others by what it was drawn with.
+    /// Says again what the pictures of a copy, or of the local player's own thing, are drawn from, a moment after it
+    /// came out, if it is still there. The spike ball looked wrong only some of the times it was thrown (USER 10-31:
+    /// "刺团并不是每次都花的，而是某几次花"), so a throw that looks wrong is told apart from the others by what it was
+    /// drawn with.
     /// </summary>
-    /// <param name="copy">The copy.</param>
+    /// <param name="copy">The copy, or the local player's thing.</param>
     /// <param name="what">What it is, as the log names it.</param>
     internal static void SayPicturesLater(GameObject copy, string what) {
         MonoBehaviourUtil.Instance.StartCoroutine(SayLater());
@@ -259,7 +260,7 @@ internal class ThrownTool : BaseAttackTool {
     /// <summary>
     /// The switches of a material's shader that are on, and the turn of hue it draws with: a poisoned spike ball and its
     /// splinters draw with a copy of their material, named "(using keywords)", with the switch of the turn of hue on,
-    /// and only one of the poisoned spike balls looked wrong (USER 10-31: "只有一发出了问题，不是每一发都出了问题").
+    /// and the one throw that looked wrong is told apart by them (USER 10-31: "只有一发出了问题，不是每一发都出了问题").
     /// </summary>
     private static string Switches(Material material) {
         var keywords = material.shaderKeywords;
