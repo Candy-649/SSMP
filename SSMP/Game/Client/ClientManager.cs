@@ -1394,7 +1394,11 @@ internal class ClientManager : IClientManager {
         );
 
         foreach (var playerEnterScene in alreadyInScene.PlayerEnterSceneList) {
-            OnPlayerEnterScene(playerEnterScene);
+            try {
+                OnPlayerEnterScene(playerEnterScene);
+            } catch (Exception e) {
+                Logger.Error($"Could not take in player {playerEnterScene.Id} of this room:\n{e}");
+            }
         }
 
         if (_fullSynchronisation) {
@@ -1406,26 +1410,7 @@ internal class ClientManager : IClientManager {
                 _entityManager.InitializeSceneClient(alreadyInScene.SceneHostEpoch);
             }
 
-            foreach (var entitySpawn in alreadyInScene.EntitySpawnList) {
-                Logger.Info(
-                    $"Updating already in scene spawned entity with ID: {entitySpawn.Id}, types: {entitySpawn.SpawningType}, {entitySpawn.SpawnedType}"
-                );
-                _entityManager.SpawnEntity(
-                    entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType, entitySpawn.Position
-                );
-            }
-
-            foreach (var entityUpdate in alreadyInScene.EntityUpdateList) {
-                if (_entityManager.HandleEntityUpdate(entityUpdate, true)) {
-                    ObjectPool<EntityUpdate>.Return(entityUpdate);
-                }
-            }
-
-            foreach (var entityUpdate in alreadyInScene.ReliableEntityUpdateList) {
-                if (_entityManager.HandleReliableEntityUpdate(entityUpdate, true)) {
-                    ObjectPool<ReliableEntityUpdate>.Return(entityUpdate);
-                }
-            }
+            TakeRoomCreatures(alreadyInScene, true);
 
             // Whether there were players in the scene or not, we have now determined whether
             // we are the scene host
@@ -1434,6 +1419,52 @@ internal class ClientManager : IClientManager {
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Takes in the creatures of the state of a room, each on its own: one whose update throws is written down and
+    /// passed over, and the rest of the room is still taken in. One that threw took the rest of the room with it, and
+    /// asking again only brought the same answer: the game gave up on the room, and neither its creatures nor the
+    /// partner were seen in it until it was left (USER 10-31 "她那边没怪").
+    /// </summary>
+    /// <param name="state">The state of the room.</param>
+    /// <param name="logSpawns">Whether each creature made during play is written down as it is taken in.</param>
+    private void TakeRoomCreatures(ClientPlayerAlreadyInScene state, bool logSpawns) {
+        foreach (var entitySpawn in state.EntitySpawnList) {
+            if (logSpawns) {
+                Logger.Info(
+                    $"Updating already in scene spawned entity with ID: {entitySpawn.Id}, types: {entitySpawn.SpawningType}, {entitySpawn.SpawnedType}"
+                );
+            }
+
+            try {
+                _entityManager.SpawnEntity(
+                    entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType, entitySpawn.Position
+                );
+            } catch (Exception e) {
+                Logger.Error($"Could not take in the made creature {entitySpawn.Id} of this room:\n{e}");
+            }
+        }
+
+        foreach (var entityUpdate in state.EntityUpdateList) {
+            try {
+                if (_entityManager.HandleEntityUpdate(entityUpdate, true)) {
+                    ObjectPool<EntityUpdate>.Return(entityUpdate);
+                }
+            } catch (Exception e) {
+                Logger.Error($"Could not take in where creature {entityUpdate.Id} of this room is:\n{e}");
+            }
+        }
+
+        foreach (var entityUpdate in state.ReliableEntityUpdateList) {
+            try {
+                if (_entityManager.HandleReliableEntityUpdate(entityUpdate, true)) {
+                    ObjectPool<ReliableEntityUpdate>.Return(entityUpdate);
+                }
+            } catch (Exception e) {
+                Logger.Error($"Could not take in the state of creature {entityUpdate.Id} of this room:\n{e}");
+            }
+        }
     }
 
     /// <summary>
@@ -1561,23 +1592,7 @@ internal class ClientManager : IClientManager {
 
         Entity.Entity.FromRoomState = true;
         try {
-            foreach (var entitySpawn in roomState.EntitySpawnList) {
-                _entityManager.SpawnEntity(
-                    entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType, entitySpawn.Position
-                );
-            }
-
-            foreach (var entityUpdate in roomState.EntityUpdateList) {
-                if (_entityManager.HandleEntityUpdate(entityUpdate, true)) {
-                    ObjectPool<EntityUpdate>.Return(entityUpdate);
-                }
-            }
-
-            foreach (var entityUpdate in roomState.ReliableEntityUpdateList) {
-                if (_entityManager.HandleReliableEntityUpdate(entityUpdate, true)) {
-                    ObjectPool<ReliableEntityUpdate>.Return(entityUpdate);
-                }
-            }
+            TakeRoomCreatures(roomState, false);
         } finally {
             Entity.Entity.FromRoomState = false;
         }

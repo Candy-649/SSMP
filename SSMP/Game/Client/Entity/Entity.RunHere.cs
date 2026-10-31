@@ -1603,11 +1603,16 @@ internal partial class Entity {
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state.</param>
     private void HearStateFromSceneHost(PlayMakerFSM fsm, string stateName) {
+        // The part is kept by the kind of creature and the name of the FSM, and not everything of that kind has it:
+        // the spikes that one boss shoots are named after it, so they are taken for that boss, and their own FSM of
+        // that name has no such state. Looked for anyway, it threw at the first of them, and the game of the player
+        // who came in took nothing of the room in after it, its creatures and the partner, however often it asked
+        // (USER 10-31 "她那边没怪")
         if (!_runHereForGood && _eachGamePartWaiting == null &&
-            EntityRegistry.TryGetEachGameFrom(Type, fsm.FsmName, out var fromName)) {
+            EntityRegistry.TryGetEachGameFrom(Type, fsm.FsmName, out var fromName) &&
+            fsm.Fsm.GetState(fromName) is { } from) {
             // Every state that the first one leads to on its own, the binding that goes round as often as the boss
             // takes to be bound among them
-            var from = fsm.Fsm.GetState(fromName);
             var part = new HashSet<FsmState> { from };
             var toGo = new Stack<FsmState>();
             toGo.Push(from);
