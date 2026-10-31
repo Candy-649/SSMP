@@ -46,6 +46,17 @@ internal partial class ArenaCoop {
     private const string OpenGatesEvent = "BG OPEN";
 
     /// <summary>
+    /// Event that closes the gates of an arena.
+    /// </summary>
+    private const string CloseGatesEvent = "BG CLOSE";
+
+    /// <summary>
+    /// How long, in seconds, a gate that was still closing when the local player was let out of its arena is waited
+    /// for, to be opened once it is shut (see OpenGatesThatFinishedClosing).
+    /// </summary>
+    private const float GateCloseWait = 3f;
+
+    /// <summary>
     /// The event that the interact button sends to the FSM of what it was pressed on.
     /// </summary>
     private const string InteractEvent = "INTERACT";
@@ -146,6 +157,11 @@ internal partial class ArenaCoop {
     /// </summary>
     private static readonly MethodInfo? SendEventToChildrenMethod =
         typeof(BattleScene).GetMethod("SendEventToChildren", InstanceFlags);
+
+    /// <summary>
+    /// Reflected field with the FSMs of the gates of an arena, which SendEventToChildren sends its events to.
+    /// </summary>
+    private static readonly FieldInfo? GateFsmsField = typeof(BattleScene).GetField("gateFsms", InstanceFlags);
 
     /// <summary>
     /// Reflected method that turns the FSMs and enemy detection of a wave's enemies on or off.
@@ -470,6 +486,14 @@ internal partial class ArenaCoop {
         }
 
         if (battleScene == null || !battleScene.gameObject.activeInHierarchy) {
+            // A memory switches off the arenas it was climbed through once the way past them is open. One that was won
+            // here was won all the same, and the player who comes to it later has its end played (TryPlayMemoryEnd)
+            if (battleScene != null && IsCompleted(battleScene) && IsInMemory(battleScene)) {
+                Logger.Info($"Another player walked into arena '{path}', which was won here and is switched off now");
+                Send(path, BattleSceneStatus.AlreadyWon);
+                return;
+            }
+
             Logger.Info($"Another player walked into arena '{path}', which is not active here");
             Send(path, BattleSceneStatus.Unavailable);
             return;
@@ -534,6 +558,8 @@ internal partial class ArenaCoop {
 
         if (IsCompleted(self) ||
             state.HostUpdate is { Status: BattleSceneStatus.AlreadyWon or BattleSceneStatus.Unavailable }) {
+            // The end of a memory's arena that the scene host won is played as the local player walks in
+            TryPlayMemoryEnd(self, state, false);
             return;
         }
 
@@ -884,6 +910,7 @@ internal partial class ArenaCoop {
         ReleaseHeldBossEvents(self, state);
         UpdateLiveEnd(self, state);
         WatchForABattleThatStopped(self, state);
+        OpenGatesThatFinishedClosing(state);
 
         if (!IsOtherPlayerInScene()) {
             return;
@@ -954,8 +981,14 @@ internal partial class ArenaCoop {
 
                 break;
             case BattleSceneStatus.AlreadyWon:
+                // The answer to the local player walking in, who has the end of a memory's arena played now
+                var walkedIn = state.LockedIn;
                 if (state.LockedIn) {
                     Release(battleScene, state);
+                }
+
+                if (walkedIn) {
+                    TryPlayMemoryEnd(battleScene, state, true);
                 }
 
                 if (!IsCompleted(battleScene) && SharesWin(battleScene)) {
@@ -1312,9 +1345,93 @@ internal partial class ArenaCoop {
     private static void Release(BattleScene battleScene, ArenaState state) {
         state.LockedIn = false;
         CallArenaMethod(SendEventToChildrenMethod!, battleScene, OpenGatesEvent);
+        NoteGatesStillClosing(battleScene, state);
 
         if (CamLocksField!.GetValue(battleScene) is GameObject camLocks && camLocks != null) {
             camLocks.SetActive(false);
+        }
+    }
+
+    /// <summary>
+    /// Notes the gates of an arena that were still on their way shut when the local player was let out. A gate takes
+    /// the event that opens it only once it is shut, so it dropped the one sent on the way and would have stayed shut
+    /// with the local player behind it, which a quick answer of the scene host to them walking in did.
+    /// </summary>
+    private static void NoteGatesStillClosing(BattleScene battleScene, ArenaState state) {
+        state.GatesStillClosing.Clear();
+        if (GateFsmsField?.GetValue(battleScene) is not List<PlayMakerFSM> gates) {
+            return;
+        }
+
+        foreach (var gate in gates) {
+            if (gate != null && gate.isActiveAndEnabled && IsOnItsWay(gate)) {
+                Logger.Info(
+                    $"Gate '{gate.gameObject.name}' of arena '{state.Path}' is still on its way ('{gate.ActiveStateName}') " +
+                    "as the local player is let out, so it is opened if it ends up shut"
+                );
+                state.GatesStillClosing.Add(gate);
+            }
+        }
+
+        // Game time, which the gates close in, and which stands still while the game is paused
+        state.GatesClosingUntil = Time.time + GateCloseWait;
+    }
+
+    /// <summary>
+    /// Whether a gate is on its way between open and shut: in a state that goes on by itself and takes neither the
+    /// event that opens it nor the one that closes it. A gate that stays shut for good waits in a state that goes
+    /// nowhere.
+    /// </summary>
+    private static bool IsOnItsWay(PlayMakerFSM gate) {
+        return gate.Fsm?.ActiveState is { Transitions.Length: > 0 } && !TakesEvent(gate, OpenGatesEvent) &&
+               !TakesEvent(gate, CloseGatesEvent);
+    }
+
+    /// <summary>
+    /// Opens the gates that were still on their way shut when the local player was let out of an arena, as each is
+    /// shut, unless the local player was locked in again since. A gate that turned out to be on its way open, or to
+    /// stay shut for good, is left.
+    /// </summary>
+    private static void OpenGatesThatFinishedClosing(ArenaState state) {
+        var gates = state.GatesStillClosing;
+        if (gates.Count == 0) {
+            return;
+        }
+
+        if (state.LockedIn) {
+            gates.Clear();
+            return;
+        }
+
+        var late = Time.time > state.GatesClosingUntil;
+        for (var i = gates.Count - 1; i >= 0; i--) {
+            var gate = gates[i];
+            if (gate == null || !gate.isActiveAndEnabled) {
+                gates.RemoveAt(i);
+                continue;
+            }
+
+            var shut = TakesEvent(gate, OpenGatesEvent);
+            if (!shut && !IsOnItsWay(gate)) {
+                gates.RemoveAt(i);
+                continue;
+            }
+
+            if (late) {
+                gates.RemoveAt(i);
+                Logger.Warn(
+                    $"Gate '{gate.gameObject.name}' of arena '{state.Path}' was still on its way when the local player " +
+                    $"was let out and is {(shut ? "shut" : $"in '{gate.ActiveStateName}'")} {GateCloseWait} s later, " +
+                    "left as it is"
+                );
+            } else if (shut) {
+                gates.RemoveAt(i);
+                Logger.Info(
+                    $"Gate '{gate.gameObject.name}' of arena '{state.Path}' is shut now ('{gate.ActiveStateName}'), " +
+                    "opening it for the local player, who was let out while it was closing"
+                );
+                gate.SendEvent(OpenGatesEvent);
+            }
         }
     }
 
@@ -1620,6 +1737,23 @@ internal partial class ArenaCoop {
         /// Whether what starts the fight of such an arena was switched off for the end that is played.
         /// </summary>
         public bool LiveEndStarterOff;
+
+        /// <summary>
+        /// Whether the end of an arena of a memory that the scene host won goes to a creature that the scene host runs,
+        /// so that this game leaves it to the scene host (see TryPlayMemoryEnd).
+        /// </summary>
+        public bool MemoryEndLeftToHost;
+
+        /// <summary>
+        /// The gates that were still on their way shut when the local player was let out, to be opened once they are
+        /// shut (see OpenGatesThatFinishedClosing).
+        /// </summary>
+        public readonly List<PlayMakerFSM> GatesStillClosing = [];
+
+        /// <summary>
+        /// Until when, in game time, the gates still closing are waited for.
+        /// </summary>
+        public float GatesClosingUntil;
 
         public ArenaState(string path) {
             Path = path;
