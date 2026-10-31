@@ -6,6 +6,7 @@ using HutongGames.PlayMaker.Actions;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Animation.Effects.Tools;
 
@@ -129,6 +130,14 @@ internal class Tacks : BaseAttackTool {
             heroTouchTransition.ToState = destinationState.Name;
             heroTouchTransition.ToFsmState = destinationState;
         }
+
+        // Said for each throw, with what the first tack is drawn from, as ThrownTool says it of its copies
+        Logger.Info(
+            $"[Tools] The copies of the partner's tacks come out at {position}, poisoned: {poisoned}; " +
+            (group.transform.childCount > 0
+                ? ThrownTool.DescribePictures(group.transform.GetChild(0).gameObject)
+                : "none came out")
+        );
     }
 
     /// <summary>

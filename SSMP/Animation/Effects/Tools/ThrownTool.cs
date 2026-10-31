@@ -169,9 +169,14 @@ internal class ThrownTool : BaseAttackTool {
     /// </summary>
     internal static string DescribePictures(GameObject copy) {
         var parts = new List<string>();
+        var bySheets = new HashSet<Renderer>();
         foreach (var sprite in copy.GetComponentsInChildren<tk2dBaseSprite>(true)) {
             try {
                 var material = sprite.TryGetComponent<Renderer>(out var renderer) ? renderer.sharedMaterial : null;
+                if (renderer != null) {
+                    bySheets.Add(renderer);
+                }
+
                 var texture = material != null ? material.mainTexture : null;
                 var sheet = sprite.Collection;
                 parts.Add(
@@ -183,6 +188,31 @@ internal class ThrownTool : BaseAttackTool {
                 );
             } catch (Exception e) {
                 parts.Add($"'{sprite.name}' could not be read ({e.GetType().Name})");
+            }
+        }
+
+        // What draws without a sheet: a sprite of one of the game's atlases, particles, a line. A texture with no name
+        // is the image of a skin
+        foreach (var renderer in copy.GetComponentsInChildren<Renderer>(true)) {
+            if (bySheets.Contains(renderer)) {
+                continue;
+            }
+
+            try {
+                var material = renderer.sharedMaterial;
+                var picture = renderer is SpriteRenderer { sprite: { } shown }
+                    ? $"'{shown.name}' of '{(shown.texture != null ? shown.texture.name : "no texture")}'"
+                    : renderer.GetType().Name;
+                var texture = material != null ? material.mainTexture : null;
+                parts.Add(
+                    $"'{(renderer.gameObject == copy ? "itself" : renderer.name)}' draws {picture} with " +
+                    $"'{(material != null ? material.name : "no material")}'" +
+                    (texture != null ? $" on '{texture.name}' {texture.width}x{texture.height}" : "") +
+                    $" and '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
+                    (renderer.enabled && renderer.gameObject.activeInHierarchy ? "" : " (off)")
+                );
+            } catch (Exception e) {
+                parts.Add($"'{renderer.name}' could not be read ({e.GetType().Name})");
             }
         }
 
