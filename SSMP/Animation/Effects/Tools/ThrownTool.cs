@@ -210,6 +210,8 @@ internal class ThrownTool : BaseAttackTool {
                     $"'{sprite.CurrentSprite?.name ?? "nothing"}' of '{(sheet != null ? sheet.name : "no sheet")}' on " +
                     (texture != null ? $"'{texture.name}' {texture.width}x{texture.height}" : "no texture") +
                     $" with '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
+                    (material != null ? $" as '{material.name}'{Switches(material)}" : "") +
+                    $", tinted {Tint(sprite.color)}" +
                     (sprite.gameObject.activeInHierarchy ? "" : " (off)")
                 );
             } catch (Exception e) {
@@ -235,6 +237,10 @@ internal class ThrownTool : BaseAttackTool {
                     $"'{(material != null ? material.name : "no material")}'" +
                     (texture != null ? $" on '{texture.name}' {texture.width}x{texture.height}" : "") +
                     $" and '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
+                    (material != null ? Switches(material) : "") +
+                    (renderer is ParticleSystemRenderer && renderer.TryGetComponent<ParticleSystem>(out var system)
+                        ? $", {(system.isPlaying ? "playing" : "stopped")} with {system.particleCount} particle(s)"
+                        : "") +
                     (renderer.enabled && renderer.gameObject.activeInHierarchy ? "" : " (off)")
                 );
             } catch (Exception e) {
@@ -243,6 +249,29 @@ internal class ThrownTool : BaseAttackTool {
         }
 
         return parts.Count == 0 ? "no pictures" : string.Join("; ", parts);
+    }
+
+    /// <summary>
+    /// The ID of the turn of hue that the game's shader of sprites draws with while its switch for it is on.
+    /// </summary>
+    private static readonly int HueShiftId = Shader.PropertyToID("_HueShift");
+
+    /// <summary>
+    /// The switches of a material's shader that are on, and the turn of hue it draws with: a poisoned spike ball and its
+    /// splinters draw with a copy of their material, named "(using keywords)", with the switch of the turn of hue on,
+    /// and only one of the poisoned spike balls looked wrong (USER 10-31: "只有一发出了问题，不是每一发都出了问题").
+    /// </summary>
+    private static string Switches(Material material) {
+        var keywords = material.shaderKeywords;
+        return (keywords.Length > 0 ? $" ({string.Join(" ", keywords)})" : "") +
+               (material.HasProperty(HueShiftId) ? $", hue turned {material.GetFloat(HueShiftId):0.##}" : "");
+    }
+
+    /// <summary>
+    /// A colour that a sprite is tinted with, as its four numbers.
+    /// </summary>
+    private static string Tint(Color color) {
+        return $"({color.r:0.##}, {color.g:0.##}, {color.b:0.##}, {color.a:0.##})";
     }
 
     /// <summary>
