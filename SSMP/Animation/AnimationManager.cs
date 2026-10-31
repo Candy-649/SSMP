@@ -1334,11 +1334,20 @@ internal class AnimationManager {
 
         if (_debugLogAnimations) Logger.Info($"  conditions 2: {clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.Loop}, {clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.LoopSection}, {clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.Once}");
 
-        // Skip clips that do not have the wrap mode loop, loop-section or once
+        // Skip clips that do not have the wrap mode loop, loop-section, once or single. A clip of a single frame is a
+        // pose that the hero holds - lying on the ground after a dream sent them out, kneeling, asleep on a bench, the
+        // pull of the harpoon - and it was skipped too: the other players saw the player stand where they lay, until
+        // the getting up began (USER 10-31 "她还没有动作的时候站着，但是实际上出梦境是躺着的"). Of the clips that go
+        // over the network these five are the only ones of a single frame, and none ping-pongs or picks frames at random
         if (clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.Loop &&
             clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.LoopSection &&
-            clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.Once) {
+            clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.Once &&
+            clip.wrapMode != tk2dSpriteAnimationClip.WrapMode.Single) {
             return;
+        }
+
+        if (clip.wrapMode == tk2dSpriteAnimationClip.WrapMode.Single) {
+            Logger.Info($"[Clips] The character holds the pose '{clip.name}', which the other players are told of");
         }
 
         // Make sure that when we enter a building, we don't transmit any more animation events
