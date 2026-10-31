@@ -38,9 +38,10 @@ internal partial class GamePatcher {
         AddBlackThreadHook(TryCreateHook(type, "OnEnable", OnBlackThreadOnEnable));
         AddBlackThreadHook(TryCreateHook(type, "get_IsInActiveRange", OnBlackThreadIsInActiveRange));
         AddBlackThreadHook(TryCreateILHook(type, "DoAttack", ILBlackThreadDoAttack));
-        AddBlackThreadHook(CreateRoutineHook(
-            type, "ThreadAttackTest", il => ILBlackThreadRoutine(il, nameof(BlackThreadTarget))
-        ));
+        AddBlackThreadHook(CreateRoutineHook(type, "ThreadAttackTest", il => {
+            ILBlackThreadRoutine(il, nameof(BlackThreadTarget));
+            ILBlackThreadDarkens(il);
+        }));
         AddBlackThreadHook(CreateRoutineHook(
             type, "WaitForInRange", il => ILBlackThreadRoutine(il, nameof(BlackThreadNearest))
         ));
@@ -314,6 +315,40 @@ internal partial class GamePatcher {
             }
         } catch (Exception e) {
             Logger.Error($"Could not apply ILBlackThreadRoutine hook: {e}");
+        }
+    }
+
+    /// <summary>
+    /// Has the attack loop of a creature say when the creature begins to darken to strike, which the game does once the
+    /// creature sings, just as it stops its pulse (see <see cref="BlackThreadComponent.OnDarkens"/>): the copies darken
+    /// over the same while instead of going dark at once as the creature strikes.
+    /// </summary>
+    private static void ILBlackThreadDarkens(ILContext il) {
+        try {
+            var self = il.Method.DeclaringType.Fields.FirstOrDefault(field => field.Name == "<>4__this");
+            var c = new ILCursor(il);
+            if (self == null ||
+                !c.TryGotoNext(MoveType.After, i => i.MatchCall(typeof(BlackThreadState), "StopPulseRoutine"))) {
+                Logger.Warn("The third act's attack no longer darkens the creature where it was looked for");
+                return;
+            }
+
+            c.Emit(OpCodes.Ldarg_0);
+            c.Emit(OpCodes.Ldfld, self);
+            c.Emit(OpCodes.Call, typeof(GamePatcher).GetMethod(
+                nameof(BlackThreadDarkens), BindingFlags.NonPublic | BindingFlags.Static
+            )!);
+        } catch (Exception e) {
+            Logger.Error($"Could not apply ILBlackThreadDarkens hook: {e}");
+        }
+    }
+
+    /// <summary>
+    /// Says that a creature that this game runs began to darken to strike.
+    /// </summary>
+    private static void BlackThreadDarkens(BlackThreadState state) {
+        if (BlackThreadComponent.TryFind(state, out var component, out var isCopy) && !isCopy) {
+            component.OnDarkens(state);
         }
     }
 

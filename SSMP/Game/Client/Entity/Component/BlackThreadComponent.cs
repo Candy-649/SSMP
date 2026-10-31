@@ -82,6 +82,13 @@ internal class BlackThreadComponent : EntityComponent {
     private ushort _strike;
 
     /// <summary>
+    /// The number of the last time that the creature of the game that runs it began to darken to strike, which a copy
+    /// darkens once for each new one: the game darkens a creature over a while before it strikes, from the moment it
+    /// sings.
+    /// </summary>
+    private ushort _windUp;
+
+    /// <summary>
     /// What was last sent, so that what changes is sent once: whether it turns, whether it turned, and the attack.
     /// </summary>
     private bool _sentThreaded, _sentVisible;
@@ -330,6 +337,23 @@ internal class BlackThreadComponent : EntityComponent {
     }
 
     /// <summary>
+    /// Says that the creature that this game runs began to darken to strike, for the hook in its attack loop.
+    /// </summary>
+    /// <param name="state">The state of the creature.</param>
+    public void OnDarkens(BlackThreadState state) {
+        if (IsControlled || state != _states.Host) {
+            return;
+        }
+
+        _windUp++;
+        Send();
+        Logger.Info(
+            $"'{state.name}' darkens to strike with its third-act attack {_sentAttack} (wind-up {_windUp}), which the " +
+            "other players' copies darken for too"
+        );
+    }
+
+    /// <summary>
     /// Has a creature that this game runs turn as a blow of another player lands on it, as the game turns a creature
     /// that turns but has not yet as it is hit: the blow came here as health alone, without the hit that the game turns
     /// it from (HealthManagerComponent.DamageLanded). Only the blows of this game's player turned it.
@@ -451,6 +475,7 @@ internal class BlackThreadComponent : EntityComponent {
         data.Packet.Write((byte) ((_sentThreaded ? 1 : 0) | (_sentVisible ? 2 : 0)));
         data.Packet.Write(_sentAttack);
         data.Packet.Write(_strike);
+        data.Packet.Write(_windUp);
         data.Packet.Write(_strikeScale.x);
         data.Packet.Write(_strikeScale.y);
         data.Packet.Write(_strikeAngle);
@@ -466,16 +491,19 @@ internal class BlackThreadComponent : EntityComponent {
         var flags = data.Packet.ReadByte();
         var attack = data.Packet.ReadByte();
         var strike = data.Packet.ReadUShort();
+        var windUp = data.Packet.ReadUShort();
         var scale = new Vector2(data.Packet.ReadFloat(), data.Packet.ReadFloat());
         var angle = data.Packet.ReadFloat();
 
         var wasKnown = _isKnown;
         var struck = wasKnown && !alreadyInSceneUpdate && strike != _strike;
+        var woundUp = wasKnown && !alreadyInSceneUpdate && windUp != _windUp;
         _isKnown = true;
         _isThreaded = (flags & 1) != 0;
         _isVisible = (flags & 2) != 0;
         _attack = attack;
         _strike = strike;
+        _windUp = windUp;
 
         if (!wasKnown) {
             Logger.Info(
@@ -493,6 +521,11 @@ internal class BlackThreadComponent : EntityComponent {
         // happen as it happens, and one from before at once.
         Follow(_states.Host, atOnce: true);
         Follow(copy, atOnce: alreadyInSceneUpdate || !wasKnown);
+
+        // Darkened first, as there; one told only once it struck goes dark at once as it strikes
+        if (woundUp && copy != null) {
+            StartWindUp(copy, windUp);
+        }
 
         if (struck && copy != null) {
             StartStrike(copy, attack, scale, angle, strike);
@@ -585,31 +618,118 @@ internal class BlackThreadComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Has the copy strike as the creature of the game that runs it struck, ending a strike of its own that is still
-    /// going on. Only a copy that shows the creature turned strikes, as only a turned creature strikes.
+    /// Whether the copy shows the creature able to strike - turned, as only a turned creature strikes, switched on and
+    /// alive - and why not, for the log.
     /// </summary>
-    private void StartStrike(BlackThreadState copy, byte attackIndex, Vector2 scale, float angle, ushort strike) {
+    private static bool CanStrike(BlackThreadState copy, out string whyNot) {
         var dead = copy.healthManager != null && copy.healthManager.isDead;
-        if (!copy.isThreaded || !copy.IsVisiblyThreaded || !copy.gameObject.activeInHierarchy || dead) {
-            Logger.Info(
-                $"'{copy.name}' does not strike as the creature of the game that runs it did (strike {strike}): " +
-                (dead ? "it is dead" : !copy.gameObject.activeInHierarchy ? "it is off" : "it is not turned here")
-            );
-            return;
+        if (copy.isThreaded && copy.IsVisiblyThreaded && copy.gameObject.activeInHierarchy && !dead) {
+            whyNot = "";
+            return true;
         }
 
+        whyNot = dead ? "it is dead" : !copy.gameObject.activeInHierarchy ? "it is off" : "it is not turned here";
+        return false;
+    }
+
+    /// <summary>
+    /// Ends what the copy does of a strike, darkening or striking, for a new one: the creature of the game that runs it
+    /// strikes one at a time.
+    /// </summary>
+    private void StopStrike(BlackThreadState copy) {
         if (_strikeRoutine != null) {
             copy.StopCoroutine(_strikeRoutine);
             _strikeRoutine = null;
         }
 
         copy.CancelAttack();
+    }
+
+    /// <summary>
+    /// Has the copy darken to strike as the creature of the game that runs it began to.
+    /// </summary>
+    private void StartWindUp(BlackThreadState copy, ushort windUp) {
+        if (!CanStrike(copy, out var whyNot)) {
+            Logger.Info(
+                $"'{copy.name}' does not darken as the creature of the game that runs it did (wind-up {windUp}): " +
+                whyNot
+            );
+            return;
+        }
+
+        StopStrike(copy);
+        _strikeRoutine = copy.StartCoroutine(WindUp(copy, windUp));
+    }
+
+    /// <summary>
+    /// Darkens as the creature of the game that runs it darkens to strike, over the same while, as the game darkens a
+    /// creature from its colours to black. That game strikes the moment it is dark, which comes as a strike
+    /// (see <see cref="Strike"/>); one that did not strike after all, as without the attack's object, lightens again
+    /// after the time of its attack, as there.
+    /// </summary>
+    private IEnumerator WindUp(BlackThreadState state, ushort windUp) {
+        Logger.Info($"'{state.name}' darkens to strike (wind-up {windUp}), as the creature of the game that runs it does");
+        state.StopPulseRoutine();
+        var sprites = state.tk2dSprites;
+        var startColors = state.startColors;
+        var count = Mathf.Min(sprites.Length, startColors.Length);
+        for (var i = 0; i < count; i++) {
+            startColors[i] = sprites[i].color;
+        }
+
+        var duration = GlobalSettings.Effects.BlackThreadEnemyAttackTintDuration;
+        var curve = GlobalSettings.Effects.BlackThreadEnemyAttackTintCurve;
+        for (var elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime) {
+            var amount = curve.Evaluate(elapsed / duration);
+            for (var i = 0; i < count; i++) {
+                sprites[i].color = Color.Lerp(startColors[i], Color.black, amount);
+            }
+
+            yield return null;
+        }
+
+        foreach (var sprite in sprites) {
+            sprite.color = Color.black;
+        }
+
+        var attack = AttackAt(state, _attack) ?? state.chosenAttack;
+        var attackTime = attack != null ? attack.Duration : 0f;
+        for (var waited = 0f; waited < attackTime; waited += Time.deltaTime) {
+            yield return null;
+        }
+
+        Logger.Info($"'{state.name}' was told of no strike after it darkened (wind-up {windUp}), and lightens again");
+        for (var elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime) {
+            Lighten(state, curve.Evaluate(elapsed / duration));
+            yield return null;
+        }
+
+        Lighten(state, 1f);
+        state.StartPulseRoutine();
+        _strikeRoutine = null;
+    }
+
+    /// <summary>
+    /// Has the copy strike as the creature of the game that runs it struck, ending a strike of its own that is still
+    /// going on.
+    /// </summary>
+    private void StartStrike(BlackThreadState copy, byte attackIndex, Vector2 scale, float angle, ushort strike) {
+        if (!CanStrike(copy, out var whyNot)) {
+            Logger.Info(
+                $"'{copy.name}' does not strike as the creature of the game that runs it did (strike {strike}): " +
+                whyNot
+            );
+            return;
+        }
+
+        StopStrike(copy);
         _strikeRoutine = copy.StartCoroutine(Strike(copy, AttackAt(copy, attackIndex), scale, angle, strike));
     }
 
     /// <summary>
-    /// Strikes as the creature of the game that runs it struck: the game darkens it first, which that game did before
-    /// it said so, so here it goes dark at once; the attack sits the way it sat there, and it lightens again after.
+    /// Strikes as the creature of the game that runs it struck: dark, which it is already when it darkened as that
+    /// creature did (see <see cref="WindUp"/>) and goes at once otherwise; the attack sits the way it sat there, and it
+    /// lightens again after.
     /// </summary>
     private IEnumerator Strike(BlackThreadState state, BlackThreadAttack? attack, Vector2 scale, float angle,
         ushort strike) {
@@ -649,23 +769,27 @@ internal class BlackThreadComponent : EntityComponent {
 
         var duration = GlobalSettings.Effects.BlackThreadEnemyAttackTintDuration;
         var curve = GlobalSettings.Effects.BlackThreadEnemyAttackTintCurve;
-        var colors = state.initialColors;
-        var count = Mathf.Min(sprites.Length, colors.Length);
         for (var elapsed = 0f; elapsed < duration; elapsed += Time.deltaTime) {
-            var amount = curve.Evaluate(elapsed / duration);
-            for (var i = 0; i < count; i++) {
-                sprites[i].color = Color.Lerp(Color.black, colors[i], amount);
-            }
-
+            Lighten(state, curve.Evaluate(elapsed / duration));
             yield return null;
         }
 
-        for (var i = 0; i < count; i++) {
-            sprites[i].color = colors[i];
-        }
-
+        Lighten(state, 1f);
         state.StartPulseRoutine();
         _strikeRoutine = null;
+    }
+
+    /// <summary>
+    /// Colours a state from black back towards its own colours by an amount, as the game lightens a creature after it
+    /// struck.
+    /// </summary>
+    private static void Lighten(BlackThreadState state, float amount) {
+        var sprites = state.tk2dSprites;
+        var colors = state.initialColors;
+        var count = Mathf.Min(sprites.Length, colors.Length);
+        for (var i = 0; i < count; i++) {
+            sprites[i].color = Color.Lerp(Color.black, colors[i], amount);
+        }
     }
 
     /// <summary>
