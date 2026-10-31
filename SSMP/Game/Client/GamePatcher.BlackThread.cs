@@ -38,12 +38,12 @@ internal partial class GamePatcher {
         AddBlackThreadHook(TryCreateHook(type, "OnEnable", OnBlackThreadOnEnable));
         AddBlackThreadHook(TryCreateHook(type, "get_IsInActiveRange", OnBlackThreadIsInActiveRange));
         AddBlackThreadHook(TryCreateILHook(type, "DoAttack", ILBlackThreadDoAttack));
-        AddBlackThreadHook(CreateRoutineHook(type, "ThreadAttackTest", il => {
-            ILBlackThreadRoutine(il, nameof(BlackThreadTarget));
-            ILBlackThreadDarkens(il);
+        AddBlackThreadHook(CreateRoutineHook(type, "ThreadAttackTest", (il, routine) => {
+            ILBlackThreadRoutine(il, routine, nameof(BlackThreadTarget));
+            ILBlackThreadDarkens(il, routine);
         }));
         AddBlackThreadHook(CreateRoutineHook(
-            type, "WaitForInRange", il => ILBlackThreadRoutine(il, nameof(BlackThreadNearest))
+            type, "WaitForInRange", (il, routine) => ILBlackThreadRoutine(il, routine, nameof(BlackThreadNearest))
         ));
         HealthManagerComponent.DamageLanded += BlackThreadComponent.OnDamageLanded;
     }
@@ -68,9 +68,10 @@ internal partial class GamePatcher {
 
     /// <summary>
     /// An IL hook on the MoveNext of the coroutine that a method of a type starts, found by the method's name, which the
-    /// compiler puts in the name of the coroutine's class.
+    /// compiler puts in the name of the coroutine's class. The manipulator is given that class: the method it changes
+    /// is a copy that belongs to a class of its own, which has none of the coroutine's fields.
     /// </summary>
-    private static ILHook? CreateRoutineHook(Type type, string methodName, ILContext.Manipulator manipulator) {
+    private static ILHook? CreateRoutineHook(Type type, string methodName, Action<ILContext, Type> manipulator) {
         var routine = type.GetNestedTypes(BindingFlags.NonPublic)
             .FirstOrDefault(nested => nested.Name.StartsWith($"<{methodName}>", StringComparison.Ordinal));
         if (routine == null) {
@@ -78,7 +79,9 @@ internal partial class GamePatcher {
             return null;
         }
 
-        return TryCreateILHook(routine, "MoveNext", manipulator, InstanceNonPublicFlags | InstancePublicFlags);
+        return TryCreateILHook(
+            routine, "MoveNext", il => manipulator(il, routine), InstanceNonPublicFlags | InstancePublicFlags
+        );
     }
 
     /// <summary>
@@ -280,14 +283,14 @@ internal partial class GamePatcher {
     /// asks the method named.
     /// </summary>
     /// <param name="il">The coroutine's MoveNext.</param>
+    /// <param name="routine">The coroutine's class.</param>
     /// <param name="targetMethod">The method of this class that answers whom it looks at, from the hero and the state.</param>
-    private static void ILBlackThreadRoutine(ILContext il, string targetMethod) {
+    private static void ILBlackThreadRoutine(ILContext il, Type routine, string targetMethod) {
         try {
-            var routine = il.Method.DeclaringType;
-            var self = routine.Fields.FirstOrDefault(field => field.Name == "<>4__this");
-            var heroes = routine.Fields
+            var self = routine.GetField("<>4__this", InstanceNonPublicFlags | InstancePublicFlags);
+            var heroes = routine.GetFields(InstanceNonPublicFlags | InstancePublicFlags)
                 .Where(field => field.Name.StartsWith("<hero>", StringComparison.Ordinal) &&
-                                field.FieldType.FullName == typeof(Transform).FullName)
+                                field.FieldType == typeof(Transform))
                 .Select(field => field.Name)
                 .ToHashSet();
             if (self == null || heroes.Count == 0) {
@@ -299,7 +302,7 @@ internal partial class GamePatcher {
             var found = 0;
             while (c.TryGotoNext(
                        MoveType.After,
-                       i => i.MatchLdfld(out var field) && field.DeclaringType.FullName == routine.FullName &&
+                       i => i.MatchLdfld(out var field) && field.DeclaringType.Name == routine.Name &&
                             heroes.Contains(field.Name)
                    )) {
                 c.Emit(OpCodes.Ldarg_0);
@@ -323,9 +326,9 @@ internal partial class GamePatcher {
     /// creature sings, just as it stops its pulse (see <see cref="BlackThreadComponent.OnDarkens"/>): the copies darken
     /// over the same while instead of going dark at once as the creature strikes.
     /// </summary>
-    private static void ILBlackThreadDarkens(ILContext il) {
+    private static void ILBlackThreadDarkens(ILContext il, Type routine) {
         try {
-            var self = il.Method.DeclaringType.Fields.FirstOrDefault(field => field.Name == "<>4__this");
+            var self = routine.GetField("<>4__this", InstanceNonPublicFlags | InstancePublicFlags);
             var c = new ILCursor(il);
             if (self == null ||
                 !c.TryGotoNext(MoveType.After, i => i.MatchCall(typeof(BlackThreadState), "StopPulseRoutine"))) {
