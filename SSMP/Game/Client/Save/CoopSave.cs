@@ -46,7 +46,7 @@ internal partial class CoopSave {
     private const BindingFlags StaticFlags = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
 
     /// <summary>
-    /// The name of the file in the config folder that holds the paired saves.
+    /// The name of the file in the config folder that holds the markers of the co-op saves.
     /// </summary>
     private const string MarkersFileName = "coop-saves.json";
 
@@ -111,7 +111,7 @@ internal partial class CoopSave {
     private readonly UiManager _uiManager;
 
     /// <summary>
-    /// The paired saves, loaded when first needed.
+    /// The markers of the co-op saves, loaded when first needed.
     /// </summary>
     private CoopSaveMarkers? _markers;
 
@@ -121,7 +121,7 @@ internal partial class CoopSave {
     private Hook? _slotSubmitHook;
 
     /// <summary>
-    /// Hook for forgetting the pairing of saves that are cleared.
+    /// Hook for forgetting the marker of saves that are cleared.
     /// </summary>
     private Hook? _clearSaveHook;
 
@@ -146,7 +146,7 @@ internal partial class CoopSave {
     private BaseEventData? _waitingEventData;
 
     /// <summary>
-    /// The pairing of the save that waits in the menu for its partner, or null.
+    /// The marker of the save that waits in the menu for its partner, or null.
     /// </summary>
     private CoopSaveMarker? _waitingMarker;
 
@@ -406,8 +406,8 @@ internal partial class CoopSave {
             ReleaseHold(hero);
             ReleasePartnerCatch(hero, "the save is no longer a co-op save", null);
 
-            // A board that waited for the partner's answer when the save stopped being paired still has to open, or
-            // the hero would stand in its dialogue for good
+            // A board that waited for the partner's answer when the save stopped being a co-op save still has to
+            // open, or the hero would stand in its dialogue for good
             try {
                 UpdateWishCopyChecks();
             } catch (Exception e) {
@@ -542,7 +542,7 @@ internal partial class CoopSave {
     /// else they can't move.
     /// </summary>
     /// <param name="hero">The hero.</param>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="members">The members on the server.</param>
     private void Hold(HeroController hero, CoopSaveMarker marker, List<ClientPlayerData> members) {
         var gameManager = global::GameManager.instance;
@@ -567,17 +567,17 @@ internal partial class CoopSave {
             Chat(
                 allThere
                     ? Lang.Pick(
-                        $"Waiting for {loading} to load your {SaveWord(marker)}.",
-                        $"正在等 {loading} 进入你们的{SaveWord(marker)}。"
+                        $"Waiting for {loading} to load your {SaveWord()}.",
+                        $"正在等 {loading} 进入你们的{SaveWord()}。"
                     )
                     : atBench
                         ? Lang.Pick(
-                            $"Your {SaveWord(marker)} waits for {absent}. You can't get up until they are back.",
-                            $"你们的{SaveWord(marker)}在等 {absent}。他们回来之前你起不来。"
+                            $"Your {SaveWord()} waits for {absent}. You can't get up until they are back.",
+                            $"你们的{SaveWord()}在等 {absent}。他们回来之前你起不来。"
                         )
                         : Lang.Pick(
-                            $"Your {SaveWord(marker)} waits for {absent}. You can't move until they are back.",
-                            $"你们的{SaveWord(marker)}在等 {absent}。他们回来之前你动不了。"
+                            $"Your {SaveWord()} waits for {absent}. You can't move until they are back.",
+                            $"你们的{SaveWord()}在等 {absent}。他们回来之前你动不了。"
                         )
             );
         }
@@ -673,7 +673,7 @@ internal partial class CoopSave {
         // comes after the wish, like saving the game, on the way out (CoopSave.WishRead)
         EndHeldBegin(null, false);
 
-        // Before the pairing is forgotten, so that a question of the partner still on screen is answered back to them
+        // Before the check is forgotten, so that a question of the partner still on screen is answered back to them
         // and a button that waited on them is told it is over. ResetWishTalk below runs it again, which does nothing.
         ResetWishConfirm();
         ResetCheck();
@@ -776,8 +776,8 @@ internal partial class CoopSave {
         }
 
         Chat(Lang.Pick(
-            $"{player.Username} is here. Your {SaveWord(marker)} continues once they have loaded a save.",
-            $"{player.Username} 来了。等对方也进了存档，你们的{SaveWord(marker)}就能继续。"
+            $"{player.Username} is here. Your {SaveWord()} continues once they have loaded a save.",
+            $"{player.Username} 来了。等对方也进了存档，你们的{SaveWord()}就能继续。"
         ));
     }
 
@@ -878,8 +878,8 @@ internal partial class CoopSave {
         if (wasChecked && how != null && GetCurrentMarker() is { } marker) {
             name ??= marker.PartnerName;
             Chat(Lang.Pick(
-                $"{name} {how}. Your {SaveWord(marker)} waits for them at the next bench you sit on.",
-                $"{name} {how}。你们的{SaveWord(marker)}会在你下次坐上长椅时等他们。"
+                $"{name} {how}. Your {SaveWord()} waits for them at the next bench you sit on.",
+                $"{name} {how}。你们的{SaveWord()}会在你下次坐上长椅时等他们。"
             ));
         }
     }
@@ -1350,7 +1350,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether a player on the server with a save key isn't a member of a paired save yet.
+    /// Whether a player on the server with a save key isn't a member of a co-op save yet.
     /// </summary>
     private bool HasNewcomer(CoopSaveMarker marker) {
         foreach (var player in _playerData.Values) {
@@ -1457,7 +1457,7 @@ internal partial class CoopSave {
                 return;
             }
 
-            RemoveLocalPairing(slot);
+            MakeNormalSave(slot);
             Chat(Lang.Pick(
                 "Your save is a normal save again. Joining someone's game with it makes it a co-op save again.",
                 "你的存档变回普通存档了。以后用它加入别人的游戏时，会重新变成联机存档。"
@@ -1487,7 +1487,7 @@ internal partial class CoopSave {
     /// co-op save again by itself in this session.
     /// </summary>
     /// <param name="slot">The slot of the save.</param>
-    private void RemoveLocalPairing(int slot) {
+    private void MakeNormalSave(int slot) {
         RemoveMarker(slot);
         if (slot == _sessionSlot) {
             _declinedSlot = slot;
@@ -1779,7 +1779,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Forgets the pairing of a save that the player cleared.
+    /// Forgets the marker of a save that the player cleared.
     /// </summary>
     private void OnClearSaveFile(
         Action<global::GameManager, int, Action<bool>> orig,
@@ -1806,14 +1806,14 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The pairing of the loaded save, or null if no save is loaded or it isn't paired.
+    /// The marker of the loaded save, or null if no save is loaded or it isn't a co-op save.
     /// </summary>
     private CoopSaveMarker? GetCurrentMarker() {
         return IsInGame() ? GetMarker(global::GameManager.instance.profileID) : null;
     }
 
     /// <summary>
-    /// Whether a player is a member of a paired save: they have the save key of one of its members, or the name of one,
+    /// Whether a player is a member of a co-op save: they have the save key of one of its members, or the name of one,
     /// because a member who plays on another computer has another save key.
     /// </summary>
     private static bool IsMember(ClientPlayerData player, CoopSaveMarker marker) {
@@ -1829,7 +1829,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The player on the server who is each member of a paired save, by the index of the member, from the last
+    /// The player on the server who is each member of a co-op save, by the index of the member, from the last
     /// <see cref="MatchPlayers"/>; kept rather than made anew, as the members are matched a few times every frame.
     /// </summary>
     private readonly List<ClientPlayerData?> _matchedPlayers = [];
@@ -1840,7 +1840,7 @@ internal partial class CoopSave {
     private readonly HashSet<ushort> _matchTaken = [];
 
     /// <summary>
-    /// Matches each member of a paired save with the player on the server who is them, or null: the player with their
+    /// Matches each member of a co-op save with the player on the server who is them, or null: the player with their
     /// save key, or else one with their name. No player stands for two members. The list is reused by the next call,
     /// so it is read straight away.
     /// </summary>
@@ -1884,7 +1884,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Each member of a paired save with the player on the server who is them, or null: the player with their save key,
+    /// Each member of a co-op save with the player on the server who is them, or null: the player with their save key,
     /// or else one with their name. No player stands for two members.
     /// </summary>
     private List<(CoopSaveMember Member, ClientPlayerData? Player)> MatchMembers(CoopSaveMarker marker) {
@@ -1898,7 +1898,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The members of a paired save that are on the server, in the order of the pairing.
+    /// The members of a co-op save that are on the server, in the order of the marker.
     /// </summary>
     private List<ClientPlayerData> FindMembers(CoopSaveMarker marker) {
         var members = new List<ClientPlayerData>();
@@ -1912,7 +1912,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether every member of a paired save is on the server.
+    /// Whether every member of a co-op save is on the server.
     /// </summary>
     private bool HasAllMembers(CoopSaveMarker marker) {
         foreach (var player in MatchPlayers(marker)) {
@@ -1925,7 +1925,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether every member of a paired save is on the server and was checked with.
+    /// Whether every member of a co-op save is on the server and was checked with.
     /// </summary>
     private bool IsGroupComplete(CoopSaveMarker marker, List<ClientPlayerData> members) {
         return members.Count == marker.Members.Count && !HasUncheckedMember(members);
@@ -1959,7 +1959,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The member of a paired save that a player is, or null.
+    /// The member of a co-op save that a player is, or null.
     /// </summary>
     private static CoopSaveMember? FindMarkerMember(CoopSaveMarker marker, ClientPlayerData player) {
         return marker.Members.FirstOrDefault(member => player.SaveKey.Length > 0 && player.SaveKey == member.Key) ??
@@ -1967,7 +1967,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The save key that a pairing has for a player: the key that a hello to them names, and that decides between the
+    /// The save key that a marker has for a player: the key that a hello to them names, and that decides between the
     /// saves of the players.
     /// </summary>
     private static string GetMemberKey(CoopSaveMarker? marker, ClientPlayerData player) {
@@ -1975,7 +1975,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The members of a paired save that it waits for: those not on the server, and those on it who haven't been
+    /// The members of a co-op save that it waits for: those not on the server, and those on it who haven't been
     /// checked with. Joined for a message.
     /// </summary>
     private string GetMissingNames(CoopSaveMarker marker) {
@@ -1989,7 +1989,7 @@ internal partial class CoopSave {
     /// <summary>
     /// What a co-op save is called in messages, however many play it.
     /// </summary>
-    private static string SaveWord(CoopSaveMarker? marker) {
+    private static string SaveWord() {
         return Lang.Pick("co-op save", "联机存档");
     }
 
@@ -2030,7 +2030,7 @@ internal partial class CoopSave {
         _markers = File.Exists(path) ? FileUtil.LoadObjectFromJsonFile<CoopSaveMarkers>(path) : null;
         _markers ??= new CoopSaveMarkers();
 
-        // Pairings from before saves could have more than two players name their only other player alone
+        // Markers from before saves could have more than two players name their only other player alone
         foreach (var marker in _markers.Slots.Values) {
             marker.TakeOverPartner();
         }
@@ -2109,7 +2109,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Tells the other player in the waiting room whether the local player is ready to choose a save. Sent from the
-    /// menu, so it deliberately asks nothing about saves being loaded or paired.
+    /// menu, so it deliberately asks nothing about saves being loaded or being co-op saves.
     /// </summary>
     /// <param name="ready">Whether the local player is ready.</param>
     public void SendWaitingRoomReady(bool ready) {
@@ -2162,7 +2162,7 @@ internal partial class CoopSave {
     /// <summary>
     /// Whether an update comes from a member who is in the same save as the local player: one that the saves were
     /// checked with, or one who said hello in the current round while the local game still finishes it. A player whose
-    /// own pairing still names the local player, but who isn't in the save of the local player any more, is neither.
+    /// own marker still names the local player, but who isn't in the save of the local player any more, is neither.
     /// </summary>
     private bool IsFromMemberInSave(ClientPlayerData player) {
         return _checkedMembers.Contains(player.Id) ||

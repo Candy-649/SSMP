@@ -168,7 +168,7 @@ internal partial class CoopSave {
         }
 
         // Every member got to this same wish first and stands there waiting for this game to get here too. All have
-        // now, so they are told to go on and so does this step. A word from an earlier pairing is nobody's any more.
+        // now, so they are told to go on and so does this step. A word from an earlier check is nobody's any more.
         var members = GetCheckedMembers();
         var waits = members.Count > 0 ? GetWishWaits((WishConfirmAccept, wish)) : [];
         if (members.Count > 0 && members.TrueForAll(member => waits.Exists(wait => wait.PartnerId == member.Id))) {

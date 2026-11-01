@@ -1081,7 +1081,7 @@ internal partial class CoopSave {
             return true;
         }
 
-        // Every member has to be close by. One who isn't checked in is named from the pairing, and the ones who are
+        // Every member has to be close by. One who isn't checked in is named from the marker, and the ones who are
         // away hear that they are wanted
         var members = GetCheckedMembers();
         var absence = GetWishTalkAbsence(marker, members, out var away);
@@ -1138,9 +1138,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Why the other members can't join key dialogue now, for the message to the local player, or null if they can. A
-    /// member who isn't checked in is named from the pairing.
+    /// member who isn't checked in is named from the marker.
     /// </summary>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="members">The checked members.</param>
     /// <param name="away">The checked members who aren't close by, who hear that they are wanted.</param>
     private string? GetWishTalkAbsence(
@@ -2128,7 +2128,7 @@ internal partial class CoopSave {
     /// finishes it.
     /// </summary>
     private bool IsFromCurrentCheck(ClientPlayerData player, CoopSaveUpdate update) {
-        // A player whose pairing names the local save without the local save naming them said no hello that counts,
+        // A player whose marker names the local save without the local marker naming them said no hello that counts,
         // so their game's round key, which can be the same small number, doesn't make their changes count here
         return _checkedMembers.Contains(player.Id) ||
                (IsFromMemberInSave(player) && _checkKey != 0 && update.Sequence >> 32 == _checkKey >> 16);

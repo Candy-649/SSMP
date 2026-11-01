@@ -141,7 +141,7 @@ internal class ClientManager : IClientManager {
     private readonly BossRoomCoop _bossRoomCoop;
 
     /// <summary>
-    /// Two-player saves: pairing saves and keeping paired saves in step.
+    /// Co-op saves: marking saves for co-op and keeping them in step.
     /// </summary>
     private readonly CoopSave _coopSave;
 

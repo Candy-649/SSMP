@@ -231,7 +231,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Tells the partner about the toll benches that the local player keeps up, flips up the ones here that the partner
-    /// keeps up, and lets the ones wait again that the partner let go of. Called every frame of a paired save.
+    /// keeps up, and lets the ones wait again that the partner let go of. Called every frame of a co-op save.
     /// </summary>
     private void UpdateTollBenches() {
         try {

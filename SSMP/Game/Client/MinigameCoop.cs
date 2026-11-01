@@ -108,7 +108,7 @@ internal partial class MinigameCoop {
     private readonly Dictionary<ushort, ClientPlayerData> _playerData;
 
     /// <summary>
-    /// Gets the IDs of the members of the two-player save that it was checked with, none when no save is paired.
+    /// Gets the IDs of the members of the two-player save that it was checked with, none when no co-op save is loaded.
     /// </summary>
     private readonly Func<IReadOnlyCollection<ushort>> _getMembers;
 

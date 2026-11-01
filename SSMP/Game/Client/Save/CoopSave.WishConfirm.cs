@@ -976,7 +976,7 @@ internal partial class CoopSave {
     private void OnWishConfirm(ClientPlayerData player, CoopSaveUpdate update) {
         try {
             // Only a member of the check that runs right now shares anything with this save, so an answer from an
-            // older pairing belongs to nothing that still waits
+            // older check belongs to nothing that still waits
             if (GetCurrentMarker() is not { } marker || !IsMember(player, marker) ||
                 !_checkedMembers.Contains(player.Id)) {
                 // Never leave the other player standing in their dialogue waiting for an answer that can't come
@@ -1237,9 +1237,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Tells the members who were asked about a yes of the local player that it is over, so that their boxes close and
-    /// their own yes stops counting it. Each is told on their own, rather than whoever the pairing names by now: a
-    /// member reloading their save clears the pairing without ending this, and the notice would then be dropped and
-    /// leave their box waiting.
+    /// their own yes stops counting it. Each is told on their own, rather than whoever the check holds by now: a
+    /// member reloading their save drops out of the check without ending this, and the notice would then be dropped
+    /// and leave their box waiting.
     /// </summary>
     /// <param name="held">The yes that is over.</param>
     /// <param name="except">A member who needs no telling, like the one who said no, or null.</param>
@@ -2151,7 +2151,7 @@ internal partial class CoopSave {
 
         /// <summary>
         /// Who was asked, with their names, and who is told when this ends. Kept here rather than read from the
-        /// pairing, which can be cleared while the button still waits - and the telling would then go nowhere.
+        /// check, which can be cleared while the button still waits - and the telling would then go nowhere.
         /// </summary>
         public List<(ushort Id, string Name)> Members { get; }
 
@@ -2331,7 +2331,7 @@ internal partial class CoopSave {
         }
 
         /// <summary>
-        /// Who asked, and who the answer goes back to. Kept on the showing itself rather than read from the pairing,
+        /// Who asked, and who the answer goes back to. Kept on the showing itself rather than read from the check,
         /// which can already be cleared by the time a question is shown or taken down - and then there would be
         /// nobody to answer, leaving the one who asked to wait out their whole timeout.
         /// </summary>

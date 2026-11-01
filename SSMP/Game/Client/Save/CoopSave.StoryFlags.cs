@@ -30,7 +30,7 @@ internal partial class CoopSave {
     private const float StoryFlagInterval = 0.5f;
 
     /// <summary>
-    /// How often, in seconds, the play time that both players played together is written to the pairing, so that a
+    /// How often, in seconds, the play time that both players played together is written to the marker, so that a
     /// crash loses little of it.
     /// </summary>
     private const float CheckedPlayTimeSaveInterval = 60f;
@@ -86,7 +86,7 @@ internal partial class CoopSave {
     private int[]? _agreedStoryValues;
 
     /// <summary>
-    /// When the play time that both players played together is written to the pairing next.
+    /// When the play time that both players played together is written to the marker next.
     /// </summary>
     private float _nextCheckedPlayTimeSave;
 

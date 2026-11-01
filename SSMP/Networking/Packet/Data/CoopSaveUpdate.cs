@@ -3,9 +3,9 @@ using System.Collections.Generic;
 namespace SSMP.Networking.Packet.Data;
 
 /// <summary>
-/// Packet data for two-player saves: pairing the saves of two players, checking both saves while both players are in
-/// them, the world progress of a save that the other player adds to theirs, and mechanisms that a player used, which
-/// the game of the other player replays. It goes to one other player.
+/// Packet data for co-op saves: checking the saves of the players while all of them are in them, the world progress
+/// of a save that the other players add to theirs, and mechanisms that a player used, which the games of the other
+/// players replay. It goes to one other player or to every other player.
 /// </summary>
 internal class CoopSaveUpdate : IPacketData {
     /// <inheritdoc />
@@ -30,14 +30,15 @@ internal class CoopSaveUpdate : IPacketData {
     public CoopSaveUpdateKind Kind { get; set; }
 
     /// <summary>
-    /// For pairing, the ID of the request. For a hello, world progress and leaving, the key of the check, which tells
-    /// newer checks from older ones. For a lift, a count that grows with every ride that the sender starts. For an
-    /// answer about a delivery that broke, the <see cref="Sequence"/> of the report that it answers.
+    /// For a hello, world progress and leaving, the key of the check, which tells newer checks from older ones. For a
+    /// lift, a count that grows with every ride that the sender starts. For an answer about a delivery that broke, the
+    /// <see cref="Sequence"/> of the report that it answers.
     /// </summary>
     public ulong Key { get; set; }
 
     /// <summary>
-    /// For a hello, the save key of the player that the save of the sender is paired with.
+    /// For a hello, the save key that the co-op save of the sender has for the player it goes to. For the layout of a
+    /// room of the maze and a door taken in it, the save key of the player who came in or went through first.
     /// </summary>
     public string PartnerKey { get; set; } = "";
 
@@ -61,8 +62,8 @@ internal class CoopSaveUpdate : IPacketData {
     public ushort PartCount { get; set; }
 
     /// <summary>
-    /// For world progress and pairing, the records of beaten bosses in the save of the sender. For bringing the other
-    /// player to a delivery, the door of its scene to come in through.
+    /// For world progress, the records of beaten bosses in the save of the sender, and for a boss fight, its scene. For
+    /// bringing the other player to a delivery, the door of its scene to come in through.
     /// </summary>
     public List<string> Records { get; set; } = [];
 
@@ -75,9 +76,7 @@ internal class CoopSaveUpdate : IPacketData {
     /// <summary>
     /// For world progress, the IDs of the saved objects of the world that are set, in the order of
     /// <see cref="ItemScenes"/>. For dialogue that accepted or completed wishes, what it took and gave, each after the
-    /// index of its wish in <see cref="WishNames"/> or -1 for all of them, in the order of <see cref="Amounts"/>. For a
-    /// request to pair saves and its confirmation, the save keys of the players it went to, in the order of
-    /// <see cref="Names"/>.
+    /// index of its wish in <see cref="WishNames"/> or -1 for all of them, in the order of <see cref="Amounts"/>.
     /// </summary>
     public List<string> ItemIds { get; set; } = [];
 
@@ -161,8 +160,7 @@ internal class CoopSaveUpdate : IPacketData {
     /// <summary>
     /// Names that a kind of update carries as a set, like the boss scenes that the save of the sender has
     /// unlocked. They only ever get added, so both games take the union of them. For a hatch over a way out of the
-    /// room, the scene that the way leads to and the door of that scene that it comes in at, in that order. For a
-    /// request to pair saves and its confirmation, the usernames of the players it went to.
+    /// room, the scene that the way leads to and the door of that scene that it comes in at, in that order.
     /// </summary>
     public List<string> Names { get; set; } = [];
 
@@ -328,45 +326,43 @@ internal class CoopSaveUpdate : IPacketData {
 /// </summary>
 internal enum CoopSaveUpdateKind : byte {
     /// <summary>
-    /// A player asks the other player to pair their current saves as a two-player save, with the bosses their save has
-    /// beaten.
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     PairRequest,
 
     /// <summary>
-    /// A player agrees to a request to pair saves, with the bosses their save has beaten. Nothing is paired until the
-    /// game of the player who asked confirms.
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     PairAccept,
 
     /// <summary>
-    /// A player can't pair saves with the player who asked, because their saves have beaten different bosses, which the
-    /// update lists for the sender.
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     PairRefused,
 
     /// <summary>
-    /// The player who asked paired their save after the other player agreed, so the other player pairs theirs too.
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     PairConfirm,
 
     /// <summary>
-    /// A request to pair saves didn't go through, and a save that was already paired for it is unpaired again.
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     PairCancel,
 
     /// <summary>
-    /// A player asks the other player to make their two-player save a normal save again.
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     UnpairRequest,
 
     /// <summary>
-    /// A player made their two-player save with the other player a normal save again.
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     Unpaired,
 
     /// <summary>
-    /// A player plays a save that is paired with the save key in the update.
+    /// A player plays a co-op save and says hello for a check: the save key in the update is the one their save has for
+    /// the player it goes to.
     /// </summary>
     Hello,
 
@@ -669,8 +665,7 @@ internal enum CoopSaveUpdateKind : byte {
     SlidePlatform,
 
     /// <summary>
-    /// A member agrees to make a shared save of more than two players a normal save again, which goes to every member.
-    /// The member who asked unpairs all of them once each agreed. No longer sent since saves aren't paired (0.4.91).
+    /// Unused: saves are no longer paired (63ccd82, 0.4.91). It stays so that the kinds after it keep their numbers.
     /// </summary>
     UnpairAccept,
 

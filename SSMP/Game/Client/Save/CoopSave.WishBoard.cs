@@ -167,7 +167,7 @@ internal partial class CoopSave {
     /// stay on the board.
     /// </summary>
     /// <param name="board">The board.</param>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="resumed">The opening that waited for the partner's answer, or null if it didn't wait.</param>
     /// <param name="leftOut">The wishes that stay on the board while the others are turned in, or null.</param>
     /// <returns>Whether all the wishes that are ready to turn in stay on the board.</returns>
@@ -509,7 +509,7 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="itemBoard">The list of the board that asked.</param>
     /// <param name="quest">The wish that the donation completes.</param>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="board">The board, or null if it can't be found, in which case the members don't pay.</param>
     /// <param name="members">The members who pay too, or null if they don't.</param>
     /// <returns>Whether the donation may go through.</returns>
@@ -617,9 +617,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Why the other members can't join a use of a board now, for the message to the local player, or null if they
-    /// can. A member who isn't checked in is named from the pairing.
+    /// can. A member who isn't checked in is named from the marker.
     /// </summary>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="members">The checked members.</param>
     /// <param name="use">What the board would be used for, for the message.</param>
     /// <param name="away">The checked members who aren't close by, who hear that they are wanted.</param>

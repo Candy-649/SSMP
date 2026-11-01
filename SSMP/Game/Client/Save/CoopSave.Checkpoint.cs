@@ -226,7 +226,7 @@ internal partial class CoopSave {
     /// save whose fight lasted.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="members">The members of the save who are on the server.</param>
     private void UpdateCheckpoint(HeroController hero, CoopSaveMarker marker, List<ClientPlayerData> members) {
         var scene = SceneUtil.GetCurrentSceneName();

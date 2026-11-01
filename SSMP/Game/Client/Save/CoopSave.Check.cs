@@ -135,14 +135,14 @@ internal partial class CoopSave {
     private int _onlyLocalDefeats;
 
     /// <summary>
-    /// Whether the players have already been told that their pairings point at different saves. The games keep
+    /// Whether the players have already been told that their markers point at different saves. The games keep
     /// exchanging hellos for as long as a check cannot finish, so without this a mismatch would say the same thing
     /// again on every single one of them.
     /// </summary>
     private bool _helloKeyMismatchTold;
 
     /// <summary>
-    /// The players told about once that their pairing names this save while this save's pairing doesn't name them.
+    /// The players told about once that their marker names this save while this save's marker doesn't name them.
     /// Their game says hello every couple of seconds and waits for good, which nothing else would show.
     /// </summary>
     private readonly HashSet<ushort> _strangerHellosTold = [];
@@ -172,7 +172,7 @@ internal partial class CoopSave {
         public string Name { get; }
 
         /// <summary>
-        /// Whether the member said hello for the round, so they have loaded the save that is paired with the local one.
+        /// Whether the member said hello for the round, so they have loaded their co-op save.
         /// </summary>
         public bool Hello { get; set; }
 
@@ -255,7 +255,7 @@ internal partial class CoopSave {
     /// Moves the round with the members on the server along: start a round, say hello to each member, back up and send
     /// the world progress to each member who said hello, and once the progress of every member is in, add all of it.
     /// </summary>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="members">The members on the server.</param>
     private void UpdateCheck(CoopSaveMarker marker, List<ClientPlayerData> members) {
         // A member who wasn't in a round that finished starts a new one once their game says hello (OnHello)
@@ -497,7 +497,7 @@ internal partial class CoopSave {
     /// <summary>
     /// Finishes a round: remembers it, and lets the local player move once every member of the save was in it.
     /// </summary>
-    /// <param name="marker">The pairing of the loaded save.</param>
+    /// <param name="marker">The marker of the loaded save.</param>
     /// <param name="members">The members of the round, every member on the server.</param>
     private void FinishCheck(CoopSaveMarker marker, List<ClientPlayerData> members) {
         _roundFinished = true;

@@ -11,7 +11,7 @@ namespace SSMP.Game.Client.Save;
 /// first, as it does when the player quits to the menu, so that the copy holds everything up to the command. A slot
 /// that holds a save is never written over.
 ///
-/// The copy is a normal save, even the copy of a two-player save: two slots paired with the same partner would each be
+/// The copy is a normal save, even the copy of a two-player save: two co-op slots with the same partner would each be
 /// merged with the partner's one save. The game's save menu is built anew each time the player quits to it, so the copy
 /// shows there without restarting the game.
 /// </summary>

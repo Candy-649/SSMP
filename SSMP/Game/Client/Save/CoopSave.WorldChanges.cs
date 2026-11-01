@@ -197,7 +197,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// The save key of the member who sent an update, as the pairing has it, which decides between things that games
+    /// The save key of the member who sent an update, as the marker has it, which decides between things that games
     /// chose at once.
     /// </summary>
     private string GetSenderKey(ushort playerId) {
@@ -388,8 +388,8 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Adds saved objects of the world and flags of the player data that got set in the game of the partner to the local
-    /// save. They are added as soon as the loaded save is paired with the partner, also while its check is still running,
-    /// because the game of the partner may have finished its check already and doesn't send them again.
+    /// save. They are added as soon as the loaded co-op save has the partner in it, also while its check is still
+    /// running, because the game of the partner may have finished its check already and doesn't send them again.
     /// </summary>
     private void OnWorldChange(ClientPlayerData player, CoopSaveUpdate update) {
         var marker = GetCurrentMarker();

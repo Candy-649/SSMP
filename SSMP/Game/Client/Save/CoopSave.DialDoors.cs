@@ -18,7 +18,7 @@ namespace SSMP.Game.Client.Save;
 /// CoopSave.SlidePlatforms), each time a dial comes to rest, the game that runs the room says how it stands, and with
 /// the partner in another room the game it turned in says so, for the partner's save. The changes of the world leave
 /// dials out: they only go from not set to set, and the partner's game locked a loaded dial to save as turned whichever
-/// way it then stood. When two saves are paired, a dial turned in either is still turned in both, and a loaded one is
+/// way it then stood. In co-op saves, a dial turned in either is still turned in both, and a loaded one is
 /// put that way (see <see cref="PutDial"/>).
 /// </summary>
 internal partial class CoopSave {
@@ -146,7 +146,7 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Puts a loaded dial the way the partner's game or the paired saves have it: at once if it stands still, or once
+    /// Puts a loaded dial the way the partner's game or the co-op saves have it: at once if it stands still, or once
     /// it comes to rest if it still turns. It then saves that way itself, as it would after a turn.
     /// </summary>
     private void PutDial(DialDoorBridge dial, bool rotated) {
