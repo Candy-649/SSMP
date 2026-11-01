@@ -102,7 +102,7 @@ internal static class ToolCopies {
     /// The state machines of the things of the local player's tools that are followed, with the thing, the index of the
     /// state machine in it and the events of it that only this game can know of.
     /// </summary>
-    private static readonly Dictionary<Fsm, (TrackedTool Tool, byte Index, HashSet<string> Events)> LocalFsms = new();
+    private static readonly Dictionary<Fsm, (TrackedTool Tool, byte Index, ThrowerEventSet Events)> LocalFsms = new();
 
     /// <summary>
     /// The damagers of the things of the local player's tools that are watched for landed hits, which the pool keeps
@@ -113,7 +113,74 @@ internal static class ToolCopies {
     /// <summary>
     /// The state machines of the copies of the partner's things, with the events that only come from the thrower.
     /// </summary>
-    private static readonly Dictionary<Fsm, HashSet<string>> CopyFsms = new();
+    private static readonly Dictionary<Fsm, ThrowerEventSet> CopyFsms = new();
+
+    /// <summary>
+    /// The state machines of copies that hold a change of state that only the thrower's game can know of in one state,
+    /// until the thrower's change comes: the state, the change and when the hold began. A change that got lost on the
+    /// way never comes, and the copy would stay where it was until it went; it goes on by itself after
+    /// <see cref="LongestHold"/> (see <see cref="WatchHolds"/>).
+    /// </summary>
+    private static readonly Dictionary<Fsm, (string State, FsmTransition Transition, float Since)> Holds = new();
+
+    /// <summary>
+    /// The holds that are over this frame, kept so that they are not made every frame.
+    /// </summary>
+    private static readonly List<Fsm> HoldsOver = [];
+
+    /// <summary>
+    /// For how long a copy holds a change for the thrower's game before it goes on by itself, in seconds: much longer
+    /// than the way there takes, which the thrower's thing spends in the same state too.
+    /// </summary>
+    private const float LongestHold = 1.5f;
+
+    /// <summary>
+    /// Whether <see cref="WatchHolds"/> runs every frame now.
+    /// </summary>
+    private static bool _watchingHolds;
+
+    /// <summary>
+    /// The state machine of a copy whose held change goes through now, as it goes on by itself.
+    /// </summary>
+    private static Fsm? _letThrough;
+
+    /// <summary>
+    /// The actions of the state machines of copies that roll a number that comes from the thrower's game, which are
+    /// switched off (see <see cref="LeaveRollsToThrower"/>), for a copy that goes on by itself to roll for itself.
+    /// </summary>
+    private static readonly Dictionary<Fsm, List<FsmStateAction>> LeftRolls = new();
+
+    /// <summary>
+    /// The actions of copies that go by the character of the thrower in place of the hero (see
+    /// <see cref="ThrowerOr"/>), which a copy taken from the pool again points at its thrower then.
+    /// </summary>
+    private static readonly ConditionalWeakTable<FsmStateAction, object> ThrowerActions = new();
+
+    /// <summary>
+    /// What <see cref="ThrowerActions"/> holds for each action, which only matters by being there.
+    /// </summary>
+    private static readonly object ThrowerMark = new();
+
+    /// <summary>
+    /// Gives <see cref="ThrowerMark"/> to an action that <see cref="ThrowerActions"/> does not hold yet.
+    /// </summary>
+    private static readonly ConditionalWeakTable<FsmStateAction, object>.CreateValueCallback MarkThrowerAction =
+        _ => ThrowerMark;
+
+    /// <summary>
+    /// The field of what the hero spawns as they are hurt, each with the tool that has to be on for it.
+    /// </summary>
+    private static readonly FieldInfo? HurtSpawnsField = typeof(HeroDamageSpawn).GetField("spawns", InstanceFlags);
+
+    /// <summary>
+    /// The copied things that the local hero spawns as they are hurt with a tool on, read from <see cref="_hurtSpawnsOf"/>.
+    /// </summary>
+    private static readonly HashSet<GameObject> HurtSpawns = [];
+
+    /// <summary>
+    /// The hero that <see cref="HurtSpawns"/> were read from, or null before they were read.
+    /// </summary>
+    private static HeroController? _hurtSpawnsOf;
 
     /// <summary>
     /// The hooks, which stay for as long as the game runs.
@@ -557,13 +624,24 @@ internal static class ToolCopies {
         bool isGlobal
     ) {
         var eventName = transition?.FsmEvent?.Name;
-        if (eventName != null && CopyFsms.TryGetValue(self, out var copyEvents) && copyEvents.Contains(eventName)) {
+        var from = self.ActiveStateName;
+        if (eventName != null && self != _letThrough && CopyFsms.TryGetValue(self, out var copyEvents) &&
+            copyEvents.Has(from, eventName)) {
+            if (copyEvents.IsInOneStateOnly(from, eventName) &&
+                (!Holds.TryGetValue(self, out var held) || held.State != from)) {
+                Holds[self] = (from, transition!, Time.time);
+                if (!_watchingHolds) {
+                    _watchingHolds = true;
+                    MonoBehaviourUtil.Instance.OnUpdateEvent += WatchHolds;
+                }
+            }
+
             return false;
         }
 
         var changed = orig(self, transition!, isGlobal);
         if (changed && eventName != null && LocalFsms.TryGetValue(self, out var local) &&
-            local.Events.Contains(eventName)) {
+            local.Events.Has(from, eventName)) {
             local.Tool.QueueStateChange(local.Index, transition!.ToState, ReadCarriedFloats(self, local.Tool));
         }
 
@@ -571,13 +649,101 @@ internal static class ToolCopies {
     }
 
     /// <summary>
-    /// Reads the numbers of a state machine of a followed thing that go with its changes of state.
+    /// Watches the copies that hold a change for the thrower's game, every frame while there are any: a copy whose
+    /// state changed meanwhile got the thrower's change, or is gone; one that held it for <see cref="LongestHold"/>
+    /// makes it by itself, as the thrower's change got lost on the way, and rolls for itself what the state it goes
+    /// to rolls, where it would have taken what the thrower's rolled.
+    /// </summary>
+    private static void WatchHolds() {
+        var now = Time.time;
+        foreach (var hold in Holds) {
+            if (hold.Key.ActiveStateName != hold.Value.State || !CopyFsms.ContainsKey(hold.Key) ||
+                now - hold.Value.Since >= LongestHold) {
+                HoldsOver.Add(hold.Key);
+            }
+        }
+
+        // A copy that goes on may end, and another one's hold with it
+        foreach (var fsm in HoldsOver) {
+            if (!Holds.TryGetValue(fsm, out var hold)) {
+                continue;
+            }
+
+            Holds.Remove(fsm);
+            if (fsm.ActiveStateName == hold.State && CopyFsms.ContainsKey(fsm)) {
+                GoOnWithoutThrower(fsm, hold.State, hold.Transition, now - hold.Since);
+            }
+        }
+
+        HoldsOver.Clear();
+        if (Holds.Count == 0) {
+            MonoBehaviourUtil.Instance.OnUpdateEvent -= WatchHolds;
+            _watchingHolds = false;
+        }
+    }
+
+    /// <summary>
+    /// Makes the change of state of a copy that it held for the thrower's game, whose change never came.
+    /// </summary>
+    private static void GoOnWithoutThrower(Fsm fsm, string state, FsmTransition transition, float held) {
+        var rolled = RollForCopy(fsm, transition.ToState);
+        Logger.Info(
+            $"[Tools] A copy of the partner's thing held '{state}' of '{fsm.Name}' for {held:0.0} s for the partner's " +
+            $"change of state, which never came (lost on the way), and goes to '{transition.ToState}' by itself" +
+            (rolled.Length > 0 ? $", rolling {rolled} itself" : "")
+        );
+
+        _letThrough = fsm;
+        try {
+            fsm.Event(transition.FsmEvent);
+        } finally {
+            _letThrough = null;
+        }
+    }
+
+    /// <summary>
+    /// Rolls for a copy the numbers that a state rolls as it is entered and that the copy otherwise takes from the
+    /// thrower's game, the way the switched-off actions roll them, for a copy that goes to that state by itself.
+    /// </summary>
+    /// <returns>The names and numbers rolled, or nothing.</returns>
+    private static string RollForCopy(Fsm fsm, string toState) {
+        if (!LeftRolls.TryGetValue(fsm, out var rolls)) {
+            return "";
+        }
+
+        var rolled = "";
+        foreach (var action in rolls) {
+            if (action.State?.Name != toState) {
+                continue;
+            }
+
+            switch (action) {
+                case RandomInt { storeResult: { } whole } roll:
+                    whole.Value = roll.inclusiveMax
+                        ? UnityEngine.Random.Range(roll.min.Value, roll.max.Value + 1)
+                        : UnityEngine.Random.Range(roll.min.Value, roll.max.Value);
+                    rolled += $"{(rolled.Length > 0 ? ", " : "")}{whole.Name} {whole.Value}";
+                    break;
+                case RandomFloat { storeResult: { } number } roll:
+                    number.Value = UnityEngine.Random.Range(roll.min.Value, roll.max.Value);
+                    rolled += $"{(rolled.Length > 0 ? ", " : "")}{number.Name} {number.Value:0.##}";
+                    break;
+            }
+        }
+
+        return rolled;
+    }
+
+    /// <summary>
+    /// Reads the numbers, whole or not, of a state machine of a followed thing that go with its changes of state.
     /// </summary>
     private static float[] ReadCarriedFloats(Fsm fsm, TrackedTool tracked) {
         var names = ToolCopyRules.GetCarriedFloats(tracked.PrefabName, fsm.Name);
         var floats = new float[names.Length];
         for (var i = 0; i < names.Length; i++) {
-            floats[i] = fsm.Variables.FindFsmFloat(names[i])?.Value ?? 0f;
+            floats[i] = fsm.Variables.FindFsmFloat(names[i]) is { } number ? number.Value
+                : fsm.Variables.FindFsmInt(names[i]) is { } whole ? whole.Value
+                : 0f;
         }
 
         return floats;
@@ -856,8 +1022,10 @@ internal static class ToolCopies {
             } else if (twinned) {
                 // What it spawns in turn comes from its own private copies as well
                 var poisoned = copy!.Poisoned;
-                spawned.AddComponentIfNotPresent<RemoteToolCopy>().Poisoned = poisoned;
-                PrepareCopy(spawned, poisoned);
+                var marker = spawned.AddComponentIfNotPresent<RemoteToolCopy>();
+                marker.Poisoned = poisoned;
+                marker.Thrower = copy.Thrower;
+                PrepareCopy(spawned, prefab!.name, poisoned, copy.Thrower);
                 var place = spawned.transform.position;
                 Logger.Info(
                     $"[Tools] The copy of the partner's '{copy.PrefabName}' lets out its own '{prefab!.name}' at " +
@@ -867,6 +1035,11 @@ internal static class ToolCopies {
                 ThrownTool.SayPicturesLater(
                     spawned, $"The partner's '{prefab.name}' let out by the copy of their '{copy.PrefabName}'"
                 );
+            } else if (IsHurtSpawn(prefab!)) {
+                // What the hero spawns with a tool on as they are hurt is theirs, as the hero's own code spawns it
+                // rather than the state machine that uses their tools
+                spawned.AddComponentIfNotPresent<LocalToolComponent>();
+                Track(spawned, prefab!.name);
             } else if (owner != null) {
                 // Only something that can be touched can be set off; a sound or a puff of dust is left unmarked
                 if (spawned.GetComponentInChildren<Collider2D>(true) != null && IsLocalToolSpawner(owner)) {
@@ -894,6 +1067,57 @@ internal static class ToolCopies {
     /// </summary>
     private static bool IsLocalToolSpawner(GameObject owner) {
         return LocalToolComponent.IsLocalTool(owner) || IsHeroToolsFsm();
+    }
+
+    /// <summary>
+    /// Whether a prefab is one of the copied things that the local hero spawns as they are hurt with a tool on.
+    /// </summary>
+    private static bool IsHurtSpawn(GameObject prefab) {
+        var hero = HeroController.SilentInstance;
+        if (hero == null) {
+            return false;
+        }
+
+        ReadHurtSpawns(hero);
+        return HurtSpawns.Contains(prefab);
+    }
+
+    /// <summary>
+    /// Reads which copied things the hero spawns as they are hurt with a tool on, once for each hero.
+    /// </summary>
+    private static void ReadHurtSpawns(HeroController hero) {
+        if (_hurtSpawnsOf == hero) {
+            return;
+        }
+
+        _hurtSpawnsOf = hero;
+        HurtSpawns.Clear();
+        try {
+            if (!hero.TryGetComponent<HeroDamageSpawn>(out var spawner) ||
+                HurtSpawnsField?.GetValue(spawner) is not Array spawns) {
+                Logger.Warn("[Tools] The hero has no list of what it spawns as it is hurt; none of it shows to the partner");
+                return;
+            }
+
+            foreach (var spawn in spawns) {
+                var prefab = spawn?.GetType().GetField("Prefab", InstanceFlags)?.GetValue(spawn) as GameObject;
+                if (prefab != null && ToolCopyRules.HeroToolSpawns.Contains(prefab.name)) {
+                    HurtSpawns.Add(prefab);
+                }
+            }
+
+            var names = "";
+            foreach (var prefab in HurtSpawns) {
+                names += $"{(names.Length > 0 ? ", " : "")}'{prefab.name}'";
+            }
+
+            Logger.Info(
+                $"[Tools] Of what the hero spawns as it is hurt with a tool on, {spawns.Length} in all, these show to " +
+                $"the partner: {(names.Length > 0 ? names : "none")}"
+            );
+        } catch (Exception e) {
+            Logger.Warn($"Could not read what the hero spawns as they are hurt: {e.Message}");
+        }
     }
 
     /// <summary>
@@ -943,6 +1167,11 @@ internal static class ToolCopies {
     public static GameObject? FindPrefab(string name) {
         if (_prefabs == null || !_prefabs.ContainsKey(name) && MissingPrefabs.Add(name)) {
             _prefabs = FindPrefabs();
+
+            // What the hero spawns as it is hurt is only known with a hero: looked for again once there is one
+            if (!_prefabs.ContainsKey(name) && HeroController.SilentInstance == null) {
+                MissingPrefabs.Remove(name);
+            }
         }
 
         return _prefabs.TryGetValue(name, out var prefab) ? prefab : null;
@@ -950,7 +1179,8 @@ internal static class ToolCopies {
 
     /// <summary>
     /// Finds the prefabs of the copied things: what each copied tool throws, in either of its states for a tool that
-    /// can be switched between two, and what the hero's handling of their tools spawns.
+    /// can be switched between two, what the hero's handling of their tools spawns, and what the hero spawns as they are
+    /// hurt with a tool on.
     /// </summary>
     private static Dictionary<string, GameObject> FindPrefabs() {
         var prefabs = new Dictionary<string, GameObject>();
@@ -973,6 +1203,13 @@ internal static class ToolCopies {
         }
 
         AddHeroToolPrefabs(prefabs);
+        if (HeroController.SilentInstance is { } hero) {
+            ReadHurtSpawns(hero);
+            foreach (var prefab in HurtSpawns) {
+                AddPrefab(prefabs, prefab);
+            }
+        }
+
         return prefabs;
     }
 
@@ -1100,8 +1337,10 @@ internal static class ToolCopies {
     /// them, and a pull on enemies only where this game runs them.
     /// </summary>
     /// <param name="copy">The copy.</param>
+    /// <param name="prefabName">The name of the prefab of the thing it copies.</param>
     /// <param name="poisoned">Whether the thrower has the pouch that poisons their tools.</param>
-    public static void PrepareCopy(GameObject copy, bool poisoned) {
+    /// <param name="thrower">The character of the thrower, or null if it is not known.</param>
+    public static void PrepareCopy(GameObject copy, string prefabName, bool poisoned, GameObject? thrower) {
         ThrownTool.MarkRemote(copy);
 
         foreach (var tint in copy.GetComponentsInChildren<PoisonTintBase>(true)) {
@@ -1116,7 +1355,7 @@ internal static class ToolCopies {
         }
 
         foreach (var fsm in copy.GetComponentsInChildren<PlayMakerFSM>(true)) {
-            QuietFsm(fsm, poisoned);
+            QuietFsm(fsm, poisoned, thrower, ToolCopyRules.TakesPlaceFromTheThrower(prefabName, fsm.FsmName));
         }
     }
 
@@ -1135,6 +1374,42 @@ internal static class ToolCopies {
 
             CopyFsms[fsm.Fsm] = events;
             marker.Fsms.Add(fsm.Fsm);
+            LeaveRollsToThrower(fsm.Fsm, ToolCopyRules.GetCarriedFloats(prefabName, fsm.FsmName));
+        }
+    }
+
+    /// <summary>
+    /// Switches off the actions of a state machine of a copy that roll a number that comes with the thrower's changes
+    /// of state, so that the copy shows what the thrower's thing rolled: the thrower's game rolls, and the other games
+    /// take what came out.
+    /// </summary>
+    private static void LeaveRollsToThrower(Fsm fsm, string[] carried) {
+        if (carried.Length == 0 || fsm.States == null) {
+            return;
+        }
+
+        if (!LeftRolls.TryGetValue(fsm, out var left)) {
+            LeftRolls[fsm] = left = [];
+        }
+
+        foreach (var state in fsm.States) {
+            if (state?.Actions == null) {
+                continue;
+            }
+
+            foreach (var action in state.Actions) {
+                var rolled = action switch {
+                    RandomFloat roll => roll.storeResult?.Name,
+                    RandomInt roll => roll.storeResult?.Name,
+                    _ => null
+                };
+                if (rolled != null && Array.IndexOf(carried, rolled) >= 0) {
+                    action.Enabled = false;
+                    if (!left.Contains(action)) {
+                        left.Add(action);
+                    }
+                }
+            }
         }
     }
 
@@ -1144,6 +1419,8 @@ internal static class ToolCopies {
     public static void ForgetCopy(RemoteToolCopy marker) {
         foreach (var fsm in marker.Fsms) {
             CopyFsms.Remove(fsm);
+            LeftRolls.Remove(fsm);
+            Holds.Remove(fsm);
         }
 
         marker.Fsms.Clear();
@@ -1158,10 +1435,15 @@ internal static class ToolCopies {
     }
 
     /// <summary>
-    /// Switches off what an FSM of a copy would do to this player rather than show, and answers its checks of the
-    /// equipment the way of the thrower.
+    /// Switches off what an FSM of a copy would do to this player rather than show, answers its checks of the equipment
+    /// the way of the thrower, and, for an FSM that a rule says so of, has it take the place and facing that it takes
+    /// from the hero from the character of the thrower (see ToolCopyRules.TakesPlaceFromTheThrower).
     /// </summary>
-    private static void QuietFsm(PlayMakerFSM fsm, bool poisoned) {
+    /// <param name="fsm">The FSM of the copy.</param>
+    /// <param name="poisoned">Whether the thrower has the pouch that poisons their tools.</param>
+    /// <param name="thrower">The character of the thrower, or null if it is not known.</param>
+    /// <param name="takesPlace">Whether the FSM takes its place and facing from the thrower.</param>
+    private static void QuietFsm(PlayMakerFSM fsm, bool poisoned, GameObject? thrower, bool takesPlace) {
         var inner = fsm.Fsm;
         if (inner?.States == null) {
             return;
@@ -1196,6 +1478,27 @@ internal static class ToolCopies {
                     case AddForce2d or AddTorque2d when state.Name == startState:
                         action.Enabled = false;
                         break;
+                    // A queue of things lets only so many of them be out, and the oldest goes when one more comes: a
+                    // copy in this player's own queue would send one of theirs off
+                    case AddSpawnedToQueueGroup:
+                        action.Enabled = false;
+                        break;
+                    // The crystal forms on the hero who was hurt and faces their way
+                    case SetPositionToObject2D place when takesPlace && GoesByTheHero(action, place.targetObject):
+                        place.targetObject = ThrowerOr(thrower, action);
+                        break;
+                    case SetPositionToObject2DV2 place when takesPlace && GoesByTheHero(action, place.targetObject):
+                        place.targetObject = ThrowerOr(thrower, action);
+                        break;
+                    case MatchScaleSign match when takesPlace && GoesByTheHero(action, match.MatchTo):
+                        match.MatchTo = ThrowerOr(thrower, action);
+                        break;
+                    case MatchScaleSignV2 match when takesPlace && GoesByTheHero(action, TargetOf(match.MatchTo)):
+                        match.MatchTo = new FsmOwnerDefault {
+                            OwnerOption = OwnerDefaultOption.SpecifyGameObject,
+                            GameObject = ThrowerOr(thrower, action)
+                        };
+                        break;
                     default:
                         if (IsQuieted(action) || WritesPlayerData(action)) {
                             action.Enabled = false;
@@ -1205,6 +1508,31 @@ internal static class ToolCopies {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Whether an action of a copy goes by the hero of this game, by the game's global variable, or went by it before
+    /// it was pointed at the thrower of an earlier use of the copy from the pool (see <see cref="ThrowerActions"/>).
+    /// </summary>
+    private static bool GoesByTheHero(FsmStateAction action, FsmGameObject? target) {
+        return target is { UseVariable: true, Name: "Hero" } || ThrowerActions.TryGetValue(action, out _);
+    }
+
+    /// <summary>
+    /// The object that an action goes by when it names one, rather than going by the owner of its FSM.
+    /// </summary>
+    private static FsmGameObject? TargetOf(FsmOwnerDefault? owner) {
+        return owner is { OwnerOption: OwnerDefaultOption.SpecifyGameObject } ? owner.GameObject : null;
+    }
+
+    /// <summary>
+    /// The character of the thrower for an action of a copy that goes by the hero, or, when it is not known, nothing,
+    /// with the action switched off until it is known: a copy never goes by this player.
+    /// </summary>
+    private static FsmGameObject ThrowerOr(GameObject? thrower, FsmStateAction action) {
+        ThrowerActions.GetValue(action, MarkThrowerAction);
+        action.Enabled = thrower != null;
+        return thrower != null ? new FsmGameObject { Value = thrower } : new FsmGameObject();
     }
 
     /// <summary>
@@ -1325,6 +1653,11 @@ internal class RemoteToolCopy : MonoBehaviour {
     /// Whether the thrower has the pouch that poisons their tools.
     /// </summary>
     public bool Poisoned { get; set; }
+
+    /// <summary>
+    /// The character of the thrower, or null if it is not known.
+    /// </summary>
+    public GameObject? Thrower { get; set; }
 
     /// <summary>
     /// Whether the copy is of a thing that the thrower's game keeps up to date, rather than of something that such a

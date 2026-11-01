@@ -131,6 +131,7 @@ internal class ThrownTool : BaseAttackTool {
 
         var marker = copy.AddComponentIfNotPresent<RemoteToolCopy>();
         marker.Poisoned = spawn.Poisoned;
+        marker.Thrower = playerObject;
         marker.FromThrower = true;
         marker.PrefabName = spawn.PrefabName;
         marker.SpawnTime = Time.time;
@@ -141,7 +142,7 @@ internal class ThrownTool : BaseAttackTool {
         };
 
         copy.SetActive(true);
-        ToolCopies.PrepareCopy(copy, spawn.Poisoned);
+        ToolCopies.PrepareCopy(copy, spawn.PrefabName, spawn.Poisoned, playerObject);
         var state = ToolCopyRules.GetState(spawn.PrefabName);
         state?.PrepareCopy(copy, playerObject, spawn.Poisoned);
         ToolCopies.LeaveToThrower(copy, spawn.PrefabName, marker);
@@ -294,15 +295,21 @@ internal class ThrownTool : BaseAttackTool {
 
         var fsms = copy.GetComponentsInChildren<PlayMakerFSM>(true);
         if (fsmIndex >= fsms.Length || !fsms[fsmIndex].isActiveAndEnabled || fsms[fsmIndex].Fsm == null) {
+            Logger.Info(
+                $"[Tools] The partner's '{copy.PrefabName}' ({key.Item2}) went to '{state}' of its state machine " +
+                $"{fsmIndex}, which the copy doesn't show: " +
+                (fsmIndex >= fsms.Length ? $"it has only {fsms.Length}" : "it is switched off")
+            );
             return;
         }
 
         var fsm = fsms[fsmIndex];
         var names = ToolCopyRules.GetCarriedFloats(copy.PrefabName, fsm.FsmName);
         for (var i = 0; i < names.Length && i < floats.Length; i++) {
-            var variable = fsm.FsmVariables.FindFsmFloat(names[i]);
-            if (variable != null) {
-                variable.Value = floats[i];
+            if (fsm.FsmVariables.FindFsmFloat(names[i]) is { } number) {
+                number.Value = floats[i];
+            } else if (fsm.FsmVariables.FindFsmInt(names[i]) is { } whole) {
+                whole.Value = Mathf.RoundToInt(floats[i]);
             }
         }
 
