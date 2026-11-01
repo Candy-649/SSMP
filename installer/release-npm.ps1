@@ -4,9 +4,10 @@
 # Then it waits until npm, the mirror and GitHub have the version, and says so.
 #
 # This is the first of the two release steps, in place of `npm publish`, sync-mirror.ps1 and upload-github.ps1 by
-# hand (USER 10-25: "这个npm login还有老是要让我打开网页认证好烦啊", then "github和npm这样不能合并吗"). The second,
-# upload-nexus.ps1, comes after the two players have played the version. A tag at an older commit, whose workflow
-# doesn't release on GitHub yet, leaves upload-github.ps1 to the second step, as before.
+# hand (USER 10-25: "这个npm login还有老是要让我打开网页认证好烦啊", then "github和npm这样不能合并吗"). Nexus Mods
+# gets only the versions that the owner picks after playing them (USER 11-01 "其他时候都只要发npm就行"): pack-nexus.ps1
+# zips that one, and upload-nexus.ps1 puts the newest zip on the mod page. A tag at an older commit, whose workflow
+# doesn't release on GitHub yet, leaves upload-github.ps1 to be run by hand, as before.
 #
 # Publishing is public and cannot be undone after 72 hours, so this is run by the repository's owner, never by a build.
 # Running it again is safe: a version that npm has already is not pushed again, and only waited for.
@@ -39,7 +40,6 @@ $RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $Workflow = 'https://github.com/Candy-649/SSMP/actions/workflows/publish.yml'
 $GitHubApi = 'https://api.github.com/repos/Candy-649/SSMP'
 $Releases = 'https://github.com/Candy-649/SSMP/releases'
-$NexusScript = Join-Path $PSScriptRoot 'upload-nexus.ps1'
 $UploadScript = Join-Path $PSScriptRoot 'upload-github.ps1'
 $Npm = 'https://registry.npmjs.org'
 $Mirror = 'https://registry.npmmirror.com'
@@ -246,9 +246,6 @@ try {
         $where = if ($seen) { 'npm, the mirror and GitHub' } else { 'npm and the mirror' }
         Write-Host "  $PackageName@$version is out on $where. Both players can update with UPDATE.bat." -ForegroundColor Green
         Write-Host "  $Releases/tag/$tag" -ForegroundColor Green
-        Write-Host ""
-        Write-Host "  Once you two have played it, put it on Nexus Mods:" -ForegroundColor Yellow
-        Write-Host "      pwsh -NoProfile -ExecutionPolicy Bypass -File $NexusScript" -ForegroundColor Yellow
     } else {
         Write-Host "  $PackageName@$version is out on npm and the mirror. Both players can update with UPDATE.bat." -ForegroundColor Green
         Write-Host ""
@@ -257,8 +254,8 @@ try {
         } else {
             Write-Host "  The workflow of $($sha.Substring(0, 7)) doesn't release on GitHub." -ForegroundColor Yellow
         }
-        Write-Host "  Once you two have played it, put it on Nexus Mods and GitHub:" -ForegroundColor Yellow
-        Write-Host "      pwsh -NoProfile -ExecutionPolicy Bypass -File $NexusScript && pwsh -NoProfile -ExecutionPolicy Bypass -File $UploadScript" -ForegroundColor Yellow
+        Write-Host "  Put it on GitHub:" -ForegroundColor Yellow
+        Write-Host "      pwsh -NoProfile -ExecutionPolicy Bypass -File $UploadScript" -ForegroundColor Yellow
     }
     Write-Host ""
 } catch {

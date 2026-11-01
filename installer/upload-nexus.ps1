@@ -8,8 +8,8 @@
 # written into the repository and never taken on the command line. NEXUSMODS_API_KEY, when set, is used instead.
 #
 # In order, it:
-#   1. checks that dist-nexus holds the zip of the version staged in dist-npm, with the very SSMP.dll the npm package
-#      holds, so npm and the mod page get one build under one version;
+#   1. takes the zip of the newest version in dist-nexus - pack-nexus.ps1 makes one only for a version that goes to the
+#      mod page, as most go to npm alone - and checks that the SSMP.dll in it says that version;
 #   2. finds the page (the uploader's only Silksong mod) and the file on it (the only active one), and when there is
 #      more than one, asks once and remembers the answer beside the key;
 #   3. stops without uploading when the file already has this version or a newer one, so running it again is safe;
@@ -29,8 +29,8 @@
 # than any on the file, which cannot be on the page yet, and leaves the older gaps unchecked.
 #
 # With -ChangelogsOnly it uploads nothing and does only steps 2, 4 and 6, filling the changelog up to the newest
-# version already on the file (never past it: the page should not describe a version it does not offer). That needs
-# only the staged INSTALL.txt.
+# version already on the file (never past it: the page should not describe a version it does not offer). That reads
+# only the INSTALL.txt in the newest zip.
 #
 # It only adds versions to a file that exists; the page's first file goes up on the website. Uploading is public, so
 # it is run by the page's owner, after npm publish, never by a build.
@@ -41,11 +41,7 @@
 
 [CmdletBinding()]
 param(
-    # The package that pack-npm.ps1 staged (default ..\dist-npm). Its package.json names the version, and its DLL
-    # must be the zip's.
-    [string] $StageDir,
-
-    # Where pack-nexus.ps1 wrote the zip (default ..\dist-nexus).
+    # Where pack-nexus.ps1 writes the zips (default ..\dist-nexus). The zip of the newest version there is uploaded.
     [string] $ZipDir,
 
     # Shown under the file on the page's Files tab, for each version this script adds (default
@@ -59,7 +55,7 @@ param(
     [switch] $NoChangelog,
 
     # Upload nothing; only add to the changelog the versions it lacks, up to the newest version already on the file.
-    # Needs only the staged INSTALL.txt, not the zip.
+    # Reads only the INSTALL.txt in the newest zip.
     [switch] $ChangelogsOnly,
 
     # Ask again which mod and file take the upload, instead of using the remembered answer.
@@ -72,7 +68,6 @@ param(
 $ErrorActionPreference = 'Stop'
 
 # Set here rather than in param(): Windows PowerShell 5.1 leaves $PSScriptRoot empty in parameter defaults under -File
-if (-not $StageDir) { $StageDir = Join-Path $PSScriptRoot '..\dist-npm' }
 if (-not $ZipDir) { $ZipDir = Join-Path $PSScriptRoot '..\dist-nexus' }
 if (-not $DescriptionFile) { $DescriptionFile = Join-Path $PSScriptRoot 'nexus-file-description.txt' }
 
@@ -92,6 +87,9 @@ $VersionPattern = '^[a-zA-Z0-9.-]{1,50}$'
 
 # The zip is read into memory whole. It is about 4 MB, so anything near this size is the wrong file.
 $MaxZipBytes = 100MB
+
+# The text of the INSTALL.txt in the zip (see Get-Release), which the changelog is made from
+$ZipNotes = $null
 
 # How long Nexus Mods may take to check an upload before the script gives up waiting
 $CheckTimeout = [TimeSpan]::FromMinutes(15)
@@ -222,55 +220,75 @@ function Get-Sha256Hex([System.IO.Stream] $stream) {
     finally { $sha.Dispose() }
 }
 
-# The version staged for npm, and the zip of that version with the same SSMP.dll
+# The zip of the newest version in dist-nexus, which pack-nexus.ps1 makes only for a version that goes to the mod page,
+# with the version that the SSMP.dll in it says; the INSTALL.txt in it goes to $ZipNotes
 function Get-Release {
-    $packageJson = Join-Path $StageDir 'package.json'
-    if (-not (Test-Path $packageJson)) { throw "Nothing is staged at $StageDir. Run pack-npm.ps1 first." }
-    $version = [string](Get-Content $packageJson -Raw | ConvertFrom-Json).version
-    if ($version -notmatch $VersionPattern) { throw "The staged version '$version' is not one Nexus Mods accepts." }
-
-    $stageDll = Join-Path $StageDir 'SSMP\SSMP.dll'
-    $product = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($stageDll).ProductVersion
-    if (-not $product.StartsWith("$version.")) {
-        throw "The staged SSMP.dll says '$product', not $version. Run pack-npm.ps1 again."
+    $found = $null
+    $foundNumber = $null
+    if (Test-Path -LiteralPath $ZipDir) {
+        foreach ($file in @(Get-ChildItem -LiteralPath $ZipDir -Filter "$PackageName-*.zip" -File)) {
+            $text = $file.BaseName.Substring($PackageName.Length + 1)
+            $number = $null
+            if ($text -notmatch $VersionPattern -or -not [version]::TryParse($text, [ref]$number)) { continue }
+            if ($null -eq $foundNumber -or $number -gt $foundNumber) {
+                $found = $file
+                $foundNumber = $number
+            }
+        }
     }
-
-    $name = "$PackageName-$version"
-    $zip = Join-Path $ZipDir "$name.zip"
-    if (-not (Test-Path $zip)) { throw "There is no $name.zip in $ZipDir. Run pack-nexus.ps1 first." }
-    $zip = (Resolve-Path $zip).Path
+    if ($null -eq $found) { throw "There is no $PackageName-<version>.zip in $ZipDir. Run pack-nexus.ps1 first." }
+    $version = $found.BaseName.Substring($PackageName.Length + 1)
+    $zip = $found.FullName
 
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $product = $null
+    $noteText = $null
     $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
     try {
         # Laid out as the game folder (see pack-nexus.ps1)
-        $entry = $archive.Entries |
-            Where-Object { $_.FullName.Replace('\', '/') -eq 'BepInEx/plugins/SSMP/SSMP.dll' } |
+        $entries = @($archive.Entries)
+        $dll = $entries | Where-Object { $_.FullName.Replace('\', '/') -eq 'BepInEx/plugins/SSMP/SSMP.dll' } |
             Select-Object -First 1
-        if (-not $entry) { throw "$name.zip has no BepInEx/plugins/SSMP/SSMP.dll." }
-        $stream = $entry.Open()
-        try { $zipDllHash = Get-Sha256Hex $stream } finally { $stream.Dispose() }
+        if (-not $dll) { throw "$($found.Name) has no BepInEx/plugins/SSMP/SSMP.dll." }
+
+        # The version of a DLL is read from a file
+        $temp = [System.IO.Path]::GetTempFileName()
+        try {
+            $in = $dll.Open()
+            try {
+                $out = [System.IO.File]::Create($temp)
+                try { $in.CopyTo($out) } finally { $out.Dispose() }
+            } finally {
+                $in.Dispose()
+            }
+            $product = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($temp).ProductVersion
+        } finally {
+            Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
+        }
+
+        $notes = $entries | Where-Object { $_.FullName -eq 'INSTALL.txt' } | Select-Object -First 1
+        if ($notes) {
+            $reader = New-Object System.IO.StreamReader -ArgumentList $notes.Open(), ([System.Text.Encoding]::UTF8)
+            try { $noteText = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        }
     } finally {
         $archive.Dispose()
     }
-    $stream = [System.IO.File]::OpenRead($stageDll)
-    try { $stageDllHash = Get-Sha256Hex $stream } finally { $stream.Dispose() }
-    if ($zipDllHash -ne $stageDllHash) {
-        throw ("The SSMP.dll in $name.zip is not the one staged for npm, so the two would differ under one" +
-               "`n      version. Run pack-npm.ps1 and then pack-nexus.ps1 again.")
+    if (-not $product -or -not $product.StartsWith("$version.")) {
+        throw "The SSMP.dll in $($found.Name) says '$product', not $version. Run pack-nexus.ps1 again."
     }
 
     $bytes = [System.IO.File]::ReadAllBytes($zip)
-    if ($bytes.Length -gt $MaxZipBytes) { throw "$name.zip is over 100 MB, which this script does not upload." }
-    return @{ Version = $version; Name = "$name.zip"; Path = $zip; Bytes = $bytes; Product = $product }
+    if ($bytes.Length -gt $MaxZipBytes) { throw "$($found.Name) is over 100 MB, which this script does not upload." }
+    $script:ZipNotes = $noteText
+    return @{ Version = $version; Name = $found.Name; Path = $zip; Bytes = $bytes; Product = $product }
 }
 
 # The titles of the install notes marked with this version, e.g. "* [title](0.4.99)" in full-width brackets
 function Get-ChangelogLines([string] $version) {
-    $notes = Join-Path $StageDir 'INSTALL.txt'
-    if (-not (Test-Path $notes)) { return , @() }
-    $text = [System.IO.File]::ReadAllText($notes, [System.Text.Encoding]::UTF8)
+    $text = $script:ZipNotes
+    if (-not $text) { return , @() }
     $header = '^\* \u3010(?<title>.+?)\u3011\uFF08(?<note>[^\uFF09]*)\uFF09\s*$'
     $marked = '(^|[^0-9.])' + [regex]::Escape($version) + '($|[^0-9])'
     $lines = @()
@@ -450,9 +468,8 @@ function Wait-Checked([string] $uploadId, [string] $key) {
 
 # Every version some install note's header marks, as text. A note can name more than one ("0.4.83, 0.4.84 ...").
 function Get-MarkedVersions {
-    $notes = Join-Path $StageDir 'INSTALL.txt'
-    if (-not (Test-Path $notes)) { return , @() }
-    $text = [System.IO.File]::ReadAllText($notes, [System.Text.Encoding]::UTF8)
+    $text = $script:ZipNotes
+    if (-not $text) { return , @() }
     $header = '^\* \u3010(?<title>.+?)\u3011\uFF08(?<note>[^\uFF09]*)\uFF09\s*$'
     $found = @{}
     foreach ($line in ($text -split "\r?\n")) {
@@ -610,15 +627,15 @@ try {
     if ($ChangelogsOnly -and $NoChangelog) { throw "-ChangelogsOnly and -NoChangelog ask for opposite things." }
 
     if ($ChangelogsOnly) {
-        Write-Step 'Checking the install notes'
-        $notes = Join-Path $StageDir 'INSTALL.txt'
-        if (-not (Test-Path $notes)) { throw "There is no INSTALL.txt in $StageDir. Run pack-npm.ps1 first." }
-        Write-Ok (Resolve-Path $notes).Path
+        Write-Step 'Reading the install notes'
+        $release = Get-Release
+        if (-not $ZipNotes) { throw "$($release.Name) has no INSTALL.txt." }
+        Write-Ok "INSTALL.txt in $($release.Name)"
     } else {
         Write-Step 'Checking the zip'
         $release = Get-Release
         $sizeMb = [Math]::Round($release.Bytes.Length / 1MB, 2)
-        Write-Ok "$($release.Name), $sizeMb MB, the same SSMP.dll ($($release.Product)) as the npm stage"
+        Write-Ok "$($release.Name), $sizeMb MB, SSMP.dll $($release.Product)"
 
         $description = $null
         if (Test-Path $DescriptionFile) {

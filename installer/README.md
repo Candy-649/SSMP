@@ -45,18 +45,19 @@ which went stale twice while the flow changed. If the flow changes again, change
 
 ## Publishing a version
 
-`pack-npm.ps1` stages it in `dist-npm/` and `pack-nexus.ps1` zips that stage for the mod page. Then come two steps,
-both run by the repository's owner:
+`pack-npm.ps1` stages it in `dist-npm/`. Every version goes to npm; only the ones the owner picks after playing them
+go to the mod page as well, zipped from that stage by `pack-nexus.ps1`. Both steps are run by the repository's owner:
 
 1. `release-npm.ps1` pushes the tag `v<version>` at the commit stamped into the staged `SSMP.dll`, and GitHub runs
    `.github/workflows/publish.yml` for it: it builds that commit, publishes it on npm with trusted publishing (no
    login, token or 2FA prompt), has the mainland mirror copy it and puts the zip on a GitHub Release with
    `upload-github.ps1`. The script waits until npm, the mirror and GitHub have the version. The players update with
    `UPDATE.bat`, which reads npm.
-2. After the two players have played it, `upload-nexus.ps1` puts the zip on the mod page.
+2. For a version picked for the mod page, after the two players have played it, `pack-nexus.ps1` zips it and
+   `upload-nexus.ps1` puts the zip on the mod page.
 
-A tag at an older commit, whose workflow doesn't make the GitHub release, leaves `upload-github.ps1` to the second
-step.
+A tag at an older commit, whose workflow doesn't make the GitHub release, leaves `upload-github.ps1` to be run by
+hand.
 
 ```
 pwsh -NoProfile -ExecutionPolicy Bypass -File installer/release-npm.ps1
@@ -67,9 +68,9 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File installer/release-npm.ps1
 `pack-npm.ps1` stages a version in `dist-npm/`, and `pack-nexus.ps1` zips that stage into `dist-nexus/` for Nexus
 Mods, laid out as the game folder (the loader at the top, the plugin in `BepInEx/plugins/SSMP`) and without the
 installer or the updater: Nexus Mods quarantined every zip that held an archive or the scripts (see the top of
-`pack-nexus.ps1`), so a player of the mod page unpacks it into the game folder. After `npm publish`,
-`upload-nexus.ps1` adds the zip to the mod page as the newest version of the file already there, through the Nexus
-Mods API, so nobody uploads it by hand:
+`pack-nexus.ps1`), so a player of the mod page unpacks it into the game folder. `upload-nexus.ps1` adds the zip of
+the newest version in `dist-nexus/` to the mod page as the newest version of the file already there, through the
+Nexus Mods API, so nobody uploads it by hand:
 
 ```
 pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-nexus.ps1
@@ -77,7 +78,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File installer/upload-nexus.ps1
 
 | File | What it is |
 | --- | --- |
-| `upload-nexus.ps1` | Checks that the zip holds the same `SSMP.dll` as the npm stage, finds the page's file, uploads, adds the version (main category, previous one archived, mod version updated) and a changelog made of the titles of the `INSTALL.txt` entries marked with that version. Stops without uploading when the file already has the version or a newer one. `-DryRun` shows what it would do. |
+| `upload-nexus.ps1` | Takes the zip of the newest version in `dist-nexus/` and checks that the `SSMP.dll` in it says that version, finds the page's file, uploads, adds the version (main category, previous one archived, mod version updated) and a changelog made of the titles of the entries of the zip's `INSTALL.txt` marked with that version. Stops without uploading when the file already has the version or a newer one. `-DryRun` shows what it would do. |
 | `nexus-file-description.txt` | The description each new version gets under it on the Files tab. |
 
 It needs the page owner's personal API key from https://www.nexusmods.com/settings/api-keys. The script asks for it
