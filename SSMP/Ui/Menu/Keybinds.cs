@@ -7,8 +7,8 @@ namespace SSMP.Ui.Menu;
 /// </summary>
 internal class Keybinds : PlayerActionSet {
     /// <summary>
-    /// The gamepad button that stops waiting for a player who isn't coming, and gives up on waiting to be pulled back
-    /// up, so that no keyboard is needed once the game is running.
+    /// The gamepad button that gives up on waiting to be pulled back up and goes to the bench, so that no keyboard is
+    /// needed once the game is running.
     ///
     /// Pressing down the left stick is the only button the game itself leaves alone: it binds both triggers, both
     /// bumpers, all four face buttons, pressing down the right stick, and the two buttons beside them, and anything
@@ -26,11 +26,10 @@ internal class Keybinds : PlayerActionSet {
     public PlayerAction OpenChat { get; }
 
     /// <summary>
-    /// Keybind that stops waiting for a player of a co-op save who isn't coming, or makes the save a normal save for a
-    /// player left alone in it.
+    /// Keybind that gives up waiting in a cocoon to be pulled back up (CoopSave.Rescue).
     ///
-    /// A key rather than only the chat command, because a held player has been unable to open the chat at all - the
-    /// one way out was shut at the one moment it was needed.
+    /// A key rather than a chat command, because a held player has been unable to open the chat at all, and a player
+    /// lying in a cocoon can't pause either: the one way out would be shut at the one moment it is needed.
     /// </summary>
     public PlayerAction CoopLeave { get; }
 

@@ -30,8 +30,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// another player on the server. A joining player's save takes the host's world as it loads (CoopSave.HostSync): the
 /// host's beaten bosses, story, wishes and mechanisms, the important things the host found, and their own belongings.
 /// The players of a session are whoever is in it. While one of them hasn't loaded yet, or one has left, the others wait
-/// seated on a bench, until they are back or the others stop waiting for them; a player left alone can make the save a
-/// normal save again. Each time they are all in, every save is backed up and checked with the others, and from then on
+/// seated on a bench, until they are back; the hold names who it waits for, and /coopsave off or the save menu makes a
+/// save normal again. Each time they are all in, every save is backed up and checked with the others, and from then on
 /// they keep in step as they play.
 /// </summary>
 internal partial class CoopSave {
