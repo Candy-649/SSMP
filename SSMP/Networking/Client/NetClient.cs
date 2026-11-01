@@ -378,6 +378,7 @@ internal class NetClient : INetClient {
             // De-register the "connect failed" and register the actual timeout handler if we time out
             UpdateManager.TimeoutEvent -= OnConnectTimedOut;
             UpdateManager.TimeoutEvent += OnUpdateTimedOut;
+            UpdateManager.MarkAccepted();
 
             lock (_connectionLock) {
                 ConnectionStatus = ClientConnectionStatus.Connected;

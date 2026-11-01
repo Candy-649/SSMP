@@ -38,6 +38,25 @@ internal class PingInterface {
     private const float IconSize = 20f;
 
     /// <summary>
+    /// How long nothing has to have arrived, in milliseconds, before the display shows that time instead of the round
+    /// trip, when it is longer. The other side sends many times a second, so this long is a gap in the link. Steam
+    /// measures the round trip by what comes back, so while nothing does, the round trip it reports stands still at the
+    /// last one measured, and the number grew only seconds after the link had stopped (USER 11-01
+    /// "我都已经聊天框打不出字了，左上角的延迟还要好几秒后数字才变大").
+    /// </summary>
+    private const int QuietShownFrom = 500;
+
+    /// <summary>
+    /// The steps, in milliseconds, in which how long nothing has arrived is shown.
+    /// </summary>
+    private const int QuietShownStep = 100;
+
+    /// <summary>
+    /// The number the display shows, so that its text is made anew only when it changes.
+    /// </summary>
+    private int _shown = -1;
+
+    /// <summary>
     /// The component group for the ping display.
     /// </summary>
     private readonly ComponentGroup _pingComponentGroup;
@@ -87,13 +106,24 @@ internal class PingInterface {
             alignment: TextAnchor.MiddleLeft
         );
 
-        // Register on update so we can set the text to the latest average RTT
+        // Register on update so we can set the text to the latest round trip, or to how long nothing has arrived
         MonoBehaviourUtil.Instance.OnUpdateEvent += () => {
             if (!netClient.IsConnected) {
                 return;
             }
 
-            pingTextComponent.SetText(netClient.UpdateManager.AverageRtt.ToString());
+            var updateManager = netClient.UpdateManager;
+            var shown = updateManager.AverageRtt;
+            var quiet = updateManager.QuietSeconds * 1000;
+            if (quiet >= QuietShownFrom && quiet > shown) {
+                shown = System.Math.Max(shown, (int) (quiet / QuietShownStep) * QuietShownStep);
+            }
+
+            // Made into text only when it changes: text made every frame is garbage every frame
+            if (shown != _shown) {
+                _shown = shown;
+                pingTextComponent.SetText(shown.ToString());
+            }
         };
     }
 

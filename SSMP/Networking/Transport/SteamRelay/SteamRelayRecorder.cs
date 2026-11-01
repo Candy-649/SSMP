@@ -31,10 +31,10 @@ internal static class SteamRelayRecorder {
     private const int SampleEvery = 1000;
 
     /// <summary>
-    /// How many seconds of the record are kept for each player: a link is given up on after 30 seconds of silence, and
-    /// what came just before that silence belongs to it.
+    /// How many seconds of the record are kept for each player: a link is given up on after a minute of silence
+    /// (UpdateManager.ReconnectCeiling), and what came just before that silence belongs to it.
     /// </summary>
-    private const int Kept = 45;
+    private const int Kept = 75;
 
     /// <summary>
     /// How many seconds at most a link is written down as it goes, once a stretch of silence starts that.

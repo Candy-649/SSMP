@@ -349,6 +349,23 @@ internal class ClientManager : IClientManager {
     private float _roomStateAskedAt = float.MinValue;
 
     /// <summary>
+    /// Whether this game told its player that the link to the server is being made anew, and not yet that it carries
+    /// things again (see <see cref="OnLinkStalled"/>). Only used on the main thread.
+    /// </summary>
+    private bool _linkStallTold;
+
+    /// <summary>
+    /// The players of the server this game hosts whose link this game told its player is being made anew, and not yet
+    /// that it carries things again (see <see cref="OnPlayerLinkStalled"/>). Only used on the main thread.
+    /// </summary>
+    private readonly HashSet<ushort> _playerLinkStallsTold = [];
+
+    /// <summary>
+    /// The server that this game runs when it hosts, which says how the links of its players stand.
+    /// </summary>
+    private ServerManager? _ownServer;
+
+    /// <summary>
     /// The least time between two answers to the server asking for the state of the room this game runs, in seconds.
     /// </summary>
     private const float RoomResendInterval = 3f;
@@ -565,6 +582,12 @@ internal class ClientManager : IClientManager {
         _netClient.ConnectEvent += OnClientConnect;
         _netClient.TimeoutEvent += OnTimeout;
         _netClient.UpdateManager.ReceiveResumed += gap => ThreadUtil.RunActionOnMainThread(() => OnReceiveResumed(gap));
+        _ownServer = serverManager;
+        _netClient.UpdateManager.LinkStalled += () => ThreadUtil.RunActionOnMainThread(OnLinkStalled);
+        serverManager.PlayerLinkStalled += (id, username) =>
+            ThreadUtil.RunActionOnMainThread(() => OnPlayerLinkStalled(id, username));
+        serverManager.PlayerLinkBack += (id, username, _) =>
+            ThreadUtil.RunActionOnMainThread(() => OnPlayerLinkBack(id, username));
         SteamManager.LobbyMemberLeftEvent += (lobby, member) =>
             ThreadUtil.RunActionOnMainThread(() => OnLobbyMemberLeft(lobby, member));
 
@@ -931,6 +954,8 @@ internal class ClientManager : IClientManager {
         // Clear the player data dictionary
         Logger.Info($"Clearing {_playerData.Count} player(s) from store");
         _playerData.Clear();
+        _linkStallTold = false;
+        _playerLinkStallsTold.Clear();
 
         _uiManager.OnClientDisconnect();
 
@@ -1325,6 +1350,7 @@ internal class ClientManager : IClientManager {
         // Clear the player from the player data mapping
         _playerData.Remove(id);
         _settingsBeforeArrival.Remove(id);
+        _playerLinkStallsTold.Remove(id);
         _playerManager.OnPlayerLeftSkins(id);
 
         UiManager.InternalChatBox.AddMessage(
@@ -1468,6 +1494,13 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="gap">How long nothing arrived, in seconds.</param>
     private void OnReceiveResumed(double gap) {
+        if (_linkStallTold) {
+            _linkStallTold = false;
+            if (_netClient.IsConnected) {
+                UiManager.InternalChatBox.AddMessage(Lang.Pick("Reconnected to the host", "和房主重新连上了"));
+            }
+        }
+
         if (gap < RoomStateGap || !_netClient.IsConnected || !_sceneHostDetermined ||
             Time.unscaledTime - _roomStateAskedAt < RoomStateAskInterval) {
             return;
@@ -1476,6 +1509,58 @@ internal class ClientManager : IClientManager {
         _roomStateAskedAt = Time.unscaledTime;
         Logger.Info($"Nothing arrived for {gap:F1}s, so asking for the state of this room again");
         _netClient.UpdateManager.SetRoomStateRequest();
+    }
+
+    /// <summary>
+    /// Tells the player that the link to the server is being made anew, once nothing has come over it for a while
+    /// (UpdateManager.LinkStalled). The game waits for it up to a minute in all (UpdateManager.ReconnectCeiling) before
+    /// it goes back to the main menu; it used to give up after 30 s, less than half a second before Steam had made the
+    /// link anew (USER 11-01 "改吧"). The player hears again once things arrive (<see cref="OnReceiveResumed"/>).
+    /// </summary>
+    private void OnLinkStalled() {
+        // What arrived since the send loop told of the stretch ended it, and was told of before this ran
+        if (!_netClient.IsConnected || _linkStallTold || !_netClient.UpdateManager.Stalled) {
+            return;
+        }
+
+        _linkStallTold = true;
+        UiManager.InternalChatBox.AddMessage(Lang.Pick(
+            "Lost the connection to the host, reconnecting (back to the main menu after a minute without it)",
+            "和房主的连接断了，正在重连（断满一分钟就回主菜单）"
+        ));
+    }
+
+    /// <summary>
+    /// Tells the player of the game that hosts that the link to another player is being made anew, once nothing has
+    /// come from them for a while (ServerManager.PlayerLinkStalled): the server keeps them up to a minute in all.
+    /// </summary>
+    /// <param name="id">The ID of the other player.</param>
+    /// <param name="username">The name of the other player.</param>
+    private void OnPlayerLinkStalled(ushort id, string username) {
+        if (!_netClient.IsConnected || !_playerData.ContainsKey(id) || _ownServer?.IsPlayerLinkStalled(id) != true ||
+            !_playerLinkStallsTold.Add(id)) {
+            return;
+        }
+
+        UiManager.InternalChatBox.AddMessage(Lang.Pick(
+            $"Lost the connection to '{username}', waiting for them to reconnect " +
+            "(they time out after a minute without it)",
+            $"和 {username} 的连接断了，正在等对方重连（断满一分钟算掉线）"
+        ));
+    }
+
+    /// <summary>
+    /// Tells the player of the game that hosts that things come from another player again, after it told them that the
+    /// link to that player was being made anew (<see cref="OnPlayerLinkStalled"/>).
+    /// </summary>
+    /// <param name="id">The ID of the other player.</param>
+    /// <param name="username">The name of the other player.</param>
+    private void OnPlayerLinkBack(ushort id, string username) {
+        if (!_playerLinkStallsTold.Remove(id) || !_netClient.IsConnected) {
+            return;
+        }
+
+        UiManager.InternalChatBox.AddMessage(Lang.Pick($"'{username}' reconnected", $"{username} 重新连上了"));
     }
 
     /// <summary>

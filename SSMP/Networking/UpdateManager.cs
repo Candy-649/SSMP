@@ -25,17 +25,27 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// How long a quiet connection is kept in total, in milliseconds, while the transport still says the session is
-    /// up. Several seconds of silence is ordinary on a relay between continents - one route change is enough - and
-    /// ending the game for it is worse than waiting a little. This is where waiting stops being reasonable even so,
-    /// which is what keeps a host that has frozen from holding the other player there for ever.
+    /// up, until the other side has accepted it: a player joining a host that stops answering is told so after this
+    /// long. Several seconds of silence is ordinary on a relay between continents - one route change is enough - and
+    /// ending the game for it is worse than waiting a little.
     /// </summary>
     private const int ConnectionTimeoutCeiling = 30000;
+
+    /// <summary>
+    /// How long a quiet connection is kept in total, in milliseconds, while the transport still has the session or is
+    /// making it anew, once the other side has accepted it (see <see cref="QuietLinkKept"/>). This is where waiting
+    /// stops being reasonable, which keeps a host that has frozen from holding the other player there for ever. On
+    /// 11-01 nothing came over the relay from the host for 30 s, and Steam had made the link anew less than half a
+    /// second after the joining player's game gave up on it at 30 s and went back to the main menu (USER "改吧"). The
+    /// chat says "a minute" for it (ClientManager.OnLinkStalled).
+    /// </summary>
+    private const int ReconnectCeiling = 60000;
 
     /// <summary>
     /// How long, in milliseconds, nothing has to have arrived before the transport's link is opened anew, while it
     /// still counts as connected (see <see cref="RenewStalledLink"/>). A shorter stretch is left to come back by
     /// itself, as stretches of 13 to 19 s did in the players' logs (09-21, 09-22, 10-09): Steam keeps what was sent in
-    /// one and delivers it once the stretch is over, for 45 s (SteamRelayMessaging.SessionTimeout), where opening the
+    /// one and delivers it once the stretch is over, for 75 s (SteamRelayMessaging.SessionTimeout), where opening the
     /// link anew loses it. The two stretches that never came back (10-12, 10-15) went on past
     /// <see cref="ConnectionTimeoutCeiling"/>.
     /// </summary>
@@ -153,6 +163,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private int _renewals;
 
     /// <summary>
+    /// Whether <see cref="LinkStalled"/> was raised in this quiet stretch.
+    /// </summary>
+    private bool _stallTold;
+
+    /// <summary>
     /// How many seconds from before a quiet stretch began are written down with it, to show how the link stood as it
     /// went quiet.
     /// </summary>
@@ -200,6 +215,34 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     public double QuietSeconds => (DateTime.UtcNow - _lastReceiveTime).TotalSeconds;
 
     /// <summary>
+    /// Whether the other side has accepted this connection since it started (see <see cref="MarkAccepted"/>), after
+    /// which a quiet stretch is kept for <see cref="ReconnectCeiling"/> rather than
+    /// <see cref="ConnectionTimeoutCeiling"/>. Not whether anything has come over it: a host's server sends to a
+    /// joining player from their first message on, before it has accepted them, which made a join that stalls wait
+    /// as long as a game that does (review).
+    /// </summary>
+    private volatile bool _accepted;
+
+    /// <summary>
+    /// How long a quiet connection is kept in total, in milliseconds, while the transport still has the session or is
+    /// making it anew: longer once the other side has accepted it.
+    /// </summary>
+    private int QuietLinkKept => _accepted ? ReconnectCeiling : ConnectionTimeoutCeiling;
+
+    /// <summary>
+    /// Says that the other side has accepted this connection: the server has taken the joining player in. From then on
+    /// a quiet stretch is kept for <see cref="ReconnectCeiling"/>, and told of (<see cref="LinkStalled"/>).
+    /// </summary>
+    public void MarkAccepted() => _accepted = true;
+
+    /// <summary>
+    /// Whether nothing has arrived over a connection the other side has accepted for as long as
+    /// <see cref="LinkStalled"/> waits. Read where <see cref="LinkStalled"/> is handled, on another thread than the one
+    /// that raised it, it tells a stretch that goes on from one that something has ended since.
+    /// </summary>
+    public bool Stalled => _accepted && QuietSeconds * 1000 >= RenewLinkAfter;
+
+    /// <summary>
     /// Whether this quiet stretch has already been reported, so that a link which goes quiet says so once rather
     /// than on every pass of the send loop.
     /// </summary>
@@ -216,11 +259,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// things arrive, before they are taken in without it; a stretch in which nothing arrives counts for at most
     /// <see cref="HeldWaitStepAtMost"/>, as the missing ones can only come over a link that carries something. While
     /// things arrive, the other side hears the ask for them within a round trip, unless the other way of the link
-    /// stands still, which ends in opening the link anew or giving up on it within
-    /// <see cref="ConnectionTimeoutCeiling"/>. Counted in time alone, a link that went quiet for nearly that long just
-    /// after something went missing lost it after all in a simulation.
+    /// stands still, which ends in opening the link anew or giving up on it within <see cref="ReconnectCeiling"/>.
+    /// Counted in time alone, a link that went quiet for nearly that long just after something went missing lost it
+    /// after all in a simulation.
     /// </summary>
-    private const int HoldForMissingAtMost = ConnectionTimeoutCeiling + 5000;
+    private const int HoldForMissingAtMost = ReconnectCeiling + 5000;
 
     /// <summary>
     /// The most that one stretch between two packets that arrive counts towards <see cref="HoldForMissingAtMost"/>, in
@@ -364,6 +407,15 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// stretch may still be on its way, or lost for good.
     /// </summary>
     public event Action<double>? ReceiveResumed;
+
+    /// <summary>
+    /// Raised on the send loop's thread once in a stretch in which nothing arrives over a connection the other side has
+    /// accepted, as the stretch reaches <see cref="RenewLinkAfter"/> while the transport still has the session or is
+    /// making it anew: the link is being made anew from then on. The stretch ends in things arriving again
+    /// (<see cref="ReceiveResumed"/>) or in giving up at <see cref="ReconnectCeiling"/> (<see cref="TimeoutEvent"/>).
+    /// Something may arrive while this is handled on another thread, which <see cref="Stalled"/> tells.
+    /// </summary>
+    public event Action? LinkStalled;
 
     /// <summary>
     /// Cached capability: whether the transport requires application-level sequencing.
@@ -539,6 +591,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// </summary>
     public void StartUpdates() {
         _lastReceiveTime = DateTime.UtcNow;
+        _accepted = false;
 
         _cancellationTokenSource = new CancellationTokenSource();
         _sendThread = new Thread(SendLoop) {
@@ -1418,7 +1471,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                     // moment the link was coming back. The transports that cannot answer at all keep exactly the
                     // behaviour they had.
                     var sessionUp = _transportSessionUp?.Invoke() == true;
-                    var stillUp = quietFor < ConnectionTimeoutCeiling && sessionUp;
+                    var stillUp = quietFor < QuietLinkKept && sessionUp;
                     if (!stillUp) {
                         // Which of the two it was, because nothing else in the log can tell them apart afterwards
                         // and they call for opposite answers: one is a connection that really went away, the other
@@ -1452,6 +1505,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                     }
 
                     RenewStalledLink(quietFor);
+                    TellStall(lastReceive, quietFor);
                 }
 
                 // Send Packet
@@ -1493,6 +1547,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _linkUnsettledAtQuiet = -1;
             _renewedAtQuiet = -1;
             _renewals = 0;
+            _stallTold = false;
         }
 
         if (quietFor < LinkWatchFrom || _transportSessionConnected == null) {
@@ -1512,7 +1567,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// Has the transport open its link to the other side anew, when nothing has arrived over it for
     /// <see cref="RenewLinkAfter"/> although it counts as connected, and again every <see cref="RenewLinkInterval"/>
     /// while still nothing arrives; the next send opens the new link. Giving up still comes at
-    /// <see cref="ConnectionTimeoutCeiling"/>.
+    /// <see cref="QuietLinkKept"/>.
     ///
     /// USER 10-15 "断线去做": nothing from the host reached the joining player for 30 s while what they sent reached the
     /// host throughout, and Steam called the link connected the whole time; it ended the game, and a new lobby two
@@ -1551,10 +1606,32 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         Logger.Info(
             $"Nothing has arrived for {quietFor / 1000:F1}s although the link counted as connected, so it was opened " +
             $"anew (time {_renewals} in this quiet stretch); this is taken as a disconnect only after " +
-            $"{ConnectionTimeoutCeiling / 1000}s"
+            $"{QuietLinkKept / 1000}s"
         );
 
         SendAgainAfterRenewal();
+    }
+
+    /// <summary>
+    /// Raises <see cref="LinkStalled"/> once in a quiet stretch over a connection the other side has accepted, as it
+    /// reaches <see cref="RenewLinkAfter"/>: whether this side opened the link anew then or the transport or the other
+    /// side is making it anew already, it is being made anew, which the players are told of.
+    /// </summary>
+    /// <param name="lastReceive">When the last thing arrived, as the send loop looked.</param>
+    /// <param name="quietFor">How long nothing has arrived since, in milliseconds.</param>
+    private void TellStall(DateTime lastReceive, double quietFor) {
+        // Something that arrived since the send loop looked ended the stretch, which this would tell of too late
+        if (_stallTold || !_accepted || quietFor < RenewLinkAfter || _lastReceiveTime != lastReceive) {
+            return;
+        }
+
+        _stallTold = true;
+        Logger.Info($"Nothing has arrived for {quietFor / 1000:F1}s, so the players are told the link is made anew");
+        try {
+            LinkStalled?.Invoke();
+        } catch (Exception e) {
+            Logger.Warn($"Could not tell that the link is made anew: {e.Message}");
+        }
     }
 
     /// <summary>

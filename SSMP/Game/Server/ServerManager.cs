@@ -195,6 +195,19 @@ internal abstract class ServerManager : IServerManager {
     #endregion
 
     /// <summary>
+    /// Called once in a stretch in which nothing arrives from a player whose link has carried things, as the link to
+    /// them is being made anew, with their ID and name. The stretch ends in things arriving again
+    /// (<see cref="PlayerLinkBack"/>) or in the player timing out. Called on a thread of the network.
+    /// </summary>
+    internal event Action<ushort, string>? PlayerLinkStalled;
+
+    /// <summary>
+    /// Called when something arrives from a player after a stretch of at least two seconds in which nothing did, with
+    /// their ID, name and the length of the stretch in seconds. Called on a thread of the network.
+    /// </summary>
+    internal event Action<ushort, string, double>? PlayerLinkBack;
+
+    /// <summary>
     /// Constructs the server manager.
     /// </summary>
     /// <param name="netServer">The net server instance.</param>
@@ -259,6 +272,9 @@ internal abstract class ServerManager : IServerManager {
 
         // And one for when something arrives from a client after a stretch in which nothing did
         _netServer.ClientReceiveResumedEvent += OnClientReceiveResumed;
+
+        // And one for when the link to a client is being made anew after a long stretch in which nothing arrived
+        _netServer.ClientLinkStalledEvent += OnClientLinkStalled;
     }
 
     /// <summary>
@@ -1442,6 +1458,14 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="gap">How long nothing arrived from them, in seconds.</param>
     private void OnClientReceiveResumed(ushort id, double gap) {
+        if (_playerData.TryGetValue(id, out var player)) {
+            try {
+                PlayerLinkBack?.Invoke(id, player.Username, gap);
+            } catch (Exception e) {
+                Logger.Warn($"Could not tell that things come from ({id}, {player.Username}) again: {e.Message}");
+            }
+        }
+
         if (gap < RoomResendGap || !_fullSynchronisation || !_playerData.TryGetValue(id, out var playerData) ||
             !playerData.IsSceneHost || string.IsNullOrEmpty(playerData.CurrentScene)) {
             return;
@@ -1459,6 +1483,32 @@ internal abstract class ServerManager : IServerManager {
         );
         _netServer.GetUpdateManagerForClient(id)?.SetRoomResendRequest();
     }
+
+    /// <summary>
+    /// Callback for the link to a player being made anew after a long stretch in which nothing arrived from them
+    /// (NetServer.ClientLinkStalledEvent), which the game that hosts tells its player of
+    /// (ClientManager.OnPlayerLinkStalled).
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    private void OnClientLinkStalled(ushort id) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
+            return;
+        }
+
+        try {
+            PlayerLinkStalled?.Invoke(id, playerData.Username);
+        } catch (Exception e) {
+            Logger.Warn($"Could not tell that the link to ({id}, {playerData.Username}) is made anew: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Whether nothing has arrived from a player for as long as <see cref="PlayerLinkStalled"/> waits
+    /// (UpdateManager.Stalled). Read where that is handled, on another thread than the one that raised it, it tells a
+    /// stretch that goes on from one that something has ended since.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    internal bool IsPlayerLinkStalled(ushort id) => _netServer.GetUpdateManagerForClient(id)?.Stalled == true;
 
     /// <summary>
     /// Callback for the state of a room from the game that runs it, which the server asked for (see
@@ -1599,10 +1649,10 @@ internal abstract class ServerManager : IServerManager {
 
     /// <summary>
     /// How many seconds of what was kept of a player's link are written down when they ask for the state of their
-    /// room: the stretch that made them ask is under 30 s, as a longer one ends their connection, and the seconds
+    /// room: the stretch that made them ask is under a minute, as a longer one ends their connection, and the seconds
     /// before it show how it began.
     /// </summary>
-    private const int RoomStateRecordSeconds = 45;
+    private const int RoomStateRecordSeconds = 75;
 
     /// <summary>
     /// Callback for when a player who has been in their room all along asks for its state, after a stretch in which

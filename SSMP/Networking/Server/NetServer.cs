@@ -102,6 +102,12 @@ internal class NetServer : INetServer {
     public event Action<ushort, double>? ClientReceiveResumedEvent;
 
     /// <summary>
+    /// Event that is called once in a stretch in which nothing arrives from a client whose link has carried things, as
+    /// the link to it is being made anew, with the ID of the client (UpdateManager.LinkStalled).
+    /// </summary>
+    public event Action<ushort>? ClientLinkStalledEvent;
+
+    /// <summary>
     /// Event that is called when the server shuts down.
     /// </summary>
     public event Action? ShutdownEvent;
@@ -265,6 +271,11 @@ internal class NetServer : INetServer {
                 ClientReceiveResumedEvent?.Invoke(netServerClient.Id, gap);
             }
         };
+        netServerClient.UpdateManager.LinkStalled += () => {
+            if (netServerClient.IsRegistered) {
+                ClientLinkStalledEvent?.Invoke(netServerClient.Id);
+            }
+        };
         netServerClient.UpdateManager.StartUpdates();
 
         // Only add to _clientsById dictionary
@@ -383,6 +394,7 @@ internal class NetServer : INetServer {
                     Logger.Debug("Connection has finished sending data, registering client");
 
                     client.IsRegistered = true;
+                    client.UpdateManager.MarkAccepted();
                     client.ChunkReceiver.MaxAllowedChunkSize = ConnectionManager.MaxChunkSize;
                     client.ConnectionManager.AllowAddonChunks = true;
                     client.ConnectionManager.StopAcceptingConnection();
