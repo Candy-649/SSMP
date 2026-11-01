@@ -1975,18 +1975,26 @@ internal class ClientManager : IClientManager {
             newServerSettings.OnlyBroadcastMapIconWithCompass) {
             onlyCompassChanged = true;
 
-            var message = newServerSettings.OnlyBroadcastMapIconWithCompass
-                ? Lang.Pick(
-                    "While you wear the Compass, teammates see where you are on their map",
-                    "现在戴着罗盘时，队友的地图上会显示你的位置"
-                )
-                : Lang.Pick(
-                    "Wearing the Compass no longer shows where you are on teammates' maps",
-                    "现在戴着罗盘也不会在队友的地图上显示你的位置了"
+            if (newServerSettings.AlwaysShowMapIcons) {
+                // Map icons that are always shown show every player whether or not they wear the compass
+                // (MapManager.HeroControllerOnUpdate), so this setting changes nothing that a player would see.
+                Logger.Info(
+                    $"The compass map icon setting is now {(newServerSettings.OnlyBroadcastMapIconWithCompass ? "on" : "off")}, which changes nothing while map icons are always shown"
                 );
+            } else {
+                var message = newServerSettings.OnlyBroadcastMapIconWithCompass
+                    ? Lang.Pick(
+                        "While you wear the Compass, teammates see where you are on their map",
+                        "现在戴着罗盘时，队友的地图上会显示你的位置"
+                    )
+                    : Lang.Pick(
+                        "Wearing the Compass no longer shows where you are on teammates' maps",
+                        "现在戴着罗盘也不会在队友的地图上显示你的位置了"
+                    );
 
-            UiManager.InternalChatBox.AddMessage(message);
-            Logger.Info(message);
+                UiManager.InternalChatBox.AddMessage(message);
+                Logger.Info(message);
+            }
         }
 
         // Check whether the display names setting changed

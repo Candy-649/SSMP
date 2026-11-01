@@ -248,7 +248,7 @@ Local logic
   `LockGates` 345-356 (closes gates for the local hero inside), `KeepHeroFree` 315-339 (gives control back after 2 s),
   `OpenUnclaimedGates` 362-380 (8 s), `GiveUpWaiting` 386-413 (/giveup opens gates; room still waits).
 
-### 2d. Shared boss dialogue: DialogueStarted / DialogueDone (and the dead end-hold)
+### 2d. Shared boss dialogue: DialogueStarted / DialogueDone (and the dead end-hold, taken out in dba83cf)
 State (host/sharer): `_sharedDialogues: Dictionary<Fsm, SharedDialogue{StateName, Update, StartTime, Waiting={},
 Done={}, EndHeld=false, HoldsEnd}>` (93, class 1169-1210).
 State (reader): `_dialogueQueue` (98), `_shownDialogue` (133, null), `_shownDialogueId` (138), `_shownDialogueTime`,
@@ -267,7 +267,9 @@ Handlers
   Waiting to Done.
 Hold: `TryHoldDialogueEnd` 357-376 — **never holds today**: `HoldsEnd = isSharedTalk && _holdsSharedTalkEnd(fsm)`
 (255) and `HoldsSharedTalkEnd` returns false (S/CoopSave.WishTalk.cs:850-852). So DialogueDone only affects the dead
-`UpdateDialogues` end-hold path (1011-1047) and the reader's own queue.
+`UpdateDialogues` end-hold path (1011-1047) and the reader's own queue. dba83cf (11-01) took the end-hold out:
+`TryHoldDialogueEnd`, `HoldsEnd`, `EndHeld`, `HoldsSharedTalkEnd`, `RemoveGoneReaders`, `StartTime` and the held half
+of `UpdateDialogues` are gone; the dialogue is forgotten at its end (`ForgetEndedDialogue`).
 Reader timers (UpdateDialogues 1058-1067): box closed without callback after 1 s → ended; open > 12 s
 (`SharedDialogueReadTime` 48) → force-ended.
 
@@ -752,7 +754,8 @@ and (`_held || !_everChecked || atBench`); released when `FinishCheck` sets `_ch
 Note: `UpdateCheck` stops running as soon as the local side is checked (S/CoopSave.cs:437); the other side's hellos
 keep it answering via `OnHello`. Known unproven race from memory ("check key race"): not re-traced here.
 
-### 7j. Pairing (S/CoopSave.cs:1100-1340) — handshake, not a live wait
+### 7j. Pairing (S/CoopSave.cs:1100-1340) — handshake, not a live wait (gone: since 0.4.91 a co-op save is a
+marker aligned to the host's world; 53e18c2 marked the pairing kinds unused)
 Request{Key=id, Records=defeats} → Accept{Key, Records} or Refused → Confirm{Key} → (Cancel{Key}). Requests open 120 s
 (`PairRequestTime` 55). Simultaneous requests: larger id wins (1172-1178). Requester pairs on Accept (1253) *before*
 sending Confirm; accepter pairs on Confirm (1284). Suspect S7j.1: requester paired, Confirm lost to a disconnect or

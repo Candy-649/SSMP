@@ -358,7 +358,7 @@ internal class Packet : IPacket {
 
     /// <inheritdoc />
     public void WriteBitFlag<TEnum>(ISet<TEnum> set) where TEnum : Enum {
-        var values = EnumValues<TEnum>.Values;
+        var values = EnumCache<TEnum>.Values;
         var enumLength = values.Length;
 
         ulong flag = 0;
@@ -606,7 +606,7 @@ internal class Packet : IPacket {
 
     /// <inheritdoc />
     public ISet<TEnum> ReadBitFlag<TEnum>() where TEnum : Enum {
-        var values = EnumValues<TEnum>.Values;
+        var values = EnumCache<TEnum>.Values;
         var enumLength = values.Length;
 
         ulong flag = enumLength switch {

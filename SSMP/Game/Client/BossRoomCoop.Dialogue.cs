@@ -248,7 +248,7 @@ internal partial class BossRoomCoop {
 
         update.IsSharedTalk = isSharedTalk;
         Logger.Info($"Sharing the dialogue of '{GetPath(fsm)}' with the other players in the scene");
-        var dialogue = new SharedDialogue(state.Name, update, Time.unscaledTime);
+        var dialogue = new SharedDialogue(state.Name, update);
         _sharedDialogues[fsm] = dialogue;
         ShareDialogue(dialogue);
     }
@@ -352,15 +352,6 @@ internal partial class BossRoomCoop {
         if (eventName == ConversationEndEventName) {
             _sharedDialogues.Remove(fsm);
         }
-    }
-
-    /// <summary>
-    /// Forgets the readers of shared dialogue who left the scene.
-    /// </summary>
-    private void RemoveGoneReaders(SharedDialogue dialogue) {
-        dialogue.Waiting.RemoveWhere(id =>
-            !_playerData.TryGetValue(id, out var playerData) || !playerData.IsInLocalScene
-        );
     }
 
     /// <summary>
@@ -1140,11 +1131,6 @@ internal partial class BossRoomCoop {
         public readonly BossRoomUpdate Update;
 
         /// <summary>
-        /// When the dialogue started, in unscaled seconds.
-        /// </summary>
-        public readonly float StartTime;
-
-        /// <summary>
         /// The IDs of the players who still read the dialogue.
         /// </summary>
         public readonly HashSet<ushort> Waiting = [];
@@ -1154,10 +1140,9 @@ internal partial class BossRoomCoop {
         /// </summary>
         public readonly HashSet<ushort> Done = [];
 
-        public SharedDialogue(string stateName, BossRoomUpdate update, float startTime) {
+        public SharedDialogue(string stateName, BossRoomUpdate update) {
             StateName = stateName;
             Update = update;
-            StartTime = startTime;
         }
     }
 

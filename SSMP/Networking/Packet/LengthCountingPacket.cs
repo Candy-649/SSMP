@@ -67,7 +67,7 @@ public sealed class LengthCountingPacket : IPacket {
 
     /// <inheritdoc />
     public void WriteBitFlag<TEnum>(ISet<TEnum> set) where TEnum : Enum {
-        var enumLength = EnumValues<TEnum>.Values.Length;
+        var enumLength = EnumCache<TEnum>.Values.Length;
         switch (enumLength) {
             case <= 8:
                 Length += 1;
