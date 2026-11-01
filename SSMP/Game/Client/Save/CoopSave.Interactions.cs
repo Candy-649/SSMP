@@ -1398,7 +1398,9 @@ internal partial class CoopSave {
     /// </summary>
     private string GetPartnerName() {
         var members = GetCheckedMembers();
-        return members.Count > 0 ? JoinNames(members.Select(member => member.Username)) : "Your partner";
+        return members.Count > 0
+            ? JoinNames(members.Select(member => member.Username))
+            : Lang.Pick("Your teammate", "队友");
     }
 
     /// <summary>
