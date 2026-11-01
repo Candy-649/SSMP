@@ -22,7 +22,8 @@ namespace SSMP.Game.Client.Save;
 ///
 /// A racer asking whether to start a race is one of them too, because both players run it together: see
 /// <c>CoopSave.Races</c>. So is a character asking whether to help in a fight, which both players fight together:
-/// see <c>CoopSave.Aid</c>.
+/// see <c>CoopSave.Aid</c>. So is a donation at a wish board, which every player pays, and which asks each of them in
+/// a box wherever they are: see <c>CoopSave.WishCopyCheck</c>.
 ///
 /// The hold sits on the button rather than on the answer, because the box pays before it answers: the box wraps the
 /// yes it is given so that it takes the currency, locks the tools and takes the items first, and only then runs the
@@ -76,8 +77,9 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Why a no was given: nobody gave it. The question could not be put to the player, or kept in front of them, on
-    /// their side: they were in dialogue, a scene or a load the whole time, their game could not show it, the save or
-    /// the session was left, or the question was not about anything this game could show.
+    /// their side: their game could not show it, the save or the session was left, or the question was not about
+    /// anything this game could show. One that waited the whole time for a moment when it could be shown says
+    /// <see cref="NoBecauseCantShow"/>.
     /// </summary>
     private const ushort NoBecauseNotAsked = 1;
 
@@ -97,6 +99,19 @@ internal partial class CoopSave {
     /// the player did not get to the same prompt in time.
     /// </summary>
     private const ushort NoBecauseNotThere = 4;
+
+    /// <summary>
+    /// Why a no was given: nobody gave it. The question waited on the player's side for a moment when a box could be
+    /// shown, and none came in time: the game was paused, they were in dialogue or had another box open, or the game
+    /// held their character the whole time (USER 11-01: "她当时在串念珠，应该是因为这个").
+    /// </summary>
+    private const ushort NoBecauseCantShow = 5;
+
+    /// <summary>
+    /// What a yes says with it (CoopSaveUpdate.Part) when nobody gave it, because the save that answered has what was
+    /// asked about already, like a wish it completed, so its player saw no box. (CoopSave.FleaGames uses 1.)
+    /// </summary>
+    private const ushort YesSaveHasIt = 2;
 
     /// <summary>
     /// What a notice that a prompt of the sender is over says with it (CoopSaveUpdate.Part) when the yes went through
@@ -124,6 +139,13 @@ internal partial class CoopSave {
     /// them say yes at their own prompt.
     /// </summary>
     private const string WishConfirmRace = "race";
+
+    /// <summary>
+    /// A donation at a wish board, which every member pays. Unlike a wish, nobody walks up to the board for it: each
+    /// member is asked in a box wherever they are, and their answer goes back to the donation that waits at the board
+    /// (CoopSave.WishCopyCheck). The user's rule of 2026-11-01: "捐钱修建可以改成远程弹窗".
+    /// </summary>
+    private const string WishConfirmDonate = "donate";
 
     /// <summary>
     /// The field with the dialogue box of the game.
@@ -739,8 +761,39 @@ internal partial class CoopSave {
                 $"{name} didn't get to the same prompt in time, so it didn't go through.",
                 $"{name} 没有及时走到同一个选项，所以没有成立。"
             ),
+            NoBecauseCantShow => Lang.Pick(
+                $"The question couldn't come up on the side of {name} the whole time, so it didn't go through. Try " +
+                "again once they are free.",
+                $"{name} 那边一直弹不出确认框，所以没有成立。等对方空下来再试。"
+            ),
             _ => null
         };
+    }
+
+    /// <summary>
+    /// An answer of a member to a question of this game, for the log: yes, or no and why it was given.
+    /// </summary>
+    private static string DescribeAnswerForLog(CoopSaveUpdate answer) {
+        if (answer.PartCount == WishConfirmYes) {
+            return answer.Part switch {
+                YesWithoutPlaying => "yes, without playing",
+                YesSaveHasIt => "yes, as their save has it already",
+                _ => "yes"
+            };
+        }
+
+        // A no that a game gave because its own copy is short says what that copy has
+        return answer.WishValues.Count > 0
+            ? "no, as their game is short of what it takes"
+            : answer.Part switch {
+                NoBecauseSaid => "no, which they said",
+                NoBecauseNotAsked => "no, as their game could not ask them",
+                NoBecauseBusy => "no, as another question was going on there",
+                NoBecauseNoAnswer => "no, as they didn't answer in time",
+                NoBecauseNotThere => "no, as they didn't get to the same prompt in time",
+                NoBecauseCantShow => "no, as their game could not show the question in time",
+                _ => $"no ({answer.Part})"
+            };
     }
 
     /// <summary>
@@ -763,6 +816,15 @@ internal partial class CoopSave {
         return kind is WishConfirmAccept or WishConfirmTurnIn or WishConfirmRace or WishConfirmFleaGame
                    or WishConfirmAid or WishConfirmOffer
             ? (kind, ask.WishNames[0])
+            : null;
+    }
+
+    /// <summary>
+    /// The wish that an ask about a donation at a board completes, or null when it is not about one.
+    /// </summary>
+    private static string? GetAskDonation(CoopSaveUpdate? ask) {
+        return ask is { Records.Count: > 0, WishNames.Count: > 0 } && ask.Records[0] == WishConfirmDonate
+            ? ask.WishNames[0]
             : null;
     }
 
@@ -987,6 +1049,15 @@ internal partial class CoopSave {
                 return;
             }
 
+            // Each answer says in the log why it was given, and one about a donation that waits at a board of this game
+            // goes to the donation (CoopSave.WishCopyCheck)
+            if (update.PartCount is WishConfirmYes or WishConfirmNo) {
+                Logger.Info($"{player.Username} answered {DescribeAnswerForLog(update)} to a question of this game");
+                if (TakeDonationAnswer(player, update)) {
+                    return;
+                }
+            }
+
             switch (update.PartCount) {
                 case WishConfirmAsk:
                     QueuePartnerConfirm(player, update);
@@ -1065,14 +1136,27 @@ internal partial class CoopSave {
                             ));
                     }
 
+                    var wasWaiting = false;
                     if (_pendingConfirmAsk is { } waiting && waiting.Update.Key == update.Key) {
                         _pendingConfirmAsk = null;
+                        wasWaiting = true;
+                        Logger.Info($"The question of {player.Username} that waited here to be shown is over");
                     }
 
                     if (_partnerConfirm is { } shown && shown.Key == update.Key) {
                         _partnerConfirm = null;
                         LetHeroGoAfterConfirm();
                         CloseConfirmBox(shown.IsWish);
+                        Logger.Info($"The question of {player.Username} shown here is over, so its box closes");
+                    }
+
+                    // A donation that this player was asked about in a box, or said yes to, didn't go through after
+                    // all. One that never got to be shown here needs no word.
+                    if (!wasWaiting && update.Records.Count > 0 && update.Records[0] == WishConfirmDonate) {
+                        Chat(Lang.Pick(
+                            $"The donation of {player.Username} didn't go through in the end, so nothing was taken.",
+                            $"{player.Username} 那边最后没有捐成，什么都没有拿走。"
+                        ));
                     }
 
                     // The member is no longer standing at their own box. Kept, their yes was still here to meet, and
@@ -1363,7 +1447,7 @@ internal partial class CoopSave {
                 ForgetWishRead(had.Wish);
             }
 
-            SendConfirmAnswer(player.Id, update.Key, true);
+            SendConfirmAnswer(player.Id, update.Key, true, YesSaveHasIt);
             Logger.Info(
                 $"Agreed to the wish of {player.Username} without asking, because this save already has it"
             );
@@ -1410,7 +1494,9 @@ internal partial class CoopSave {
         // One at a time, so that a second prompt can't replace the one being read or the one waiting. A local
         // button that is itself waiting would keep the box for the whole timeout, so that is refused at once too
         // rather than left to make both players wait it out.
-        if (_partnerConfirm != null || _pendingConfirmAsk != null || _wishConfirm != null) {
+        // A donation of this player's own that waits for the members at a board is one of those too.
+        if (_partnerConfirm != null || _pendingConfirmAsk != null || _wishConfirm != null || _donationHold != null) {
+            Logger.Info($"A question of {player.Username} was turned down, because another one is going on here");
             SendConfirmAnswer(player.Id, update.Key, false, NoBecauseBusy);
             return;
         }
@@ -1424,9 +1510,14 @@ internal partial class CoopSave {
             return;
         }
 
-        if (!CanShowConfirmNow()) {
-            _pendingConfirmAsk = new PendingAsk(player.Id, player.Username, update);
-            Logger.Info($"A prompt of {player.Username} waits for a moment when it can be shown");
+        // Why it waits goes into the log, and again whenever that changes, so that a box that never came can be told
+        // apart from a question that never arrived (USER 11-01: "她当时在串念珠，应该是因为这个")
+        if (WhyConfirmCantShowNow() is { } why) {
+            _pendingConfirmAsk = new PendingAsk(player.Id, player.Username, update) { Why = why };
+            Logger.Info(
+                $"A prompt of {player.Username} waits for a moment when it can be shown, because {why} " +
+                $"({DescribeHeroForConfirmLog()})"
+            );
             return;
         }
 
@@ -1586,7 +1677,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// Whether a question of the partner is one this save has answered by living: a wish it has already taken, when
-    /// they are taking it, or one it has already turned in, when they are turning it in.
+    /// they are taking it, or one it has already turned in or donated to, when they are turning it in or donating.
     ///
     /// A character asked to help in a fight is the same: this save has asked them already. What the story takes for
     /// good is asked about every time, because that is a thing being spent and two players spending it are spending
@@ -1607,19 +1698,42 @@ internal partial class CoopSave {
         return update.Records[0] switch {
             WishConfirmAccept => wish.IsAccepted || wish.IsCompleted,
             WishConfirmTurnIn => wish.IsCompleted,
+            WishConfirmDonate => wish.IsCompleted,
             WishConfirmAid => playerData.GetBool(update.WishNames[0]),
             _ => false
         };
     }
 
     /// <summary>
-    /// Answers no to a turn-in of the partner when this save is short of what it takes, with what this save has, and
-    /// tells the local player.
+    /// Answers no to a turn-in or a donation of the partner when this save is short of what it takes, with what this
+    /// save has, and tells the local player.
     /// </summary>
-    /// <returns>Whether the turn-in was refused.</returns>
+    /// <returns>Whether it was refused.</returns>
     private bool RefuseTurnInThisSaveCannotPay(ClientPlayerData player, CoopSaveUpdate update) {
-        if (GetAskWish(update) is not { Kind: WishConfirmTurnIn } turnIn || FindQuest(turnIn.Wish) is not { } quest ||
-            PlayerData.instance is not { } playerData || _differentWishNames.Contains(quest.name)) {
+        var donation = GetAskDonation(update);
+        var wish = GetAskWish(update) is { Kind: WishConfirmTurnIn } turnIn ? turnIn.Wish : donation;
+        return wish != null && FindQuest(wish) is { } quest &&
+               RefuseThisSaveCannotPay(player.Id, player.Username, update.Key, quest, donation != null);
+    }
+
+    /// <summary>
+    /// Answers no to a question of a member about a wish that takes something from every save, when this save is short
+    /// of it, with what this save has, and tells the local player.
+    /// </summary>
+    /// <param name="partnerId">The member who asked.</param>
+    /// <param name="partnerName">Their name.</param>
+    /// <param name="key">The key of their question.</param>
+    /// <param name="quest">The wish.</param>
+    /// <param name="isDonation">Whether it is a donation rather than a turn-in.</param>
+    /// <returns>Whether it was refused.</returns>
+    private bool RefuseThisSaveCannotPay(
+        ushort partnerId,
+        string partnerName,
+        ulong key,
+        FullQuestBase quest,
+        bool isDonation
+    ) {
+        if (PlayerData.instance is not { } playerData || _differentWishNames.Contains(quest.name)) {
             return false;
         }
 
@@ -1629,50 +1743,178 @@ internal partial class CoopSave {
         }
 
         var refusal = new CoopSaveUpdate {
-            TargetId = player.Id,
+            TargetId = partnerId,
             Kind = CoopSaveUpdateKind.WishConfirm,
             PartCount = WishConfirmNo,
-            Key = update.Key
+            Key = key
         };
         AddCopyEntries(refusal, quest, playerData);
         Send(refusal);
 
-        Chat(DescribeShortCopy(null, amount, needed, counter) + (_checkedMembers.Count <= 1
-            ? Lang.Pick(
-                $" So {player.Username} couldn't hand this wish in. Both of you pay one to hand it in.",
-                $"所以 {player.Username} 这次交不了这个愿望。要交的话，你们两个各出一份。"
-            )
-            : Lang.Pick(
-                $" So {player.Username} couldn't hand this wish in. Each of you pays one to hand it in.",
-                $"所以 {player.Username} 这次交不了这个愿望。要交的话，每个人各出一份。"
-            )));
+        var two = _checkedMembers.Count <= 1;
+        Chat(DescribeShortCopy(null, amount, needed, counter) + (isDonation
+            ? two
+                ? Lang.Pick(
+                    $" So {partnerName} couldn't donate this time. Both of you pay the donation.",
+                    $"所以 {partnerName} 这次捐不了。捐赠需要你们两个各出一份。"
+                )
+                : Lang.Pick(
+                    $" So {partnerName} couldn't donate this time. Each of you pays the donation.",
+                    $"所以 {partnerName} 这次捐不了。捐赠需要每个人各出一份。"
+                )
+            : two
+                ? Lang.Pick(
+                    $" So {partnerName} couldn't hand this wish in. Both of you pay one to hand it in.",
+                    $"所以 {partnerName} 这次交不了这个愿望。要交的话，你们两个各出一份。"
+                )
+                : Lang.Pick(
+                    $" So {partnerName} couldn't hand this wish in. Each of you pays one to hand it in.",
+                    $"所以 {partnerName} 这次交不了这个愿望。要交的话，每个人各出一份。"
+                )));
         Logger.Info(
-            $"Refused the turn-in of '{quest.name}' by {player.Username}, because this save has {amount} of the " +
-            $"{needed} it takes"
+            $"Refused the {(isDonation ? "donation" : "turn-in")} of '{quest.name}' by {partnerName}, because this " +
+            $"save has {amount} of the {needed} it takes"
         );
         return true;
     }
 
     /// <summary>
-    /// Whether a box can be shown right now. Opening one ends dialogue that runs, and it writes over the answers of a
-    /// box that is already open, which would leave the dialogue of the local player with nothing to answer it. A panel
-    /// that is still animating is worse: opening on top of it runs the answer of the old one at once, on the box that
-    /// was just filled in.
+    /// The reasons why a box can't be shown right now (see <see cref="WhyConfirmCantShowNow"/>), as the log writes them.
     /// </summary>
-    private bool CanShowConfirmNow() {
-        if (IsAnyDialogueRunning() == true || IsBoxBusy(GetPromptBox(true)) || IsBoxBusy(GetPromptBox(false))) {
-            return false;
+    private const string CantShowPaused = "the game is paused";
+
+    private const string CantShowDialogue = "dialogue is on screen";
+
+    private const string CantShowBox = "a yes/no box is in use";
+
+    private const string CantShowNoHero = "there is no hero";
+
+    private const string CantShowHeroHeld = "something of the game has control of the hero";
+
+    private const string CantShowHeroTaken = "the hero is dead, down, respawning or between rooms";
+
+    /// <summary>
+    /// Why a box can't be shown right now, or null when it can. Opening one ends dialogue that runs, and it writes over
+    /// the answers of a box that is already open, which would leave the dialogue of the local player with nothing to
+    /// answer it. A panel that is still animating is worse: opening on top of it runs the answer of the old one at
+    /// once, on the box that was just filled in. Asked every frame while a question waits, so it gives back only the
+    /// reasons above, for the log and for comparing.
+    /// </summary>
+    private static string? WhyConfirmCantShowNow() {
+        // A box opened under the pause menu can't be answered from there, and its time would run out meanwhile
+        if (global::GameManager.instance is { } gameManager && gameManager.IsGamePaused()) {
+            return CantShowPaused;
+        }
+
+        if (IsAnyDialogueRunning() == true) {
+            return CantShowDialogue;
+        }
+
+        if (IsBoxBusy(GetPromptBox(true)) || IsBoxBusy(GetPromptBox(false))) {
+            return CantShowBox;
         }
 
         // Answering stops the hero for as long as it takes, so it waits for a moment when standing still is safe
         // rather than freezing them in the middle of something. A two-player save shares what a death costs.
         var hero = HeroController.instance;
-        return hero != null && !hero.controlReqlinquished && !IsHeroTakenByGame(hero);
+        if (hero == null) {
+            return CantShowNoHero;
+        }
+
+        if (hero.controlReqlinquished) {
+            return CantShowHeroHeld;
+        }
+
+        return IsHeroTakenByGame(hero) ? CantShowHeroTaken : null;
+    }
+
+    /// <summary>
+    /// Why a box couldn't be shown, for a message to the local player (see <see cref="WhyConfirmCantShowNow"/>).
+    /// </summary>
+    private static string DescribeCantShowForChat(string why) {
+        return why switch {
+            CantShowPaused => Lang.Pick("the game was paused", "游戏暂停着"),
+            CantShowDialogue => Lang.Pick("you were in dialogue", "你在对话"),
+            CantShowBox => Lang.Pick("another question was open", "开着别的确认框"),
+            CantShowHeroHeld => Lang.Pick(
+                "the game had your character busy, like on a bench or in the middle of something",
+                "你的角色正被游戏占着，比如坐在椅子上或者正在做某个动作"
+            ),
+            CantShowHeroTaken => Lang.Pick(
+                "your character was down or between rooms",
+                "你的角色倒下了或者正在换房间"
+            ),
+            _ => Lang.Pick("your game wasn't ready", "你这边的游戏还没准备好")
+        };
+    }
+
+    /// <summary>
+    /// Tells the local player about a question of a member that waited here and was never shown, since otherwise they
+    /// would never know they were asked: what it was about and why its box couldn't come up.
+    /// </summary>
+    private void ChatQuestionNeverShown(PendingAsk pending) {
+        var why = DescribeCantShowForChat(pending.Why);
+        var name = pending.PartnerName;
+        if (GetAskDonation(pending.Update) is { } wish && FindQuest(wish) is { } donation) {
+            Chat(Lang.Pick(
+                $"{name} wanted to donate to \"{donation.GetPopupName()}\" with you, but the question couldn't come up " +
+                $"here ({why}), so nothing was donated.",
+                $"{name} 想和你一起捐赠「{donation.GetPopupName()}」，可你这边一直弹不出确认框（{why}），所以这次没捐。"
+            ));
+            return;
+        }
+
+        var items = GetAskedItemNames(pending.Update);
+        Chat(items.Count > 0
+            ? Lang.Pick(
+                $"{name} wanted to use up {string.Join(", ", items)}, but the question couldn't come up here ({why}), " +
+                "so nothing was used up.",
+                $"{name} 想用掉 {string.Join("、", items)}，可你这边一直弹不出确认框（{why}），所以这次没用掉。"
+            )
+            : Lang.Pick(
+                $"{name} asked you something, but the question couldn't come up here ({why}), so it didn't go through.",
+                $"{name} 问了你一件事，可你这边一直弹不出确认框（{why}），所以这次没成。"
+            ));
+    }
+
+    /// <summary>
+    /// The names of what a member's question about using up story items takes, with how many, for a box or a
+    /// message. An item this game can't find is left out.
+    /// </summary>
+    private static List<string> GetAskedItemNames(CoopSaveUpdate update) {
+        var names = new List<string>();
+        for (var i = 0; i < update.Names.Count; i++) {
+            var parts = update.Names[i].Split('\n');
+            if (parts.Length == 2 && FindSavedItem(parts[0], parts[1]) is { } item) {
+                var amount = i < update.Amounts.Count ? update.Amounts[i] : 1;
+                var name = item.GetPopupName();
+                names.Add(amount > 1 ? $"{name} x{amount}" : name);
+            }
+        }
+
+        return names;
+    }
+
+    /// <summary>
+    /// What the hero is doing, for the log of a question that can't be shown: the clip they play, their state, whether
+    /// they sit on a bench and whether the game is paused.
+    /// </summary>
+    private static string DescribeHeroForConfirmLog() {
+        var hero = HeroController.instance;
+        if (hero == null) {
+            return "no hero";
+        }
+
+        var animator = hero.GetComponent<tk2dSpriteAnimator>();
+        var clip = animator != null && animator.CurrentClip != null ? animator.CurrentClip.name : "none";
+        var paused = global::GameManager.instance is { } gameManager && gameManager.IsGamePaused();
+        return $"clip '{clip}', state {hero.hero_state}, at a bench {PlayerData.instance?.atBench == true}, " +
+               $"paused {paused}";
     }
 
     /// <summary>
     /// Whether the game shows dialogue or one of its yes/no boxes is in use, so that a box opened now would land on top
-    /// of something (see <see cref="CanShowConfirmNow"/>). For the box of the games that each player plays on their own
+    /// of something (see <see cref="WhyConfirmCantShowNow"/>). For the box of the games that each player plays on their own
     /// (MinigameCoop).
     /// </summary>
     internal static bool IsDialogueOrBoxBusy() {
@@ -1789,6 +2031,7 @@ internal partial class CoopSave {
             _partnerConfirm = null;
             LetHeroGoAfterConfirm();
             SendConfirmAnswer(partnerId, key, agreed);
+            Logger.Info($"Answered {(agreed ? "yes" : "no")} to the question of {partnerName}");
         }
 
         void Yes() {
@@ -1815,16 +2058,51 @@ internal partial class CoopSave {
             return;
         }
 
-        var names = new List<string>();
-        for (var i = 0; i < update.Names.Count; i++) {
-            var parts = update.Names[i].Split('\n');
-            if (parts.Length == 2 && FindSavedItem(parts[0], parts[1]) is { } item) {
-                var amount = i < update.Amounts.Count ? update.Amounts[i] : 1;
-                var name = item.GetPopupName();
-                names.Add(amount > 1 ? $"{name} x{amount}" : name);
+        // A donation names what it costs each player rather than items. What this save carries is looked at again as
+        // the yes is given: rosaries strung or spent since the question came can't pay for it.
+        if (kind == WishConfirmDonate) {
+            if (GetAskDonation(update) is not { } wish || FindQuest(wish) is not { } donation) {
+                SendConfirmAnswer(partnerId, key, false, NoBecauseNotAsked);
+                return;
             }
+
+            void DonateYes() {
+                if (ReferenceEquals(_partnerConfirm, shown) &&
+                    RefuseThisSaveCannotPay(partnerId, partnerName, key, donation, true)) {
+                    _partnerConfirm = null;
+                    LetHeroGoAfterConfirm();
+                    return;
+                }
+
+                Yes();
+            }
+
+            _partnerConfirm = shown;
+            StopHeroForConfirm();
+            ClearBoxChoice(false);
+            var cost = DescribeDonationCost(donation);
+            DialogueYesNoBox.Open(
+                DonateYes,
+                No,
+                true,
+                _checkedMembers.Count <= 1
+                    ? Lang.Pick(
+                        $"{partnerName} wants to donate to \"{donation.GetPopupName()}\" with you. Each of you pays " +
+                        $"{cost}. Agree?",
+                        $"{partnerName} 想和你一起捐赠「{donation.GetPopupName()}」，你们两个各出 {cost}。同意吗？"
+                    )
+                    : Lang.Pick(
+                        $"{partnerName} wants to donate to \"{donation.GetPopupName()}\" with all of you. Each of you " +
+                        $"pays {cost}. Agree?",
+                        $"{partnerName} 想和大家一起捐赠「{donation.GetPopupName()}」，每个人各出 {cost}。同意吗？"
+                    ),
+                null
+            );
+            Logger.Info($"Asked the local player to agree to the donation '{donation.name}' of {partnerName}");
+            return;
         }
 
+        var names = GetAskedItemNames(update);
         if (names.Count == 0) {
             SendConfirmAnswer(partnerId, key, false, NoBecauseNotAsked);
             return;
@@ -1900,7 +2178,8 @@ internal partial class CoopSave {
     /// <param name="partnerId">Who asked.</param>
     /// <param name="key">The key of their question.</param>
     /// <param name="agreed">Whether the answer is yes.</param>
-    /// <param name="why">Why a no was given (see <see cref="NoBecauseSaid"/> and the reasons after it).</param>
+    /// <param name="why">Why a no was given (see <see cref="NoBecauseSaid"/> and the reasons after it), or what a yes
+    /// says with it (<see cref="YesSaveHasIt"/>, and the yes without playing of CoopSave.FleaGames).</param>
     private void SendConfirmAnswer(ushort partnerId, ulong key, bool agreed, ushort why = NoBecauseSaid) {
         Send(new CoopSaveUpdate {
             TargetId = partnerId,
@@ -1964,6 +2243,7 @@ internal partial class CoopSave {
             LetHeroGoAfterConfirm();
             CloseConfirmBox(shown.IsWish);
             SendConfirmAnswer(shown.PartnerId, shown.Key, false, NoBecauseNoAnswer);
+            Logger.Info($"A question shown here went unanswered for {WishConfirmTimeout:0} s, so it answers no");
         }
 
         foreach (var wishWait in _partnerWishWaits.Values.ToList()) {
@@ -2036,23 +2316,41 @@ internal partial class CoopSave {
         if (_pendingConfirmAsk is { } pending) {
             if (now - pending.Started > WishConfirmTimeout) {
                 _pendingConfirmAsk = null;
-                SendConfirmAnswer(pending.PartnerId, pending.Update.Key, false, NoBecauseNotAsked);
+                Logger.Info(
+                    $"A prompt of {pending.PartnerName} was never shown, {now - pending.Started:0.0} s after it came, " +
+                    $"because {pending.Why} ({DescribeHeroForConfirmLog()})"
+                );
+                SendConfirmAnswer(pending.PartnerId, pending.Update.Key, false, NoBecauseCantShow);
+
+                // The box never came up here, so the local player would otherwise never know they were asked
+                ChatQuestionNeverShown(pending);
             } else if (_partnerConfirm == null) {
                 // A line of dialogue the partner shared holds the one box this question can be asked in, and between
                 // the two of them it is the question that costs something. Left alone the line waits out its own
                 // time, and then this waits out its own, and the partner is told no for a wish they have been
-                // standing in front of the whole while. So the line gives way.
-                if (IsReadingSharedDialogue?.Invoke() == true && !CanShowConfirmNow()) {
+                // standing in front of the whole while. So the line gives way, but not under the pause menu, where
+                // ending it makes no room.
+                var why = WhyConfirmCantShowNow();
+                if (why != null && why != CantShowPaused && IsReadingSharedDialogue?.Invoke() == true) {
                     Logger.Info(
                         $"Ending the shared dialogue, so that the question {pending.PartnerName} is waiting on can " +
                         "be asked here"
                     );
                     EndSharedDialogue?.Invoke();
+                    why = WhyConfirmCantShowNow();
                 }
 
-                if (CanShowConfirmNow()) {
+                if (why == null) {
                     _pendingConfirmAsk = null;
+                    Logger.Info(
+                        $"A prompt of {pending.PartnerName} can be shown now, {now - pending.Started:0.0} s after it came"
+                    );
                     ShowPartnerConfirm(pending.PartnerId, pending.PartnerName, pending.Update);
+                } else if (why != pending.Why) {
+                    pending.Why = why;
+                    Logger.Info(
+                        $"A prompt of {pending.PartnerName} still waits, now because {why} ({DescribeHeroForConfirmLog()})"
+                    );
                 }
             }
         }
@@ -2318,6 +2616,11 @@ internal partial class CoopSave {
         /// When it arrived.
         /// </summary>
         public float Started { get; } = Time.unscaledTime;
+
+        /// <summary>
+        /// Why it can't be shown yet, as the log last said.
+        /// </summary>
+        public string Why { get; set; } = "";
     }
 
     /// <summary>

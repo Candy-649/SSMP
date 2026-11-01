@@ -366,10 +366,11 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Hook for QuestItemBoard.AcceptDonation: a donation needs every other member close by and able to pay too, since
-    /// every player pays it, and none of them using the board themselves. Whether they can pay is asked right then: the
-    /// yes waits for their games' answers and runs again once they came (see CoopSave.WishCopyCheck). Otherwise the board
-    /// goes back to its list. A wish that a member completed while the board asked is never paid again.
+    /// Hook for QuestItemBoard.AcceptDonation: a donation needs every other member in the save, agreeing and able to pay
+    /// too, since every player pays it, and none of them using the board themselves. Where they are doesn't matter: each
+    /// of them is asked in a box, and their game looks at what it carries as they answer. The yes waits for their
+    /// answers and runs again once they came (see CoopSave.WishCopyCheck). Otherwise the board goes back to its list. A
+    /// wish that a member completed while the board asked is never paid again.
     /// </summary>
     private void OnBoardAcceptDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
         _donationPrompt = null;
@@ -380,13 +381,13 @@ internal partial class CoopSave {
                 return;
             }
 
-            // Pressing yes again while the partner's game is being asked does nothing more
+            // Pressing yes again while the members are being asked does nothing more
             if (resumed == null && _donationHold is { } waiting) {
                 if (waiting.ItemBoard == self) {
                     return;
                 }
 
-                _donationHold = null;
+                DropDonationHold("a donation at another board was said yes to");
             }
 
             if (_everChecked && GetCurrentMarker() is { } marker &&
@@ -404,13 +405,23 @@ internal partial class CoopSave {
                             return;
                         }
 
-                        if (!CanPartnerPayDonation(quest, resumed)) {
+                        if (!CanPartnerPayDonation(quest, resumed, members)) {
                             self.DeclineDonation();
                             return;
                         }
                     }
 
                     StartDonationTalk(board, members, quest);
+                    if (resumed != null) {
+                        resumed.WentThrough = true;
+                        var agreed = JoinNames(resumed.Members.Select(member => member.Name));
+                        Chat(Lang.Pick(
+                            resumed.Members.Count == 1
+                                ? $"{agreed} agreed, so you donate together."
+                                : $"{agreed} all agreed, so you donate together.",
+                            $"{agreed} 也同意了，一起捐。"
+                        ));
+                    }
                 }
             } else if (resumed != null) {
                 // The save stopped being shared while the donation waited, so it isn't paid for both
@@ -435,8 +446,8 @@ internal partial class CoopSave {
     /// Hook for QuestItemBoard.DeclineDonation: the board goes back to its list, and closes when the list has nothing
     /// left. The game only ever goes back, because on its own the list keeps the wish that it asks about; the partner
     /// can take the last wishes off it meanwhile, by turning them in or accepting them, which used to leave the local
-    /// player in front of a question with no way out. Answering no while the partner's game is asked about a yes takes
-    /// that yes back.
+    /// player in front of a question with no way out. Answering no while the members are asked about a yes takes that
+    /// yes back.
     /// </summary>
     private void OnBoardDeclineDonation(Action<QuestItemBoard> orig, QuestItemBoard self) {
         if (_donationPrompt == self) {
@@ -444,8 +455,7 @@ internal partial class CoopSave {
         }
 
         if (_donationHold is { } waiting && waiting.ItemBoard == self) {
-            _donationHold = null;
-            Logger.Info($"The donation '{waiting.Quest.name}' was taken back while the partner's game was asked");
+            DropDonationHold("it was taken back at the board");
         }
 
         var closing = false;
@@ -504,8 +514,9 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Checks that a donation at a board can go through with every other member: close by, and none of them using the
-    /// board themselves. The local player hears why not.
+    /// Checks that a donation at a board can go through with every other member: in the save, and none of them using the
+    /// board themselves. Where they are doesn't matter, since each of them is asked in a box (CoopSave.WishCopyCheck).
+    /// The local player hears why not.
     /// </summary>
     /// <param name="itemBoard">The list of the board that asked.</param>
     /// <param name="quest">The wish that the donation completes.</param>
@@ -535,27 +546,25 @@ internal partial class CoopSave {
             return false;
         }
 
-        var checkedMembers = GetCheckedMembers();
-        var absence = GetBoardAbsence(
-            marker,
-            checkedMembers,
-            marker.Members.Count <= 1
-                ? Lang.Pick("donate, since both of you pay", "一起捐赠（两个人都要出）")
-                : Lang.Pick("donate, since all of you pay", "一起捐赠（每个人都要出）"),
-            out var away
-        );
-        if (absence != null) {
-            Chat(absence);
-            foreach (var member in away) {
-                Send(CreateWishTalkUpdate(
-                    member.Id, board.gameObject.scene.name, ScenePath.Get(board.transform), WishTalkRefused
+        var missing = GetMissingMemberNames(marker);
+        if (missing.Count > 0) {
+            var names = JoinNames(missing);
+            var one = missing.Count == 1;
+            Chat(marker.Members.Count <= 1
+                ? Lang.Pick(
+                    $"{names} isn't in your {SaveWord()} yet. You can donate once they are, since both of you pay.",
+                    $"{names} 还没进你们的{SaveWord()}，进来了才能一起捐（两个人都要出一份）。"
+                )
+                : Lang.Pick(
+                    one
+                        ? $"{names} isn't in your {SaveWord()} yet. You can donate once they are, since all of you pay."
+                        : $"{names} aren't in your {SaveWord()} yet. You can donate once they are, since all of you pay.",
+                    $"{names} 还没进你们的{SaveWord()}，进来了才能一起捐（每个人都要出一份）。"
                 ));
-            }
-
             return false;
         }
 
-        members = checkedMembers;
+        members = GetCheckedMembers();
         return true;
     }
 
@@ -577,7 +586,7 @@ internal partial class CoopSave {
         }
 
         Logger.Info(
-            $"Donation '{quest.name}' goes through with {JoinNames(members.Select(member => member.Username))} close by"
+            $"Donation '{quest.name}' goes through, paid by {JoinNames(members.Select(member => member.Username))} too"
         );
     }
 
@@ -630,10 +639,7 @@ internal partial class CoopSave {
         out List<ClientPlayerData> away
     ) {
         away = members.FindAll(member => GetWishTalkAbsence(member) != null);
-        var missing = MatchMembers(marker)
-            .Where(match => match.Player == null || !_checkedMembers.Contains(match.Player.Id))
-            .Select(match => match.Member.Name)
-            .ToList();
+        var missing = GetMissingMemberNames(marker);
         if (missing.Count > 0) {
             var names = JoinNames(missing);
             return Lang.Pick(
@@ -657,6 +663,17 @@ internal partial class CoopSave {
                 one ? $"{awayNames} needs to be here too to {use}." : $"{awayNames} need to be here too to {use}.",
                 $"{awayNames} 也要在场，才能{use}。"
             );
+    }
+
+    /// <summary>
+    /// The names of the members of the save who aren't checked in with the local game: not connected, or not in the
+    /// save yet. They are named from the marker.
+    /// </summary>
+    private List<string> GetMissingMemberNames(CoopSaveMarker marker) {
+        return MatchMembers(marker)
+            .Where(match => match.Player == null || !_checkedMembers.Contains(match.Player.Id))
+            .Select(match => match.Member.Name)
+            .ToList();
     }
 
     /// <summary>

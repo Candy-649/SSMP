@@ -1014,10 +1014,11 @@ internal partial class CoopSave {
         ResetWishRead();
         ResetWishProgress();
 
-        // A donation asked about is asked again by the next yes. A board that waits for the partner's answer is kept:
-        // the hero stands in its dialogue until it opens, which it does once the wait runs out, without handing
-        // anything in now that the save isn't shared, and only a room change takes the board away
-        _donationHold = null;
+        // A donation asked about is asked again by the next yes, and the members asked about it hear that it is over.
+        // A board that waits for the partner's answer is kept: the hero stands in its dialogue until it opens, which
+        // it does once the wait runs out, without handing anything in now that the save isn't shared, and only a
+        // room change takes the board away
+        DropDonationHold("the session of the save is over");
     }
 
     /// <summary>
@@ -2182,6 +2183,11 @@ internal partial class CoopSave {
                 var taken = Mathf.Min(-amount, CurrencyManager.GetCurrencyAmount(type));
                 if (taken > 0) {
                     CurrencyManager.TakeCurrency(taken, type, true);
+                }
+
+                // A save that spent since it agreed pays what it has left
+                if (taken < -amount) {
+                    Logger.Info($"The partner's change takes {-amount} {type} from this save, which had only {taken}");
                 }
 
                 return taken > 0;

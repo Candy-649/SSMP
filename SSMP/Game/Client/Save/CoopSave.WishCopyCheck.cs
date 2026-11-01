@@ -14,9 +14,12 @@ namespace SSMP.Game.Client.Save;
 /// their game pushed whenever they changed. One push that never arrived, like one that came while the local game was
 /// riding between rooms, which drops what arrives meanwhile, then kept a partner who had plenty "short" until their
 /// amount changed again. So nothing about the partner's bag is kept any more: opening a board that would hand such
-/// wishes in, or saying yes to a donation, stops for a moment, asks the partner's game, and goes on with its answer.
+/// wishes in stops for a moment, asks the partner's game, and goes on with its answer.
 /// A character's own turn-in needs no question of its own, because the partner says yes at their own prompt, and
-/// their game answers no at once, with what it has, when its own copy is short (see CoopSave.WishConfirm).
+/// their game answers no at once, with what it has, when its own copy is short (see CoopSave.WishConfirm). A donation
+/// at a board asks every member in a box wherever they are, which their game answers no to at once, with what it has,
+/// when their copy is short, and again if it is short by the time they say yes; the donation waits at the board for
+/// their answers (the user's rule of 2026-11-01: "捐钱修建可以改成远程弹窗").
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -24,6 +27,13 @@ internal partial class CoopSave {
     /// trip, so this only runs out when something is wrong. The hero stands at the board meanwhile.
     /// </summary>
     private const float WishCopyCheckTimeout = 5f;
+
+    /// <summary>
+    /// How long, in seconds, a donation waits for the members' answers. Their games always answer: a question waits
+    /// there at most <see cref="WishConfirmTimeout"/> for a moment when it can be shown, and is then in front of them
+    /// for at most as long again, so this only runs out when the connection lost an answer.
+    /// </summary>
+    private const float DonationAgreeTimeout = 2 * WishConfirmTimeout + 5f;
 
     /// <summary>
     /// The value of <see cref="CoopSaveUpdate.PartCount"/> for the question what the partner carries.
@@ -57,12 +67,12 @@ internal partial class CoopSave {
     private BoardOpenHold? _resumedBoardOpen;
 
     /// <summary>
-    /// The donation that waits for the partner's answer, or null.
+    /// The donation that waits for the members' answers, or null.
     /// </summary>
     private DonationHold? _donationHold;
 
     /// <summary>
-    /// The donation that runs again now that the partner answered or the wait ran out, or null.
+    /// The donation that runs again now that the members answered or the wait ran out, or null.
     /// </summary>
     private DonationHold? _resumedDonation;
 
@@ -308,12 +318,8 @@ internal partial class CoopSave {
     /// waiting belongs to nothing any more.
     /// </summary>
     private void TakeWishCopyAnswer(ClientPlayerData player, CoopSaveUpdate update) {
-        CopyCheckHold? hold = _boardOpenHold is { } open && open.Key == update.Key
-            ? open
-            : _donationHold is { } donation && donation.Key == update.Key
-                ? donation
-                : null;
-        if (hold == null || !hold.IsAsked(player.Id) || hold.Answers.ContainsKey(player.Id)) {
+        if (_boardOpenHold is not { } hold || hold.Key != update.Key || !hold.IsAsked(player.Id) ||
+            hold.Answers.ContainsKey(player.Id)) {
             return;
         }
 
@@ -352,7 +358,8 @@ internal partial class CoopSave {
             _donationHold = null;
 
             // The board asks about the donation until it is answered, so a question that was answered, taken down or
-            // went away with its room meanwhile has nothing left to go on with
+            // went away with its room meanwhile has nothing left to go on with. The members whose boxes are still
+            // open, or who said yes, hear when it didn't go through.
             if (donation.ItemBoard != null && IsBoardListOpen(donation.ItemBoard) &&
                 BoardYesNoQuestField?.GetValue(donation.ItemBoard) as FullQuestBase == donation.Quest) {
                 _resumedDonation = donation;
@@ -360,19 +367,37 @@ internal partial class CoopSave {
                     donation.Proceed();
                 } finally {
                     _resumedDonation = null;
+                    if (!donation.WentThrough) {
+                        TellDonationIsOver(donation);
+                    }
                 }
             } else {
-                Logger.Info($"The donation '{donation.Quest.name}' was no longer asked about when the partner answered");
+                Logger.Info($"The donation '{donation.Quest.name}' was no longer asked about when the members answered");
+                TellDonationIsOver(donation);
             }
         }
     }
 
     /// <summary>
-    /// Forgets the turn-ins that wait for the partner, whose board went away with the room.
+    /// Forgets the turn-ins and the donation that wait for the members, whose board went away with the room.
     /// </summary>
     private void ResetWishCopyChecks() {
         _boardOpenHold = null;
+        DropDonationHold("its board went away with the room");
+    }
+
+    /// <summary>
+    /// Forgets the donation that waits for the members, if any, and tells them it is over.
+    /// </summary>
+    /// <param name="why">Why, for the log.</param>
+    private void DropDonationHold(string why) {
+        if (_donationHold is not { } donation) {
+            return;
+        }
+
         _donationHold = null;
+        Logger.Info($"The donation '{donation.Quest.name}' stops waiting for the members: {why}");
+        TellDonationIsOver(donation);
     }
 
     /// <summary>
@@ -497,9 +522,10 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Asks the members what they carry before a donation that the local player said yes to goes through, which waits
-    /// for their answers: the yes runs again once they came (see <see cref="UpdateWishCopyChecks"/>). The board keeps
-    /// asking meanwhile, and answering no there takes the yes back.
+    /// Asks the members in a box, wherever they are, to agree to a donation that the local player said yes to, which
+    /// waits for their answers: the yes runs again once they came (see <see cref="UpdateWishCopyChecks"/>). The board
+    /// keeps asking meanwhile, and answering no there takes the yes back. Each member's game looks at what it carries
+    /// as it answers (CoopSave.WishConfirm).
     /// </summary>
     private void AskBeforeDonation(
         QuestItemBoard itemBoard,
@@ -507,22 +533,73 @@ internal partial class CoopSave {
         List<ClientPlayerData> members,
         Action proceed
     ) {
-        var wishes = new List<string> { quest.name };
-        var key = SendWishCopyAsk(wishes);
-        Logger.Info(
-            $"The donation '{quest.name}' waits for {JoinNames(members.Select(member => member.Username))} to say " +
-            "what they carry"
-        );
+        var ask = CreateConfirm(WishConfirmDonate);
+        ask.WishNames.Add(quest.name);
+        SendToMembers(ask);
+
+        var names = JoinNames(members.Select(member => member.Username));
+        Chat(Lang.Pick(
+            $"Waiting for {names} to agree to donate together.",
+            $"正在等 {names} 同意一起捐。"
+        ));
+        Logger.Info($"The donation '{quest.name}' waits for {names} to agree, asked in a box wherever they are");
 
         // Last, so that nothing above throwing can leave the donation both declined and waiting
-        _donationHold = new DonationHold(key, members, wishes, itemBoard, quest, proceed);
+        _donationHold = new DonationHold(ask.Key, members, itemBoard, quest, proceed);
     }
 
     /// <summary>
     /// Whether the members' answers let a donation that waited for them go through, telling the local player why not.
+    /// A member who said yes had their game look at what they carry as they said it.
     /// </summary>
-    private bool CanPartnerPayDonation(FullQuestBase quest, DonationHold resumed) {
-        var silent = resumed.GetSilentNames();
+    /// <param name="quest">The wish that the donation completes.</param>
+    /// <param name="resumed">The donation that waited.</param>
+    /// <param name="members">The members who pay it now.</param>
+    private bool CanPartnerPayDonation(FullQuestBase quest, DonationHold resumed, List<ClientPlayerData> members) {
+        // A member who came into the save while the others were asked would pay without having been asked
+        var unasked = members.FindAll(member => !resumed.IsAsked(member.Id));
+        if (unasked.Count > 0) {
+            var newNames = JoinNames(unasked.Select(member => member.Username));
+            Chat(Lang.Pick(
+                $"{newNames} came in while the others were asked, so nothing was donated. Donate again to ask everyone.",
+                $"{newNames} 是刚进来的，还没问过，所以这次没捐。再捐一次就会问到所有人。"
+            ));
+            Logger.Info($"The donation '{quest.name}' didn't go through, because {newNames} came in after the question");
+            return false;
+        }
+
+        foreach (var (id, name) in resumed.Members) {
+            if (!resumed.Refusals.TryGetValue(id, out var no)) {
+                continue;
+            }
+
+            // A member whose game found their own copy short said what it has
+            if (no.WishValues.Count > 0 && ReadCopies(no).Lacks(quest, out var amount, out var needed, out var counter)) {
+                Chat(DescribeShortCopy(name, amount, needed, counter) + (resumed.Members.Count == 1
+                    ? Lang.Pick(
+                        " So nothing was donated. Both of you pay the donation.",
+                        "所以这次没捐。捐赠需要你们两个各出一份。"
+                    )
+                    : Lang.Pick(
+                        " So nothing was donated. Each of you pays the donation.",
+                        "所以这次没捐。捐赠需要每个人各出一份。"
+                    )));
+                Logger.Info(
+                    $"The donation '{quest.name}' didn't go through, because {name} has " +
+                    (amount < 0 ? "an amount that their game didn't say" : $"{amount}") + $" of the {needed} it takes"
+                );
+                return false;
+            }
+
+            Chat(DescribeNoNobodyGave(name, no.Part) ?? Lang.Pick(
+                $"{name} didn't agree, so nothing was donated.",
+                $"{name} 没有同意，所以这次没捐。"
+            ));
+            Logger.Info($"The donation '{quest.name}' didn't go through, because {name} answered {DescribeAnswerForLog(no)}");
+            return false;
+        }
+
+        var silent = resumed.GetUnansweredNames();
         if (silent.Count > 0) {
             var names = JoinNames(silent);
             Chat(silent.Count == 1
@@ -540,28 +617,89 @@ internal partial class CoopSave {
             return false;
         }
 
-        foreach (var (id, name) in resumed.Members) {
-            if (!resumed.Answers[id].Lacks(quest, out var amount, out var needed, out var counter)) {
-                continue;
-            }
+        return true;
+    }
 
-            Chat(DescribeShortCopy(name, amount, needed, counter) + (resumed.Members.Count == 1
-                ? Lang.Pick(
-                    " So nothing was donated. Both of you pay the donation.",
-                    "所以这次没捐。捐赠需要你们两个各出一份。"
-                )
-                : Lang.Pick(
-                    " So nothing was donated. Each of you pays the donation.",
-                    "所以这次没捐。捐赠需要每个人各出一份。"
-                )));
-            Logger.Info(
-                $"The donation '{quest.name}' didn't go through, because {name} has " +
-                (amount < 0 ? "an amount that their game didn't say" : $"{amount}") + $" of the {needed} it takes"
-            );
+    /// <summary>
+    /// Takes a member's answer to the box that asked them about the donation that waits here.
+    /// </summary>
+    /// <returns>Whether the answer was about it.</returns>
+    private bool TakeDonationAnswer(ClientPlayerData player, CoopSaveUpdate update) {
+        if (_donationHold is not { } hold || hold.Key != update.Key) {
             return false;
         }
 
+        if (!hold.IsAsked(player.Id) || hold.IsAnswered(player.Id)) {
+            return true;
+        }
+
+        var after = Time.unscaledTime - hold.Started;
+        if (update.PartCount == WishConfirmYes) {
+            hold.Agreed.Add(player.Id);
+            if (update.Part == YesSaveHasIt) {
+                hold.AgreedWithoutBox.Add(player.Id);
+            }
+
+            Logger.Info($"{player.Username} agreed to the donation '{hold.Quest.name}', {after:0.0} s after the question");
+            var missing = hold.GetUnansweredNames();
+            if (missing.Count > 0) {
+                ChatStillWaiting(player.Username, missing);
+            }
+
+            return true;
+        }
+
+        hold.Refusals[player.Id] = update;
+        Logger.Info(
+            $"{player.Username} turned the donation '{hold.Quest.name}' down, {after:0.0} s after the question"
+        );
         return true;
+    }
+
+    /// <summary>
+    /// Tells the members who were asked about a donation that didn't go through that it is over, so that a box still
+    /// open for it closes and a member who said yes hears that nothing was taken. A member who said no knows already,
+    /// and one whose save had the wish done already saw no box to hear about.
+    /// </summary>
+    private void TellDonationIsOver(DonationHold hold) {
+        foreach (var (id, _) in hold.Members) {
+            if (hold.Refusals.ContainsKey(id) || hold.AgreedWithoutBox.Contains(id)) {
+                continue;
+            }
+
+            var gone = new CoopSaveUpdate {
+                TargetId = id,
+                Kind = CoopSaveUpdateKind.WishConfirm,
+                PartCount = WishConfirmGone,
+                Key = hold.Key
+            };
+            gone.Records.Add(WishConfirmDonate);
+            Send(gone);
+        }
+    }
+
+    /// <summary>
+    /// What a donation takes from each player, for the box that asks a member about it, in the words of the game.
+    /// </summary>
+    private static string DescribeDonationCost(FullQuestBase quest) {
+        var parts = new List<string>();
+        foreach (var target in quest.Targets) {
+            if (!IsTakenFromEach(target)) {
+                continue;
+            }
+
+            parts.Add(target.Counter switch {
+                QuestTargetCurrency { CurrencyType: CurrencyType.Money } => Lang.Pick(
+                    $"{target.Count} rosaries", $"{target.Count} 枚念珠"
+                ),
+                QuestTargetCurrency { CurrencyType: CurrencyType.Shard } => Lang.Pick(
+                    $"{target.Count} shell shards", $"{target.Count} 块甲壳碎片"
+                ),
+                _ => Lang.Pick($"{target.Count} of what it takes", $"{target.Count} 份所需的东西")
+            });
+        }
+
+        return string.Join(Lang.Pick(", ", "、"), parts);
     }
 
     /// <summary>
@@ -696,20 +834,92 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// A donation that waits for the partner's answer.
+    /// A donation that waits for the members to agree in their boxes.
     /// </summary>
-    private sealed class DonationHold : CopyCheckHold {
+    private sealed class DonationHold {
         public DonationHold(
             ulong key,
             List<ClientPlayerData> members,
-            List<string> wishes,
             QuestItemBoard itemBoard,
             FullQuestBase quest,
             Action proceed
-        ) : base(key, members, wishes) {
+        ) {
+            Key = key;
+            Members = members.ConvertAll(member => (member.Id, member.Username));
             ItemBoard = itemBoard;
             Quest = quest;
             Proceed = proceed;
+        }
+
+        /// <summary>
+        /// The key of the question, which the answers come back with.
+        /// </summary>
+        public ulong Key { get; }
+
+        /// <summary>
+        /// Who was asked, with their names. Only their answers count.
+        /// </summary>
+        public List<(ushort Id, string Name)> Members { get; }
+
+        /// <summary>
+        /// When they were asked.
+        /// </summary>
+        public float Started { get; } = Time.unscaledTime;
+
+        /// <summary>
+        /// The members who said yes.
+        /// </summary>
+        public HashSet<ushort> Agreed { get; } = [];
+
+        /// <summary>
+        /// The members whose games said yes without a box, because their save has the wish done already.
+        /// </summary>
+        public HashSet<ushort> AgreedWithoutBox { get; } = [];
+
+        /// <summary>
+        /// The no of each member who gave one, which says why, or what their copy has when it is short.
+        /// </summary>
+        public Dictionary<ushort, CoopSaveUpdate> Refusals { get; } = new();
+
+        /// <summary>
+        /// Whether the yes went through when it ran again, so that the members paid with it.
+        /// </summary>
+        public bool WentThrough { get; set; }
+
+        /// <summary>
+        /// Whether a member was asked.
+        /// </summary>
+        public bool IsAsked(ushort id) => Members.Exists(member => member.Id == id);
+
+        /// <summary>
+        /// Whether a member answered.
+        /// </summary>
+        public bool IsAnswered(ushort id) => Agreed.Contains(id) || Refusals.ContainsKey(id);
+
+        /// <summary>
+        /// The names of the members who haven't answered.
+        /// </summary>
+        public List<string> GetUnansweredNames() =>
+            Members.Where(member => !IsAnswered(member.Id)).Select(member => member.Name).ToList();
+
+        /// <summary>
+        /// Whether the donation goes on now: every member said yes, one said no, or the wait ran out. Read every
+        /// frame while it waits, so it makes no garbage.
+        /// </summary>
+        public bool IsDue {
+            get {
+                if (Refusals.Count > 0 || Time.unscaledTime - Started > DonationAgreeTimeout) {
+                    return true;
+                }
+
+                foreach (var (id, _) in Members) {
+                    if (!Agreed.Contains(id)) {
+                        return false;
+                    }
+                }
+
+                return true;
+            }
         }
 
         /// <summary>

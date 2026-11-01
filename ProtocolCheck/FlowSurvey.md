@@ -390,6 +390,12 @@ Purpose: a yes/no prompt that spends shared things (accept/turn in wish, story i
 when both players said yes. Wishes and races: each player answers their own box ("meeting"). Items: the partner is
 shown a box of ours.
 
+Since 0.4.143 a donation at a wish board is the kind "donate": every member is shown a box of ours wherever they are
+(their game refuses at once, with what it carries, when its copy is short, and again at the yes), and the donation
+waits at the board in `DonationHold` (S/CoopSave.WishCopyCheck.cs) for every answer, a no, or 45 s; when it doesn't
+go through, the members who didn't say no get Gone with `Records[0] = "donate"`. Before, a donation asked the
+partner's game what it carries (WishCopyCheck) and needed them close by.
+
 Constants: timeout 20 s (41). PartCount codes: Ask 0 (52), Yes 1 (57), No 2 (62), Gone 3 (67). Kind strings in
 `Records[0]`: "wish", "wishdone", "item", "race" (72-88). `Key` = random 64-bit per ask (`CreateConfirm` 588-598).
 State: `_openPrompt` (171), `_wishConfirm: HeldConfirm{PartnerId, Key, Action, Box, Callback, Proceed, WishKey,
