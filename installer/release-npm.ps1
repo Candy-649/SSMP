@@ -28,6 +28,9 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# No bar from PowerShell for each question to npm, the mirror and GitHub: the dots say that this waits
+$ProgressPreference = 'SilentlyContinue'
+
 # Set here rather than in param(): Windows PowerShell 5.1 leaves $PSScriptRoot empty in parameter defaults under -File
 if (-not $StageDir) { $StageDir = Join-Path $PSScriptRoot '..\dist-npm' }
 
@@ -218,8 +221,9 @@ try {
     }
     Write-Ok "The mirror serves $version"
 
-    $releases = Test-ReleasesOnGitHub $sha
-    $onGitHub = $releases -and $workflowRan
+    # Not $releases: PowerShell's names ignore case, so that one is $Releases, the address written at the end
+    $workflowReleases = Test-ReleasesOnGitHub $sha
+    $onGitHub = $workflowReleases -and $workflowRan
     $seen = $false
     if ($onGitHub) {
         $zipName = "$PackageName-$version.zip"
@@ -248,7 +252,7 @@ try {
     } else {
         Write-Host "  $PackageName@$version is out on npm and the mirror. Both players can update with UPDATE.bat." -ForegroundColor Green
         Write-Host ""
-        if ($releases) {
+        if ($workflowReleases) {
             Write-Host "  npm had it already and its tag isn't on GitHub, so no run of the workflow released it there." -ForegroundColor Yellow
         } else {
             Write-Host "  The workflow of $($sha.Substring(0, 7)) doesn't release on GitHub." -ForegroundColor Yellow

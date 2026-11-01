@@ -13,6 +13,10 @@
 
 $ErrorActionPreference = 'Stop'
 
+# No progress bars: the lines below say what is going on, and PowerShell's bar for packing or unpacking an archive
+# only covers part of the window and makes it slower
+$ProgressPreference = 'SilentlyContinue'
+
 $GameExe = 'Hollow Knight Silksong.exe'
 $GameDirName = 'Hollow Knight Silksong'
 

@@ -29,6 +29,10 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# No progress bars. Not cosmetic: Invoke-WebRequest's bar makes a download several times slower, and the bar of each
+# question to a registry only covers part of the window
+$ProgressPreference = 'SilentlyContinue'
+
 $GameExe = 'Hollow Knight Silksong.exe'
 $GameDirName = 'Hollow Knight Silksong'
 $PackageName = 'silksong-coop-mod'
@@ -203,15 +207,10 @@ try {
     New-Item -ItemType Directory -Path $work -Force | Out-Null
     $tgz = Join-Path $work 'package.tgz'
 
-    $oldProgress = $ProgressPreference
-    # Not cosmetic: Invoke-WebRequest's progress bar makes a download several times slower.
-    $ProgressPreference = 'SilentlyContinue'
     try {
         Invoke-WebRequest -Uri $tarballUrl -OutFile $tgz -UseBasicParsing -TimeoutSec 300
     } catch {
         throw "Could not download the update: $($_.Exception.Message)"
-    } finally {
-        $ProgressPreference = $oldProgress
     }
     Write-Ok "Got $([math]::Round((Get-Item $tgz).Length / 1MB, 2)) MB"
 
