@@ -24,7 +24,7 @@ internal class HeroPartClips : AnimationEffect {
 
     /// <summary>
     /// The parts, by their path under the hero, which are all parts of <see cref="HeroChildEffects"/> too. Their place
-    /// in this list is what they are known by over the network, so new ones go at the end.
+    /// in this list is what they are known by over the network.
     /// </summary>
     private static readonly string[] Paths = [
         "Tool Effects/Tool Hornet",

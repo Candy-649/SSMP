@@ -22,7 +22,7 @@ internal class HeroChildEffects : AnimationEffect {
 
     /// <summary>
     /// The watched parts, by their path under the hero. Their place in this list is what they are known by over the
-    /// network, so new ones go at the end. Left out are the parts that another effect already plays, the parts that
+    /// network. Left out are the parts that another effect already plays, the parts that
     /// could hurt, touch or be noticed by anything in the room (damagers, colliders, state machines, noise makers),
     /// the parts that show or hide by what the local player has equipped, the parts of the local player's own view
     /// (the light around the hero and the dark of a room), and what the game shows when the hero is hit, which is for

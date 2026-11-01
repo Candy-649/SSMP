@@ -54,6 +54,8 @@ internal class CoopCheckUpdate : IPacketData {
 
 /// <summary>
 /// What an update that compares the state of a room is.
+/// A kind travels as a byte. Every game in a session runs the same build (ModVersion), so the numbers only have to
+/// agree within one build; a kind no longer used keeps its place only so that the kinds after it keep their numbers.
 /// </summary>
 internal enum CoopCheckKind : byte {
     /// <summary>
@@ -75,8 +77,7 @@ internal enum CoopCheckKind : byte {
 
     /// <summary>
     /// What came up in the sender's game that can hurt a player since its last word, for the other game to compare
-    /// with what came up in its own (see CoopAttackCheck). Appended at the end, so that the kinds before keep their
-    /// numbers.
+    /// with what came up in its own (see CoopAttackCheck).
     /// </summary>
     Attacks
 }

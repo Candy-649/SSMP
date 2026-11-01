@@ -31,7 +31,7 @@ internal class HeroChildParticles : AnimationEffect {
 
     /// <summary>
     /// The watched particles, by their path under the hero. Their place in this list is what they are known by over the
-    /// network, so new ones go at the end.
+    /// network.
     /// </summary>
     private static readonly string[] Paths = [
         "Tool Effects/WebShot Effects/Smoke S",

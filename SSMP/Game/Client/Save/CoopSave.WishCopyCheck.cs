@@ -566,7 +566,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// The message to the local player when the partner's game refused a turn-in at a character because the partner is
-    /// short of what it takes, or null when the refusal doesn't say so, like one from an older version of the mod.
+    /// short of what it takes, or null when the refusal doesn't say so.
     /// </summary>
     private string? GetShortCopyRefusal(ClientPlayerData player, CoopSaveUpdate update) {
         if (update.WishNames.Count == 0 || FindQuest(update.WishNames[0]) is not { } quest ||

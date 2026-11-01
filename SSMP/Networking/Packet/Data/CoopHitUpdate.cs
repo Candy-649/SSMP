@@ -106,6 +106,8 @@ internal class CoopHitUpdate : IPacketData {
 
 /// <summary>
 /// What a hit in a two-player save hit.
+/// A kind travels as a byte. Every game in a session runs the same build (ModVersion), so the numbers only have to
+/// agree within one build; a kind no longer used keeps its place only so that the kinds after it keep their numbers.
 /// </summary>
 internal enum CoopHitKind : byte {
     /// <summary>
@@ -191,9 +193,6 @@ internal enum CoopHitKind : byte {
     /// listens for it, like a platform that slides along its rails. <see cref="CoopHitUpdate.Hit"/> holds the direction,
     /// where what struck it was and where the object it sat under was, and the dice of the sender's game; the other game
     /// tells what listens the same.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently change
-    /// what every later kind means to a game running an older build.
     /// </summary>
     ObjectDirection,
 
@@ -201,7 +200,6 @@ internal enum CoopHitKind : byte {
     /// A thing that a creature threw, found by its name in <see cref="CoopHitUpdate.Path"/> with where it was (see
     /// ThrownThings.PathOf), that hurt the sender's player through its part that hurts at
     /// <see cref="CoopHitUpdate.Index"/> among those of its object; the other game tells its own of it the same way.
-    /// Appended at the end, like the one before.
     /// </summary>
     ObjectHurtPlayer,
 
@@ -215,7 +213,7 @@ internal enum CoopHitKind : byte {
     /// Like <see cref="EntityTouch"/>, for something with which the sender's player set the creature off themselves -
     /// woke it, hooked it with the harpoon, gave a sign of theirs that it heard - which the sender's copy could not
     /// play at once: the scene host's game plays it all the same, and the creature goes after the sender there, as it
-    /// would after the one player there is who set it off. Appended at the end, like the ones before.
+    /// would after the one player there is who set it off.
     /// </summary>
     EntitySetOff,
 
@@ -225,7 +223,6 @@ internal enum CoopHitKind : byte {
     /// that name, with the state it waited in and the states it went to in turn. <see cref="CoopHitUpdate.Responder"/>
     /// names the sign, and <see cref="CoopHitUpdate.Hit"/> holds them all and then the dice of the sender's game; the
     /// other game takes each of its own that waits in the same state the same way (see CoopHits.WalkSignHere).
-    /// Appended at the end, like the ones before.
     /// </summary>
     ObjectSignWalk
 }

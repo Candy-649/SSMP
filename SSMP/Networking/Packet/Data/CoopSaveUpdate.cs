@@ -323,6 +323,8 @@ internal class CoopSaveUpdate : IPacketData {
 
 /// <summary>
 /// What an update of a two-player save is about.
+/// A kind travels as a byte. Every game in a session runs the same build (ModVersion), so the numbers only have to
+/// agree within one build; a kind no longer used keeps its place only so that the kinds after it keep their numbers.
 /// </summary>
 internal enum CoopSaveUpdateKind : byte {
     /// <summary>
@@ -475,9 +477,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender is ready to leave the waiting room and choose a save, or took that back.
     /// <see cref="CoopSaveUpdate.Part"/> is 1 for ready and 0 for not. This one is sent from the menu, before either
     /// player has a save loaded.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     WaitingRoomReady,
 
@@ -487,9 +486,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.Values"/> holds the x and y of the cocoon, so that the other games can show one where
     /// there is none of their own, and a third value of 1 for a death in the chase of a lava, which leaves no cocoon.
     /// <see cref="CoopSaveUpdate.Key"/> names the death, which every hit on the cocoon names in turn.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     RescueOffer,
 
@@ -516,27 +512,18 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.ObjectPath"/> is then the name of the game. <see cref="CoopSaveUpdate.Key"/> is the
     /// score of the round as a running total rather than a single point, so a lost or repeated update cannot make the
     /// other game count wrong: it only ever takes the larger of the two.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     FleaGameScore,
 
     /// <summary>
     /// Whether the sender has won every game of the festival, which is what a character there waits for before
     /// taking both players on to what follows. <see cref="CoopSaveUpdate.Part"/> is 1 for won and 0 for not.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     FleaGamesOutroReady,
 
     /// <summary>
     /// The sender has died while the other members were all waiting to be pulled back up, so there is nobody left to
     /// open their cocoons and their waits end. Everyone goes to their bench, which is the rule for everyone down.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     RescueLost,
 
@@ -546,9 +533,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.FsmName"/> and <see cref="CoopSaveUpdate.StateName"/> name it and what it went into.
     /// Nothing is kept for a player in another room: these traps are saved nowhere and are back the next time their
     /// room loads.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     WorldTrigger,
 
@@ -556,9 +540,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// How the race of the sender against the racer of the room goes, in a race that both players run together.
     /// <see cref="CoopSaveUpdate.PartCount"/> says what happened: the sender is at the start line, won, or is out, and
     /// <see cref="CoopSaveUpdate.Scene"/> names the room.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     Race,
 
@@ -568,9 +549,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// once they don't, and <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name it.
     /// For a hatch over a way out of the room, <see cref="CoopSaveUpdate.Names"/> says where that way comes in, so
     /// that a game in the next room keeps the hatch at the other end of the pipe open.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     Trapdoor,
 
@@ -581,9 +559,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// is 1 when the game of the sender runs the room, whose lava the others follow, and
     /// <see cref="CoopSaveUpdate.Values"/> holds how high the lava is, how fast it rises, whether it is after anyone (1
     /// or 0), whether there is a safe place (1 or 0), that place, and how many seconds ago the sender stood there.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     LavaChase,
 
@@ -591,9 +566,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// The lava that chases the players was set down below the sender for a burn in their game, which does not run
     /// the room, so the game that does sets its own down the same way. <see cref="CoopSaveUpdate.Values"/> holds how
     /// high it was set down and for how many seconds it holds there.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     LavaChaseSetDown,
 
@@ -601,17 +573,11 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender took the bait of a cage while the other player stood in it, so the cage went off in their game and
     /// the game of the other player makes its own go off as well. <see cref="CoopSaveUpdate.Scene"/> and
     /// <see cref="CoopSaveUpdate.ObjectPath"/> name the bait.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     CageSprung,
 
     /// <summary>
     /// The sender was caught and taken to the prison, so the game of the other player takes them there as well.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     PrisonCapture,
 
@@ -619,27 +585,18 @@ internal enum CoopSaveUpdateKind : byte {
     /// How taking the clothes back in the prison goes for the sender. <see cref="CoopSaveUpdate.PartCount"/> says what
     /// happened: 1 they reached for theirs, 0 they stopped waiting, 2 their grab started, 3 it showed them
     /// again. <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name where they reached.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     ClothesGrab,
 
     /// <summary>
     /// The sender came back out of the lava in the room named by <see cref="CoopSaveUpdate.Scene"/>, so the room of the
     /// other player hears it as well and puts its broken floors back like the room of the sender did.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     LavaDeathEnd,
 
     /// <summary>
     /// A lift was locked in the room of the sender and their game unlocked it, so the game of the other player unlocks
     /// the same lift.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     LiftUnlock,
 
@@ -651,9 +608,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.WishNames"/>, with the index of the target in <see cref="CoopSaveUpdate.WishValues"/>
     /// (-1 for a wish that the save of the sender completed already) and what they carry in
     /// <see cref="CoopSaveUpdate.Amounts"/>.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     WishCopyCheck,
 
@@ -663,9 +617,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// while they keep it up and 0 once they don't, <see cref="CoopSaveUpdate.Scene"/> and
     /// <see cref="CoopSaveUpdate.ObjectPath"/> name it, and <see cref="CoopSaveUpdate.Sequence"/> grows with every such
     /// update of the sender.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     TollBench,
 
@@ -673,9 +624,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender was waiting to be pulled back up and is now on their feet again. The member whose hit pulled them up
     /// is told only then, since a hit that pulls them up doesn't stand them up when something comes first in their
     /// game.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     RescueStoodUp,
 
@@ -689,9 +637,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// its ways comes next in <see cref="CoopSaveUpdate.Part"/>, and 1 in <see cref="CoopSaveUpdate.PartCount"/> if
     /// its ways start over. The controller of a fight says every state it goes into after the start of the fight, each
     /// as a round of its own.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     MachineRound,
 
@@ -699,18 +644,12 @@ internal enum CoopSaveUpdateKind : byte {
     /// A grinder caught the sender, so it and the grinders that go with it stopped in the sender's game, and they stop
     /// in the other game too. <see cref="CoopSaveUpdate.Scene"/>, <see cref="CoopSaveUpdate.ObjectPath"/> and
     /// <see cref="CoopSaveUpdate.FsmName"/> name the grinder.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     MachineStop,
 
     /// <summary>
     /// A grinder that had caught the sender goes on, with the grinders that go with it, so they go on in the other
     /// game too. Named like <see cref="MachineStop"/>.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     MachineGo,
 
@@ -718,9 +657,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// A creature that the game brings back after a rest died in the sender's game, which keeps it dead in its save until
     /// then. <see cref="CoopSaveUpdate.ItemScenes"/> and <see cref="CoopSaveUpdate.ItemIds"/> name it the way the
     /// creature's item saves it.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     CreatureDeath,
 
@@ -729,9 +665,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.ItemScenes"/> and <see cref="CoopSaveUpdate.ItemIds"/> name it the way its item saves
     /// it, and <see cref="CoopSaveUpdate.Amounts"/> holds the place it came to rest at and 1 if its item keeps it only
     /// until a rest.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     SlidePlatform,
 
@@ -744,9 +677,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// <summary>
     /// The sender chose a save in the menu to join the host's game with and asks for the host's save, which goes to
     /// every player and which only the host's game answers. <see cref="CoopSaveUpdate.Key"/> names the request.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     HostSaveRequest,
 
@@ -757,9 +687,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// "gzip" when the save is compressed. With a part count of 0 it carries no part: it is the host's answer, sent as
     /// soon as the request arrives and again whenever it changes, and <see cref="CoopSaveUpdate.Part"/> says what keeps
     /// the save from coming (0 for nothing), or that the host's game could not take it (CoopSave.HostSaveWait).
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     HostSave,
 
@@ -769,9 +696,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// creatures that the game brings back for a put-back of its own player (see CoopSave.PutBack), and every game of
     /// the room turns the passages of dropping boxes near there to the sender (see GamePatcher.BoxPassages). A third
     /// value of 1 says that the sender stood up there after a rescue instead, which only turns those passages.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     PutBack,
 
@@ -780,9 +704,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// is the scene host, so that the other games in the room bring theirs there (see CoopSave.RoomClocks).
     /// <see cref="CoopSaveUpdate.Values"/> holds the time of the sender's game to the server and back in milliseconds,
     /// then the time of each clock, and <see cref="CoopSaveUpdate.Amounts"/> the clocks by their keys.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     RoomClocks,
 
@@ -791,9 +712,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// which the other games in it ring and the game that runs the room judges (see CoopSave.PodSequences).
     /// <see cref="CoopSaveUpdate.Amounts"/> holds the key of the music box, the bell by its place among the bells of
     /// the box, and the side it was struck from: -1, 1, or 0 for one struck from above.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     PodStrike,
 
@@ -802,9 +720,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.Scene"/> names, for the other games in it to play out (see CoopSave.PodSequences).
     /// <see cref="CoopSaveUpdate.Amounts"/> holds the key of the music box, 1 for the right bell or 0 for a wrong one,
     /// and the bell and the round that the box was at before it.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     PodOutcome,
 
@@ -813,9 +728,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// number by its scene in <see cref="CoopSaveUpdate.ItemScenes"/> and its ID in
     /// <see cref="CoopSaveUpdate.ItemIds"/>, and in <see cref="CoopSaveUpdate.Amounts"/> the rounds and 1 if the save
     /// keeps them only until the next rest (see CoopSave.PodSequences).
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     PodProgress,
 
@@ -834,9 +746,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// state machine that went up or moved; for one told something, <see cref="CoopSaveUpdate.Names"/> holds the event
     /// and the state machine it went to. <see cref="CoopSaveUpdate.Sequence"/> tells a word that comes again, and names
     /// what a part told something rolls from then on.
-    ///
-    /// Appended at the end on purpose: the kind travels as a raw byte, so inserting anywhere else would silently
-    /// change what every later kind means to a game running an older build.
     /// </summary>
     MachinePart,
 
@@ -844,7 +753,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender is going into a room of the maze, as their load begins, or left the maze (see
     /// CoopSave.RoomLayouts). <see cref="CoopSaveUpdate.Scene"/> is the room, or empty for none, and
     /// <see cref="CoopSaveUpdate.Part"/> is 0 when nobody was known to be in it or on the way into it, 1 otherwise.
-    /// Appended at the end, like every kind.
     /// </summary>
     RoomLayoutPlace,
 
@@ -855,7 +763,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// what rolled for the room, and <see cref="CoopSaveUpdate.Amounts"/> how many results each has, followed by them;
     /// <see cref="CoopSaveUpdate.Records"/> holds the path of each door, the scene it leads to and the door it comes in
     /// at there, and <see cref="CoopSaveUpdate.Values"/> 0 for each that does not lead on through the maze, else 1 more
-    /// than its place among those that do. Appended at the end, like every kind.
+    /// than its place among those that do.
     /// </summary>
     RoomLayout,
 
@@ -864,7 +772,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// while the room had someone in it (see CoopSave.RoomLayouts). <see cref="CoopSaveUpdate.Scene"/> is the room,
     /// <see cref="CoopSaveUpdate.Records"/> holds the path of the door, the scene it took them to, the door they came
     /// in at there and the key of the layout of the room it was made under, and <see cref="CoopSaveUpdate.PartnerKey"/>
-    /// the save key of that player. Appended at the end, like every kind.
+    /// the save key of that player.
     /// </summary>
     RoomDoorTaken,
 
@@ -873,15 +781,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.PartCount"/>: 0 when it caught them, 1 when it blacked out their screen and 2 when it
     /// let go of them without taking them there. The game of the other player holds its own player from the catch on
     /// and blacks out their screen along with the sender's, until the capture takes them there too
-    /// (<see cref="PrisonCapture"/>) or the catch lets go (see CoopSave.PrisonCapture). Appended at the end, like every
-    /// kind.
+    /// (<see cref="PrisonCapture"/>) or the catch lets go (see CoopSave.PrisonCapture).
     /// </summary>
     PrisonCatch,
 
     /// <summary>
     /// The answer to a <see cref="Hello"/> that the game of the sender turned down because its player made their loaded
     /// save a normal save in this session. The game that said hello tells its player why the save waits for the sender,
-    /// and that it waits until the sender loads their save again. Appended at the end, like every kind.
+    /// and that it waits until the sender loads their save again.
     /// </summary>
     HelloDeclined,
 
@@ -897,8 +804,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// <summary>
     /// A dial that levers turn a way through a room with came to rest in the sender's game (see CoopSave.DialDoors).
     /// <see cref="CoopSaveUpdate.ItemScenes"/> and <see cref="CoopSaveUpdate.ItemIds"/> name it the way its item saves
-    /// it, and <see cref="CoopSaveUpdate.Amounts"/> holds 1 if it came to rest turned. Appended at the end, like every
-    /// kind.
+    /// it, and <see cref="CoopSaveUpdate.Amounts"/> holds 1 if it came to rest turned.
     /// </summary>
     DialRest,
 
@@ -907,7 +813,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// share (see CoopSave.SharedPurchases). <see cref="CoopSaveUpdate.FlagNames"/> and
     /// <see cref="CoopSaveUpdate.FlagValues"/> hold what the purchase set, <see cref="CoopSaveUpdate.Key"/> its random
     /// key, which settles two purchases that crossed on the way, and <see cref="CoopSaveUpdate.StateName"/> the name of
-    /// what was bought, for messages. Appended at the end, like every kind.
+    /// what was bought, for messages.
     /// </summary>
     SharedPurchase,
 
@@ -915,7 +821,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender watches the round of a game that the receiver plays, or no longer does (see MinigameCoop).
     /// <see cref="CoopSaveUpdate.Part"/> is 1 while they watch and 0 once they stop, and
     /// <see cref="CoopSaveUpdate.ObjectPath"/> names the game. While anyone watches, the game of the receiver shows
-    /// them what is going on in its round. Appended at the end, like every kind.
+    /// them what is going on in its round.
     /// </summary>
     MinigameWatch,
 
@@ -924,7 +830,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// and runs on (see CoopSave.SpikedCogs). <see cref="CoopSaveUpdate.Scene"/> and
     /// <see cref="CoopSaveUpdate.ObjectPath"/> name the cog, and <see cref="CoopSaveUpdate.Part"/> is 1 while it holds
     /// them and 0 once it let go. The same cog stops in the other games too until the last player it holds there is
-    /// let go. Appended at the end, like every kind.
+    /// let go.
     /// </summary>
     CogHold,
 
@@ -932,8 +838,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// The sender pushed a rope that a ring hangs from in their game: their needle hooked the ring, or they took hold
     /// of it or let go of it (see CoopSave.PullRings). <see cref="CoopSaveUpdate.Scene"/> and
     /// <see cref="CoopSaveUpdate.ObjectPath"/> name the rope, and <see cref="CoopSaveUpdate.Values"/> hold the push,
-    /// across and up, the way it pushed there. The other games push it the same way. Appended at the end, like every
-    /// kind.
+    /// across and up, the way it pushed there. The other games push it the same way.
     /// </summary>
     RopePush,
 
@@ -941,7 +846,6 @@ internal enum CoopSaveUpdateKind : byte {
     /// What the sender's player has had of what lets a character leave for good (see CoopSave.Departures):
     /// <see cref="CoopSaveUpdate.FlagNames"/> name the flags of the sender's own save, and
     /// <see cref="CoopSaveUpdate.FlagValues"/> hold them, 1 for had. A character leaves only once every member had it.
-    /// Appended at the end, like every kind.
     /// </summary>
     DepartureReadiness,
 
@@ -949,7 +853,7 @@ internal enum CoopSaveUpdateKind : byte {
     /// The world shakes in the sender's game, the scene host's, as it does now and then once it is bound in thread
     /// (see CoopSave.WorldRumbles). <see cref="CoopSaveUpdate.Scene"/> names the room and
     /// <see cref="CoopSaveUpdate.Amounts"/> holds the dice it shook with. The other games in the room shake with it, and
-    /// not by themselves. Appended at the end, like every kind.
+    /// not by themselves.
     /// </summary>
     WorldRumble
 }

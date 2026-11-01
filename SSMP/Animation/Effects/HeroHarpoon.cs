@@ -28,7 +28,7 @@ internal class HeroHarpoon : AnimationEffect {
     public static readonly HeroHarpoon Instance = new();
 
     /// <summary>
-    /// What a message is about, as it goes over the network: new kinds go at the end.
+    /// What a message is about, as it goes over the network.
     /// </summary>
     private enum Kind : byte {
         Needle,

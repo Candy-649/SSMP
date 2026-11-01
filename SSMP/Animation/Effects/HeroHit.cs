@@ -22,7 +22,7 @@ internal class HeroHit : AnimationEffect {
     public static readonly HeroHit Instance = new();
 
     /// <summary>
-    /// Which streak the game drew, as it goes over the network: new kinds go at the end.
+    /// Which streak the game drew, as it goes over the network.
     /// </summary>
     private enum Kind : byte {
         // A hit that took one mask

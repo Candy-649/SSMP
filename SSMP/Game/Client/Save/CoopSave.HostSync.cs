@@ -67,8 +67,7 @@ internal partial class CoopSave {
 
     /// <summary>
     /// What <see cref="CoopSaveUpdate.StateName"/> says on the host's answer that their save won't come when the
-    /// host's game is older than the mod needs and lacks what the mod takes the save with. A joining player of an
-    /// earlier version, which reads no reason, hears that the save won't come.
+    /// host's game is older than the mod needs and lacks what the mod takes the save with.
     /// </summary>
     private const string HostGameTooOld = "GameTooOld";
 

@@ -32,8 +32,7 @@ internal class Death : AnimationEffect {
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
-        // Read one at a time rather than matched as a whole, so that the two answers stay separate and a message
-        // from a game that only had the first of them to send still means what it meant
+        // Read one at a time, so that the two answers stay separate
         var byFrost = effectInfo is { Length: > 0 } && effectInfo[0] == 1;
         var nonLethal = effectInfo is { Length: > 1 } && effectInfo[1] == 1;
 

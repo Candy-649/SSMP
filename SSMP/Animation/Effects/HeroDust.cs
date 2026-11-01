@@ -26,7 +26,7 @@ internal class HeroDust : AnimationEffect {
     public static readonly HeroDust Instance = new();
 
     /// <summary>
-    /// The kinds of dust, as they go over the network: new ones go at the end.
+    /// The kinds of dust, as they go over the network.
     /// </summary>
     private enum Kind : byte {
         SoftLand,
