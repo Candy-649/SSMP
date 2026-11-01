@@ -149,6 +149,7 @@ internal class NetServer : INetServer {
         );
 
         IsStarted = true;
+        LinkWatch.Hosting = true;
 
         _transportServer = transportServer;
         _transportServer.Start(port);
@@ -342,6 +343,12 @@ internal class NetServer : INetServer {
                 }
 
                 if (client.IsRegistered) {
+                    // Counted for the smoothing of positions in the game that hosts: what the other players send
+                    // comes to it here, while the packets from this server on to that game never stop
+                    if (!client.TransportClient.IsLocal) {
+                        LinkWatch.TookInFromOtherPlayer();
+                    }
+
                     _packetManager.HandleServerUpdatePacket(id, inOrder);
                 }
             }
@@ -431,6 +438,7 @@ internal class NetServer : INetServer {
         Logger.Info("Stopping NetServer");
 
         IsStarted = false;
+        LinkWatch.Hosting = false;
 
         // Request cancellation for the processing thread
         _taskTokenSource?.Cancel();

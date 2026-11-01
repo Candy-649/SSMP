@@ -326,6 +326,9 @@ internal class NetClient : INetClient {
     /// </summary>
     /// <param name="clientUpdatePacket">The packet.</param>
     private void HandleUpdatePacket(ClientUpdatePacket clientUpdatePacket) {
+        // Counted for the smoothing of positions, which tells from it a connection gone quiet from things that stopped
+        LinkWatch.TookInFromServer();
+
         // First check for slice or slice ack data and handle it separately by passing it onto either the chunk
         // sender or chunk receiver
         var packetData = clientUpdatePacket.GetPacketData();

@@ -24,6 +24,12 @@ internal interface IEncryptedTransportClient {
     IPEndPoint? EndPoint { get; }
 
     /// <summary>
+    /// Whether this client is the game of the player who runs the server, on the same machine: what goes between
+    /// them never leaves it, so it is never lost and never late.
+    /// </summary>
+    bool IsLocal { get; }
+
+    /// <summary>
     /// Indicates whether the application must handle reliability (retransmission).
     /// Returns false for transports with built-in reliable delivery (e.g., Steam P2P).
     /// </summary>

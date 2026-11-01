@@ -27,6 +27,10 @@ internal class UdpEncryptedTransportClient : IEncryptedTransportClient {
     public IPEndPoint EndPoint => _dtlsServerClient.EndPoint;
 
     /// <inheritdoc />
+    /// <remarks>The host's own game connects to its server at 127.0.0.1.</remarks>
+    public bool IsLocal => IPAddress.IsLoopback(EndPoint.Address);
+
+    /// <inheritdoc />
     public bool RequiresReliability => true;
 
     /// <inheritdoc />

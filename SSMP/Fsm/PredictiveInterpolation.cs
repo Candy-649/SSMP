@@ -1,25 +1,23 @@
+using SSMP.Networking;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Fsm;
 
 /// <summary>
-/// Handles smooth client-side interpolation of networked entities using 
-/// explicit extrapolation with RTT-adaptive error correction.
+/// Moves a copy smoothly between the positions its sender sends: on from the last one at the speed they show it
+/// going, until either the packets that keep coming show that it stopped or the connection has been quiet for too
+/// long, with how far the next position puts it from there smoothed away rather than jumped, over a time that follows
+/// the round trip.
 /// </summary>
 internal class PredictiveInterpolation : MonoBehaviour {
     #region Settings
 
     /// <summary>
-    /// Threshold (seconds) where prediction is hard-stopped to prevent huge de-syncs.
-    /// </summary>
-    [Header("Prediction Limits")] [SerializeField]
-    private float extremeLossThreshold = 1.0f;
-
-    /// <summary>
     /// Squared distance threshold for valid prediction vs teleport.
     /// </summary>
-    [SerializeField] private float snapThresholdSq = 16.0f;
+    [Header("Prediction Limits")] [SerializeField]
+    private float snapThresholdSq = 16.0f;
 
     /// <summary>
     /// Minimum squared speed to consider moving.
@@ -59,12 +57,79 @@ internal class PredictiveInterpolation : MonoBehaviour {
     [Header("Smoothing Weights")] [SerializeField, Range(0f, 1f)]
     private float velocityBlendFactor = 0.7f;
 
-    [SerializeField] private float velocityDecayRate = 2.0f;
-
     [Header("RTT Adaptation")] [SerializeField]
     private bool enableRttAdaptation = true;
 
     [SerializeField] private float rttSmoothingSpeed = 3.0f; // How fast to transition between RTT tiers
+
+    #endregion
+
+    #region Going On By Itself
+
+    /// <summary>
+    /// How long a copy goes on at full speed after its last position while nothing says that it stopped, in seconds.
+    ///
+    /// Positions come about sixty times a second, and a connection that drops some goes quiet for a tenth of a second
+    /// or a quarter. A copy used to stop after two or three that didn't come (30 to 60 ms), slide back toward its
+    /// last position and jump on when the next one came, so that a creature went on in fits and starts through every
+    /// stretch of loss (USER 11-01 "丢包的时候，那个怪一停一停的"). Most things go on the way they were going for that
+    /// long, and so the copy does.
+    /// </summary>
+    private const float CoastFullSpeedTime = 0.25f;
+
+    /// <summary>
+    /// By when, after its last position, a copy that is still told nothing has slowed to a stop, in seconds. From
+    /// <see cref="CoastFullSpeedTime"/> to this its speed falls off evenly, so it doesn't stop dead.
+    /// </summary>
+    private const float CoastStopTime = 0.4f;
+
+    /// <summary>
+    /// The farthest a copy goes on from its last position, in units. What turns out wrong of where it went is smoothed
+    /// away when the next position comes, and much more than this would be a slide that anyone sees.
+    /// </summary>
+    private const float CoastMaxDistance = BigMoveDistance;
+
+    /// <summary>
+    /// How many packets in a row, at the least, have to come without a position of a moving copy for it to count as
+    /// stopped. A thing is sent only while it moves, so packets that keep coming without it mean it stopped, while a
+    /// quiet connection brings no packets at all. One or two often come without it while it still moves, since the
+    /// ticks of its sender and of the server don't line up.
+    /// </summary>
+    private const int MinStopPackets = 3;
+
+    /// <summary>
+    /// The most packets an ordinary step between two positions of a moving copy is taken to span, for how many in a
+    /// row are usual for it (<see cref="_typicalCover"/>). More is a quiet stretch, not a step.
+    /// </summary>
+    private const int MaxTypicalCover = 4;
+
+    /// <summary>
+    /// How much of each step goes into <see cref="_typicalCover"/>.
+    /// </summary>
+    private const float CoverLearnRate = 0.1f;
+
+    /// <summary>
+    /// After how long going on from a position a copy looks out for walls, in seconds. As far as this it goes on as
+    /// it always did, which positions sixty times a second seldom let it get far in; past it, it goes on by itself.
+    /// </summary>
+    private const float WallCheckAfter = 0.05f;
+
+    /// <summary>
+    /// How far short of a wall a copy that goes on by itself stops, in units: where a copy is placed is near the
+    /// middle of its body, which reaches out about this far.
+    /// </summary>
+    private const float WallLookAhead = 0.3f;
+
+    /// <summary>
+    /// The layer of the ground and the walls (8).
+    /// </summary>
+    private const int TerrainMask = 1 << 8;
+
+    /// <summary>
+    /// A wall closer than this, in units, is one the copy is inside of, like a creature that goes through the ground,
+    /// and is no reason to stop.
+    /// </summary>
+    private const float InsideTerrain = 0.001f;
 
     #endregion
 
@@ -77,14 +142,6 @@ internal class PredictiveInterpolation : MonoBehaviour {
     // Higher values = smoother but more latent visual corrections
     private static readonly float[] CorrectionTimes = [0.05f, 0.06f, 0.10f, 0.14f, 0.20f];
 
-    // Prediction time cap multiplier per tier (multiplied by serverDeltaTime)
-    // Higher values = more extrapolation allowed before clamping
-    private static readonly float[] PredictionCaps = [1.8f, 2.0f, 2.5f, 3.0f, 3.5f];
-
-    // Decay rate multiplier per tier
-    // Lower values = slower decay, smoother movement but more gliding risk
-    private static readonly float[] DecayMultipliers = [18f, 15f, 10f, 6f, 3f];
-
     #endregion
 
     #region State Variables
@@ -92,15 +149,17 @@ internal class PredictiveInterpolation : MonoBehaviour {
     // The last authoritative position received from the server (used for velocity calculation)
     private Vector3 _lastServerPosition;
 
-    // The current predicted position (integrated frame-by-frame)
+    // Where the object is reckoned to be now: its last position, and as far on from there as it went by itself
     private Vector3 _logicalPosition;
 
+    // How fast and which way its positions show it going, which it goes on at
     private Vector3 _velocity;
 
     /// <summary>
-    /// How fast and which way the object is seen to move, worked out from the positions it was sent.
+    /// How fast and which way the object is seen to move, worked out from the positions it was sent, and slowing with
+    /// it as it slows to a stop by itself.
     /// </summary>
-    public Vector3 Velocity => _velocity;
+    public Vector3 Velocity => _velocity * SpeedAfter(_reckoned);
 
     /// <summary>
     /// How far the object is drawn from where the sender's positions have it, which the smoothing takes away.
@@ -109,6 +168,33 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
     private float _timeSinceLastPacket;
     private float _lastUpdateTime;
+
+    /// <summary>
+    /// How long the object has gone on from its last position, in seconds.
+    /// </summary>
+    private float _reckoned;
+
+    /// <summary>
+    /// How far the object has gone on from its last position, in units.
+    /// </summary>
+    private float _reckonedDistance;
+
+    /// <summary>
+    /// What <see cref="LinkWatch.Heard"/> was when the last position came.
+    /// </summary>
+    private int _heardAtPosition;
+
+    /// <summary>
+    /// How many packets a step between two positions of the object usually spans, while it moves: one at sixty
+    /// positions a second, two or three from a sender that draws thirty or twenty frames a second, which sends a
+    /// position only every second or third packet. So many in a row without a position are no stop.
+    /// </summary>
+    private float _typicalCover = 1f;
+
+    /// <summary>
+    /// Whether the object went on by itself through a quiet stretch since its last position, for the log.
+    /// </summary>
+    private bool _coasted;
 
     // Visual Offsets
     private Vector3 _visualOffset;
@@ -122,8 +208,6 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
     // RTT-Adaptive values (smoothly interpolated)
     private float _adaptedCorrectionTime;
-    private float _adaptedPredictionCapMultiplier;
-    private float _adaptedDecayMultiplier;
     private float _currentRtt;
 
     #endregion
@@ -151,17 +235,16 @@ internal class PredictiveInterpolation : MonoBehaviour {
         _lastServerPosition = _cachedTransform.position;
         _logicalPosition = _cachedTransform.position;
         _lastUpdateTime = Time.time;
-        _timeSinceLastPacket = 0f;
         _velocity = Vector3.zero;
         _visualOffset = Vector3.zero;
         _visualOffsetVelocity = Vector3.zero;
+        _typicalCover = 1f;
+        TookPosition();
 
-        // Initialize adaptive values from the "Good" tier so the first few frames
+        // Initialize the adaptive value from the "Good" tier so the first few frames
         // after spawn match the tier system instead of arbitrary magic numbers.
         // AdaptToRTT will smoothly converge from here once real RTT data flows in.
         _adaptedCorrectionTime = CorrectionTimes[2];
-        _adaptedPredictionCapMultiplier = PredictionCaps[2];
-        _adaptedDecayMultiplier = DecayMultipliers[2];
         _currentRtt = RttThresholds[1];
     }
 
@@ -173,53 +256,31 @@ internal class PredictiveInterpolation : MonoBehaviour {
         if (_predictionDisabled) return;
 
         // Skip integration until the first authoritative packet arrives. Without
-        // this guard, a freshly-recycled container would run decay/extrapolation
+        // this guard, a freshly-recycled container would run extrapolation
         // against its seed position before the server has confirmed anything.
         if (!_hasNewServerData) return;
 
         _timeSinceLastPacket += dt;
+        TellWhatQuietStretchesDid();
 
-        // Cache adapted values once (avoid repeated ternary evaluation)
-        var decayMult = _adaptedDecayMultiplier;
-        var predCapMult = _adaptedPredictionCapMultiplier;
-        var corrTime = _adaptedCorrectionTime;
-
-        // 1. Handle Packet Loss / Decay
+        // 1. Going on from the last position, until the packets say that it stopped
         if (_velocity.x != 0f || _velocity.y != 0f || _velocity.z != 0f) {
-            if (_timeSinceLastPacket > serverDeltaTime) {
-                var decayFactor = velocityDecayRate * decayMult * dt;
-                var decay = 1f / (1f + decayFactor);
-
-                _velocity.x *= decay;
-                _velocity.y *= decay;
-                _velocity.z *= decay;
-
-                const float threshold = 0.01f;
-                if (_velocity.x is > -threshold and < threshold &&
-                    _velocity.y is > -threshold and < threshold &&
-                    _velocity.z is > -threshold and < threshold) {
-                    _velocity = Vector3.zero;
-                }
-            }
-
-            if (_timeSinceLastPacket > extremeLossThreshold) {
-                _velocity = Vector3.zero;
+            // The packets that came since its last position, or since the connection came back from going quiet if
+            // that was later: a run of them without a position means it stopped, while a quiet connection brings none
+            var returned = LinkWatch.HeardAtReturn;
+            var heardSince = LinkWatch.Heard - Mathf.Max(_heardAtPosition, returned);
+            if (heardSince >= StopPackets) {
+                // Where its last position has it, unless the connection went quiet since: it went on by itself
+                // meanwhile, maybe as the sender's object did before it stopped, which is in positions still to come
+                Stop(returned <= _heardAtPosition);
+            } else {
+                GoOn(dt, heardSince);
             }
         }
 
-        // 2. Explicit Extrapolation (Dead Reckoning)
-        var clampedTime = _timeSinceLastPacket;
-        var maxTime = serverDeltaTime * predCapMult;
-        if (clampedTime > maxTime) clampedTime = maxTime;
-
-        // Inline position calculation
-        var px = _lastServerPosition.x + _velocity.x * clampedTime;
-        var py = _lastServerPosition.y + _velocity.y * clampedTime;
-        var pz = _lastServerPosition.z + _velocity.z * clampedTime;
-
-        // 3. Smooth Visual Offsets - Padé Approximation for performance
+        // 2. Smooth Visual Offsets - Padé Approximation for performance
         if (_visualOffset.x != 0f || _visualOffset.y != 0f || _visualOffset.z != 0f) {
-            var omega = 2f / corrTime;
+            var omega = 2f / _adaptedCorrectionTime;
             var x = omega * dt;
             var exp = 1f / (1f + x + 0.48f * x * x + 0.235f * x * x * x);
 
@@ -232,19 +293,163 @@ internal class PredictiveInterpolation : MonoBehaviour {
             _visualOffsetVelocity.z = (_visualOffsetVelocity.z - omega * _visualOffset.z) * exp;
         }
 
-        // 4. Apply Final State - direct position set
+        // 3. Apply Final State - direct position set
         var applied = new Vector3(
-            px + _visualOffset.x,
-            py + _visualOffset.y,
-            pz + _visualOffset.z
+            _logicalPosition.x + _visualOffset.x,
+            _logicalPosition.y + _visualOffset.y,
+            _logicalPosition.z + _visualOffset.z
         );
 
         // As far as its own speed takes it in this frame is no jump, however long the frame was
         SayItMovedALongWay(
-            "what it was predicted to be doing", _cachedTransform.position, applied, _velocity.magnitude * dt
+            "what it was predicted to be doing", _cachedTransform.position, applied, Velocity.magnitude * dt
         );
 
         _cachedTransform.position = applied;
+    }
+
+    /// <summary>
+    /// How many packets in a row without a position of the object mean that it stopped.
+    /// </summary>
+    private int StopPackets => Mathf.Max(MinStopPackets, Mathf.RoundToInt(2f * _typicalCover) + 1);
+
+    /// <summary>
+    /// Takes the object on from where it is reckoned to be by one frame, the way its positions showed it going: at
+    /// full speed at first, then slowing to a stop (<see cref="CoastFullSpeedTime"/>, <see cref="CoastStopTime"/>),
+    /// no further than <see cref="CoastMaxDistance"/> from its last position, and not on into a wall.
+    /// </summary>
+    /// <param name="dt">The length of the frame.</param>
+    /// <param name="heardSince">The packets that came since its last position, for the log.</param>
+    private void GoOn(float dt, int heardSince) {
+        var from = _reckoned;
+        var to = from + dt;
+        _reckoned = to;
+
+        var step = _velocity * (GoneOnAfter(to) - GoneOnAfter(from));
+        var length = step.magnitude;
+        var stoppedBy = to >= CoastStopTime ? StopCause.Time : StopCause.None;
+
+        // No further than the limit in all
+        var left = CoastMaxDistance - _reckonedDistance;
+        if (length >= left) {
+            step = left > 0f && length > 0f ? step * (left / length) : Vector3.zero;
+            length = Mathf.Max(left, 0f);
+            stoppedBy = StopCause.Distance;
+        }
+
+        // And not into a wall, once it goes on by itself
+        if (to > WallCheckAfter) {
+            var flatLength = Mathf.Sqrt(step.x * step.x + step.y * step.y);
+            if (flatLength > 0f) {
+                var direction = new Vector2(step.x / flatLength, step.y / flatLength);
+                if (Helper.Raycast2DHit(
+                        new Vector2(_logicalPosition.x, _logicalPosition.y), direction, flatLength + WallLookAhead,
+                        TerrainMask, out var hit
+                    ) && hit.distance > InsideTerrain) {
+                    var free = Mathf.Max(0f, hit.distance - WallLookAhead);
+                    if (free < flatLength) {
+                        var kept = free / flatLength;
+                        step *= kept;
+                        length *= kept;
+                        stoppedBy = StopCause.Wall;
+                    }
+                }
+            }
+        }
+
+        _logicalPosition += step;
+        _reckonedDistance += length;
+
+        // For the log: on further than positions every 17 ms would have let it go, while hardly any packet came
+        if (!_coasted && to > CoastCountsAfter && heardSince <= 1) {
+            _coasted = true;
+            _quietCoasts++;
+        }
+
+        if (_coasted) {
+            _quietLongestCoast = Mathf.Max(_quietLongestCoast, to);
+            _quietFarthestCoast = Mathf.Max(_quietFarthestCoast, _reckonedDistance);
+        }
+
+        if (stoppedBy == StopCause.None) {
+            return;
+        }
+
+        _velocity = Vector3.zero;
+        if (!_coasted) {
+            return;
+        }
+
+        switch (stoppedBy) {
+            case StopCause.Time:
+                _quietStoppedByTime++;
+                break;
+            case StopCause.Distance:
+                _quietStoppedByDistance++;
+                break;
+            case StopCause.Wall:
+                _quietStoppedByWall++;
+                break;
+        }
+    }
+
+    /// <summary>
+    /// Stops the object, which the packets that keep coming without a position of it say it did.
+    /// </summary>
+    /// <param name="goBack">
+    /// Whether it stopped where its last position has it, which the copy then slides back to from as far as it went
+    /// on. Not so when the connection went quiet since that position: whatever the sender's object did meanwhile is in
+    /// positions that are still to come, and the copy stays where it got to until they do.
+    /// </param>
+    private void Stop(bool goBack) {
+        if (goBack) {
+            _visualOffset += _logicalPosition - _lastServerPosition;
+            _logicalPosition = _lastServerPosition;
+        }
+
+        _velocity = Vector3.zero;
+    }
+
+    /// <summary>
+    /// How far, in seconds at full speed, an object has gone on after the given time from its last position: all of
+    /// it at first, then less and less until it stands.
+    /// </summary>
+    /// <param name="time">The time since its last position, in seconds.</param>
+    private static float GoneOnAfter(float time) {
+        const float slowing = CoastStopTime - CoastFullSpeedTime;
+        if (time <= CoastFullSpeedTime) {
+            return time;
+        }
+
+        if (time >= CoastStopTime) {
+            return CoastFullSpeedTime + slowing * 0.5f;
+        }
+
+        var slowed = time - CoastFullSpeedTime;
+        return CoastFullSpeedTime + slowed - slowed * slowed / (2f * slowing);
+    }
+
+    /// <summary>
+    /// How much of its speed an object that goes on by itself still has after the given time from its last position.
+    /// </summary>
+    /// <param name="time">The time since its last position, in seconds.</param>
+    private static float SpeedAfter(float time) {
+        if (time <= CoastFullSpeedTime) {
+            return 1f;
+        }
+
+        return time >= CoastStopTime ? 0f : (CoastStopTime - time) / (CoastStopTime - CoastFullSpeedTime);
+    }
+
+    /// <summary>
+    /// Starts the reckoning of how far the object goes on afresh, from a position that was just taken.
+    /// </summary>
+    private void TookPosition() {
+        _heardAtPosition = LinkWatch.Heard;
+        _reckoned = 0f;
+        _reckonedDistance = 0f;
+        _timeSinceLastPacket = 0f;
+        _coasted = false;
     }
 
     /// <summary>
@@ -337,16 +542,26 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
         _lastUpdateTime = now;
 
+        // How many packets a step of it usually spans while it moves, for how many in a row without a position of it
+        // mean that it stopped
+        var movementSq = (newPos - _lastServerPosition).sqrMagnitude;
+        var playerStopped = movementSq < minPredictionSpeedSq;
+        if (!playerStopped && snapshotsSinceLast is >= 1 and <= MaxTypicalCover) {
+            _typicalCover += (snapshotsSinceLast - _typicalCover) * CoverLearnRate;
+        }
+
         // 4. Snap / Teleport Check
         // Compare against logical position to detect large prediction errors
         var distSq = (newPos - _logicalPosition).sqrMagnitude;
-        if (isTeleport || distSq > snapThresholdSq) {
+        var snaps = isTeleport || distSq > snapThresholdSq;
+        NoteWhereItCameTo(newPos, snaps);
+        if (snaps) {
             ForceSnap(newPos);
             return;
         }
 
         // 5. Visual Offset Calculation (Continuity Logic)
-        // Maintain visual continuity: VisualPos = LogicalPos + Offset. 
+        // Maintain visual continuity: VisualPos = LogicalPos + Offset.
         // NewOffset = OldVisualPos - NewLogicalPos (which will be newPos)
         // This ensures the object doesn't visually jump when logical position updates.
         _visualOffset = _cachedTransform.position - newPos;
@@ -356,9 +571,6 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
         // 6. Velocity Estimation
         // First, check if player has stopped (must be done even for bunched packets)
-        var movementSq = (newPos - _lastServerPosition).sqrMagnitude;
-        var playerStopped = movementSq < minPredictionSpeedSq;
-
         if (playerStopped) {
             // Player has stopped - zero velocity immediately to prevent gliding
             _velocity = Vector3.zero;
@@ -380,7 +592,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         _lastServerPosition = newPos;
         // Snap logical position to authoritative state
         _logicalPosition = newPos;
-        _timeSinceLastPacket = 0f;
+        TookPosition();
     }
 
     /// <summary>
@@ -456,7 +668,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
         _lastServerPosition = position;
         _logicalPosition = position;
-        _timeSinceLastPacket = 0f;
+        TookPosition();
         _lastUpdateTime = Time.time;
     }
 
@@ -521,8 +733,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
             return false;
         }
 
-        var reckoned = Mathf.Min(_timeSinceLastPacket, serverDeltaTime * _adaptedPredictionCapMultiplier);
-        var position = _lastServerPosition + _velocity * reckoned;
+        var position = _logicalPosition;
         if ((position - _cachedTransform.position).sqrMagnitude < BigMoveDistance * BigMoveDistance) {
             return false;
         }
@@ -550,7 +761,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         _visualOffset = Vector3.zero;
         _visualOffsetVelocity = Vector3.zero;
 
-        _timeSinceLastPacket = 0f;
+        TookPosition();
         _lastUpdateTime = Time.time;
 
         _cachedTransform.position = position;
@@ -576,7 +787,8 @@ internal class PredictiveInterpolation : MonoBehaviour {
     }
 
     /// <summary>
-    /// Adapts interpolation parameters based on measured RTT.
+    /// Adapts the time over which what a new position corrects is smoothed away to the measured RTT: longer for a
+    /// longer round trip, whose positions come less evenly.
     /// Call this whenever you measure/update the client's RTT.
     /// </summary>
     /// <param name="rttMs">Round-trip time in milliseconds</param>
@@ -586,18 +798,11 @@ internal class PredictiveInterpolation : MonoBehaviour {
         // Smooth the RTT transition to prevent jarring changes
         _currentRtt = Mathf.Lerp(_currentRtt, rttMs, Time.deltaTime * rttSmoothingSpeed);
 
-        // Calculate target values based on current RTT
+        // Smoothly transition toward the value for the current RTT
         var targetCorrectionTime = InterpolateValueForRtt(_currentRtt, CorrectionTimes);
-        var targetPredictionCap = InterpolateValueForRtt(_currentRtt, PredictionCaps);
-        var targetDecayMult = InterpolateValueForRtt(_currentRtt, DecayMultipliers);
-
-        // Smoothly transition adapted values
-        var smoothFactor = Time.deltaTime * rttSmoothingSpeed;
-        _adaptedCorrectionTime = Mathf.Lerp(_adaptedCorrectionTime, targetCorrectionTime, smoothFactor);
-        _adaptedPredictionCapMultiplier = Mathf.Lerp(
-            _adaptedPredictionCapMultiplier, targetPredictionCap, smoothFactor
+        _adaptedCorrectionTime = Mathf.Lerp(
+            _adaptedCorrectionTime, targetCorrectionTime, Time.deltaTime * rttSmoothingSpeed
         );
-        _adaptedDecayMultiplier = Mathf.Lerp(_adaptedDecayMultiplier, targetDecayMult, smoothFactor);
     }
 
     /// <summary>
@@ -621,4 +826,117 @@ internal class PredictiveInterpolation : MonoBehaviour {
         // Above maximum threshold - use Poor tier
         return tierValues[^1];
     }
+
+    #region What Quiet Stretches Did, For The Log
+
+    /// <summary>
+    /// Why an object that went on by itself stopped.
+    /// </summary>
+    private enum StopCause {
+        None,
+        Time,
+        Distance,
+        Wall
+    }
+
+    /// <summary>
+    /// After how long going on from its last position an object counts as having gone on by itself through a quiet
+    /// stretch, for the log, in seconds: past what positions every 17 ms leave to the smoothing.
+    /// </summary>
+    private const float CoastCountsAfter = 0.06f;
+
+    /// <summary>
+    /// How long after the connection came back from going quiet what the copies did is written down, in seconds: by
+    /// then the positions that came after it have corrected them.
+    /// </summary>
+    private const double TellAfter = 0.5;
+
+    private static int _quietCoasts;
+    private static float _quietLongestCoast;
+    private static float _quietFarthestCoast;
+    private static int _quietStoppedByTime;
+    private static int _quietStoppedByDistance;
+    private static int _quietStoppedByWall;
+    private static float _quietLargestCorrection;
+    private static int _quietSnaps;
+
+    /// <summary>
+    /// The quiet stretches through which nothing went on by itself, since the last line.
+    /// </summary>
+    private static int _quietStretchesUntold;
+
+    /// <summary>
+    /// The <see cref="LinkWatch.Returns"/> that the log has been told about.
+    /// </summary>
+    private static int _toldReturns;
+
+    /// <summary>
+    /// The frame in which <see cref="TellWhatQuietStretchesDid"/> last looked, so it looks once a frame.
+    /// </summary>
+    private static int _toldFrame = -1;
+
+    /// <summary>
+    /// Notes how far from where it went on to by itself the object's next position put it.
+    /// </summary>
+    /// <param name="newPos">The position.</param>
+    /// <param name="snapped">Whether the object is put straight there.</param>
+    private void NoteWhereItCameTo(Vector3 newPos, bool snapped) {
+        if (!_coasted) {
+            return;
+        }
+
+        _coasted = false;
+        _quietLargestCorrection = Mathf.Max(_quietLargestCorrection, (_cachedTransform.position - newPos).magnitude);
+        if (snapped) {
+            _quietSnaps++;
+        }
+    }
+
+    /// <summary>
+    /// Writes one line on the quiet stretches since the last line, once the connection has been back for a moment:
+    /// how long they were, how many times a copy went on by itself through them, for how long and how far, what
+    /// stopped it, and how far off that was by the positions that came after.
+    /// </summary>
+    private static void TellWhatQuietStretchesDid() {
+        var frame = Time.frameCount;
+        if (frame == _toldFrame) {
+            return;
+        }
+
+        _toldFrame = frame;
+        if (LinkWatch.Returns == _toldReturns || LinkWatch.SecondsSinceReturn < TellAfter) {
+            return;
+        }
+
+        _toldReturns = LinkWatch.Returns;
+        LinkWatch.TakeQuietStretches(out var stretches, out var longestMs);
+        if (_quietCoasts == 0) {
+            _quietStretchesUntold += stretches;
+            return;
+        }
+
+        var before = _quietStretchesUntold > 0
+            ? $"; before these, {_quietStretchesUntold} quiet stretch(es) through which nothing went on by itself"
+            : "";
+        Logger.Info(
+            $"[Smoothing] {stretches} quiet stretch(es) in what comes from " +
+            $"{(LinkWatch.Hosting ? "the other players" : "the server")}, the longest {longestMs} ms: a copy went " +
+            $"on by itself {_quietCoasts} time(s), for up to {_quietLongestCoast:0.00} s and " +
+            $"{_quietFarthestCoast:0.00} units; stopped by the time limit {_quietStoppedByTime}, by the distance " +
+            $"limit {_quietStoppedByDistance}, by a wall {_quietStoppedByWall}; the largest correction after was " +
+            $"{_quietLargestCorrection:0.00} units, {_quietSnaps} put straight there{before}"
+        );
+
+        _quietCoasts = 0;
+        _quietLongestCoast = 0f;
+        _quietFarthestCoast = 0f;
+        _quietStoppedByTime = 0;
+        _quietStoppedByDistance = 0;
+        _quietStoppedByWall = 0;
+        _quietLargestCorrection = 0f;
+        _quietSnaps = 0;
+        _quietStretchesUntold = 0;
+    }
+
+    #endregion
 }

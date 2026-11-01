@@ -30,6 +30,10 @@ internal class SteamRelayTransportClient : IReliableTransportClient, ISessionSta
     public IPEndPoint? EndPoint => null; // Steam identifies the player, so there is nothing to throttle by address
 
     /// <inheritdoc />
+    /// <remarks>The host's own game is the one with the host's Steam ID, and is sent to by the loopback channel.</remarks>
+    public bool IsLocal { get; }
+
+    /// <inheritdoc />
     public bool RequiresReliability => false;
 
     /// <inheritdoc />
@@ -63,6 +67,7 @@ internal class SteamRelayTransportClient : IReliableTransportClient, ISessionSta
 
     public SteamRelayTransportClient(ulong steamId) {
         SteamId = steamId;
+        IsLocal = SteamManager.IsInitialized && steamId == SteamUser.GetSteamID().m_SteamID;
     }
 
     /// <inheritdoc/>

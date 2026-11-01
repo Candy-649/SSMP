@@ -32,6 +32,10 @@ internal class SteamEncryptedTransportClient : IReliableTransportClient {
     public IPEndPoint? EndPoint => null; // Steam doesn't need throttling
 
     /// <inheritdoc />
+    /// <remarks>The host's own game is the one with the host's Steam ID, and is sent to by the loopback channel.</remarks>
+    public bool IsLocal { get; }
+
+    /// <inheritdoc />
     public bool RequiresReliability => false;
 
     /// <inheritdoc />
@@ -56,6 +60,7 @@ internal class SteamEncryptedTransportClient : IReliableTransportClient {
     public SteamEncryptedTransportClient(ulong steamId) {
         SteamId = steamId;
         _steamIdStruct = new CSteamID(steamId);
+        IsLocal = SteamManager.IsInitialized && _steamIdStruct == SteamUser.GetSteamID();
     }
 
     /// <inheritdoc/>
