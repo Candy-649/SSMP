@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using SSMP.Math;
+using SSMP.Util;
 
 namespace SSMP.Networking.Packet;
 
@@ -66,7 +67,7 @@ public sealed class LengthCountingPacket : IPacket {
 
     /// <inheritdoc />
     public void WriteBitFlag<TEnum>(ISet<TEnum> set) where TEnum : Enum {
-        var enumLength = Enum.GetValues(typeof(TEnum)).Length;
+        var enumLength = EnumValues<TEnum>.Values.Length;
         switch (enumLength) {
             case <= 8:
                 Length += 1;

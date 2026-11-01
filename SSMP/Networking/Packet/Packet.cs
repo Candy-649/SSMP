@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using System.Threading;
 using SSMP.Math;
+using SSMP.Util;
 
 namespace SSMP.Networking.Packet;
 
@@ -357,14 +358,14 @@ internal class Packet : IPacket {
 
     /// <inheritdoc />
     public void WriteBitFlag<TEnum>(ISet<TEnum> set) where TEnum : Enum {
-        var enumTypes = Enum.GetValues(typeof(TEnum));
-        var enumLength = enumTypes.Length;
+        var values = EnumValues<TEnum>.Values;
+        var enumLength = values.Length;
 
         ulong flag = 0;
         ulong currentValue = 1;
 
         for (var i = 0; i < enumLength; i++) {
-            if (set.Contains((TEnum) enumTypes.GetValue(i))) {
+            if (set.Contains(values[i])) {
                 flag |= currentValue;
             }
 
@@ -605,8 +606,8 @@ internal class Packet : IPacket {
 
     /// <inheritdoc />
     public ISet<TEnum> ReadBitFlag<TEnum>() where TEnum : Enum {
-        var enumTypes = Enum.GetValues(typeof(TEnum));
-        var enumLength = enumTypes.Length;
+        var values = EnumValues<TEnum>.Values;
+        var enumLength = values.Length;
 
         ulong flag = enumLength switch {
             <= 8 => ReadByte(),
@@ -618,9 +619,9 @@ internal class Packet : IPacket {
 
         ulong currentValue = 1;
         var set = new HashSet<TEnum>();
-        foreach (var enumType in enumTypes) {
+        for (var i = 0; i < values.Length; i++) {
             if ((flag & currentValue) != 0) {
-                set.Add((TEnum) enumType);
+                set.Add(values[i]);
             }
 
             currentValue *= 2;

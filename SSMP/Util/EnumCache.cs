@@ -12,3 +12,16 @@ public static class EnumCache<T> where T : struct, Enum {
     /// </summary>
     public static readonly int Count = Enum.GetNames(typeof(T)).Length;
 }
+
+/// <summary>
+/// The values of an enum type, asked for once, in the order that <see cref="Enum.GetValues"/> gives them. Without a
+/// struct constraint, so that methods constrained only to <see cref="Enum"/> can use it. The array is shared: it is
+/// only read.
+/// </summary>
+/// <typeparam name="T">The enum type.</typeparam>
+internal static class EnumValues<T> where T : Enum {
+    /// <summary>
+    /// The values of the enum.
+    /// </summary>
+    public static readonly T[] Values = (T[]) Enum.GetValues(typeof(T));
+}
