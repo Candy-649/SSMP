@@ -115,9 +115,8 @@ internal static class EntitySpawner {
     }
 
     /// <summary>
-    /// Spawn the game object for an entity with the given type that is spawned from the other given type.
+    /// Spawn the game object for an entity with the given type that is spawned from the given spawning entity.
     /// </summary>
-    /// <param name="spawningType">The type of the entity that spawns the new entity.</param>
     /// <param name="spawnedType">The type of the spawned entity.</param>
     /// <param name="clientObject">The client game object from the spawning entity.</param>
     /// <param name="clientFsms">The list of client FSMs from the spawning entity.</param>
@@ -125,7 +124,6 @@ internal static class EntitySpawner {
     /// <returns>The game object for the spawned entity, or null if the spawning entity spawns nothing of that type.
     /// </returns>
     public static GameObject? SpawnEntityGameObject(
-        EntityType spawningType,
         EntityType spawnedType,
         GameObject clientObject,
         List<PlayMakerFSM> clientFsms,

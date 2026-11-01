@@ -526,7 +526,6 @@ internal class ClientManager : IClientManager {
     /// that only need to be done once.
     /// </summary>
     public void Initialize(ServerManager serverManager) {
-        _playerManager.Initialize();
         _animationManager.Initialize(_serverSettings);
         _mapManager.Initialize();
 

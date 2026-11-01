@@ -227,11 +227,6 @@ internal partial class CoopSave {
     public IReadOnlyCollection<ushort> CheckedMemberIds => _checkedMembers;
 
     /// <summary>
-    /// Whether the saves were checked with a player while they are in the save.
-    /// </summary>
-    public bool IsCheckedMember(ushort id) => _checkedMembers.Contains(id);
-
-    /// <summary>
     /// Takes the name of a flag of the player data that the partner's game set and that the local save got from it,
     /// live or in a check.
     /// </summary>

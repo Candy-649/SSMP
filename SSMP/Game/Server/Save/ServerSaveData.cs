@@ -14,10 +14,6 @@ namespace SSMP.Game.Server.Save;
 /// </summary>
 internal class ServerSaveData {
     /// <summary>
-    /// Name of the variable in PlayerData that denotes a Steel Soul save file.
-    /// </summary>
-    private const string SteelSoulVarName = "permadeathMode";
-    /// <summary>
     /// Name of the variable in PlayerData that denotes a Godseeker save file.
     /// </summary>
     private const string GodseekerVarName = "bossRushMode";
@@ -34,10 +30,6 @@ internal class ServerSaveData {
     private static readonly Dictionary<ushort, byte[]> GodseekerOverrides;
 
     /// <summary>
-    /// The index that corresponds with the Steel Soul variable.
-    /// </summary>
-    private static readonly ushort SteelSoulIndex;
-    /// <summary>
     /// The index that corresponds with the Godseeker variable.
     /// </summary>
     private static readonly ushort GodseekerIndex;
@@ -53,14 +45,9 @@ internal class ServerSaveData {
     public Dictionary<string, Dictionary<ushort, byte[]>> PlayerSaveData { get; set; }
 
     /// <summary>
-    /// Static constructor for initializing the indices for the Steel Soul and Godseeker variables and the Godseeker
-    /// overrides.
+    /// Static constructor for initializing the index for the Godseeker variable and the Godseeker overrides.
     /// </summary>
     static ServerSaveData() {
-        if (!SaveDataMapping.Instance.PlayerDataIndices.TryGetValue(SteelSoulVarName, out SteelSoulIndex)) {
-            Logger.Warn("Could not find index for steel soul variable");
-        }
-        
         if (!SaveDataMapping.Instance.PlayerDataIndices.TryGetValue(GodseekerVarName, out GodseekerIndex)) {
             Logger.Warn("Could not find index for godseeker variable");
         }
@@ -113,18 +100,6 @@ internal class ServerSaveData {
         currentSave.SaveData = saveData;
 
         return currentSave;
-    }
-
-    /// <summary>
-    /// Whether the global save data in this instance is for Steel Soul mode.
-    /// </summary>
-    /// <returns>True if the save data is for Steel Soul mode, false otherwise.</returns>
-    public bool IsSteelSoul() {
-        if (!GlobalSaveData.TryGetValue(SteelSoulIndex, out var value)) {
-            return false;
-        }
-
-        return value.Length > 0 && value[0] != 0;
     }
 
     /// <summary>

@@ -203,31 +203,6 @@ internal class PlayerManager : IPlayerManager {
     }
 
     /// <summary>
-    /// Initialize the player manager.
-    /// </summary>
-    public void Initialize() {
-    }
-
-    /// <summary>
-    /// Updates interpolation for all active players.
-    /// Also feeds the current network RTT (round-trip time) into each player's
-    /// interpolation so it can adapt smoothing/prediction to the actual ping.
-    /// </summary>
-    /// <param name="dt">The delta time for this frame.</param>
-    /// <param name="currentRttMs">The current average round-trip time in milliseconds.</param>
-    public void UpdateInterpolations(float dt, float currentRttMs) {
-        foreach (var container in _activePlayers.Values) {
-            // Cache component reference if accessed frequently
-            if (container.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
-                // Tell the interpolator what the current ping is, so it can pick
-                // a smoothing tier (LAN / Excellent / Good / Fair / Poor).
-                interpolation.AdaptToRTT(currentRttMs);
-                interpolation.ManualUpdate(dt);
-            }
-        }
-    }
-
-    /// <summary>
     /// Register the relevant hooks for player-related operations.
     /// </summary>
     public void RegisterHooks() {

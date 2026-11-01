@@ -433,7 +433,6 @@ internal class EntityManager {
             Vector3? madeAt = position != null ? new Vector3(position.X, position.Y, position.Z) : null;
             foreach (var templateEntity in _entities.Values.Where(e => e.Type == spawningType)) {
                 spawnedObject = EntitySpawner.SpawnEntityGameObject(
-                    spawningType,
                     spawnedType,
                     templateEntity.Object.Client,
                     templateEntity.GetClientFsms(),

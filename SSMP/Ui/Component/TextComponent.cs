@@ -76,33 +76,6 @@ internal class TextComponent : Component, ITextComponent {
     }
     
     /// <summary>
-    /// Gets the preferred width required to render the component's text without wrapping.
-    /// </summary>
-    /// <returns>The preferred width in pixels.</returns>
-    /// <remarks>
-    /// <para>
-    /// <strong>NOTE:</strong> This method is currently unused by the ChatBox implementation.
-    /// ChatBox performs dynamic text measurement on arbitrary strings during its wrapping algorithm,
-    /// which requires direct use of <see cref="TextGenerator"/> with custom settings rather than
-    /// querying an existing component's preferred width.
-    /// </para>
-    /// <para>
-    /// This method is retained for potential future use cases where measuring the preferred width
-    /// of an already-instantiated text component may be needed, such as:
-    /// <list type="bullet">
-    /// <item><description>Dynamic UI layout systems</description></item>
-    /// <item><description>Tooltip sizing</description></item>
-    /// <item><description>Button auto-sizing based on text content</description></item>
-    /// </list>
-    /// </para>
-    /// </remarks>
-    public float GetPreferredWidth() {
-        var textGen = new TextGenerator();
-        var settings = _textObject.GetGenerationSettings(_textObject.rectTransform.rect.size);
-        return textGen.GetPreferredWidth(_textObject.text, settings);
-    }
-
-    /// <summary>
     /// Create the Unity Text object with all the parameters.
     /// </summary>
     /// <returns>The Unity <see cref="Text"/> object.</returns>

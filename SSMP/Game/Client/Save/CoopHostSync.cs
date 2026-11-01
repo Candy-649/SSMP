@@ -330,18 +330,6 @@ internal static class CoopHostSync {
     }
 
     /// <summary>
-    /// The beaten bosses and the act of a joining player's save that are ahead of the host's, which merging undoes for
-    /// them, without merging.
-    /// </summary>
-    public static CoopHostSyncReport CompareProgress(JObject host, JObject client) {
-        var report = new CoopHostSyncReport();
-        var hostData = host["playerData"] as JObject ?? new JObject();
-        var clientData = client["playerData"] as JObject ?? new JObject();
-        Merger.FindAhead(hostData, clientData, report);
-        return report;
-    }
-
-    /// <summary>
     /// Whether a boolean of the player data records a beaten boss, as CoopSave.IsDefeatRecord decides.
     /// </summary>
     public static bool IsDefeatRecord(string name) {

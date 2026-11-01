@@ -32,11 +32,6 @@ internal class AnimationManager {
     /// animation events are logged.
     /// </summary>
     private static bool _debugLogAnimations = false;
-    
-    /// <summary>
-    /// The distance threshold for playing certain effects.
-    /// </summary>
-    public const float EffectDistanceThreshold = 25f;
 
     #region Clip Tables
 
