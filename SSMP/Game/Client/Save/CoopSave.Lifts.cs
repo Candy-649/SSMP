@@ -94,6 +94,12 @@ internal partial class CoopSave {
     private ulong _liftRideCount;
 
     /// <summary>
+    /// The count of what the local game told of where its hero is on lifts that move (LiftRide), which tells newer
+    /// from older.
+    /// </summary>
+    private ulong _liftRiderCount;
+
+    /// <summary>
     /// When the local player entered the current room.
     /// </summary>
     private float _liftRoomStart;
@@ -317,6 +323,22 @@ internal partial class CoopSave {
         /// When the lift last changed its position.
         /// </summary>
         public float MovedAt { get; set; } = float.NegativeInfinity;
+
+        /// <summary>
+        /// When the lift last set off from standing still, which begins the trip that members tell their place on
+        /// it in.
+        /// </summary>
+        public float SetOffAt { get; set; } = float.NegativeInfinity;
+
+        /// <summary>
+        /// The ride of the local hero on the lift while it moves, as the members were told of it, or null.
+        /// </summary>
+        public LocalLiftRide? LocalRide { get; set; }
+
+        /// <summary>
+        /// What the game of each member told last of where their hero is on the lift while it moves, by member.
+        /// </summary>
+        public Dictionary<ushort, ToldLiftRide> ToldRides { get; } = new();
     }
 
     /// <summary>
@@ -337,6 +359,81 @@ internal partial class CoopSave {
         /// Where the sync last put the avatar.
         /// </summary>
         public Vector3 Placed { get; set; }
+
+        /// <summary>
+        /// When the ride began.
+        /// </summary>
+        public float StartedAt { get; init; }
+
+        /// <summary>
+        /// How far from the lift along its way the avatar was as the ride began, which is on the lift.
+        /// </summary>
+        public float StartAlong { get; init; }
+
+        /// <summary>
+        /// How far from the lift the avatar is shown along its way.
+        /// </summary>
+        public float Along { get; set; }
+
+        /// <summary>
+        /// How fast that changes, for smoothing it toward what the member's game says.
+        /// </summary>
+        public float AlongSpeed;
+
+        /// <summary>
+        /// Whether the ride follows what the member's game says of where they are on the lift.
+        /// </summary>
+        public bool Told { get; set; }
+    }
+
+    /// <summary>
+    /// The ride of the local hero on a lift that moves, as the members were told of it.
+    /// </summary>
+    private sealed class LocalLiftRide {
+        /// <summary>
+        /// How far from the lift along its way the hero was in what was told last.
+        /// </summary>
+        public float SentAlong { get; set; }
+
+        /// <summary>
+        /// When that was told.
+        /// </summary>
+        public float SentAt { get; set; }
+
+        /// <summary>
+        /// How many times it was told in this ride, for the log.
+        /// </summary>
+        public int Sent { get; set; }
+
+        /// <summary>
+        /// Whether the hero stood on the lift when that was told.
+        /// </summary>
+        public bool SentGrounded { get; set; }
+    }
+
+    /// <summary>
+    /// What the game of a member told last of where their hero is on a lift that moves.
+    /// </summary>
+    private sealed class ToldLiftRide {
+        /// <summary>
+        /// The member's count of what they told, which tells newer from older.
+        /// </summary>
+        public required ulong Key { get; init; }
+
+        /// <summary>
+        /// How far from the lift along its way their hero is.
+        /// </summary>
+        public required float Along { get; init; }
+
+        /// <summary>
+        /// Whether they ride it, or stepped off it while it moves.
+        /// </summary>
+        public required bool Riding { get; init; }
+
+        /// <summary>
+        /// When it came.
+        /// </summary>
+        public required float At { get; init; }
     }
 
     /// <summary>
@@ -595,6 +692,7 @@ internal partial class CoopSave {
     /// </summary>
     private void UpdateLift(SyncedLift lift, List<ClientPlayerData> members, bool decides) {
         lift.Update();
+        UpdateLocalLiftRide(lift, members);
         if (lift is FsmLift fsmLift) {
             UpdateFsmLiftRide(fsmLift, members);
         }

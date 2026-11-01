@@ -850,5 +850,15 @@ internal enum CoopSaveUpdateKind : byte {
     /// <see cref="CoopSaveUpdate.Amounts"/> holds the dice it shook with. The other games in the room shake with it, and
     /// not by themselves.
     /// </summary>
-    WorldRumble
+    WorldRumble,
+
+    /// <summary>
+    /// Where the sender's hero is on a lift that moves, along the way it moves: how far from the lift that way, in
+    /// <see cref="CoopSaveUpdate.Values"/>, sent as the ride begins and then as that changes, as it does in a jump.
+    /// <see cref="CoopSaveUpdate.PartCount"/> is 1 while they ride it and 0 once they stepped off it while it still
+    /// moves, and <see cref="CoopSaveUpdate.Key"/> counts the sender's updates of this kind. The other games put the
+    /// sender's figure that far from the lift where theirs is, since its positions lag behind a moving lift
+    /// (CoopSave.LiftReplay).
+    /// </summary>
+    LiftRide
 }

@@ -1100,6 +1100,9 @@ internal partial class CoopSave {
             case CoopSaveUpdateKind.LiftUnlock:
                 OnLiftUnlock(player, update);
                 break;
+            case CoopSaveUpdateKind.LiftRide:
+                OnLiftRide(player, update);
+                break;
             case CoopSaveUpdateKind.DeliveryBreak:
                 OnDeliveryBreak(player, update);
                 break;
