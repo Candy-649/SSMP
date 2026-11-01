@@ -2789,30 +2789,21 @@ internal partial class Entity {
     private void TakeOffTheSilkMarks(HutongGames.PlayMaker.Fsm fsm) {
         foreach (var state in fsm.States) {
             foreach (var action in state.Actions) {
-                if (action is not AddUsingSilk { DidAddTracker: { IsNone: false, Value: true } added } add) {
+                if (action is not AddUsingSilk { DidAddTracker.Value: true } add) {
                     continue;
                 }
 
                 // Cleared as RemoveUsingSilk clears it - first, so that a mark that shares the note comes off once
-                added.Value = false;
-
-                // Never in the way of letting the player go, which comes after
-                try {
-                    var flags = (SilkSpool.SilkUsingFlags) add.UsingType.Value;
-                    var amount = add.Amount.Value;
-                    var spool = SilkSpool.Instance;
-                    var taken = spool != null && spool.RemoveUsing(flags, amount);
-                    Logger.Info(
-                        $"The copy of entity {Id} stopped with the mark that '{state.Name}' of '{fsm.Name}' put on " +
-                        $"the local player's silk ({flags} x{amount}) still on, so it is taken off" +
-                        (taken ? "" : ", which the silk did not have")
-                    );
-                } catch (Exception e) {
-                    Logger.Warn(
-                        $"Could not take off the local player's silk the mark that '{state.Name}' of '{fsm.Name}' of " +
-                        $"entity {Id} put on: {e.GetType().Name}: {e.Message}"
-                    );
-                }
+                add.DidAddTracker.Value = false;
+                var flags = (SilkSpool.SilkUsingFlags) add.UsingType.Value;
+                var amount = add.Amount.Value;
+                var spool = SilkSpool.Instance;
+                var taken = spool != null && spool.RemoveUsing(flags, amount);
+                Logger.Info(
+                    $"The copy of entity {Id} stopped with the mark that '{state.Name}' of '{fsm.Name}' put on the " +
+                    $"local player's silk ({flags} x{amount}) still on, so it is taken off" +
+                    (taken ? "" : ", which the silk did not have")
+                );
             }
         }
     }
