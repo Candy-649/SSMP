@@ -13,9 +13,24 @@
 #   2. finds the page (the uploader's only Silksong mod) and the file on it (the only active one), and when there is
 #      more than one, asks once and remembers the answer beside the key;
 #   3. stops without uploading when the file already has this version or a newer one, so running it again is safe;
-#   4. uploads the zip, waits for Nexus Mods to check it, and adds it to the file as its newest version in the main
+#      when the file already has this version, it still goes on to step 6, so a run whose changelog failed can be
+#      finished by running it again;
+#   4. reads which versions the page's changelog already has;
+#   5. uploads the zip, waits for Nexus Mods to check it, and adds it to the file as its newest version in the main
 #      category, archiving the previous version and setting the mod's version to match;
-#   5. adds the version's changelog: the titles of the INSTALL.txt entries marked with this version.
+#   6. fills the page's changelog: every version that INSTALL.txt marks, from the oldest version on the file up to
+#      this one, that the changelog does not have yet, each under its own version, oldest first, with the titles of
+#      the INSTALL.txt entries marked with that version. Every version goes to npm, but only some go to Nexus Mods,
+#      and the page's changelog should still name the versions in between.
+#
+# The v3 API can only add to a changelog (adding a version twice lists its lines twice) and cannot read one, so step
+# 4 reads it from the v1 API with the same key. Its answer is believed only when every key is a version number and
+# one of them is a version on the file. When the read fails or is not believed, step 6 adds only the versions newer
+# than any on the file, which cannot be on the page yet, and leaves the older gaps unchecked.
+#
+# With -ChangelogsOnly it uploads nothing and does only steps 2, 4 and 6, filling the changelog up to the newest
+# version already on the file (never past it: the page should not describe a version it does not offer). That needs
+# only the staged INSTALL.txt.
 #
 # It only adds versions to a file that exists; the page's first file goes up on the website. Uploading is public, so
 # it is run by the page's owner, after npm publish, never by a build.
@@ -37,11 +52,15 @@ param(
     # nexus-file-description.txt beside this script).
     [string] $DescriptionFile,
 
-    # Do every check and show what would be uploaded, but upload nothing.
+    # Do every check and show what would be uploaded and added to the changelog, but upload and add nothing.
     [switch] $DryRun,
 
-    # Add the version without a changelog.
+    # Add the version and leave the changelog as it is.
     [switch] $NoChangelog,
+
+    # Upload nothing; only add to the changelog the versions it lacks, up to the newest version already on the file.
+    # Needs only the staged INSTALL.txt, not the zip.
+    [switch] $ChangelogsOnly,
 
     # Ask again which mod and file take the upload, instead of using the remembered answer.
     [switch] $Choose,
@@ -60,6 +79,8 @@ if (-not $DescriptionFile) { $DescriptionFile = Join-Path $PSScriptRoot 'nexus-f
 $PackageName = 'silksong-coop-mod'
 # NEXUSMODS_API_BASE is the same override Nexus Mods' upload action reads; it exists for testing against a stand-in.
 $ApiBase = if ($env:NEXUSMODS_API_BASE) { $env:NEXUSMODS_API_BASE.TrimEnd('/') } else { 'https://api.nexusmods.com/v3' }
+# The v1 API, which can read a mod's changelog, beside v3 on the same host (so a stand-in serves both)
+$V1Base = if ($ApiBase -match '/v3$') { $ApiBase -replace '/v3$', '/v1' } else { $null }
 $UserAgent = "$PackageName-upload"
 $SettingsDir = Join-Path $env:APPDATA $PackageName
 $KeyFile = Join-Path $SettingsDir 'nexus-api-key.txt'
@@ -124,9 +145,9 @@ function Get-ProblemText([string] $text) {
     return $text
 }
 
-function Invoke-Nexus([string] $Method, [string] $Path, $Body, [string] $Key) {
+function Invoke-Nexus([string] $Method, [string] $Path, $Body, [string] $Key, [string] $Base = $ApiBase) {
     $request = New-Object System.Net.Http.HttpRequestMessage(
-        (New-Object System.Net.Http.HttpMethod $Method), "$ApiBase$Path")
+        (New-Object System.Net.Http.HttpMethod $Method), "$Base$Path")
     $request.Headers.TryAddWithoutValidation('apikey', $Key) | Out-Null
     $request.Headers.TryAddWithoutValidation('User-Agent', $UserAgent) | Out-Null
     $request.Headers.TryAddWithoutValidation('Accept', 'application/json') | Out-Null
@@ -425,6 +446,157 @@ function Wait-Checked([string] $uploadId, [string] $key) {
     }
 }
 
+# --- The changelog ------------------------------------------------------------------------------------------------
+
+# Every version some install note's header marks, as text. A note can name more than one ("0.4.83, 0.4.84 ...").
+function Get-MarkedVersions {
+    $notes = Join-Path $StageDir 'INSTALL.txt'
+    if (-not (Test-Path $notes)) { return , @() }
+    $text = [System.IO.File]::ReadAllText($notes, [System.Text.Encoding]::UTF8)
+    $header = '^\* \u3010(?<title>.+?)\u3011\uFF08(?<note>[^\uFF09]*)\uFF09\s*$'
+    $found = @{}
+    foreach ($line in ($text -split "\r?\n")) {
+        $match = [regex]::Match($line, $header)
+        if (-not $match.Success) { continue }
+        # Bounded as Get-ChangelogLines bounds a version, so the two agree on what a note marks
+        foreach ($number in [regex]::Matches($match.Groups['note'].Value, '(?<![0-9.])[0-9]+(\.[0-9]+){1,3}')) {
+            $parsed = $null
+            if ([version]::TryParse($number.Value, [ref]$parsed) -and $number.Value -match $VersionPattern) {
+                $found[$number.Value] = $true
+            }
+        }
+    }
+    return , @($found.Keys)
+}
+
+# The versions of a file as [version], oldest first, leaving out a version text that is not a plain number
+function Get-VersionNumbers($versions) {
+    $numbers = @()
+    foreach ($entry in $versions) {
+        $parsed = $null
+        if ([version]::TryParse([string]$entry.version, [ref]$parsed)) { $numbers += $parsed }
+    }
+    return , @($numbers | Sort-Object)
+}
+
+# The versions the page's changelog already has. The v1 API answers an object with one property per version, each
+# a list of lines. Posting can only add, so a wrong reading of the answer would put lines on the public page that
+# cannot be taken back: the answer is believed only when every key is a version number and at least one of them is
+# a version on the file ($fileNumbers), and anything else counts as a failed read.
+function Get-PageChangelogVersions($mod, [string] $key, $fileNumbers) {
+    if (-not $V1Base) { throw "The API base $ApiBase does not end in /v3, so where the v1 API is is not known." }
+    $domain = [uri]::EscapeDataString([string]$mod.game.domain_name)
+    $id = [uri]::EscapeDataString([string]$mod.game_scoped_id)
+    $answer = Invoke-Nexus GET "/games/$domain/mods/$id/changelogs.json" $null $key $V1Base
+    # An empty answer ([] or {}) names no version on the file either, so it is not believed: this file's page has
+    # a changelog, and an answer without it may be one this script misreads
+    if ($null -eq $answer -or ($answer -is [array] -and $answer.Count -eq 0)) {
+        throw "It named no version that is on the file (the answer was empty)."
+    }
+    if ($answer -is [array]) { throw "The changelog came back as a list, not as an object keyed by version." }
+    if ($answer -isnot [System.Management.Automation.PSCustomObject]) {
+        throw "The changelog came back as '$answer', not as an object keyed by version."
+    }
+    $names = @($answer.PSObject.Properties | ForEach-Object { [string]$_.Name })
+    $onFile = $false
+    foreach ($name in $names) {
+        $parsed = $null
+        if (-not [version]::TryParse($name.Trim(), [ref]$parsed)) {
+            throw "It named '$name', which is not a version, so the answer is not read as the changelog."
+        }
+        if (@($fileNumbers | Where-Object { $_ -eq $parsed }).Count) { $onFile = $true }
+    }
+    if (-not $onFile) {
+        throw "It named no version that is on the file, so the answer is not read as this file's changelog."
+    }
+    return , $names
+}
+
+# What to add to the changelog: each version INSTALL.txt marks from $from up to $upTo ([version]s, both included)
+# that the page's changelog lacks, oldest first, with its lines. When the changelog cannot be read and $mustRead is
+# not set, only the versions after $after (the file's newest before this upload) are taken, since those cannot be
+# on the page yet; with $mustRead set it answers $null instead. A version text that is not a plain number is taken
+# on its own. $fileNumbers are the file's versions, which the answer must name one of to be believed.
+function Get-ChangelogPlan($mod, [string] $key, $from, [string] $upTo, $after, [bool] $mustRead, $fileNumbers) {
+    Write-Step "Reading the page's changelog"
+    $have = $null
+    try {
+        $have = Get-PageChangelogVersions $mod $key $fileNumbers
+        Write-Ok "It has $($have.Count) version(s)"
+    } catch {
+        # A read without an answer must not later read as "no answer came to adding the version"
+        $script:NoAnswer = $false
+        Write-Note "Could not read it: $($_.Exception.Message)"
+        if ($mustRead) { return $null }
+        if ($after) {
+            Write-Note "Older missing versions were not checked: only the versions after $after, the file's newest,"
+            Write-Note "go up, as those cannot be on the page yet."
+        } else {
+            Write-Note "Older missing versions were not checked: only $upTo goes up."
+        }
+    }
+
+    # Versions the page has, by their text and by their number, so "0.4.99" also finds a key written differently
+    $onPage = @{}
+    if ($null -ne $have) {
+        foreach ($text in $have) {
+            $onPage[$text.Trim()] = $true
+            $parsed = $null
+            if ([version]::TryParse($text.Trim(), [ref]$parsed)) { $onPage[$parsed.ToString()] = $true }
+        }
+    }
+
+    $last = $null
+    if ([version]::TryParse($upTo, [ref]$last)) {
+        if ($null -eq $from) { $from = $last }
+        $marked = Get-MarkedVersions
+        $candidates = @($marked | Where-Object { ([version]$_) -ge $from -and ([version]$_) -le $last } |
+            Sort-Object { [version]$_ })
+        if ($null -eq $have -and $after) { $candidates = @($candidates | Where-Object { ([version]$_) -gt $after }) }
+    } else {
+        $candidates = @($upTo)
+    }
+
+    $entries = @()
+    foreach ($version in $candidates) {
+        if ($onPage.ContainsKey($version)) { continue }
+        $parsed = $null
+        if ([version]::TryParse($version, [ref]$parsed) -and $onPage.ContainsKey($parsed.ToString())) { continue }
+        $lines = Get-ChangelogLines $version
+        if ($lines.Count) { $entries += @{ Version = $version; Lines = $lines } }
+    }
+
+    if (-not ($entries | Where-Object { $_.Version -eq $upTo }) -and -not $onPage.ContainsKey($upTo)) {
+        Write-Note "No install note is marked $upTo, so it gets no changelog."
+    }
+    if ($entries.Count) {
+        Write-Note "Missing from it: $(($entries | ForEach-Object { $_.Version }) -join ', ')"
+    } elseif ($null -ne $have) {
+        Write-Note "It has every version the install notes mark from $from up to $upTo."
+    }
+    return @{ Entries = $entries }
+}
+
+function Show-ChangelogPlan($plan) {
+    Write-Note "Changelog:   $($plan.Entries.Count) version(s) to add"
+    foreach ($entry in $plan.Entries) {
+        Write-Note "  $($entry.Version), $($entry.Lines.Count) line(s):"
+        foreach ($line in $entry.Lines) { Write-Note "    $line" }
+    }
+}
+
+# Each version as its own changelog, oldest first, so the page lists them in order
+function Send-Changelogs($mod, $plan, [string] $key) {
+    if (-not $plan.Entries.Count) { return }
+    Write-Step 'Adding to the changelog'
+    foreach ($entry in $plan.Entries) {
+        $script:posting = $true
+        $body = @{ version = $entry.Version; changelog = ($entry.Lines -join "`n") }
+        Invoke-Nexus POST "/mods/$($mod.id)/changelogs" $body $key | Out-Null
+        Write-Ok "$($entry.Version): $($entry.Lines.Count) line(s)"
+    }
+}
+
 # --- Main ---------------------------------------------------------------------------------------------------------
 
 # Dot-sourcing loads the functions only, for testing them one at a time
@@ -432,19 +604,28 @@ if ($MyInvocation.InvocationName -eq '.') { return }
 
 $sending = $false
 $added = $false
+# Set once a changelog has been sent, so a failure after it does not claim that nothing reached the page
+$posting = $false
 try {
-    Write-Step 'Checking the zip'
-    $release = Get-Release
-    $sizeMb = [Math]::Round($release.Bytes.Length / 1MB, 2)
-    Write-Ok "$($release.Name), $sizeMb MB, the same SSMP.dll ($($release.Product)) as the npm stage"
+    if ($ChangelogsOnly -and $NoChangelog) { throw "-ChangelogsOnly and -NoChangelog ask for opposite things." }
 
-    $description = $null
-    if (Test-Path $DescriptionFile) {
-        $descriptionPath = (Resolve-Path $DescriptionFile).Path
-        $description = [System.IO.File]::ReadAllText($descriptionPath, [System.Text.Encoding]::UTF8).Trim()
+    if ($ChangelogsOnly) {
+        Write-Step 'Checking the install notes'
+        $notes = Join-Path $StageDir 'INSTALL.txt'
+        if (-not (Test-Path $notes)) { throw "There is no INSTALL.txt in $StageDir. Run pack-npm.ps1 first." }
+        Write-Ok (Resolve-Path $notes).Path
+    } else {
+        Write-Step 'Checking the zip'
+        $release = Get-Release
+        $sizeMb = [Math]::Round($release.Bytes.Length / 1MB, 2)
+        Write-Ok "$($release.Name), $sizeMb MB, the same SSMP.dll ($($release.Product)) as the npm stage"
+
+        $description = $null
+        if (Test-Path $DescriptionFile) {
+            $descriptionPath = (Resolve-Path $DescriptionFile).Path
+            $description = [System.IO.File]::ReadAllText($descriptionPath, [System.Text.Encoding]::UTF8).Trim()
+        }
     }
-    $changelog = @()
-    if (-not $NoChangelog) { $changelog = Get-ChangelogLines $release.Version }
 
     Write-Step 'Finding the page'
     $key = Get-ApiKey
@@ -452,13 +633,56 @@ try {
     Write-Ok "$($target.Mod.name): file '$($target.File.name)'"
     Write-Note $target.Page
 
+    # Archived versions are still on the file (and in its changelog); removed ones are not
     $versions = @((Invoke-Nexus GET "/mod-files/$($target.File.id)/versions" $null $key).data.versions |
         Where-Object { $_.category -ne 'removed' } |
         Sort-Object { [decimal]::Parse([string]$_.position, [Globalization.CultureInfo]::InvariantCulture) })
     $newest = if ($versions.Count) { $versions[-1] } else { $null }
-    if ($versions | Where-Object { $_.version -eq $release.Version }) {
+    $numbers = Get-VersionNumbers $versions
+    $oldestNumber = if ($numbers.Count) { $numbers[0] } else { $null }
+    $newestNumber = if ($numbers.Count) { $numbers[-1] } else { $null }
+
+    if ($ChangelogsOnly) {
+        if ($null -eq $newestNumber) {
+            throw "None of the file's versions is a plain version number, so there is nothing to fill up to."
+        }
+        Write-Note "Versions on the file: $oldestNumber to $newestNumber"
+        $plan = Get-ChangelogPlan $target.Mod $key $oldestNumber ($newestNumber.ToString()) $null $true $numbers
+        if ($null -eq $plan) {
+            throw ("Without the page's changelog it is not known which versions it lacks, so nothing was added to" +
+                   " it.")
+        }
+        if ($DryRun) {
+            Write-Step 'Dry run: this is what would be added'
+            Show-ChangelogPlan $plan
+            Write-Host ""
+            Write-Host "  Nothing was added." -ForegroundColor Yellow
+            exit 0
+        }
+        Send-Changelogs $target.Mod $plan $key
         Write-Host ""
-        Write-Host "  The file already has version $($release.Version); nothing was uploaded." -ForegroundColor Green
+        Write-Host "  Done: $($target.Page)" -ForegroundColor Green
+        exit 0
+    }
+
+    if ($versions | Where-Object { $_.version -eq $release.Version }) {
+        Write-Ok "The file already has version $($release.Version), so nothing is uploaded"
+        if (-not $NoChangelog) {
+            # Finishes an earlier run whose changelog failed. Without the page's changelog nothing here is known to
+            # be missing, so nothing is added.
+            $plan = Get-ChangelogPlan $target.Mod $key $oldestNumber $release.Version $null $true $numbers
+            if ($null -eq $plan) {
+                Write-Note "Without it, nothing was added to the changelog."
+            } elseif ($DryRun) {
+                Write-Step 'Dry run: this is what would be added'
+                Show-ChangelogPlan $plan
+            } else {
+                Send-Changelogs $target.Mod $plan $key
+            }
+        }
+        Write-Host ""
+        $what = if ($DryRun) { 'nothing was uploaded or added' } else { 'nothing was uploaded' }
+        Write-Host "  The file already has version $($release.Version); $what." -ForegroundColor Green
         exit 0
     }
     if ($newest) {
@@ -483,14 +707,24 @@ try {
     $name = $names | Where-Object { $_ -match $NamePattern } | Select-Object -First 1
     if (-not $name) { $name = $PackageName }
 
+    # Planned before the upload, so a dry run shows the same plan; posted only once the version is on the page
+    $plan = $null
+    if (-not $NoChangelog) {
+        $from = $oldestNumber
+        $ours = $null
+        if ([version]::TryParse($release.Version, [ref]$ours) -and ($null -eq $from -or $ours -lt $from)) {
+            $from = $ours
+        }
+        $plan = Get-ChangelogPlan $target.Mod $key $from $release.Version $newestNumber $false $numbers
+    }
+
     if ($DryRun) {
         Write-Step 'Dry run: this is what would be uploaded'
         Write-Note "Version:     $($release.Version), named '$name', main category, previous version archived"
         Write-Note "Description: $(if ($description) { $description -replace "`r?`n", ' / ' } else { '(none)' })"
-        Write-Note "Changelog:   $($changelog.Count) line(s)"
-        foreach ($line in $changelog) { Write-Note "  $line" }
+        if ($plan) { Show-ChangelogPlan $plan } else { Write-Note "Changelog:   left as it is" }
         Write-Host ""
-        Write-Host "  Nothing was uploaded." -ForegroundColor Yellow
+        Write-Host "  Nothing was uploaded or added." -ForegroundColor Yellow
         exit 0
     }
 
@@ -514,15 +748,7 @@ try {
     $added = $true
     Write-Ok "Version $($release.Version) is on the page; the previous one is archived"
 
-    if ($changelog.Count) {
-        Write-Step 'Adding the changelog'
-        $text = $changelog -join "`n"
-        Invoke-Nexus POST "/mods/$($target.Mod.id)/changelogs" @{ version = $release.Version; changelog = $text } $key |
-            Out-Null
-        Write-Ok "$($changelog.Count) line(s)"
-    } elseif (-not $NoChangelog) {
-        Write-Note "No install note is marked $($release.Version), so no changelog was added."
-    }
+    if ($plan) { Send-Changelogs $target.Mod $plan $key }
 
     Write-Host ""
     Write-Host "  Done: $($target.Page)" -ForegroundColor Green
@@ -530,13 +756,18 @@ try {
     Write-Host ""
     Write-Host "  FAILED: $($_.Exception.Message)" -ForegroundColor Red
     if ($added) {
-        Write-Host "  The new version is on the page; only its changelog failed. Add that on the website if it" `
+        Write-Host "  The new version is on the page; only its changelog failed. Running this again uploads nothing" `
             -ForegroundColor Yellow
-        Write-Host "  matters: running this again stops at the version that is already there." -ForegroundColor Yellow
+        Write-Host "  and adds what the changelog still lacks, once the page's changelog can be read." `
+            -ForegroundColor Yellow
     } elseif ($sending -and $NoAnswer) {
         Write-Host "  No answer came to adding the version, so it may be on the page anyway. Run this again: it" `
             -ForegroundColor Yellow
         Write-Host "  stops at the version if it is there, and adds it if it is not." -ForegroundColor Yellow
+    } elseif ($posting) {
+        Write-Host "  Only part of the changelog may have been added. Running this again reads the page's" `
+            -ForegroundColor Yellow
+        Write-Host "  changelog and adds only what it still lacks." -ForegroundColor Yellow
     } else {
         Write-Host "  Nothing was added to the page." -ForegroundColor Yellow
     }
