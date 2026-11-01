@@ -2005,12 +2005,10 @@ internal class AnimationManager {
             return;
         }
 
-        Logger.Debug("Client has died, sending PlayerDeath data");
+        Logger.Debug("Client has died, sending the death clip");
 
-        // Let the server know that we have died
-        // Whether it was lethal goes with it. This is sent for every death the game has, and a death that is not
-        // lethal is the player being knocked down and getting up again - no cocoon is left, so the other player
-        // should not be shown one being spun.
+        // Whether it was lethal goes with it, so that the other game's log says which kind of death it played out
+        // (Death.Play).
         byte[] effectInfo = [
             (byte)(frostDeath ? 1 : 0),
             (byte)(nonLethal ? 1 : 0)

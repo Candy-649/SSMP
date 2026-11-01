@@ -421,15 +421,6 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
-    /// Set that the player has died in the current packet.
-    /// </summary>
-    public void SetDeath() {
-        lock (Lock) {
-            CurrentUpdatePacket.SetSendingPacketData(ServerUpdatePacketId.PlayerDeath, new ReliableEmptyData());
-        }
-    }
-
-    /// <summary>
     /// Asks to be told again who and what is in the room, in the current packet.
     /// </summary>
     public void SetSceneResyncRequest() {

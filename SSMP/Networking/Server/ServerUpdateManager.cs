@@ -525,16 +525,6 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
-    /// Add player death data to the current packet.
-    /// </summary>
-    /// <param name="id">The ID of the player.</param>
-    public void AddPlayerDeathData(ushort id) {
-        lock (Lock) {
-            FindOrCreatePacketData<GenericClientData>(id, ClientUpdatePacketId.PlayerDeath);
-        }
-    }
-
-    /// <summary>
     /// Add data that a player rested at a bench or died, which respawns semi-persistent objects, to the current packet.
     /// </summary>
     /// <param name="id">The ID of the player.</param>

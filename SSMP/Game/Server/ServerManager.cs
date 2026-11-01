@@ -316,10 +316,6 @@ internal abstract class ServerManager : IServerManager {
             OnPlayerDisconnect
         );
         _packetManager.RegisterServerUpdatePacketHandler(
-            ServerUpdatePacketId.PlayerDeath,
-            OnPlayerDeath
-        );
-        _packetManager.RegisterServerUpdatePacketHandler(
             ServerUpdatePacketId.SemiPersistentReset,
             OnSemiPersistentReset
         );
@@ -399,7 +395,6 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerMapUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDisconnect);
-        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDeath);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SceneResyncRequest);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.RoomStateRequest);
@@ -697,43 +692,11 @@ internal abstract class ServerManager : IServerManager {
             // Answering again decides nothing again: the room keeps whoever has been running it, and this player
             // keeps whatever they already were. Running the choice a second time would hand the room to the player
             // whose first answer went missing, taking it off the one that has been playing it all along.
-            var isReturningPreviousHost = !resync && playerData.LastHostedScene == playerData.CurrentScene;
-            var shouldDemoteCurrentHost = !resync && alreadyPlayersInScene && isReturningPreviousHost;
-            makeEnteringPlayerHost = resync
-                ? playerData.IsSceneHost
-                : !alreadyPlayersInScene || isReturningPreviousHost;
-
-            if (shouldDemoteCurrentHost) {
-                var epoch = GetNextSceneHostEpoch(playerData.CurrentScene);
-                foreach (var (key, otherPlayerData) in _playerData) {
-                    if (key == playerData.Id) continue;
-                    if (otherPlayerData.CurrentScene != playerData.CurrentScene) continue;
-
-                    if (otherPlayerData.IsSceneHost) {
-                        otherPlayerData.IsSceneHost = false;
-
-                        _netServer
-                            .GetUpdateManagerForClient(key)
-                            ?.SetSceneHostTransfer(playerData.CurrentScene, epoch, demote: true);
-
-                        Logger.Info(
-                            $"Demoted player {key} ({otherPlayerData.Username}) in scene {playerData.CurrentScene} since the previous host {playerData.Id} ({playerData.Username}) re-entered (epoch {epoch})"
-                        );
-                    } else {
-                        _netServer
-                            .GetUpdateManagerForClient(key)
-                            ?.SetSceneHostTransfer(playerData.CurrentScene, epoch, demote: true);
-                    }
-                }
-            }
+            makeEnteringPlayerHost = resync ? playerData.IsSceneHost : !alreadyPlayersInScene;
 
             if (makeEnteringPlayerHost) {
                 Logger.Debug($"Making {playerData.Id} the scene host");
                 playerData.IsSceneHost = true;
-            }
-
-            if (!resync) {
-                playerData.LastHostedScene = null;
             }
 
             sceneHostEpoch = _sceneHostEpochs.GetOrAdd(playerData.CurrentScene, 0u);
@@ -1376,53 +1339,6 @@ internal abstract class ServerManager : IServerManager {
         } catch (Exception e) {
             Logger.Error($"Exception thrown while invoking PlayerDisconnect event:\n{e}");
         }
-    }
-
-    /// <summary>
-    /// Callback method for when a player dies. 
-    /// </summary>
-    /// <param name="id">The ID of the player.</param>
-    private void OnPlayerDeath(ushort id) {
-        if (!_playerData.TryGetValue(id, out var playerData)) {
-            Logger.Warn($"Received PlayerDeath data, but player with ID {id} is not in mapping");
-            return;
-        }
-
-        Logger.Info($"Received PlayerDeath data from ({id}, {playerData.Username})");
-
-        if (_fullSynchronisation && playerData.IsSceneHost) {
-            var sceneName = playerData.CurrentScene;
-            var scenePlayers = new List<KeyValuePair<ushort, ServerPlayerData>>();
-            foreach (var pair in _playerData) {
-                if (pair.Key != id && pair.Value.CurrentScene == sceneName) {
-                    scenePlayers.Add(pair);
-                }
-            }
-
-            if (scenePlayers.Count > 0) {
-                var epoch = GetNextSceneHostEpoch(sceneName);
-                var newHostPair = scenePlayers[0];
-                newHostPair.Value.IsSceneHost = true;
-                playerData.IsSceneHost = false;
-                playerData.LastHostedScene = sceneName;
-
-                Logger.Info(
-                    $"Player {id} ({playerData.Username}) died. Host transferred to {newHostPair.Key} ({newHostPair.Value.Username}) in scene {sceneName} (epoch {epoch})"
-                );
-
-                foreach (var pair in scenePlayers) {
-                    var updateManager = _netServer.GetUpdateManagerForClient(pair.Key);
-                    var isNewHost = (pair.Key == newHostPair.Key);
-                    updateManager?.SetSceneHostTransfer(sceneName, epoch, demote: !isNewHost);
-                }
-            }
-        }
-
-        SendDataInSameScene(
-            id,
-            playerData.CurrentScene,
-            otherId => { _netServer.GetUpdateManagerForClient(otherId)?.AddPlayerDeathData(id); }
-        );
     }
 
     /// <summary>

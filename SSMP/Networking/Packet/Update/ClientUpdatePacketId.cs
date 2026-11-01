@@ -76,6 +76,7 @@ internal enum ClientUpdatePacketId {
 
     /// <summary>
     /// Notify that a player has died.
+    /// Unused: nothing sends it; it keeps the numbers of the IDs after it.
     /// </summary>
     PlayerDeath = 14,
 

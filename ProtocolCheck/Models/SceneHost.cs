@@ -401,7 +401,7 @@ internal sealed class SceneHost(int walks = 3, bool sceneStamped = true) : Model
             players = players.Add(other.Id);
         }
 
-        // LastHostedScene is only ever set by OnPlayerDeath, which nothing sends (SetDeath is never called)
+        // The server has no rule for a player coming back to a room they ran, so whoever is already there keeps it
         var makeEnteringPlayerHost = resync ? player.IsSceneHost : !alreadyPlayersInScene;
         if (makeEnteringPlayerHost) {
             player.IsSceneHost = true;
