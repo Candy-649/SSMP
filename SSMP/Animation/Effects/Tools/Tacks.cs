@@ -33,24 +33,14 @@ internal class Tacks : BaseAttackTool {
         AudioUtil.PlayAudio(audio, playerObject);
 
         var poisoned = EffectIsPoisoned(effectInfo);
-        var placements = PlacementsOf(effectInfo);
-
-        // Determine scatter angle
-        var isFacingRight = playerObject.transform.localScale.x < 0;
-        if (EffectIsOnWall(effectInfo)) {
-            isFacingRight = !isFacingRight;
-        }
-
-        var minAngle = 150f;
-        var maxAngle = 190f;
-
-        if (isFacingRight) {
-            minAngle = -10f;
-            maxAngle = 30f;
-        }
-
-        var velocity = Vector2.zero;
         var position = playerObject.transform.position;
+
+        // The tacks go where the thrower's went, which their game rolled; an effect that does not say shows none
+        var placements = PlacementsOf(effectInfo);
+        if (placements.Length == 0) {
+            Logger.Info($"[Tools] The partner's tacks at {position} came without where they went, so no copies come out");
+            return;
+        }
 
         // Set up tack group
         var key = playerObject.GetInstanceID();
@@ -68,38 +58,23 @@ internal class Tacks : BaseAttackTool {
 
         groups.Add(group);
 
-        // Spawn in tacks
+        // Spawn in tacks, as many as the thrower's game threw, at most the four of a throw
         var prefab = GetTackPrefab(playerObject);
+        var count = Mathf.Min(placements.Length, 4);
 
-        for (var i = 0; i < 4; i++) {
+        for (var i = 0; i < count; i++) {
             var tack = prefab.Spawn(group.transform);
 
             // Set damage settings
             SetDamageHeroState(tack, ServerSettings.TacksDamage);
             tack.AddComponentIfNotPresent<RemoteAttackComponent>();
 
-            if (i < placements.Length) {
-                // Where the thrower's tack went, which their game rolled
-                tack.transform.position = new Vector3(position.x, position.y);
-                placements[i].PutAt(tack.transform, position);
-                velocity = placements[i].Velocity;
-            } else {
-                // Set spawn position
-                var variationX = Random.Range(-0.1f, 0.1f);
-                var variationY = Random.Range(-0.15f, 0.15f);
-
-                tack.transform.position = new Vector3(position.x + variationX, position.y + variationY);
-
-                // Set velocity
-                var speed = Random.Range(15f, 22f);
-                var angle = Random.Range(minAngle, maxAngle);
-
-                velocity.x = speed * Mathf.Cos(angle * (Mathf.PI / 180f));
-                velocity.y = speed * Mathf.Sin(angle * (Mathf.PI / 180f));
-            }
+            // Where the thrower's tack went
+            tack.transform.position = new Vector3(position.x, position.y);
+            placements[i].PutAt(tack.transform, position);
 
             if (tack.TryGetComponent<Rigidbody2D>(out var body)) {
-                body.linearVelocity = velocity;
+                body.linearVelocity = placements[i].Velocity;
             }
 
             // Set poison state
@@ -133,7 +108,7 @@ internal class Tacks : BaseAttackTool {
 
         // Said for each throw, with what the first tack is drawn from, as ThrownTool says it of its copies
         Logger.Info(
-            $"[Tools] The copies of the partner's tacks come out at {position}, poisoned: {poisoned}; " +
+            $"[Tools] {count} copies of the partner's tacks come out at {position}, poisoned: {poisoned}; " +
             (group.transform.childCount > 0
                 ? ThrownTool.DescribePictures(group.transform.GetChild(0).gameObject)
                 : "none came out")

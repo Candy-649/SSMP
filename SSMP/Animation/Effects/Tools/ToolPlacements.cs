@@ -8,7 +8,8 @@ namespace SSMP.Animation.Effects.Tools;
 /// Where the things that a tool of the local player threw went, sent with the tool's effect. The game rolls where tacks
 /// scatter and at what angle pins fly, and the copies of them on the other screens, which the tools' effects make
 /// rather than the game, rolled their own and threw some at other angles altogether. A copy is now put where the
-/// thrower's thing went: as far from the player, moving the same way as fast, turned and sized the same.
+/// thrower's thing went: as far from the player, moving the same way as fast, turned and sized the same. An effect that
+/// says nothing of where they went shows no copies, as the copies never roll for themselves.
 /// </summary>
 internal static class ToolPlacements {
     /// <summary>

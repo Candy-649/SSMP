@@ -3,6 +3,7 @@ using HutongGames.PlayMaker.Actions;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Animation.Effects.Tools;
 
@@ -37,85 +38,56 @@ internal class ThreefoldPin : BaseAttackTool {
         var audio = fsm.GetFirstAction<PlayAudioEventRandom>("TriPin Type");
         AudioUtil.PlayAudio(audio, playerObject);
 
-        // Spawn pins, where the thrower's went if the effect info says, which also tells the throw in the air from
-        // the one on the ground
+        // Spawn pins where the thrower's went, which their game rolled and which also tells the throw in the air from
+        // the one on the ground; an effect that does not say shows none
         var isOnWall = EffectIsOnWall(effectInfo);
         var placements = PlacementsOf(effectInfo);
-        SpawnPin(modifiedPrefab, playerObject, 177, 0, isOnWall, poisoned,
-            placements.Length > 0 ? placements[0] : null);
-        SpawnPin(modifiedPrefab, playerObject, 167, -10, isOnWall, poisoned,
-            placements.Length > 1 ? placements[1] : null);
-        SpawnPin(modifiedPrefab, playerObject, 157, -20, isOnWall, poisoned,
-            placements.Length > 2 ? placements[2] : null);
+        if (placements.Length == 0) {
+            Logger.Info(
+                $"[Tools] The partner's three pins at {playerObject.transform.position} came without where they went, " +
+                "so no copies come out"
+            );
+            return;
+        }
+
+        for (var i = 0; i < placements.Length && i < 3; i++) {
+            SpawnPin(modifiedPrefab, playerObject, isOnWall, poisoned, placements[i]);
+        }
     }
 
     /// <summary>
-    /// Spawns a pin at a given player object.
+    /// Spawns a copy of one of the three pins where the thrower's went.
     /// </summary>
     /// <param name="modifiedPrefab">The player's prefab of the pin.</param>
     /// <param name="playerObject">The player using the pin.</param>
-    /// <param name="minAngle">The minimum angle for the pin.</param>
-    /// <param name="rotation">The pin's rotation.</param>
     /// <param name="onWall">If the player is on a wall or not.</param>
     /// <param name="poisoned">If the pin is poisoned or not.</param>
-    /// <param name="placement">Where the thrower's pin went, if known.</param>
+    /// <param name="placement">Where the thrower's pin went.</param>
     private void SpawnPin(
         GameObject modifiedPrefab,
         GameObject playerObject,
-        float minAngle,
-        float rotation,
         bool onWall,
         bool poisoned,
-        ToolPlacements.Placement? placement
+        ToolPlacements.Placement placement
     ) {
-        // Determine spawn position
-        var spawnPosition = playerObject.transform.position;
-        var playerFacing = playerObject.transform.localScale.x;
-        if (onWall) {
-            spawnPosition.x += 0.5f * playerFacing;
-        } else {
-            spawnPosition.x -= 1.1f * playerFacing;
-        }
-
         // Spawn pin
-        var pin = modifiedPrefab.Spawn(spawnPosition);
+        var player = playerObject.transform.position;
+        var pin = modifiedPrefab.Spawn(player);
         if (!pin) return;
 
-        // Set up variables, then change depending on facing direction
-        var directionToSet = 180;
-        var scaleX = -1.2f;
-        var maxAngle = minAngle + 3;
-
+        // The way the pin flies: the way the player faces, or away from the wall they are on
         var facingDirection = playerObject.transform.localScale.x * (onWall ? -1 : 1);
-        if (facingDirection < 0) {
-            directionToSet = 0;
-            scaleX = 1.2f;
-            maxAngle = 180 - minAngle;
-            minAngle = maxAngle - 3;
-            rotation *= -1;
-        }
+        pin.SendMessage("SetDirection", facingDirection < 0 ? 0 : 180, SendMessageOptions.DontRequireReceiver);
 
-        // Set direction and rotation
-        pin.SendMessage("SetDirection", directionToSet, SendMessageOptions.DontRequireReceiver);
-
-        pin.transform.SetLocalRotation2D(rotation);
-        pin.transform.localScale = new Vector3(scaleX, 1, 1);
+        // Put it where the thrower's went, turned and sized the same
+        placement.PutAt(pin.transform, player);
 
         // Set initial velocity
         if (!pin.TryGetComponent<Rigidbody2D>(out var body)) {
             return;
         }
 
-        if (placement is { } place) {
-            place.PutAt(pin.transform, playerObject.transform.position);
-            body.linearVelocity = place.Velocity;
-        } else {
-            var angle = Random.Range(minAngle, maxAngle);
-            var x = 60 * Mathf.Cos(angle * (Mathf.PI / 180f));
-            var y = 60 * Mathf.Sin(angle * (Mathf.PI / 180f));
-
-            body.linearVelocity = new Vector2(x, y);
-        }
+        body.linearVelocity = placement.Velocity;
 
         SetDamageHeroState(pin, ServerSettings.ThreefoldPinDamage);
         pin.AddComponentIfNotPresent<RemoteAttackComponent>();

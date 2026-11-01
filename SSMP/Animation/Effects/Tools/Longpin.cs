@@ -1,9 +1,9 @@
-using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Animation.Effects.Tools;
 
@@ -17,45 +17,22 @@ internal class Longpin : BaseAttackTool {
     /// </summary>
     private static readonly Dictionary<GameObject, GameObject> ModifiedPrefabs = new();
 
-    /// <summary>
-    /// Map of player object IDs to their last pin throw time.
-    /// </summary>
-    private static readonly Dictionary<int, long> PlayerLastFireTime = [];
-
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         var poisoned = EffectIsPoisoned(effectInfo);
-        var isOnWall = EffectIsOnWall(effectInfo);
+        var position = playerObject.transform.position;
 
-        // Determine spawn position
-        var spawnPosition = playerObject.transform.position + new Vector3(0, 0.2f, 0);
-        var facingRight = playerObject.transform.localScale.x < 0;
-
-        if (isOnWall) {
-            facingRight = !facingRight;
+        // The pin goes where the thrower's went, which their game rolled; an effect that does not say shows none
+        var placements = PlacementsOf(effectInfo);
+        if (placements.Length == 0) {
+            Logger.Info($"[Tools] The partner's long pin at {position} came without where it went, so no copy comes out");
+            return;
         }
 
         var prefab = GetPrefab(playerObject);
         if (!prefab) return;
 
-        // Get the last time a Longpin was fired
-        var key = playerObject.GetInstanceID();
-        var now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-        var lastFireTime = PlayerLastFireTime.GetValueOrDefault(key, now);
-
-        PlayerLastFireTime[key] = now;
-
-        // Determine angle based on if the last pin was recent enough (second quick sling shot)
-        var angle = UnityEngine.Random.Range(147, 153);
-
-        if (now - lastFireTime < 500) {
-            angle = UnityEngine.Random.Range(134, 140);
-        }
-
-        var placements = PlacementsOf(effectInfo);
-        var placement = placements.Length > 0 ? placements[0] : (ToolPlacements.Placement?) null;
-        SpawnPin(prefab, spawnPosition, angle, facingRight, poisoned, placement, playerObject.transform.position);
+        SpawnPin(prefab, poisoned, placements[0], position);
     }
 
     /// <summary>
@@ -107,60 +84,30 @@ internal class Longpin : BaseAttackTool {
     }
 
     /// <summary>
-    /// Spawns a Longpin at the given position.
+    /// Spawns a copy of a Longpin where the thrower's went.
     /// </summary>
     /// <param name="prefab">The Longpin prefab.</param>
-    /// <param name="spawnPosition">The position to spawn the Longpin.</param>
-    /// <param name="angle">The angle to fire the Longpin at.</param>
-    /// <param name="facingRight">Whether the player is facing right.</param>
     /// <param name="poisoned">Whether the Longpin is poisoned.</param>
-    /// <param name="placement">Where the thrower's pin went, if known.</param>
+    /// <param name="placement">Where the thrower's pin went.</param>
     /// <param name="player">Where the player who threw it is.</param>
-    private void SpawnPin(
-        GameObject prefab,
-        Vector3 spawnPosition,
-        float angle,
-        bool facingRight,
-        bool poisoned,
-        ToolPlacements.Placement? placement,
-        Vector3 player
-    ) {
+    private void SpawnPin(GameObject prefab, bool poisoned, ToolPlacements.Placement placement, Vector3 player) {
         // Spawn pin
-        var pin = prefab.Spawn(spawnPosition);
+        var pin = prefab.Spawn(player);
         if (!pin) return;
 
         pin.SetActive(false);
         pin.transform.localScale = prefab.transform.localScale;
 
-        var x = 35 * Mathf.Cos(angle * (Mathf.PI / 180f));
-        var y = 35 * Mathf.Sin(angle * (Mathf.PI / 180f));
-
-        // Set initial velocity
         if (!pin.TryGetComponent<Rigidbody2D>(out var body)) {
             return;
         }
 
-        // Make the pin face the correct way
-        if (facingRight) {
-            x *= -1;
-        }
-
-        if (x < 0) {
-            pin.transform.FlipLocalScale(true);
-        }
-
-        // Set the rotation and activate
-        pin.transform.SetRotationZ(angle);
-        var velocity = new Vector2(x, y);
-        if (placement is { } place) {
-            place.PutAt(pin.transform, player);
-            velocity = place.Velocity;
-        }
-
+        // Put it where the thrower's went, turned and sized the same, and activate
+        placement.PutAt(pin.transform, player);
         pin.SetActive(true);
 
         // Set the velocity
-        body.linearVelocity = velocity;
+        body.linearVelocity = placement.Velocity;
 
         // Set damage settings
         SetDamageHeroState(pin, ServerSettings.LongpinDamage);
