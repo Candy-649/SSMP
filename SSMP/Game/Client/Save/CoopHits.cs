@@ -745,19 +745,6 @@ internal partial class CoopHits {
             return;
         }
 
-        // A strike of the partner on a pod or a balloon, which games of 0.4.96 to 0.4.137 still send for this game to
-        // show: nothing of what each player has to themselves shows here any more (USER 10-30, "直接去掉样子同步，在任何
-        // 地方都不要留样子同步但是各用各的了")
-        if (update.Kind == CoopHitKind.BounceLook) {
-            return;
-        }
-
-        // The death of a creature that each player has to themselves, which games of 0.4.121 to 0.4.130 still send:
-        // nothing of it is shown any more (USER 10-25, "这个播一下死掉的样子貌似也没有在正常工作，删掉吧")
-        if (update.Kind == CoopHitKind.DeathLook) {
-            return;
-        }
-
         if (update.Kind == CoopHitKind.ObjectSignWalk) {
             WalkSignHere(update);
             return;

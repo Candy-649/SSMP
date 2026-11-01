@@ -206,12 +206,8 @@ internal enum CoopHitKind : byte {
     ObjectHurtPlayer,
 
     /// <summary>
-    /// A pod or a balloon of the room that the sender's player struck, found like a tink, which the other game showed
-    /// struck the same way without flinging or shutting anything there. <see cref="CoopHitUpdate.Hit"/> holds how it
-    /// was struck, the way a pod swings and where the player was across. Appended at the end, like the ones before.
-    /// Sent by 0.4.96 to 0.4.137 only: since 0.4.138 nothing sends it, and one that comes is left alone (USER 10-30,
-    /// "直接去掉样子同步，在任何地方都不要留样子同步但是各用各的了"). Kept so that what a game of those versions sends still
-    /// reads.
+    /// Unused: nothing sends it since the look of a struck pod or balloon stopped being shown (USER 10-30, "直接去掉样子同步").
+    /// It stays so that the kinds after it keep their numbers.
     /// </summary>
     BounceLook,
 
@@ -231,14 +227,5 @@ internal enum CoopHitKind : byte {
     /// other game takes each of its own that waits in the same state the same way (see CoopHits.WalkSignHere).
     /// Appended at the end, like the ones before.
     /// </summary>
-    ObjectSignWalk,
-
-    /// <summary>
-    /// A creature of the room that each player has to themselves (see PersonalPlaces), found by its path, that died in
-    /// the sender's game, whose death the other game showed on its own creature, which stayed as it was there.
-    /// <see cref="CoopHitUpdate.Hit"/> holds the way its body was flung. Appended at the end, like the ones before.
-    /// Sent by 0.4.121 to 0.4.130 only: since 0.4.131 nothing sends it, and one that comes is left alone (USER 10-25,
-    /// "这个播一下死掉的样子貌似也没有在正常工作，删掉吧"). Kept so that what a game of those versions sends still reads.
-    /// </summary>
-    DeathLook
+    ObjectSignWalk
 }
