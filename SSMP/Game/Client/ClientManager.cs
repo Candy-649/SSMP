@@ -1950,7 +1950,9 @@ internal class ClientManager : IClientManager {
 
         // Check whether the PvP state changed
         if (_serverSettings.IsPvpEnabled != newServerSettings.IsPvpEnabled) {
-            var message = $"PvP is now {(newServerSettings.IsPvpEnabled ? "enabled" : "disabled")}";
+            var message = newServerSettings.IsPvpEnabled
+                ? Lang.Pick("Players can now hurt each other", "现在可以互相攻击了")
+                : Lang.Pick("Players can no longer hurt each other", "现在不能互相攻击了");
 
             UiManager.InternalChatBox.AddMessage(message);
             Logger.Info(message);
@@ -1968,19 +1970,19 @@ internal class ClientManager : IClientManager {
             Logger.Info(message);
         }
 
-        // Check whether the wayward compass broadcast state changed
+        // Check whether the compass map icon setting changed
         if (_serverSettings.OnlyBroadcastMapIconWithCompass !=
             newServerSettings.OnlyBroadcastMapIconWithCompass) {
             onlyCompassChanged = true;
 
             var message = newServerSettings.OnlyBroadcastMapIconWithCompass
                 ? Lang.Pick(
-                    "Map icons are now only broadcast when wearing the Wayward Compass charm",
-                    "现在只有佩戴指南针护符时才会广播地图图标"
+                    "While you wear the Compass, teammates see where you are on their map",
+                    "现在戴着罗盘时，队友的地图上会显示你的位置"
                 )
                 : Lang.Pick(
-                    "Map icons are not broadcast when wearing the Wayward Compass charm",
-                    "地图图标不再需要佩戴指南针护符才广播"
+                    "Wearing the Compass no longer shows where you are on teammates' maps",
+                    "现在戴着罗盘也不会在队友的地图上显示你的位置了"
                 );
 
             UiManager.InternalChatBox.AddMessage(message);
