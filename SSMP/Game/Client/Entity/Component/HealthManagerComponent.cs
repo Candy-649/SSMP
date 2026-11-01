@@ -253,6 +253,13 @@ internal class HealthManagerComponent : EntityComponent {
     internal static event Action<HealthManager, GameObject?>? DamageLanded;
 
     /// <summary>
+    /// Raised as this game's player puts a tag of damage on a creature or its copy, or puts it on again: with the
+    /// health manager, the tag and the number of ticks it was put on with (0 for as many as the tag has), for the games
+    /// of the others to show it (see CoopHits).
+    /// </summary>
+    internal static event Action<HealthManager, DamageTag, int, bool>? OwnTagPut;
+
+    /// <summary>
     /// The copy that a blow just put back at the health last told, with the health the blow had left it. The log of
     /// damage (EnemyHealthCoop) says what a blow took from that, as its hook on blows may run around this one, which
     /// puts the health back before it looks (see <see cref="ForgetPutBack"/>, <see cref="HealthBeforePutBack"/>).
@@ -362,6 +369,17 @@ internal class HealthManagerComponent : EntityComponent {
     private static Hook? _tagDamagerHook, _imbuementHook, _addTagHook, _tagTickHook;
 
     /// <summary>
+    /// The hook on a tick of tag damage taking health (HealthManager.ApplyTagDamage), which a tag shown for another
+    /// game's player skips (see <see cref="ShowTag"/>); null if it could not be made, and then no such tag is shown.
+    /// </summary>
+    private static Hook? _applyTagHook;
+
+    /// <summary>
+    /// Whether a tag of another game's player is being put on here to be shown (see <see cref="ShowTag"/>).
+    /// </summary>
+    private static bool _showingTag;
+
+    /// <summary>
     /// What puts tag damage on something now, for the stack to be known as this game's player's or not (see
     /// <see cref="TagDamageTakerOnAddTag"/>): a thing that leaves it on what it touches, or else whether the blow that
     /// brings it is theirs; neither for anything else.
@@ -384,6 +402,12 @@ internal class HealthManagerComponent : EntityComponent {
     /// since, by the health manager (see <see cref="TagDamageTakerOnAddTag"/>).
     /// </summary>
     private HashSet<(HealthManager, DamageTag)>? _ownTags;
+
+    /// <summary>
+    /// The tags on the creature and its copy in this game whose stacks are only shown for the player of another game,
+    /// who put them on there, by the health manager (see <see cref="ShowTag"/>): their ticks take no health here.
+    /// </summary>
+    private HashSet<(HealthManager, DamageTag)>? _shownTags;
 
     public HealthManagerComponent(
         NetClient netClient,
@@ -519,6 +543,104 @@ internal class HealthManagerComponent : EntityComponent {
         _imbuementHook = new Hook(imbuement, DamageEnemiesOnNailImbuement);
         _addTagHook = new Hook(addTag, TagDamageTakerOnAddTag);
         _tagTickHook = new Hook(tagTick, DamageTagOnHit);
+
+        var applyTag = typeof(HealthManager).GetMethod(
+            nameof(HealthManager.ApplyTagDamage), HookBindingFlags, Type.DefaultBinder,
+            [typeof(DamageTag.DamageTagInstance)], null
+        );
+        if (applyTag == null) {
+            Logger.Error("Could not find HealthManager.ApplyTagDamage; the tags that the others put on creatures don't show");
+            return;
+        }
+
+        // This runs in the constructor of the first creature's component, which an exception would leave half made
+        try {
+            _applyTagHook = new Hook(applyTag, HealthManagerOnApplyTag);
+        } catch (Exception e) {
+            Logger.Error(
+                $"Could not hook HealthManager.ApplyTagDamage; the tags that the others put on creatures don't show: {e}"
+            );
+        }
+    }
+
+    /// <summary>
+    /// Shows on the creature or copy of this game a tag of damage that the player of another game put on the creature
+    /// there (see CoopHits): its cloud, and the flash and spark of each tick, with ticks that take no health here, as the
+    /// game of that player counts them. A stack of the tag that is on here for real shows already, and is left as it is.
+    /// A tag put on here for real takes the stack over (see <see cref="TagDamageTakerOnAddTag"/>).
+    /// </summary>
+    /// <param name="healthManager">The health manager of the creature or copy in this game.</param>
+    /// <param name="tag">The tag.</param>
+    /// <param name="hitAmountOverride">The number of ticks it was put on with there, 0 for as many as the tag has.</param>
+    /// <param name="whyNot">Why the tag does not show, when it does not.</param>
+    /// <returns>Whether the tag shows here now.</returns>
+    internal static bool ShowTag(HealthManager healthManager, DamageTag tag, int hitAmountOverride, out string whyNot) {
+        if (_applyTagHook == null) {
+            whyNot = "the hook that keeps its ticks from taking health here is not in place";
+            return false;
+        }
+
+        if (!ComponentOf.TryGetValue(healthManager, out var component) ||
+            healthManager.tagDamageTaker is not { } taker) {
+            whyNot = "the creature here takes no tags";
+            return false;
+        }
+
+        var key = (healthManager, tag);
+        if (taker.taggedDamage.ContainsKey(tag) && component._shownTags?.Contains(key) != true) {
+            whyNot = "one of this game is on it already";
+            return false;
+        }
+
+        whyNot = "";
+
+        (component._shownTags ??= []).Add(key);
+        var showingTag = _showingTag;
+        _showingTag = true;
+        try {
+            taker.AddDamageTagToStack(tag, hitAmountOverride);
+        } finally {
+            _showingTag = showingTag;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// A tick of tag damage taking health (HealthManager.ApplyTagDamage), with what it tells the creature's FSMs. A tick
+    /// of a tag shown for the player of another game (see <see cref="ShowTag"/>) takes no health here, as the game of
+    /// that player takes it, and counts it as a blow of theirs. On the creature that this game runs, the creature
+    /// hears of the tick as of one of its own, as it hears of that player's other blows: it was hurt, and a song it
+    /// was made to sing ends. A copy hears of nothing, as it does what the game that runs the creature does. The
+    /// journal is left alone: the tick is that player's. The flash, spark and sound of the tick show as long as this
+    /// returns true, as the game returns for a creature that is not dead (DamageTag.OnHit).
+    /// </summary>
+    private static bool HealthManagerOnApplyTag(
+        Func<HealthManager, DamageTag.DamageTagInstance, bool> orig,
+        HealthManager self,
+        DamageTag.DamageTagInstance damageTagInstance
+    ) {
+        if (_tickedHealthManager != self || _tickingTag == null || !ComponentOf.TryGetValue(self, out var component) ||
+            component._shownTags?.Contains((self, _tickingTag)) != true) {
+            return orig(self, damageTagInstance);
+        }
+
+        if (self.isDead) {
+            return false;
+        }
+
+        if (!component.IsControlled) {
+            var creature = self.gameObject;
+            FSMUtility.SendEventToGameObject(creature, "TOOK TAG DAMAGE", false);
+            FSMUtility.SendEventToGameObject(creature, "TOOK DAMAGE", false);
+            if (!self.hasBlackThreadState || !self.blackThreadState.IsInForcedSing) {
+                FSMUtility.SendEventToGameObject(creature, "SING DURATION END", false);
+            }
+
+            self.hasTakenDamage = true;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -584,17 +706,27 @@ internal class HealthManagerComponent : EntityComponent {
         var wasOn = damageTag != null && self.taggedDamage.ContainsKey(damageTag);
         orig(self, damageTag!, hitAmountOverride);
 
-        if (damageTag == null || self.owner is not HealthManager healthManager ||
+        // A tag of another game's player that is only shown here is nobody's here (see ShowTag)
+        if (_showingTag || damageTag == null || self.owner is not HealthManager healthManager ||
             !ComponentOf.TryGetValue(healthManager, out var component)) {
             return;
         }
 
         var own = _taggingDamager != null ? IsOwnTagDamager(_taggingDamager) : _taggingBlowIsOwn == true;
+        var key = (healthManager, damageTag);
+
+        // Put on for real where it was only shown, the stack is no longer only shown: its ticks count from now on, as
+        // this player's if they put it on
+        var wasShown = component._shownTags?.Remove(key) == true;
         component._ownTags ??= [];
         if (!own) {
-            component._ownTags.Remove((healthManager, damageTag));
-        } else if (!wasOn) {
-            component._ownTags.Add((healthManager, damageTag));
+            component._ownTags.Remove(key);
+        } else if (!wasOn || wasShown) {
+            component._ownTags.Add(key);
+        }
+
+        if (own) {
+            OwnTagPut?.Invoke(healthManager, damageTag, hitAmountOverride, !wasOn || wasShown);
         }
     }
 

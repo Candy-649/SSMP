@@ -483,6 +483,7 @@ internal partial class CoopHits {
     /// Registers the hooks that send, filter and replay hits.
     /// </summary>
     public void RegisterHooks() {
+        Entity.Component.HealthManagerComponent.OwnTagPut += OnOwnTagPut;
         Entity.Entity.CopyTouchedLocalPlayer += OnCopyTouchedLocalPlayer;
         Entity.Entity.CopyToldByLocalTalk += OnCopyToldByLocalTalk;
         Entity.Entity.CopyWokenByLocalPlayer += OnCopyWokenByLocalPlayer;
@@ -633,6 +634,7 @@ internal partial class CoopHits {
     /// Disposes the hooks and the objects that replayed hits come from.
     /// </summary>
     public void DeregisterHooks() {
+        Entity.Component.HealthManagerComponent.OwnTagPut -= OnOwnTagPut;
         Entity.Entity.CopyTouchedLocalPlayer -= OnCopyTouchedLocalPlayer;
         Entity.Entity.CopyToldByLocalTalk -= OnCopyToldByLocalTalk;
         Entity.Entity.CopyWokenByLocalPlayer -= OnCopyWokenByLocalPlayer;
@@ -702,6 +704,11 @@ internal partial class CoopHits {
 
         if (update.Kind == CoopHitKind.EnemyBlockEffect) {
             ApplyBlockEffect(update);
+            return;
+        }
+
+        if (update.Kind == CoopHitKind.EnemyTag) {
+            ApplyTag(update);
             return;
         }
 
@@ -3509,6 +3516,113 @@ internal partial class CoopHits {
                 angle = 270f;
                 break;
         }
+    }
+
+    /// <summary>
+    /// The tags of damage of the game by their name, as found (see <see cref="FindTag"/>), with null for a name that
+    /// names none.
+    /// </summary>
+    private static readonly Dictionary<string, DamageTag?> TagsByName = new();
+
+    /// <summary>
+    /// When a tag of damage that the local player put on an enemy went to the members last, by the entity of the
+    /// enemy and the name of the tag (see <see cref="OnOwnTagPut"/>).
+    /// </summary>
+    private static readonly Dictionary<(ushort Entity, string Tag), float> TagsSentAt = new();
+
+    /// <summary>
+    /// How often a tag that is on an enemy already goes to the members as it is put on again, at most, in seconds.
+    /// </summary>
+    private const float TagAgainInterval = 0.5f;
+
+    /// <summary>
+    /// Sends a tag of damage that the local player put on an enemy, or put on again, to the members in the room, whose
+    /// games show it on their own of the enemy (see <see cref="ApplyTag"/>). The game puts it on only in the game of
+    /// the player whose tool or needle it came from, and the poison of the partner's tools never showed on the other
+    /// screen (USER 11-01: "她用带毒的工具，实际上我这边似乎连毒的效果都看不到，就是怪物被毒的效果"). A tag that
+    /// is on already, put on again - as the imbued needle does with every strike - goes at most every
+    /// <see cref="TagAgainInterval"/>: it only makes the stack there last as long again.
+    /// </summary>
+    private void OnOwnTagPut(HealthManager healthManager, DamageTag tag, int hitAmountOverride, bool isNewStack) {
+        if (!_netClient.IsConnected || healthManager == null || tag == null || !IsAnyMemberInRoom() ||
+            !TryGetEntity(healthManager.gameObject, out var entity, out _)) {
+            return;
+        }
+
+        var ticks = hitAmountOverride > 0 ? $"{hitAmountOverride} ticks" : "all its ticks";
+        var key = (entity.Id, tag.name);
+        var now = Time.unscaledTime;
+        if (!isNewStack && TagsSentAt.TryGetValue(key, out var sentAt) && now - sentAt < TagAgainInterval) {
+            Logger.Info(
+                $"[Tags] This player put '{tag.name}' on entity {entity.Id} ('{healthManager.name}') again, {ticks}; " +
+                $"not sent, as it went {now - sentAt:0.00} s ago"
+            );
+            return;
+        }
+
+        if (TagsSentAt.Count > 256) {
+            TagsSentAt.Clear();
+        }
+
+        TagsSentAt[key] = now;
+        SendToRoomMembers(new CoopHitUpdate {
+            Kind = CoopHitKind.EnemyTag,
+            EntityId = entity.Id,
+            Responder = tag.name,
+            Hit = BitConverter.GetBytes(hitAmountOverride)
+        });
+        Logger.Info(
+            $"[Tags] This player put '{tag.name}' on entity {entity.Id} ('{healthManager.name}')" +
+            $"{(isNewStack ? "" : " again")}, {ticks}; sent to the members in the room"
+        );
+    }
+
+    /// <summary>
+    /// Shows a tag of damage that the partner put on an enemy on the enemy here, with ticks that take no health, as the
+    /// partner's game counts them (see HealthManagerComponent.ShowTag).
+    /// </summary>
+    /// <param name="update">The update of the partner's tag.</param>
+    private void ApplyTag(CoopHitUpdate update) {
+        if (FindHitEnemy(update.EntityId) is not { } healthManager || FindTag(update.Responder) is not { } tag) {
+            return;
+        }
+
+        var hitAmountOverride = update.Hit.Length >= 4 ? BitConverter.ToInt32(update.Hit, 0) : 0;
+        var shown = Entity.Component.HealthManagerComponent.ShowTag(healthManager, tag, hitAmountOverride, out var whyNot);
+        Logger.Info(
+            $"[Tags] The partner put '{tag.name}' on entity {update.EntityId} ('{healthManager.name}'): " +
+            (shown ? "shown here, its ticks taking no health" : $"not shown, as {whyNot}")
+        );
+    }
+
+    /// <summary>
+    /// A tag of damage of the game by its name, or null if there is none of that name.
+    /// </summary>
+    private static DamageTag? FindTag(string name) {
+        // A name known to name none names none still; a tag that was unloaded since is looked for again
+        if (TagsByName.TryGetValue(name, out var known)) {
+            if (known is null) {
+                return null;
+            }
+
+            if (known != null) {
+                return known;
+            }
+        }
+
+        foreach (var found in Resources.FindObjectsOfTypeAll<DamageTag>()) {
+            if (found != null) {
+                TagsByName[found.name] = found;
+            }
+        }
+
+        if (TagsByName.TryGetValue(name, out var tag) && tag != null) {
+            return tag;
+        }
+
+        TagsByName[name] = null;
+        Logger.Warn($"[Tags] There is no tag of damage '{name}' in this game to show");
+        return null;
     }
 
     /// <summary>

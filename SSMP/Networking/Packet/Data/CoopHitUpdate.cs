@@ -224,5 +224,14 @@ internal enum CoopHitKind : byte {
     /// names the sign, and <see cref="CoopHitUpdate.Hit"/> holds them all and then the dice of the sender's game; the
     /// other game takes each of its own that waits in the same state the same way (see CoopHits.WalkSignHere).
     /// </summary>
-    ObjectSignWalk
+    ObjectSignWalk,
+
+    /// <summary>
+    /// An enemy, found by the ID of its entity, on which the sender's player put a tag of damage - the poison of a
+    /// tool, the zap of a rod, the dust of a bomb - or put it on again. <see cref="CoopHitUpdate.Responder"/> names the
+    /// tag, and <see cref="CoopHitUpdate.Hit"/> holds the number of ticks it was put on with, 0 for as many as the tag
+    /// has. The other game shows the tag on its own of the enemy - its cloud, and the flash and spark of each tick -
+    /// with ticks that take no health there: the sender's game counts them.
+    /// </summary>
+    EnemyTag
 }
