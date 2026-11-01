@@ -142,7 +142,8 @@ internal class SkinManager {
             }
         }
 
-        look.PlayerColor = PlayerColorMod.LocalLook();
+        // None while Hornet wears a skin, whatever colour is chosen: Player Color colours nothing here then
+        look.PlayerColor = OwnSkin.Worn ? null : PlayerColorMod.LocalLook();
         look.Unshown.AddRange(SkinModPlugins.Unshown());
         look.Slash = SlashSkin.LocalLook();
 
@@ -255,7 +256,7 @@ internal class SkinManager {
             ));
         }
 
-        if (look.PlayerColor != null && !PlayerColorMod.CanDraw) {
+        if (look.ShownColour != null && !PlayerColorMod.CanDraw) {
             problems.Add(Lang.Pick(
                 $"{username} colours their cloak with the mod Player Color, which isn't fully installed here, so " +
                 $"you see {username}'s cloak in its own colour.",
@@ -638,19 +639,12 @@ internal class SkinManager {
         // The art of its skins in their order. Until all of it has loaded, the character keeps the game's own art, so
         // that it never shows half of a skin
         var arts = new List<PackArt>();
-
-        // Whether Player Color colours none of the character, as one of the skins it wears dresses Hornet herself and
-        // isn't shown here, where the character shows the game's own look in its place: in the game of its player that
-        // skin keeps the colour off her, so a colour here would show what they never see (USER 10-24: "在她那边我穿的就是
-        // 斗篷换色了")
-        var colourKeptOff = false;
         if (look.Packs.Count > 0) {
             var ready = true;
             var packs = CustomizerPacks.FindAll();
             foreach (var wanted in look.Packs) {
                 var pack = CustomizerPacks.Find(packs, wanted);
                 if (pack == null) {
-                    colourKeptOff |= wanted.DressesHer;
                     continue;
                 }
 
@@ -663,7 +657,6 @@ internal class SkinManager {
             // it first plays from a library of a crest; its new atlases show the game's own art until then
             if (!ready && !SameArts(figure.Wearing, arts)) {
                 arts.Clear();
-                colourKeptOff |= look.Packs.Exists(pack => pack.DressesHer);
             }
         }
 
@@ -689,7 +682,11 @@ internal class SkinManager {
 
         figure.Slashes = slashArt;
 
-        var colorShader = look.PlayerColor != null && !colourKeptOff ? PlayerColorMod.Shader : null;
+        // No colour on a character in a skin of Hornet, also where that skin isn't found here and the character shows
+        // the game's own look in its place: in the game of its player the skin keeps every colour off (USER 10-24:
+        // "在她那边我穿的就是斗篷换色了"; USER 11-01: "我们都用其他皮肤了就不要启动这个player color")
+        var shownColour = look.ShownColour;
+        var colorShader = shownColour != null ? PlayerColorMod.Shader : null;
 
         // An atlas takes the art of the first skin that has it, as Customizer gives it
         var artOfSlot = new Texture?[figure.Slots.Count];
@@ -721,7 +718,7 @@ internal class SkinManager {
             }
 
             Material? colored = null;
-            if (look.PlayerColor is { } color && colorShader != null) {
+            if (shownColour is { } color && colorShader != null) {
                 // Player Color colours the cloak by the mask of the game's own atlas, which it finds by the name of
                 // the texture: the art of a skin, whose texture has no name, has no mask
                 var mask = art == null && slot.TextureName.Length > 0

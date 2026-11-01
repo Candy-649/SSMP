@@ -28,6 +28,13 @@ internal sealed class SkinLook {
     public PlayerColorLook? PlayerColor { get; set; }
 
     /// <summary>
+    /// The colour of Player Color that the player is shown in: none while they wear a skin of Hornet herself, whatever
+    /// colour they chose, as Player Color colours nothing in their own game then (see PlayerColorMod.KeepOffUnderSkins).
+    /// A game of an older version still names its colour in a skin.
+    /// </summary>
+    public PlayerColorLook? ShownColour => Packs.Exists(pack => pack.DressesHer) ? null : PlayerColor;
+
+    /// <summary>
     /// The skin mods that the game of the player has loaded and that no other game can show yet.
     /// </summary>
     public List<string> Unshown { get; } = [];

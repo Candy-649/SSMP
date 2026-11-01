@@ -69,6 +69,50 @@ internal static class OwnSkin {
     public static bool CanChoose => CustomizerPacks.IsLoaded;
 
     /// <summary>
+    /// Whether Hornet wears a skin now: one of hers holds an active.txt, which Customizer dresses the game with. Read
+    /// again as a skin is chosen here and as each room loads, when Customizer dresses the game with what holds an
+    /// active.txt then, and kept in between, as Player Color asks at every change of a picture
+    /// (see PlayerColorMod.KeepOffUnderSkins).
+    /// </summary>
+    public static bool Worn {
+        get {
+            if (!_wornRead) {
+                ReadWorn();
+            }
+
+            return _worn;
+        }
+    }
+
+    /// <summary>
+    /// Backing fields for <see cref="Worn"/>: the answer, and whether it was read.
+    /// </summary>
+    private static bool _worn;
+    private static bool _wornRead;
+
+    /// <summary>
+    /// Reads again whether Hornet wears a skin (see <see cref="Worn"/>), and says so in the log when that changed.
+    /// </summary>
+    public static void ReadWorn() {
+        bool worn;
+        try {
+            worn = CanChoose && Current(Choices()) != null;
+        } catch (Exception e) {
+            Logger.Warn($"Could not read whether Hornet wears a skin: {e.Message}");
+            worn = false;
+        }
+
+        if (!_wornRead || worn != _worn) {
+            Logger.Info(worn
+                ? "Hornet wears a skin, so Player Color colours nothing in this game"
+                : "Hornet wears the game's own look, so Player Color colours as it is set to");
+        }
+
+        _worn = worn;
+        _wornRead = true;
+    }
+
+    /// <summary>
     /// Whether the game waits for the art of a skin to show it.
     /// </summary>
     public static bool IsDressing => _waiting != null;
@@ -158,6 +202,7 @@ internal static class OwnSkin {
         }
 
         Logger.Info($"Chose to wear {(chosen == null ? "the game's own look" : $"the skin '{chosen.Name}'")}");
+        ReadWorn();
         DressLoaded();
         Changed?.Invoke();
     }

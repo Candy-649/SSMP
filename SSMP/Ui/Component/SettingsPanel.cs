@@ -1964,9 +1964,9 @@ internal class SettingsPanel : IRootedComponent {
             // The author on this note too, which is the one that a player who wears a skin sees (USER 10-25: "某个版本
             // 开始player color的原作者名字没了")
             _cloakNoteText.text = Lang.Pick(
-                "A skin keeps its own colours. The colour chosen shows on the game's own look, and is kept for it. " +
-                "The colour is drawn by another mod, Player Color by PDE26jjk.",
-                "穿着皮肤时斗篷不变色，换回“原样”才看得到；选的颜色会留着。颜色由另一个模组 Player Color（作者 " +
+                "A skin keeps its own colours, and nothing is coloured while it is worn. The colour chosen shows on " +
+                "the game's own look, and is kept for it. The colour is drawn by another mod, Player Color by PDE26jjk.",
+                "穿着皮肤时什么都不变色，换回“原样”才看得到；选的颜色会留着。颜色由另一个模组 Player Color（作者 " +
                 "PDE26jjk）来画。"
             );
         } else {

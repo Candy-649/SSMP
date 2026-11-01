@@ -196,6 +196,9 @@ internal class PlayerManager : IPlayerManager {
         _skinManager = new SkinManager(() => _serverSettings.AllowSkins);
         SlashSkin.Start(modSettings);
 
+        // Player Color colours nothing while Hornet wears a skin, connected or not
+        Skin.PlayerColorMod.KeepOffUnderSkins();
+
         _playerData = playerData;
 
         _inactivePlayers = new Queue<GameObject>();

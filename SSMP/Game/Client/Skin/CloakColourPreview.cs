@@ -9,7 +9,8 @@ namespace SSMP.Game.Client.Skin;
 /// colours only the hero of a save, and so nothing in the menu where the colour is chosen. It is on the camera that
 /// draws her: it puts a material of Player Color's shader on her just before that camera draws her and her own back
 /// after, as her animation puts her own on her whenever her picture changes, after everything else of the frame ran.
-/// A skin keeps its own colours, as in Player Color: only the game's own art has masks.
+/// A skin keeps its own colours, as in Player Color: only the game's own art has masks; and while Hornet wears a skin,
+/// nothing is coloured, as in the game (see <see cref="PlayerColorMod.KeepOffUnderSkins"/>).
 /// </summary>
 internal sealed class CloakColourPreview : MonoBehaviour {
     /// <summary>
@@ -59,13 +60,29 @@ internal sealed class CloakColourPreview : MonoBehaviour {
     }
 
     private void OnEnable() {
-        _look = PlayerColorMod.LocalLook();
-        _stopWatching ??= PlayerColorMod.OnSettingsChanged(() => _look = PlayerColorMod.LocalLook());
+        _look = ShownLook();
+        _stopWatching ??= PlayerColorMod.OnSettingsChanged(ReadLook);
+        OwnSkin.Changed += ReadLook;
     }
 
     private void OnDisable() {
         _stopWatching?.Invoke();
         _stopWatching = null;
+        OwnSkin.Changed -= ReadLook;
+    }
+
+    /// <summary>
+    /// Reads again the colour she is shown in, as the settings of Player Color or the skin she wears changed.
+    /// </summary>
+    private void ReadLook() {
+        _look = ShownLook();
+    }
+
+    /// <summary>
+    /// The colour she is shown in: the one chosen, or none while she wears a skin, whatever colour is chosen.
+    /// </summary>
+    private static PlayerColorLook? ShownLook() {
+        return OwnSkin.Worn ? null : PlayerColorMod.LocalLook();
     }
 
     private void OnDestroy() {

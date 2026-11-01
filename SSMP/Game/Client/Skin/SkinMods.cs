@@ -589,6 +589,69 @@ internal static class PlayerColorMod {
     }
 
     /// <summary>
+    /// The hook that keeps Player Color from colouring anything while Hornet wears a skin, once in place.
+    /// </summary>
+    private static Hook? _keepOffHook;
+
+    /// <summary>
+    /// Whether the hook was put in place, or tried to be.
+    /// </summary>
+    private static bool _keepOffTried;
+
+    /// <summary>
+    /// Keeps Player Color from colouring anything in this game while the player's own Hornet wears a skin
+    /// (<see cref="OwnSkin.Worn"/>), whatever colour is chosen in it, connected or not (USER 11-01: "我们都用其他皮肤了就
+    /// 不要启动这个player color，不管选了什么颜色都不应该启动player color"). Player Color colours whatever draws from an
+    /// atlas that it has a mask of: never the art of a skin, which has none, but everything the skin has no art for, as
+    /// the spike balls a player throws, which lost the purple of their poison on the thrower's own screen, while the
+    /// games of the others drew their copies with its shader too. Its colour and its switch stay as they are in its own
+    /// settings, and colour again once Hornet wears the game's own look.
+    /// </summary>
+    public static void KeepOffUnderSkins() {
+        if (_keepOffTried || Plugin is not { } plugin) {
+            return;
+        }
+
+        _keepOffTried = true;
+
+        // Customizer dresses the game with the skins that hold an active.txt as each room loads
+        UnityEngine.SceneManagement.SceneManager.sceneLoaded += (_, _) => OwnSkin.ReadWorn();
+        OwnSkin.ReadWorn();
+
+        var method = plugin.GetType()
+            .GetNestedType("HeroSprite_Pather", BindingFlags.Public | BindingFlags.NonPublic)?
+            .GetMethod(
+                "ChangeMaterial",
+                BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
+                null,
+                [typeof(tk2dSprite)],
+                null
+            );
+        if (method == null) {
+            Logger.Warn("Could not find where Player Color colours a sprite, so it colours what a skin has no art for");
+            return;
+        }
+
+        try {
+            _keepOffHook = new Hook(method, (Action<Action<tk2dSprite>, tk2dSprite>) OnColouring);
+        } catch (Exception e) {
+            Logger.Warn($"Could not keep Player Color from colouring what a skin has no art for: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Player Color colours a sprite after the game gives it its material, unless Hornet wears a skin: then the sprite
+    /// keeps the game's own.
+    /// </summary>
+    private static void OnColouring(Action<tk2dSprite> orig, tk2dSprite sprite) {
+        if (OwnSkin.Worn) {
+            return;
+        }
+
+        orig(sprite);
+    }
+
+    /// <summary>
     /// The colour that Player Color gives the player's own cloak, or null if it gives it none: not loaded, switched
     /// off, without its masks or with its settings not read yet.
     /// </summary>
