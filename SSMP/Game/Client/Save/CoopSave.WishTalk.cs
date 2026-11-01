@@ -870,14 +870,6 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Whether the end of dialogue that the partner reads too waits for them. Nothing does any more: only key
-    /// dialogue ever did, and that is each player's own now.
-    /// </summary>
-    public bool HoldsSharedTalkEnd(Fsm fsm) {
-        return false;
-    }
-
-    /// <summary>
     /// Ends dialogue whose character stopped talking, frees the characters that the members talked to, and sends the
     /// progress of the wishes.
     /// </summary>

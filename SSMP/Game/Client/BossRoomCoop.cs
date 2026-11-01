@@ -296,19 +296,13 @@ internal partial class BossRoomCoop {
     /// </summary>
     private readonly Func<Fsm, bool> _isSharedTalk;
 
-    /// <summary>
-    /// Whether the end of such dialogue waits for the partner to read it, which dialogue that turns in a delivery doesn't.
-    /// </summary>
-    private readonly Func<Fsm, bool> _holdsSharedTalkEnd;
-
     public BossRoomCoop(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
         Func<bool> isFullSynchronisation,
         Func<bool> isPartnerMissing,
-        Func<Fsm, bool> isSharedTalk,
-        Func<Fsm, bool> holdsSharedTalkEnd
+        Func<Fsm, bool> isSharedTalk
     ) {
         _netClient = netClient;
         _playerData = playerData;
@@ -316,7 +310,6 @@ internal partial class BossRoomCoop {
         _isFullSynchronisation = isFullSynchronisation;
         _isPartnerMissing = isPartnerMissing;
         _isSharedTalk = isSharedTalk;
-        _holdsSharedTalkEnd = holdsSharedTalkEnd;
 
         // For as long as the game runs, since what other players said holds across connections
         SceneManager.activeSceneChanged += ClearStoryReportsOnMenu;
@@ -583,14 +576,16 @@ internal partial class BossRoomCoop {
             return;
         }
 
-        // Key dialogue of a two-player save waits for the partner to read it also where rooms don't wait
-        if (self.ActiveState is { } activeState &&
-            (IsHoldActive()
-                ? TryHoldStoryStart(self, activeState, eventName) ||
-                  TryHoldDialogueEnd(self, activeState, eventName) || TryHoldFightGate(self, activeState, eventName) ||
-                  TryHoldStart(self, activeState, eventName) || TryHoldEventStart(self, activeState, eventName) ||
-                  TryHoldChallenge(self, activeState, eventName)
-                : _sharedDialogues.Count > 0 && TryHoldDialogueEnd(self, activeState, eventName))) {
+        if (_sharedDialogues.Count > 0) {
+            ForgetEndedDialogue(self, eventName);
+        }
+
+        // Where rooms wait for other players: the story scene, the fight gate, the start of a room, its event and
+        // its challenge wait for every player to get there
+        if (self.ActiveState is { } activeState && IsHoldActive() &&
+            (TryHoldStoryStart(self, activeState, eventName) || TryHoldFightGate(self, activeState, eventName) ||
+             TryHoldStart(self, activeState, eventName) || TryHoldEventStart(self, activeState, eventName) ||
+             TryHoldChallenge(self, activeState, eventName))) {
             return;
         }
 

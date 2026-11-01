@@ -20,10 +20,10 @@ namespace SSMP.Game.Client;
 using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
-/// Dialogue rules for boss rooms: a fight that comes after dialogue only starts once every player finished it.
-/// Dialogue of a boss only runs for the scene host, so the other players in the scene are shown the same dialogue and
-/// the boss waits at its end until they read it. Dialogue of a room runs for every player, so the room waits before its
-/// fight until every player got there.
+/// Dialogue rules for boss rooms. Dialogue of a boss only runs for the scene host, so the other players in the scene
+/// are shown the same lines, and nobody waits for them: each player reads at their own pace. A fight that comes after
+/// dialogue waits for every player to get to it: dialogue of a room runs for every player, so the room waits before
+/// its fight until every player got there.
 /// </summary>
 internal partial class BossRoomCoop {
     /// <summary>
@@ -32,16 +32,10 @@ internal partial class BossRoomCoop {
     private const string ConversationEndEventName = "CONVO_END";
 
     /// <summary>
-    /// How long, in seconds, a boss waits for other players to read its dialogue before it continues anyway.
-    /// </summary>
-    private const float DialogueTimeout = 20f;
-
-    /// <summary>
     /// The longest a player is held while reading dialogue that the scene host shared, in seconds, however unread it
     /// still looks.
     ///
-    /// Shorter than <see cref="DialogueTimeout"/> so that a reader gives up before the player who shared it does,
-    /// which is the order that ends with both of them free. Long enough for anyone to read one box, and no longer:
+    /// Long enough for anyone to read one box, and no longer:
     /// a player held here has no control and no pause menu, so every second past what it takes to read is a second
     /// of a game that can only be killed. It was a minute, and a minute of that per line is not a game.
     /// </summary>
@@ -57,13 +51,6 @@ internal partial class BossRoomCoop {
     /// their fight.
     /// </summary>
     private const float FightReachCheckInterval = 1f;
-
-    /// <summary>
-    /// The message for a player whose boss waits for other players to read its dialogue.
-    /// </summary>
-    private string ReadingMessage => _playerData.Count <= 1
-        ? Lang.Pick("Waiting for your teammate to finish the dialogue...", "正在等队友把对话看完……")
-        : Lang.Pick("Waiting for your teammates to finish the dialogue...", "正在等队友们把对话看完……");
 
     /// <summary>
     /// The field with the dialogue box of the game.
@@ -261,14 +248,7 @@ internal partial class BossRoomCoop {
 
         update.IsSharedTalk = isSharedTalk;
         Logger.Info($"Sharing the dialogue of '{GetPath(fsm)}' with the other players in the scene");
-        var dialogue = new SharedDialogue(state.Name, update, Time.unscaledTime) {
-            // A boss no longer stands still between its own lines while the other player reads them. Key dialogue of
-            // a two-player save settled this shape first: both players read the same thing, each at their own pace,
-            // and what waits for the pair of them is the one step that cannot be taken twice - there the button that
-            // agrees to something, here walking into the fight. Holding every line instead put one player in front
-            // of a frozen boss being told to wait for someone they could not see.
-            HoldsEnd = isSharedTalk && _holdsSharedTalkEnd(fsm)
-        };
+        var dialogue = new SharedDialogue(state.Name, update, Time.unscaledTime);
         _sharedDialogues[fsm] = dialogue;
         ShareDialogue(dialogue);
     }
@@ -366,28 +346,12 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Holds back the end of shared dialogue of a boss until the other players in the scene read it.
+    /// Forgets the shared dialogue of a boss once it ends. Its end is never held: each player reads at their own pace.
     /// </summary>
-    /// <returns>Whether the end of the dialogue is held back.</returns>
-    private bool TryHoldDialogueEnd(Fsm fsm, FsmState state, string eventName) {
-        if (eventName != ConversationEndEventName || !_sharedDialogues.TryGetValue(fsm, out var dialogue)) {
-            return false;
-        }
-
-        RemoveGoneReaders(dialogue);
-        if (!dialogue.HoldsEnd || dialogue.StateName != state.Name || dialogue.Waiting.Count == 0 ||
-            Time.unscaledTime - dialogue.StartTime > DialogueTimeout) {
+    private void ForgetEndedDialogue(Fsm fsm, string eventName) {
+        if (eventName == ConversationEndEventName) {
             _sharedDialogues.Remove(fsm);
-            return false;
         }
-
-        if (!dialogue.EndHeld) {
-            dialogue.EndHeld = true;
-            Logger.Info($"Holding back the end of the dialogue of '{GetPath(fsm)}' until the other players read it");
-            UiManager.InternalChatBox.AddMessage(ReadingMessage);
-        }
-
-        return true;
     }
 
     /// <summary>
@@ -1031,8 +995,8 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Continues dialogue of bosses once the other players read it, shows shared dialogue to the local player, and
-    /// starts fights of rooms with dialogue once every player got to them.
+    /// Forgets shared dialogue of bosses that moved on from it, shows shared dialogue to the local player, and starts
+    /// fights of rooms with dialogue once every player got to them.
     /// </summary>
     private void UpdateDialogues() {
         if (_sharedDialogues.Count > 0) {
@@ -1041,35 +1005,7 @@ internal partial class BossRoomCoop {
                 var dialogue = pair.Value;
                 if (fsm.GameObject == null || fsm.ActiveState?.Name != dialogue.StateName) {
                     _sharedDialogues.Remove(fsm);
-                    continue;
                 }
-
-                if (!dialogue.EndHeld) {
-                    continue;
-                }
-
-                RemoveGoneReaders(dialogue);
-                var waited = Time.unscaledTime - dialogue.StartTime;
-                if (dialogue.Waiting.Count > 0 && waited <= DialogueTimeout) {
-                    continue;
-                }
-
-                // Said apart, because which of the two it was is the whole of what a log of this can tell anyone:
-                // one is the pair of them reading a line together, and the other is one of them standing still for
-                // the whole wait over a line the other never saw.
-                _sharedDialogues.Remove(fsm);
-                if (dialogue.Waiting.Count > 0) {
-                    Logger.Warn(
-                        $"{dialogue.Waiting.Count} player(s) never finished the dialogue of '{GetPath(fsm)}' in " +
-                        $"{waited:0.0}s, continuing it without them"
-                    );
-                } else {
-                    Logger.Info(
-                        $"The other players finished the dialogue of '{GetPath(fsm)}' in {waited:0.0}s, continuing it"
-                    );
-                }
-
-                fsm.Event(ConversationEndEventName);
             }
         }
 
@@ -1147,8 +1083,8 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Forgets the dialogue and fights of the rooms of the current scene. Bosses and rooms that still wait for other
-    /// players continue without them if they are still there, like after disconnecting. Shown dialogue ends by itself.
+    /// Forgets the dialogue and fights of the rooms of the current scene. Rooms that still wait for other players
+    /// continue without them if they are still there, like after disconnecting. Shown dialogue ends by itself.
     /// </summary>
     private void ClearDialogues() {
         // What the local player was reading goes with the rest of it. Nothing else ever let go of this: a player who
@@ -1161,10 +1097,6 @@ internal partial class BossRoomCoop {
             GiveHeroControlBack();
         }
 
-        var heldDialogues = _sharedDialogues
-            .Where(pair => pair.Value.EndHeld)
-            .Select(pair => (Fsm: pair.Key, pair.Value.StateName))
-            .ToList();
         var heldFights = _heldFights.ToList();
 
         _sharedDialogues.Clear();
@@ -1176,18 +1108,12 @@ internal partial class BossRoomCoop {
         _fightTransitions.Clear();
         _dialogueFsms.Clear();
 
-        if (heldDialogues.Count == 0 && heldFights.Count == 0) {
+        if (heldFights.Count == 0) {
             return;
         }
 
         _bypassGates = true;
         try {
-            foreach (var (fsm, stateName) in heldDialogues) {
-                if (fsm.GameObject != null && fsm.ActiveState?.Name == stateName) {
-                    fsm.Event(ConversationEndEventName);
-                }
-            }
-
             foreach (var pair in heldFights) {
                 if (pair.Key.GameObject != null && pair.Key.ActiveState?.Name == pair.Value.StateName) {
                     RestoreHero(pair.Value);
@@ -1227,16 +1153,6 @@ internal partial class BossRoomCoop {
         /// The IDs of the players who read the dialogue.
         /// </summary>
         public readonly HashSet<ushort> Done = [];
-
-        /// <summary>
-        /// Whether the end of the dialogue is held back for the players who still read it.
-        /// </summary>
-        public bool EndHeld;
-
-        /// <summary>
-        /// Whether the end of the dialogue waits for the players who still read it at all.
-        /// </summary>
-        public bool HoldsEnd = true;
 
         public SharedDialogue(string stateName, BossRoomUpdate update, float startTime) {
             StateName = stateName;

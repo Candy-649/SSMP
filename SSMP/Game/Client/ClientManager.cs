@@ -473,8 +473,7 @@ internal class ClientManager : IClientManager {
             // Made here and called later, by which time the two-player save below exists. It cannot be made first,
             // because it asks this one for the room a player waits in.
             () => _coopSave!.IsPartnerMissing(),
-            fsm => _coopSave!.IsSharedTalk(fsm),
-            fsm => _coopSave!.HoldsSharedTalkEnd(fsm)
+            fsm => _coopSave!.IsSharedTalk(fsm)
         );
         _coopSave = new CoopSave(netClient, _playerData, modSettings, uiManager) {
             IsHeroLockedInArena = _arenaCoop.IsLocalHeroLockedIn,
