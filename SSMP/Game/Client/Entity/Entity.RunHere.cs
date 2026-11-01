@@ -2632,7 +2632,8 @@ internal partial class Entity {
     /// <summary>
     /// Stops the copy's FSM running here, after which the copy follows the scene host again from where it is. A catch
     /// that this game led is over with it: a player that the creature still holds is let go, since what lets them go
-    /// in the end was the copy's own FSM to do, and the scene host's FSM does not do it to them.
+    /// in the end was the copy's own FSM to do, and the scene host's FSM does not do it to them. Whatever the copy ran,
+    /// what it marked on the player's silk comes off too (see <see cref="TakeOffTheSilkMarks"/>).
     /// </summary>
     /// <param name="letGoOfThePlayer">Whether a player held by a catch that this game led is let go, which they are
     /// not when the room's own creature takes over and goes on holding them.</param>
@@ -2683,6 +2684,11 @@ internal partial class Entity {
         ForgetTalkHere(fsm);
         TakeTheCopysBodyBack();
 
+        // Before the scene host's variables come in, which know nothing of the marks. Also when the room's own creature
+        // takes over and goes on holding the player: it goes on with what the scene host last said of its variables,
+        // not with the copy's, and would never take the copy's marks off
+        TakeOffTheSilkMarks(fsm);
+
         // What the move worked out by itself gives way to what the scene host's FSM holds, which the copy is given
         // again from here (UpdateHostFsmData)
         if (takeVariables) {
@@ -2714,7 +2720,8 @@ internal partial class Entity {
     /// <summary>
     /// Lets go of the FSM of the copy that runs here without stopping it, for an entity that goes away with its room:
     /// stopping runs the game's own code for leaving a state, which nothing needs of a copy that is going. A player
-    /// that it held for a catch this game led is let go all the same, since nothing else would.
+    /// that it held for a catch this game led is let go all the same, since nothing else would, and what it marked on
+    /// the player's silk comes off, which stays when the room goes (see <see cref="TakeOffTheSilkMarks"/>).
     /// </summary>
     private void LetGoOfRunHere() {
         // Not the component's FSM: a copy that the game destroyed, as one that died while it ran here, has none any
@@ -2741,6 +2748,7 @@ internal partial class Entity {
         _aftermath = null;
         StopSteppingRunHere();
         TakeTheCopysBodyBack();
+        TakeOffTheSilkMarks(fsm);
 
         if (led) {
             FreeTheLocalPlayer(fsm, !over);
@@ -2765,6 +2773,48 @@ internal partial class Entity {
 
         GiveTheSoundBack(fsm);
         GiveBackWhatTheCatchTook(cut);
+    }
+
+    /// <summary>
+    /// Takes off the local player's silk the marks that the FSM of a copy that ran here put on it and had not taken off
+    /// again when it stopped (see <see cref="AddUsingSilk"/>), like the one that shows the silk drained while a
+    /// creature holds the player and sucks it: the creature takes its mark off only as it lets go of them its own way,
+    /// and nothing else in the game does, so the silk of a player let go any other way - the scene host did not take
+    /// the catch, the copy went away with its room - shone on for good, through deaths and benches
+    /// (USER 11-01 "这个丝常亮"). Which marks are still on is what the FSM itself notes as it puts one on and clears as
+    /// it takes it off. A room's own creature that takes over from the copy goes on without them: it would never take
+    /// them off, and the silk only stops shining before the creature lets go.
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    private void TakeOffTheSilkMarks(HutongGames.PlayMaker.Fsm fsm) {
+        foreach (var state in fsm.States) {
+            foreach (var action in state.Actions) {
+                if (action is not AddUsingSilk { DidAddTracker: { IsNone: false, Value: true } added } add) {
+                    continue;
+                }
+
+                // Cleared as RemoveUsingSilk clears it - first, so that a mark that shares the note comes off once
+                added.Value = false;
+
+                // Never in the way of letting the player go, which comes after
+                try {
+                    var flags = (SilkSpool.SilkUsingFlags) add.UsingType.Value;
+                    var amount = add.Amount.Value;
+                    var spool = SilkSpool.Instance;
+                    var taken = spool != null && spool.RemoveUsing(flags, amount);
+                    Logger.Info(
+                        $"The copy of entity {Id} stopped with the mark that '{state.Name}' of '{fsm.Name}' put on " +
+                        $"the local player's silk ({flags} x{amount}) still on, so it is taken off" +
+                        (taken ? "" : ", which the silk did not have")
+                    );
+                } catch (Exception e) {
+                    Logger.Warn(
+                        $"Could not take off the local player's silk the mark that '{state.Name}' of '{fsm.Name}' of " +
+                        $"entity {Id} put on: {e.GetType().Name}: {e.Message}"
+                    );
+                }
+            }
+        }
     }
 
     /// <summary>
