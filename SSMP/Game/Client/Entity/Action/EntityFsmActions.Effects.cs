@@ -530,7 +530,12 @@ internal static partial class EntityFsmActions {
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="found">The states, which the states found are added to.</param>
-    internal static void AddStatesEnteredOnlyFrom(HutongGames.PlayMaker.Fsm fsm, HashSet<FsmState> found) {
+    /// <param name="never">A state that is never added, nor what it alone leads to, or null.</param>
+    internal static void AddStatesEnteredOnlyFrom(
+        HutongGames.PlayMaker.Fsm fsm,
+        HashSet<FsmState> found,
+        FsmState? never = null
+    ) {
         var globalTargets = new HashSet<string>();
         foreach (var transition in fsm.GlobalTransitions) {
             globalTargets.Add(transition.ToState);
@@ -551,7 +556,7 @@ internal static partial class EntityFsmActions {
         do {
             added = false;
             foreach (var state in fsm.States) {
-                if (found.Contains(state) || globalTargets.Contains(state.Name) ||
+                if (found.Contains(state) || state == never || globalTargets.Contains(state.Name) ||
                     !sources.TryGetValue(state.Name, out var from) || !from.TrueForAll(found.Contains)) {
                     continue;
                 }

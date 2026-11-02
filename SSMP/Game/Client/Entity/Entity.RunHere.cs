@@ -649,7 +649,7 @@ internal partial class Entity {
         _runHereCombo = _runHereLed
             ? EntityFsmActions.StatesOnlyThrough(fsm, path[0])
             : caught != null
-                ? RestOfTheInput(fsm)
+                ? RestOfTheInput(fsm, from)
                 : null;
         _runHereFrom = from;
         _runHereStep = 0;
@@ -1154,6 +1154,12 @@ internal partial class Entity {
         Logger.Info($"The scene host took the input on entity {Id} to '{_runHereReached}' too");
         var heldAnimation = _heldAnimation;
         var heldScale = _heldScale;
+
+        // An input that came back to where it found the FSM did nothing to the rest of the creature: what the scene
+        // host said of the rest meanwhile - how it moves, its colours, which of its parts hurt - stands, and is taken
+        // in as the copy follows it again
+        var cameBack = CameBackToWhereItWasFound(_runHereReached);
+        var heldOfTheRest = cameBack ? _heldData.FindAll(held => held.Type != EntityComponentType.Fsm) : null;
         _runHereAwaited = 0;
         _heldData.Clear();
         _madeByHeld.Clear();
@@ -1166,8 +1172,19 @@ internal partial class Entity {
         // held here, the copy would keep every other input of the local player on it from playing at once until the
         // scene host's FSM went somewhere else, which one that waits for the next sign may never do
         var hostState = EntityFsmActions.HostStateOf(fsm);
-        if (hostState != _runHereReached && !IsInCombo(hostState) || CameBackToWhereItWasFound(_runHereReached)) {
+        if (hostState != _runHereReached && !IsInCombo(hostState) || cameBack) {
+            if (cameBack) {
+                Logger.Info(
+                    $"The input on entity {Id} left '{fsm.Name}' in '{_runHereReached}', where it found it, so its " +
+                    $"copy follows the scene host again, taking {heldOfTheRest!.Count} message(s) of the rest held"
+                );
+            }
+
             StopRunningHere();
+            if (heldOfTheRest is { Count: > 0 }) {
+                UpdateData(heldOfTheRest, false);
+            }
+
             if (heldAnimation is { } animation) {
                 UpdateAnimation(animation.Id, animation.WrapMode, false);
             }
@@ -2117,8 +2134,8 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether a state that the scene host's FSM is in is where the last input of the local player found the FSM that
-    /// runs here, for an input that is no catch: it played all of that input, and nothing is left for the copy to
-    /// run by itself.
+    /// runs here, for an input that has no combo left to run (see RestOfTheInput): it played all of that input, and
+    /// nothing is left for the copy to run by itself.
     /// </summary>
     /// <param name="stateName">The state, or null.</param>
     private bool CameBackToWhereItWasFound(string? stateName) {
@@ -2283,7 +2300,7 @@ internal partial class Entity {
     /// <param name="isCatch">Whether it is a catch rather than a strike or a touch.</param>
     /// <param name="play">What plays it on the FSM.</param>
     /// <param name="catchStates">The states of a catch that the partner's game leads, for which the actions stay off
-    /// however the FSM goes through them; null for the state it stands in once played and those it alone leads to.
+    /// however the FSM goes through them; null for the rest of what it played (see RestOfTheInput).
     /// </param>
     /// <param name="figure">For a catch that the partner's game leads, the figure of that partner here, or null.
     /// </param>
@@ -2313,10 +2330,11 @@ internal partial class Entity {
         }
 
         // Whatever the game's code does on the way, what is switched off is never left off for good
+        var from = fsm.ActiveState;
         try {
             play();
         } finally {
-            KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm));
+            KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm, from) ?? []);
         }
     }
 
@@ -2358,15 +2376,24 @@ internal partial class Entity {
 
     /// <summary>
     /// The rest of what an input does to an FSM once it has played: the state it took the FSM to, and the states that
-    /// only that state leads to - for a catch, the rest of its combo.
+    /// only that state leads to - for a catch, the rest of its combo. Not the state that the input found the FSM in:
+    /// back there, the FSM is through with it (see HearStateFromSceneHost), and an input that left it there at once
+    /// left nothing to run here at all, like the part of a creature that notes a hit in one step and goes back to wait
+    /// for the next. Counted in, as the state that only the noting leads back to, it kept the run going for good, and
+    /// the copy took none of the scene host's animations while it did: a boss that struck the local player with its
+    /// counter stood frozen in a dark shape of it, for the rest of the fight (USER 11-02, 我被她的反击打了之后我就看不到
+    /// 她了).
     /// </summary>
-    private static HashSet<FsmState> RestOfTheInput(HutongGames.PlayMaker.Fsm fsm) {
-        var states = new HashSet<FsmState>();
-        if (fsm.ActiveState is { } reached) {
-            states.Add(reached);
-            EntityFsmActions.AddStatesEnteredOnlyFrom(fsm, states);
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="from">The state the input found it in.</param>
+    /// <returns>The states, or null if the input left it where it found it.</returns>
+    private static HashSet<FsmState>? RestOfTheInput(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
+        if (fsm.ActiveState is not { } reached || reached == from) {
+            return null;
         }
 
+        var states = new HashSet<FsmState> { reached };
+        EntityFsmActions.AddStatesEnteredOnlyFrom(fsm, states, from);
         return states;
     }
 

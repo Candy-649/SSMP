@@ -3553,6 +3553,14 @@
         "Stun Start": [
           "Stun Air",
           "Stun Land"
+        ],
+        "Parry Block": [
+          "Parry Swipe",
+          "Hero Swiped?",
+          "Parry Stab",
+          "Parry Miss",
+          "Parry Mock?",
+          "Parry End"
         ]
       }
     }
