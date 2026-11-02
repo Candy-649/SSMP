@@ -414,6 +414,62 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region FaceAngle
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// The action turns its object to the way it goes, which it works out from how fast it goes which way: a needle
+    /// that a boss throws at a slant points the way it flies. Only that it did is sent, for a part of the creature
+    /// (see <see cref="FaceTheWayItGoes"/>).
+    /// </remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FaceAngle action) {
+        return IsMovingPart(action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, FaceAngle action) {
+        FaceTheWayItGoes(data, action);
+    }
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>As <see cref="GetNetworkDataFromAction(EntityNetworkData, FaceAngle)"/>.</remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FaceAngleV2 action) {
+        return IsMovingPart(action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, FaceAngleV2 action) {
+        FaceTheWayItGoes(data, action);
+    }
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>As <see cref="GetNetworkDataFromAction(EntityNetworkData, FaceAngle)"/>.</remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, FaceAngleV3 action) {
+        return IsMovingPart(action, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, FaceAngleV3 action) {
+        FaceTheWayItGoes(data, action);
+    }
+
+    /// <summary>
+    /// Turns a part of the copy to the way it goes, once, as the game that runs the creature turned its own as it sent
+    /// it off: the copy's part was sent off the same way (see SetVelocityAsAngle), and the game's own action works out
+    /// the turn from that here as it did there. Never turned, a needle thrown at a slant flew along flat (USER 11-02,
+    /// 织针丢的朝向貌似没有同步). Not every frame after, which the game does: the way something flies is worked out as
+    /// it is sent off, and turning it again each frame here only says it again (USER 11-02, 不许再搞每帧转向). The
+    /// creature itself is left out, which is kept in step by its own turn (RotationComponent), and so is anything not
+    /// its own (see IsMovingPart); so is the replay that sets up a creature's first states, which has nothing to go by.
+    /// </summary>
+    private static void FaceTheWayItGoes(EntityNetworkData? data, FsmStateAction action) {
+        if (data != null) {
+            action.OnEnter();
+        }
+    }
+
+    #endregion
+
     #region SetBoxCollider2DSizeVector
 
     /// <summary>Builds network data from the FSM action.</summary>
