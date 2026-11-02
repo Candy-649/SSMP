@@ -44,6 +44,19 @@ internal abstract class EntityComponent {
     }
 
     /// <summary>
+    /// Whether a part of the room's own object of the entity is under it still. While the other game runs the creature,
+    /// that object sleeps out of sight, and the parts it holds follow what the other game says of them, for when this
+    /// game takes the creature over. A part that it let go of into the room is not asleep with it (see LetGoParts):
+    /// switched on from here, it showed and hurt where it was let go. The needle that a boss throws stood where the
+    /// boss had started, in the game that did not run the fight, for as long as the scene host's needle was out, and
+    /// the player saw it there before the copy's was thrown (USER 11-02, 在织针的目的地我先看到了织针).
+    /// </summary>
+    /// <param name="part">The part of the room's own object, or null where it has none.</param>
+    protected bool IsHeldByTheRoomsOwn(UnityEngine.GameObject? part) {
+        return part != null && part.transform.IsChildOf(GameObject.Host.transform);
+    }
+
+    /// <summary>
     /// Send the given <see cref="EntityNetworkData"/>.
     /// </summary>
     /// <param name="data">The data to send.</param>

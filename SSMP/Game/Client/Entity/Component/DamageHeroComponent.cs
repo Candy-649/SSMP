@@ -183,8 +183,9 @@ internal class DamageHeroComponent : EntityComponent {
                 // game runs it, the room's own copy of it is asleep. Switching that on woke the whole creature at the
                 // place it started from until the entity put it back to sleep, which is the creature flashing there
                 // every time any of its damage changed. Whether it is awake is the entity's business; the parts below
-                // it can follow along while it sleeps.
-                if (_hostDamageHeroes[i].gameObject != GameObject.Host) {
+                // it can follow along while it sleeps, and only those (see IsHeldByTheRoomsOwn).
+                if (_hostDamageHeroes[i].gameObject != GameObject.Host &&
+                    IsHeldByTheRoomsOwn(_hostDamageHeroes[i].gameObject)) {
                     _hostDamageHeroes[i].gameObject.SetActive(active);
                 }
             }

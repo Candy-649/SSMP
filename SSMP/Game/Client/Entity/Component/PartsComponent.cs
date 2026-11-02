@@ -419,7 +419,9 @@ internal class PartsComponent : EntityComponent {
                 SetOn(_clientParts[i], parts[i]);
             }
 
-            SetOn(_hostParts[i], parts[i]);
+            if (IsHeldByTheRoomsOwn(_hostParts[i])) {
+                SetOn(_hostParts[i], parts[i]);
+            }
         }
     }
 
