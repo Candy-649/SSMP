@@ -968,27 +968,41 @@ internal class AnimationManager {
                 return;
             }
 
-            // Check if the animation effect is a DamageAnimationEffect and if so,
-            // set whether it should deal damage based on player teams
-            if (animationEffect is DamageAnimationEffect damageAnimationEffect) {
-                var localPlayerTeam = _playerManager.LocalPlayerTeam;
-                var otherPlayerTeam = _playerManager.GetPlayerTeam(id);
-
-                damageAnimationEffect.SetShouldDoDamage(
-                    otherPlayerTeam != localPlayerTeam
-                    || otherPlayerTeam.Equals(Team.None)
-                    || localPlayerTeam.Equals(Team.None)
-                );
-            }
-            
             if (_debugLogAnimations) Logger.Info($"Playing animation effect for animation clip: {animationClip}, {animationEffect.GetType()}");
 
-            animationEffect.Play(
-                playerObject,
-                crestType,
-                effectInfo
+            PlayEffect(id, playerObject, animationEffect, crestType, effectInfo);
+        }
+    }
+
+    /// <summary>
+    /// Plays an effect on the character of another player: of a clip or a sub-animation of theirs, or of a clip change
+    /// of theirs that never arrived and was put right from what they play (see <see cref="OnPlayerClipState"/>). One
+    /// that can hurt hurts the local player only where the teams have it so.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="playerObject">Their character.</param>
+    /// <param name="effect">The effect.</param>
+    /// <param name="crestType">The crest they wear.</param>
+    /// <param name="effectInfo">The effect info that came with it.</param>
+    private void PlayEffect(
+        ushort id,
+        GameObject playerObject,
+        IAnimationEffect effect,
+        CrestType crestType,
+        byte[]? effectInfo
+    ) {
+        if (effect is DamageAnimationEffect damageAnimationEffect) {
+            var localPlayerTeam = _playerManager.LocalPlayerTeam;
+            var otherPlayerTeam = _playerManager.GetPlayerTeam(id);
+
+            damageAnimationEffect.SetShouldDoDamage(
+                otherPlayerTeam != localPlayerTeam
+                || otherPlayerTeam.Equals(Team.None)
+                || localPlayerTeam.Equals(Team.None)
             );
         }
+
+        effect.Play(playerObject, crestType, effectInfo);
     }
 
     /// <summary>
@@ -1242,7 +1256,7 @@ internal class AnimationManager {
 
         if (effectInfo != null && AnimationEffects.TryGetValue(animationClip, out var effect) &&
             effect is AnimationEffect { HoldsWhileClipPlays: true }) {
-            effect.Play(playerObject, crestType, effectInfo);
+            PlayEffect(id, playerObject, effect, crestType, effectInfo);
         }
     }
 

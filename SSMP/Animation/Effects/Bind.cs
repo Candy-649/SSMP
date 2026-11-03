@@ -27,6 +27,12 @@ internal class Bind : DamageAnimationEffect {
     /// </summary>
     public State BindState = State.Normal;
 
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The silk of a bind stays on the player for as long as they bind, as a storm does (see ThreadStorm).
+    /// </remarks>
+    public override bool HoldsWhileClipPlays => true;
+
     /// <summary>
     /// Cached FSM for Hornet's bind ability.
     /// </summary>

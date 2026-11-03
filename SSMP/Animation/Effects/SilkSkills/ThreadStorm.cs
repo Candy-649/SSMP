@@ -21,6 +21,13 @@ internal class ThreadStorm : BaseSilkSkill {
     private static readonly Dictionary<int, int> PlayerExtensions = [];
 
     /// <inheritdoc/>
+    /// <remarks>
+    /// The storm stays round the player for as long as they storm. Its clip change lost on the way, it never showed in
+    /// the other game, which put only the clip right (USER 11-03, 我朋友说有几次我灵丝风暴，她没看到我的丝).
+    /// </remarks>
+    public override bool HoldsWhileClipPlays => true;
+
+    /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         var volt = IsVolt(effectInfo);
         var isShaman = crestType == CrestType.Shaman;

@@ -29,6 +29,10 @@ internal class BindBurst : Bind {
     public static readonly HashSet<int> MaggotedPlayers = [];
 
     /// <inheritdoc/>
+    /// <remarks>Unlike the bind that it ends, the burst is a moment.</remarks>
+    public override bool HoldsWhileClipPlays => false;
+
+    /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         // Set maggot info
         var flags = new Flags(effectInfo);
