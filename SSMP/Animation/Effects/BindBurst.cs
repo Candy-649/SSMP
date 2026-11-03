@@ -29,8 +29,12 @@ internal class BindBurst : Bind {
     public static readonly HashSet<int> MaggotedPlayers = [];
 
     /// <inheritdoc/>
-    /// <remarks>Unlike the bind that it ends, the burst is a moment.</remarks>
-    public override bool HoldsWhileClipPlays => false;
+    /// <remarks>
+    /// The burst is a moment, but one that the player stands still for, and what it shows is on them: played a few
+    /// frames late, it shows where they are. Its clip change lost on the way, the end of the bind never showed in the
+    /// other game (USER 11-03, 刚刚我朋友敷丝我没有看到敷丝结束那一小段动画).
+    /// </remarks>
+    public override bool HoldsWhileClipPlays => true;
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
