@@ -419,11 +419,11 @@ internal static partial class EntityFsmActions {
     /// <summary>Builds network data from the FSM action.</summary>
     /// <remarks>
     /// The action turns its object to the way it goes, which it works out from how fast it goes which way: a needle
-    /// that a boss throws at a slant points the way it flies. Only that it did is sent, for a part of the creature
-    /// (see <see cref="FaceTheWayItGoes"/>).
+    /// that a boss throws at a slant points the way it flies. Only that it did is sent, and whether it turns the
+    /// creature itself every frame or a part of it (see <see cref="WriteFacing"/>).
     /// </remarks>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, FaceAngle action) {
-        return IsMovingPart(action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        return WriteFacing(data, action, action.gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -434,7 +434,7 @@ internal static partial class EntityFsmActions {
     /// <summary>Builds network data from the FSM action.</summary>
     /// <remarks>As <see cref="GetNetworkDataFromAction(EntityNetworkData, FaceAngle)"/>.</remarks>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, FaceAngleV2 action) {
-        return IsMovingPart(action, action.Fsm.GetOwnerDefaultTarget(action.gameObject));
+        return WriteFacing(data, action, action.gameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -445,7 +445,7 @@ internal static partial class EntityFsmActions {
     /// <summary>Builds network data from the FSM action.</summary>
     /// <remarks>As <see cref="GetNetworkDataFromAction(EntityNetworkData, FaceAngle)"/>.</remarks>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, FaceAngleV3 action) {
-        return IsMovingPart(action, action.Fsm.GetOwnerDefaultTarget(action.GameObject));
+        return WriteFacing(data, action, action.GameObject);
     }
 
     /// <summary>Applies network data to the FSM action.</summary>
@@ -454,17 +454,291 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// Writes whether an action that turns its object to the way it goes is a turn of the creature that the copy makes
+    /// by itself (see <see cref="CopyMakesTheTurn"/>), or one of a part of it (see <see cref="FaceTheWayItGoes"/>);
+    /// anything else the copy is not told of.
+    /// </summary>
+    /// <param name="data">The network data.</param>
+    /// <param name="action">The action.</param>
+    /// <param name="target">What the action turns.</param>
+    /// <returns>Whether anything was written.</returns>
+    private static bool WriteFacing(EntityNetworkData data, FsmStateAction action, FsmOwnerDefault target) {
+        var itself = CopyMakesTheTurn(action);
+        if (!itself && !IsMovingPart(action, action.Fsm.GetOwnerDefaultTarget(target))) {
+            return false;
+        }
+
+        data.Packet.Write(itself);
+        return true;
+    }
+
+    /// <summary>
     /// Turns a part of the copy to the way it goes, once, as the game that runs the creature turned its own as it sent
     /// it off: the copy's part was sent off the same way (see SetVelocityAsAngle), and the game's own action works out
     /// the turn from that here as it did there. Never turned, a needle thrown at a slant flew along flat (USER 11-02,
     /// 织针丢的朝向貌似没有同步). Not every frame after, which the game does: the way something flies is worked out as
     /// it is sent off, and turning it again each frame here only says it again (USER 11-02, 不许再搞每帧转向). The
-    /// creature itself is left out, which is kept in step by its own turn (RotationComponent), and so is anything not
-    /// its own (see IsMovingPart); so is the replay that sets up a creature's first states, which has nothing to go by.
+    /// creature itself, which the action turns every frame, the copy turns to the way it is seen to go every frame
+    /// (see <see cref="FaceTheWayItIsSeenToGo"/>). Anything not its own is left out (see IsMovingPart), and so is the
+    /// replay that sets up a creature's first states, which has nothing to go by.
     /// </summary>
     private static void FaceTheWayItGoes(EntityNetworkData? data, FsmStateAction action) {
+        if (data == null) {
+            return;
+        }
+
+        if (data.Packet.ReadBool()) {
+            TurnInState(action);
+            return;
+        }
+
+        action.OnEnter();
+    }
+
+    /// <summary>
+    /// Turns the copy of the creature to the way it is seen to go, every frame until the scene host's FSM leaves the
+    /// state, with the game's own action, as the action turns the creature in the game that runs it, which then sends
+    /// nothing of the turn (see <see cref="CopyMakesTheTurn"/>). The action turns by how fast the body goes which way.
+    /// The body of a copy stands still while the positions it is sent move it (PredictiveInterpolation), so for each
+    /// turn it is given the speed that those positions show, and gets its own back at once; a copy that moves by
+    /// itself goes by its own (OwnMotionComponent).
+    /// </summary>
+    /// <param name="action">The action of the copy's FSM.</param>
+    private static void FaceTheWayItIsSeenToGo(FsmStateAction action) {
+        var copy = action.Fsm.GameObject;
+        var body = copy.GetComponent<Rigidbody2D>();
+        var seen = copy.GetComponent<SSMP.Fsm.PredictiveInterpolation>();
+        var inSteps = action is FaceAngleV3;
+
+        // Entering the state it is still in leaves the state first, as the game does (see RunInState)
+        for (var i = ActionsInState.Count - 1; i >= 0; i--) {
+            if (ActionsInState[i].Action == action) {
+                ExitAt(i);
+            }
+        }
+
+        action.Finished = false;
+        Turn(true);
+
+        new ActionInState {
+            Fsm = action.Fsm,
+            StateName = action.State.Name,
+            Action = action,
+            Coroutine = action.Finished ? null : SSMP.Util.MonoBehaviourUtil.Instance.StartCoroutine(EveryFrame()),
+            ExitAction = action.OnExit
+        }.Register();
+
+        IEnumerator EveryFrame() {
+            while (!action.Finished) {
+                yield return null;
+
+                if (copy == null || !copy.activeInHierarchy) {
+                    yield break;
+                }
+
+                Turn(false);
+            }
+        }
+
+        // The last of these works in the steps of physics in the game, and here every frame, which shows the same
+        void Turn(bool entering) {
+            var own = body.linearVelocity;
+            if (own == Vector2.zero) {
+                body.linearVelocity = seen.Velocity;
+            }
+
+            if (entering) {
+                action.OnEnter();
+            } else if (inSteps) {
+                action.OnFixedUpdate();
+            } else {
+                action.OnUpdate();
+            }
+
+            body.linearVelocity = own;
+        }
+    }
+
+    #endregion
+
+    #region Turns of the creature itself
+
+    /// <summary>
+    /// Whether an action whose replay went to the other game turns the copy of the creature itself there for as long
+    /// as it runs, in which time nothing of the creature's turn is sent (Entity.CopyTurnsItself): a spin, a turn to an
+    /// angle or toward it, which are replayed only where the copy makes them by itself, or a turn of the creature
+    /// itself to the way it goes, which is replayed otherwise only for a part of it (see CopyMakesTheTurn). Looked at
+    /// every frame for what went, it looks at nothing that the replay going settled already.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    internal static bool TurnsTheCopysRoot(FsmStateAction action) => action switch {
+        Rotate or RotateTo or AnimateRotationTo or AnimateRotationToV2 => true,
+        FaceAngle face => action.Fsm.GetOwnerDefaultTarget(face.gameObject) == action.Fsm.GameObject,
+        FaceAngleV2 face => action.Fsm.GetOwnerDefaultTarget(face.gameObject) == action.Fsm.GameObject,
+        FaceAngleV3 face => action.Fsm.GetOwnerDefaultTarget(face.GameObject) == action.Fsm.GameObject,
+        _ => false
+    };
+
+    /// <summary>
+    /// Whether the copy of the creature makes the turn of an action by itself, as the action turns the creature in the
+    /// game that runs it, which sends the replay of the action and nothing of the turn while it runs (settled with the
+    /// user on 11-03, after "不许再搞每帧转向这种屎山了"): a spin every frame by a speed and a way set as it starts, a
+    /// turn toward an angle at a speed or to it over a time, or a turn every frame to the way the creature goes, which
+    /// its copy is seen to go too (see <see cref="FaceTheWayItIsSeenToGo"/>), each of the creature itself. A spin once,
+    /// late in the frame or in the steps of physics goes by its angles (RotationComponent), and so does a turn of a
+    /// part of another creature to the way it goes, which the copy of that one carries without a speed of its own.
+    /// </summary>
+    /// <param name="action">The action, of the FSM of the creature in the game that runs it or of its copy.</param>
+    internal static bool CopyMakesTheTurn(FsmStateAction action) => action switch {
+        Rotate rotate => rotate.everyFrame && !rotate.lateUpdate && !rotate.fixedUpdate &&
+                         TurnsTheCreatureItself(action, rotate.gameObject),
+        RotateTo rotateTo => TurnsTheCreatureItself(action, rotateTo.gameObject),
+        AnimateRotationTo animate => TurnsTheCreatureItself(action, animate.gameObject),
+        AnimateRotationToV2 animate => TurnsTheCreatureItself(action, animate.gameObject),
+        FaceAngle face => face.everyFrame && FacesItself(action, face.gameObject),
+        FaceAngleV2 face => face.everyFrame && FacesItself(action, face.gameObject),
+        FaceAngleV3 face => face.EveryFrame && FacesItself(action, face.GameObject),
+        _ => false
+    };
+
+    /// <summary>
+    /// Whether an action turns the creature itself to the way it goes by the body that the game's action reads, where
+    /// the creature is one of its own, whose copy is seen to go (see <see cref="CopyMakesTheTurn"/>).
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="target">What the action turns.</param>
+    private static bool FacesItself(FsmStateAction action, FsmOwnerDefault target) {
+        var creature = action.Fsm.GameObject;
+        return TurnsTheCreatureItself(action, target) && creature.GetComponent<Rigidbody2D>() != null &&
+               Entity.IsACreatureOfItsOwn(creature);
+    }
+
+    /// <summary>
+    /// Makes on the copy a turn that it makes by itself (see <see cref="CopyMakesTheTurn"/>): to the way it goes as it
+    /// is seen to go, any other the game's own way (see RunInState). Not once the scene host's FSM has left the state
+    /// by the time it comes - a replay held while a blow of the local player's played on the copy, or sent again after
+    /// it was lost - which the angle the creature ended up at may have come before: begun and ended at once, the turn
+    /// left the copy where its start put it.
+    /// </summary>
+    /// <param name="action">The action of the copy's FSM.</param>
+    private static void TurnInState(FsmStateAction action) {
+        if (HostLeft(action.Fsm, action.State.Name)) {
+            return;
+        }
+
+        if (action is FaceAngle or FaceAngleV2 or FaceAngleV3) {
+            FaceTheWayItIsSeenToGo(action);
+        } else {
+            RunInState(action);
+        }
+    }
+
+    /// <summary>
+    /// Starts on the copy a turn that it makes by itself (see <see cref="CopyMakesTheTurn"/>) in a state of the
+    /// creature's FSM that this game was told of with the state of the room, walking in or after a gap, unless the copy
+    /// makes it already: the replay that starts it went before, and nothing of the turn comes while it lasts
+    /// (Entity.CopyTurnsItself). A creature that spun as a player walked in stood still in that player's game for as
+    /// long as it spun.
+    /// </summary>
+    /// <param name="action">The action of the copy's FSM.</param>
+    internal static void StartTurnHeardLate(FsmStateAction action) {
+        foreach (var running in ActionsInState) {
+            if (running.Action == action) {
+                return;
+            }
+        }
+
+        TurnInState(action);
+    }
+
+    /// <summary>
+    /// Ends what the copy of a creature turns by itself (see <see cref="TurnsTheCopysRoot"/>), as an angle of the
+    /// creature comes, which goes only while it makes no such turn in the game that runs it (Entity.CopyTurnsItself).
+    /// Where the change of state that ended the turn there was lost on the way and came again later, the copy turned
+    /// on past the angle it had ended up at until then, and stayed there.
+    /// </summary>
+    /// <param name="copy">The copy.</param>
+    internal static void StopTurnsOf(GameObject copy) {
+        for (var i = ActionsInState.Count - 1; i >= 0; i--) {
+            var action = ActionsInState[i].Action;
+            if (action != null && action.Fsm.GameObject == copy && TurnsTheCopysRoot(action)) {
+                ExitAt(i);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether an action turns the creature whose FSM runs it, itself, rather than a part of it or anything else.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    /// <param name="target">What the action turns.</param>
+    private static bool TurnsTheCreatureItself(FsmStateAction action, FsmOwnerDefault target) {
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(target);
+        return gameObject != null && gameObject == action.Fsm.GameObject && IsObjectInRegistry(gameObject);
+    }
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// A spin of the creature itself every frame, by a speed and a way set as it starts, which the copy makes by itself
+    /// (see <see cref="CopyMakesTheTurn"/>); any other goes by its angles (RotationComponent).
+    /// </remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, Rotate action) {
+        return CopyMakesTheTurn(action);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    /// <remarks>Not in the replay that sets up a creature's first states, which may be long over.</remarks>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, Rotate action) {
         if (data != null) {
-            action.OnEnter();
+            TurnInState(action);
+        }
+    }
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// A turn of the creature itself toward an angle at a speed, which the copy makes by itself (see
+    /// <see cref="CopyMakesTheTurn"/>).
+    /// </remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, RotateTo action) {
+        return CopyMakesTheTurn(action);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    /// <remarks>As <see cref="ApplyNetworkDataFromAction(EntityNetworkData, Rotate)"/>.</remarks>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, RotateTo action) {
+        if (data != null) {
+            TurnInState(action);
+        }
+    }
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// A turn of the creature itself to an angle over a time, eased, which the copy makes by itself (see
+    /// <see cref="CopyMakesTheTurn"/>).
+    /// </remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimateRotationTo action) {
+        return CopyMakesTheTurn(action);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    /// <remarks>As <see cref="ApplyNetworkDataFromAction(EntityNetworkData, Rotate)"/>.</remarks>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AnimateRotationTo action) {
+        if (data != null) {
+            TurnInState(action);
+        }
+    }
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>As <see cref="GetNetworkDataFromAction(EntityNetworkData, AnimateRotationTo)"/>.</remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, AnimateRotationToV2 action) {
+        return CopyMakesTheTurn(action);
+    }
+
+    /// <summary>Applies network data to the FSM action.</summary>
+    /// <remarks>As <see cref="ApplyNetworkDataFromAction(EntityNetworkData, Rotate)"/>.</remarks>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, AnimateRotationToV2 action) {
+        if (data != null) {
+            TurnInState(action);
         }
     }
 

@@ -85,8 +85,14 @@ internal sealed class PositionSequence {
     /// was taken for a single packet - so a position that had covered three packets' worth of ground was read as
     /// having covered it in one, and everything it was doing came out three times as fast as it was.
     /// </param>
+    /// <param name="orSame">
+    /// Whether one that came in the same packet as the last one taken is taken too. What goes the way that is sent
+    /// again until it arrives is taken in after what came beside it the other way (BasePacket.ReadPacketData), and may
+    /// be the newer of the two, like the first angle of a turn of a creature beside the last angle of the turn before
+    /// (RotationComponent).
+    /// </param>
     /// <returns>Whether the position is newer than the last one taken.</returns>
-    public bool Accepts(ushort sequence, out int gap) {
+    public bool Accepts(ushort sequence, out int gap, bool orSame = false) {
         gap = 1;
         // Zero is what a position carries when nothing stamped it with the packet it came in - one that travelled
         // inside another kind of update, or one out of the pool that was never written to. There is nothing to
@@ -102,7 +108,8 @@ internal sealed class PositionSequence {
             // Compared by the sign of the difference in the size the numbers are kept in, so that the step from the
             // largest back to zero reads as one forward rather than as sixty-five thousand back
             var difference = (short) (sequence - _last);
-            if (difference <= 0 && difference > -ReorderWindow && _refused < RefusalLimit) {
+            if ((difference < 0 || difference == 0 && !orSame) && difference > -ReorderWindow &&
+                _refused < RefusalLimit) {
                 _refused++;
 
                 return false;

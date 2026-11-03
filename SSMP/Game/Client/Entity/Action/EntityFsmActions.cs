@@ -1322,6 +1322,28 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
+    /// Whether the scene host's FSM has gone on from a state by the time what the creature did through it came here,
+    /// which then shows nothing (said once a room).
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    /// <param name="stateName">The state.</param>
+    private static bool HostLeft(HutongGames.PlayMaker.Fsm fsm, string stateName) {
+        if (!HostStates.TryGetValue(fsm, out var hostState) || hostState == stateName) {
+            return false;
+        }
+
+        var owner = fsm.GameObject == null ? "?" : fsm.GameObject.name;
+        if (SaidLeftAtOnce.Add($"{owner}/{fsm.Name}/{stateName}")) {
+            Logger.Info(
+                $"What '{owner}' does through '{stateName}' of '{fsm.Name}' came after the scene host's FSM had gone " +
+                $"on to '{hostState}', so it ended as it began and showed nothing (said once a room)"
+            );
+        }
+
+        return true;
+    }
+
+    /// <summary>
     /// Register a state change for the given FSM. Will propagate this change to all actions that are running in
     /// that state.
     /// </summary>
@@ -1393,17 +1415,9 @@ internal static partial class EntityFsmActions {
         /// death let the spray out into the world (the user's report of 2026-10-18).
         /// </summary>
         public void Register() {
-            if (HostStates.TryGetValue(Fsm, out var hostState) && hostState != StateName) {
-                // Nothing of it shows then: a warning of where a boss comes up, shown for the second before it does,
-                // never showed for a player whose game heard of it late (USER 10-19)
-                var owner = Fsm.GameObject == null ? "?" : Fsm.GameObject.name;
-                if (SaidLeftAtOnce.Add($"{owner}/{Fsm.Name}/{StateName}")) {
-                    Logger.Info(
-                        $"What '{owner}' does through '{StateName}' of '{Fsm.Name}' came after the scene host's FSM " +
-                        $"had gone on to '{hostState}', so it ended as it began and showed nothing (said once a room)"
-                    );
-                }
-
+            // Nothing of it shows then: a warning of where a boss comes up, shown for the second before it does,
+            // never showed for a player whose game heard of it late (USER 10-19)
+            if (HostLeft(Fsm, StateName)) {
                 ExitState();
                 return;
             }

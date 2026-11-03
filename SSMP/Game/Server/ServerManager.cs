@@ -1051,6 +1051,18 @@ internal abstract class ServerManager : IServerManager {
                 entityData.HeardAt[HeardScale] = now;
             }
         }
+
+        // A turn as it goes on, the newest only, like a position. None is kept for the players who walk in later: the
+        // angle it ends up at goes with its data, which is (RotationComponent)
+        if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Rotation) &&
+            entityData.TakesNewer(id, HeardRotation, sequence)) {
+            SendDataInSameScene(
+                id,
+                playerData.CurrentScene,
+                entityUpdate,
+                static (updateManager, update) => updateManager.UpdateEntityRotation(update.Id, update.Rotation)
+            );
+        }
     }
 
     /// <summary>
@@ -1133,6 +1145,14 @@ internal abstract class ServerManager : IServerManager {
 
             foreach (var updateData in entityUpdate.GenericData) {
                 updateData.SenderId = id;
+
+                // An angle that the creature turned to goes by the packet it was first sent in, in one order with its
+                // turn as it goes on (OnEntityUpdate): one sent again after a newer one went is neither passed on nor
+                // kept, and one that came beside the newest is the newer (RotationComponent)
+                if (updateData.Type == EntityComponentType.Rotation &&
+                    !entityData.TakesNewer(id, HeardRotation, entityUpdate.ReceivedSequence, true)) {
+                    continue;
+                }
 
                 // The health of a creature is told by the game that runs it alone; the other games send the damage
                 // that their copies took, which goes on to it (HealthManagerComponent)
@@ -1409,10 +1429,11 @@ internal abstract class ServerManager : IServerManager {
 
     /// <summary>
     /// The kinds of things heard of an entity besides its data, which go by their component type (see
-    /// <see cref="ServerEntityData.HeardAt"/>): whether it is on, its clip, its scale, where it stands, and the variables
-    /// of each FSM from this one on.
+    /// <see cref="ServerEntityData.HeardAt"/>): whether it is on, its clip, its scale, where it stands, its turn as it
+    /// goes on, and the variables of each FSM from this one on.
     /// </summary>
-    private const int HeardActive = -1, HeardClip = -2, HeardScale = -3, HeardPosition = -4, HeardFsmVariables = 1000;
+    private const int HeardActive = -1, HeardClip = -2, HeardScale = -3, HeardPosition = -4, HeardRotation = -5,
+        HeardFsmVariables = 1000;
 
     /// <summary>
     /// How recently a kind of thing must have been heard as it happened for the state of a room to leave it be, in

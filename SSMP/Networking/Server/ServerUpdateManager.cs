@@ -396,6 +396,19 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     }
 
     /// <summary>
+    /// Update the angle of an entity as it turns in the current packet (see <see cref="EntityUpdateType.Rotation"/>).
+    /// </summary>
+    /// <param name="entityId">The ID of the entity.</param>
+    /// <param name="rotation">The angle about its depth.</param>
+    public void UpdateEntityRotation(ushort entityId, float rotation) {
+        lock (Lock) {
+            var entityUpdate = FindOrCreateEntityUpdate<EntityUpdate>(entityId, ClientUpdatePacketId.EntityUpdate);
+            entityUpdate!.UpdateTypes.Add(EntityUpdateType.Rotation);
+            entityUpdate.Rotation = rotation;
+        }
+    }
+
+    /// <summary>
     /// Update how far the scene host has got through what the scene clients did to an entity before telling it.
     /// </summary>
     /// <param name="entityId">The ID of the entity.</param>

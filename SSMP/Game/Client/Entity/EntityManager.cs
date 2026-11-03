@@ -503,6 +503,9 @@ internal class EntityManager {
                 update.ReceivedSequence
             );
 
+        if (update.UpdateTypes.Contains(EntityUpdateType.Rotation))
+            entity.UpdateRotation(update.Rotation, update.ReceivedSequence);
+
         return true;
     }
 
@@ -553,11 +556,11 @@ internal class EntityManager {
                 entity.UpdateIsActive(update.IsActive);
 
             if (update.UpdateTypes.Contains(EntityUpdateType.HostFsm))
-                entity.UpdateHostFsmData(update.HostFsmData);
+                entity.UpdateHostFsmData(update.HostFsmData, alreadyInSceneUpdate);
         }
 
         if (update.UpdateTypes.Contains(EntityUpdateType.Data) && !isPersonal)
-            entity.UpdateData(update.GenericData, alreadyInSceneUpdate);
+            entity.UpdateData(update.GenericData, alreadyInSceneUpdate, update.ReceivedSequence);
 
         // A move that the scene host's FSM went into, which the copy plays by itself, starts once all of this is in
         entity.StartMoveHeard();

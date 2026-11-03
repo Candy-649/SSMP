@@ -96,6 +96,11 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
     public byte AnimationWrapMode { get; set; }
 
     /// <summary>
+    /// The angle of the entity about its depth as it turns (see <see cref="EntityUpdateType.Rotation"/>).
+    /// </summary>
+    public float Rotation { get; set; }
+
+    /// <summary>
     /// Construct the entity update data.
     /// </summary>
     public EntityUpdate() {
@@ -116,6 +121,7 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
         Scale.Reset();
         AnimationId = 0;
         AnimationWrapMode = 0;
+        Rotation = 0;
     }
 
     /// <inheritdoc />
@@ -171,6 +177,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
                 packet.Write(report.PushedY);
             }
         }
+
+        if (UpdateTypes.Contains(EntityUpdateType.Rotation)) {
+            packet.Write(Rotation);
+        }
     }
 
     /// <inheritdoc />
@@ -216,6 +226,10 @@ internal class EntityUpdate : BaseEntityUpdate, IPoolable {
                 var pushedX = packet.ReadFloat();
                 Anticipations.Add(new AnticipationReport(tag, number, since, pushedX, packet.ReadFloat()));
             }
+        }
+
+        if (UpdateTypes.Contains(EntityUpdateType.Rotation)) {
+            Rotation = packet.ReadFloat();
         }
     }
 
@@ -596,10 +610,10 @@ internal class ReliableEntityUpdate : BaseEntityUpdate, IPoolable {
     /// <summary>
     /// The number of the packet this was first sent in, filled in on reading rather than sent
     /// (UpdatePacket.ReadPacket): the packet it came in, or for one sent again in a later packet because the first was
-    /// lost, the packet that was lost. Only the clip is compared by it (ServerEntityData.TakesNewer,
-    /// Entity.IsLatePose), as it was when it came in the unreliable kind: over a transport that does not keep in order
-    /// what it carries, a clip sent again after a newer one went, or one overtaken on the way, is older than the clip
-    /// shown and is not played.
+    /// lost, the packet that was lost. The clip is compared by it (ServerEntityData.TakesNewer, Entity.IsLatePose), as
+    /// it was when it came in the unreliable kind: over a transport that does not keep in order what it carries, a clip
+    /// sent again after a newer one went, or one overtaken on the way, is older than the clip shown and is not played.
+    /// So is an angle that the entity turned to, in one order with its turn as it goes on (RotationComponent).
     /// </summary>
     public ushort ReceivedSequence { get; set; }
 
@@ -1236,7 +1250,14 @@ internal enum EntityUpdateType {
     /// what lets the client's copy go on moving the way the entity moves by itself while it waits, rather than stand
     /// still (see <see cref="AnticipationReport"/>).
     /// </summary>
-    Anticipation
+    Anticipation,
+
+    /// <summary>
+    /// The angle of the entity as it turns, frame after frame, which only the unreliable kind carries: one that is lost
+    /// is put right by the next, and the angle it ends up at goes once with its data, the way that is sent again until
+    /// it arrives (RotationComponent).
+    /// </summary>
+    Rotation
 }
 
 /// <summary>

@@ -84,8 +84,10 @@ internal class ServerEntityData {
     /// </summary>
     /// <param name="playerId">The ID of the player who sent it.</param>
     /// <param name="kind">The kind of thing.</param>
-    /// <param name="sequence">The number of the packet it came in.</param>
-    public bool TakesNewer(ushort playerId, int kind, ushort sequence) {
+    /// <param name="sequence">The number of the packet it came in, or that it was first sent in.</param>
+    /// <param name="orSame">Whether one that came in the same packet as the one last taken is taken too (see
+    /// <see cref="Util.PositionSequence.Accepts"/>).</param>
+    public bool TakesNewer(ushort playerId, int kind, ushort sequence, bool orSame = false) {
         if (_order.Count > 0 && _orderOf != playerId) {
             _order.Clear();
         }
@@ -96,7 +98,7 @@ internal class ServerEntityData {
             _order[kind] = order;
         }
 
-        return order.Accepts(sequence, out _);
+        return order.Accepts(sequence, out _, orSame);
     }
 
     public ServerEntityData() {

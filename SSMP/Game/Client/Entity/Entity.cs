@@ -471,6 +471,12 @@ internal partial class Entity {
     private readonly PositionSequence _scaleSequence;
 
     /// <summary>
+    /// The packet order of the angles the copy took as the creature turned, so that an older one arriving after a newer
+    /// one is thrown away, as for positions (see <see cref="UpdateRotation"/>).
+    /// </summary>
+    private readonly PositionSequence _rotationSequence;
+
+    /// <summary>
     /// Which way the game that runs this creature last said its copy faces (the sign of its x scale), and when, for the
     /// log of what hurt the player (CoopSave.Hurts); 0 until it has said.
     /// </summary>
@@ -520,6 +526,7 @@ internal partial class Entity {
 
         _positionSequence = new PositionSequence($"entity {id} ({type})");
         _scaleSequence = new PositionSequence($"the facing of entity {id} ({type})");
+        _rotationSequence = new PositionSequence($"the turn of entity {id} ({type})");
 
         _isControlled = true;
         _keepsRunning = keepsRunning;
@@ -739,6 +746,9 @@ internal partial class Entity {
 
             // What the parts send goes through the entity, which holds it back with its replays (SendEntityData)
             component.SendThrough = SendEntityData;
+            if (component is RotationComponent rotation) {
+                rotation.TurnsOnTheCopy = CopyTurnsItself;
+            }
             if (component is not HealthManagerComponent && !_updatableComponents.Contains(component)) {
                 _updatableComponents.Add(component);
             }
@@ -3247,6 +3257,16 @@ internal partial class Entity {
     private static readonly Dictionary<GameObject, Entity> EntitiesByRoomObject = new();
 
     /// <summary>
+    /// Whether an object, the room's own of a creature or its copy, is a creature of its own, whose copy is put where
+    /// the creature is said to be and is seen to go at the speed that shows (PredictiveInterpolation), rather than a
+    /// part of another creature, which the copy of that one carries.
+    /// </summary>
+    /// <param name="gameObject">The object.</param>
+    internal static bool IsACreatureOfItsOwn(GameObject gameObject) =>
+        (EntitiesByRoomObject.TryGetValue(gameObject, out var entity) ||
+         EntitiesByCopy.TryGetValue(gameObject, out entity)) && !entity._hasParent;
+
+    /// <summary>
     /// What a replay that puts an object under a parent - one of the room's own objects, or none for the top of its
     /// scene - is to put there: the object itself, or for the copy of a creature, the room's own creature, as the scene
     /// host's creature put itself there, while the copy stays at the top of its scene. Null when nothing is to be put
@@ -4416,6 +4436,23 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Turns the copy, and the room's own creature with it, to the angle that the scene host's creature had turned to
+    /// as it went on turning (see RotationComponent), unless a newer angle came already, or the copy plays a move by
+    /// itself, which turns it there as the move turns the creature here: the angle that a turn ends up at comes as
+    /// data, which waits for the copy to get as far (UpdateData).
+    /// </summary>
+    /// <param name="rotation">The angle about its depth.</param>
+    /// <param name="sequence">The number of the packet it came in.</param>
+    public void UpdateRotation(float rotation, ushort sequence) {
+        if (_runHereMove || !_rotationSequence.Accepts(sequence, out _)) {
+            return;
+        }
+
+        RotationComponent.Turn(Object.Client, rotation);
+        RotationComponent.Turn(Object.Host, rotation);
+    }
+
+    /// <summary>
     /// Updates the scale of the client entity.
     /// </summary>
     /// <param name="scale">The new scale data.</param>
@@ -4633,10 +4670,19 @@ internal partial class Entity {
     /// </summary>
     /// <param name="entityNetworkData">A list of data to update the client entity with.</param>
     /// <param name="alreadyInSceneUpdate">Whether this data is from an already in scene update.</param>
-    public void UpdateData(List<EntityNetworkData> entityNetworkData, bool alreadyInSceneUpdate) {
+    /// <param name="sequence">The number of the packet it was first sent in, or 0 for none, as of what was held.
+    /// </param>
+    public void UpdateData(List<EntityNetworkData> entityNetworkData, bool alreadyInSceneUpdate, ushort sequence = 0) {
         foreach (var data in entityNetworkData) {
             if (data.Type == EntityComponentType.Echo) {
                 HearEcho(data);
+                continue;
+            }
+
+            // An angle that the creature turned to, in one order with its turn as it goes on (UpdateRotation) and with
+            // the replays of the turns that the copy makes by itself: one sent again after a newer one came is not
+            // taken, and one that came beside the newest is the newer (RotationComponent)
+            if (data.Type == EntityComponentType.Rotation && !_rotationSequence.Accepts(sequence, out _, true)) {
                 continue;
             }
 
@@ -4755,6 +4801,12 @@ internal partial class Entity {
                 EntityFsmActions.ReadSubject(data, action);
                 EntityFsmActions.ApplyNetworkDataFromAction(data, action);
 
+                // A turn that the copy makes by itself from here on is newer than any angle sent before it, which a
+                // packet lost on the way may bring after it (UpdateRotation)
+                if (EntityFsmActions.TurnsTheCopysRoot(action)) {
+                    _rotationSequence.Accepts(sequence, out _, true);
+                }
+
                 if (ringSpawn) {
                     NoteDazeRingSpawnMade((SpawnObjectFromGlobalPool) action);
                 }
@@ -4803,6 +4855,14 @@ internal partial class Entity {
                 continue;
             }
 
+            // An angle goes only while the creature makes no turn that the copy makes by itself (RotationComponent), so
+            // what the copy still turns that way ends: the change of state that ended it may have been lost on the way.
+            // Not the angle kept for the room, which is older than the turns of the state it is told of
+            // (StartTheTurnsOf)
+            if (data.Type == EntityComponentType.Rotation && !alreadyInSceneUpdate) {
+                EntityFsmActions.StopTurnsOf(Object.Client);
+            }
+
             if (_components.TryGetValue(data.Type, out var component)) {
                 component.Update(data, alreadyInSceneUpdate);
             }
@@ -4813,7 +4873,8 @@ internal partial class Entity {
     /// Update the FSMs of the host entity to prepare for host transfer or disconnects.
     /// </summary>
     /// <param name="hostFsmData">Dictionary mapping FSM index to data.</param>
-    public void UpdateHostFsmData(Dictionary<byte, EntityHostFsmData> hostFsmData) {
+    /// <param name="fromTheRoom">Whether it came with the state of the room, walking in or after a gap.</param>
+    public void UpdateHostFsmData(Dictionary<byte, EntityHostFsmData> hostFsmData, bool fromTheRoom) {
         foreach (var (fsmIndex, data) in hostFsmData) {
             // Newer when heard just before the state of the room (see YieldsToNewer)
             if (YieldsToNewer(HeardFsmVariables + fsmIndex)) {
@@ -4852,6 +4913,9 @@ internal partial class Entity {
                     // same index
                     EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, stateName);
                     HearStateFromSceneHost(_fsms.Client[fsmIndex], stateName);
+                    if (fromTheRoom) {
+                        StartTheTurnsOf(_fsms.Client[fsmIndex], stateName);
+                    }
                 }
             }
 
