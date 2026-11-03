@@ -1029,9 +1029,10 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// The fields of a kind of action by which it is given numbers, points and switches, in the same order in both
-    /// games.
+    /// games. The scene host also goes on sending what the variables among them hold while an action whose replay went
+    /// to the other game still runs (Entity.AddVariableChanges).
     /// </summary>
-    private static FieldInfo[] ValueFieldsOf(Type type) {
+    internal static FieldInfo[] ValueFieldsOf(Type type) {
         if (!ValueFields.TryGetValue(type, out var fields)) {
             fields = Array.FindAll(
                 type.GetFields(BindingFlags.Instance | BindingFlags.Public),

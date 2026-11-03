@@ -26,4 +26,10 @@ internal class HookedEntityAction {
     /// The index of the hooked action.
     /// </summary>
     public int ActionIndex { get; set; }
+
+    /// <summary>
+    /// The numbers and points of its FSM that the action is given, found the first time its replay goes to the other
+    /// game (Entity.NoteReplayed); null until then.
+    /// </summary>
+    public NumbersRead? Reads { get; set; }
 }
