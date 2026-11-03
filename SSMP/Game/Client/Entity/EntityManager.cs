@@ -465,7 +465,8 @@ internal class EntityManager {
 
     /// <summary>
     /// Applies an unreliable entity update (position, scale, and the animation in the state of a room).
-    /// Returns false and buffers the update if the entity isn't ready yet.
+    /// Returns false and buffers the update if the entity isn't ready yet, or if the entity keeps it for later
+    /// (Entity.KeepsForLater).
     /// </summary>
     public bool HandleEntityUpdate(EntityUpdate update, bool alreadyInSceneUpdate = false) {
         // Scene host owns entity state; updates from peers are ignored.
@@ -482,36 +483,21 @@ internal class EntityManager {
             return false;
         }
 
-        // The stamp travels beside the position it describes rather than on its own, so it is read out here and
-        // handed over with it. An update that carries none says nothing either way, which is not the same as saying
-        // the scene host has taken nothing in.
-        var anticipation = update.UpdateTypes.Contains(EntityUpdateType.Anticipation)
-            ? update.Anticipations
-            : null;
+        // What the copy is behind with comes first, and the state of the room after all of it (Entity.KeepsForLater)
+        if (alreadyInSceneUpdate) {
+            entity.CatchUpWithWhatCameSince("the state of the room came");
+        } else if (entity.KeepsForLater(update)) {
+            return false;
+        }
 
-        if (update.UpdateTypes.Contains(EntityUpdateType.Position))
-            entity.UpdatePosition(update.Position, update.ReceivedSequence, anticipation);
-
-        if (update.UpdateTypes.Contains(EntityUpdateType.Scale))
-            entity.UpdateScale(update.Scale, update.ReceivedSequence);
-
-        if (update.UpdateTypes.Contains(EntityUpdateType.Animation))
-            entity.UpdateAnimation(
-                update.AnimationId,
-                (tk2dSpriteAnimationClip.WrapMode) update.AnimationWrapMode,
-                alreadyInSceneUpdate,
-                update.ReceivedSequence
-            );
-
-        if (update.UpdateTypes.Contains(EntityUpdateType.Rotation))
-            entity.UpdateRotation(update.Rotation, update.ReceivedSequence);
-
+        entity.TakeIn(update, alreadyInSceneUpdate);
         return true;
     }
 
     /// <summary>
     /// Applies a reliable entity update (the clip it started, active state, host FSM data, generic data).
-    /// Returns false and buffers the update if the entity isn't ready yet.
+    /// Returns false and buffers the update if the entity isn't ready yet, or if the entity keeps it for later
+    /// (Entity.KeepsForLater).
     /// </summary>
     public bool HandleReliableEntityUpdate(ReliableEntityUpdate update, bool alreadyInSceneUpdate = false) {
         if (!_entities.TryGetValue(update.Id, out var entity) || !_sceneRoleDetermined) {
@@ -525,46 +511,16 @@ internal class EntityManager {
             return false;
         }
 
-        // What one player did to something that belongs to each of them alone is not carried to the other on the way
-        // into a room.
-        //
-        // The server keeps whether each thing in a room is still there and how much health it has, and hands all of
-        // it to whoever walks in afterwards. For nearly everything that is what should happen: an enemy the other
-        // player killed is dead, and walking in should not raise it. But a creature carrying something that belongs
-        // to one player is not shared - this mod gives each of them their own copy of it - and handing over "that
-        // one is gone" took it away from a player who had never had it. One of them went through the room first, and
-        // the other could not get theirs at all: not by walking in, not by being made the one who runs the room,
-        // which reads the state of the copy it was just told to switch off.
-        //
-        // Only what was stored is turned away. While both of them are standing there it still behaves as one
-        // creature, so neither of them sees the other fighting nothing.
-        var isPersonal = alreadyInSceneUpdate && entity.Type == EntityType.Aknid;
-
-        // Active state and host FSM are driven by the scene host; clients are consumers only.
+        // As the unreliable kind (HandleEntityUpdate)
         if (!IsSceneHost) {
-            // The clip first, as when it came in the unreliable kind, which is taken in before this one: the entity
-            // is switched on or off and told the rest of that moment after it started the clip
-            if (update.UpdateTypes.Contains(EntityUpdateType.Animation))
-                entity.UpdateAnimation(
-                    update.AnimationId,
-                    (tk2dSpriteAnimationClip.WrapMode) update.AnimationWrapMode,
-                    alreadyInSceneUpdate,
-                    update.ReceivedSequence
-                );
-
-            if (update.UpdateTypes.Contains(EntityUpdateType.Active) && !isPersonal)
-                entity.UpdateIsActive(update.IsActive);
-
-            if (update.UpdateTypes.Contains(EntityUpdateType.HostFsm))
-                entity.UpdateHostFsmData(update.HostFsmData, alreadyInSceneUpdate);
+            if (alreadyInSceneUpdate) {
+                entity.CatchUpWithWhatCameSince("the state of the room came");
+            } else if (entity.KeepsForLater(update)) {
+                return false;
+            }
         }
 
-        if (update.UpdateTypes.Contains(EntityUpdateType.Data) && !isPersonal)
-            entity.UpdateData(update.GenericData, alreadyInSceneUpdate, update.ReceivedSequence);
-
-        // A move that the scene host's FSM went into, which the copy plays by itself, starts once all of this is in
-        entity.StartMoveHeard();
-
+        entity.TakeIn(update, alreadyInSceneUpdate, IsSceneHost);
         return true;
     }
 
@@ -815,7 +771,8 @@ internal class EntityManager {
             };
 
             if (!applied) {
-                // Still not applicable; it was re-enqueued by Handle*..nothing to do.
+                // Still not applicable and queued again by Handle*, or kept for later by its entity
+                // (Entity.KeepsForLater)
                 continue;
             }
 
@@ -864,7 +821,7 @@ internal class EntityManager {
     /// Discards and returns the buffered entity update packet to the object pool.
     /// </summary>
     /// <param name="update">The update packet to release.</param>
-    private static void ReleaseUpdate(BaseEntityUpdate update) {
+    internal static void ReleaseUpdate(BaseEntityUpdate update) {
         switch (update) {
             case EntityUpdate entityUpdate:
                 ObjectPool<EntityUpdate>.Return(entityUpdate);

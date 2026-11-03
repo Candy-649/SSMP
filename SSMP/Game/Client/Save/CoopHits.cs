@@ -1392,6 +1392,13 @@ internal partial class CoopHits {
             ? FindCopyHolding(part.gameObject)
             : null;
 
+        // A copy that goes on behind the scene host's creature takes in all that it is behind with first, so that the
+        // blow lands on the creature where it is over there now, which is where the scene host plays it
+        // (Entity.CatchUpWithWhatCameSince)
+        if (!isRemote && (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source))) {
+            (struckCopy ? enemyEntity : copied)?.CatchUpWithWhatCameSince("the local player strikes it");
+        }
+
         // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is. A
         // creature that this game runs answers a wound of this game's player at them, as it answers one of the
         // partner's (see PlaySetOff)

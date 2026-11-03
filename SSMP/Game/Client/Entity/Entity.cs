@@ -1901,6 +1901,7 @@ internal partial class Entity {
             HideTheRoomsOwnCopy();
             SayWhyTheCopyIsOff();
             UpdateRunHere();
+            PlayOnWhatCameSince();
             CheckWokenByLocalPlayer();
             CheckCaughtByCopy();
 
@@ -2978,6 +2979,9 @@ internal partial class Entity {
         // A talk of the local player with the copy ends here: the room's own creature goes on from where the scene
         // host's was, and the copy that the talk ran on is put away
         EndTalkHere(null);
+
+        // And from what the scene host last sent of it, with all that the copy was behind with taken in first
+        CatchUpWithWhatCameSince("this game takes over the room");
 
         ResetAnticipation();
         ForgetPosePackets();
@@ -4768,8 +4772,7 @@ internal partial class Entity {
                 // a catch is played here all through, and not again from what the scene host sends of it, and so is
                 // the part of an FSM that each game runs by itself (RunEachGamePart). What comes after what the copy
                 // plays by itself out of a catch that this game led is held until it has played that
-                // (HoldsForTheAftermath), and so is what comes after a move that the copy plays on to its own end of
-                // once the scene host's FSM came out of it (HoldsForTheMoveEnd).
+                // (HoldsForTheAftermath).
                 HearFromSceneHost(fsm, state);
                 if (fsm == _runHere) {
                     var muted = _mutedHere.Contains(action);
@@ -4783,7 +4786,7 @@ internal partial class Entity {
 
                     // And while it runs here for a talk of the local player, until the talk is over (TalkHere)
                     if ((!muted || HoldsWithWhatMadeIt(action)) &&
-                        (WaitsForEcho || HoldsForTheAftermath(state) || HoldsForTheMoveEnd(state) || _runHereTalk)) {
+                        (WaitsForEcho || HoldsForTheAftermath(state) || _runHereTalk)) {
                         HoldForEcho(data, action);
                         continue;
                     }
@@ -4818,21 +4821,16 @@ internal partial class Entity {
 
             // How the scene host switches its creature in a move that the copy plays by itself - drawn, turned, on
             // which layer, whether it can be hit or hurts, how it moves by itself - waits for the copy to get to the
-            // state of the move that the scene host's FSM is at (WaitsForTheCopy), and once that came out of the move
-            // first, for the copy to be through it, which it comes after (see _moveFinishBy). Not its health or death,
-            // which are the scene host's to settle as they come, nor the music of the room. A boss that rose out of the
-            // lava turned back as it came out, which came here before the copy's own rise turned it: it rose here and
-            // stayed on its side
+            // state of the move that the scene host's FSM is at (WaitsForTheCopy). Not its health or death, which are
+            // the scene host's to settle as they come, nor the music of the room. A boss that rose out of the lava
+            // turned back as it came out, which came here before the copy's own rise turned it: it rose here and
+            // stayed on its side. What the scene host sends once its FSM came out of the move first waits for the copy
+            // to be through it, with all else it sends then (KeepsForLater)
             if (!_takingWhatWaited && data.Type is not (EntityComponentType.Health or EntityComponentType.Death or
                     EntityComponentType.Music)) {
                 // So does what came along with the start of the move, where the scene host's FSM was heard to be
                 // further into it than its first state, for the move to start (HoldsSwitchForTheMoveHeard)
                 if (HoldsSwitchForTheMoveHeard(data)) {
-                    continue;
-                }
-
-                if (_runHereMove && _moveFinishBy != null) {
-                    HoldForEcho(data);
                     continue;
                 }
 
@@ -5024,6 +5022,7 @@ internal partial class Entity {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
         _heldUntilPlaced = null;
+        ForgetWhatCameSince();
 
         // What the entity was doing to the local player is undone first. Its hooks and parts go whatever happens there:
         // left behind, they would go on acting for a room that is gone
