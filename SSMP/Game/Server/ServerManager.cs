@@ -78,6 +78,17 @@ internal abstract class ServerManager : IServerManager {
     private readonly ConcurrentDictionary<string, uint> _sceneHostEpochs;
 
     /// <summary>
+    /// What the name of a room that is over has after the name of its scene, followed by its number (see
+    /// <see cref="EndRoom"/>). No scene has it in its name: it is not a character a file may have in its name.
+    /// </summary>
+    private const string EndedRoomMark = "|ended ";
+
+    /// <summary>
+    /// How many rooms have been over, which numbers the names they are kept under (see <see cref="EndRoom"/>).
+    /// </summary>
+    private uint _roomsEnded;
+
+    /// <summary>
     /// The white-list for managing player logins.
     /// </summary>
     private readonly WhiteList _whiteList;
@@ -540,6 +551,7 @@ internal abstract class ServerManager : IServerManager {
 
         // Store it in their PlayerData object
         playerData.CurrentScene = newSceneName;
+        playerData.DiedForGood = false;
         SendPlayerRoom(id, newSceneName);
         playerData.Position = playerEnterScene.Position;
         playerData.Scale = playerEnterScene.Scale;
@@ -1267,10 +1279,15 @@ internal abstract class ServerManager : IServerManager {
 
         Logger.Info($"Handling player leave scene (dc: {disconnected}) for ID {id}, left scene: {sceneName}");
 
+        // A player who died for good in a room that is over leaves it as it is kept for them (EndRoom)
+        var room = playerData.CurrentScene.StartsWith(sceneName + EndedRoomMark, StringComparison.Ordinal)
+            ? playerData.CurrentScene
+            : sceneName;
+
         // If the current scene of the player is the one being left, we can set it to an empty string
         // It can happen that enter scene data arrives earlier than the leave scene packet, in which case this will
         // not be true, and we don't want to set the current scene (which is now already something else) to empty
-        if (playerData.CurrentScene == sceneName) {
+        if (playerData.CurrentScene == room) {
             playerData.CurrentScene = "";
             SendPlayerRoom(id, "");
         }
@@ -1281,27 +1298,16 @@ internal abstract class ServerManager : IServerManager {
         var isSceneNowEmpty = true;
         var scenePlayers = new List<KeyValuePair<ushort, ServerPlayerData>>();
         foreach (var pair in _playerData) {
-            if (pair.Key != id && pair.Value.CurrentScene == sceneName) {
+            if (pair.Key != id && pair.Value.CurrentScene == room) {
                 isSceneNowEmpty = false;
                 scenePlayers.Add(pair);
             }
         }
 
-        if (_fullSynchronisation && playerData.IsSceneHost && scenePlayers.Count > 0) {
-            var epoch = GetNextSceneHostEpoch(sceneName);
-            var newHostPair = scenePlayers[0];
-            newHostPair.Value.IsSceneHost = true;
-            playerData.IsSceneHost = false;
-
-            Logger.Info(
-                $"Player {id} left scene. Host transferred to {newHostPair.Key} in scene {sceneName} (epoch {epoch})"
-            );
-
-            foreach (var pair in scenePlayers) {
-                var updateManager = _netServer.GetUpdateManagerForClient(pair.Key);
-                bool isNewHost = (pair.Key == newHostPair.Key);
-                updateManager?.SetSceneHostTransfer(sceneName, epoch, demote: !isNewHost);
-            }
+        // Run on by a player alive in it: one who died there for good is on their way out of it as well
+        var newHost = scenePlayers.Find(pair => !pair.Value.DiedForGood).Value;
+        if (_fullSynchronisation && playerData.IsSceneHost && newHost != null) {
+            HandOverSceneHost(playerData, newHost, room, scenePlayers.ConvertAll(pair => pair.Value), "left scene");
         }
 
         foreach (var pair in scenePlayers) {
@@ -1310,7 +1316,7 @@ internal abstract class ServerManager : IServerManager {
             if (disconnected) {
                 updateManager?.AddPlayerDisconnectData(id, username, timeout);
             } else {
-                updateManager?.AddPlayerLeaveSceneData(id, sceneName);
+                updateManager?.AddPlayerLeaveSceneData(id, SceneOf(room));
             }
         }
 
@@ -1322,10 +1328,17 @@ internal abstract class ServerManager : IServerManager {
             // If the scene is now empty, we can remove all data from stored entities in that scene
             if (isSceneNowEmpty) {
                 foreach (var keyDataPair in _entityData) {
-                    if (keyDataPair.Key.Scene == sceneName) {
+                    if (keyDataPair.Key.Scene == room) {
                         _entityData.TryRemove(keyDataPair.Key, out _);
                     }
                 }
+
+                if (room != SceneOf(room)) {
+                    _sceneHostEpochs.TryRemove(room, out _);
+                }
+            } else if (newHost == null && room == SceneOf(room)) {
+                // Everyone left in it died there for good
+                EndRoom(room);
             }
         }
 
@@ -1333,6 +1346,122 @@ internal abstract class ServerManager : IServerManager {
             // Now remove the client from the player data mapping
             _playerData.TryRemove(id, out _);
         }
+    }
+
+    /// <summary>
+    /// Takes it that a player died for good in the room they are in (see <see cref="ServerPlayerData.DiedForGood"/>).
+    /// Their game is on its way out of the room, and goes on running it as it was when they died until it leaves.
+    /// Two players who both died came back into the room a moment apart, and the one who came back first was given
+    /// what the game of the other kept running: the boss standing over the players it had killed, in a state that it
+    /// never comes out of, where it stood for the rest of the fight (USER 11-03, 这个幽影直接不会动了，保持在开场姿势).
+    /// So the room goes to a player still alive in it, and once nobody alive is in it, it is over (see
+    /// <see cref="EndRoom"/>).
+    /// </summary>
+    /// <param name="playerData">The player.</param>
+    private void MarkDiedForGood(ServerPlayerData playerData) {
+        if (playerData.DiedForGood) {
+            return;
+        }
+
+        playerData.DiedForGood = true;
+        var room = playerData.CurrentScene;
+        if (room.Length == 0 || room != SceneOf(room)) {
+            Logger.Info($"({playerData.Id}, {playerData.Username}) died for good, in no room that goes on");
+            return;
+        }
+
+        var inTheRoom = new List<ServerPlayerData>();
+        foreach (var other in _playerData.Values) {
+            if (other.Id != playerData.Id && other.CurrentScene == room) {
+                inTheRoom.Add(other);
+            }
+        }
+
+        var alive = inTheRoom.Find(other => !other.DiedForGood);
+        Logger.Info(
+            $"({playerData.Id}, {playerData.Username}) died for good in '{room}', " +
+            (alive == null ? "with nobody alive left in it" : $"with ({alive.Id}, {alive.Username}) alive in it")
+        );
+
+        if (!_fullSynchronisation) {
+            return;
+        }
+
+        if (alive == null) {
+            EndRoom(room);
+        } else if (playerData.IsSceneHost) {
+            inTheRoom.Add(playerData);
+            HandOverSceneHost(playerData, alive, room, inTheRoom, "died for good");
+        }
+    }
+
+    /// <summary>
+    /// Ends the room of a scene that nobody alive is in any more, as each game's own death ends it, which brings its
+    /// player back into a room loaded anew: what was kept of it is forgotten, and whoever comes into the scene next runs
+    /// it from the start, as their game has it. The players still in it, who died there, are kept in it under a name of
+    /// its own until their games leave it, and what they send goes to each other and is kept under that name: it is
+    /// still the room on their screens, and nothing of it reaches the scene that the others come back into.
+    /// </summary>
+    /// <param name="sceneName">The name of the scene.</param>
+    private void EndRoom(string sceneName) {
+        var ended = $"{sceneName}{EndedRoomMark}{++_roomsEnded}";
+        var names = new List<string>();
+        foreach (var player in _playerData.Values) {
+            if (player.CurrentScene == sceneName) {
+                player.CurrentScene = ended;
+                names.Add(player.Username);
+            }
+        }
+
+        var forgotten = 0;
+        foreach (var key in _entityData.Keys) {
+            if (key.Scene == sceneName && _entityData.TryRemove(key, out _)) {
+                forgotten++;
+            }
+        }
+
+        Logger.Info(
+            $"Nobody alive is in '{sceneName}' any more, so the room is over: the {forgotten} creature(s) kept of it " +
+            $"are forgotten, whoever comes in next runs it anew, and {string.Join(", ", names)} go(es) on in it as " +
+            $"'{ended}' until they leave"
+        );
+    }
+
+    /// <summary>
+    /// Has another player run a room in place of the one who did, and tells the players in it.
+    /// </summary>
+    /// <param name="from">The player who ran it.</param>
+    /// <param name="to">The player who runs it now.</param>
+    /// <param name="sceneName">The name of the scene.</param>
+    /// <param name="told">The players in it to tell.</param>
+    /// <param name="why">What the player who ran it did, for the log.</param>
+    private void HandOverSceneHost(
+        ServerPlayerData from,
+        ServerPlayerData to,
+        string sceneName,
+        List<ServerPlayerData> told,
+        string why
+    ) {
+        var epoch = GetNextSceneHostEpoch(sceneName);
+        to.IsSceneHost = true;
+        from.IsSceneHost = false;
+
+        Logger.Info($"Player {from.Id} {why}. Host transferred to {to.Id} in scene {sceneName} (epoch {epoch})");
+
+        foreach (var player in told) {
+            _netServer.GetUpdateManagerForClient(player.Id)?.SetSceneHostTransfer(
+                sceneName, epoch, demote: player != to
+            );
+        }
+    }
+
+    /// <summary>
+    /// The scene of a room: the room itself, or the scene of a room that is over (see <see cref="EndRoom"/>).
+    /// </summary>
+    /// <param name="room">The room.</param>
+    private static string SceneOf(string room) {
+        var mark = room.IndexOf(EndedRoomMark, StringComparison.Ordinal);
+        return mark < 0 ? room : room.Substring(0, mark);
     }
 
     /// <summary>
@@ -1811,9 +1940,15 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="update">The CoopSaveUpdate packet data.</param>
     private void OnCoopSaveUpdate(ushort id, CoopSaveUpdate update) {
-        if (!_playerData.ContainsKey(id)) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
             Logger.Warn($"Received CoopSaveUpdate data, but player with ID {id} is not in mapping");
             return;
+        }
+
+        // A player who says that nobody is coming has died for good, with nobody left standing who could pull them
+        // up: the game plays out their death, which brings them back at their bench (CoopSave.TellNobodyIsComing)
+        if (update.Kind == CoopSaveUpdateKind.RescueLost) {
+            MarkDiedForGood(playerData);
         }
 
         update.PlayerId = id;
@@ -2172,7 +2307,7 @@ internal abstract class ServerManager : IServerManager {
                     Skin = otherPd.Skin,
                     CrestType = otherPd.CrestType,
                     SaveKey = AuthUtil.GetSaveKey(otherPd.AuthKey),
-                    Room = otherPd.CurrentScene
+                    Room = SceneOf(otherPd.CurrentScene)
                 }
             );
 

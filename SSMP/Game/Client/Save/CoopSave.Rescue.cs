@@ -1074,6 +1074,13 @@ internal partial class CoopSave {
         }
 
         EndWaitEveryoneDown(rescue, player.Username);
+
+        // Said on as the death of this player plays out now as well, which is how the server knows that this game is
+        // out of the room it died in too, as the game of the one who said it first is (ServerManager.MarkDiedForGood)
+        Logger.Info($"Telling {GetCheckedNames()} that nobody is coming, because this player dies as well");
+        SendToMembers(new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.RescueLost
+        });
     }
 
     /// <summary>

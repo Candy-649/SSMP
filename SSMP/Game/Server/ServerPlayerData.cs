@@ -60,6 +60,13 @@ internal class ServerPlayerData : IServerPlayer {
     public bool IsSceneHost { get; set; }
 
     /// <summary>
+    /// Whether this player died for good in their current scene, with nobody left standing to pull them up: their
+    /// game is on its way to where it brings them back, and runs nothing of the room any more
+    /// (see ServerManager.MarkDiedForGood). Until they come into a scene again.
+    /// </summary>
+    public bool DiedForGood { get; set; }
+
+    /// <summary>
     /// Reference of the authorized list for checking whether this player is authorized.
     /// </summary>
     private readonly AuthKeyList _authorizedList;
