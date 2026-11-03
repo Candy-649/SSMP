@@ -1379,12 +1379,6 @@ internal partial class CoopHits {
 
         SayWhatWasHit(responder, hit, isRemote, isEnemyEntity);
 
-        // Where the enemy stood as the hit landed, which is what the direction of a hit that spreads out from its
-        // source is worked out against
-        var enemyPosition = isEnemyEntity && responder is Component hitComponent
-            ? hitComponent.transform.position
-            : (Vector3?) null;
-
         // A part of the copy of something that the scene host runs, like a falling bell, a creature's shield or a flea
         // of a festival game that both players play with the same fleas. What it has for health goes by the hits of
         // enemies instead
@@ -1398,6 +1392,12 @@ internal partial class CoopHits {
         if (!isRemote && (hit.IsHeroDamage || LocalToolComponent.IsLocalTool(hit.Source))) {
             (struckCopy ? enemyEntity : copied)?.CatchUpWithWhatCameSince("the local player strikes it");
         }
+
+        // Where the enemy stood as the hit landed, which is what the direction of a hit that spreads out from its
+        // source is worked out against
+        var enemyPosition = isEnemyEntity && responder is Component hitComponent
+            ? hitComponent.transform.position
+            : (Vector3?) null;
 
         // Anything else, like an enemy, takes the hit as usual, and the hook of Recoil knows whose hit it is. A
         // creature that this game runs answers a wound of this game's player at them, as it answers one of the

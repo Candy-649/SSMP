@@ -1636,7 +1636,8 @@ internal partial class Entity {
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state.</param>
-    private void HearStateFromSceneHost(PlayMakerFSM fsm, string stateName) {
+    /// <param name="before">The state that the scene host's FSM was heard in before.</param>
+    private void HearStateFromSceneHost(PlayMakerFSM fsm, string stateName, string before) {
         // The part is kept by the kind of creature and the name of the FSM, and not everything of that kind has it:
         // the spikes that one boss shoots are named after it, so they are taken for that boss, and their own FSM of
         // that name has no such state. Looked for anyway, it threw at the first of them, and the game of the player
@@ -1673,7 +1674,7 @@ internal partial class Entity {
         // of the local player, waiting for the scene host's answer, ends now rather than once the answer comes, which
         // the scene host sent only after it went into the move - a creature that caught the local player held them
         // that much longer, and jumped from where it held them to where the scene host's creature had got to by then
-        if (StartsAMove(fsm, stateName, out var first, out var move)) {
+        if (StartsAMove(fsm, stateName, before, out var first, out var move)) {
             _moveHeard = (fsm, first, move, stateName);
             if (WaitsForEcho || _aftermath != null) {
                 Logger.Info(
@@ -1715,20 +1716,23 @@ internal partial class Entity {
     /// goes into that state again while the copy is past it, which a move never does within itself; or as it goes into
     /// a state of the move that the first one goes on to, which it passed over between two sends: only the latest state
     /// of an FSM is sent, also again for one that was lost, and a stun starts in a state that it is out of the next
-    /// frame - but only one that nothing outside the move goes to. Not from the state of a room asked for again after a
-    /// gap, which says where the scene host's FSM is but not since when, nor from what the copy takes in at once that
-    /// it was behind with (see <see cref="_catchingUp"/>), nor while the local player talks to the creature or the copy
-    /// runs the part of the FSM that each game runs by itself, nor while it runs another of the creature's FSMs here,
-    /// nor for a move that the copy's FSM goes through another way (see <see cref="StatesOfTheMove"/>), which it
-    /// follows the scene host through.
+    /// frame - but only one that nothing outside the move goes to, and not where it was heard in the move already, the
+    /// copy having left the move to it then: the move is under way there. Not from the state of a room asked for again
+    /// after a gap, which says where the scene host's FSM is but not since when, nor from what the copy takes in at
+    /// once that it was behind with (see <see cref="_catchingUp"/>), nor while the local player talks to the creature
+    /// or the copy runs the part of the FSM that each game runs by itself, nor while it runs another of the creature's
+    /// FSMs here, nor for a move that the copy's FSM goes through another way (see <see cref="StatesOfTheMove"/>),
+    /// which it follows the scene host through.
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state the scene host's FSM went to.</param>
+    /// <param name="before">The state that the scene host's FSM was heard in before.</param>
     /// <param name="first">The first state of the move.</param>
     /// <param name="move">Every state of the move, the first one too.</param>
     private bool StartsAMove(
         PlayMakerFSM fsm,
         string stateName,
+        string before,
         out string first,
         [NotNullWhen(true)] out HashSet<string>? move
     ) {
@@ -1753,7 +1757,7 @@ internal partial class Entity {
         // transition: the scene host's FSM could have got there without going into the move. A creature knocked into
         // the water by its stun goes into it the way its dive does
         foreach (var (from, states) in moves) {
-            if (states.Contains(stateName) && fsm.Fsm.GetState(from) is { } fromState &&
+            if (states.Contains(stateName) && !states.Contains(before) && fsm.Fsm.GetState(from) is { } fromState &&
                 Array.Exists(fromState.Transitions, transition => transition.ToFsmState == heard) &&
                 !Array.Exists(fsm.Fsm.GlobalTransitions, transition => transition.ToFsmState == heard) &&
                 !Array.Exists(fsm.Fsm.States, state => !states.Contains(state.Name) &&

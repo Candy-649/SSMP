@@ -4907,12 +4907,13 @@ internal partial class Entity {
                     var stateName = states[data.CurrentState].Name;
 
                     SayStunned(hostFsm, snapshot.CurrentState, stateName, false);
+                    var before = snapshot.CurrentState;
                     snapshot.CurrentState = stateName;
 
                     // Also propagate this state change to the EntityFsmActions class with the client FSM for the
                     // same index
                     EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, stateName);
-                    HearStateFromSceneHost(_fsms.Client[fsmIndex], stateName);
+                    HearStateFromSceneHost(_fsms.Client[fsmIndex], stateName, before);
                     if (fromTheRoom) {
                         StartTheTurnsOf(_fsms.Client[fsmIndex], stateName);
                     }
@@ -5022,7 +5023,7 @@ internal partial class Entity {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= OnLateUpdate;
         _heldUntilPlaced = null;
-        ForgetWhatCameSince();
+        ForgetWhatCameSince("the entity goes");
 
         // What the entity was doing to the local player is undone first. Its hooks and parts go whatever happens there:
         // left behind, they would go on acting for a room that is gone

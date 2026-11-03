@@ -19,7 +19,8 @@ namespace SSMP.Game.Client.Entity;
 /// scene host's creature, and makes it up as it stands still between two moves (see <see cref="StandsStill"/>), where
 /// nothing that shows comes sooner; whatever the local player does to the creature first takes in the rest at once
 /// (see <see cref="CatchUpWithWhatCameSince"/>), so that it goes from where the creature is over there now. Both as the
-/// user chose (11-03).
+/// user chose (11-03). Its health and the music go as they come all the same, and its death after all that the copy
+/// kept (see <see cref="TakeInAsItComes"/>).
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -67,10 +68,16 @@ internal partial class Entity {
     private const float MakeUpRate = 3f;
 
     /// <summary>
-    /// How far behind the scene host's creature the copy goes at the most, in seconds: as late as a move that it played
-    /// on with twice over. Further behind, it takes in the rest at once.
+    /// How long the copy keeps what the scene host sent at the most, in seconds: as long as a move that it played on
+    /// with twice over. What it kept longer is taken in at once, with all the rest (see <see cref="KeepsForLater"/>).
     /// </summary>
     private const float MostBehind = 2f * MoveFinishTime;
+
+    /// <summary>
+    /// What the scene host sent of the creature's health and the music of the room in what the copy keeps, taken in now
+    /// (see <see cref="TakeInAsItComes"/>).
+    /// </summary>
+    private readonly List<EntityNetworkData> _asItComes = [];
 
     /// <summary>
     /// How fast the copy may still drift as it stands still, in units a second: what is left of the smoothing of a
@@ -92,20 +99,89 @@ internal partial class Entity {
     /// Whether the copy keeps what the scene host sent of it for later rather than take it in now: it is behind with
     /// what came since a move, or this is the word that the scene host's FSM came out of a move that the copy plays by
     /// itself first, after which what comes waits for the copy to get through the move too. What it keeps is its own
-    /// until it is taken in. Not asked of the state of a room, which comes after all of it (EntityManager).
+    /// until it is taken in, but for the health and the music in it (see <see cref="TakeInAsItComes"/>). A death is
+    /// taken in now, after all that the copy kept, and so is anything once the first of what it kept came longer ago
+    /// than it goes behind at the most (see <see cref="MostBehind"/>), which a copy that took in nothing of it since
+    /// would be. Not asked of the state of a room (see <see cref="MakeWayForTheRoomState"/>).
     /// </summary>
     /// <param name="update">What the scene host sent.</param>
     public bool KeepsForLater(BaseEntityUpdate update) {
+        var reliable = update as ReliableEntityUpdate;
         if (!IsBehind) {
-            if (update is not ReliableEntityUpdate reliable || ComesOutOfTheMoveFirst(reliable) is not { } way) {
+            if (reliable == null || ComesOutOfTheMoveFirst(reliable) is not { } way || Dies(reliable)) {
                 return false;
             }
 
             WaitOutTheMove(way);
+        } else if (reliable != null && Dies(reliable)) {
+            CatchUpWithWhatCameSince("the scene host's creature died");
+            return false;
+        } else if (_cameSince.Count > 0 && Time.unscaledTime - _cameSince.Peek().At > MostBehind) {
+            CatchUpWithWhatCameSince("what it kept came too long ago");
+            return false;
+        }
+
+        if (reliable != null) {
+            TakeInAsItComes(reliable);
         }
 
         _cameSince.Enqueue((Time.unscaledTime, update));
         return true;
+    }
+
+    /// <summary>
+    /// Takes in now what the scene host sent of the creature's health and of the music of the room in something that
+    /// the copy keeps for later: the health is the scene host's to settle as it comes, which the blows of the partner,
+    /// seen to land where their figure is now, bring down - a boss whose health waited went on with what it had been,
+    /// and a creature that never stands still would have shown it late for the whole fight - and the music is the
+    /// room's. They are taken out of it and given back.
+    /// </summary>
+    /// <param name="update">What the scene host sent.</param>
+    private void TakeInAsItComes(ReliableEntityUpdate update) {
+        if (!update.UpdateTypes.Contains(EntityUpdateType.Data)) {
+            return;
+        }
+
+        var data = update.GenericData;
+        for (var i = 0; i < data.Count;) {
+            if (data[i].Type is EntityComponentType.Health or EntityComponentType.Music) {
+                _asItComes.Add(data[i]);
+                data.RemoveAt(i);
+            } else {
+                i++;
+            }
+        }
+
+        if (_asItComes.Count == 0) {
+            return;
+        }
+
+        UpdateData(_asItComes, false, update.ReceivedSequence);
+        foreach (var taken in _asItComes) {
+            ObjectPool<EntityNetworkData>.Return(taken);
+        }
+
+        _asItComes.Clear();
+    }
+
+    /// <summary>
+    /// Whether what the scene host sent says that its creature died: the copy then dies at once, after all that it was
+    /// behind with, which is what the creature did before it died. Kept for later, the boss that the partner had killed
+    /// fought on here, its replays still able to hurt the local player.
+    /// </summary>
+    /// <param name="update">What the scene host sent.</param>
+    private static bool Dies(ReliableEntityUpdate update) {
+        if (!update.UpdateTypes.Contains(EntityUpdateType.Data)) {
+            return false;
+        }
+
+        foreach (var data in update.GenericData) {
+            if (data.Type == EntityComponentType.Death) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -218,11 +294,6 @@ internal partial class Entity {
 
             _cameSinceWaits = false;
             _behind = now - _cameSince.Peek().At;
-            if (_behind > MostBehind) {
-                CatchUpWithWhatCameSince($"it would be {_behind:0.00} s behind");
-                return;
-            }
-
             Logger.Info(
                 $"The copy of entity {Id} goes on with the {_cameSince.Count} word(s) of the scene host's that came " +
                 $"since, {_behind:0.00} s later than they came"
@@ -255,9 +326,9 @@ internal partial class Entity {
     /// <summary>
     /// Takes in at once all that the copy is behind with, in the order it came, for what goes from where the scene
     /// host's creature is now: what the local player does to it, which the scene host plays there (see
-    /// <see cref="PlayHere"/>, CoopHits), this game taking over the room, and the state of the room, which comes after
-    /// all of it. A move that the copy plays on with stops where it is, and one that the scene host's FSM went into
-    /// meanwhile is not played here from its start (see <see cref="_catchingUp"/>).
+    /// <see cref="PlayHere"/>, CoopHits), this game taking over the room, and the creature's death. A move that the
+    /// copy plays on with stops where it is, and one that the scene host's FSM went into meanwhile is not played here
+    /// from its start (see <see cref="_catchingUp"/>).
     /// </summary>
     /// <param name="why">Why, for the log.</param>
     public void CatchUpWithWhatCameSince(string why) {
@@ -277,28 +348,40 @@ internal partial class Entity {
             CatchUpWithSceneHost("what the scene host sent since is taken in at once");
         }
 
-        // As it came, which is not the state of a room even where that is what this is taken in for
-        var fromRoom = FromRoomState;
-        FromRoomState = false;
         _catchingUp = true;
         while (_cameSince.Count > 0) {
             TakeInLater(_cameSince.Dequeue().Update);
         }
 
         _catchingUp = false;
-        FromRoomState = fromRoom;
     }
 
     /// <summary>
-    /// Gives back all that the copy is behind with, none of it taken in, for an entity that goes.
+    /// Makes way for the state of the room, which comes after all that the copy is behind with and puts right what the
+    /// copy shows now: what it kept is older, and goes untaken. Taken in first, everything in it would have counted as
+    /// heard just before the state of the room, which then left all of it be (see <see cref="YieldsToNewer"/>). A move
+    /// that the copy plays on with stops where it is.
     /// </summary>
-    private void ForgetWhatCameSince() {
+    public void MakeWayForTheRoomState() {
+        if (_cameSinceWaits && _runHereMove) {
+            CatchUpWithSceneHost("the state of the room came");
+        }
+
+        ForgetWhatCameSince("the state of the room came, which is newer");
+    }
+
+    /// <summary>
+    /// Gives back all that the copy is behind with, none of it taken in.
+    /// </summary>
+    /// <param name="why">Why, for the log.</param>
+    private void ForgetWhatCameSince(string why) {
         if (!IsBehind) {
             return;
         }
 
         Logger.Info(
-            $"Entity {Id} goes with {_cameSince.Count} word(s) of the scene host's that its copy had not taken in"
+            $"The copy of entity {Id} leaves the {_cameSince.Count} word(s) of the scene host's that it had not " +
+            $"taken in, as {why}"
         );
         while (_cameSince.Count > 0) {
             EntityManager.ReleaseUpdate(_cameSince.Dequeue().Update);

@@ -483,9 +483,9 @@ internal class EntityManager {
             return false;
         }
 
-        // What the copy is behind with comes first, and the state of the room after all of it (Entity.KeepsForLater)
+        // What the copy is behind with waits (Entity.KeepsForLater), and gives way to the state of the room
         if (alreadyInSceneUpdate) {
-            entity.CatchUpWithWhatCameSince("the state of the room came");
+            entity.MakeWayForTheRoomState();
         } else if (entity.KeepsForLater(update)) {
             return false;
         }
@@ -514,7 +514,7 @@ internal class EntityManager {
         // As the unreliable kind (HandleEntityUpdate)
         if (!IsSceneHost) {
             if (alreadyInSceneUpdate) {
-                entity.CatchUpWithWhatCameSince("the state of the room came");
+                entity.MakeWayForTheRoomState();
             } else if (entity.KeepsForLater(update)) {
                 return false;
             }
