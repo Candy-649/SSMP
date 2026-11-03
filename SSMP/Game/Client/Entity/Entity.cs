@@ -1910,10 +1910,10 @@ internal partial class Entity {
 
                 // While something the local player did to this entity is still on its way to the scene host and
                 // back, what the local game did is what moves it, and the interpolation stays out of the way. So it
-                // does while the copy moves by itself from how the entity set off (OwnMotionComponent), while its
-                // own FSM runs here for something the local player did (PlayHere), or while a pull of the local
-                // player's own moves it (NotePulledHere).
-                var movedHere = IsAnticipating() || MovesByItself() || _runHere != null ||
+                // does while the copy moves by itself from how the entity set off (OwnMotionComponent), while an FSM
+                // of its that can move it runs here for something the local player did (PlayHere,
+                // RunHereMovesTheCopy), or while a pull of the local player's own moves it (NotePulledHere).
+                var movedHere = IsAnticipating() || MovesByItself() || RunHereMovesTheCopy ||
                                 Time.time < _pulledHereUntil;
                 if (_wasMovedHere && !movedHere) {
                     // The interpolation did not write this object while that was going on, so it carried on
@@ -4404,9 +4404,10 @@ internal partial class Entity {
         wait.Heard = true;
 
         // What is left is what the creature did by itself, which the copy does too, unless something else moves it
-        // here: its own FSM run for the local player, how it set off, or a pull of the local player's
+        // here: its own FSM run for the local player (RunHereMovesTheCopy), how it set off, or a pull of the local
+        // player's
         var own = new Vector2(position.x, position.y) - wait.Pushed;
-        if (_runHere != null || MovesByItself() || Time.time < _pulledHereUntil) {
+        if (RunHereMovesTheCopy || MovesByItself() || Time.time < _pulledHereUntil) {
             wait.OwnFrom = null;
             return;
         }
@@ -4484,11 +4485,12 @@ internal partial class Entity {
             return;
         }
 
-        // Held for as long as the copy's FSM runs here (PlayHere), as its positions are not taken meanwhile either: what
-        // the scene host sends is from before the input, or of its own creature, which may face elsewhere, and now that
-        // the facing rides along with every position it would turn the copy back from what its own FSM turned it to,
-        // frame after frame. It is taken once the copy follows the scene host again.
-        if (_runHere != null) {
+        // Held for as long as an FSM of the copy that can move it runs here (PlayHere, RunHereMovesTheCopy), as its
+        // positions are not taken meanwhile either: what the scene host sends is from before the input, or of its own
+        // creature, which may face elsewhere, and now that the facing rides along with every position it would turn the
+        // copy back from what its own FSM turned it to, frame after frame. It is taken once the copy follows the scene
+        // host again.
+        if (RunHereMovesTheCopy) {
             _heldScale ??= new EntityUpdate.ScaleData();
             _heldScale.TakeNewer(scale);
             return;
