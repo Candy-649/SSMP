@@ -257,6 +257,13 @@ internal class ClientManager : IClientManager {
     private string? _lastScene;
 
     /// <summary>
+    /// How many times the local player came into a scene on this connection, which the server counts the same way, so
+    /// that it can tell which room something the local game says of the room it is in was said of (see
+    /// CoopSave.NobodyIsComing).
+    /// </summary>
+    internal static uint RoomsEntered { get; private set; }
+
+    /// <summary>
     /// The crest that this client last told the server the local player wears, or last tried to and found no crest
     /// type for, so that it is not tried again every frame; null when it has told none since it connected (see
     /// <see cref="SendChangedCrest"/>).
@@ -1056,6 +1063,9 @@ internal class ClientManager : IClientManager {
     /// <param name="serverInfo">The server info received from the server.</param>
     private void OnClientConnect(ServerInfo serverInfo) {
         Logger.Info("Received server info from server");
+
+        // Counted from the first room this game comes into on this connection, as the server counts them
+        RoomsEntered = 0;
 
         // Nothing sent before this connection counts for it: the first frame of play sends the crest if nothing else
         // has by then
@@ -2264,6 +2274,7 @@ internal class ClientManager : IClientManager {
     /// </summary>
     private void OnEnterScene() {
         var sceneName = SceneManager.GetActiveScene().name;
+        RoomsEntered++;
 
         Logger.Debug($"OnEnterScene, scene: {sceneName}");
 

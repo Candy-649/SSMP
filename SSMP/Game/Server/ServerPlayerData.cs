@@ -67,6 +67,18 @@ internal class ServerPlayerData : IServerPlayer {
     public bool DiedForGood { get; set; }
 
     /// <summary>
+    /// Whether this player lies in their cocoon, waiting to be pulled back up, as their game last said
+    /// (CoopSaveUpdateKind.RescueOffer, RescueStoodUp and RescueEnd). Until they come into a scene again.
+    /// </summary>
+    public bool Down { get; set; }
+
+    /// <summary>
+    /// How many times this player came into a scene since they connected, which their game counts the same way: what
+    /// it says of a room it was in goes by it (see ServerManager.OnCoopSaveUpdate).
+    /// </summary>
+    public uint RoomsEntered { get; set; }
+
+    /// <summary>
     /// Reference of the authorized list for checking whether this player is authorized.
     /// </summary>
     private readonly AuthKeyList _authorizedList;

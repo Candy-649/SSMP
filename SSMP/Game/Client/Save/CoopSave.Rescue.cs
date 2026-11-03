@@ -1043,9 +1043,7 @@ internal partial class CoopSave {
 
             Logger.Info($"Telling {GetCheckedNames()} that nobody is coming, because this player has died as well");
 
-            SendToMembers(new CoopSaveUpdate {
-                Kind = CoopSaveUpdateKind.RescueLost
-            });
+            SendToMembers(NobodyIsComing());
 
             // Their cocoons go now rather than when they answer: this player is on their way to a bench either way.
             // So are they, so their bodies are not stood up where they lay.
@@ -1078,9 +1076,19 @@ internal partial class CoopSave {
         // Said on as the death of this player plays out now as well, which is how the server knows that this game is
         // out of the room it died in too, as the game of the one who said it first is (ServerManager.MarkDiedForGood)
         Logger.Info($"Telling {GetCheckedNames()} that nobody is coming, because this player dies as well");
-        SendToMembers(new CoopSaveUpdate {
-            Kind = CoopSaveUpdateKind.RescueLost
-        });
+        SendToMembers(NobodyIsComing());
+    }
+
+    /// <summary>
+    /// The word that nobody is coming, of the room the local player dies in: by the room and the count of the rooms
+    /// this game came into, which the server takes it of only (ServerManager.OnCoopSaveUpdate).
+    /// </summary>
+    private static CoopSaveUpdate NobodyIsComing() {
+        return new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.RescueLost,
+            Scene = SceneUtil.GetCurrentSceneName(),
+            Sequence = ClientManager.RoomsEntered
+        };
     }
 
     /// <summary>

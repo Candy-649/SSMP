@@ -552,6 +552,8 @@ internal abstract class ServerManager : IServerManager {
         // Store it in their PlayerData object
         playerData.CurrentScene = newSceneName;
         playerData.DiedForGood = false;
+        playerData.Down = false;
+        playerData.RoomsEntered++;
         SendPlayerRoom(id, newSceneName);
         playerData.Position = playerEnterScene.Position;
         playerData.Scale = playerEnterScene.Scale;
@@ -1336,7 +1338,7 @@ internal abstract class ServerManager : IServerManager {
                 if (room != SceneOf(room)) {
                     _sceneHostEpochs.TryRemove(room, out _);
                 }
-            } else if (newHost == null && room == SceneOf(room)) {
+            } else if (newHost == null && room.Length > 0 && room == SceneOf(room)) {
                 // Everyone left in it died there for good
                 EndRoom(room);
             }
@@ -1354,8 +1356,10 @@ internal abstract class ServerManager : IServerManager {
     /// Two players who both died came back into the room a moment apart, and the one who came back first was given
     /// what the game of the other kept running: the boss standing over the players it had killed, in a state that it
     /// never comes out of, where it stood for the rest of the fight (USER 11-03, 这个幽影直接不会动了，保持在开场姿势).
-    /// So the room goes to a player still alive in it, and once nobody alive is in it, it is over (see
-    /// <see cref="EndRoom"/>).
+    /// So the room goes to a player still on their feet in it, and once nobody in it is, it is over (see
+    /// <see cref="EndRoom"/>): those lying in their cocoons die as well, as nobody is coming for them. That is known
+    /// here as soon as it is in the game of the player who said it, which heard of every member going down and
+    /// standing up from here, so a member whose own word is held up on the way does not leave the room going on.
     /// </summary>
     /// <param name="playerData">The player.</param>
     private void MarkDiedForGood(ServerPlayerData playerData) {
@@ -1377,10 +1381,12 @@ internal abstract class ServerManager : IServerManager {
             }
         }
 
-        var alive = inTheRoom.Find(other => !other.DiedForGood);
+        var alive = inTheRoom.Find(other => !other.DiedForGood && !other.Down);
         Logger.Info(
             $"({playerData.Id}, {playerData.Username}) died for good in '{room}', " +
-            (alive == null ? "with nobody alive left in it" : $"with ({alive.Id}, {alive.Username}) alive in it")
+            (alive == null
+                ? "with nobody on their feet left in it"
+                : $"with ({alive.Id}, {alive.Username}) on their feet in it")
         );
 
         if (!_fullSynchronisation) {
@@ -1410,6 +1416,10 @@ internal abstract class ServerManager : IServerManager {
             if (player.CurrentScene == sceneName) {
                 player.CurrentScene = ended;
                 names.Add(player.Username);
+
+                // Out of the room for the games of the others too: one that comes into it next runs it at once rather
+                // than wait to hear who does (EntityManager)
+                SendPlayerRoom(player.Id, "");
             }
         }
 
@@ -1453,6 +1463,16 @@ internal abstract class ServerManager : IServerManager {
                 sceneName, epoch, demote: player != to
             );
         }
+    }
+
+    /// <summary>
+    /// The room that what a player says of the given scene goes to: theirs, while they are in a room of that scene that
+    /// is over (see <see cref="EndRoom"/>), so that it reaches only the others still in it.
+    /// </summary>
+    /// <param name="sender">The player.</param>
+    /// <param name="sceneName">The scene they named.</param>
+    private static string RoomOf(ServerPlayerData sender, string sceneName) {
+        return SceneOf(sender.CurrentScene) == sceneName ? sender.CurrentScene : sceneName;
     }
 
     /// <summary>
@@ -1886,7 +1906,7 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="update">The BattleSceneUpdate packet data.</param>
     private void OnBattleSceneUpdate(ushort id, BattleSceneUpdate update) {
-        if (!_playerData.ContainsKey(id)) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
             Logger.Warn($"Received BattleSceneUpdate data, but player with ID {id} is not in mapping");
             return;
         }
@@ -1894,7 +1914,7 @@ internal abstract class ServerManager : IServerManager {
         update.PlayerId = id;
         SendDataInSameScene(
             id,
-            update.SceneName,
+            RoomOf(playerData, update.SceneName),
             otherId => _netServer.GetUpdateManagerForClient(otherId)?.AddBattleSceneUpdateData(update)
         );
     }
@@ -1907,7 +1927,7 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="update">The BossRoomUpdate packet data.</param>
     private void OnBossRoomUpdate(ushort id, BossRoomUpdate update) {
-        if (!_playerData.ContainsKey(id)) {
+        if (!_playerData.TryGetValue(id, out var playerData)) {
             Logger.Warn($"Received BossRoomUpdate data, but player with ID {id} is not in mapping");
             return;
         }
@@ -1928,7 +1948,7 @@ internal abstract class ServerManager : IServerManager {
 
         SendDataInSameScene(
             id,
-            update.SceneName,
+            RoomOf(playerData, update.SceneName),
             otherId => _netServer.GetUpdateManagerForClient(otherId)?.AddBossRoomUpdateData(update)
         );
     }
@@ -1945,10 +1965,30 @@ internal abstract class ServerManager : IServerManager {
             return;
         }
 
-        // A player who says that nobody is coming has died for good, with nobody left standing who could pull them
-        // up: the game plays out their death, which brings them back at their bench (CoopSave.TellNobodyIsComing)
-        if (update.Kind == CoopSaveUpdateKind.RescueLost) {
-            MarkDiedForGood(playerData);
+        switch (update.Kind) {
+            case CoopSaveUpdateKind.RescueOffer:
+                playerData.Down = true;
+                break;
+            case CoopSaveUpdateKind.RescueStoodUp or CoopSaveUpdateKind.RescueEnd:
+                playerData.Down = false;
+                break;
+
+            // A player who says that nobody is coming has died for good, with nobody left standing who could pull
+            // them up: the game plays out their death, which brings them back at their bench
+            // (CoopSave.TellNobodyIsComing). Only of the room they said it in: held up on the way, it can come along
+            // with their coming into the next, which a packet has taken in first, and that room goes on
+            case CoopSaveUpdateKind.RescueLost:
+                if (update.Sequence == playerData.RoomsEntered && update.Scene == SceneOf(playerData.CurrentScene)) {
+                    MarkDiedForGood(playerData);
+                } else {
+                    Logger.Info(
+                        $"({id}, {playerData.Username}) said that nobody is coming in '{update.Scene}' (room " +
+                        $"{update.Sequence}), which they have left since: they are in '{playerData.CurrentScene}' " +
+                        $"(room {playerData.RoomsEntered})"
+                    );
+                }
+
+                break;
         }
 
         update.PlayerId = id;
