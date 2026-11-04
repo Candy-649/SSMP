@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using GlobalEnums;
+using MonoMod.RuntimeDetour;
 using SSMP.Game.Settings;
 using SSMP.Util;
 using UnityEngine;
@@ -189,6 +190,17 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private bool _failed;
 
     /// <summary>
+    /// The creatures of the scene whose own FSM recorded their kill, whose bars are gone from then on (see
+    /// <see cref="NoteKillRecorded"/>).
+    /// </summary>
+    private readonly HashSet<HealthManager> _killRecorded = [];
+
+    /// <summary>
+    /// The hooks of the two actions with which an FSM records the kill of its creature.
+    /// </summary>
+    private Hook? _recordKillHook, _recordKillV2Hook;
+
+    /// <summary>
     /// Creates the canvas of the bars and starts drawing them.
     /// </summary>
     public void Start() {
@@ -211,6 +223,39 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         // Placed after the camera moved and before the canvases are drawn, so that the bars don't trail the creatures
         Canvas.preWillRenderCanvases += OnPreWillRenderCanvases;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
+
+        const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public;
+        _recordKillHook = new Hook(
+            typeof(RecordJournalKill).GetMethod(nameof(RecordJournalKill.OnEnter), flags),
+            new Action<Action<RecordJournalKill>, RecordJournalKill>((orig, self) => {
+                orig(self);
+                NoteKillRecorded(self.Fsm);
+            })
+        );
+        _recordKillV2Hook = new Hook(
+            typeof(RecordJournalKillV2).GetMethod(nameof(RecordJournalKillV2.OnEnter), flags),
+            new Action<Action<RecordJournalKillV2>, RecordJournalKillV2>((orig, self) => {
+                orig(self);
+                NoteKillRecorded(self.Fsm);
+            })
+        );
+    }
+
+    /// <summary>
+    /// Takes the bar of a creature down for good once its own FSM recorded its kill. A boss that the game finishes by a
+    /// scene of its own, rather than by its health running out, never dies by its health, and its bar stayed on screen
+    /// with health left in it until the players left the room (USER 11-04 "那个boss的血条后来一直跟着我们直到出了房间").
+    /// Both games record the kill: the scene client's copy of the action is played there too.
+    /// </summary>
+    /// <param name="fsm">The FSM that recorded it.</param>
+    private void NoteKillRecorded(HutongGames.PlayMaker.Fsm? fsm) {
+        var owner = fsm?.GameObject;
+        if (owner == null || owner.GetComponentInParent<HealthManager>() is not { } healthManager ||
+            !_killRecorded.Add(healthManager)) {
+            return;
+        }
+
+        Logger.Info($"[Bars] '{healthManager.name}' recorded its own kill, so its health bar goes");
     }
 
     /// <summary>
@@ -238,6 +283,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         _bars.Clear();
         _bossBars.Clear();
         _numberedBosses.Clear();
+        _killRecorded.Clear();
     }
 
     /// <summary>
@@ -289,7 +335,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
 
             var isActive = bar.SeenFrame == Time.frameCount;
             bar.Update(isActive);
-            if (!bar.IsShown) {
+            if (!bar.IsShown || _killRecorded.Contains(healthManager)) {
                 bar.Hide();
                 bossBarsChanged |= _bossBars.Remove(bar);
                 continue;
