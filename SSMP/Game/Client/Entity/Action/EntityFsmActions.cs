@@ -633,7 +633,8 @@ internal static partial class EntityFsmActions {
     /// each, 0 for none, 1 and its path for a part of the creature, 3 and its scene and path for a part of the room
     /// itself, 4 and its scene and path for a part of the room named before the action ran (see
     /// <see cref="NoteRoomSubjects"/>), 5 and its place under the creature for a part that the creature let go of into
-    /// the room (see <see cref="LetGoParts"/>), 2 for an object anywhere else.
+    /// the room (see <see cref="LetGoParts"/>), 6 and its path under this game's player character for a part of the
+    /// character (see <see cref="HeroPartOnFigure"/>), 2 for an object anywhere else.
     ///
     /// The creature's FSM fills such variables in while it runs - which spray to use, which of its parts to light, which
     /// of them an event is for - and the scene client's copy never runs, so there the variable stayed empty and the
@@ -680,6 +681,15 @@ internal static partial class EntityFsmActions {
 
             var path = PathFromOwner(action.Fsm.GameObject, subject);
             if (path == null) {
+                // A part of this game's player character, like the flash of a parry that a boss switches on at the end
+                // of its fight, which the other game does to its figure of this player (see HeroPartOnFigure)
+                if (HeroController.instance is { } hero && subject.transform != hero.transform &&
+                    subject.transform.IsChildOf(hero.transform)) {
+                    data.Packet.Write((byte) 6);
+                    data.Packet.Write(PathFromOwner(hero.gameObject, subject)!);
+                    continue;
+                }
+
                 // The floor a boss breaks, the rocks it drops, the lava it lights: the room's own things, found by
                 // the creature's FSM from its parent or through a reference into another scene. The copy has no
                 // parent and never runs that, so its variables for them stayed empty and none of it happened on the
@@ -811,8 +821,48 @@ internal static partial class EntityFsmActions {
                     }
 
                     break;
+                case 6:
+                    var heroPath = data.Packet.ReadString();
+
+                    // Else left to what the copy's variable holds, the same part of this game's own character, which
+                    // the action is then kept off (see ActsOnTheLocalPlayer)
+                    if (HeroPartOnFigure(action, heroPath) is { } figurePart) {
+                        variable.Value = figurePart;
+                    }
+
+                    break;
             }
         }
+    }
+
+    /// <summary>
+    /// The part of the figure of the player whose game runs a creature that an action of the creature switches on or
+    /// off there, on that player's own character - their part with that path under it (see <see cref="WriteSubject"/>)
+    /// - or null for any other action, or when there is not one other player in the room.
+    ///
+    /// At the end of a fight a boss strikes its last blow by the player who beat it: it hides the player, switches on
+    /// the flash of a parry and then the strike of a cross slash, both parts of the player's own character, and those
+    /// were about the other player's character here and never done, so the other player saw the boss fall to nothing
+    /// (USER 11-04 "击杀动画就应该都能看到啊，其他动画都能看到"). The figure has copies of such parts that only show
+    /// (see <see cref="SSMP.Animation.Effects.HeroChildEffects.GetFigurePart"/>).
+    /// </summary>
+    /// <param name="action">The action about to be replayed.</param>
+    /// <param name="path">The path of the part under the character, in the game that runs the creature.</param>
+    private static GameObject? HeroPartOnFigure(FsmStateAction action, string path) {
+        if (action is not (ActivateGameObject or HutongGames.PlayMaker.Actions.ActivateAllChildren) ||
+            PlayerTargetRegistry.TheOtherPlayer() is not { } figure) {
+            return null;
+        }
+
+        var part = SSMP.Animation.Effects.HeroChildEffects.GetFigurePart(figure, path);
+        var owner = action.Fsm?.GameObject;
+        Logger.Info(
+            $"[Figures] '{(owner == null ? "?" : owner.name)}'s {action.GetType().Name} in '{action.State?.Name}' " +
+            (part == null
+                ? $"works on '{path}' of the other player's character, which this game's character has no part like"
+                : $"works on '{path}' of the other player's character, and so on that part of their figure here")
+        );
+        return part;
     }
 
     /// <summary>

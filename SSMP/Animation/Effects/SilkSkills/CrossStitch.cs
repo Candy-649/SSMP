@@ -24,6 +24,27 @@ internal class CrossStitch : BaseSilkSkill {
     /// </summary>
     public static readonly CrossStitch StartingInstance = new() { _isStarting = true };
 
+    /// <summary>
+    /// The state of the hero's skill FSM that plays the clash of the skill.
+    /// </summary>
+    private const string ClashStateName = "Parry Clash";
+
+    /// <summary>
+    /// The effect info of the clip: whether the Volt Filament is on (see <see cref="BaseSilkSkill.GetEffectFlags"/>),
+    /// and for the clash, whether the skill plays it. At the end of a fight a boss plays the clip of the clash on the
+    /// hero itself, and shows the flash and the strike by switching on the hero's own parts, which its copy in the
+    /// other game switches on there too (EntityFsmActions.HeroPartOnFigure). Played by this effect as well, the other
+    /// player saw a second strike of the skill come after the boss's own.
+    /// </summary>
+    public override byte[] GetEffectInfo() {
+        var flags = GetEffectFlags();
+        if (_isStarting) {
+            return flags;
+        }
+
+        return [flags[0], (byte) (GetSkillFsm().ActiveStateName == ClashStateName ? 1 : 0)];
+    }
+
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         var isShaman = crestType == CrestType.Shaman;
@@ -32,6 +53,15 @@ internal class CrossStitch : BaseSilkSkill {
         // Determine which animation to play
         if (_isStarting) {
             PlayStart(playerObject, isShaman, isVolt);
+            return;
+        }
+
+        // A clash that the skill did not play is the boss's, whose copy shows it here (see GetEffectInfo)
+        if (effectInfo is [_, 0]) {
+            Logger.Info(
+                $"[Parts] '{playerObject.name}' plays the clash of a parry that the room plays on them, which the " +
+                "room's copy here shows by itself"
+            );
             return;
         }
 

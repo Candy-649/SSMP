@@ -563,6 +563,41 @@ internal class HeroChildEffects : AnimationEffect {
     }
 
     /// <summary>
+    /// The copy of a part of the hero on the character of another player that a creature of the room switches on or
+    /// off there, on that player's own character (see EntityFsmActions.HeroPartOnFigure), made from the local hero's
+    /// part when there is none yet, or null when the local hero has no such part.
+    ///
+    /// Such a part is not one of the watched parts: it may hold parts of its own that the creature switches on, like
+    /// the holder of the strike of a cross slash, which is on under the hero while its strike is off. The copy is on or
+    /// off as the local part is, and nothing on it hurts or is hit: the strike's damager would have struck the copies
+    /// of creatures here as if this game's player had, beside the strike that their game counts.
+    /// </summary>
+    /// <param name="playerObject">The character of the other player.</param>
+    /// <param name="path">The path of the part under the hero.</param>
+    public static GameObject? GetFigurePart(GameObject playerObject, string path) {
+        var part = GetCopy(playerObject, path, false);
+        if (part != null) {
+            return part;
+        }
+
+        part = GetCopy(playerObject, path, true);
+        if (part == null) {
+            return null;
+        }
+
+        foreach (var damager in part.GetComponentsInChildren<DamageEnemies>(true)) {
+            Object.DestroyImmediate(damager);
+        }
+
+        foreach (var collider in part.GetComponentsInChildren<Collider2D>(true)) {
+            Object.DestroyImmediate(collider);
+        }
+
+        part.SetActive(HeroController.instance.transform.Find(path).gameObject.activeSelf);
+        return part;
+    }
+
+    /// <summary>
     /// Makes an empty object on the way to a copied part, placed like the object on the way to the local part, so that
     /// only the part itself is copied and never the objects around it.
     /// </summary>
