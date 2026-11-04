@@ -215,6 +215,19 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     public double QuietSeconds => (DateTime.UtcNow - _lastReceiveTime).TotalSeconds;
 
     /// <summary>
+    /// How long the oldest packet with reliable data that the other side has not said it took in has waited since it
+    /// was first sent, in seconds, or 0 when the other side took in all that was sent. The other side says what it took
+    /// in with every packet, so on a link that is up this is a round trip and a send at most; it grows as soon as the
+    /// link is held up either way, even while some things still arrive.
+    /// </summary>
+    public double UntakenSeconds {
+        get {
+            var ticks = Volatile.Read(ref _oldestUntakenTicks);
+            return ticks == 0 ? 0 : (DateTime.UtcNow.Ticks - ticks) / (double) TimeSpan.TicksPerSecond;
+        }
+    }
+
+    /// <summary>
     /// Whether the other side has accepted this connection since it started (see <see cref="MarkAccepted"/>), after
     /// which a quiet stretch is kept for <see cref="ReconnectCeiling"/> rather than
     /// <see cref="ConnectionTimeoutCeiling"/>. Not whether anything has come over it: a host's server sends to a
@@ -307,6 +320,12 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// The packets with reliable data that the other side has not said it took in, oldest first, as they were sent.
     /// </summary>
     private readonly Queue<KeptReliable> _keptToSendAgain = new();
+
+    /// <summary>
+    /// When the oldest of <see cref="_keptToSendAgain"/> was first sent, in UTC ticks, or 0 when there is none: set
+    /// where the queue changes, for <see cref="UntakenSeconds"/> to read without the lock every frame.
+    /// </summary>
+    private long _oldestUntakenTicks;
 
     /// <summary>
     /// Whether letting go of the oldest of <see cref="_keptToSendAgain"/> for want of room was said since the other
@@ -859,6 +878,18 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         }
 
         _keptToSendAgain.Enqueue(kept);
+        NoteOldestUntaken();
+    }
+
+    /// <summary>
+    /// Notes when the oldest packet with reliable data that the other side has not taken in was first sent (see
+    /// <see cref="_oldestUntakenTicks"/>). Called with <see cref="_reliableLock"/> held.
+    /// </summary>
+    private void NoteOldestUntaken() {
+        Volatile.Write(
+            ref _oldestUntakenTicks,
+            _keptToSendAgain.Count > 0 ? _keptToSendAgain.Peek().FirstSentTicks : 0
+        );
     }
 
     /// <summary>
@@ -1190,6 +1221,8 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _keptToSendAgain.Dequeue();
             _keptFullTold = false;
         }
+
+        NoteOldestUntaken();
     }
 
     /// <summary>
@@ -1229,6 +1262,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         /// Where its numbering is.
         /// </summary>
         public int HeaderAt { get; } = headerAt;
+
+        /// <summary>
+        /// When it first went, in UTC ticks.
+        /// </summary>
+        public long FirstSentTicks { get; } = DateTime.UtcNow.Ticks;
 
         /// <summary>
         /// When it last went.
@@ -1375,6 +1413,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         lock (_reliableLock) {
             _lastReliableSent = 0;
             _keptToSendAgain.Clear();
+            NoteOldestUntaken();
             _keptFullTold = false;
             _sendAgainAsked = false;
             _sendAgainOnNextAck = false;
@@ -1523,11 +1562,16 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     }
 
     /// <summary>
-    /// Asks the transport for its round trip, which <see cref="AverageRtt"/> gives everyone else from then on.
+    /// Asks the transport for its round trip, which <see cref="AverageRtt"/> gives everyone else from then on. While
+    /// the transport knows none, as while Steam makes a link anew, the last one it gave stands: forgotten, the round
+    /// trip fell back to one that Steam's relay never measures, 0, and the display showed 0 as things arrived again
+    /// after a long hold-up (USER 11-04 "反而有时候卡久了变成0了").
     /// </summary>
     private void AskTransportPing() {
         try {
-            _transportPingMs = _transportPing?.Invoke() is { } ping and >= 0 ? ping : -1;
+            if (_transportPing?.Invoke() is { } ping and >= 0) {
+                _transportPingMs = ping;
+            }
         } catch (Exception) {
             // Nothing is known of the round trip this time round, which the next asks again
         }

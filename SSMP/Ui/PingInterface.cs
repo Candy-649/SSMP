@@ -38,16 +38,19 @@ internal class PingInterface {
     private const float IconSize = 20f;
 
     /// <summary>
-    /// How long nothing has to have arrived, in milliseconds, before the display shows that time instead of the round
-    /// trip, when it is longer. The other side sends many times a second, so this long is a gap in the link. Steam
-    /// measures the round trip by what comes back, so while nothing does, the round trip it reports stands still at the
-    /// last one measured, and the number grew only seconds after the link had stopped (USER 11-01
-    /// "我都已经聊天框打不出字了，左上角的延迟还要好几秒后数字才变大").
+    /// How long the link has to have been held up, in milliseconds, before the display shows that time instead of the
+    /// round trip, when it is longer: how long nothing has arrived, or how long the oldest packet with reliable data
+    /// that the other side has not said it took in has waited. The other side sends many times a second and says with
+    /// each packet what it took in, so either that long is a hold-up of the link. Steam measures the round trip by
+    /// what comes back and evens it out, so its number grew only seconds after the link was held up (USER 11-01
+    /// "我都已经聊天框打不出字了，左上角的延迟还要好几秒后数字才变大"). Counting only the time in which nothing arrived,
+    /// it did not grow at all while some things still came, late, or while only what this side sent was held up (USER
+    /// 11-04 "左上角的延迟数字还是不会网络卡了马上变大").
     /// </summary>
     private const int QuietShownFrom = 500;
 
     /// <summary>
-    /// The steps, in milliseconds, in which how long nothing has arrived is shown.
+    /// The steps, in milliseconds, in which how long the link has been held up is shown.
     /// </summary>
     private const int QuietShownStep = 100;
 
@@ -106,7 +109,7 @@ internal class PingInterface {
             alignment: TextAnchor.MiddleLeft
         );
 
-        // Register on update so we can set the text to the latest round trip, or to how long nothing has arrived
+        // Register on update so we can set the text to the latest round trip, or to how long the link has been held up
         MonoBehaviourUtil.Instance.OnUpdateEvent += () => {
             if (!netClient.IsConnected) {
                 return;
@@ -114,7 +117,7 @@ internal class PingInterface {
 
             var updateManager = netClient.UpdateManager;
             var shown = updateManager.AverageRtt;
-            var quiet = updateManager.QuietSeconds * 1000;
+            var quiet = System.Math.Max(updateManager.QuietSeconds, updateManager.UntakenSeconds) * 1000;
             if (quiet >= QuietShownFrom && quiet > shown) {
                 shown = System.Math.Max(shown, (int) (quiet / QuietShownStep) * QuietShownStep);
             }
