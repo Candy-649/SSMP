@@ -42,6 +42,11 @@ internal class MapManager : IMapManager {
     private Vector2 _lastSentHeroPosition;
 
     /// <summary>
+    /// Whether it was said that the map position moved while the hero stood still, since the hero last moved.
+    /// </summary>
+    private bool _saidStillMove;
+
+    /// <summary>
     /// The value of the last sent whether the map icon was active. If true, we have sent to the server
     /// that we have a map icon active. Otherwise, we have sent to the server that we don't have a map
     /// icon active.
@@ -142,16 +147,20 @@ internal class MapManager : IMapManager {
         // Only send update if the position changed
         if (newPosition != _lastPosition) {
             // A place on the map that moved while the hero did not was moved by the map, as by how the room is drawn
-            // on it (see MapHeadLog)
+            // on it; said once each time the hero stands still (see MapHeadLog)
             var heroPosition = (Vector2) heroController.transform.position;
-            if (_lastPosition != Vector2.zero && heroPosition == _lastSentHeroPosition) {
+            if (heroPosition != _lastSentHeroPosition) {
+                _saidStillMove = false;
+            } else if (_lastPosition != Vector2.zero && !_saidStillMove) {
+                _saidStillMove = true;
                 var drawnBy = _sceneInfoScene != null && _sceneInfoScene.BoundsSprite != null
                     ? _sceneInfoScene.BoundsSprite.name
                     : "nothing";
                 Logger.Info(
                     $"[MapHeads] Own place on the map moved from ({_lastPosition.x:0.000}, {_lastPosition.y:0.000}) " +
-                    $"to ({newPosition.x:0.000}, {newPosition.y:0.000}) while the hero stayed at " +
-                    $"({heroPosition.x:0.00}, {heroPosition.y:0.00}), in '{_sceneInfoName}' drawn by {drawnBy}"
+                    $"to ({newPosition.x:0.000}, {newPosition.y:0.000}) while the hero stood at " +
+                    $"({heroPosition.x:0.00}, {heroPosition.y:0.00}), in '{_sceneInfoName}' drawn by {drawnBy}; " +
+                    "said once until the hero moves"
                 );
             }
 
@@ -341,10 +350,8 @@ internal class MapManager : IMapManager {
         // Update the position of the player icon
         transform.localPosition = unityPosition;
 
-        // Said while the map shows it, next to where it is drawn (see MapHeadLog)
-        if (mapObject.GetComponent<Renderer>().isVisible) {
-            Logger.Info($"[MapHeads] Player {id}'s head sent to ({position.X:0.000}, {position.Y:0.000})");
-        }
+        // Counted while the map shows it, next to how it moved
+        mapObject.GetComponent<MapHeadLog>().PlaceCame();
 
         // While the map is shown, the head is put at the edge of what is shown if this place is outside it
         if (mapObject.TryGetComponent<MapHeadPointer>(out var pointer)) {
