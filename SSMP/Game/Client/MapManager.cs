@@ -17,6 +17,12 @@ namespace SSMP.Game.Client;
 /// </summary>
 internal class MapManager : IMapManager {
     /// <summary>
+    /// What tells the game's own head on the map that the player stopped walking with the map open, which has it stop
+    /// walking (Map Control's Map Idle to Mapwalk Bob).
+    /// </summary>
+    private const string MapWalkEndEvent = "MAPWALK END";
+
+    /// <summary>
     /// The net client instance.
     /// </summary>
     private readonly NetClient _netClient;
@@ -35,16 +41,6 @@ internal class MapManager : IMapManager {
     /// The last sent map position.
     /// </summary>
     private Vector2 _lastPosition;
-
-    /// <summary>
-    /// Where the hero was when the last map position was sent.
-    /// </summary>
-    private Vector2 _lastSentHeroPosition;
-
-    /// <summary>
-    /// Whether it was said that the map position moved while the hero stood still, since the hero last moved.
-    /// </summary>
-    private bool _saidStillMove;
 
     /// <summary>
     /// The value of the last sent whether the map icon was active. If true, we have sent to the server
@@ -146,31 +142,12 @@ internal class MapManager : IMapManager {
     
         // Only send update if the position changed
         if (newPosition != _lastPosition) {
-            // A place on the map that moved while the hero did not was moved by the map, as by how the room is drawn
-            // on it; said once each time the hero stands still (see MapHeadLog)
-            var heroPosition = (Vector2) heroController.transform.position;
-            if (heroPosition != _lastSentHeroPosition) {
-                _saidStillMove = false;
-            } else if (_lastPosition != Vector2.zero && !_saidStillMove) {
-                _saidStillMove = true;
-                var drawnBy = _sceneInfoScene != null && _sceneInfoScene.BoundsSprite != null
-                    ? _sceneInfoScene.BoundsSprite.name
-                    : "nothing";
-                Logger.Info(
-                    $"[MapHeads] Own place on the map moved from ({_lastPosition.x:0.000}, {_lastPosition.y:0.000}) " +
-                    $"to ({newPosition.x:0.000}, {newPosition.y:0.000}) while the hero stood at " +
-                    $"({heroPosition.x:0.00}, {heroPosition.y:0.00}), in '{_sceneInfoName}' drawn by {drawnBy}; " +
-                    "said once until the hero moves"
-                );
-            }
-
             var vec2 = new Math_Vector2(newPosition.x, newPosition.y);
-
+    
             _netClient.UpdateManager.UpdatePlayerMapPosition(vec2);
-
+    
             // Update the last position, since it changed
             _lastPosition = newPosition;
-            _lastSentHeroPosition = heroPosition;
         }
     }
 
@@ -350,9 +327,6 @@ internal class MapManager : IMapManager {
         // Update the position of the player icon
         transform.localPosition = unityPosition;
 
-        // Counted while the map shows it, next to how it moved
-        mapObject.GetComponent<MapHeadLog>().PlaceCame();
-
         // While the map is shown, the head is put at the edge of what is shown if this place is outside it
         if (mapObject.TryGetComponent<MapHeadPointer>(out var pointer)) {
             pointer.SetPlace(new Vector2(position.X, position.Y));
@@ -375,6 +349,13 @@ internal class MapManager : IMapManager {
     /// </summary>
     /// <param name="gameMap">The GameMap instance.</param>
     private void OnPositionCompass(GameMap gameMap) {
+        // The game's own head walks from when the player starts walking with the quick map open until they stop with it
+        // still open. Shutting the map while walking, falling or being hurt on the way never told it they stopped, so
+        // it walked on the next time a map was opened, even the inventory's at a bench (USER 11-04 "有时候看地图那个头像会
+        // 上下浮动", "可是有时候我们坐在椅子上也会上下浮动"). No map opens while the player walks with one, so it is told
+        // they stopped, the way the game tells it when they stop with the map open
+        EventRegister.SendEvent(MapWalkEndEvent, null);
+
         // Otherwise, we have opened the map
         _displayingIcons = true;
 
@@ -389,7 +370,6 @@ internal class MapManager : IMapManager {
         UpdateMapIconsActive();
 
         OutlineOwnIcon(gameMap);
-        MapHeadLog.Attach(gameMap.compassIcon, "Own head", true);
     }
 
     /// <summary>
@@ -504,7 +484,6 @@ internal class MapManager : IMapManager {
 
         // Outside what the map shows, the head waits at its edge with the game's arrow pointing to it
         MapHeadPointer.Attach(mapIcon, gameMap, new Vector2(position.X, position.Y));
-        MapHeadLog.Attach(mapIcon, $"Player {id}'s head", false);
 
         // Remove the bob effect when walking with the map
         Object.Destroy(mapIcon.LocateMyFSM("Mapwalk Bob"));
