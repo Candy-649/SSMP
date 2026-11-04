@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using HutongGames.PlayMaker;
+using SSMP.Fsm;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -782,23 +783,81 @@ internal partial class CoopSave {
     /// Switches off, in the copy of a trap here, whatever it does to the player who set it off. In their game that
     /// player is them; here the same actions would take hold of the local player, who set nothing off. The copy only
     /// ever goes off once, so they stay off: the next time the room loads, it is a new copy.
+    ///
+    /// Unless the local player sits on it as well: on the bench that gives way, the partner sitting down sets it off,
+    /// and the local player could sit down on it too while it is still coming down, or as the partner did. It then
+    /// left them sitting in the air, with nothing to take them off a bench that was gone (USER 11-04 "我卡住了，卡在椅子
+    /// 上了，但是椅子已经碎了，我坐在半空中"). So as it gets to each state that does something to its sitter, it looks
+    /// whether the local player sits on it, and if they do, it does all of it to them.
     /// </summary>
     /// <returns>How many actions were switched off.</returns>
     private static int KeepTrapOffThePlayer(PlayMakerFSM fsm) {
         var hero = HeroController.instance;
-        var switchedOff = 0;
+        var switchedOff = new List<FsmStateAction>();
+        var statesWithThem = new List<FsmState>();
         foreach (var state in fsm.FsmStates) {
+            var before = switchedOff.Count;
             foreach (var action in state.Actions) {
                 if (action is not { Enabled: true } || !IsAboutThePlayer(action, fsm.Fsm, hero)) {
                     continue;
                 }
 
                 action.Enabled = false;
-                switchedOff++;
+                switchedOff.Add(action);
+            }
+
+            if (switchedOff.Count > before) {
+                statesWithThem.Add(state);
             }
         }
 
-        return switchedOff;
+        foreach (var state in statesWithThem) {
+            FsmStateActionInjector.Inject(state, _ => TakeTheLocalSitterToo(fsm, switchedOff), 0, TrapSitterHookName);
+        }
+
+        return switchedOff.Count;
+    }
+
+    /// <summary>
+    /// The name of the hook of a trap's copy that does to the local player what it does to its sitter, if they sit on it.
+    /// </summary>
+    private const string TrapSitterHookName = "Trap Sitter";
+
+    /// <summary>
+    /// The variable of a bench's FSMs that says that the local player sits on that bench: set as they sit down on it,
+    /// cleared as the bench is cancelled under them.
+    /// </summary>
+    private const string AtThisBenchVariable = "At This Bench";
+
+    /// <summary>
+    /// Switches back on what a trap's copy does to its sitter, if the local player sits on one of its benches. The
+    /// states still ahead then do it to them, as they would have, had their own sitting down set the trap off.
+    /// </summary>
+    /// <param name="trap">The FSM of the trap's copy.</param>
+    /// <param name="keptOff">The actions about its sitter that were switched off, emptied once they are back on.</param>
+    private static void TakeTheLocalSitterToo(PlayMakerFSM trap, List<FsmStateAction> keptOff) {
+        if (keptOff.Count == 0) {
+            return;
+        }
+
+        var sitting = false;
+        foreach (var bench in trap.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            sitting |= bench.FsmVariables.FindFsmBool(AtThisBenchVariable) is { Value: true };
+        }
+
+        if (!sitting) {
+            return;
+        }
+
+        foreach (var action in keptOff) {
+            action.Enabled = true;
+        }
+
+        Logger.Info(
+            $"'{trap.name}' takes the local player down as well, who sits on it: its {keptOff.Count} actions about " +
+            $"its sitter are back on from '{trap.ActiveStateName}'"
+        );
+        keptOff.Clear();
     }
 
     /// <summary>
