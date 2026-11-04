@@ -23,6 +23,12 @@ internal sealed class MapHeadPointer : MonoBehaviour {
     private Vector2 _place;
 
     /// <summary>
+    /// How far the middle of the drawn head is from its place, in the space of the map: the head is drawn above its
+    /// place, the way a pin's head is above its point.
+    /// </summary>
+    private Vector2 _middle;
+
+    /// <summary>
     /// The game's arrow under the head, or null if the game had none to copy.
     /// </summary>
     private GameObject? _arrow;
@@ -48,6 +54,12 @@ internal sealed class MapHeadPointer : MonoBehaviour {
         pointer._map = map;
         pointer._place = place;
 
+        // The game's ring goes around the place of the marker it was made for, which is drawn around its place; the
+        // head is drawn above its place, so the ring goes around the middle of the drawn head instead, and that middle
+        // is what waits at the edge (USER 11-04 "现在的队友头像并不完全在圈的正中央")
+        Vector2 middle = head.GetComponent<tk2dSprite>().GetBounds().center;
+        pointer._middle = Vector2.Scale(middle, head.transform.localScale);
+
         // The cocoon's marker keeps the game's arrow; the head gets a copy of it the way the marker made its own
         MapMarkerArrow? marker = map.shadeMarker;
         if (marker == null) {
@@ -68,6 +80,7 @@ internal sealed class MapHeadPointer : MonoBehaviour {
 
         var arrow = Instantiate(prefab, head.transform);
         global::Extensions.Reset(arrow.transform);
+        arrow.transform.localPosition = middle;
 
         // As large as the cocoon's arrow, which sits under a marker of its own size, while the head is drawn smaller
         var headScale = head.transform.localScale;
@@ -101,10 +114,10 @@ internal sealed class MapHeadPointer : MonoBehaviour {
         var outside = false;
         var shownAt = _place;
         if (edge != null && edge.isActiveAndEnabled) {
-            var world = parent.TransformPoint(_place);
+            var world = parent.TransformPoint(_place + _middle);
             outside = !edge.OverlapPoint(world);
             if (outside) {
-                shownAt = parent.InverseTransformPoint(edge.ClosestPoint(world));
+                shownAt = (Vector2) parent.InverseTransformPoint(edge.ClosestPoint(world)) - _middle;
             }
         }
 
