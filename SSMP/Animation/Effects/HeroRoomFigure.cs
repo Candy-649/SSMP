@@ -6,6 +6,7 @@ using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Game.Client;
+using SSMP.Game.Client.Entity;
 using SSMP.Game.Client.Save;
 using SSMP.Internals;
 using TeamCherry.NestedFadeGroup;
@@ -281,9 +282,9 @@ internal class HeroRoomFigure : AnimationEffect {
             return;
         }
 
-        // A creature shows the hero it holds itself, on its copy in the other players' games too
+        // A creature shows the hero it holds itself, on its copy in the other players' games too (see ShowsItsOwnCopy)
         if (target != hero && !IsTheHerosOwn(fsm, hero) && HidesTheHero(self.State, fsm, hero) &&
-            !IsPartOfACreature(target)) {
+            !IsPartOfACreature(target) && !ShowsItsOwnCopy(self)) {
             watcher.Show(target);
         }
     }
@@ -310,9 +311,22 @@ internal class HeroRoomFigure : AnimationEffect {
             return;
         }
 
-        if (!IsTheHerosOwn(fsm, hero) && HidesTheHero(self.State, fsm, hero) && !IsPartOfACreature(target)) {
+        if (!IsTheHerosOwn(fsm, hero) && HidesTheHero(self.State, fsm, hero) && !IsPartOfACreature(target) &&
+            !ShowsItsOwnCopy(self)) {
             watcher.Show(target);
         }
+    }
+
+    /// <summary>
+    /// Whether the action that switches on a figure is one of a creature that this game runs, whose copy in the other
+    /// players' games does the same to their figure there, which is where it is here. Told about it as well, they made
+    /// a copy of the figure beside it: at the end of a fight a boss shows the player who beat it by a figure of the
+    /// room, and the other player saw that player twice over, three times with their character (USER 11-04
+    /// "最后的击杀动画我没看到，我这里的演出超级奇怪，三个我朋友").
+    /// </summary>
+    /// <param name="action">The action.</param>
+    private static bool ShowsItsOwnCopy(FsmStateAction action) {
+        return EntityProcessor.IsSentForACreature(action);
     }
 
     /// <summary>
@@ -1131,6 +1145,7 @@ internal class RoomFigureCopy : MonoBehaviour {
             _path = path;
             _loose = false;
             made = true;
+            Logger.Info($"[Figures] '{gameObject.name}' is shown here by a copy of the room's figure '{path}'");
 
             // A new copy starts where the figure is, rather than going there from where the room keeps it
             _copy.transform.localPosition = position;

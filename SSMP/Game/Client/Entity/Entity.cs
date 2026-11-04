@@ -368,6 +368,13 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether this game sends an action to the other games, for a creature that it runs: the copies of the creature
+    /// there do it too.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    internal bool Sends(FsmStateAction action) => !_isControlled && _hookedActions.ContainsKey(action);
+
+    /// <summary>
     /// The entity that each action of the room's own creatures that works on objects held in variables is sent for
     /// (see <see cref="NoteRoomSubjects"/>).
     /// </summary>

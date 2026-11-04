@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using HutongGames.PlayMaker;
 using SSMP.Networking.Client;
 using SSMP.Util;
 using UnityEngine;
@@ -121,6 +122,21 @@ internal class EntityProcessor {
     public static bool IsRegistered(GameObject gameObject) {
         foreach (var entity in _entities.Values) {
             if (entity.Object.Host == gameObject || entity.Object.Client == gameObject) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether an action is one that this game sends to the other games for a creature that it runs, whose copies there
+    /// do it too.
+    /// </summary>
+    /// <param name="action">The action.</param>
+    public static bool IsSentForACreature(FsmStateAction action) {
+        foreach (var entity in _entities.Values) {
+            if (entity.Sends(action)) {
                 return true;
             }
         }
