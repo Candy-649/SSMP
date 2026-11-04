@@ -487,6 +487,13 @@ internal partial class CoopSave {
             LogInteractionError(e);
         }
 
+        // Also once the partner is gone, so that an object that waits for their word of how it started goes its own way
+        try {
+            UpdateStartPicks();
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // Also while nobody else is in, so that a member who comes into the room later gets its layout
         try {
             UpdateRoomLayouts();
@@ -721,8 +728,9 @@ internal partial class CoopSave {
         }
 
         // First, so that none of the others throwing on the way can keep them from running. Forgetting the machines
-        // only empties lists, which can't throw.
+        // and how the objects of the room started only empties lists, which can't throw.
         ResetMachines();
+        ResetStartPicks();
         _layoutPickingStates.Clear();
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
@@ -1159,6 +1167,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.RoomClocks:
                 OnRoomClocks(player, update);
+                break;
+            case CoopSaveUpdateKind.StartPick:
+                OnStartPick(player, update);
                 break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);

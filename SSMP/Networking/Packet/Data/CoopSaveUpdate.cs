@@ -860,5 +860,14 @@ internal enum CoopSaveUpdateKind : byte {
     /// sender's figure that far from the lift where theirs is, since its positions lag behind a moving lift
     /// (CoopSave.LiftReplay).
     /// </summary>
-    LiftRide
+    LiftRide,
+
+    /// <summary>
+    /// How an object of the sender's room started, which it picks at random as the room loads (see
+    /// CoopSave.StartPicks): <see cref="CoopSaveUpdate.Scene"/> and <see cref="CoopSaveUpdate.ObjectPath"/> name the
+    /// object, <see cref="CoopSaveUpdate.FsmName"/> its state machine, and <see cref="CoopSaveUpdate.StateName"/> the
+    /// state it started in. The scene host sends it as the object picks and to whoever walks in later; the other games
+    /// start theirs that way instead of picking.
+    /// </summary>
+    StartPick
 }

@@ -512,6 +512,19 @@ internal partial class CoopSave {
             return;
         }
 
+        // And objects of the room that pick how they start, which start the way the scene host's did (see
+        // CoopSave.StartPicks): one that waits for the host's word goes nowhere yet
+        try {
+            if (TakeStartPick(self, toState) is not { } startState) {
+                MachineSwitchToStateField?.SetValue(self, null);
+                return;
+            }
+
+            toState = startState;
+        } catch (Exception e) {
+            LogInteractionError(e);
+        }
+
         // The cage that only goes off for both players first, since it can send its bait into another state, which is
         // then the state that everything below sees
         try {
