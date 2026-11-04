@@ -1830,6 +1830,30 @@ internal class AnimationManager {
         }
 
         ToolItemManager.BoundAttackToolUsed += AttackToolUsed;
+
+        // The tacks, the three pins and the long pin are thrown by the tool FSM after the game says that the tool was
+        // used, so their effect goes once the state that throws them has thrown them all
+        foreach (var (stateName, clip) in ToolPlacements.ThrowingStates) {
+            var state = toolFsm.GetState(stateName);
+            FsmStateActionInjector.Inject(state, _ => OnToolThrown(clip), state.Actions.Length, "Tool Thrown");
+        }
+    }
+
+    /// <summary>
+    /// Sends the effect of a throw of the local player's tacks, three pins or long pin, with where each thing that the
+    /// throw threw went, as the state of the tool FSM that threw them is done with it.
+    /// </summary>
+    /// <param name="clip">The clip of the tool's effect.</param>
+    private void OnToolThrown(AnimationClip clip) {
+        if (!_netClient.IsConnected) {
+            return;
+        }
+
+        var info = BaseAttackTool.GetToolInfo();
+        var effectInfo = ToolPlacements.Append(info);
+        var count = effectInfo.Length > info.Length ? effectInfo[info.Length] : 0;
+        Logger.Info($"[Tools] This player's {clip} goes out with where its {count} thing(s) went");
+        _netClient.UpdateManager.UpdatePlayerAnimation(clip, 0, effectInfo);
     }
 
     /// <summary>
@@ -1864,9 +1888,12 @@ internal class AnimationManager {
             return;
         }
 
-        // Where the things it threw went, which the game rolled, goes with it (see ToolPlacements)
-        var effectInfo = ToolPlacements.Append(BaseAttackTool.GetToolInfo());
-        _netClient.UpdateManager.UpdatePlayerAnimation(toolClip, 0, effectInfo);
+        // The tool FSM has not thrown the tacks, three pins or long pin yet: they go as it has (see OnToolThrown)
+        if (ToolPlacements.ThrowingStates.ContainsValue(toolClip)) {
+            return;
+        }
+
+        _netClient.UpdateManager.UpdatePlayerAnimation(toolClip, 0, BaseAttackTool.GetToolInfo());
     }
 
     /// <summary>

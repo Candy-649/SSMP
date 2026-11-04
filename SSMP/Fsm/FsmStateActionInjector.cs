@@ -25,10 +25,10 @@ internal sealed class FsmStateActionInjector : FsmStateAction {
     private void DoInjection(int index) {
         var stateActions = State.Actions.ToList();
 
-        if (index < stateActions.Count) {
-            // Replace existing hooks with this one
-            var atIndex = stateActions[index];
-            if (atIndex is FsmStateActionInjector injector && injector.Name == Name) {
+        // Replace an existing hook of this name in the state with this one, wherever it is: one put at the end is no
+        // longer at the end once it is there
+        foreach (var action in stateActions) {
+            if (action is FsmStateActionInjector injector && injector.Name == Name) {
                 injector._onStateEnter = _onStateEnter;
                 return;
             }

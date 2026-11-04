@@ -13,12 +13,20 @@ namespace SSMP.Animation.Effects.Tools;
 /// </summary>
 internal static class ToolPlacements {
     /// <summary>
-    /// The states of the hero's tool FSM that throw the things whose copies the tools' effects make: the tacks, the
-    /// three pins on the ground and in the air, and the long pin.
+    /// The states of the hero's tool FSM that throw the things whose copies the tools' effects make - the tacks, the
+    /// three pins on the ground and in the air, and the long pin - with the clip of the effect of each. The game says
+    /// that one of these tools was used before it sends the tool FSM the event that throws its things, so the effect
+    /// goes as one of these states has thrown them all (AnimationManager.OnToolThrown).
     /// </summary>
-    private static readonly HashSet<string> ThrowingStates = [
-        "Tacks L", "Tacks R", "TriPin Ground L", "TriPin Ground R", "TriPin Air L", "TriPin Air R", "Fisherpin"
-    ];
+    public static readonly Dictionary<string, AnimationClip> ThrowingStates = new() {
+        { "Tacks L", AnimationClip.ToolTacks },
+        { "Tacks R", AnimationClip.ToolTacks },
+        { "TriPin Ground L", AnimationClip.ToolThreefoldPin },
+        { "TriPin Ground R", AnimationClip.ToolThreefoldPin },
+        { "TriPin Air L", AnimationClip.ToolThreefoldPin },
+        { "TriPin Air R", AnimationClip.ToolThreefoldPin },
+        { "Fisherpin", AnimationClip.ToolLongpin }
+    };
 
     /// <summary>
     /// The things that the hero's tool FSM threw in the throw going on now.
@@ -47,14 +55,14 @@ internal static class ToolPlacements {
     /// </summary>
     public static void Note(GameObject spawned) {
         var hero = HeroController.SilentInstance;
-        if (hero != null && hero.toolsFSM != null && ThrowingStates.Contains(hero.toolsFSM.ActiveStateName)) {
+        if (hero != null && hero.toolsFSM != null && ThrowingStates.ContainsKey(hero.toolsFSM.ActiveStateName)) {
             Thrown.Add(spawned);
         }
     }
 
     /// <summary>
-    /// The effect info of a tool followed by where the things that it threw went, which are then forgotten. The game
-    /// throws them all and has them moving before it says that the tool was used, which is when the effect is sent.
+    /// The effect info of a tool followed by where the things that it threw went, which are then forgotten. The state
+    /// that throws them has them all moving by then.
     /// </summary>
     /// <param name="info">The effect info of the tool.</param>
     public static byte[] Append(byte[] info) {
