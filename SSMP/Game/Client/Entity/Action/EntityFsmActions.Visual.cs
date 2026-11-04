@@ -263,6 +263,88 @@ internal static partial class EntityFsmActions {
 
     #endregion
 
+    #region PlayParticleEmitterChildren
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, PlayParticleEmitterChildren action) {
+        return true;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action: plays the particles of each child of the object, and stops them again
+    /// as the state is left if the action does, as the game does. Nothing played them on the copy, so the spray that a
+    /// creature spat at the players never showed in the other game, nor hurt anyone there (USER 11-04:
+    /// "全是蛆的地方有个会喷东西的怪，那个怪喷东西没有同步", "我朋友说她根本没看到喷绿水").
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, PlayParticleEmitterChildren action) {
+        if (action.gameObject == null) {
+            return;
+        }
+
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null) {
+            return;
+        }
+
+        foreach (Transform child in gameObject.transform) {
+            var particleSystem = child.GetComponent<ParticleSystem>();
+            if (particleSystem == null) {
+                continue;
+            }
+
+            particleSystem.Play();
+            if (action.resetTimeIfPlaying) {
+                particleSystem.time = 0f;
+            }
+        }
+
+        if (!action.stopOnStateExit) {
+            return;
+        }
+
+        new ActionInState {
+            Fsm = action.Fsm,
+            StateName = action.State.Name,
+            ExitAction = () => {
+                foreach (Transform child in gameObject.transform) {
+                    var particleSystem = child.GetComponent<ParticleSystem>();
+                    if (particleSystem != null) {
+                        particleSystem.Stop();
+                    }
+                }
+            }
+        }.Register();
+    }
+
+    #endregion
+
+    #region StopParticleEmittersInChildren
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, StopParticleEmittersInChildren action) {
+        return true;
+    }
+
+    /// <summary>Applies network data to the FSM action: stops every playing particle system under the object.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData data, StopParticleEmittersInChildren action) {
+        if (action.gameObject == null) {
+            return;
+        }
+
+        var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        if (gameObject == null) {
+            return;
+        }
+
+        foreach (var particleSystem in gameObject.GetComponentsInChildren<ParticleSystem>()) {
+            if (particleSystem.isPlaying) {
+                particleSystem.Stop();
+            }
+        }
+    }
+
+    #endregion
+
     #region SetMeshRenderer
 
     /// <summary>Builds network data from the FSM action.</summary>
