@@ -174,14 +174,18 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     /// that carries the change also says that it is the newest.
     /// </summary>
     /// <param name="clip">The animation clip.</param>
+    /// <param name="frame">The frame that the character starts it from.</param>
     /// <param name="effectInfo">Byte array of effect info.</param>
     /// <param name="clipChanges">How many clip changes were sent, this one included, counted round.</param>
+    /// <param name="clipTime">How far into the clip that frame is, in milliseconds.</param>
     /// <param name="stateEffectInfo">The effect info said with what the character plays (see
     /// <see cref="PlayerUpdate.StateEffectInfo"/>).</param>
     public void UpdatePlayerClipChange(
         AnimationClip clip,
+        byte frame,
         byte[]? effectInfo,
         ushort clipChanges,
+        ushort clipTime,
         byte[]? stateEffectInfo
     ) {
         lock (Lock) {
@@ -190,10 +194,11 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
             playerUpdate.AnimationInfos.Add(
                 new AnimationInfo {
                     ClipId = (ushort) clip,
+                    Frame = frame,
                     EffectInfo = effectInfo
                 }
             );
-            playerUpdate.SetClipState(clipChanges, (ushort) clip, 0, stateEffectInfo);
+            playerUpdate.SetClipState(clipChanges, (ushort) clip, clipTime, stateEffectInfo);
         }
     }
 
@@ -203,7 +208,7 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     /// </summary>
     /// <param name="clipChanges">How many clip changes were sent, counted round.</param>
     /// <param name="clip">The clip of the last of them.</param>
-    /// <param name="clipTime">How long ago the character started it, in milliseconds.</param>
+    /// <param name="clipTime">How far into it the character is, in milliseconds.</param>
     /// <param name="effectInfo">Its effect info, when what its effect sets holds while it plays.</param>
     public void UpdatePlayerClipState(ushort clipChanges, AnimationClip clip, ushort clipTime, byte[]? effectInfo) {
         lock (Lock) {

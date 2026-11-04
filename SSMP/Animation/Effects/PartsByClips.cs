@@ -202,7 +202,7 @@ internal static class PartsByClips {
     /// <param name="clip">The clip as the character plays it, which may be the clip of its crest.</param>
     /// <param name="crestType">The crest of the player.</param>
     /// <param name="startTime">How far into the clip it starts, in seconds: more than 0 for a clip that was put right
-    /// after its change got lost.</param>
+    /// after its change got lost, or that its player started from a frame further in than its first.</param>
     public static void OnCharacterClip(
         GameObject playerObject,
         ushort id,

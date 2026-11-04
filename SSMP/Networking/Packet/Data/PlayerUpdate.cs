@@ -57,7 +57,8 @@ internal class PlayerUpdate : GenericClientData {
     public ushort StateClipId { get; private set; }
 
     /// <summary>
-    /// How long ago the player's character started that clip, in milliseconds.
+    /// How far into that clip the player's character is, in milliseconds: how long ago they started it, and how far
+    /// into it the frame was that they started it from.
     /// </summary>
     public ushort StateClipTime { get; private set; }
 
@@ -84,7 +85,7 @@ internal class PlayerUpdate : GenericClientData {
     /// </summary>
     /// <param name="clipChanges">How many clip changes the player had sent, counted round.</param>
     /// <param name="clipId">The clip of the last of them.</param>
-    /// <param name="clipTime">How long ago the character started it, in milliseconds.</param>
+    /// <param name="clipTime">How far into it the character is, in milliseconds.</param>
     /// <param name="effectInfo">Its effect info, when what its effect sets holds while it plays.</param>
     public void SetClipState(ushort clipChanges, ushort clipId, ushort clipTime, byte[]? effectInfo) {
         if (UpdateTypes.Contains(PlayerUpdateType.ClipState) && (short) (clipChanges - ClipChanges) < 0) {

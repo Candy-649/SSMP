@@ -806,7 +806,8 @@ internal class AnimationManager {
     private AnimationClip? _stateClip;
 
     /// <summary>
-    /// When the local player sent it, in game time.
+    /// When the character would have started it from its first frame, in game time: when the local player sent it, less
+    /// how far into the clip the frame that the character started it from is.
     /// </summary>
     private float _stateClipSentAt;
 
@@ -833,7 +834,14 @@ internal class AnimationManager {
     private readonly Dictionary<ushort, (int PutRight, int LeftOut)> _clipFixes = new();
 
     /// <summary>
-    /// When the clip changes put right or left out are next written down, in unscaled time.
+    /// How many clip changes of the local player's character were sent from a frame further in than their first since
+    /// they were last written down, by clip and frame (see <see cref="Tk2dSpriteAnimatorOnWarpClipToLocalTime"/>).
+    /// </summary>
+    private readonly Dictionary<(string Clip, int Frame), int> _startsFurtherIn = new();
+
+    /// <summary>
+    /// When the clip changes put right or left out, and those sent from further in, are next written down, in unscaled
+    /// time.
     /// </summary>
     private float _nextClipLogAt;
 
@@ -1112,8 +1120,9 @@ internal class AnimationManager {
             return false;
         }
 
-        // How late the clip is for what comes with it, before the clip's own start is kept within its length below
-        var lateBy = alreadyGoing ? float.PositiveInfinity : startTime;
+        // How late the clip is for what comes with it, before the clip's own start is kept within its length below: as
+        // far in as it is put right at, or as the frame that its player started it from
+        var lateBy = alreadyGoing ? float.PositiveInfinity : startTime > 0f ? startTime : frame / clip.fps;
 
         if (_debugLogAnimations) Logger.Info($"  playing clip: {clipName}");
         if (startTime <= 0f) {
@@ -1137,11 +1146,13 @@ internal class AnimationManager {
 
     /// <summary>
     /// Says again in the packet that is being put together what the local player's character plays now: the clip of
-    /// the last clip change they sent, how many they sent, and how long ago that one started. A clip change is said
-    /// once, in a packet that is not sent again if it is lost on the way; said with every update, what the character
-    /// plays reaches the other players with the next one that arrives (see <see cref="OnPlayerClipState"/>).
+    /// the last clip change they sent, how many they sent, and how far into that clip the character is. A clip change
+    /// is said once, in a packet that is not sent again if it is lost on the way; said with every update, what the
+    /// character plays reaches the other players with the next one that arrives (see <see cref="OnPlayerClipState"/>).
     /// </summary>
     public void SendClipState() {
+        WriteDownClipFixes();
+
         if (_stateClip is not { } clip || Time.unscaledTime < _nextClipStateAt) {
             return;
         }
@@ -1157,15 +1168,29 @@ internal class AnimationManager {
     /// </summary>
     /// <param name="animationClip">The clip.</param>
     /// <param name="effectInfo">The effect info of the clip, if it has an effect.</param>
-    private void SendClipChange(AnimationClip animationClip, byte[]? effectInfo) {
+    /// <param name="startFrame">The frame that the character starts it from.</param>
+    /// <param name="startedAt">How far into it that frame is, in seconds.</param>
+    private void SendClipChange(
+        AnimationClip animationClip,
+        byte[]? effectInfo,
+        int startFrame = 0,
+        float startedAt = 0f
+    ) {
         _clipChanges = unchecked((ushort) (_clipChanges + 1));
         _stateClip = animationClip;
-        _stateClipSentAt = Time.time;
+        _stateClipSentAt = Time.time - startedAt;
         _stateEffectInfo = AnimationEffects.TryGetValue(animationClip, out var effect) &&
                            effect is AnimationEffect { HoldsWhileClipPlays: true }
             ? effectInfo
             : null;
-        _netClient.UpdateManager.UpdatePlayerClipChange(animationClip, effectInfo, _clipChanges, _stateEffectInfo);
+        _netClient.UpdateManager.UpdatePlayerClipChange(
+            animationClip,
+            (byte) startFrame,
+            effectInfo,
+            _clipChanges,
+            (ushort) (startedAt * 1000f),
+            _stateEffectInfo
+        );
     }
 
     /// <summary>
@@ -1212,11 +1237,9 @@ internal class AnimationManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="clipChanges">How many clip changes they had sent.</param>
     /// <param name="clipId">The clip of the last of them, which their character plays.</param>
-    /// <param name="clipTime">How long ago their character started it, in milliseconds.</param>
+    /// <param name="clipTime">How far into it their character is, in milliseconds.</param>
     /// <param name="effectInfo">The effect info of that clip, when what its effect sets holds while it plays.</param>
     public void OnPlayerClipState(ushort id, ushort clipChanges, ushort clipId, ushort clipTime, byte[]? effectInfo) {
-        WriteDownClipFixes();
-
         if (_clipChangesHeard.TryGetValue(id, out var heard)) {
             var ahead = (short) (clipChanges - heard);
             if (ahead == 0 || ahead < 0 && ahead >= ClipChangesStartedOver) {
@@ -1269,7 +1292,8 @@ internal class AnimationManager {
     }
 
     /// <summary>
-    /// Writes down how many clip changes of other players were put right and left out, once a minute when any were.
+    /// Writes down how many clip changes of other players were put right and left out, and how many of the local
+    /// player's were sent from further in than their first frame, once a minute when any were.
     /// </summary>
     private void WriteDownClipFixes() {
         if (Time.unscaledTime < _nextClipLogAt) {
@@ -1277,6 +1301,18 @@ internal class AnimationManager {
         }
 
         _nextClipLogAt = Time.unscaledTime + ClipLogEvery;
+        if (_startsFurtherIn.Count > 0) {
+            Logger.Info(
+                $"[Clips] {DateTime.Now:HH:mm:ss} In the last minute, the character started clips from further in " +
+                "than their first frame, and the other players were told of each with its frame: " +
+                string.Join(
+                    ", ",
+                    _startsFurtherIn.Select(pair => $"'{pair.Key.Clip}' from {pair.Key.Frame} {pair.Value}x")
+                )
+            );
+            _startsFurtherIn.Clear();
+        }
+
         if (_clipFixes.Count == 0) {
             return;
         }
@@ -1331,7 +1367,9 @@ internal class AnimationManager {
     /// Callback method when an animation fires in the sprite animator.
     /// </summary>
     /// <param name="clip">The sprite animation clip.</param>
-    private void OnAnimationEvent(tk2dSpriteAnimationClip clip) {
+    /// <param name="startFrame">The frame that the character starts it from.</param>
+    /// <param name="startedAt">How far into it that frame is, in seconds.</param>
+    private void OnAnimationEvent(tk2dSpriteAnimationClip clip, int startFrame = 0, float startedAt = 0f) {
         if (_debugLogAnimations) Logger.Info($"Animation event with name: {clip.name}");
 
         // If we are not connected, there is nothing to send to
@@ -1404,6 +1442,11 @@ internal class AnimationManager {
 
         var animationClip = ClipEnumNames[clip.name];
 
+        if (startFrame != 0) {
+            _startsFurtherIn.TryGetValue((clip.name, startFrame), out var starts);
+            _startsFurtherIn[(clip.name, startFrame)] = starts + 1;
+        }
+
         // A stand-in for a part of a bind that has no clip of its own is only an effect, and the figure stays on the
         // clip of the last change. It is sent uncounted, and what the character plays stays that clip: said instead, a
         // clip change lost just before it could not be put right
@@ -1412,7 +1455,9 @@ internal class AnimationManager {
         } else {
             SendClipChange(
                 animationClip,
-                AnimationEffects.TryGetValue(animationClip, out var effect) ? effect.GetEffectInfo() : null
+                AnimationEffects.TryGetValue(animationClip, out var effect) ? effect.GetEffectInfo() : null,
+                startFrame,
+                startedAt
             );
         }
 
@@ -1945,13 +1990,20 @@ internal class AnimationManager {
             return;
         }
 
-        var clipTime = self.clipTime;
-        var index = (int) clipTime % clip.frames.Length;
+        // The animator warps to a clip only as it starts it (tk2dSpriteAnimator.Play), at the frame it starts it from:
+        // its first, or one further in, as the run that a dash goes on into starts at its third
+        // (HeroAnimationController.AnimationCompleteDelegate). A clip other than the last one sent is sent from
+        // wherever it starts, with that frame. Left out, the other players' figure stayed on the last frame of the clip
+        // before it, a running pose as the player ran on (USER 11-04
+        // "队友在移动，匀速移动，一看就是在跑步，但是我这边看她定在某个跑步动作上"). The same clip started again is sent
+        // again only from its first frame or one with an event.
+        var index = (int) self.clipTime % clip.frames.Length;
         var frame = clip.frames[index];
-    
-        if (index == 0 || frame.triggerEvent || AllowedLoopAnimations.Contains(clip.name)) {
-            if (_debugLogAnimations) Logger.Info($"OnAnimationEvent from tk2dSpriteAnimatorOnWarpClipToLocalTime: {clip.name}, conditions: {index == 0}, {frame.triggerEvent}, {AllowedLoopAnimations.Contains(clip.name)}");
-            OnAnimationEvent(clip);
+
+        if (index == 0 || frame.triggerEvent || clip.name != _lastAnimationClip ||
+            AllowedLoopAnimations.Contains(clip.name)) {
+            if (_debugLogAnimations) Logger.Info($"Clip started in WarpClipToLocalTime: {clip.name} from {index}");
+            OnAnimationEvent(clip, index, self.ClipTimeSeconds);
         }
     }
 
