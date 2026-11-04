@@ -37,6 +37,11 @@ internal class MapManager : IMapManager {
     private Vector2 _lastPosition;
 
     /// <summary>
+    /// Where the hero was when the last map position was sent.
+    /// </summary>
+    private Vector2 _lastSentHeroPosition;
+
+    /// <summary>
     /// The value of the last sent whether the map icon was active. If true, we have sent to the server
     /// that we have a map icon active. Otherwise, we have sent to the server that we don't have a map
     /// icon active.
@@ -136,12 +141,27 @@ internal class MapManager : IMapManager {
     
         // Only send update if the position changed
         if (newPosition != _lastPosition) {
+            // A place on the map that moved while the hero did not was moved by the map, as by how the room is drawn
+            // on it (see MapHeadLog)
+            var heroPosition = (Vector2) heroController.transform.position;
+            if (_lastPosition != Vector2.zero && heroPosition == _lastSentHeroPosition) {
+                var drawnBy = _sceneInfoScene != null && _sceneInfoScene.BoundsSprite != null
+                    ? _sceneInfoScene.BoundsSprite.name
+                    : "nothing";
+                Logger.Info(
+                    $"[MapHeads] Own place on the map moved from ({_lastPosition.x:0.000}, {_lastPosition.y:0.000}) " +
+                    $"to ({newPosition.x:0.000}, {newPosition.y:0.000}) while the hero stayed at " +
+                    $"({heroPosition.x:0.00}, {heroPosition.y:0.00}), in '{_sceneInfoName}' drawn by {drawnBy}"
+                );
+            }
+
             var vec2 = new Math_Vector2(newPosition.x, newPosition.y);
-    
+
             _netClient.UpdateManager.UpdatePlayerMapPosition(vec2);
-    
+
             // Update the last position, since it changed
             _lastPosition = newPosition;
+            _lastSentHeroPosition = heroPosition;
         }
     }
 
@@ -321,6 +341,11 @@ internal class MapManager : IMapManager {
         // Update the position of the player icon
         transform.localPosition = unityPosition;
 
+        // Said while the map shows it, next to where it is drawn (see MapHeadLog)
+        if (mapObject.GetComponent<Renderer>().isVisible) {
+            Logger.Info($"[MapHeads] Player {id}'s head sent to ({position.X:0.000}, {position.Y:0.000})");
+        }
+
         // While the map is shown, the head is put at the edge of what is shown if this place is outside it
         if (mapObject.TryGetComponent<MapHeadPointer>(out var pointer)) {
             pointer.SetPlace(new Vector2(position.X, position.Y));
@@ -357,6 +382,7 @@ internal class MapManager : IMapManager {
         UpdateMapIconsActive();
 
         OutlineOwnIcon(gameMap);
+        MapHeadLog.Attach(gameMap.compassIcon, "Own head", true);
     }
 
     /// <summary>
@@ -471,6 +497,7 @@ internal class MapManager : IMapManager {
 
         // Outside what the map shows, the head waits at its edge with the game's arrow pointing to it
         MapHeadPointer.Attach(mapIcon, gameMap, new Vector2(position.X, position.Y));
+        MapHeadLog.Attach(mapIcon, $"Player {id}'s head", false);
 
         // Remove the bob effect when walking with the map
         Object.Destroy(mapIcon.LocateMyFSM("Mapwalk Bob"));
