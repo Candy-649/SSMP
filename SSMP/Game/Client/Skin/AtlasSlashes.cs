@@ -541,11 +541,7 @@ internal static class AtlasSlashPictures {
         }
 
         var shownAtRest = sprites.Count;
-        try {
-            SampleClips(attacks, sprites);
-        } catch (Exception e) {
-            Logger.Warn($"Could not go through the clips of the hero's attacks: {e.Message}");
-        }
+        SampleClips(attacks, sprites);
 
         // Where the clips gave nothing, every sprite of the kinds shown at rest on their pages: the name without the
         // number at its end

@@ -199,26 +199,22 @@ internal class ThrownTool : BaseAttackTool {
         var parts = new List<string>();
         var bySheets = new HashSet<Renderer>();
         foreach (var sprite in copy.GetComponentsInChildren<tk2dBaseSprite>(true)) {
-            try {
-                var material = sprite.TryGetComponent<Renderer>(out var renderer) ? renderer.sharedMaterial : null;
-                if (renderer != null) {
-                    bySheets.Add(renderer);
-                }
-
-                var texture = material != null ? material.mainTexture : null;
-                var sheet = sprite.Collection;
-                parts.Add(
-                    $"'{(sprite.gameObject == copy ? "itself" : sprite.name)}' shows " +
-                    $"'{sprite.CurrentSprite?.name ?? "nothing"}' of '{(sheet != null ? sheet.name : "no sheet")}' on " +
-                    (texture != null ? $"'{texture.name}' {texture.width}x{texture.height}" : "no texture") +
-                    $" with '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
-                    (material != null ? $" as '{material.name}'{Switches(material)}" : "") +
-                    $", tinted {Tint(sprite.color)}" +
-                    (sprite.gameObject.activeInHierarchy ? "" : " (off)")
-                );
-            } catch (Exception e) {
-                parts.Add($"'{sprite.name}' could not be read ({e.GetType().Name})");
+            var material = sprite.TryGetComponent<Renderer>(out var renderer) ? renderer.sharedMaterial : null;
+            if (renderer != null) {
+                bySheets.Add(renderer);
             }
+
+            var texture = material != null ? material.mainTexture : null;
+            var sheet = sprite.Collection;
+            parts.Add(
+                $"'{(sprite.gameObject == copy ? "itself" : sprite.name)}' shows " +
+                $"'{sprite.CurrentSprite?.name ?? "nothing"}' of '{(sheet != null ? sheet.name : "no sheet")}' on " +
+                (texture != null ? $"'{texture.name}' {texture.width}x{texture.height}" : "no texture") +
+                $" with '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
+                (material != null ? $" as '{material.name}'{Switches(material)}" : "") +
+                $", tinted {Tint(sprite.color)}" +
+                (sprite.gameObject.activeInHierarchy ? "" : " (off)")
+            );
         }
 
         // What draws without a sheet: a sprite of one of the game's atlases, particles, a line. A texture with no name
@@ -228,26 +224,22 @@ internal class ThrownTool : BaseAttackTool {
                 continue;
             }
 
-            try {
-                var material = renderer.sharedMaterial;
-                var picture = renderer is SpriteRenderer { sprite: { } shown }
-                    ? $"'{shown.name}' of '{(shown.texture != null ? shown.texture.name : "no texture")}'"
-                    : renderer.GetType().Name;
-                var texture = material != null ? material.mainTexture : null;
-                parts.Add(
-                    $"'{(renderer.gameObject == copy ? "itself" : renderer.name)}' draws {picture} with " +
-                    $"'{(material != null ? material.name : "no material")}'" +
-                    (texture != null ? $" on '{texture.name}' {texture.width}x{texture.height}" : "") +
-                    $" and '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
-                    (material != null ? Switches(material) : "") +
-                    (renderer is ParticleSystemRenderer && renderer.TryGetComponent<ParticleSystem>(out var system)
-                        ? $", {(system.isPlaying ? "playing" : "stopped")} with {system.particleCount} particle(s)"
-                        : "") +
-                    (renderer.enabled && renderer.gameObject.activeInHierarchy ? "" : " (off)")
-                );
-            } catch (Exception e) {
-                parts.Add($"'{renderer.name}' could not be read ({e.GetType().Name})");
-            }
+            var material = renderer.sharedMaterial;
+            var picture = renderer is SpriteRenderer { sprite: { } shown }
+                ? $"'{shown.name}' of '{(shown.texture != null ? shown.texture.name : "no texture")}'"
+                : renderer.GetType().Name;
+            var texture = material != null ? material.mainTexture : null;
+            parts.Add(
+                $"'{(renderer.gameObject == copy ? "itself" : renderer.name)}' draws {picture} with " +
+                $"'{(material != null ? material.name : "no material")}'" +
+                (texture != null ? $" on '{texture.name}' {texture.width}x{texture.height}" : "") +
+                $" and '{(material != null && material.shader != null ? material.shader.name : "no shader")}'" +
+                (material != null ? Switches(material) : "") +
+                (renderer is ParticleSystemRenderer && renderer.TryGetComponent<ParticleSystem>(out var system)
+                    ? $", {(system.isPlaying ? "playing" : "stopped")} with {system.particleCount} particle(s)"
+                    : "") +
+                (renderer.enabled && renderer.gameObject.activeInHierarchy ? "" : " (off)")
+            );
         }
 
         return parts.Count == 0 ? "no pictures" : string.Join("; ", parts);

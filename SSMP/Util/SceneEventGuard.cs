@@ -52,11 +52,6 @@ internal static class SceneEventGuard {
     private static readonly Dictionary<string, int> Failures = new();
 
     /// <summary>
-    /// Whether reading the handlers of an event threw, which is written down once.
-    /// </summary>
-    private static bool _saidUnreadable;
-
-    /// <summary>
     /// Takes over the calling of the handlers of Unity's scene events.
     /// </summary>
     public static void Initialize() {
@@ -147,16 +142,7 @@ internal static class SceneEventGuard {
             return null;
         }
 
-        try {
-            return (field.GetValue(null) as Delegate)?.GetInvocationList() ?? [];
-        } catch (Exception e) {
-            if (!_saidUnreadable) {
-                _saidUnreadable = true;
-                Logger.Warn($"The handlers of '{field.Name}' could not be read, and Unity calls them itself:\n{e}");
-            }
-
-            return null;
-        }
+        return (field.GetValue(null) as Delegate)?.GetInvocationList() ?? [];
     }
 
     /// <summary>
@@ -191,27 +177,23 @@ internal static class SceneEventGuard {
     /// Writes down that a handler of a scene event threw: the first time with all of it, and after that in a line.
     /// </summary>
     private static void SayItFailed(Delegate handler, SceneEvent sceneEvent, Scene scene, Scene next, Exception e) {
-        try {
-            var name = TimedEvent.Describe(handler);
-            Failures.TryGetValue(name, out var before);
-            Failures[name] = before + 1;
+        var name = TimedEvent.Describe(handler);
+        Failures.TryGetValue(name, out var before);
+        Failures[name] = before + 1;
 
-            var when = sceneEvent switch {
-                SceneEvent.Loaded => $"'{scene.name}' is loaded",
-                SceneEvent.Unloaded => $"'{scene.name}' is unloaded",
-                _ => $"the room changes from '{scene.name}' to '{next.name}'"
-            };
+        var when = sceneEvent switch {
+            SceneEvent.Loaded => $"'{scene.name}' is loaded",
+            SceneEvent.Unloaded => $"'{scene.name}' is unloaded",
+            _ => $"the room changes from '{scene.name}' to '{next.name}'"
+        };
 
-            if (before == 0) {
-                Logger.Error($"'{name}', which runs when {when}, failed; what runs after it still does:\n{e}");
-            } else {
-                Logger.Error(
-                    $"'{name}', which runs when {when}, failed again, {before + 1} times now: " +
-                    $"{e.GetType().Name}: {e.Message}"
-                );
-            }
-        } catch (Exception inner) {
-            Logger.Error($"A handler of a scene event failed, and saying so failed too:\n{e}\n{inner}");
+        if (before == 0) {
+            Logger.Error($"'{name}', which runs when {when}, failed; what runs after it still does:\n{e}");
+        } else {
+            Logger.Error(
+                $"'{name}', which runs when {when}, failed again, {before + 1} times now: " +
+                $"{e.GetType().Name}: {e.Message}"
+            );
         }
     }
 }

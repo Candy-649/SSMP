@@ -682,13 +682,9 @@ internal static class PlayerColorMod {
             return;
         }
 
-        try {
-            var others = plugin.GetType().GetField("otherObjs", BindingFlags.NonPublic | BindingFlags.Static);
-            if (others?.GetValue(null) is HashSet<GameObject> leftAlone) {
-                leftAlone.Clear();
-            }
-        } catch (Exception e) {
-            Logger.Warn($"Could not have Player Color look again at what it leaves alone: {e.Message}");
+        var others = plugin.GetType().GetField("otherObjs", BindingFlags.NonPublic | BindingFlags.Static);
+        if (others?.GetValue(null) is HashSet<GameObject> leftAlone) {
+            leftAlone.Clear();
         }
     }
 
@@ -755,20 +751,15 @@ internal static class PlayerColorMod {
             return null;
         }
 
-        try {
-            if (!_theirMasksLooked) {
-                _theirMasksLooked = true;
-                _theirMasks = plugin.GetType().GetField("atlas2Mask", BindingFlags.NonPublic | BindingFlags.Static);
-            }
-
-            return _theirMasks?.GetValue(null) is Dictionary<string, Texture> masks
-                   && masks.TryGetValue(key, out var mask) && mask != null
-                ? mask
-                : null;
-        } catch (Exception e) {
-            Logger.Warn($"Could not read the masks that Player Color loaded: {e.Message}");
-            return null;
+        if (!_theirMasksLooked) {
+            _theirMasksLooked = true;
+            _theirMasks = plugin.GetType().GetField("atlas2Mask", BindingFlags.NonPublic | BindingFlags.Static);
         }
+
+        return _theirMasks?.GetValue(null) is Dictionary<string, Texture> masks
+               && masks.TryGetValue(key, out var mask) && mask != null
+            ? mask
+            : null;
     }
 
     /// <summary>
@@ -818,29 +809,18 @@ internal static class SkinModPlugins {
     /// <summary>
     /// Whether a loaded plugin matches.
     /// </summary>
-    public static bool Find(Func<PluginInfo, bool> match) {
-        try {
-            return Chainloader.PluginInfos.Values.Any(match);
-        } catch (Exception e) {
-            Logger.Warn($"Could not go through the loaded plugins: {e.Message}");
-            return false;
-        }
-    }
+    public static bool Find(Func<PluginInfo, bool> match) => Chainloader.PluginInfos.Values.Any(match);
 
     /// <summary>
     /// The names of the loaded skin mods whose skins no other game can show yet.
     /// </summary>
     public static List<string> Unshown() {
         var names = new List<string>();
-        try {
-            foreach (var info in Chainloader.PluginInfos.Values) {
-                var name = info.Metadata?.Name ?? "";
-                if (UnshownNames.Any(part => name.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0)) {
-                    names.Add(name);
-                }
+        foreach (var info in Chainloader.PluginInfos.Values) {
+            var name = info.Metadata?.Name ?? "";
+            if (UnshownNames.Any(part => name.IndexOf(part, StringComparison.OrdinalIgnoreCase) >= 0)) {
+                names.Add(name);
             }
-        } catch (Exception e) {
-            Logger.Warn($"Could not go through the loaded plugins: {e.Message}");
         }
 
         return names;

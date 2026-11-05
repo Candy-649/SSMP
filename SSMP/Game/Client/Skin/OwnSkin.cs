@@ -94,13 +94,7 @@ internal static class OwnSkin {
     /// Reads again whether Hornet wears a skin (see <see cref="Worn"/>), and says so in the log when that changed.
     /// </summary>
     public static void ReadWorn() {
-        bool worn;
-        try {
-            worn = CanChoose && Current(Choices()) != null;
-        } catch (Exception e) {
-            Logger.Warn($"Could not read whether Hornet wears a skin: {e.Message}");
-            worn = false;
-        }
+        var worn = CanChoose && Current(Choices()) != null;
 
         if (!_wornRead || worn != _worn) {
             Logger.Info(worn

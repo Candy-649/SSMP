@@ -277,18 +277,14 @@ internal static class LoadWatch {
             return;
         }
 
-        try {
-            if (handler.Method.DeclaringType?.Assembly != typeof(LoadWatch).Assembly) {
-                change.OtherEventTicks += ticks;
-                return;
-            }
-
-            var name = TimedEvent.Describe(handler);
-            change.ModEventTicks.TryGetValue(name, out var before);
-            change.ModEventTicks[name] = before + ticks;
-        } catch (Exception e) {
-            Fail(e);
+        if (handler.Method.DeclaringType?.Assembly != typeof(LoadWatch).Assembly) {
+            change.OtherEventTicks += ticks;
+            return;
         }
+
+        var name = TimedEvent.Describe(handler);
+        change.ModEventTicks.TryGetValue(name, out var before);
+        change.ModEventTicks[name] = before + ticks;
     }
 
     /// <summary>

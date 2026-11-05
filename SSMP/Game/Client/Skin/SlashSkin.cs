@@ -115,11 +115,7 @@ internal static class SlashPictures {
             var waiting = new List<Action>(Waiting);
             Waiting.Clear();
             foreach (var action in waiting) {
-                try {
-                    action();
-                } catch (Exception e) {
-                    Logger.Error($"Could not go on once the slashes in Hornet's art were found: {e}");
-                }
+                action();
             }
         };
     }
@@ -348,12 +344,7 @@ internal static class SlashPictures {
         _bySheet = bySheet;
         Logger.Info($"Found {count} slash sprites on {bySheet.Count} sheets of Hornet's art, on {onAtlas.Count} atlases");
 
-        try {
-            AtlasSlashPictures.Read(hero);
-        } catch (Exception e) {
-            Logger.Warn($"Could not find the pictures of the hero's attacks on atlases: {e.Message}");
-        }
-
+        AtlasSlashPictures.Read(hero);
         return bySheet;
     }
 

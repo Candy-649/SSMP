@@ -418,14 +418,8 @@ internal static class ToolCopies {
     /// Catches the thing that the hero throws, for the tools in <see cref="ToolCopyRules.ThrownTools"/>.
     /// </summary>
     private static void OnThrowTool(Action<HeroController, bool> orig, HeroController self, bool isAutoThrow) {
-        GameObject? prefab = null;
-        try {
-            var tool = WillThrowToolField?.GetValue(self) as ToolItem;
-            prefab = tool != null && ToolCopyRules.ThrownTools.Contains(tool.name) ? tool.Usage.ThrowPrefab : null;
-        } catch (Exception e) {
-            Logger.Warn($"Could not see which tool the hero throws: {e.Message}");
-        }
-
+        var tool = WillThrowToolField?.GetValue(self) as ToolItem;
+        var prefab = tool != null && ToolCopyRules.ThrownTools.Contains(tool.name) ? tool.Usage.ThrowPrefab : null;
         _throwPrefab = prefab;
         _thrown = null;
         ToolPlacements.Clear();
@@ -524,15 +518,11 @@ internal static class ToolCopies {
         // What the thing is drawn with on the screen of the one who threw it, as its copy is said on the other screen:
         // the one poisoned spike ball of an evening stayed red there rather than turning purple (USER 11-01, of the
         // partner's recording: "确实就那一个带毒，但是确实没有紫色的贴图")
-        try {
-            Logger.Info(
-                $"[Tools] This player's '{tracked.PrefabName}' ({id}) is out, poisoned: " +
-                $"{Gameplay.PoisonPouchTool.IsEquipped}; {ThrownTool.DescribePictures(tracked.gameObject)}"
-            );
-            ThrownTool.SayPicturesLater(tracked.gameObject, $"This player's '{tracked.PrefabName}' ({id})");
-        } catch (Exception e) {
-            Logger.Warn($"Could not say what the '{tracked.PrefabName}' of the local player is drawn with: {e.Message}");
-        }
+        Logger.Info(
+            $"[Tools] This player's '{tracked.PrefabName}' ({id}) is out, poisoned: " +
+            $"{Gameplay.PoisonPouchTool.IsEquipped}; {ThrownTool.DescribePictures(tracked.gameObject)}"
+        );
+        ThrownTool.SayPicturesLater(tracked.gameObject, $"This player's '{tracked.PrefabName}' ({id})");
     }
 
     /// <summary>
@@ -1092,32 +1082,28 @@ internal static class ToolCopies {
 
         _hurtSpawnsOf = hero;
         HurtSpawns.Clear();
-        try {
-            if (!hero.TryGetComponent<HeroDamageSpawn>(out var spawner) ||
-                HurtSpawnsField?.GetValue(spawner) is not Array spawns) {
-                Logger.Warn("[Tools] The hero has no list of what it spawns as it is hurt; none of it shows to the partner");
-                return;
-            }
-
-            foreach (var spawn in spawns) {
-                var prefab = spawn?.GetType().GetField("Prefab", InstanceFlags)?.GetValue(spawn) as GameObject;
-                if (prefab != null && ToolCopyRules.HeroToolSpawns.Contains(prefab.name)) {
-                    HurtSpawns.Add(prefab);
-                }
-            }
-
-            var names = "";
-            foreach (var prefab in HurtSpawns) {
-                names += $"{(names.Length > 0 ? ", " : "")}'{prefab.name}'";
-            }
-
-            Logger.Info(
-                $"[Tools] Of what the hero spawns as it is hurt with a tool on, {spawns.Length} in all, these show to " +
-                $"the partner: {(names.Length > 0 ? names : "none")}"
-            );
-        } catch (Exception e) {
-            Logger.Warn($"Could not read what the hero spawns as they are hurt: {e.Message}");
+        if (!hero.TryGetComponent<HeroDamageSpawn>(out var spawner) ||
+            HurtSpawnsField?.GetValue(spawner) is not Array spawns) {
+            Logger.Warn("[Tools] The hero has no list of what it spawns as it is hurt; none of it shows to the partner");
+            return;
         }
+
+        foreach (var spawn in spawns) {
+            var prefab = spawn?.GetType().GetField("Prefab", InstanceFlags)?.GetValue(spawn) as GameObject;
+            if (prefab != null && ToolCopyRules.HeroToolSpawns.Contains(prefab.name)) {
+                HurtSpawns.Add(prefab);
+            }
+        }
+
+        var names = "";
+        foreach (var prefab in HurtSpawns) {
+            names += $"{(names.Length > 0 ? ", " : "")}'{prefab.name}'";
+        }
+
+        Logger.Info(
+            $"[Tools] Of what the hero spawns as it is hurt with a tool on, {spawns.Length} in all, these show to " +
+            $"the partner: {(names.Length > 0 ? names : "none")}"
+        );
     }
 
     /// <summary>

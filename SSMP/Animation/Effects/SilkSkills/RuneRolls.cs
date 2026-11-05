@@ -6,7 +6,6 @@ using HutongGames.PlayMaker.Actions;
 using SSMP.Game.Client.Save;
 using SSMP.Util;
 using UnityEngine;
-using Logger = SSMP.Logging.Logger;
 using Random = UnityEngine.Random;
 
 namespace SSMP.Animation.Effects.SilkSkills;
@@ -200,12 +199,7 @@ internal static class RuneRolls {
             return _plan;
         }
 
-        try {
-            _plan = ClusterPlan.Read(clusterPrefab);
-        } catch (Exception e) {
-            Logger.Warn($"Could not read how a cluster of Rune Rage plays: {e.Message}");
-        }
-
+        _plan = ClusterPlan.Read(clusterPrefab);
         _planFailed = _plan == null;
         return _plan;
     }

@@ -176,13 +176,7 @@ internal static class ChatHeldKeys {
             }
 
             foreach (var binding in action.UnfilteredBindings) {
-                float value;
-                try {
-                    value = binding.GetValue(action.Device);
-                } catch (Exception) {
-                    continue;
-                }
-
+                var value = binding.GetValue(action.Device);
                 if (value < HeldFrom) {
                     continue;
                 }

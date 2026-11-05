@@ -1,6 +1,5 @@
 using System;
 using System.Reflection;
-using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Util;
 
@@ -51,31 +50,20 @@ internal static class GameVersion {
     /// logs then tell whether they run the same game.
     /// </summary>
     public static string Describe() {
-        string build;
-        try {
-            build = typeof(global::Constants).Assembly.ManifestModule.ModuleVersionId.ToString();
-        } catch (Exception e) {
-            build = $"unknown ({e.GetType().Name})";
-        }
-
+        var build = typeof(global::Constants).Assembly.ManifestModule.ModuleVersionId.ToString();
         return $"Game version {Running ?? "unknown"} (build {build}), the mod is built for {BuiltFor}" +
                (IsOlder ? ": the game is older than the mod needs" : "");
     }
 
     private static string? ReadRunning() {
-        try {
-            var field = typeof(global::Constants).GetField(
-                "GAME_VERSION",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
-            );
-            if (field == null) {
-                return null;
-            }
-
-            return (field.IsLiteral ? field.GetRawConstantValue() : field.GetValue(null)) as string;
-        } catch (Exception e) {
-            Logger.Warn($"Could not read the version of the game:\n{e}");
+        var field = typeof(global::Constants).GetField(
+            "GAME_VERSION",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static
+        );
+        if (field == null) {
             return null;
         }
+
+        return (field.IsLiteral ? field.GetRawConstantValue() : field.GetValue(null)) as string;
     }
 }

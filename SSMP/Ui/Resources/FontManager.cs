@@ -286,28 +286,21 @@ internal static class FontManager {
     /// </summary>
     /// <param name="font">The font to ask.</param>
     /// <param name="name">The name to draw.</param>
-    /// <returns>How many characters it lacks, or none when asking it threw.</returns>
+    /// <returns>How many characters it lacks.</returns>
     private static int CountMissing(TMP_FontAsset font, string name) {
         if (font == null) {
             return 0;
         }
 
         var missing = 0;
-        try {
-            foreach (var character in name) {
-                if (char.IsWhiteSpace(character)) {
-                    continue;
-                }
-
-                if (!font.HasCharacter(character)) {
-                    missing++;
-                }
+        foreach (var character in name) {
+            if (char.IsWhiteSpace(character)) {
+                continue;
             }
-        } catch (Exception e) {
-            // Treated as drawable, because a name in the wrong face is better than no name at all
-            Logger.Warn($"Could not ask '{font.name}' whether it can draw a name: {e.Message}");
 
-            return 0;
+            if (!font.HasCharacter(character)) {
+                missing++;
+            }
         }
 
         return missing;
@@ -327,21 +320,17 @@ internal static class FontManager {
             return;
         }
 
-        try {
-            face.fallbackFontAssets ??= [];
-            foreach (var other in NameFallbackFonts) {
-                if (other != null && other != face && !face.fallbackFontAssets.Contains(other)) {
-                    face.fallbackFontAssets.Add(other);
-                }
+        face.fallbackFontAssets ??= [];
+        foreach (var other in NameFallbackFonts) {
+            if (other != null && other != face && !face.fallbackFontAssets.Contains(other)) {
+                face.fallbackFontAssets.Add(other);
             }
-
-            Logger.Info(
-                $"No face the game has loaded holds all of '{name}' - '{face.name}' is short of {missing} of it, " +
-                "so the others are hung off it to fill the rest in"
-            );
-        } catch (Exception e) {
-            Logger.Warn($"Could not hang the other faces off '{face.name}': {e.Message}");
         }
+
+        Logger.Info(
+            $"No face the game has loaded holds all of '{name}' - '{face.name}' is short of {missing} of it, " +
+            "so the others are hung off it to fill the rest in"
+        );
     }
 
     /// <summary>
@@ -637,28 +626,22 @@ internal static class FontManager {
     }
 
     /// <summary>
-    /// The first character of <see cref="ChineseSample"/> a font cannot draw, or null if it can draw all of them. A
-    /// font that answers by throwing is treated as one that cannot draw the first, because asking is only worth
-    /// doing while it cannot break showing the text at all.
+    /// The first character of <see cref="ChineseSample"/> a font cannot draw, or null if it can draw all of them.
     /// </summary>
     /// <param name="font">The font to ask.</param>
     /// <returns>The first character the font lacks, or null if it lacks none.</returns>
     private static char? FirstCharacterMissing(Font font) {
-        try {
-            // A dynamic font only builds the glyphs asked of it, so it has to be asked before it can answer.
-            if (font.dynamic) {
-                font.RequestCharactersInTexture(ChineseSample);
-            }
-
-            foreach (var character in ChineseSample) {
-                if (!font.HasCharacter(character)) {
-                    return character;
-                }
-            }
-
-            return null;
-        } catch {
-            return ChineseSample[0];
+        // A dynamic font only builds the glyphs asked of it, so it has to be asked before it can answer.
+        if (font.dynamic) {
+            font.RequestCharactersInTexture(ChineseSample);
         }
+
+        foreach (var character in ChineseSample) {
+            if (!font.HasCharacter(character)) {
+                return character;
+            }
+        }
+
+        return null;
     }
 }

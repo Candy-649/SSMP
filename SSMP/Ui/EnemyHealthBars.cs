@@ -488,18 +488,14 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             return true;
         }
 
-        try {
-            foreach (var playMakerFsm in gameObject.GetComponents<PlayMakerFSM>()) {
-                foreach (var state in playMakerFsm.FsmStates ?? []) {
-                    foreach (var action in state.Actions ?? []) {
-                        if (action is HutongGames.PlayMaker.Actions.DisplayBossTitle) {
-                            return true;
-                        }
+        foreach (var playMakerFsm in gameObject.GetComponents<PlayMakerFSM>()) {
+            foreach (var state in playMakerFsm.FsmStates ?? []) {
+                foreach (var action in state.Actions ?? []) {
+                    if (action is HutongGames.PlayMaker.Actions.DisplayBossTitle) {
+                        return true;
                     }
                 }
             }
-        } catch (Exception e) {
-            Logger.Warn($"Could not read the FSMs of '{gameObject.name}' to tell whether it is a boss:\n{e}");
         }
 
         return false;
