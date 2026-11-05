@@ -286,6 +286,10 @@ internal abstract class ServerManager : IServerManager {
 
         // And one for when the link to a client is being made anew after a long stretch in which nothing arrived
         _netServer.ClientLinkStalledEvent += OnClientLinkStalled;
+
+        // And for when the link to a client is held up for a moment either way, and when that is over
+        _netServer.ClientLinkHeldUpEvent += OnClientLinkHeldUp;
+        _netServer.ClientLinkFreedEvent += OnClientLinkFreed;
     }
 
     /// <summary>
@@ -1501,6 +1505,9 @@ internal abstract class ServerManager : IServerManager {
 
         var username = playerData.Username;
 
+        // A player who leaves while held up is not said to be back, and whoever gets their ID next starts afresh
+        _heldUpTold.TryRemove(id, out _);
+
         foreach (var idPlayerDataPair in _playerData) {
             if (idPlayerDataPair.Key == id) {
                 continue;
@@ -1679,6 +1686,62 @@ internal abstract class ServerManager : IServerManager {
     /// </summary>
     /// <param name="id">The ID of the player.</param>
     internal bool IsPlayerLinkStalled(ushort id) => _netServer.GetUpdateManagerForClient(id)?.Stalled == true;
+
+    /// <summary>
+    /// The players whose link the others were told is held up (see <see cref="OnClientLinkHeldUp"/>), until it is over
+    /// or they leave.
+    /// </summary>
+    private readonly ConcurrentDictionary<ushort, byte> _heldUpTold = new();
+
+    /// <summary>
+    /// Tells every other player that the link to a player has been held up for a moment, either way (NetServer
+    /// .ClientLinkHeldUpEvent): the host never knew that the line to the other player had broken, as it went on
+    /// carrying what that player sent (USER 11-05, "只要能及时说出有人卡了，或者有人好像卡了就行"). The player held up
+    /// is not told: their own game shows it, by the ping number and what it says once things come again.
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="held">How long the link has been held up, in seconds.</param>
+    private void OnClientLinkHeldUp(ushort id, double held) {
+        if (!_playerData.TryGetValue(id, out var playerData) || !_heldUpTold.TryAdd(id, 0)) {
+            return;
+        }
+
+        Logger.Info($"[Link] The link to ({id}, {playerData.Username}) has been held up for {held:F1}s, which the " +
+                    "other players are told");
+        TellTheOthers(id, Lang.Pick($"{playerData.Username} seems to be stuck", $"{playerData.Username} 好像卡了"));
+    }
+
+    /// <summary>
+    /// Tells every other player that a hold-up of the link to a player that they were told of is over (NetServer
+    /// .ClientLinkFreedEvent).
+    /// </summary>
+    /// <param name="id">The ID of the player.</param>
+    /// <param name="heldFor">How long the link was held up, in seconds.</param>
+    private void OnClientLinkFreed(ushort id, double heldFor) {
+        if (!_heldUpTold.TryRemove(id, out _) || !_playerData.TryGetValue(id, out var playerData)) {
+            return;
+        }
+
+        Logger.Info($"[Link] The link to ({id}, {playerData.Username}) is no longer held up, after {heldFor:F1}s, " +
+                    "which the other players are told");
+        TellTheOthers(id, Lang.Pick(
+            $"{playerData.Username} is back (stuck for {heldFor:F0} s)",
+            $"{playerData.Username} 恢复了（卡了 {heldFor:F0} 秒）"
+        ));
+    }
+
+    /// <summary>
+    /// Puts a line in the chat of every player but one, the game that hosts among them.
+    /// </summary>
+    /// <param name="id">The ID of the player who is not told.</param>
+    /// <param name="line">The line.</param>
+    private void TellTheOthers(ushort id, string line) {
+        foreach (var other in _playerData.Keys) {
+            if (other != id) {
+                _netServer.GetUpdateManagerForClient(other)?.AddChatMessage(line);
+            }
+        }
+    }
 
     /// <summary>
     /// Callback for the state of a room from the game that runs it, which the server asked for (see

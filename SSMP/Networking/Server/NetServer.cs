@@ -108,6 +108,18 @@ internal class NetServer : INetServer {
     public event Action<ushort>? ClientLinkStalledEvent;
 
     /// <summary>
+    /// Event that is called once the link to a client other than the host's own game has been held up either way for a
+    /// moment, with the ID of the client and how long it has been, in seconds (UpdateManager.LinkHeldUp).
+    /// </summary>
+    public event Action<ushort, double>? ClientLinkHeldUpEvent;
+
+    /// <summary>
+    /// Event that is called once a hold-up told of by <see cref="ClientLinkHeldUpEvent"/> is over, with the ID of the
+    /// client and how long it lasted, in seconds (UpdateManager.LinkFreed).
+    /// </summary>
+    public event Action<ushort, double>? ClientLinkFreedEvent;
+
+    /// <summary>
     /// Event that is called when the server shuts down.
     /// </summary>
     public event Action? ShutdownEvent;
@@ -276,6 +288,20 @@ internal class NetServer : INetServer {
                 ClientLinkStalledEvent?.Invoke(netServerClient.Id);
             }
         };
+
+        // The host's own game never leaves the machine
+        if (!transportClient.IsLocal) {
+            netServerClient.UpdateManager.LinkHeldUp += held => {
+                if (netServerClient.IsRegistered) {
+                    ClientLinkHeldUpEvent?.Invoke(netServerClient.Id, held);
+                }
+            };
+            netServerClient.UpdateManager.LinkFreed += heldFor => {
+                if (netServerClient.IsRegistered) {
+                    ClientLinkFreedEvent?.Invoke(netServerClient.Id, heldFor);
+                }
+            };
+        }
         netServerClient.UpdateManager.StartUpdates();
 
         // Only add to _clientsById dictionary

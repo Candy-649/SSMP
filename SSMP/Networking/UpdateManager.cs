@@ -437,6 +437,79 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     public event Action? LinkStalled;
 
     /// <summary>
+    /// How long the link may be held up either way before it is said to be, in seconds: nothing has arrived from the
+    /// other side for that long, or the newest of what this side sent that the other side says it had went that long
+    /// ago (<see cref="NoteSeen"/>), which grows while the way to the other side is held up although things still come
+    /// from it. On a link that is up the second is the first and a round trip more. In the logs of 11-01 to 11-04 the
+    /// longest wait between two packets in play was 0.75 s, on a night that lost a quarter to two fifths of them, and a
+    /// hit and its answer took 0.79 s at the most there; every wait past 1 s was the link held up, for 1 to 19 s (USER
+    /// 11-05, the host never knew that the line to the other player had broken: "只要能及时说出有人卡了").
+    /// </summary>
+    private const double HeldUpTold = 1.5;
+
+    /// <summary>
+    /// How short both waits are again once a hold-up that was told of is over, in seconds.
+    /// </summary>
+    private const double HeldUpOverBelow = 0.5;
+
+    /// <summary>
+    /// How long the send loop may go between two looks at the link before this game counts as having stood still
+    /// meanwhile, as a whole game does for a moment now and then, in ticks of DateTime. What it did not send then the
+    /// other side cannot have had, and what arrived then still waits to be taken in: counted, it made a host whose game
+    /// froze for 2 s say that the other player was stuck (review).
+    /// </summary>
+    private const long StoodStillAfter = TimeSpan.TicksPerSecond / 4;
+
+    /// <summary>
+    /// When the send loop last looked at the link (<see cref="WatchHeldUp"/>), in ticks of DateTime. Only used on the
+    /// send loop's thread.
+    /// </summary>
+    private long _lookedAt;
+
+    /// <summary>
+    /// When the send loop went on after this game last stood still (<see cref="StoodStillAfter"/>), in ticks of
+    /// DateTime: a hold-up is counted from no earlier than then before it is told of. Only used on the send loop's
+    /// thread.
+    /// </summary>
+    private long _wentOnAt;
+
+    /// <summary>
+    /// When the hold-up that was told of began (see <see cref="LinkHeldUp"/>), in ticks of DateTime, or 0 while none
+    /// was told of. Only used on the send loop's thread.
+    /// </summary>
+    private long _heldUpSince;
+
+    /// <summary>
+    /// Raised on the send loop's thread once the link over a connection the other side has accepted has been held up
+    /// either way for <see cref="HeldUpTold"/> seconds, with how long it has been.
+    /// </summary>
+    public event Action<double>? LinkHeldUp;
+
+    /// <summary>
+    /// Raised on the send loop's thread once a hold-up told of by <see cref="LinkHeldUp"/> is over, with how long it
+    /// lasted, in seconds.
+    /// </summary>
+    public event Action<double>? LinkFreed;
+
+    /// <summary>
+    /// How many of the last packets sent <see cref="_sentAt"/> holds, a power of two: 17 s of them at the usual rate.
+    /// </summary>
+    private const int SentAtKept = 1024;
+
+    /// <summary>
+    /// When each of the last <see cref="SentAtKept"/> packets went, by its sequence number: the time in milliseconds of
+    /// DateTime shifted up 16 bits, with the sequence number in them, so that one read tells a packet from the one that
+    /// took its place. Written where the number is given out, under <see cref="Lock"/>; read where packets arrive.
+    /// </summary>
+    private readonly long[] _sentAt = new long[SentAtKept];
+
+    /// <summary>
+    /// When the newest of what this side sent that the other side says it had went, in milliseconds of DateTime, or 0
+    /// until it said so of any. Written only where packets arrive.
+    /// </summary>
+    private long _seenSentAtMs;
+
+    /// <summary>
     /// Cached capability: whether the transport requires application-level sequencing.
     /// </summary>
     private bool _requiresSequencing = true;
@@ -611,6 +684,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     public void StartUpdates() {
         _lastReceiveTime = DateTime.UtcNow;
         _accepted = false;
+        _heldUpSince = 0;
 
         _cancellationTokenSource = new CancellationTokenSource();
         _sendThread = new Thread(SendLoop) {
@@ -675,11 +749,18 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             }
         }
 
-        // A transport without sequence numbers has nothing here to acknowledge: the packet that just arrived answers
-        // nothing that was sent. Closing the round trip of the last sent sequence anyway, as this used to, timed the
-        // gap between sending and the next arrival of anything - the send interval - and fed that to the tracker as
-        // though it were the distance to the other player. Such a transport reports its own ping instead.
+        // The newest of what this side sent that the other side had when it sent this
+        NoteSeen(packet.Ack);
+
+        // A transport without sequence numbers of its own times no round trip here: closing the round trip of the last
+        // sent sequence, as this used to, timed the gap between sending and the next arrival of anything - the send
+        // interval - and fed that to the tracker as though it were the distance to the other player. Such a transport
+        // reports its own ping instead. It only notes the newest packet that came, which this side's packets say (Ack).
         if (!_requiresSequencing) {
+            if (IsSequenceGreaterThan(packet.Sequence, _remoteSequence)) {
+                _remoteSequence = packet.Sequence;
+            }
+
             return;
         }
 
@@ -727,9 +808,12 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             // enemy ends up back where it was standing before a player hit it.
             CurrentUpdatePacket.Sequence = _localSequence;
 
+            // The newest packet that came from the other side, on every transport, by which the other side tells how
+            // long ago the newest of what it sent that got here went (NoteSeen)
+            CurrentUpdatePacket.Ack = _remoteSequence;
+
             // Transports requiring sequencing: Configure ACK data
             if (_requiresSequencing) {
-                CurrentUpdatePacket.Ack = _remoteSequence;
                 // TODO: PopulateAckField is called while Lock is already held and still re-locks internally.
                 // TODO: Flatten this re-entrant lock boundary in a dedicated concurrency cleanup pass.
                 PopulateAckField();
@@ -780,6 +864,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
         // For Steam: increment sequence for RTT tracking purposes only
         lock (Lock) {
+            NoteSent(packetToSend.Sequence);
             _localSequence++;
         }
 
@@ -1398,6 +1483,10 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _remoteSequence = 0;
             CurrentUpdatePacket = new TOutgoing();
 
+            // A new connection numbers its packets from 0 again, which the last one's must not be taken for
+            Array.Clear(_sentAt, 0, SentAtKept);
+            _seenSentAtMs = 0;
+
             _rttTracker?.Reset();
 
             if (RequiresReliability && _rttTracker != null) {
@@ -1498,6 +1587,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                 var lastReceive = _lastReceiveTime;
                 var quietFor = (DateTime.UtcNow - lastReceive).TotalMilliseconds;
                 WatchLink(lastReceive, quietFor);
+                WatchHeldUp();
                 if (quietFor > ConnectionTimeout) {
                     // Ask the transport before giving up on the other player. A relay between continents can stop
                     // delivering for seconds at a time without the session being gone: one player was dropped in
@@ -1575,6 +1665,79 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         } catch (Exception) {
             // Nothing is known of the round trip this time round, which the next asks again
         }
+    }
+
+    /// <summary>
+    /// Notes when a packet went, for <see cref="NoteSeen"/> to find by its sequence number. Under <see cref="Lock"/>.
+    /// </summary>
+    /// <param name="sequence">The sequence number of the packet.</param>
+    private void NoteSent(ushort sequence) {
+        Volatile.Write(
+            ref _sentAt[sequence & (SentAtKept - 1)],
+            (DateTime.UtcNow.Ticks / TimeSpan.TicksPerMillisecond << 16) | sequence
+        );
+    }
+
+    /// <summary>
+    /// Notes when the newest of what this side sent that the other side says it had went (<see cref="_seenSentAtMs"/>),
+    /// where packets arrive. A packet sent again later says what it said the first time, which is older, and one that
+    /// names a packet older than the last <see cref="SentAtKept"/> names none of them, so neither changes anything.
+    /// </summary>
+    /// <param name="ack">The sequence number of the newest packet of this side's that the other side had.</param>
+    private void NoteSeen(ushort ack) {
+        var sent = Volatile.Read(ref _sentAt[ack & (SentAtKept - 1)]);
+        var sentAtMs = sent >> 16;
+        if ((ushort) sent == ack && sentAtMs > _seenSentAtMs) {
+            Volatile.Write(ref _seenSentAtMs, sentAtMs);
+        }
+    }
+
+    /// <summary>
+    /// Tells once the link has been held up either way for <see cref="HeldUpTold"/> seconds (<see cref="LinkHeldUp"/>),
+    /// counted from no earlier than when this game last went on after standing still, and once that is over
+    /// (<see cref="LinkFreed"/>), each in the log too. Only on the send loop's thread.
+    /// </summary>
+    private void WatchHeldUp() {
+        var now = DateTime.UtcNow.Ticks;
+        if (now - _lookedAt > StoodStillAfter) {
+            _wentOnAt = now;
+        }
+
+        _lookedAt = now;
+        if (!_accepted) {
+            return;
+        }
+
+        var lastReceive = _lastReceiveTime.Ticks;
+        var seenSent = Volatile.Read(ref _seenSentAtMs) * TimeSpan.TicksPerMillisecond;
+        if (_heldUpSince == 0) {
+            var quiet = now - System.Math.Max(lastReceive, _wentOnAt);
+            var unseen = seenSent == 0 ? 0 : now - System.Math.Max(seenSent, _wentOnAt);
+            var held = System.Math.Max(quiet, unseen);
+            if (held < HeldUpTold * TimeSpan.TicksPerSecond) {
+                return;
+            }
+
+            _heldUpSince = now - held;
+            Logger.Info(
+                $"[Link] The link is held up: nothing has arrived for {new TimeSpan(quiet).TotalSeconds:F1}s, and the " +
+                $"newest of what was sent that the other side had went {new TimeSpan(unseen).TotalSeconds:F1}s ago" +
+                DescribeTransportSession()
+            );
+            LinkHeldUp?.Invoke(new TimeSpan(held).TotalSeconds);
+            return;
+        }
+
+        // Over once both are short again, counted in full
+        var stillHeld = System.Math.Max(now - lastReceive, seenSent == 0 ? 0 : now - seenSent);
+        if (stillHeld >= HeldUpOverBelow * TimeSpan.TicksPerSecond) {
+            return;
+        }
+
+        var heldFor = new TimeSpan(now - _heldUpSince).TotalSeconds;
+        _heldUpSince = 0;
+        Logger.Info($"[Link] The link is no longer held up, after {heldFor:F1}s");
+        LinkFreed?.Invoke(heldFor);
     }
 
     /// <summary>
