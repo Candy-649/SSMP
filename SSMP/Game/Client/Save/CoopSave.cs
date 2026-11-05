@@ -732,6 +732,7 @@ internal partial class CoopSave {
         ResetMachines();
         ResetStartPicks();
         _layoutPickingStates.Clear();
+
         GrowBackPustulesThePartnerDrew();
         OnCheckpointSceneChanged(newScene.name);
         ResetInteractions();
