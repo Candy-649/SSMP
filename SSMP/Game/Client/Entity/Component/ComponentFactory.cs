@@ -78,9 +78,6 @@ internal static class ComponentFactory {
                 return new HazardRespawnComponent(netClient, entityId, objects);
             case EntityComponentType.OwnMotion:
                 return new OwnMotionComponent(netClient, entityId, objects);
-            case EntityComponentType.Tint:
-                // The sprites are found from the creature's own FSMs (Entity.HandleComponents)
-                return null;
             default:
                 throw new ArgumentOutOfRangeException(nameof(type), type, $"Could not instantiate entity component for type: {type}");
         }

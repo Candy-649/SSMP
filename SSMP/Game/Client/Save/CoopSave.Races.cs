@@ -498,7 +498,7 @@ internal partial class CoopSave {
                     var waiting = room.FindAll(member => !IsAtRaceStartLine(member.Id));
                     if (room.Count == 0) {
                         var gone = members.Count == 0
-                            ? GetCurrentMarker()?.PartnerName ?? Lang.Pick("Your partner", "队友")
+                            ? GetCurrentMarker()?.Members.FirstOrDefault()?.Name ?? Lang.Pick("Your partner", "队友")
                             : JoinNames(members.Select(member => member.Username));
                         ReleaseRaceHold(fsm, Lang.Pick(
                             members.Count <= 1
@@ -539,7 +539,7 @@ internal partial class CoopSave {
                     var left = racers.FindAll(member => !member.IsInLocalScene);
                     if (left.Count > 0 || racers.Count == 0) {
                         var gone = racers.Count == 0
-                            ? GetCurrentMarker()?.PartnerName ?? Lang.Pick("Your partner", "队友")
+                            ? GetCurrentMarker()?.Members.FirstOrDefault()?.Name ?? Lang.Pick("Your partner", "队友")
                             : JoinNames(left.Select(member => member.Username));
                         ReleaseRaceHold(fsm, Lang.Pick(
                             left.Count <= 1

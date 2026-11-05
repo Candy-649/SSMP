@@ -883,8 +883,7 @@ internal partial class CoopSave {
             _interruptName = name;
         }
 
-        if (wasChecked && how != null && GetCurrentMarker() is { } marker) {
-            name ??= marker.PartnerName;
+        if (wasChecked && how != null && GetCurrentMarker() != null) {
             Chat(Lang.Pick(
                 $"{name} {how}. Your {SaveWord()} waits for them at the next bench you sit on.",
                 $"{name} {how}。你们的{SaveWord()}会在你下次坐上长椅时等他们。"
@@ -1320,8 +1319,6 @@ internal partial class CoopSave {
     private void StartRoster(CoopSaveMarker marker, int slot) {
         if (_freshMarkerSlot != slot) {
             marker.Members.Clear();
-            marker.PartnerKey = "";
-            marker.PartnerName = "";
         }
 
         _freshMarkerSlot = -1;
@@ -1348,18 +1345,12 @@ internal partial class CoopSave {
             return;
         }
 
-        var changed = false;
         foreach (var player in GetOthersOnServer()) {
             if (player.SaveKey.Length == 0 || IsMember(player, marker)) {
                 continue;
             }
 
             marker.Members.Add(new CoopSaveMember { Key = player.SaveKey, Name = player.Username });
-            changed = true;
-        }
-
-        if (changed) {
-            marker.TakeOverPartner();
         }
     }
 
@@ -2043,12 +2034,6 @@ internal partial class CoopSave {
         var path = Path.Combine(FileUtil.GetConfigPath(), MarkersFileName);
         _markers = File.Exists(path) ? FileUtil.LoadObjectFromJsonFile<CoopSaveMarkers>(path) : null;
         _markers ??= new CoopSaveMarkers();
-
-        // Markers from before saves could have more than two players name their only other player alone
-        foreach (var marker in _markers.Slots.Values) {
-            marker.TakeOverPartner();
-        }
-
         return _markers;
     }
 

@@ -532,7 +532,6 @@ internal partial class CoopSave {
             }
         }
 
-        marker.TakeOverPartner();
         marker.LastCheckUtc = DateTime.UtcNow;
 
         // The play time counts from when every member last played together, so only a round with all of them sets it

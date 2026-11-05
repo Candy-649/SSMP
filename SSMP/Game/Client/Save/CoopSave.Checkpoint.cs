@@ -377,7 +377,7 @@ internal partial class CoopSave {
                 ? $"A member dropped out of the boss fight, leaving through door '{gate}'"
                 : $"A member dropped out of the boss fight, coming back in through door '{gate}', which doesn't lead out"
         );
-        var name = marker.Members.Count <= 1 ? marker.PartnerName : _interruptName ?? marker.PartnerName;
+        var name = _interruptName;
         Chat(
             marker.Members.Count <= 1
                 ? Lang.Pick(

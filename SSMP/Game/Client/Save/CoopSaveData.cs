@@ -10,59 +10,23 @@ namespace SSMP.Game.Client.Save;
 /// </summary>
 internal class CoopSaveMarkers {
     /// <summary>
-    /// The paired saves, by the folder of the game's save files and the slot of the save.
+    /// The co-op saves, by the folder of the game's save files and the slot of the save.
     /// </summary>
     [JsonProperty("slots")]
     public Dictionary<string, CoopSaveMarker> Slots { get; set; } = new();
 }
 
 /// <summary>
-/// A save of the local player that is paired with the saves of other players: one other player for a two-player save,
-/// more for a save that more players share.
+/// A save of the local player that is a co-op save. It is bound to nobody: each session takes whoever plays it
+/// (USER 10-11 "不要给存档限定成员，只限定这个存档是用来联机的").
 /// </summary>
 internal class CoopSaveMarker {
     /// <summary>
-    /// The save key of the first other player. Pairings from before saves could have more than two players name their
-    /// only other player here, and <see cref="Members"/> takes them over as it loads; it is still written for the first
-    /// member, so that an older build reads a two-player save the way it always did.
-    /// </summary>
-    [JsonProperty("partnerKey")]
-    public string PartnerKey { get; set; } = "";
-
-    /// <summary>
-    /// The username of the first other player, kept like <see cref="PartnerKey"/>.
-    /// </summary>
-    [JsonProperty("partnerName")]
-    public string PartnerName { get; set; } = "";
-
-    /// <summary>
-    /// The other players that share the save, each with their save key and their username when the saves were last
-    /// checked, for messages. Empty in a pairing from before saves could have more than two players, which
-    /// <see cref="TakeOverPartner"/> fills from <see cref="PartnerKey"/>.
+    /// The other players of the session that plays the save, each with their save key and their username when the
+    /// saves were last checked, for messages. Each session starts it anew (CoopSave.StartRoster).
     /// </summary>
     [JsonProperty("members")]
     public List<CoopSaveMember> Members { get; set; } = [];
-
-    /// <summary>
-    /// Fills <see cref="Members"/> of a pairing from before saves could have more than two players from its only other
-    /// player, and writes the first member back to <see cref="PartnerKey"/> and <see cref="PartnerName"/>.
-    /// </summary>
-    public void TakeOverPartner() {
-        if (Members.Count == 0 && PartnerKey.Length > 0) {
-            Members.Add(new CoopSaveMember { Key = PartnerKey, Name = PartnerName });
-        }
-
-        if (Members.Count > 0) {
-            PartnerKey = Members[0].Key;
-            PartnerName = Members[0].Name;
-        }
-    }
-
-    /// <summary>
-    /// When the saves were paired.
-    /// </summary>
-    [JsonProperty("pairedUtc")]
-    public DateTime PairedUtc { get; set; }
 
     /// <summary>
     /// When both saves were last backed up and compared, or null if they never were.
@@ -122,7 +86,7 @@ internal class CoopSaveMarker {
 }
 
 /// <summary>
-/// Another player that shares a save of the local player.
+/// Another player of the session that plays a co-op save of the local player.
 /// </summary>
 internal class CoopSaveMember {
     /// <summary>

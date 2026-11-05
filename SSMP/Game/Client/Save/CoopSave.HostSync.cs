@@ -1203,14 +1203,13 @@ internal partial class CoopSave {
         var markers = GetMarkers();
         var key = GetSlotKey(slot);
         if (!markers.Slots.TryGetValue(key, out var marker)) {
-            marker = markers.Slots[key] = new CoopSaveMarker { PairedUtc = DateTime.UtcNow };
+            marker = markers.Slots[key] = new CoopSaveMarker();
         }
 
         marker.Members = GetOthersOnServer()
             .Where(player => player.SaveKey.Length > 0)
             .Select(player => new CoopSaveMember { Key = player.SaveKey, Name = player.Username })
             .ToList();
-        marker.TakeOverPartner();
         _freshMarkerSlot = slot;
         foreach (var flag in arrivalsToSee) {
             if (!marker.ArrivalsToSee.Contains(flag)) {
