@@ -792,8 +792,7 @@ internal partial class GamePatcher {
         turns.KeptAt = now;
         turns.KeepTarget = target;
         turns.Keeps = PlayerTargetRegistry.GetTrackedPlayers().Contains(target) &&
-                      (IsHeldByTime(turns, now) ||
-                       IsWithinReach(owner.transform.position, target) && IsNoticedBy(owner, target));
+                      (IsHeldByTime(turns, now) || IsWithinReachOf(owner, target) && IsNoticedBy(owner, target));
         return turns.Keeps;
     }
 
@@ -914,6 +913,11 @@ internal partial class GamePatcher {
     /// no one yet. Such a creature - no range, no sight, no move it picks - aimed at the player of the game that runs
     /// it before, whoever stood nearer, and never turned; one that fights by its aim alone after a range woke it went
     /// on after the player it woke for wherever they went.
+    ///
+    /// The same goes for a thing with no health that sends creatures out at a player (see
+    /// <see cref="SendsFromElsewhere"/>), which takes the nearest player inside its ranges as it aims, since those
+    /// answer for anyone. It sent them at the player of the game that runs it alone, wherever the other stood (USER
+    /// 11-05: "那个会从蛆水里面跳出来咬人的虫，我这边好像比我朋友那边少很多").
     /// </summary>
     /// <param name="machine">The FSM, or null.</param>
     private static void LookAsItAims(PlayMakerFSM? machine) {
@@ -933,11 +937,13 @@ internal partial class GamePatcher {
         }
 
         AimLooks[id] = now;
-        if (!Entity.Entity.RunsHere(machine) || owner.GetComponent<HealthManager>() == null) {
+        var fromElsewhere = SendsFromElsewhere(owner);
+        if (!Entity.Entity.RunsHere(machine) || owner.GetComponent<HealthManager>() == null && !fromElsewhere) {
             return;
         }
 
-        if (KeptTarget(owner) == null && (GetApprovedEnemyTarget(owner) != null || !HasAwarenessRanges(owner))) {
+        if (KeptTarget(owner) == null &&
+            (fromElsewhere || GetApprovedEnemyTarget(owner) != null || !HasAwarenessRanges(owner))) {
             AcquireNearestNoticed(owner, "as it aimed at a player");
         }
     }
@@ -967,9 +973,8 @@ internal partial class GamePatcher {
     private static List<GameObject> FindReachablePlayers(GameObject owner) {
         ReachablePlayers.Clear();
 
-        var origin = owner.transform.position;
         foreach (var player in PlayerTargetRegistry.GetTrackedPlayers()) {
-            if (player != null && player.activeInHierarchy && IsWithinReach(origin, player) &&
+            if (player != null && player.activeInHierarchy && IsWithinReachOf(owner, player) &&
                 IsNoticedBy(owner, player)) {
                 ReachablePlayers.Add(player);
             }
@@ -977,6 +982,37 @@ internal partial class GamePatcher {
 
         return ReachablePlayers;
     }
+
+    /// <summary>
+    /// Whether a player is within the reach of a creature (see <see cref="IsWithinReach"/>), or, for a thing that sends
+    /// creatures out from elsewhere, inside one of its ranges with which it notices players: where it stands itself says
+    /// nothing of where it sends them.
+    /// </summary>
+    /// <param name="owner">The creature or thing.</param>
+    /// <param name="player">The player.</param>
+    private static bool IsWithinReachOf(GameObject owner, GameObject player) {
+        if (!SendsFromElsewhere(owner)) {
+            return IsWithinReach(owner.transform.position, player);
+        }
+
+        foreach (var range in AwarenessRangesOf(owner)) {
+            if (range != null && range.isActiveAndEnabled && IsPlayerInsideAlertRange(range, player)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a creature's FSMs run on a thing with no health that watches for players with ranges of its own, and
+    /// sends creatures out at the one it finds where they stand: the spawner that sends creatures up out of the water by
+    /// the player, at the player's place (FSM 'Control' of 'Dustroach Pollywog Spawner', under the registry entry of
+    /// the creatures it sends, the scene host's alone).
+    /// </summary>
+    /// <param name="owner">The thing.</param>
+    private static bool SendsFromElsewhere(GameObject owner) =>
+        owner.GetComponent<HealthManager>() == null && HasAwarenessRanges(owner);
 
     /// <summary>
     /// Whether a player stands within <see cref="TargetReach"/> of a place, with no wall in between. A creature whose
