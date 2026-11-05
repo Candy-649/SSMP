@@ -92,7 +92,10 @@ internal partial class BossRoomCoop {
     private void OnRelinquishControl(Action<HeroController> orig, HeroController self) {
         orig(self);
 
-        if (_endingHasLocalPlayer || FsmExecutionStack.ExecutingAction == null ||
+        // A player who lies down plays no end the others wait for: they would stand held while nobody can pull them up,
+        // and the game gives no control back to one lying down (see OnRegainControl)
+        if (_endingHasLocalPlayer || PlayerTargetRegistry.IsPlayerDown(self.gameObject) ||
+            FsmExecutionStack.ExecutingAction == null ||
             FsmExecutionStack.ExecutingFsm is not { GameObject: { } owner } fsm ||
             owner.GetComponentInParent<HealthManager>() is not { } creature || creature.hp > 0) {
             return;
