@@ -463,6 +463,7 @@ internal partial class GamePatcher {
         SetOffForPlayer.Clear();
         ClearNeedolinTargets();
         ClearMoveStartTargets();
+        ClearSenders();
     }
 
     /// <summary>

@@ -212,6 +212,12 @@ internal partial class GamePatcher {
             return orig(self);
         }
 
+        // A thing that sends creatures at the players in its ranges asks about one player for each run of it, in the
+        // game that runs it (see AnswerForSenderRun)
+        if (GetEnemyTargetOwner(self.gameObject) is { } thing && SenderRunOf(thing) is { } run) {
+            return AnswerForSenderRun(run, self);
+        }
+
         // A hit or touch of the partner that is being replayed goes by what the range said in their game when they
         // struck
         if (Save.CoopHits.TryGetReplayedInRange(self, out var replayed)) {

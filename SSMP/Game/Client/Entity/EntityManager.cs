@@ -602,6 +602,9 @@ internal class EntityManager {
     /// <param name="scene">The scene to find entities in.</param>
     /// <param name="lateLoad">Whether this scene was loaded late.</param>
     private void FindEntitiesInScene(Scene scene, bool lateLoad) {
+        // Before anything is made an entity, so that every game makes the same creatures of them
+        GamePatcher.GrowSenderPools(scene);
+
         var objects = CollectEntityCandidates(scene);
 
         foreach (var obj in objects) {
