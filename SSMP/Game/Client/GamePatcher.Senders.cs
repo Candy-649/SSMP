@@ -129,6 +129,12 @@ internal partial class GamePatcher {
     private static readonly List<SenderRun> DroppedRuns = [];
 
     /// <summary>
+    /// Whether each state of the FSM of a run aims at a player, as it was first asked (see AimsAtAPlayerNow), so that
+    /// what a run asks every frame names no types.
+    /// </summary>
+    private static readonly Dictionary<FsmState, bool> AimingStates = new();
+
+    /// <summary>
     /// The run of a thing that sends creatures whose FSM runs on the given object, while this game runs the thing: the
     /// copy's own run, or the run of the local player for the thing itself; otherwise null. A copy whose thing this game
     /// no longer runs is dropped with the others.
@@ -250,7 +256,7 @@ internal partial class GamePatcher {
     /// <param name="run">The run.</param>
     /// <param name="range">The range.</param>
     private static bool AnswerForSenderRun(SenderRun run, AlertRange range) {
-        if (FsmExecutionStack.ExecutingState is { } state && AimsAtAPlayerNow(state)) {
+        if (FsmExecutionStack.ExecutingState is { } state && Aims(state)) {
             return IsValidTargetForAlertRange(range, SendsAt(run));
         }
 
@@ -261,6 +267,18 @@ internal partial class GamePatcher {
 
         FindSharers(run.Sender, range, run.Player);
         return Sharers.Count > 0 && FirstOf(Sharers) == run.Player;
+    }
+
+    /// <summary>
+    /// Whether a state of the FSM of a run aims at a player (see <see cref="AimingStates"/>).
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private static bool Aims(FsmState state) {
+        if (!AimingStates.TryGetValue(state, out var aims)) {
+            AimingStates[state] = aims = AimsAtAPlayerNow(state);
+        }
+
+        return aims;
     }
 
     /// <summary>
@@ -391,6 +409,10 @@ internal partial class GamePatcher {
             }
         }
 
+        var run = new SenderRun(sender, player, copy);
+        sender.Runs[player] = run;
+        CopiedRuns[copy.GetInstanceID()] = run;
+
         copy.transform.SetParent(thing.parent, false);
         copy.transform.localPosition = thing.localPosition;
         copy.transform.localRotation = thing.localRotation;
@@ -399,16 +421,14 @@ internal partial class GamePatcher {
 
         foreach (var fsm in copy.GetComponents<PlayMakerFSM>()) {
             foreach (var variable in fsm.FsmVariables.GameObjectVariables) {
-                if (variable.Value is { } part && part != copy && part.transform.IsChildOf(copy.transform) &&
+                var part = variable.Value;
+                if (part != null && part != copy && part.transform.IsChildOf(copy.transform) &&
                     thing.Find(PathUnder(copy.transform, part.transform)) is { } own) {
                     variable.Value = own.gameObject;
                 }
             }
         }
 
-        var run = new SenderRun(sender, player, copy);
-        sender.Runs[player] = run;
-        CopiedRuns[copy.GetInstanceID()] = run;
         Logger.Info($"[Senders] '{sender.Thing.name}' gets a run of its own for {DescribePlayer(player)}");
     }
 
@@ -453,16 +473,29 @@ internal partial class GamePatcher {
         run.Sender.Runs.Remove(run.Player);
         CopiedRuns.Remove(run.Run.GetInstanceID());
         EnemyApprovedTargets.Remove(run.Run.GetInstanceID());
+
+        // Off at once, so that it sends nothing more in this frame, at the end of which it goes
+        run.Run.SetActive(false);
         Object.Destroy(run.Run);
         Logger.Info($"[Senders] The run of '{run.Sender.Thing.name}' for a player is dropped: {why}");
     }
 
     /// <summary>
-    /// Forgets the things that send creatures with the room, whose copies go with it.
+    /// Forgets the things that send creatures with the room, whose copies go with it, or as the hooks go with a lost
+    /// link: then the copies are taken out here, as they would go on sending at the local player in the room, which
+    /// nothing answers for them any more.
     /// </summary>
     private static void ClearSenders() {
+        foreach (var run in CopiedRuns.Values) {
+            if (run.Run != null) {
+                run.Run.SetActive(false);
+                Object.Destroy(run.Run);
+            }
+        }
+
         Senders.Clear();
         CopiedRuns.Clear();
+        AimingStates.Clear();
     }
 
     /// <summary>
