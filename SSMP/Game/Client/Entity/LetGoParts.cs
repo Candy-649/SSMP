@@ -124,35 +124,31 @@ internal static class LetGoParts {
     /// <param name="parent">The parent it is about to be given, or null for none.</param>
     /// <param name="itself">Whether the part lets go of itself, for the log.</param>
     public static void NoteLetGo(GameObject? part, GameObject? parent, bool itself = false) {
-        try {
-            if (part == null || Entity.IsEntityObject(part)) {
-                return;
-            }
-
-            Transform? creature = null;
-            for (var current = part.transform.parent; current != null; current = current.parent) {
-                if (Entity.IsEntityObject(current.gameObject)) {
-                    creature = current;
-                    break;
-                }
-            }
-
-            if (creature == null || parent != null && parent.transform.IsChildOf(creature)) {
-                return;
-            }
-
-            var place = PlaceUnder(creature, part.transform);
-            Origins.Remove(part);
-            Origins.Add(part, new Origin(creature.gameObject, place));
-            ByPlace[(creature.gameObject, place)] = part;
-            Logger.Info(
-                $"[Let go] '{creature.name}' lets go of its part '{place}' " +
-                (parent == null ? "into the room" : $"to go under '{parent.name}'") +
-                $"{(itself ? ", which lets go of itself" : "")}; it goes by that place from now on"
-            );
-        } catch (Exception e) {
-            SayFailed(e);
+        if (part == null || Entity.IsEntityObject(part)) {
+            return;
         }
+
+        Transform? creature = null;
+        for (var current = part.transform.parent; current != null; current = current.parent) {
+            if (Entity.IsEntityObject(current.gameObject)) {
+                creature = current;
+                break;
+            }
+        }
+
+        if (creature == null || parent != null && parent.transform.IsChildOf(creature)) {
+            return;
+        }
+
+        var place = PlaceUnder(creature, part.transform);
+        Origins.Remove(part);
+        Origins.Add(part, new Origin(creature.gameObject, place));
+        ByPlace[(creature.gameObject, place)] = part;
+        Logger.Info(
+            $"[Let go] '{creature.name}' lets go of its part '{place}' " +
+            (parent == null ? "into the room" : $"to go under '{parent.name}'") +
+            $"{(itself ? ", which lets go of itself" : "")}; it goes by that place from now on"
+        );
     }
 
     /// <summary>

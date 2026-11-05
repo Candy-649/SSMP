@@ -474,27 +474,19 @@ internal partial class Entity {
     /// <param name="npc">The character the player talked through, or null.</param>
     /// <param name="giveBack">Whether to give the player back too.</param>
     private static void CloseTalk(PlayMakerNPC? npc, bool giveBack) {
-        try {
-            if (npc != null && npc.IsRunningDialogue) {
-                npc.CloseDialogueBox(true, true, null);
-            } else if (TalkBoxField?.GetValue(null) is DialogueBox box && box != null &&
-                       TalkBoxRunningField?.GetValue(box) is true) {
-                DialogueBox.EndConversation();
-            }
-        } catch (Exception e) {
-            Logger.Warn($"Could not end a talk of the local player: {e.Message}");
+        if (npc != null && npc.IsRunningDialogue) {
+            npc.CloseDialogueBox(true, true, null);
+        } else if (TalkBoxField?.GetValue(null) is DialogueBox box && box != null &&
+                   TalkBoxRunningField?.GetValue(box) is true) {
+            DialogueBox.EndConversation();
         }
 
         if (!giveBack || HeroController.instance is not { } hero) {
             return;
         }
 
-        try {
-            hero.RegainControl();
-            hero.StartAnimationControl();
-        } catch (Exception e) {
-            Logger.Warn($"Could not give the local player back after a talk: {e.Message}");
-        }
+        hero.RegainControl();
+        hero.StartAnimationControl();
     }
 
     /// <summary>

@@ -632,12 +632,7 @@ internal class CoopStateCheck {
 
         while (!IsOutOfTime(FindBudgetMs)) {
             if (_findIndex < _toFind.Count) {
-                try {
-                    Find(_toFind[_findIndex++]);
-                } catch (Exception e) {
-                    Fail($"Could not look at an object of the room:\n{e}");
-                }
-
+                Find(_toFind[_findIndex++]);
                 continue;
             }
 
@@ -934,19 +929,15 @@ internal class CoopStateCheck {
         var total = _fsms.Count + _parts.Count + _items.Count;
         while (_sampleCursor < total) {
             var index = _sampleCursor++;
-            try {
-                if (index < _fsms.Count) {
-                    var (fsm, entry) = _fsms[index];
-                    SetValue(entry, ReadFsm(fsm), now);
-                } else if (index < _fsms.Count + _parts.Count) {
-                    var (part, fields, entry) = _parts[index - _fsms.Count];
-                    SetValue(entry, ReadPart(part, fields), now);
-                } else {
-                    var (item, entry) = _items[index - _fsms.Count - _parts.Count];
-                    SetValue(entry, ReadItem(item), now);
-                }
-            } catch (Exception e) {
-                Fail($"Could not read a value of the room:\n{e}");
+            if (index < _fsms.Count) {
+                var (fsm, entry) = _fsms[index];
+                SetValue(entry, ReadFsm(fsm), now);
+            } else if (index < _fsms.Count + _parts.Count) {
+                var (part, fields, entry) = _parts[index - _fsms.Count];
+                SetValue(entry, ReadPart(part, fields), now);
+            } else {
+                var (item, entry) = _items[index - _fsms.Count - _parts.Count];
+                SetValue(entry, ReadItem(item), now);
             }
 
             if (IsOutOfTime(SampleBudgetMs)) {
@@ -954,18 +945,8 @@ internal class CoopStateCheck {
             }
         }
 
-        try {
-            ReadCreatures(now);
-        } catch (Exception e) {
-            Fail($"Could not read the creatures of the room:\n{e}");
-        }
-
-        try {
-            ReadStory(now);
-        } catch (Exception e) {
-            Fail($"Could not read the story flags:\n{e}");
-        }
-
+        ReadCreatures(now);
+        ReadStory(now);
         ForgetGoneValues();
 
         _sampling = false;

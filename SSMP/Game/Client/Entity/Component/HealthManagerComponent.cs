@@ -1147,7 +1147,7 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// Queues on the copy, just before it dies, what the blow that killed the creature drops, the way the game queues
-    /// it for a blow of its own that kills: here for the player of this game. The copy dies all the same if that fails.
+    /// it for a blow of its own that kills: here for the player of this game.
     /// </summary>
     /// <param name="copy">The copy.</param>
     /// <param name="killingToolDamage">The tool damage of the blow that killed the creature.</param>
@@ -1159,8 +1159,6 @@ internal class HealthManagerComponent : EntityComponent {
         _queueingDeathDrop = true;
         try {
             copy.DieDropFling(killingToolDamage, false);
-        } catch (Exception e) {
-            Logger.Error($"Could not queue what the blow that killed '{copy.name}' drops:\n{e}");
         } finally {
             _queueingDeathDrop = false;
         }
@@ -1174,7 +1172,7 @@ internal class HealthManagerComponent : EntityComponent {
     /// <see cref="HealthManagerOnDieDropFling"/>); and it dies of the blow, its body thrown the way the blow went, by
     /// the death of the attack's kind, with the moment held still only for the player who struck it (see
     /// <see cref="HealthManagerOnDie"/>). It used to die of no particular attack, thrown nowhere, as it still does of a
-    /// blow that was not kept. The creature dies all the same if the queueing fails.
+    /// blow that was not kept.
     /// </summary>
     /// <param name="creature">The room's own creature.</param>
     /// <param name="blow">What the blow that kills it kills with, if it was kept.</param>
@@ -1189,11 +1187,7 @@ internal class HealthManagerComponent : EntityComponent {
 
             KeepLastAttack(creature, death);
             if (death.ToolDamage != ToolDamageFlags.None) {
-                try {
-                    creature.DieDropFling(death.ToolDamage, death.BreaksItems);
-                } catch (Exception e) {
-                    Logger.Error($"Could not queue what the blow that killed '{creature.name}' drops:\n{e}");
-                }
+                creature.DieDropFling(death.ToolDamage, death.BreaksItems);
             }
 
             creature.Die(

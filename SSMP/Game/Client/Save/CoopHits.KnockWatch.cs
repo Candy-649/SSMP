@@ -146,38 +146,34 @@ internal partial class CoopHits {
         float magnitude,
         string whose
     ) {
-        try {
-            var now = Time.time;
-            if (_knockWatches.TryGetValue(recoil, out var before)) {
-                _knockWatches.Remove(recoil);
-                before.Over = $"the next knockback came {now - before.StartedAt:0.00} s on";
-                WriteKnock(before);
-            }
-
-            var way = direction & 3;
-            var shown = recoil.transform;
-            _knockWatches[recoil] = new KnockWatch {
-                Recoil = recoil,
-                Entity = entity,
-                Shown = shown,
-                IsCopy = isCopy,
-                Whose = whose,
-                Direction = way,
-                Magnitude = magnitude,
-                Speed = recoil.recoilSpeed,
-                Duration = recoil.recoilDuration,
-                Axis = way switch {
-                    0 => Vector2.right,
-                    1 => Vector2.up,
-                    2 => Vector2.left,
-                    _ => Vector2.down
-                },
-                From = shown.position,
-                StartedAt = now
-            };
-        } catch (Exception e) {
-            Logger.Warn($"Could not watch a knockback: {e.Message}");
+        var now = Time.time;
+        if (_knockWatches.TryGetValue(recoil, out var before)) {
+            _knockWatches.Remove(recoil);
+            before.Over = $"the next knockback came {now - before.StartedAt:0.00} s on";
+            WriteKnock(before);
         }
+
+        var way = direction & 3;
+        var shown = recoil.transform;
+        _knockWatches[recoil] = new KnockWatch {
+            Recoil = recoil,
+            Entity = entity,
+            Shown = shown,
+            IsCopy = isCopy,
+            Whose = whose,
+            Direction = way,
+            Magnitude = magnitude,
+            Speed = recoil.recoilSpeed,
+            Duration = recoil.recoilDuration,
+            Axis = way switch {
+                0 => Vector2.right,
+                1 => Vector2.up,
+                2 => Vector2.left,
+                _ => Vector2.down
+            },
+            From = shown.position,
+            StartedAt = now
+        };
     }
 
     /// <summary>

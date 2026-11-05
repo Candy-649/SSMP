@@ -1655,17 +1655,13 @@ internal partial class Entity {
     /// so the one place that can name the caller is there.
     /// </summary>
     private void AskTheRoomsOwnCopyToSayWhoWakesIt() {
-        try {
-            if (Object.Host.GetComponent<SaysWhoWakesIt>() != null) {
-                return;
-            }
-
-            // Adding it wakes it up in the sense Unity means, so it is armed only afterwards: the one line it is
-            // allowed should be about whoever wakes the creature, not about this
-            Object.Host.AddComponent<SaysWhoWakesIt>().Armed = true;
-        } catch (Exception e) {
-            SSMP.Logging.Logger.Warn($"Could not ask '{Object.Host.name}' to say who wakes it: {e.Message}");
+        if (Object.Host.GetComponent<SaysWhoWakesIt>() != null) {
+            return;
         }
+
+        // Adding it wakes it up in the sense Unity means, so it is armed only afterwards: the one line it is
+        // allowed should be about whoever wakes the creature, not about this
+        Object.Host.AddComponent<SaysWhoWakesIt>().Armed = true;
     }
 
     /// <summary>
@@ -2755,22 +2751,18 @@ internal partial class Entity {
     /// else behind to tell what happened to it.
     /// </summary>
     private void SayWhatWasTakenOver() {
-        try {
-            var seen = Object.Host.GetComponent<Renderer>();
-            var touched = Object.Host.GetComponent<Collider2D>();
-            var body = Object.Host.GetComponent<Rigidbody2D>();
-            var states = string.Join(", ", _fsms.Host.Select(fsm => $"{fsm.FsmName}: {fsm.ActiveStateName}"));
+        var seen = Object.Host.GetComponent<Renderer>();
+        var touched = Object.Host.GetComponent<Collider2D>();
+        var body = Object.Host.GetComponent<Rigidbody2D>();
+        var states = string.Join(", ", _fsms.Host.Select(fsm => $"{fsm.FsmName}: {fsm.ActiveStateName}"));
 
-            SSMP.Logging.Logger.Info(
-                $"Took over '{Object.Host.name}' at {Object.Host.transform.position}, " +
-                $"on: {Object.Host.activeInHierarchy}, " +
-                $"drawn: {(seen == null ? "-" : seen.enabled.ToString())}, " +
-                $"touchable: {(touched == null ? "-" : touched.enabled.ToString())}, " +
-                $"body: {(body == null ? "-" : body.bodyType.ToString())}, going on in {states}"
-            );
-        } catch (Exception e) {
-            SSMP.Logging.Logger.Warn($"Could not say what was taken over: {e.Message}");
-        }
+        SSMP.Logging.Logger.Info(
+            $"Took over '{Object.Host.name}' at {Object.Host.transform.position}, " +
+            $"on: {Object.Host.activeInHierarchy}, " +
+            $"drawn: {(seen == null ? "-" : seen.enabled.ToString())}, " +
+            $"touchable: {(touched == null ? "-" : touched.enabled.ToString())}, " +
+            $"body: {(body == null ? "-" : body.bodyType.ToString())}, going on in {states}"
+        );
     }
 
     /// <summary>

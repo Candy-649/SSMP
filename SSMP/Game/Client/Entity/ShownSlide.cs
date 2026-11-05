@@ -128,41 +128,37 @@ internal static class ShownSlide {
     /// <param name="way">The way it was put: from where it is to where it was.</param>
     /// <param name="why">What put it there, for the log.</param>
     public static void Start(Transform target, Vector2 way, string why) {
-        try {
-            // Still sliding from before, it was drawn short of where it was
-            var index = Slides.FindIndex(slide => slide.Target == target);
-            if (index >= 0) {
-                way += Slides[index].LeftAt(Time.time);
-                Slides.RemoveAt(index);
-            }
+        // Still sliding from before, it was drawn short of where it was
+        var index = Slides.FindIndex(slide => slide.Target == target);
+        if (index >= 0) {
+            way += Slides[index].LeftAt(Time.time);
+            Slides.RemoveAt(index);
+        }
 
-            var distance = way.magnitude;
-            if (distance < LeastDistance || distance > MostDistance) {
+        var distance = way.magnitude;
+        if (distance < LeastDistance || distance > MostDistance) {
+            return;
+        }
+
+        var bodies = target.GetComponentsInChildren<Rigidbody2D>();
+        foreach (var body in bodies) {
+            if (body.interpolation != RigidbodyInterpolation2D.None) {
                 return;
             }
-
-            var bodies = target.GetComponentsInChildren<Rigidbody2D>();
-            foreach (var body in bodies) {
-                if (body.interpolation != RigidbodyInterpolation2D.None) {
-                    return;
-                }
-            }
-
-            var duration = Mathf.Clamp(0.1f + 0.03f * distance, LeastTime, MostTime);
-            Slides.Add(new Slide(target, bodies, way, duration));
-            if (distance >= LoggedDistance) {
-                Logger.Info($"'{target.name}' is shown sliding {distance:0.00} units in {duration:0.00} s to {why}");
-            }
-
-            if (!_registered) {
-                _registered = true;
-                Application.onBeforeRender += OnBeforeRender;
-            }
-
-            KeepPuttingBack();
-        } catch (Exception e) {
-            SayFailed(e);
         }
+
+        var duration = Mathf.Clamp(0.1f + 0.03f * distance, LeastTime, MostTime);
+        Slides.Add(new Slide(target, bodies, way, duration));
+        if (distance >= LoggedDistance) {
+            Logger.Info($"'{target.name}' is shown sliding {distance:0.00} units in {duration:0.00} s to {why}");
+        }
+
+        if (!_registered) {
+            _registered = true;
+            Application.onBeforeRender += OnBeforeRender;
+        }
+
+        KeepPuttingBack();
     }
 
     /// <summary>
@@ -174,11 +170,8 @@ internal static class ShownSlide {
         }
 
         try {
-            // Any that were not put back after the last frame, which should not happen, are put back first, so as not
-            // to be moved twice
-            if (PutBack()) {
-                Logger.Warn("Creatures shown sliding were not put back after the last frame was drawn");
-            }
+            // Any that were not put back after the last frame are put back first, so as not to be moved twice
+            PutBack();
 
             var time = Time.time;
             for (var i = Slides.Count - 1; i >= 0; i--) {

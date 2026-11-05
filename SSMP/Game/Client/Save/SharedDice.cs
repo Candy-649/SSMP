@@ -822,12 +822,7 @@ internal static class SharedDice {
             return "|" + transform.name;
         }
 
-        try {
-            return scene.name + "|" + ScenePath.Get(transform);
-        } catch (Exception e) {
-            Logger.Debug($"No path for '{transform.name}' to know it by in a shuffled list: {e.Message}");
-            return scene.name + "|" + transform.name;
-        }
+        return scene.name + "|" + ScenePath.Get(transform);
     }
 
     /// <summary>

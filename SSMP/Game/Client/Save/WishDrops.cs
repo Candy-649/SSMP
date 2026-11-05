@@ -140,16 +140,12 @@ internal static class WishDrops {
         }
 
         var text = new StringBuilder($"'{quest.name}' (accepted {quest.IsAccepted}, completed {quest.IsCompleted}");
-        try {
-            var completion = quest.Completion;
-            text.Append($", counted {completion.CompletedCount}");
-            foreach (var target in quest.targets) {
-                if (target.Counter is { } counter) {
-                    text.Append($", {counter.name} {counter.GetCompletionAmount(completion)}/{target.Count}");
-                }
+        var completion = quest.Completion;
+        text.Append($", counted {completion.CompletedCount}");
+        foreach (var target in quest.targets) {
+            if (target.Counter is { } counter) {
+                text.Append($", {counter.name} {counter.GetCompletionAmount(completion)}/{target.Count}");
             }
-        } catch (Exception e) {
-            text.Append($", counts unreadable: {e.GetType().Name}");
         }
 
         return text.Append(')').ToString();

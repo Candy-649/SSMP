@@ -200,12 +200,8 @@ internal partial class Entity {
                           $"{HandOverGiveBackTime:0}s of the {_handedOverBy} that handed them over") +
                     ", so they are given back here"
                 );
-                try {
-                    hero!.RegainControl();
-                    hero.StartAnimationControl();
-                } catch (Exception e) {
-                    SSMP.Logging.Logger.Warn($"Could not give the local player back after a hand-over: {e.Message}");
-                }
+                hero!.RegainControl();
+                hero.StartAnimationControl();
             }
 
             over = true;

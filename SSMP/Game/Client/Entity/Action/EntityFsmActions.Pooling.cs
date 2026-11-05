@@ -115,30 +115,26 @@ internal static partial class EntityFsmActions {
     /// <param name="from">Where the thrown thing appears.</param>
     /// <param name="where">Which of the two games this is, as it should read in the log.</param>
     private static void SayIfThrownUnseen(SpawnObjectFromGlobalPool action, Vector3 from, string where) {
-        try {
-            var thrower = action.Fsm?.GameObject;
-            if (thrower == null || NamedForThrowingUnseen.Contains(thrower.GetInstanceID())) {
-                return;
-            }
-
-            var body = thrower.GetComponent<Renderer>();
-            var drawn = body == null || body.enabled;
-            var distance = Vector2.Distance(thrower.transform.position, from);
-            if (thrower.activeInHierarchy && drawn && distance <= 6f) {
-                return;
-            }
-
-            NamedForThrowingUnseen.Add(thrower.GetInstanceID());
-
-            var thrown = action.gameObject?.Value;
-            Logger.Info(
-                $"'{thrower.name}' threw '{(thrown == null ? "nothing" : thrown.name)}' {where} while it could not " +
-                $"be seen there: on: {thrower.activeInHierarchy}, drawn: {(body == null ? "-" : body.enabled.ToString())}, " +
-                $"standing at {thrower.transform.position}, {distance:0.0} away from where it threw from, {from}"
-            );
-        } catch (System.Exception e) {
-            Logger.Warn($"Could not say whether a throw was seen: {e.Message}");
+        var thrower = action.Fsm?.GameObject;
+        if (thrower == null || NamedForThrowingUnseen.Contains(thrower.GetInstanceID())) {
+            return;
         }
+
+        var body = thrower.GetComponent<Renderer>();
+        var drawn = body == null || body.enabled;
+        var distance = Vector2.Distance(thrower.transform.position, from);
+        if (thrower.activeInHierarchy && drawn && distance <= 6f) {
+            return;
+        }
+
+        NamedForThrowingUnseen.Add(thrower.GetInstanceID());
+
+        var thrown = action.gameObject?.Value;
+        Logger.Info(
+            $"'{thrower.name}' threw '{(thrown == null ? "nothing" : thrown.name)}' {where} while it could not " +
+            $"be seen there: on: {thrower.activeInHierarchy}, drawn: {(body == null ? "-" : body.enabled.ToString())}, " +
+            $"standing at {thrower.transform.position}, {distance:0.0} away from where it threw from, {from}"
+        );
     }
 
     #endregion

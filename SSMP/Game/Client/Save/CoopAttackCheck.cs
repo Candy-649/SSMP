@@ -464,14 +464,9 @@ internal class CoopAttackCheck {
             watch.On = on;
         }
 
-        // After the look, so that nothing called for one can change the list of the game while it is being read, and
-        // one that fails to be written down is on by now and does not come up again each frame
+        // After the look, so that nothing called for one can change the list of the game while it is being read
         foreach (var damager in _cameUp) {
-            try {
-                ComeUp(damager, now);
-            } catch (Exception e) {
-                Fail($"Could not write down a thing that came up:\n{e}");
-            }
+            ComeUp(damager, now);
         }
 
         _cameUp.Clear();

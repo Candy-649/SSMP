@@ -912,29 +912,25 @@ internal partial class CoopHits {
             foreach (var held in _releasingReplays) {
                 var update = held.Update;
                 var what = update.Kind == CoopHitKind.ObjectTouch ? "touch" : "hit";
-                try {
-                    if (held.Target == null) {
-                        NoteTraffic(
-                            update.Scene, update.Path,
-                            $"got a {what} through {update.Responder}, not replayed: the object went away while it waited"
-                        );
-                        continue;
-                    }
+                if (held.Target == null) {
+                    NoteTraffic(
+                        update.Scene, update.Path,
+                        $"got a {what} through {update.Responder}, not replayed: the object went away while it waited"
+                    );
+                    continue;
+                }
 
-                    // Behind another for the same thing that still waits, or the thing is still between hits
-                    var waited = now - held.Since;
-                    if (waited < HeldReplayTime && (IsHeld(held.Target) || IsBetweenHits(held.Target))) {
-                        _heldReplays.Add(held);
-                        continue;
-                    }
+                // Behind another for the same thing that still waits, or the thing is still between hits
+                var waited = now - held.Since;
+                if (waited < HeldReplayTime && (IsHeld(held.Target) || IsBetweenHits(held.Target))) {
+                    _heldReplays.Add(held);
+                    continue;
+                }
 
-                    if (update.Kind == CoopHitKind.ObjectTouch) {
-                        ReplayTouch(update, waited);
-                    } else {
-                        ReplayHit(update, waited);
-                    }
-                } catch (Exception e) {
-                    Logger.Warn($"Could not replay a {what} of the partner that waited, on {update.Path}:\n{e}");
+                if (update.Kind == CoopHitKind.ObjectTouch) {
+                    ReplayTouch(update, waited);
+                } else {
+                    ReplayHit(update, waited);
                 }
             }
         } finally {
@@ -1997,21 +1993,17 @@ internal partial class CoopHits {
             return;
         }
 
-        try {
-            var name = component.gameObject.name;
-            if (NextHitLogTime.TryGetValue(name, out var next) && Time.unscaledTime < next) {
-                return;
-            }
-
-            NextHitLogTime[name] = Time.unscaledTime + HitLogInterval;
-
-            Logger.Info(
-                $"A hit reached '{name}' ({component.GetType().Name}) for {hit.DamageDealt} damage, " +
-                $"{(isRemote ? "from a copy of the partner's swing" : "from this player")}"
-            );
-        } catch (Exception e) {
-            Logger.Warn($"Could not say what was hit: {e.Message}");
+        var name = component.gameObject.name;
+        if (NextHitLogTime.TryGetValue(name, out var next) && Time.unscaledTime < next) {
+            return;
         }
+
+        NextHitLogTime[name] = Time.unscaledTime + HitLogInterval;
+
+        Logger.Info(
+            $"A hit reached '{name}' ({component.GetType().Name}) for {hit.DamageDealt} damage, " +
+            $"{(isRemote ? "from a copy of the partner's swing" : "from this player")}"
+        );
     }
 
     /// <summary>
@@ -2216,21 +2208,17 @@ internal partial class CoopHits {
         found = null;
         isClientCopy = false;
 
-        try {
-            foreach (var entity in _entityManager.ActiveEntities) {
-                if (entity.Object.Client == gameObject) {
-                    found = entity;
-                    isClientCopy = true;
-                    return true;
-                }
-
-                if (entity.Object.Host == gameObject) {
-                    found = entity;
-                    return true;
-                }
+        foreach (var entity in _entityManager.ActiveEntities) {
+            if (entity.Object.Client == gameObject) {
+                found = entity;
+                isClientCopy = true;
+                return true;
             }
-        } catch (InvalidOperationException) {
-            // The entities changed while looking, which only happens when a hit spawns one
+
+            if (entity.Object.Host == gameObject) {
+                found = entity;
+                return true;
+            }
         }
 
         return false;
@@ -3661,37 +3649,28 @@ internal partial class CoopHits {
     /// </summary>
     /// <returns>The update, or null if no member is in the scene or the object can't be found by others.</returns>
     private CoopHitUpdate? CreateUpdate(Component component, HitInstance hit) {
-        try {
-            if (!IsAnyMemberInRoom()) {
-                return null;
-            }
-
-            var target = component.gameObject;
-            if (!TryGetPlace(target, out var scene, out var path)) {
-                return null;
-            }
-
-            var type = component.GetType();
-            var index = Array.IndexOf(target.GetComponents(type), component);
-            if (index is < 0 or > byte.MaxValue || type.FullName == null) {
-                return null;
-            }
-
-            return new CoopHitUpdate {
-                Scene = scene,
-                Path = path,
-                Responder = type.FullName,
-                Index = (byte) index,
-                Hit = WriteHit(hit, null, target)
-            };
-        } catch (Exception e) {
-            if (!_sendFailed) {
-                _sendFailed = true;
-                Logger.Error($"Could not send a hit to the partner:\n{e}");
-            }
-
+        if (!IsAnyMemberInRoom()) {
             return null;
         }
+
+        var target = component.gameObject;
+        if (!TryGetPlace(target, out var scene, out var path)) {
+            return null;
+        }
+
+        var type = component.GetType();
+        var index = Array.IndexOf(target.GetComponents(type), component);
+        if (index is < 0 or > byte.MaxValue || type.FullName == null) {
+            return null;
+        }
+
+        return new CoopHitUpdate {
+            Scene = scene,
+            Path = path,
+            Responder = type.FullName,
+            Index = (byte) index,
+            Hit = WriteHit(hit, null, target)
+        };
     }
 
     /// <summary>
@@ -3710,54 +3689,45 @@ internal partial class CoopHits {
         string? thrownPath = null,
         string? callback = null
     ) {
-        try {
-            if (!IsAnyMemberInRoom()) {
-                return null;
-            }
-
-            var target = receiver.gameObject;
-            var type = receiver.GetType();
-            var index = Array.IndexOf(target.GetComponents(type), receiver);
-            string scene, path;
-            if (thrownPath != null) {
-                scene = SceneManager.GetActiveScene().name;
-                path = thrownPath;
-            } else if (!TryGetPlace(target, out scene, out path)) {
-                return null;
-            }
-
-            if (index is < 0 or > byte.MaxValue || type.FullName == null) {
-                return null;
-            }
-
-            using var stream = new MemoryStream();
-            using var writer = new BinaryWriter(stream);
-            var position = attack.transform.position;
-            writer.Write(position.x);
-            writer.Write(position.y);
-            writer.Write(position.z);
-            writer.Write(attack.name);
-            writer.Write(attack.tag);
-            writer.Write(attack.gameObject.layer);
-            WriteRanges(writer, target);
-            writer.Flush();
-
-            return new CoopHitUpdate {
-                Kind = CoopHitKind.ObjectTouch,
-                Scene = scene,
-                Path = path,
-                Responder = callback == null ? type.FullName : $"{type.FullName}.{callback}",
-                Index = (byte) index,
-                Hit = stream.ToArray()
-            };
-        } catch (Exception e) {
-            if (!_sendFailed) {
-                _sendFailed = true;
-                Logger.Error($"Could not send a touch to the partner:\n{e}");
-            }
-
+        if (!IsAnyMemberInRoom()) {
             return null;
         }
+
+        var target = receiver.gameObject;
+        var type = receiver.GetType();
+        var index = Array.IndexOf(target.GetComponents(type), receiver);
+        string scene, path;
+        if (thrownPath != null) {
+            scene = SceneManager.GetActiveScene().name;
+            path = thrownPath;
+        } else if (!TryGetPlace(target, out scene, out path)) {
+            return null;
+        }
+
+        if (index is < 0 or > byte.MaxValue || type.FullName == null) {
+            return null;
+        }
+
+        using var stream = new MemoryStream();
+        using var writer = new BinaryWriter(stream);
+        var position = attack.transform.position;
+        writer.Write(position.x);
+        writer.Write(position.y);
+        writer.Write(position.z);
+        writer.Write(attack.name);
+        writer.Write(attack.tag);
+        writer.Write(attack.gameObject.layer);
+        WriteRanges(writer, target);
+        writer.Flush();
+
+        return new CoopHitUpdate {
+            Kind = CoopHitKind.ObjectTouch,
+            Scene = scene,
+            Path = path,
+            Responder = callback == null ? type.FullName : $"{type.FullName}.{callback}",
+            Index = (byte) index,
+            Hit = stream.ToArray()
+        };
     }
 
     /// <summary>

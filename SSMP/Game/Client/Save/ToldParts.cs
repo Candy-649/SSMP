@@ -356,36 +356,31 @@ internal static class ToldParts {
             return true;
         }
 
-        try {
-            var here = FindTold(fsm, eventTarget);
-            if (told.Word == Word.NotTaken) {
-                // A tell that waits goes all the same, so only one that goes now catches parts up
-                if (here != null && atOnce &&
-                    (told.Takers == null || !CatchUp(fsm, here.Target, told.Takers, eventName))) {
-                    SayOnce(here.Target, $"is not told '{eventName}', as it let that go by in the scene host's game");
-                }
-
-                return false;
+        var here = FindTold(fsm, eventTarget);
+        if (told.Word == Word.NotTaken) {
+            // A tell that waits goes all the same, so only one that goes now catches parts up
+            if (here != null && atOnce &&
+                (told.Takers == null || !CatchUp(fsm, here.Target, told.Takers, eventName))) {
+                SayOnce(here.Target, $"is not told '{eventName}', as it let that go by in the scene host's game");
             }
 
-            if (here == null) {
-                return true;
-            }
-
-            // Named after a part is put back, so that what the state it goes back to rolls again is not taken from the
-            // name, which the host's part rolls from only after it took the event
-            SayOnce(here.Target, "rolls under the name and goes after the player of the scene host's creature");
-            AimAt(here, told);
-            if (atOnce && told.Takers != null) {
-                PutBackToTake(here.Target, told.Takers, eventName);
-            }
-
-            NameMachines(here, told.Key);
-        } catch (Exception e) {
-            SayFailed(e);
+            return false;
         }
 
-        return told.Word != Word.NotTaken;
+        if (here == null) {
+            return true;
+        }
+
+        // Named after a part is put back, so that what the state it goes back to rolls again is not taken from the
+        // name, which the host's part rolls from only after it took the event
+        SayOnce(here.Target, "rolls under the name and goes after the player of the scene host's creature");
+        AimAt(here, told);
+        if (atOnce && told.Takers != null) {
+            PutBackToTake(here.Target, told.Takers, eventName);
+        }
+
+        NameMachines(here, told.Key);
+        return true;
     }
 
     /// <summary>
@@ -414,12 +409,8 @@ internal static class ToldParts {
             return;
         }
 
-        try {
-            if (FindListeners(eventName) is { Count: > 0 } listeners) {
-                NameListeners(listeners, told.Key);
-            }
-        } catch (Exception e) {
-            SayFailed(e);
+        if (FindListeners(eventName) is { Count: > 0 } listeners) {
+            NameListeners(listeners, told.Key);
         }
     }
 

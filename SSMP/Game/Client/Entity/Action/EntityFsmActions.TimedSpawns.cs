@@ -188,7 +188,7 @@ internal static partial class EntityFsmActions {
     /// </summary>
     private static void TellIfEntered(FsmStateAction action) {
         var state = action.State;
-        if (state == null || TimedRuns.TryGetValue(action, out var run) && run.IsCopy) {
+        if (TimedRuns.TryGetValue(action, out var run) && run.IsCopy) {
             return;
         }
 
