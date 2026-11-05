@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Text;
 using HutongGames.PlayMaker;
@@ -133,13 +132,7 @@ internal partial class GamePatcher {
             }
 
             watch.Said = true;
-
-            // Only a look, so it never stands in the way of the game
-            try {
-                Logger.Info(DescribeIdle(watch, now));
-            } catch (Exception e) {
-                Logger.Warn($"Could not say what '{watch.Owner.name}' does: {e.GetType().Name}: {e.Message}");
-            }
+            Logger.Info(DescribeIdle(watch, now));
         }
 
         foreach (var id in IdleWatchesGone) {

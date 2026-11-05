@@ -140,14 +140,7 @@ internal class FightOutline {
         var colour = PlayerManager.OwnColour(_modSettings);
         if (_outline == null || _outline.transform.parent != hero.transform) {
             Remove();
-
-            // Only a look, so it never stands in the way of the game
-            try {
-                _outline = OwnFigureOutline.Attach(hero.gameObject, colour, Reach);
-            } catch (System.Exception e) {
-                Logger.Error($"Could not outline own hero:\n{e}");
-            }
-
+            _outline = OwnFigureOutline.Attach(hero.gameObject, colour, Reach);
             if (_outline == null) {
                 return;
             }

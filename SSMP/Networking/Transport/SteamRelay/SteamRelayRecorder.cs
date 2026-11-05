@@ -373,12 +373,7 @@ internal static class SteamRelayRecorder {
                     return;
                 }
 
-                // One player that cannot be asked about does not keep the others from being asked about
-                try {
-                    TakeSample(pair.Key, pair.Value);
-                } catch (Exception e) {
-                    TellTickFailure(e);
-                }
+                TakeSample(pair.Key, pair.Value);
             }
 
             if (Volatile.Read(ref _users) > 0) {
@@ -400,11 +395,7 @@ internal static class SteamRelayRecorder {
         }
 
         _tickFailureTold = true;
-        try {
-            Logger.Warn($"[Link] Could not write down how the links stand: {e}");
-        } catch (Exception) {
-            // Only a line of the log is lost
-        }
+        Logger.Warn($"[Link] Could not write down how the links stand: {e}");
     }
 
     /// <summary>

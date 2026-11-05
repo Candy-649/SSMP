@@ -658,11 +658,7 @@ internal partial class MinigameCoop {
 
         var added = false;
         foreach (var memberId in _getMembers().OrderBy(id => id)) {
-            try {
-                added |= AddMemberRow(self, memberId);
-            } catch (Exception e) {
-                Logger.Warn($"Could not add a member's row to the score board: {e.GetType()}, {e.Message}");
-            }
+            added |= AddMemberRow(self, memberId);
         }
 
         if (added) {

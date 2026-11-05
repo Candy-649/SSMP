@@ -107,12 +107,8 @@ internal class SteamRelayLoopbackChannel {
 
         // An exactly sized array, because whatever reads this assumes the whole array is the packet
         var copy = new byte[length];
-        try {
-            Array.Copy(data, offset, copy, 0, length);
-            server.ReceiveLoopbackPacket(copy, length);
-        } catch (Exception e) {
-            Logger.Error($"Steam relay loopback: error sending to server: {e}");
-        }
+        Array.Copy(data, offset, copy, 0, length);
+        server.ReceiveLoopbackPacket(copy, length);
     }
 
     /// <summary>

@@ -214,11 +214,6 @@ internal sealed class MinigameMirror {
     private readonly List<int> _entryStarts = [];
 
     /// <summary>
-    /// Whether sending something went wrong, which is only logged once.
-    /// </summary>
-    private bool _sendFailed;
-
-    /// <summary>
     /// A part, or a thing thrown out, that may draw, with what it draws with and what was last sent of it.
     /// </summary>
     private sealed class Drawn {
@@ -354,34 +349,27 @@ internal sealed class MinigameMirror {
         _entriesLength = 0;
         _entryStarts.Clear();
 
-        try {
-            foreach (var drawn in _sendParts) {
-                WriteIfChanged(drawn, whole);
-            }
+        foreach (var drawn in _sendParts) {
+            WriteIfChanged(drawn, whole);
+        }
 
-            for (var index = _thrown.Count - 1; index >= 0; index--) {
-                var drawn = _thrown[index];
-                WriteIfChanged(drawn, whole);
+        for (var index = _thrown.Count - 1; index >= 0; index--) {
+            var drawn = _thrown[index];
+            WriteIfChanged(drawn, whole);
 
-                // A thing that was put away a while ago is forgotten, once the watching game was told so
-                if (drawn.Object == null ||
-                    !drawn.Sent.Shown && drawn.PutAwayAt >= 0f && now - drawn.PutAwayAt > ThrownGoneAfter) {
-                    _thrown.RemoveAt(index);
-                }
-            }
-
-            if (whole || _namesChanged) {
-                _namesChanged = false;
-                SendNames(send);
-            }
-
-            SendParts(whole, camera, send);
-        } catch (Exception e) {
-            if (!_sendFailed) {
-                _sendFailed = true;
-                Logger.Warn($"Could not send the picture of the round: {e.GetType()}, {e.Message}");
+            // A thing that was put away a while ago is forgotten, once the watching game was told so
+            if (drawn.Object == null ||
+                !drawn.Sent.Shown && drawn.PutAwayAt >= 0f && now - drawn.PutAwayAt > ThrownGoneAfter) {
+                _thrown.RemoveAt(index);
             }
         }
+
+        if (whole || _namesChanged) {
+            _namesChanged = false;
+            SendNames(send);
+        }
+
+        SendParts(whole, camera, send);
     }
 
     /// <summary>

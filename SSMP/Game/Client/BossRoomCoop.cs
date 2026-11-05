@@ -233,11 +233,6 @@ internal partial class BossRoomCoop {
     private readonly List<(Fsm Fsm, float ReadAt)> _roomFsmsToRead = [];
 
     /// <summary>
-    /// Whether an FSM that could not be looked at was written down in this scene, so that it is said once.
-    /// </summary>
-    private bool _scanFailureSaid;
-
-    /// <summary>
     /// Whether this class sends an event to a gate itself, which the hooks let through.
     /// </summary>
     private bool _bypassGates;
@@ -1094,7 +1089,7 @@ internal partial class BossRoomCoop {
                          FindObjectsInactive.Include,
                          FindObjectsSortMode.None
                      )) {
-                TryScanFsm(playMakerFsm);
+                ScanFsm(playMakerFsm);
             }
 
             return;
@@ -1105,7 +1100,7 @@ internal partial class BossRoomCoop {
             for (var i = 0; i < _madeFsms.Count; i++) {
                 var playMakerFsm = _madeFsms[i];
                 if (playMakerFsm != null) {
-                    TryScanFsm(playMakerFsm);
+                    ScanFsm(playMakerFsm);
                 }
             }
 
@@ -1124,26 +1119,6 @@ internal partial class BossRoomCoop {
             _roomFsmsToRead.RemoveAt(i);
             if (fsm.GameObject != null) {
                 GetBossRoom(fsm);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Looks at an FSM as <see cref="ScanFsm"/> does, keeping what it throws to itself: the search is done once, and the
-    /// FSMs after one that threw were otherwise never looked at in the scene.
-    /// </summary>
-    /// <param name="playMakerFsm">The FSM.</param>
-    private void TryScanFsm(PlayMakerFSM playMakerFsm) {
-        try {
-            ScanFsm(playMakerFsm);
-        } catch (Exception e) {
-            // Said once a scene: what throws for one FSM usually throws for many
-            if (!_scanFailureSaid) {
-                _scanFailureSaid = true;
-                Logger.Error(
-                    $"Could not look at FSM '{playMakerFsm.FsmName}' of '{playMakerFsm.name}' for what starts rooms, " +
-                    $"and the room is looked at without it:\n{e}"
-                );
             }
         }
     }
@@ -1973,7 +1948,6 @@ internal partial class BossRoomCoop {
         _sceneScanned = false;
         _madeFsms.Clear();
         _roomFsmsToRead.Clear();
-        _scanFailureSaid = false;
     }
 
     /// <summary>

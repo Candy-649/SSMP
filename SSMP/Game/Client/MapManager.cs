@@ -401,13 +401,7 @@ internal class MapManager : IMapManager {
         }
 
         RemoveOwnOutline();
-
-        // Only a look, so it never stands in the way of the map opening
-        try {
-            _ownOutline = OwnMapIconOutline.Attach(head, colour);
-        } catch (System.Exception e) {
-            Logger.Error($"Could not outline own head on the map:\n{e}");
-        }
+        _ownOutline = OwnMapIconOutline.Attach(head, colour);
     }
 
     /// <summary>

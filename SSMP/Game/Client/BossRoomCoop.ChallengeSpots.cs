@@ -232,12 +232,8 @@ internal partial class BossRoomCoop {
 
             _challengeSpotsToSwitchOff.RemoveAt(i);
             Logger.Info($"Switching off challenge spot '{path}', which another player used ('{state.Name}')");
-            try {
-                UndoWhatTheStateSet(fsm, state);
-                spot.SetActive(false);
-            } catch (Exception e) {
-                Logger.Warn($"Could not switch off challenge spot '{path}':\n{e}");
-            }
+            UndoWhatTheStateSet(fsm, state);
+            spot.SetActive(false);
         }
     }
 
@@ -450,34 +446,26 @@ internal partial class BossRoomCoop {
     /// Tells an FSM of this game's receiver at a path an event that another player's challenge told theirs.
     /// </summary>
     private void TellToldChallenge(string path, Fsm fsm, string eventName, ToldChallenge told) {
-        try {
-            if (told.KeptOff.Add(fsm)) {
-                KeepChallengeOffLocalPlayer(fsm);
+        if (told.KeptOff.Add(fsm)) {
+            KeepChallengeOffLocalPlayer(fsm);
+        }
+
+        if (GetBossRoom(fsm) is { } room) {
+            if (!_localChallengeTells.ContainsKey(path)) {
+                _roomsChallengedElsewhere.Add(room);
             }
 
-            if (GetBossRoom(fsm) is { } room) {
-                if (!_localChallengeTells.ContainsKey(path)) {
-                    _roomsChallengedElsewhere.Add(room);
-                }
-
-                if (!told.Started) {
-                    told.Started = true;
-                    OnBossFightStarting(room);
-                }
+            if (!told.Started) {
+                told.Started = true;
+                OnBossFightStarting(room);
             }
-        } catch (Exception e) {
-            Logger.Warn($"Could not ready '{GetPath(fsm)}' for what another player's challenge told it:\n{e}");
         }
 
         Logger.Info(
             $"Telling '{GetPath(fsm)}' in '{fsm.ActiveState?.Name}' '{eventName}', which another player's challenge " +
             "told it"
         );
-        try {
-            fsm.Event(eventName);
-        } catch (Exception e) {
-            Logger.Warn($"Could not tell '{GetPath(fsm)}' '{eventName}':\n{e}");
-        }
+        fsm.Event(eventName);
     }
 
     /// <summary>

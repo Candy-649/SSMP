@@ -506,11 +506,7 @@ internal partial class BossRoomCoop {
         // screen and the game goes on calling itself busy - and the box is the one thing every question in the game
         // has to have to itself, so leaving it open is how one line of dialogue ends up refusing a wish.
         if (IsDialogueRunning() == true) {
-            try {
-                DialogueBox.EndConversation();
-            } catch (Exception e) {
-                Logger.Error($"Could not close the box of the dialogue that the other player shared:\n{e}");
-            }
+            DialogueBox.EndConversation();
         }
 
         OnSharedDialogueEnded(_shownDialogueId);

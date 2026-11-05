@@ -269,53 +269,48 @@ internal class EnemyHealthCoop {
         GameObject? source,
         bool isHeroDamage
     ) {
-        // Only a record: never in the way of the damage itself
-        try {
-            var id = creature.GetInstanceID();
-            var wasScaled = _scaled.TryGetValue(id, out var scaled);
-            _scaled.Remove(id);
+        var id = creature.GetInstanceID();
+        var wasScaled = _scaled.TryGetValue(id, out var scaled);
+        _scaled.Remove(id);
 
-            var now = Time.unscaledTime;
-            if (now - _damageMinuteStart >= 60f) {
-                if (_damageLinesLeftOut > 0) {
-                    Logger.Info($"[Damage] {_damageLinesLeftOut} more in the minute before were not written");
-                }
-
-                _damageMinuteStart = now;
-                _damageLinesThisMinute = 0;
-                _damageLinesLeftOut = 0;
+        var now = Time.unscaledTime;
+        if (now - _damageMinuteStart >= 60f) {
+            if (_damageLinesLeftOut > 0) {
+                Logger.Info($"[Damage] {_damageLinesLeftOut} more in the minute before were not written");
             }
 
-            if (_damageLinesThisMinute >= DamageLinesPerMinute) {
-                _damageLinesLeftOut++;
-                return;
-            }
-
-            _damageLinesThisMinute++;
-
-            var line = new StringBuilder();
-            var hpAfter = HealthManagerComponent.HealthBeforePutBack(creature);
-            line.Append($"[Damage] '{creature.name}' {hpBefore} -> {hpAfter} from {kind} of {damage}");
-            if (source != null) {
-                line.Append(" by ");
-                line.Append(
-                    RemoteAttackComponent.IsRemoteAttack(source) ? "a copy of another player's"
-                    : isHeroDamage || LocalToolComponent.IsLocalTool(source) ? "this player's"
-                    : "something else:"
-                );
-                line.Append($" '{source.name}'");
-            }
-
-            if (wasScaled) {
-                line.Append(scaled.KeptWhole
-                    ? $"; co-op: {scaled.From} kept whole, as it kills a creature at full health outright"
-                    : $"; co-op: {scaled.From} / {scaled.By:0.###} = {scaled.To}");
-            }
-
-            Logger.Info(line.ToString());
-        } catch (Exception e) {
-            Logger.Warn($"Could not write down damage to a creature: {e.Message}");
+            _damageMinuteStart = now;
+            _damageLinesThisMinute = 0;
+            _damageLinesLeftOut = 0;
         }
+
+        if (_damageLinesThisMinute >= DamageLinesPerMinute) {
+            _damageLinesLeftOut++;
+            return;
+        }
+
+        _damageLinesThisMinute++;
+
+        var line = new StringBuilder();
+        var hpAfter = HealthManagerComponent.HealthBeforePutBack(creature);
+        line.Append($"[Damage] '{creature.name}' {hpBefore} -> {hpAfter} from {kind} of {damage}");
+        if (source != null) {
+            line.Append(" by ");
+            line.Append(
+                RemoteAttackComponent.IsRemoteAttack(source) ? "a copy of another player's"
+                : isHeroDamage || LocalToolComponent.IsLocalTool(source) ? "this player's"
+                : "something else:"
+            );
+            line.Append($" '{source.name}'");
+        }
+
+        if (wasScaled) {
+            line.Append(scaled.KeptWhole
+                ? $"; co-op: {scaled.From} kept whole, as it kills a creature at full health outright"
+                : $"; co-op: {scaled.From} / {scaled.By:0.###} = {scaled.To}");
+        }
+
+        Logger.Info(line.ToString());
     }
 
     /// <summary>

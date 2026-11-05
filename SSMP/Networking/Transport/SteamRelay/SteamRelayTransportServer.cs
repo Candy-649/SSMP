@@ -242,17 +242,12 @@ internal sealed class SteamRelayTransportServer : IEncryptedTransportServer {
                 return;
             }
 
-            // Nothing may leave a timer's thread: an exception there would close the game
-            try {
-                var now = _clock.ElapsedMilliseconds;
-                Logger.Info(
-                    $"Steam relay: nothing from {steamId} has arrived in the {(now - acceptedAt) / 1000.0:F0}s since " +
-                    $"their session was accepted; {SteamRelayMessaging.DescribeSession(steamId)}; this server last " +
-                    $"looked for messages {now - Interlocked.Read(ref _lastLookedMs)} ms ago"
-                );
-            } catch (Exception) {
-                // Only a line of the log is lost
-            }
+            var now = _clock.ElapsedMilliseconds;
+            Logger.Info(
+                $"Steam relay: nothing from {steamId} has arrived in the {(now - acceptedAt) / 1000.0:F0}s since " +
+                $"their session was accepted; {SteamRelayMessaging.DescribeSession(steamId)}; this server last " +
+                $"looked for messages {now - Interlocked.Read(ref _lastLookedMs)} ms ago"
+            );
         }, null, SilenceToldEvery, SilenceToldEvery);
 
         if (_silenceWatches.TryRemove(steamId, out var earlier)) {

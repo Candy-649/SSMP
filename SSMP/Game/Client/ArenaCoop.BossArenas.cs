@@ -383,8 +383,6 @@ internal partial class ArenaCoop {
         _resendingBossEvent = true;
         try {
             fsm.Event(held.EventName);
-        } catch (Exception e) {
-            Logger.Error($"Could not send '{held.EventName}' of '{fsm.GameObject.name}':\n{e}");
         } finally {
             _resendingBossEvent = false;
         }

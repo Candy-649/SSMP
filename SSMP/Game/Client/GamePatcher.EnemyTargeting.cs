@@ -390,17 +390,13 @@ internal partial class GamePatcher {
     /// <param name="owner">The enemy that chose.</param>
     /// <param name="target">What it chose.</param>
     private static void SayWhoAnEnemyGoesAfter(GameObject owner, GameObject target) {
-        try {
-            var hero = HeroController.instance;
-            var isLocal = hero != null && target == hero.gameObject;
+        var hero = HeroController.instance;
+        var isLocal = hero != null && target == hero.gameObject;
 
-            Logger.Info(
-                $"{owner.name} now goes after {(isLocal ? "the local player" : $"the partner ({target.name})")}, " +
-                $"and {_targetsWrittenIntoActions} target(s) have been written into actions so far"
-            );
-        } catch (Exception e) {
-            Logger.Warn($"Could not say who an enemy goes after: {e.Message}");
-        }
+        Logger.Info(
+            $"{owner.name} now goes after {(isLocal ? "the local player" : $"the partner ({target.name})")}, " +
+            $"and {_targetsWrittenIntoActions} target(s) have been written into actions so far"
+        );
     }
 
     /// <summary>

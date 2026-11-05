@@ -1636,11 +1636,7 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="gap">How long nothing arrived from them, in seconds.</param>
     private void OnClientReceiveResumed(ushort id, double gap) {
         if (_playerData.TryGetValue(id, out var player)) {
-            try {
-                PlayerLinkBack?.Invoke(id, player.Username, gap);
-            } catch (Exception e) {
-                Logger.Warn($"Could not tell that things come from ({id}, {player.Username}) again: {e.Message}");
-            }
+            PlayerLinkBack?.Invoke(id, player.Username, gap);
         }
 
         if (gap < RoomResendGap || !_fullSynchronisation || !_playerData.TryGetValue(id, out var playerData) ||
@@ -1672,11 +1668,7 @@ internal abstract class ServerManager : IServerManager {
             return;
         }
 
-        try {
-            PlayerLinkStalled?.Invoke(id, playerData.Username);
-        } catch (Exception e) {
-            Logger.Warn($"Could not tell that the link to ({id}, {playerData.Username}) is made anew: {e.Message}");
-        }
+        PlayerLinkStalled?.Invoke(id, playerData.Username);
     }
 
     /// <summary>

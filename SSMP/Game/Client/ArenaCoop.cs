@@ -1512,8 +1512,6 @@ internal partial class ArenaCoop {
         _remoteTarget = battleScene;
         try {
             action();
-        } catch (Exception e) {
-            Logger.Error($"Could not change arena '{battleScene.name}' for another player:\n{e}");
         } finally {
             _remoteTarget = previousTarget;
         }
