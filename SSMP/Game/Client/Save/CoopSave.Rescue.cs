@@ -1160,6 +1160,18 @@ internal partial class CoopSave {
     private float _lastStoodBackUpTime;
 
     /// <summary>
+    /// Where the local player last stood on the ground, out of water, in the room that <see cref="_lastGroundScene"/>
+    /// names: where they stand up when they went down in the air or in water (see WhereToStandUp). Written every frame
+    /// they stand there (NoteGroundStoodOn).
+    /// </summary>
+    private static Vector3 _lastGround;
+
+    /// <summary>
+    /// The room that <see cref="_lastGround"/> is in, or null before the local player stood on the ground in any.
+    /// </summary>
+    private static string? _lastGroundScene;
+
+    /// <summary>
     /// Lays the player down where they are instead of playing the death out, holds them there while the other members
     /// have a chance to open their cocoon, and then either puts them back on their feet or plays the game's own death
     /// after all, from its first step.
@@ -2034,16 +2046,11 @@ internal partial class CoopSave {
             hero.rb2d.bodyType = RigidbodyType2D.Dynamic;
             hero.AffectedByGravity(true);
 
-            // Put back on their feet where they fell is the whole point of this everywhere else, and for a player who
-            // went down in the air that is where they land (see WhereToStandUp). Where that spot is in lava, spikes or
-            // a drop, or over one, it is the one place that cannot be done: a player put back there falls straight
-            // in - a creature can kill a player in the middle of a jump across lava - and lava takes two masks, all
-            // that a rescue gives back of five. The game keeps a place of its own for exactly this, which is where it
-            // would have put them itself.
+            // Put back on their feet where they fell, or, for a player who went down in the air or in water, where
+            // they last stood on the ground (see WhereToStandUp). Lava or spikes there are left to the game: the
+            // first seconds after standing up take no health (below), and the game puts a player who meets them back
+            // at its own safe place (USER 10-18, again 11-05: 岩浆尖刺那个判定不是取消了吗，改成2秒无敌了).
             //
-            // What the death left behind cannot tell this. The game marks a death by the room (cState.hazardDeath)
-            // only on the way back to that place after a hit the player lives through; the hit that takes the last
-            // of the health goes straight to the death without it (HeroController.TakeDamage).
             // Beside a member, for a death in the chase: a place their game picked, below which the lava is set
             // down if it has come near, while the game's own mark is usually under it by now. Only while the lava
             // here chases: one at rest is not set down, and a place in or over it is no place to stand up
@@ -2076,13 +2083,14 @@ internal partial class CoopSave {
                 hero.transform.position = place;
                 if (safe) {
                     Logger.Info(
-                        $"Standing back up at {place} instead of {lying}, which is in or over lava, spikes, a drop " +
-                        "or sand that pulls players under, or in the air over a way out or nothing to land on"
+                        $"Standing back up at {place}, the game's safe place, instead of {lying}, in the air or in " +
+                        "water, with no ground stood on in this room that is still there"
                     );
                     NoteStandUpAtSafePlace(place);
                 } else if (place != lying) {
                     Logger.Info(
-                        $"Standing back up at {place}, where the body lands falling from {lying}, where they went down"
+                        $"Standing back up at {place}, where they last stood on the ground, instead of {lying}, in " +
+                        "the air or in water, where they went down"
                     );
                 } else if (rescue.Current is { } current) {
                     // Back in the current they lay in and never left, which going down took off them
@@ -2271,60 +2279,30 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Where the local player lying here stands up: where they lie, or at the place the game keeps for putting a
-    /// player back when that is in or over something of the room that hurts (see IsInOrOverTheRoomsHarm).
+    /// Where the local player lying here stands up, and their cocoon lies: where they lie, when that is on the ground
+    /// out of water; otherwise where they last stood on the ground in this room, while that ground is still there; and
+    /// otherwise at the place the game keeps for putting a player back.
     ///
-    /// A player who went down in the air - held up by a creature, or in the middle of a jump - stands up where their
-    /// body lands falling from there, or at that place of the game when it would fall into something that hurts, out
-    /// of the room, or for good. Stood up in the air they fell the moment they could move: pulled up where a creature
-    /// had held them, a player fell into the mist of a maze and woke up back at its start, away from the one who had
-    /// just pulled them up (USER 11-02, 被救了之后直接掉下去了).
+    /// No cocoon is left where a player would fall a long way from (USER 11-05, 茧就不要摆在可以直接掉下去这么远的地方).
+    /// Stood up in the air, a player fell the moment they could move: pulled up where a creature had held them, one fell
+    /// into the mist of a maze and woke up back at its start (USER 11-02). Put down where their body would land
+    /// instead, one stood up in the water full of maggots that they had gone down far above (USER 11-05,
+    /// 我人出现就已经在蛆里了).
     /// </summary>
     /// <param name="hero">The hero controller.</param>
     /// <returns>The place, and whether it is the place the game keeps for putting a player back.</returns>
     private static (Vector3 Place, bool Safe) WhereToStandUp(HeroController hero) {
         var lying = hero.transform.position;
-        if (IsInOrOverTheRoomsHarm(lying)) {
-            return (PlayerData.instance.hazardRespawnLocation, true);
-        }
-
-        if (hero.CheckTouchingGround()) {
+        if (hero.CheckTouchingGround() && !hero.cState.swimming) {
             return (lying, false);
         }
 
-        return WhereTheBodyLands(hero) is { } landing
-            ? (landing, false)
-            : (PlayerData.instance.hazardRespawnLocation, true);
-    }
-
-    /// <summary>
-    /// Where the body of the local player comes to rest falling from where it is: on the first thing that it meets
-    /// and stands on. None when the first thing it meets is something of the room that hurts, or a way out of the
-    /// room, or when it meets nothing at all.
-    /// </summary>
-    /// <param name="hero">The hero controller.</param>
-    private static Vector3? WhereTheBodyLands(HeroController hero) {
-        var hits = new List<RaycastHit2D>();
-        hero.col2d.Cast(Vector2.down, new ContactFilter2D().NoFilter(), hits, Mathf.Infinity);
-
-        RaycastHit2D? first = null;
-        var lands = false;
-        foreach (var hit in hits) {
-            if (first is { } nearer && nearer.distance <= hit.distance) {
-                continue;
-            }
-
-            var collider = hit.collider;
-            var isGround = IsGroundForThePlayer(collider);
-            var isHarm = IsTheRoomsHarm(collider);
-            var isWayOut = IsWayOutOfTheRoom(collider);
-            if (isGround || isHarm || isWayOut) {
-                first = hit;
-                lands = isGround && !isHarm && !isWayOut;
-            }
+        // Ground that gave way since, or a lift that moved on, holds nobody up there any more
+        if (_lastGroundScene == hero.gm.GetSceneNameString() && GetGroundRightBelow(hero, _lastGround) != null) {
+            return (_lastGround, false);
         }
 
-        return lands && first is { } ground ? hero.transform.position + Vector3.down * ground.distance : null;
+        return (PlayerData.instance.hazardRespawnLocation, true);
     }
 
     /// <summary>
@@ -2335,41 +2313,13 @@ internal partial class CoopSave {
         !collider.isTrigger && !Physics2D.GetIgnoreLayerCollision(PlayerLayer, collider.gameObject.layer);
 
     /// <summary>
-    /// Whether coming into a collider takes the player out of the room: a gate they go through by walking or falling
-    /// into it, rather than one they open, or a zone that moves them elsewhere as they come into it, like the mist of
-    /// a maze, which takes them back to its start (MazeMistZone).
-    /// </summary>
-    private static bool IsWayOutOfTheRoom(Collider2D collider) =>
-        collider.TryGetComponent<TransitionPoint>(out var gate)
-            ? !gate.isADoor && !gate.isInactive
-            : collider.TryGetComponent<SceneTransitionZoneBase>(out _);
-
-    /// <summary>
     /// Whether a collider hurts the player for the room rather than for a creature. The game reads the harm off the
     /// collider's own object (HeroBox.CheckForDamage), and answers every kind of it but a creature's attack and an
     /// explosion by putting the player back at the last safe place (HeroController.TakeDamage).
-    ///
-    /// The sand that creatures pull a player down into hurts without any of that: its trigger tells the group of
-    /// creatures (RangeAttackGroup.OnCustomDamageTriggerEntered), whose event drags the player under and puts them
-    /// back at the same safe place, so it is known by being the trigger of such a group.
     /// </summary>
-    private static bool IsTheRoomsHarm(Collider2D collider) {
-        if (collider.TryGetComponent<DamageHero>(out var damage) && damage.hazardType is not (
-                GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or GlobalEnums.HazardType.EXPLOSION)) {
-            return true;
-        }
-
-        return collider.TryGetComponent<TriggerEnterEvent>(out var trigger) &&
-               collider.GetComponentInParent<RangeAttackGroup>(true) is { } group &&
-               RangeAttackGroupDamageTriggerField?.GetValue(group) is TriggerEnterEvent groupTrigger &&
-               groupTrigger == trigger;
-    }
-
-    /// <summary>
-    /// The trigger through which a group of creatures that live in the ground hurts the player.
-    /// </summary>
-    private static readonly FieldInfo? RangeAttackGroupDamageTriggerField =
-        typeof(RangeAttackGroup).GetField("customDamageTrigger", InstanceFlags);
+    private static bool IsTheRoomsHarm(Collider2D collider) =>
+        collider.TryGetComponent<DamageHero>(out var damage) && damage.hazardType is not (
+            GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or GlobalEnums.HazardType.EXPLOSION);
 
     /// <summary>
     /// Lets the camera follow the player again if it is still held where they went down. Some of the room's harm holds
@@ -2406,6 +2356,22 @@ internal partial class CoopSave {
     }
 
     /// <summary>
+    /// Notes where the local player stands while they stand on the ground out of water, for WhereToStandUp: only with
+    /// the ground right below their middle, which at the edge of a platform is over the drop while the feet still touch.
+    /// </summary>
+    /// <param name="hero">The hero controller.</param>
+    private static void NoteGroundStoodOn(HeroController hero) {
+        var state = hero.cState;
+        if (!state.onGround || state.swimming || state.dead || state.transitioning ||
+            PlayerTargetRegistry.IsPlayerDown(hero.gameObject) || GetGroundRightBelow(hero, hero.transform.position) == null) {
+            return;
+        }
+
+        _lastGround = hero.transform.position;
+        _lastGroundScene = hero.gm.GetSceneNameString();
+    }
+
+    /// <summary>
     /// Keeps a wait for a rescue and the cocoons of other members in step with the game each frame: the line that tells
     /// the waiting player what is happening, the key that gives up on it, and the cocoons that stop being shown once
     /// their members are no longer waiting.
@@ -2413,6 +2379,8 @@ internal partial class CoopSave {
     /// <param name="hero">The hero controller.</param>
     private void UpdateRescue(HeroController hero) {
         try {
+            NoteGroundStoodOn(hero);
+
             // The wait marks every frame it runs on, and so does the way to the bench after it, so one that has
             // stopped marking them is gone: the room was loaded again underneath it, or the save was left, and
             // whatever was holding it went away with it. After a room is loaded this is a different hero entirely.
