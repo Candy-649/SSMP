@@ -58,8 +58,8 @@ internal partial class BossRoomCoop {
     private readonly List<UnclaimedGate> _unclaimedGates = [];
 
     /// <summary>
-    /// Hook for noticing when the game gives control back to the local player while a room waits, and for keeping it
-    /// from a player lying down.
+    /// Hook for noticing when the game gives control back to the local player while a room waits or after a creature's
+    /// end took it (see BossRoomCoop.Endings), and for keeping it from a player lying down.
     /// </summary>
     private Hook? _regainControlHook;
 
@@ -120,6 +120,7 @@ internal partial class BossRoomCoop {
 
         orig(self, allowInput);
         ForgetTakenControl();
+        TellEndingGaveBack();
     }
 
     /// <summary>
@@ -133,6 +134,7 @@ internal partial class BossRoomCoop {
 
         orig(self);
         ForgetTakenControl();
+        TellEndingGaveBack();
     }
 
     /// <summary>

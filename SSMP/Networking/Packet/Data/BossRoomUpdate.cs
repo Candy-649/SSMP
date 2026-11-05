@@ -241,5 +241,18 @@ internal enum BossRoomUpdateKind : byte {
     /// A player's challenge told the object of the room that plays its intro something, which the other players in the
     /// scene tell their own, with all that it told so far.
     /// </summary>
-    ChallengeTold
+    ChallengeTold,
+
+    /// <summary>
+    /// An action of the FSM of a creature with no health left took the sender's character to play the creature's end,
+    /// which the other players in the scene watch (see BossRoomCoop.Endings): <see cref="BossRoomUpdate.Path"/> is the
+    /// creature, and <see cref="BossRoomUpdate.FsmName"/> and <see cref="BossRoomUpdate.FromState"/> the FSM and state.
+    /// </summary>
+    EndingTook,
+
+    /// <summary>
+    /// The sender's character has control again after a creature's end took it, so the other players in the scene stop
+    /// watching.
+    /// </summary>
+    EndingGaveBack
 }

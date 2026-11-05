@@ -45,6 +45,13 @@ internal static class HeldLook {
     };
 
     /// <summary>
+    /// The character of another player whose end of a creature the local player watches, or null (see
+    /// BossRoomCoop.Endings). What creatures draw of a player anywhere in the room is drawn in that player's look
+    /// meanwhile, as the stand-in of them that the end shows may be far from where the game hid them.
+    /// </summary>
+    internal static GameObject? EndingFigure;
+
+    /// <summary>
     /// Gives the copy of a sheet of sprites that the character of another player draws from, made if there is none
     /// yet, or null (see <see cref="PlayerManager.FigureSheet"/>).
     /// </summary>
@@ -141,6 +148,7 @@ internal static class HeldLook {
         drawn.Clear();
 
         var place = (Vector2) figure.transform.position;
+        var watched = figure == EndingFigure;
         var hero = HeroController.UnsafeInstance;
         var heroHidden = hero != null && HeroHidden.LocalHeroHidden;
         var heroPlace = hero != null ? (Vector2) hero.transform.position : default;
@@ -155,10 +163,10 @@ internal static class HeldLook {
                 continue;
             }
 
-            // The local player draws themselves while a creature hides them too
+            // The local player draws themselves while a creature hides them too, but not while they watch an end
             var bounds = renderer.bounds;
             var distance = Distance(bounds, place);
-            if (distance > Reach || heroHidden && Distance(bounds, heroPlace) < distance) {
+            if (!watched && (distance > Reach || heroHidden && Distance(bounds, heroPlace) < distance)) {
                 continue;
             }
 

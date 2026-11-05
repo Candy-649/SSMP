@@ -352,6 +352,7 @@ internal partial class BossRoomCoop {
         RegisterDialogueHooks();
         RegisterEventHooks();
         RegisterWaitHooks();
+        RegisterEndingHooks();
 
         EventHooks.HeroControllerUpdate += OnHeroControllerUpdate;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
@@ -382,6 +383,7 @@ internal partial class BossRoomCoop {
         DeregisterDialogueHooks();
         DeregisterEventHooks();
         DeregisterWaitHooks();
+        DeregisterEndingHooks();
 
         EventHooks.HeroControllerUpdate -= OnHeroControllerUpdate;
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
@@ -512,6 +514,12 @@ internal partial class BossRoomCoop {
                 break;
             case BossRoomUpdateKind.ChallengeTold:
                 OnChallengeTold(update);
+                break;
+            case BossRoomUpdateKind.EndingTook:
+                OnEndingTook(update);
+                break;
+            case BossRoomUpdateKind.EndingGaveBack:
+                OnEndingGaveBack(update);
                 break;
         }
     }
@@ -1960,6 +1968,7 @@ internal partial class BossRoomCoop {
         ClearCatchUps();
         ClearChallengeSpots();
         ClearHeartRecords();
+        ForgetEnding();
         _lastHeroPosition = null;
         _sceneScanned = false;
         _madeFsms.Clear();
