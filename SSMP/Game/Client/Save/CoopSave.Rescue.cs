@@ -439,40 +439,36 @@ internal partial class CoopSave {
     /// <param name="silkGained">Whether the local player gained silk by the hit, which the flash and the sound are
     /// about.</param>
     private static void PlaySilkHitEffect(GameObject cocoon, bool silkGained) {
-        try {
-            if (_strikeEffect == null || _silkBurstEffect == null) {
-                foreach (var startup in ObjectPool.instance.startupPools) {
-                    if (startup.prefab == null) {
-                        continue;
-                    }
+        if (_strikeEffect == null || _silkBurstEffect == null) {
+            foreach (var startup in ObjectPool.instance.startupPools) {
+                if (startup.prefab == null) {
+                    continue;
+                }
 
-                    if (startup.prefab.name == StrikeEffectName) {
-                        _strikeEffect = startup.prefab;
-                    } else if (startup.prefab.name == SilkBurstEffectName) {
-                        _silkBurstEffect = startup.prefab;
-                    }
+                if (startup.prefab.name == StrikeEffectName) {
+                    _strikeEffect = startup.prefab;
+                } else if (startup.prefab.name == SilkBurstEffectName) {
+                    _silkBurstEffect = startup.prefab;
                 }
             }
+        }
 
-            // Where the cocoon is rather than where its feet are. A cocoon is drawn from the ground up, so its own
-            // position is the bottom of it, and an effect put there would go off under the blow.
-            var at = cocoon.GetComponentInChildren<Collider2D>() is { } body
-                ? (Vector3) body.bounds.center
-                : cocoon.transform.position;
+        // Where the cocoon is rather than where its feet are. A cocoon is drawn from the ground up, so its own
+        // position is the bottom of it, and an effect put there would go off under the blow.
+        var at = cocoon.GetComponentInChildren<Collider2D>() is { } body
+            ? (Vector3) body.bounds.center
+            : cocoon.transform.position;
 
-            if (_strikeEffect != null) {
-                _strikeEffect.Spawn(at);
-            }
+        if (_strikeEffect != null) {
+            _strikeEffect.Spawn(at);
+        }
 
-            if (_silkBurstEffect != null) {
-                _silkBurstEffect.Spawn(at);
-            }
+        if (_silkBurstEffect != null) {
+            _silkBurstEffect.Spawn(at);
+        }
 
-            if (silkGained && Effects.RageHitHealthEffectPrefab is { } silkGet) {
-                silkGet.Spawn(at);
-            }
-        } catch (Exception e) {
-            Logger.Warn($"Could not play the effect of a hit on a cocoon: {e.Message}");
+        if (silkGained && Effects.RageHitHealthEffectPrefab is { } silkGet) {
+            silkGet.Spawn(at);
         }
     }
 
@@ -1000,26 +996,22 @@ internal partial class CoopSave {
     /// <param name="nonLethal">Whether the death was non-lethal.</param>
     /// <param name="frostDeath">Whether the death was caused by frost.</param>
     private void SayWhatTheDeathFound(bool nonLethal, bool frostDeath) {
-        try {
-            var hero = HeroController.instance;
-            var playerData = PlayerData.instance;
-            var since = _lastStoodBackUpTime > 0f
-                ? $"{Time.unscaledTime - _lastStoodBackUpTime:0.00}s after standing up"
-                : "having not been pulled up before";
+        var hero = HeroController.instance;
+        var playerData = PlayerData.instance;
+        var since = _lastStoodBackUpTime > 0f
+            ? $"{Time.unscaledTime - _lastStoodBackUpTime:0.00}s after standing up"
+            : "having not been pulled up before";
 
-            Logger.Info(
-                $"A death reached the player {since}, with " +
-                $"{(playerData == null ? "?" : playerData.health.ToString())}/" +
-                $"{(playerData == null ? "?" : playerData.maxHealth.ToString())} health, " +
-                $"by the room: {(hero == null ? "?" : hero.cState.hazardDeath.ToString())}, " +
-                $"non-lethal: {nonLethal}, " +
-                $"by frost: {frostDeath}, " +
-                $"already dead: {(hero == null ? "?" : hero.cState.dead.ToString())}, " +
-                $"at {(hero == null ? "?" : hero.transform.position.ToString())}"
-            );
-        } catch (Exception e) {
-            Logger.Warn($"Could not write down what the death found: {e.Message}");
-        }
+        Logger.Info(
+            $"A death reached the player {since}, with " +
+            $"{(playerData == null ? "?" : playerData.health.ToString())}/" +
+            $"{(playerData == null ? "?" : playerData.maxHealth.ToString())} health, " +
+            $"by the room: {(hero == null ? "?" : hero.cState.hazardDeath.ToString())}, " +
+            $"non-lethal: {nonLethal}, " +
+            $"by frost: {frostDeath}, " +
+            $"already dead: {(hero == null ? "?" : hero.cState.dead.ToString())}, " +
+            $"at {(hero == null ? "?" : hero.transform.position.ToString())}"
+        );
     }
 
     /// <summary>
@@ -1620,41 +1612,37 @@ internal partial class CoopSave {
     /// death that is still being waited out, not declaring the player alive.
     /// </remarks>
     private static void OpenTheDarknessAroundTheHero() {
-        try {
-            var hero = HeroController.instance;
-            if (hero == null) {
-                return;
-            }
-
-            PlayMakerFSM? darkness = null;
-            foreach (var fsm in hero.GetComponentsInChildren<PlayMakerFSM>(true)) {
-                if (fsm.FsmName == DarknessFsmName) {
-                    darkness = fsm;
-
-                    break;
-                }
-            }
-
-            if (darkness == null) {
-                Logger.Info("The hero has no plates to draw the dark with, so the death left none of them closed");
-
-                return;
-            }
-
-            // Said either way, because the whole difficulty of a thing left on the screen is telling what it was:
-            // silence here would only mean the next report is another guess.
-            var state = darkness.ActiveStateName;
-            if (state != DarknessDeathStateName) {
-                Logger.Info($"The dark plates around the player were in '{state}', so the death left them open");
-
-                return;
-            }
-
-            darkness.SendEvent(DarknessOpenEvent);
-            Logger.Info($"Opened the dark plates the death closed around the player; they are now in '{darkness.ActiveStateName}'");
-        } catch (Exception e) {
-            Logger.Warn($"Could not open the dark plates the death closed around the player: {e.Message}");
+        var hero = HeroController.instance;
+        if (hero == null) {
+            return;
         }
+
+        PlayMakerFSM? darkness = null;
+        foreach (var fsm in hero.GetComponentsInChildren<PlayMakerFSM>(true)) {
+            if (fsm.FsmName == DarknessFsmName) {
+                darkness = fsm;
+
+                break;
+            }
+        }
+
+        if (darkness == null) {
+            Logger.Info("The hero has no plates to draw the dark with, so the death left none of them closed");
+
+            return;
+        }
+
+        // Said either way, because the whole difficulty of a thing left on the screen is telling what it was:
+        // silence here would only mean the next report is another guess.
+        var state = darkness.ActiveStateName;
+        if (state != DarknessDeathStateName) {
+            Logger.Info($"The dark plates around the player were in '{state}', so the death left them open");
+
+            return;
+        }
+
+        darkness.SendEvent(DarknessOpenEvent);
+        Logger.Info($"Opened the dark plates the death closed around the player; they are now in '{darkness.ActiveStateName}'");
     }
 
     /// <summary>
@@ -1708,13 +1696,7 @@ internal partial class CoopSave {
     /// dealt with, so the only honest way to name one is to know what was there beforehand.
     /// </summary>
     private static void NoteWhatIsOnAroundThePlayer() {
-        try {
-            _whatWasOnBeforeTheDeath = WhatIsOnAroundThePlayer();
-        } catch (Exception e) {
-            _whatWasOnBeforeTheDeath = null;
-
-            Logger.Warn($"Could not write down what was on around the player before the death: {e.Message}");
-        }
+        _whatWasOnBeforeTheDeath = WhatIsOnAroundThePlayer();
     }
 
     /// <summary>
@@ -1722,43 +1704,39 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="when">Which moment this is being asked at, for the log to say.</param>
     private static void SayWhatTheDeathLeftSwitchedOn(string when) {
-        try {
-            if (_whatWasOnBeforeTheDeath == null) {
-                return;
-            }
-
-            var left = new List<string>();
-            foreach (var thing in WhatIsOnAroundThePlayer()) {
-                if (_whatWasOnBeforeTheDeath.Contains(thing)) {
-                    continue;
-                }
-
-                // Only what actually puts something on the screen: a death switches plenty of bookkeeping on as
-                // well, and a list nobody can read through is the same as no list at all.
-                var drawn = thing.GetComponent<Renderer>();
-                if (drawn == null || !drawn.enabled) {
-                    continue;
-                }
-
-                left.Add(PathOf(thing.transform));
-            }
-
-            if (left.Count == 0) {
-                Logger.Debug($"The death left nothing of its own drawing around the player, {when}");
-
-                return;
-            }
-
-            left.Sort(StringComparer.Ordinal);
-
-            Logger.Debug(
-                $"The death switched these on around the player and they are still drawing, {when} " +
-                $"({left.Count}): " +
-                string.Join(", ", left.Count > MostLeftoversWorthNaming ? left.GetRange(0, MostLeftoversWorthNaming) : left)
-            );
-        } catch (Exception e) {
-            Logger.Warn($"Could not look over what the death left around the player: {e.Message}");
+        if (_whatWasOnBeforeTheDeath == null) {
+            return;
         }
+
+        var left = new List<string>();
+        foreach (var thing in WhatIsOnAroundThePlayer()) {
+            if (_whatWasOnBeforeTheDeath.Contains(thing)) {
+                continue;
+            }
+
+            // Only what actually puts something on the screen: a death switches plenty of bookkeeping on as
+            // well, and a list nobody can read through is the same as no list at all.
+            var drawn = thing.GetComponent<Renderer>();
+            if (drawn == null || !drawn.enabled) {
+                continue;
+            }
+
+            left.Add(PathOf(thing.transform));
+        }
+
+        if (left.Count == 0) {
+            Logger.Debug($"The death left nothing of its own drawing around the player, {when}");
+
+            return;
+        }
+
+        left.Sort(StringComparer.Ordinal);
+
+        Logger.Debug(
+            $"The death switched these on around the player and they are still drawing, {when} " +
+            $"({left.Count}): " +
+            string.Join(", ", left.Count > MostLeftoversWorthNaming ? left.GetRange(0, MostLeftoversWorthNaming) : left)
+        );
     }
 
     /// <summary>
@@ -1817,35 +1795,31 @@ internal partial class CoopSave {
     /// and the resting state alone is left alone.
     /// </remarks>
     private static void StopTheScreenShaking() {
-        try {
-            var shake = GameCameras.instance?.cameraShakeFSM;
-            if (shake == null) {
-                return;
-            }
+        var shake = GameCameras.instance?.cameraShakeFSM;
+        if (shake == null) {
+            return;
+        }
 
-            var state = shake.ActiveStateName;
-            if (state == null) {
-                return;
-            }
+        var state = shake.ActiveStateName;
+        if (state == null) {
+            return;
+        }
 
-            // Every state that shakes the screen leaves on one of two events and on nothing else: the ones that
-            // rumble on and on until told to stop, and the ones that shake for a while and announce their own end.
-            // Both are sent, because the state resting between them has no answer to either and a death can leave
-            // the screen in one of them just as easily as in the other.
-            if (state == HoldingStillStateName) {
-                shake.SendEvent(ResumeShakingEvent);
-                Logger.Info("Let the screen shake again, which the death had switched off with nothing to switch on");
-            } else if (state != RestingStateName) {
-                shake.SendEvent(StopShakingEvent);
-                shake.SendEvent(DoneShakingEvent);
+        // Every state that shakes the screen leaves on one of two events and on nothing else: the ones that
+        // rumble on and on until told to stop, and the ones that shake for a while and announce their own end.
+        // Both are sent, because the state resting between them has no answer to either and a death can leave
+        // the screen in one of them just as easily as in the other.
+        if (state == HoldingStillStateName) {
+            shake.SendEvent(ResumeShakingEvent);
+            Logger.Info("Let the screen shake again, which the death had switched off with nothing to switch on");
+        } else if (state != RestingStateName) {
+            shake.SendEvent(StopShakingEvent);
+            shake.SendEvent(DoneShakingEvent);
 
-                Logger.Info(
-                    $"Told the screen to stop shaking, which the death left in '{state}' with nothing to end it; " +
-                    $"it is now in '{shake.ActiveStateName}'"
-                );
-            }
-        } catch (Exception e) {
-            Logger.Warn($"Could not stop the screen shaking after the death: {e.Message}");
+            Logger.Info(
+                $"Told the screen to stop shaking, which the death left in '{state}' with nothing to end it; " +
+                $"it is now in '{shake.ActiveStateName}'"
+            );
         }
     }
 
@@ -2119,14 +2093,11 @@ internal partial class CoopSave {
             // Given the game's own way rather than written into the number, because the number is only half of what
             // health is here. The row of masks in the corner is not drawn from the field - it is redrawn when the
             // game says health has changed - so writing the field left a player standing up with health they had no
-            // way of seeing, and a corner that still said they were dead. Writing it is kept for the case where
-            // there is nothing to add, which cannot happen to someone who has just died but costs nothing to hold.
+            // way of seeing, and a corner that still said they were dead.
             var health = Mathf.Max(1, playerData.maxHealth / 2);
             var missing = health - playerData.health;
             if (missing > 0) {
                 hero.AddHealth(missing);
-            } else {
-                playerData.health = health;
             }
 
             // A silk for every hit it took to open the cocoon. Those who opened it got one for each of their hits as
@@ -2161,54 +2132,29 @@ internal partial class CoopSave {
             // death froze part-way through, and it tells the FSMs of the hero that the death was called off. The
             // death told every one of them to cancel, and nothing else ever tells them otherwise - so without this a
             // player who was pulled back up walks, looks and swings, and touches nothing.
-            //
-            // Wrapped on its own because of what is on the other end of it: that event is handed to the whole stack
-            // of the hero's own FSMs and every one of them runs there and then. If any one of them throws, the
-            // rescue above it has already given the player their body, their health and their control back - and
-            // failing at this point would report the rescue as having failed and let the death carry on over the
-            // top of it, which is worse than anything this line can fix.
-            try {
-                hero.HeroRespawned();
-            } catch (Exception e) {
-                LogRescueError(e);
-            }
+            hero.HeroRespawned();
 
             // Giving control back writes the state of the player straight into the field, without telling the part
             // that decides which animation belongs to that state. Left alone it stays on the last thing it was told,
             // which is the death - so a player who is pulled up and then stands still is still lying there dead on
-            // the screen of the other player. This is what the game's own respawn does about it. Wrapped for the
-            // same reason as above: standing in the wrong pose is not worth failing a rescue over.
-            try {
-                hero.StartAnimationControlToIdle();
-            } catch (Exception e) {
-                LogRescueError(e);
-            }
+            // the screen of the other player. This is what the game's own respawn does about it.
+            hero.StartAnimationControlToIdle();
 
-            // Wrapped for the same reason: none of this is worth failing a rescue over either
-            try {
-                // The cold the player went down in is let go of, as the game's own death does a moment in
-                // (HeroController.Die). Left alone, a player who froze stood up frozen and started freezing again.
-                hero.SetFrostAmount(0f);
-                StatusVignette.SetFrostVignetteAmount(0f);
+            // The cold the player went down in is let go of, as the game's own death does a moment in
+            // (HeroController.Die). Left alone, a player who froze stood up frozen and started freezing again.
+            hero.SetFrostAmount(0f);
+            StatusVignette.SetFrostVignetteAmount(0f);
 
-                // The death shown over them turned the rumble of the pad down to nothing, and only the fade into the
-                // next room turns it back up (GameManager.FadeSceneIn), so a player pulled back up played on without
-                // it until they left the room. This is the call that fade makes.
-                VibrationManager.FadeVibration(1f, 0.25f);
-            } catch (Exception e) {
-                LogRescueError(e);
-            }
+            // The death shown over them turned the rumble of the pad down to nothing, and only the fade into the
+            // next room turns it back up (GameManager.FadeSceneIn), so a player pulled back up played on without
+            // it until they left the room. This is the call that fade makes.
+            VibrationManager.FadeVibration(1f, 0.25f);
 
             // Asked again here and not only when the screen came back, because this is the moment the player is
             // walking around looking at whatever is left, and everything the rescue itself undoes has now run
             SayWhatTheDeathLeftSwitchedOn("with the player back on their feet");
 
-            // Wrapped for the same reason as above
-            try {
-                BringBackOwnThings();
-            } catch (Exception e) {
-                LogRescueError(e);
-            }
+            BringBackOwnThings();
 
             _lastStoodBackUpTime = Time.unscaledTime;
 
@@ -2685,17 +2631,12 @@ internal partial class CoopSave {
     /// <param name="cocoon">The cocoon to take it out of.</param>
     private static void RemoveCocoonPayout(GameObject cocoon) {
         foreach (var fsm in cocoon.GetComponentsInChildren<PlayMakerFSM>(true)) {
-            // Asked for by name first: RemoveFirstAction throws when the state is missing, and a cocoon that the
-            // game one day ships without this state should still be shown rather than swallowed by an exception.
+            // Asked for by name first: RemoveFirstAction throws when the state is missing
             if (fsm == null || fsm.GetStateOrNull(ReturnCurrencyStateName) == null) {
                 continue;
             }
 
-            try {
-                fsm.RemoveFirstAction<CallMethodProper>(ReturnCurrencyStateName);
-            } catch (Exception e) {
-                Logger.Warn($"Could not take the payout out of the cocoon of a member: {e.Message}");
-            }
+            fsm.RemoveFirstAction<CallMethodProper>(ReturnCurrencyStateName);
         }
     }
 
@@ -2816,54 +2757,50 @@ internal partial class CoopSave {
     /// <param name="playerId">The player whose body it is.</param>
     /// <param name="hidden">Whether to take it off the screen.</param>
     private void SetPartnerBodyHidden(ushort playerId, bool hidden) {
-        try {
-            // Held off the screen whatever arrives for it in the meantime, before anything below can return early:
-            // a character that is only put in the room after this is held off it as well
-            if (hidden) {
-                BodiesKeptHidden.TryAdd(playerId, 0);
-            } else {
-                BodiesKeptHidden.Remove(playerId);
-            }
+        // Held off the screen whatever arrives for it in the meantime, before anything below can return early:
+        // a character that is only put in the room after this is held off it as well
+        if (hidden) {
+            BodiesKeptHidden.TryAdd(playerId, 0);
+        } else {
+            BodiesKeptHidden.Remove(playerId);
+        }
 
-            if (!_playerData.TryGetValue(playerId, out var player)) {
-                return;
-            }
+        if (!_playerData.TryGetValue(playerId, out var player)) {
+            return;
+        }
 
-            var body = player.PlayerObject;
-            if (body == null) {
-                return;
-            }
+        var body = player.PlayerObject;
+        if (body == null) {
+            return;
+        }
 
-            if (hidden) {
-                // Nothing should come looking for someone who is lying in a cocoon. Off the list, nothing chooses
-                // them from here on; an enemy that had already chosen them is let go of them as well, as one is
-                // when this game's own player goes down. Left holding them, it kept them for as long as they lay in
-                // its sight, which is all of the wait: a boss went on striking the cocoon of the member it had
-                // been fighting while the player still standing was right there. Done before their body is hidden,
-                // so that it holds whatever becomes of that.
-                PlayerTargetRegistry.UnregisterRemotePlayer(body);
-                GamePatcher.ForgetPlayerAsTarget(body);
+        if (hidden) {
+            // Nothing should come looking for someone who is lying in a cocoon. Off the list, nothing chooses
+            // them from here on; an enemy that had already chosen them is let go of them as well, as one is
+            // when this game's own player goes down. Left holding them, it kept them for as long as they lay in
+            // its sight, which is all of the wait: a boss went on striking the cocoon of the member it had
+            // been fighting while the player still standing was right there. Done before their body is hidden,
+            // so that it holds whatever becomes of that.
+            PlayerTargetRegistry.UnregisterRemotePlayer(body);
+            GamePatcher.ForgetPlayerAsTarget(body);
 
-                AnimationEffect.HidePlayer(body);
-                return;
-            }
+            AnimationEffect.HidePlayer(body);
+            return;
+        }
 
-            var animator = body.GetComponent<tk2dSpriteAnimator>();
-            if (animator == null) {
-                return;
-            }
+        var animator = body.GetComponent<tk2dSpriteAnimator>();
+        if (animator == null) {
+            return;
+        }
 
-            PlayerTargetRegistry.RegisterRemotePlayer(body);
+        PlayerTargetRegistry.RegisterRemotePlayer(body);
 
-            // From here on any animation of theirs puts their own sprite back, so this only has to cover the player
-            // who is put back on their feet and then stands perfectly still: their game would send nothing, and a
-            // body that was taken off the screen for the wait would stay that way.
-            var idle = animator.GetClipByName(IdleClipName);
-            if (idle != null) {
-                animator.Play(idle);
-            }
-        } catch (Exception e) {
-            LogRescueError(e);
+        // From here on any animation of theirs puts their own sprite back, so this only has to cover the player
+        // who is put back on their feet and then stands perfectly still: their game would send nothing, and a
+        // body that was taken off the screen for the wait would stay that way.
+        var idle = animator.GetClipByName(IdleClipName);
+        if (idle != null) {
+            animator.Play(idle);
         }
     }
 

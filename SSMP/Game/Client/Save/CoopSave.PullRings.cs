@@ -643,9 +643,6 @@ internal partial class CoopSave {
             } else {
                 return;
             }
-        } catch (Exception e) {
-            Logger.Warn($"Could not {(holding ? "hold" : "let go of")} the ring of '{holder.name}': {e.Message}");
-            return;
         } finally {
             _replayingRingHold = false;
         }
@@ -702,18 +699,14 @@ internal partial class CoopSave {
     /// while the room stays: nothing comes of them from their games any more.
     /// </summary>
     private void LetGoOfMemberHolds() {
-        try {
-            var holders = _platesStoodOn.Values.SelectMany(ids => ids)
-                .Concat(_trapPlatesStoodOn.Values.SelectMany(ids => ids))
-                .Concat(_ringHolders.Values.SelectMany(ids => ids))
-                .Distinct()
-                .ToList();
-            foreach (var id in holders) {
-                ForgetPlatesOf(id);
-                ForgetRingHoldsOf(id, _playerData.TryGetValue(id, out var player) ? player.Username : "?");
-            }
-        } catch (Exception e) {
-            Logger.Warn($"Could not let go of what members held down in the room: {e.Message}");
+        var holders = _platesStoodOn.Values.SelectMany(ids => ids)
+            .Concat(_trapPlatesStoodOn.Values.SelectMany(ids => ids))
+            .Concat(_ringHolders.Values.SelectMany(ids => ids))
+            .Distinct()
+            .ToList();
+        foreach (var id in holders) {
+            ForgetPlatesOf(id);
+            ForgetRingHoldsOf(id, _playerData.TryGetValue(id, out var player) ? player.Username : "?");
         }
     }
 

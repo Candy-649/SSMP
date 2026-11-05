@@ -385,19 +385,9 @@ internal partial class CoopSave {
             return;
         }
 
-        var reason = "";
-        try {
-            reason = TellWhyHostSaveFailed(e);
-        } catch (Exception reasonException) {
-            Logger.Error($"Could not tell why the host's save won't come:\n{reasonException}");
-        }
-
+        var reason = TellWhyHostSaveFailed(e);
         foreach (var request in failed) {
-            try {
-                SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed, reason);
-            } catch (Exception sendException) {
-                Logger.Error($"Could not tell a player that the host's save won't come:\n{sendException}");
-            }
+            SendHostSaveWait(request.Key, request.Value, HostSaveWait.Failed, reason);
         }
     }
 
