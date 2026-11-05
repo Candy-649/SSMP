@@ -211,12 +211,8 @@ internal partial class CoopSave {
                 continue;
             }
 
-            try {
-                if (pair.Key != null && pair.Key.player == pair.Key.gameObject) {
-                    pair.Key.OnTouchEnd(pair.Key.gameObject);
-                }
-            } catch (Exception e) {
-                Logger.Warn($"Could not let the plate up that a member who left stood on: {e.Message}");
+            if (pair.Key != null && pair.Key.player == pair.Key.gameObject) {
+                pair.Key.OnTouchEnd(pair.Key.gameObject);
             }
         }
     }
@@ -452,11 +448,7 @@ internal partial class CoopSave {
                 continue;
             }
 
-            try {
-                LetTrapPlateUp(pair.Key);
-            } catch (Exception e) {
-                Logger.Warn($"Could not let the trap plate up that a member who left stood on: {e.Message}");
-            }
+            LetTrapPlateUp(pair.Key);
         }
     }
 

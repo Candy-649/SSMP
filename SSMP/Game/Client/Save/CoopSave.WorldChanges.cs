@@ -478,7 +478,7 @@ internal partial class CoopSave {
                      FindObjectsInactive.Include, FindObjectsSortMode.None
                  )) {
             // An object that already collapsed here is switched off whole, and a switched off FSM runs nothing
-            if (item == null || !item.gameObject.activeInHierarchy) {
+            if (!item.gameObject.activeInHierarchy) {
                 continue;
             }
 
@@ -492,12 +492,8 @@ internal partial class CoopSave {
                     continue;
                 }
 
-                try {
-                    fsm.SendEvent(CollapseEventName);
-                    collapsing.Add(fsm);
-                } catch (Exception e) {
-                    Logger.Warn($"Could not bring down '{id}' the way the partner did: {e.Message}");
-                }
+                fsm.SendEvent(CollapseEventName);
+                collapsing.Add(fsm);
             }
         }
 
@@ -534,44 +530,40 @@ internal partial class CoopSave {
     /// of the second that has to be explained.
     /// </summary>
     private static void SayWhatTheTrappedCreaturesAreDoing() {
-        try {
-            foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(FindObjectsSortMode.None)) {
-                if (fsm == null || !fsm.gameObject.name.StartsWith(TrappedCreatureNamePrefix, StringComparison.Ordinal)) {
-                    continue;
-                }
-
-                // What actually answers a nail. Its own Hit refuses outright when nothing is registered with it, and
-                // a state machine registers itself only while the state holding the action is the one it is in - so
-                // this number being zero is the whole of "the swing does nothing", with no mark left anywhere.
-                var handlers = -1;
-                if (fsm.TryGetComponent<ReceivedDamageProxy>(out var proxy)) {
-                    var field = typeof(ReceivedDamageProxy).GetField(
-                        "handlers", BindingFlags.Instance | BindingFlags.NonPublic
-                    );
-                    if (field?.GetValue(proxy) is ICollection set) {
-                        handlers = set.Count;
-                    }
-                }
-
-                var collider = fsm.GetComponent<Collider2D>();
-                var colliders = fsm.GetComponentsInChildren<Collider2D>(true);
-                var awake = 0;
-                foreach (var other in colliders) {
-                    if (other != null && other.enabled && other.gameObject.activeInHierarchy) {
-                        awake++;
-                    }
-                }
-
-                Logger.Info(
-                    $"'{fsm.gameObject.name}' ({fsm.FsmName}) is sitting in '{fsm.ActiveStateName}', switched " +
-                    $"{(fsm.gameObject.activeInHierarchy ? "on" : "off")}, its own collider " +
-                    $"{(collider == null ? "missing" : collider.enabled ? "on" : "off")}, {awake} of " +
-                    $"{colliders.Length} collider(s) under it able to be touched, and " +
-                    $"{(handlers < 0 ? "nothing at all that answers a nail" : $"{handlers} thing(s) listening for a nail")}"
-                );
+        foreach (var fsm in UnityEngine.Object.FindObjectsByType<PlayMakerFSM>(FindObjectsSortMode.None)) {
+            if (!fsm.gameObject.name.StartsWith(TrappedCreatureNamePrefix, StringComparison.Ordinal)) {
+                continue;
             }
-        } catch (Exception e) {
-            Logger.Warn($"Could not say what the trapped creatures are doing: {e.Message}");
+
+            // What actually answers a nail. Its own Hit refuses outright when nothing is registered with it, and
+            // a state machine registers itself only while the state holding the action is the one it is in - so
+            // this number being zero is the whole of "the swing does nothing", with no mark left anywhere.
+            var handlers = -1;
+            if (fsm.TryGetComponent<ReceivedDamageProxy>(out var proxy)) {
+                var field = typeof(ReceivedDamageProxy).GetField(
+                    "handlers", BindingFlags.Instance | BindingFlags.NonPublic
+                );
+                if (field?.GetValue(proxy) is ICollection set) {
+                    handlers = set.Count;
+                }
+            }
+
+            var collider = fsm.GetComponent<Collider2D>();
+            var colliders = fsm.GetComponentsInChildren<Collider2D>(true);
+            var awake = 0;
+            foreach (var other in colliders) {
+                if (other.enabled && other.gameObject.activeInHierarchy) {
+                    awake++;
+                }
+            }
+
+            Logger.Info(
+                $"'{fsm.gameObject.name}' ({fsm.FsmName}) is sitting in '{fsm.ActiveStateName}', switched " +
+                $"{(fsm.gameObject.activeInHierarchy ? "on" : "off")}, its own collider " +
+                $"{(collider == null ? "missing" : collider.enabled ? "on" : "off")}, {awake} of " +
+                $"{colliders.Length} collider(s) under it able to be touched, and " +
+                $"{(handlers < 0 ? "nothing at all that answers a nail" : $"{handlers} thing(s) listening for a nail")}"
+            );
         }
     }
 

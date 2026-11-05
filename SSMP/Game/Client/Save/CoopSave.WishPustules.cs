@@ -1,4 +1,3 @@
-using System;
 using UnityEngine.SceneManagement;
 using Logger = SSMP.Logging.Logger;
 
@@ -29,11 +28,6 @@ internal partial class CoopSave {
     ];
 
     /// <summary>
-    /// Whether growing back the pustules failed once, which is said once.
-    /// </summary>
-    private bool _growingBackPustulesFailed;
-
-    /// <summary>
     /// Grows back the pustules that this save shows drawn only because the partner drew them.
     ///
     /// Up to 0.4.65 a pustule being drawn went to the partner's save like an opened wall, while the sample went only
@@ -44,55 +38,48 @@ internal partial class CoopSave {
     /// for later: the pustule there would put its own "drawn" back as the room is left.
     /// </summary>
     private void GrowBackPustulesThePartnerDrew() {
-        try {
-            var playerData = PlayerData.instance;
-            var sceneData = SceneData.instance;
-            if (GetCurrentMarker() == null || playerData == null || sceneData == null ||
-                playerData.BlueScientistSceneryPustulesGrown || CollectableItemManager.IsInHiddenMode()) {
+        var playerData = PlayerData.instance;
+        var sceneData = SceneData.instance;
+        if (GetCurrentMarker() == null || playerData == null || sceneData == null ||
+            playerData.BlueScientistSceneryPustulesGrown || CollectableItemManager.IsInHiddenMode()) {
+            return;
+        }
+
+        var wish = FindQuest(PustuleWishName);
+        var sample = CollectableItemManager.GetItemByName(PustuleSampleName);
+        if (wish == null || wish.IsCompleted || sample == null) {
+            return;
+        }
+
+        var lost = -sample.CollectedAmount;
+        foreach (var (scene, id) in WishPustules) {
+            if (sceneData.PersistentBools.TryGetValue(scene, id, out var drawn) && drawn.Value) {
+                lost++;
+            }
+        }
+
+        foreach (var (scene, id) in WishPustules) {
+            if (lost <= 0) {
                 return;
             }
 
-            var wish = FindQuest(PustuleWishName);
-            var sample = CollectableItemManager.GetItemByName(PustuleSampleName);
-            if (wish == null || wish.IsCompleted || sample == null) {
-                return;
+            if (!sceneData.PersistentBools.TryGetValue(scene, id, out var drawn) || !drawn.Value ||
+                SceneManager.GetSceneByName(scene).isLoaded) {
+                continue;
             }
 
-            var lost = -sample.CollectedAmount;
-            foreach (var (scene, id) in WishPustules) {
-                if (sceneData.PersistentBools.TryGetValue(scene, id, out var drawn) && drawn.Value) {
-                    lost++;
-                }
-            }
+            sceneData.PersistentBools.SetValue(new PersistentItemData<bool> {
+                ID = id,
+                SceneName = scene,
+                Value = false,
+                IsSemiPersistent = drawn.IsSemiPersistent
+            });
+            lost--;
 
-            foreach (var (scene, id) in WishPustules) {
-                if (lost <= 0) {
-                    return;
-                }
-
-                if (!sceneData.PersistentBools.TryGetValue(scene, id, out var drawn) || !drawn.Value ||
-                    SceneManager.GetSceneByName(scene).isLoaded) {
-                    continue;
-                }
-
-                sceneData.PersistentBools.SetValue(new PersistentItemData<bool> {
-                    ID = id,
-                    SceneName = scene,
-                    Value = false,
-                    IsSemiPersistent = drawn.IsSemiPersistent
-                });
-                lost--;
-
-                Logger.Info(
-                    $"Grew back the pustule '{id}' in {scene}: this save showed more of them drawn than it holds " +
-                    "samples, the rest having gone to the partner"
-                );
-            }
-        } catch (Exception e) {
-            if (!_growingBackPustulesFailed) {
-                _growingBackPustulesFailed = true;
-                Logger.Warn($"Could not grow back the pustules the partner drew: {e}");
-            }
+            Logger.Info(
+                $"Grew back the pustule '{id}' in {scene}: this save showed more of them drawn than it holds " +
+                "samples, the rest having gone to the partner"
+            );
         }
     }
 }

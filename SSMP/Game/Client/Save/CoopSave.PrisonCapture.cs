@@ -407,52 +407,47 @@ internal partial class CoopSave {
             return;
         }
 
-        try {
-            // Caught in their own game meanwhile, which already did all of this
-            if (IsInPrisonClothes()) {
-                _pendingCaptureBy = null;
-                ForgetPartnerCatch(hero);
-                return;
-            }
-
-            // Not out of shared dialogue either, which the move of a delivery takes over and this one doesn't, nor out
-            // of a cage of their own, which takes them there itself
-            var gameManager = global::GameManager.instance;
-            if (gameManager == null || PlayerData.instance.atBench || hero.cState.dead || hero.cState.hazardDeath ||
-                hero.cState.hazardRespawning || !CanMoveHeroNow(gameManager, hero) ||
-                IsReadingSharedDialogue?.Invoke() == true || _ownCatch != null) {
-                return;
-            }
-
+        // Caught in their own game meanwhile, which already did all of this
+        if (IsInPrisonClothes()) {
             _pendingCaptureBy = null;
-            _capturingForPartner = true;
-            try {
-                HeroSlabCapture.ApplyCaptured();
-            } finally {
-                _capturingForPartner = false;
-            }
-
-            // Let go of before the move, which clears the hold too: kept, it would hold them in the prison as well
-            var held = _partnerCatch;
             ForgetPartnerCatch(hero);
+            return;
+        }
 
-            var moved = BeginMove(hero, new global::GameManager.SceneLoadInfo {
-                SceneName = PrisonSceneName,
-                EntryGateName = PrisonDoorName,
-                WaitForSceneTransitionCameraFade = true
-            });
-            if (moved) {
-                Logger.Info($"Taken to the prison after {username}");
-                return;
-            }
+        // Not out of shared dialogue either, which the move of a delivery takes over and this one doesn't, nor out
+        // of a cage of their own, which takes them there itself
+        var gameManager = global::GameManager.instance;
+        if (gameManager == null || PlayerData.instance.atBench || hero.cState.dead || hero.cState.hazardDeath ||
+            hero.cState.hazardRespawning || !CanMoveHeroNow(gameManager, hero) ||
+            IsReadingSharedDialogue?.Invoke() == true || _ownCatch != null) {
+            return;
+        }
 
-            Logger.Info($"The game didn't start the move to the prison after {username}");
-            if (held is { Darkened: true }) {
-                ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), ScreenBack(held.ScreenBefore), PrisonUnfadeTime);
-            }
-        } catch (Exception e) {
-            _pendingCaptureBy = null;
-            Logger.Error($"Could not take the local player to the prison after {username}:\n{e}");
+        _pendingCaptureBy = null;
+        _capturingForPartner = true;
+        try {
+            HeroSlabCapture.ApplyCaptured();
+        } finally {
+            _capturingForPartner = false;
+        }
+
+        // Let go of before the move, which clears the hold too: kept, it would hold them in the prison as well
+        var held = _partnerCatch;
+        ForgetPartnerCatch(hero);
+
+        var moved = BeginMove(hero, new global::GameManager.SceneLoadInfo {
+            SceneName = PrisonSceneName,
+            EntryGateName = PrisonDoorName,
+            WaitForSceneTransitionCameraFade = true
+        });
+        if (moved) {
+            Logger.Info($"Taken to the prison after {username}");
+            return;
+        }
+
+        Logger.Info($"The game didn't start the move to the prison after {username}");
+        if (held is { Darkened: true }) {
+            ScreenFaderUtils.Fade(ScreenFaderUtils.GetColour(), ScreenBack(held.ScreenBefore), PrisonUnfadeTime);
         }
     }
 

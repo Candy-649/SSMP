@@ -35,27 +35,23 @@ internal partial class CoopSave {
         }
 
         foreach (var sequence in Object.FindObjectsByType<StateChangeSequence>(UnityEngine.FindObjectsSortMode.None)) {
-            try {
-                if (SequenceCompleteBoolField.GetValue(sequence) is not string flag || !flags.Contains(flag) ||
-                    SequenceStatesField.GetValue(sequence) is not Array states ||
-                    SequenceValueField.GetValue(sequence) is not int value) {
-                    continue;
-                }
-
-                // A sequence that has not started yet finishes itself when it starts, since the flag is set now
-                var last = states.Length - 1;
-                if (value < 0 || value >= last) {
-                    continue;
-                }
-
-                Logger.Info(
-                    $"The partner finished the shrine '{sequence.name}' in {sequence.gameObject.scene.name} " +
-                    $"(flag {flag}), which stood at {value} of {last} here: finishing it as its room does"
-                );
-                sequence.SetStateReturn(last);
-            } catch (Exception e) {
-                Logger.Warn($"Could not finish the shrine '{sequence.name}' that the partner finished:\n{e}");
+            if (SequenceCompleteBoolField.GetValue(sequence) is not string flag || !flags.Contains(flag) ||
+                SequenceStatesField.GetValue(sequence) is not Array states ||
+                SequenceValueField.GetValue(sequence) is not int value) {
+                continue;
             }
+
+            // A sequence that has not started yet finishes itself when it starts, since the flag is set now
+            var last = states.Length - 1;
+            if (value < 0 || value >= last) {
+                continue;
+            }
+
+            Logger.Info(
+                $"The partner finished the shrine '{sequence.name}' in {sequence.gameObject.scene.name} " +
+                $"(flag {flag}), which stood at {value} of {last} here: finishing it as its room does"
+            );
+            sequence.SetStateReturn(last);
         }
     }
 }

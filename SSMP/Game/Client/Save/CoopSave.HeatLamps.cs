@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -34,27 +33,22 @@ internal partial class CoopSave {
 
         List<string>? restored = null;
         foreach (var lamp in Object.FindObjectsByType<WeaverHeatLamp>(FindObjectsSortMode.None)) {
-            var name = lamp != null ? lamp.name : "?";
-            try {
-                if (lamp == null || !lamp.TryGetComponent<Breakable>(out var breakable)) {
-                    continue;
-                }
-
-                var broken = breakable.isBroken;
-                if (!broken && breakable.hitsLeft >= breakable.hitsToBreak) {
-                    continue;
-                }
-
-                var was = broken ? "broken" : $"{breakable.hitsLeft} of {breakable.hitsToBreak} hits left";
-                breakable.hitsLeft = breakable.hitsToBreak;
-                if (broken) {
-                    RestoreBrokenHeatLamp(lamp, breakable);
-                }
-
-                (restored ??= []).Add($"'{ScenePath.Get(lamp.transform)}' ({was})");
-            } catch (Exception e) {
-                Logger.Warn($"Could not bring back the heat lamp '{name}': {e.Message}");
+            if (!lamp.TryGetComponent<Breakable>(out var breakable)) {
+                continue;
             }
+
+            var broken = breakable.isBroken;
+            if (!broken && breakable.hitsLeft >= breakable.hitsToBreak) {
+                continue;
+            }
+
+            var was = broken ? "broken" : $"{breakable.hitsLeft} of {breakable.hitsToBreak} hits left";
+            breakable.hitsLeft = breakable.hitsToBreak;
+            if (broken) {
+                RestoreBrokenHeatLamp(lamp, breakable);
+            }
+
+            (restored ??= []).Add($"'{ScenePath.Get(lamp.transform)}' ({was})");
         }
 
         if (restored != null) {

@@ -1,4 +1,3 @@
-using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -88,7 +87,7 @@ internal partial class CoopSave {
 
         // Switched off ones are left out: a thing that broke here already may switch itself off whole
         foreach (var item in Object.FindObjectsByType<PersistentBoolItem>(FindObjectsSortMode.None)) {
-            if (item == null || !item.gameObject.activeInHierarchy) {
+            if (!item.gameObject.activeInHierarchy) {
                 continue;
             }
 
@@ -97,11 +96,7 @@ internal partial class CoopSave {
                 continue;
             }
 
-            try {
-                FollowPartnerBreak(item, collapsing);
-            } catch (Exception e) {
-                Logger.Warn($"Could not show '{id}' broken as the partner broke it: {e.Message}");
-            }
+            FollowPartnerBreak(item, collapsing);
         }
 
         ShowWaitingBreaks();
@@ -206,48 +201,43 @@ internal partial class CoopSave {
 
         var now = Time.unscaledTime;
         foreach (var (fsm, (look, broken, since)) in _waitingBreaks) {
-            try {
-                if (fsm == null || !fsm.isActiveAndEnabled || IsMechanismReplayed(fsm.Fsm) ||
-                    fsm.FsmVariables.FindFsmBool(SavedFlagName) is not { Value: false } flag) {
-                    _endedBreakWaits.Add(fsm!);
-                    continue;
-                }
-
-                // On its way to its look at the flag, as it is while it starts, or stopped: set, the look takes it to
-                // being broken, as in a room that loads it so
-                var state = fsm.Fsm.ActiveState;
-                if (state == null || state != look && IsOnWayTo(fsm, state, look)) {
-                    flag.Value = true;
-                    _endedBreakWaits.Add(fsm);
-                    Logger.Info(
-                        $"[Breaks] '{ScenePath.Get(fsm.transform)}' ({fsm.FsmName}) was starting in " +
-                        $"'{state?.Name ?? "nothing"}' when the partner broke it: it looks at its flag in '{look.Name}' " +
-                        "and shows broken"
-                    );
-                    continue;
-                }
-
-                var waited = now - since;
-                if (!HitMachines.ListensForHits(state) && waited < BreakWaitTime) {
-                    continue;
-                }
-
-                // What its saved value does to it when its room loads it broken: the flag that it looks at as it starts
-                // (PersistentItem.Start), and the state that the look takes it to
-                _endedBreakWaits.Add(fsm);
-                var counts = string.Join(", ", fsm.FsmVariables.IntVariables.Select(v => $"{v.Name}={v.Value}"));
-                flag.Value = true;
-                fsm.SetState(broken.Name);
-                Logger.Info(
-                    $"[Breaks] '{ScenePath.Get(fsm.transform)}' ({fsm.FsmName}) stood here in '{state.Name}' with " +
-                    $"{(counts.Length > 0 ? counts : "no counts")} when the partner broke it" +
-                    $"{(waited >= BreakWaitTime ? $", and still did {waited:0.0} s later" : "")}: shown broken now" +
-                    DescribeBreakTraffic(fsm.gameObject)
-                );
-            } catch (Exception e) {
-                _endedBreakWaits.Add(fsm);
-                Logger.Warn($"Could not show a thing broken as the partner broke it: {e.Message}");
+            if (fsm == null || !fsm.isActiveAndEnabled || IsMechanismReplayed(fsm.Fsm) ||
+                fsm.FsmVariables.FindFsmBool(SavedFlagName) is not { Value: false } flag) {
+                _endedBreakWaits.Add(fsm!);
+                continue;
             }
+
+            // On its way to its look at the flag, as it is while it starts, or stopped: set, the look takes it to
+            // being broken, as in a room that loads it so
+            var state = fsm.Fsm.ActiveState;
+            if (state == null || state != look && IsOnWayTo(fsm, state, look)) {
+                flag.Value = true;
+                _endedBreakWaits.Add(fsm);
+                Logger.Info(
+                    $"[Breaks] '{ScenePath.Get(fsm.transform)}' ({fsm.FsmName}) was starting in " +
+                    $"'{state?.Name ?? "nothing"}' when the partner broke it: it looks at its flag in '{look.Name}' " +
+                    "and shows broken"
+                );
+                continue;
+            }
+
+            var waited = now - since;
+            if (!HitMachines.ListensForHits(state) && waited < BreakWaitTime) {
+                continue;
+            }
+
+            // What its saved value does to it when its room loads it broken: the flag that it looks at as it starts
+            // (PersistentItem.Start), and the state that the look takes it to
+            _endedBreakWaits.Add(fsm);
+            var counts = string.Join(", ", fsm.FsmVariables.IntVariables.Select(v => $"{v.Name}={v.Value}"));
+            flag.Value = true;
+            fsm.SetState(broken.Name);
+            Logger.Info(
+                $"[Breaks] '{ScenePath.Get(fsm.transform)}' ({fsm.FsmName}) stood here in '{state.Name}' with " +
+                $"{(counts.Length > 0 ? counts : "no counts")} when the partner broke it" +
+                $"{(waited >= BreakWaitTime ? $", and still did {waited:0.0} s later" : "")}: shown broken now" +
+                DescribeBreakTraffic(fsm.gameObject)
+            );
         }
 
         foreach (var fsm in _endedBreakWaits) {

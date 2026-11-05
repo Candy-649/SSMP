@@ -577,11 +577,7 @@ internal partial class CoopSave {
             // Where the parts are that the state switched on or moved, which also hangs on where earlier states left
             // them: states that the partner's game may not have gone through
             if (partsBefore != null) {
-                try {
-                    TellPartsMoved(word, partsBefore);
-                } catch (Exception e) {
-                    LogInteractionError(e);
-                }
+                TellPartsMoved(word, partsBefore);
             }
         } finally {
             Send(word);
@@ -685,11 +681,7 @@ internal partial class CoopSave {
     /// </summary>
     private void StartMachineRound(MachineKind kind, Fsm fsm, CoopSaveUpdate update, Action start) {
         if (kind.IsGrinder) {
-            try {
-                PutGrinderWhereTheHostsIs(fsm, update);
-            } catch (Exception e) {
-                LogInteractionError(e);
-            }
+            PutGrinderWhereTheHostsIs(fsm, update);
         }
 
         if (_machinesSaid.Add(fsm)) {
@@ -709,11 +701,7 @@ internal partial class CoopSave {
             return;
         }
 
-        try {
-            SharedDice.RollByName(fsm.GameObject, RoundRollName(update));
-        } catch (Exception e) {
-            LogInteractionError(e);
-        }
+        SharedDice.RollByName(fsm.GameObject, RoundRollName(update));
 
         var lastStarting = _startingMachineRound;
         _startingMachineRound = fsm;
@@ -926,11 +914,7 @@ internal partial class CoopSave {
             // the copy passed on here.
             if (FindDirector(fsm) is { } director) {
                 var goTo = director.ShowsParts && !director.OwnStateNames!.Contains(from.Name) ? from.Name : state.Name;
-                try {
-                    EnterDirectedState(fsm, null, null, () => fsm.SetState(goTo));
-                } catch (Exception e) {
-                    LogInteractionError(e);
-                }
+                EnterDirectedState(fsm, null, null, () => fsm.SetState(goTo));
 
                 continue;
             }
@@ -942,8 +926,6 @@ internal partial class CoopSave {
 
             try {
                 fsm.SetState(state.Name);
-            } catch (Exception e) {
-                LogInteractionError(e);
             } finally {
                 _startingMachineRound = lastStarting;
             }
@@ -1084,18 +1066,13 @@ internal partial class CoopSave {
             return;
         }
 
-        // The change of state already went on, so what throws here must not reach the game
-        try {
-            SendToMembers(new CoopSaveUpdate {
-                Kind = kind,
-                Scene = gameObject.scene.name,
-                ObjectPath = ScenePath.Get(gameObject.transform),
-                FsmName = fsm.Name,
-                Sequence = ++_machineRoundCount
-            });
-        } catch (Exception e) {
-            LogInteractionError(e);
-        }
+        SendToMembers(new CoopSaveUpdate {
+            Kind = kind,
+            Scene = gameObject.scene.name,
+            ObjectPath = ScenePath.Get(gameObject.transform),
+            FsmName = fsm.Name,
+            Sequence = ++_machineRoundCount
+        });
     }
 
     /// <summary>

@@ -358,11 +358,7 @@ internal partial class CoopSave {
         }
 
         shown.RunsItself.Add(part);
-        try {
-            Send(word);
-        } catch (Exception e) {
-            LogInteractionError(e);
-        }
+        Send(word);
     }
 
     /// <summary>
@@ -500,61 +496,57 @@ internal partial class CoopSave {
         float first = 0f,
         float second = 0f
     ) {
-        try {
-            // A creature among the parts goes where its own sync puts it
-            if (EntityProcessor.IsRegistered(part.gameObject)) {
-                return;
-            }
-
-            if (change == PartChange.WentUp) {
-                StartMachinesUnder(part);
-            }
-
-            var place = part.position;
-            var word = new CoopSaveUpdate {
-                TargetId = CoopTargets.Everyone,
-                Kind = CoopSaveUpdateKind.MachinePart,
-                Scene = controller.gameObject.scene.name,
-                ObjectPath = ScenePath.Get(controller),
-                FsmName = fsm.Name,
-                StateName = PathUnder(part, controller),
-                Part = (ushort) change,
-                Sequence = ++_machineRoundCount,
-                Values = [Time.time, place.x, place.y]
-            };
-            var hasMachine = part.GetComponent<PlayMakerFSM>() != null;
-            switch (change) {
-                case PartChange.WentUp when hasMachine:
-                    var size = part.localScale;
-                    word.Values.Add(size.x);
-                    word.Values.Add(size.y);
-                    foreach (Transform piece in part) {
-                        var piecePlace = piece.localPosition;
-                        var pieceSize = piece.localScale;
-                        word.Values.Add(piecePlace.x);
-                        word.Values.Add(piecePlace.y);
-                        word.Values.Add(pieceSize.x);
-                        word.Values.Add(pieceSize.y);
-                    }
-
-                    TellFlags(word, part);
-                    break;
-                case PartChange.Moved when hasMachine:
-                    TellFlags(word, part);
-                    break;
-                case PartChange.Played:
-                    word.Values.Add(first);
-                    word.Values.Add(second);
-                    break;
-                case PartChange.WentOut:
-                    word.Values.Add(first);
-                    break;
-            }
-
-            Send(word);
-        } catch (Exception e) {
-            LogInteractionError(e);
+        // A creature among the parts goes where its own sync puts it
+        if (EntityProcessor.IsRegistered(part.gameObject)) {
+            return;
         }
+
+        if (change == PartChange.WentUp) {
+            StartMachinesUnder(part);
+        }
+
+        var place = part.position;
+        var word = new CoopSaveUpdate {
+            TargetId = CoopTargets.Everyone,
+            Kind = CoopSaveUpdateKind.MachinePart,
+            Scene = controller.gameObject.scene.name,
+            ObjectPath = ScenePath.Get(controller),
+            FsmName = fsm.Name,
+            StateName = PathUnder(part, controller),
+            Part = (ushort) change,
+            Sequence = ++_machineRoundCount,
+            Values = [Time.time, place.x, place.y]
+        };
+        var hasMachine = part.GetComponent<PlayMakerFSM>() != null;
+        switch (change) {
+            case PartChange.WentUp when hasMachine:
+                var size = part.localScale;
+                word.Values.Add(size.x);
+                word.Values.Add(size.y);
+                foreach (Transform piece in part) {
+                    var piecePlace = piece.localPosition;
+                    var pieceSize = piece.localScale;
+                    word.Values.Add(piecePlace.x);
+                    word.Values.Add(piecePlace.y);
+                    word.Values.Add(pieceSize.x);
+                    word.Values.Add(pieceSize.y);
+                }
+
+                TellFlags(word, part);
+                break;
+            case PartChange.Moved when hasMachine:
+                TellFlags(word, part);
+                break;
+            case PartChange.Played:
+                word.Values.Add(first);
+                word.Values.Add(second);
+                break;
+            case PartChange.WentOut:
+                word.Values.Add(first);
+                break;
+        }
+
+        Send(word);
     }
 
     /// <summary>
@@ -646,11 +638,7 @@ internal partial class CoopSave {
             shown.HasShown = true;
             shown.LastShownHostTime = hostTime;
             shown.LastShownAt = now;
-            try {
-                ShowPart(fsm, shown, word);
-            } catch (Exception e) {
-                LogInteractionError(e);
-            }
+            ShowPart(fsm, shown, word);
         }
     }
 

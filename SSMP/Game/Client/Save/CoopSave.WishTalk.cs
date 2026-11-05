@@ -966,11 +966,7 @@ internal partial class CoopSave {
     /// Ends dialogue and frees the character of the partner when the scene changes.
     /// </summary>
     private void OnWishTalkSceneChanged() {
-        try {
-            EndWishTalk();
-        } catch (Exception e) {
-            LogWishTalkError(e);
-        }
+        EndWishTalk();
 
         _partnerTalks.Clear();
         _lastKeyTalk = null;
@@ -2263,24 +2259,18 @@ internal partial class CoopSave {
             }
 
             var name = quest.name;
-            int[] amounts;
-            try {
-                if (quest.IsCompleted || !quest.IsAccepted) {
-                    continue;
-                }
-
-                amounts = GetLocalWishProgress(quest, playerData.QuestCompletionData.GetData(name));
-                var targets = quest.Targets;
-                for (var i = 0; i < amounts.Length && i < targets.Count; i++) {
-                    if (targets[i].Counter != null && targets[i].Counter.CanConsume) {
-                        amounts[i] = 0;
-                    }
-                }
-            } catch (Exception e) {
-                // A wish whose progress can't be read doesn't hold back the others
-                LogWishTalkError(e);
+            if (quest.IsCompleted || !quest.IsAccepted) {
                 continue;
             }
+
+            var amounts = GetLocalWishProgress(quest, playerData.QuestCompletionData.GetData(name));
+            var targets = quest.Targets;
+            for (var i = 0; i < amounts.Length && i < targets.Count; i++) {
+                if (targets[i].Counter != null && targets[i].Counter.CanConsume) {
+                    amounts[i] = 0;
+                }
+            }
+
             if (amounts.Length == 0 ||
                 (_sentWishProgress.TryGetValue(name, out var sent) && sent.SequenceEqual(amounts))) {
                 continue;

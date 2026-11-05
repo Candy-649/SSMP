@@ -73,17 +73,9 @@ internal partial class CoopSave {
     /// </summary>
     /// <param name="place">Where they stood up.</param>
     private void NoteStandUpAtSafePlace(UnityEngine.Vector3 place) {
-        try {
-            TellRoomOfPutBack(place, true);
-        } catch (Exception e) {
-            LogInteractionError(e);
-        }
+        TellRoomOfPutBack(place, true);
 
-        try {
-            GamePatcher.NoteBoxPutBack(SceneUtil.GetCurrentSceneName(), place.x, "the local player");
-        } catch (Exception e) {
-            LogInteractionError(e);
-        }
+        GamePatcher.NoteBoxPutBack(SceneUtil.GetCurrentSceneName(), place.x, "the local player");
     }
 
     /// <summary>

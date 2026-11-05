@@ -155,28 +155,24 @@ internal partial class CoopSave {
             return;
         }
 
-        try {
-            var sequence = pod.GetComponentInParent<BouncePodSequence>(true);
-            if (sequence == null || sequence.pods == null) {
-                return;
-            }
-
-            var index = Array.IndexOf(sequence.pods, pod);
-            if (index < 0) {
-                return;
-            }
-
-            var update = new CoopSaveUpdate {
-                Kind = CoopSaveUpdateKind.PodStrike,
-                Scene = sequence.gameObject.scene.name
-            };
-            update.Amounts.Add((int) GetPodSequenceKey(sequence));
-            update.Amounts.Add(index);
-            update.Amounts.Add(side);
-            SendToRoomMembers(update);
-        } catch (Exception e) {
-            LogPodSequenceError(e);
+        var sequence = pod.GetComponentInParent<BouncePodSequence>(true);
+        if (sequence == null || sequence.pods == null) {
+            return;
         }
+
+        var index = Array.IndexOf(sequence.pods, pod);
+        if (index < 0) {
+            return;
+        }
+
+        var update = new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.PodStrike,
+            Scene = sequence.gameObject.scene.name
+        };
+        update.Amounts.Add((int) GetPodSequenceKey(sequence));
+        update.Amounts.Add(index);
+        update.Amounts.Add(side);
+        SendToRoomMembers(update);
     }
 
     /// <summary>
@@ -325,19 +321,15 @@ internal partial class CoopSave {
             return;
         }
 
-        try {
-            var update = new CoopSaveUpdate {
-                Kind = CoopSaveUpdateKind.PodOutcome,
-                Scene = sequence.gameObject.scene.name
-            };
-            update.Amounts.Add((int) GetPodSequenceKey(sequence));
-            update.Amounts.Add(right ? 1 : 0);
-            update.Amounts.Add(sequence.targetPodIndex);
-            update.Amounts.Add(sequence.currentSequenceIndex);
-            SendToRoomMembers(update);
-        } catch (Exception e) {
-            LogPodSequenceError(e);
-        }
+        var update = new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.PodOutcome,
+            Scene = sequence.gameObject.scene.name
+        };
+        update.Amounts.Add((int) GetPodSequenceKey(sequence));
+        update.Amounts.Add(right ? 1 : 0);
+        update.Amounts.Add(sequence.targetPodIndex);
+        update.Amounts.Add(sequence.currentSequenceIndex);
+        SendToRoomMembers(update);
     }
 
     /// <summary>
@@ -430,17 +422,13 @@ internal partial class CoopSave {
             return;
         }
 
-        try {
-            GetItemSceneAndId(sequence.persistent, out var scene, out var id);
-            var update = new CoopSaveUpdate { TargetId = CoopTargets.Everyone, Kind = CoopSaveUpdateKind.PodProgress };
-            update.ItemScenes.Add(scene);
-            update.ItemIds.Add(id);
-            update.Amounts.Add(sequence.currentSequenceIndex);
-            update.Amounts.Add(sequence.persistent.ItemData.IsSemiPersistent ? 1 : 0);
-            Send(update);
-        } catch (Exception e) {
-            LogPodSequenceError(e);
-        }
+        GetItemSceneAndId(sequence.persistent, out var scene, out var id);
+        var update = new CoopSaveUpdate { TargetId = CoopTargets.Everyone, Kind = CoopSaveUpdateKind.PodProgress };
+        update.ItemScenes.Add(scene);
+        update.ItemIds.Add(id);
+        update.Amounts.Add(sequence.currentSequenceIndex);
+        update.Amounts.Add(sequence.persistent.ItemData.IsSemiPersistent ? 1 : 0);
+        Send(update);
     }
 
     /// <summary>

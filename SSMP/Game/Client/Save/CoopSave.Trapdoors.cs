@@ -287,8 +287,6 @@ internal partial class CoopSave {
         try {
             door.OpenDoor(System.Math.Sign(partnerDoor.LocalSign));
             Logger.Info($"Opened the hatch '{door.name}' that the partner keeps open");
-        } catch (Exception e) {
-            Logger.Warn($"Could not open the hatch '{door.name}' that the partner keeps open: {e.Message}");
         } finally {
             _openingPartnerTrapdoor = false;
         }

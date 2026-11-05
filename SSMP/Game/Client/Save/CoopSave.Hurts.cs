@@ -47,39 +47,35 @@ internal partial class CoopSave {
         int healthBefore,
         string? sourceText
     ) {
-        try {
-            var playerData = PlayerData.instance;
-            if (playerData == null) {
-                return;
-            }
-
-            // A hit that took nothing - the player was safe from it for the moment - is not a hurt
-            var healthAfter = playerData.health;
-            if (healthAfter >= healthBefore) {
-                return;
-            }
-
-            var now = Time.unscaledTime;
-            if (now - _hurtMinuteStart >= 60f) {
-                _hurtMinuteStart = now;
-                _hurtLinesThisMinute = 0;
-            }
-
-            if (_hurtLinesThisMinute++ >= HurtLinesPerMinute) {
-                return;
-            }
-
-            var line = new StringBuilder();
-            line.Append($"[Hurts] {healthBefore} -> {healthAfter}/{playerData.maxHealth} from {damageAmount} damage");
-            line.Append($" ({hazardType}{(((int) flags & 2) != 0 ? ", not lethal" : "")})");
-            line.Append(sourceText ?? DescribeHurtSource(hero, source));
-
-            var heroPosition = hero.transform.position;
-            line.Append($"; the player at ({heroPosition.x:0.00}, {heroPosition.y:0.00})");
-            Logger.Info(line.ToString());
-        } catch (Exception e) {
-            Logger.Warn($"Could not write down a hurt of the player: {e.Message}");
+        var playerData = PlayerData.instance;
+        if (playerData == null) {
+            return;
         }
+
+        // A hit that took nothing - the player was safe from it for the moment - is not a hurt
+        var healthAfter = playerData.health;
+        if (healthAfter >= healthBefore) {
+            return;
+        }
+
+        var now = Time.unscaledTime;
+        if (now - _hurtMinuteStart >= 60f) {
+            _hurtMinuteStart = now;
+            _hurtLinesThisMinute = 0;
+        }
+
+        if (_hurtLinesThisMinute++ >= HurtLinesPerMinute) {
+            return;
+        }
+
+        var line = new StringBuilder();
+        line.Append($"[Hurts] {healthBefore} -> {healthAfter}/{playerData.maxHealth} from {damageAmount} damage");
+        line.Append($" ({hazardType}{(((int) flags & 2) != 0 ? ", not lethal" : "")})");
+        line.Append(sourceText ?? DescribeHurtSource(hero, source));
+
+        var heroPosition = hero.transform.position;
+        line.Append($"; the player at ({heroPosition.x:0.00}, {heroPosition.y:0.00})");
+        Logger.Info(line.ToString());
     }
 
     /// <summary>

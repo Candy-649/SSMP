@@ -201,11 +201,7 @@ internal partial class CoopSave {
             }
 
             if (word != null) {
-                try {
-                    PutPartsWhereTheHostsAre(fsm, word);
-                } catch (Exception e) {
-                    LogInteractionError(e);
-                }
+                PutPartsWhereTheHostsAre(fsm, word);
             }
 
             fsm.UpdateStateChanges();
@@ -329,22 +325,17 @@ internal partial class CoopSave {
     }
 
     /// <summary>
-    /// Writes in the log what the controllers of fights did in the room that is left, and forgets it. Throws nothing,
-    /// since it goes with forgetting the machines as a scene changes, which nothing may keep from running.
+    /// Writes in the log what the controllers of fights did in the room that is left, and forgets it.
     /// </summary>
     private void LogDirectedStates() {
-        try {
-            foreach (var (name, counts) in _directedStates.Values) {
-                Logger.Info(
-                    $"[Directed] The fight controller '{name}' told the partner {counts[(int) DirectedStep.Told]} " +
-                    $"states, went into {counts[(int) DirectedStep.Followed]} on the scene host's word and stayed " +
-                    $"in its start {counts[(int) DirectedStep.StayedInStart]} times when sent into the fight early"
-                );
-            }
-        } catch (Exception) {
-            // Writing in the log is all this does, so a log that fails leaves nothing else undone
-        } finally {
-            _directedStates.Clear();
+        foreach (var (name, counts) in _directedStates.Values) {
+            Logger.Info(
+                $"[Directed] The fight controller '{name}' told the partner {counts[(int) DirectedStep.Told]} " +
+                $"states, went into {counts[(int) DirectedStep.Followed]} on the scene host's word and stayed " +
+                $"in its start {counts[(int) DirectedStep.StayedInStart]} times when sent into the fight early"
+            );
         }
+
+        _directedStates.Clear();
     }
 }

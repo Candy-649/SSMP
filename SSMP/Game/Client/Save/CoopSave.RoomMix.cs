@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using MonoMod.RuntimeDetour;
 using UnityEngine.Audio;
-using Logger = SSMP.Logging.Logger;
 
 namespace SSMP.Game.Client.Save;
 
@@ -168,16 +167,6 @@ internal partial class CoopSave {
     /// <param name="music">The music to put back if none was written down yet.</param>
     /// <param name="fadeTime">How long the mixers take to get there, in seconds.</param>
     private void RestoreRoomMix(global::GameManager gameManager, MusicCue? music, float fadeTime) {
-        // Whatever goes wrong here, the rest of the rescue still has to stand the player up
-        try {
-            PutBackRoomMix(gameManager, music, fadeTime);
-        } catch (Exception e) {
-            Logger.Error($"Could not put the sound of the room back:\n{e}");
-        }
-    }
-
-    /// <inheritdoc cref="RestoreRoomMix" />
-    private void PutBackRoomMix(global::GameManager gameManager, MusicCue? music, float fadeTime) {
         // Music written down whose asset is gone since counts as none
         var cue = _roomMusic != null ? _roomMusic : music;
         if (cue != null) {

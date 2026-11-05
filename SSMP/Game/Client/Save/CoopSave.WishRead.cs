@@ -532,30 +532,25 @@ internal partial class CoopSave {
     /// it while the others couldn't hear never asked each other at a moment when all could answer.
     /// </summary>
     private void AskAboutWishesRead(List<ClientPlayerData> members) {
-        // The check finishes whatever happens here
-        try {
-            if (members.Count == 0 || GetCurrentMarker() is not { } marker || marker.WishesRead.Count == 0 ||
-                PlayerData.instance is not { } playerData) {
-                return;
+        if (members.Count == 0 || GetCurrentMarker() is not { } marker || marker.WishesRead.Count == 0 ||
+            PlayerData.instance is not { } playerData) {
+            return;
+        }
+
+        var ids = members.ConvertAll(member => member.Id);
+        foreach (var wish in marker.WishesRead.ToArray()) {
+            // The check may have brought the wish in from the save of a member already
+            var completion = playerData.QuestCompletionData.GetData(wish);
+            if (completion.IsAccepted || completion.IsCompleted) {
+                ForgetWishRead(wish);
+                continue;
             }
 
-            var ids = members.ConvertAll(member => member.Id);
-            foreach (var wish in marker.WishesRead.ToArray()) {
-                // The check may have brought the wish in from the save of a member already
-                var completion = playerData.QuestCompletionData.GetData(wish);
-                if (completion.IsAccepted || completion.IsCompleted) {
-                    ForgetWishRead(wish);
-                    continue;
-                }
-
-                var ask = CreateConfirm(WishConfirmAccept);
-                ask.Records.Add(WishConfirmReadCheck);
-                ask.WishNames.Add(wish);
-                _readChecks[ask.Key] = new ReadWait(ask.Key, wish, ids, []);
-                SendToMembers(ask);
-            }
-        } catch (Exception e) {
-            LogWishTalkError(e);
+            var ask = CreateConfirm(WishConfirmAccept);
+            ask.Records.Add(WishConfirmReadCheck);
+            ask.WishNames.Add(wish);
+            _readChecks[ask.Key] = new ReadWait(ask.Key, wish, ids, []);
+            SendToMembers(ask);
         }
     }
 

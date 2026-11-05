@@ -197,17 +197,12 @@ internal partial class CoopSave {
             return;
         }
 
-        // The cog already stopped or ran on, so what throws here must not reach the game
-        try {
-            SendToMembers(new CoopSaveUpdate {
-                Kind = CoopSaveUpdateKind.CogHold,
-                Scene = cog.gameObject.scene.name,
-                ObjectPath = ScenePath.Get(cog.transform),
-                Part = (ushort) (holds ? 1 : 0)
-            });
-        } catch (Exception e) {
-            LogInteractionError(e);
-        }
+        SendToMembers(new CoopSaveUpdate {
+            Kind = CoopSaveUpdateKind.CogHold,
+            Scene = cog.gameObject.scene.name,
+            ObjectPath = ScenePath.Get(cog.transform),
+            Part = (ushort) (holds ? 1 : 0)
+        });
     }
 
     /// <summary>
