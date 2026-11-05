@@ -311,8 +311,18 @@ internal class ThrownTool : BaseAttackTool {
             fsm.Fsm.Start();
         }
 
+        // Entered as the copy's own state machine would enter it, so that what the state spawns as it starts is the
+        // copy's own, which only shows (ToolCopies.OnSpawn knows a copy by the state machine that runs). Set from here
+        // with none running, a bola that the thrower's hit sent on threw the game's own balls, and their blast counted
+        // as this player's blows on the boss, which took the partner's blast twice (11-05)
         snapshot.ApplyTo(copy.gameObject);
-        fsm.Fsm.SetState(state);
+        HutongGames.PlayMaker.FsmExecutionStack.PushFsm(fsm.Fsm);
+        try {
+            fsm.Fsm.SetState(state);
+        } finally {
+            HutongGames.PlayMaker.FsmExecutionStack.PopFsm();
+        }
+
         snapshot.ApplyTo(copy.gameObject);
 
         var place = copy.transform.position;
