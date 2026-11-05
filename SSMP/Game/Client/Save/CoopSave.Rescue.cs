@@ -734,6 +734,12 @@ internal partial class CoopSave {
             return;
         }
 
+        // Nor can a creature of a room that another game runs for a moment once things come from the server again
+        // after a gap, where it comes back at once to where it has got to (KeepCreaturesOff)
+        if (KeepsCreatureHurtOff(go, damageAmount, hazardType)) {
+            return;
+        }
+
         // What hits the player is written down as it was when the game told it of the hurt, if it did, since what it
         // does on that can take it away (OnHurtSourceTold), and as it is after the hurt otherwise
         var healthBefore = PlayerData.instance == null ? 0 : PlayerData.instance.health;

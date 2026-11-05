@@ -1504,11 +1504,29 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="gap">How long nothing arrived, in seconds.</param>
     private void OnReceiveResumed(double gap) {
+        // The creatures of a room that another game runs come back at once to where they have got to, and the moves
+        // held up on the way play all together: for a moment they cannot hurt the local player (CoopSave.KeepCreaturesOff)
+        var keptOff = _netClient.IsConnected && _sceneHostDetermined && !_entityManager.IsSceneHost;
+        if (keptOff) {
+            _coopSave.KeepCreaturesOff(gap);
+        }
+
+        var keptOffText = Lang.Pick(
+            $"for the next {CoopSave.KeptOffAfterGap:0.#} s the creatures cannot hurt you",
+            $"接下来 {CoopSave.KeptOffAfterGap:0.#} 秒里怪伤不到你"
+        );
         if (_linkStallTold) {
             _linkStallTold = false;
             if (_netClient.IsConnected) {
-                UiManager.InternalChatBox.AddMessage(Lang.Pick("Reconnected to the host", "和房主重新连上了"));
+                UiManager.InternalChatBox.AddMessage(keptOff
+                    ? Lang.Pick($"Reconnected to the host, and {keptOffText}", $"和房主重新连上了，{keptOffText}")
+                    : Lang.Pick("Reconnected to the host", "和房主重新连上了"));
             }
+        } else if (keptOff) {
+            UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                $"Nothing came from the host for {gap:F0} s: {keptOffText}",
+                $"和房主之间断了 {gap:F0} 秒，{keptOffText}"
+            ));
         }
 
         if (gap < RoomStateGap || !_netClient.IsConnected || !_sceneHostDetermined ||
