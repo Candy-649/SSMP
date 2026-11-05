@@ -817,9 +817,11 @@ internal partial class Entity {
 
         EntityInitializer.CheckPreProcessFsm(fsm);
 
-        // Nothing of what an FSM that each game runs by itself does is sent (see IsRunByEachGame)
+        // Nothing of what an FSM that each game runs by itself does is sent (see IsRunByEachGame), and it takes no
+        // wound of the partner's, whose game played it already
         if (!IsRunByEachGame(fsm)) {
             HookActions(fsm);
+            NoteTheWaysOf(fsm);
         }
 
         _fsmSnapshots.Add(TakeSnapshot(fsm));
@@ -5042,10 +5044,14 @@ internal partial class Entity {
             ForgetIn(EntitiesByCopy, Object.Client);
             ForgetIn(EntitiesByRoomObject, Object.Host);
 
-            // An FSM that was still to be made is no longer this entity's to hook
+            // An FSM that was still to be made is no longer this entity's to hook, nor is any its to note the ways of
             foreach (var fsm in _fsms.Host) {
                 if (FsmsMadeLater.TryGetValue(fsm, out var waiting) && waiting == this) {
                     FsmsMadeLater.Remove(fsm);
+                }
+
+                if (RoomFsmWays.TryGetValue(fsm, out var ways) && ways.Owner == this) {
+                    RoomFsmWays.Remove(fsm);
                 }
             }
 

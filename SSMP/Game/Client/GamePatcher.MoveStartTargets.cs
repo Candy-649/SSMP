@@ -369,7 +369,10 @@ internal partial class GamePatcher {
             }
         }
 
-        if (self.Fsm?.FsmComponent is { } machine && machine != null && NoteOfState(self).Starts) {
+        // A state that an FSM is put in without doing what it does starts no move: put back where the partner's copy
+        // took a wound or watched for a catch, the creature would roll whom it goes after where their copy did not
+        if (!Entity.Entity.PutsInWithoutDoing && self.Fsm?.FsmComponent is { } machine && machine != null &&
+            NoteOfState(self).Starts) {
             try {
                 TurnAtMoveStart(machine, self);
             } catch (Exception e) {

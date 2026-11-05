@@ -4,13 +4,14 @@ namespace SSMP.Game.Client.Entity;
 
 /// <summary>
 /// What the game of a scene client sends with something its player did to the copy of an entity that the copy's own FSM
-/// played there at once (see <see cref="Entity.PlayHere"/>): where it took the FSM, where the copy was and how its body
-/// moved, and the dice that the FSM rolled on the way. The scene host puts its entity there and plays the same with the
-/// same dice (see <see cref="Entity.TakeInput"/>), so that it goes the way the player already sees it go.
+/// played there at once (see <see cref="Entity.PlayHere"/>): where it took the FSM from and to, where the copy was and
+/// how its body moved, and the dice that the FSM rolled on the way. The scene host puts its entity there and plays the
+/// same with the same dice (see <see cref="Entity.TakeInput"/>), so that it goes the way the player already sees it go.
 /// </summary>
 internal readonly struct InputStart {
     public InputStart(
         string state,
+        string from,
         Vector2 position,
         BodyMotion? motion,
         int[] dice,
@@ -20,6 +21,7 @@ internal readonly struct InputStart {
         ushort tag = 0
     ) {
         State = state;
+        From = from;
         Position = position;
         Motion = motion;
         Dice = dice;
@@ -33,6 +35,12 @@ internal readonly struct InputStart {
     /// The state the input took the FSM to.
     /// </summary>
     public string State { get; }
+
+    /// <summary>
+    /// The state the FSM took the input in, which the scene host's FSM may have gone on from by the time it comes
+    /// (see <see cref="Entity.PutBackWhereTheWoundCameIn"/>).
+    /// </summary>
+    public string From { get; }
 
     /// <summary>
     /// Where the copy was.

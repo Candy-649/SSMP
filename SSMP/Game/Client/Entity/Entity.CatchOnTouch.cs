@@ -257,6 +257,12 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether an FSM is being put in a state without doing what the state does (see <see cref="PutInWithoutDoing"/>),
+    /// in which no move of the creature starts (GamePatcher.OnStateEnter).
+    /// </summary>
+    internal static bool PutsInWithoutDoing { get; private set; }
+
+    /// <summary>
     /// Puts an FSM in a state without doing what the state does, as though it had come there a moment ago: what it does
     /// on going in was done in the other game, and the event that it is put there for takes it on at once.
     /// </summary>
@@ -265,9 +271,11 @@ internal partial class Entity {
     private static void PutInWithoutDoing(HutongGames.PlayMaker.Fsm fsm, FsmState state) {
         var actions = state.Actions;
         state.Actions = [new HoldHere()];
+        PutsInWithoutDoing = true;
         try {
             fsm.SetState(state.Name);
         } finally {
+            PutsInWithoutDoing = false;
             state.Actions = actions;
         }
     }

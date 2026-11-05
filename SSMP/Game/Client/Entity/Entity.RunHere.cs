@@ -726,7 +726,7 @@ internal partial class Entity {
         _runHereCatch = _runHereAwaited;
         _runHereExpiry = Time.unscaledTime + AnticipationHoldTime;
         return new InputStart(
-            _runHereReached, position, motion, dice, _runHereAwaited, caught,
+            _runHereReached, from.Name, position, motion, dice, _runHereAwaited, caught,
             _runHereLed ? path.ConvertAll(state => state.Name).ToArray() : null
         );
     }
@@ -1009,6 +1009,17 @@ internal partial class Entity {
             into = EntityFsmActions.FindTransition(fsm, state, eventName);
         }
 
+        // What a wound sets off is taken where the creature is, from now: the partner struck it where their game
+        // showed it, a little behind where it is here, and put back there at every blow, it jumped back under each of
+        // them. One that their copy took in a state that the creature has gone on from since, by itself and through
+        // nothing that it leaves behind, is taken from that state (see PutBackWhereTheWoundCameIn).
+        var inPlace = IsWoundEvent(eventName) && start.Path is not { Length: > 0 } && start.Caught == null;
+        if (into == null && inPlace &&
+            PutBackWhereTheWoundCameIn(hostFsm, fsm, state, eventName, start.From) is { } struckIn) {
+            state = struckIn;
+            into = EntityFsmActions.FindTransition(fsm, state, eventName);
+        }
+
         if (into == null) {
             SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
             return false;
@@ -1029,12 +1040,9 @@ internal partial class Entity {
         }
 
         // Drawn sliding from here to where it is put and carried on, but not along any way the event takes it itself
-        // (see ShownSlide). What a wound sets off is taken where the creature is, from now: the partner struck it
-        // where their game showed it, a little behind where it is here, and put back there at every blow, it jumped
-        // back under each of them
+        // (see ShownSlide)
         var hostTransform = Object.Host.transform;
         var shownFrom = (Vector2) hostTransform.position;
-        var inPlace = IsWoundEvent(eventName) && start.Path is not { Length: > 0 } && start.Caught == null;
         Rigidbody2D? body = null;
         if (!inPlace && start.Motion is { } motion && Object.Host.TryGetComponent<Rigidbody2D>(out var hostBody)) {
             body = hostBody;

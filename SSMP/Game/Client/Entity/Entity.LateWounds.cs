@@ -1,0 +1,641 @@
+using System;
+using System.Collections.Generic;
+using System.Linq.Expressions;
+using System.Reflection;
+using System.Text.RegularExpressions;
+using HutongGames.PlayMaker;
+using HutongGames.PlayMaker.Actions;
+using MonoMod.RuntimeDetour;
+using SSMP.Game.Client.Entity.Action;
+using UnityEngine;
+using Logger = SSMP.Logging.Logger;
+
+namespace SSMP.Game.Client.Entity;
+
+/// <summary>
+/// A wound of the partner's that comes after the room's own creature went on from the state that their copy took it
+/// in. Their copy showed the creature in that state as they struck, and answered the wound at once (D14), while the
+/// FSM here had gone on, mostly from waiting into the start of its next move, where a wound leads nowhere. It was not
+/// taken, and their copy cut its answer short and jumped back to the creature here, turning about and starting another
+/// move before their eyes (USER 11-04 "这局boss经常很奇怪的转向", four of the five answers of the fight that this was
+/// for). Now the FSM here is put back in the state their copy took it in, if it went on from there only by itself,
+/// through nothing that it leaves behind, and not long ago, with what it went through since as if it had never been:
+/// the numbers of its FSM that those states set, and how fast the creature moved, are put back as they were there (see
+/// <see cref="PutBackWhereTheWoundCameIn"/>). The wound is taken from there with the partner's dice, so that the
+/// creature goes the way it went there. What it had gone on to here is cut off instead, which the scene host's player
+/// sees as the partner's blow breaking into the start of a move.
+/// </summary>
+internal partial class Entity {
+    /// <summary>
+    /// How many of the ways that each FSM of a room's own creature went from one state to another are kept (see
+    /// <see cref="FsmWays"/>): more than an FSM goes through between a state that a wound leads somewhere from and the
+    /// first state of its next move, which for the boss of the fight that this was for is eight.
+    /// </summary>
+    private const int WaysKept = 16;
+
+    /// <summary>
+    /// How long ago, at most, the room's own creature may have left the state that the partner's copy took a wound in,
+    /// in seconds, for the wound to be taken from there: longer than the round trips of the evening that this was for
+    /// (0.36 to 0.79 s, 11-04), and short enough that a stalled connection does not take back a whole move that the
+    /// scene host's player saw the creature make.
+    /// </summary>
+    private const float LateWoundAtMost = 1f;
+
+    /// <summary>
+    /// The ways that each FSM of a room's own creature went lately (see <see cref="OnDoTransition"/>), by the FSM's
+    /// component: the game makes a new FSM for one that comes from a template when its object is first switched on.
+    /// </summary>
+    private static readonly Dictionary<PlayMakerFSM, FsmWays> RoomFsmWays = new();
+
+    /// <summary>
+    /// The hook that notes the ways of the FSMs of the room's own creatures, put in place with the first such FSM.
+    /// </summary>
+    private static Hook? _doTransitionHook;
+
+    /// <summary>
+    /// How far a state got in going into its actions: the index of the last one it went into (FsmState's
+    /// activeActionIndex). The game goes into none of the rest once one has taken the FSM on, like a test of a
+    /// yes-or-no that sends it to the next state at once, so they were never done.
+    /// </summary>
+    private static Func<FsmState, int>? _enteredUpTo;
+
+    /// <summary>
+    /// Whether each kind of action leaves nothing behind by its name (see <see cref="NothingLeftBehindName"/>), by
+    /// kind.
+    /// </summary>
+    private static readonly Dictionary<Type, bool> NothingLeftBehindKinds = new();
+
+    /// <summary>
+    /// The events that each kind of action that plays a clip tells its FSM as the clip ends or reaches a frame, by kind
+    /// (see <see cref="WentByItself"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> ClipEventFields = new();
+
+    /// <summary>
+    /// The fields of each kind of action that name numbers of its FSM, singly or in a list, by kind (see
+    /// <see cref="PutBackWhatItSet"/>).
+    /// </summary>
+    private static readonly Dictionary<Type, FieldInfo[]> NumberFields = new();
+
+    /// <summary>
+    /// What the name of a kind of action has in it that leaves nothing behind once its state is left but the numbers of
+    /// its FSM, how the creature looks, sounds and faces, and where it is and how fast it moves, which are put back or
+    /// told the other game by themselves: one that looks about and decides, works with the FSM's own numbers or waits;
+    /// one that plays a clip, a sound, particles, a shake or a flash; one that turns, moves or steers the creature. The
+    /// kinds that the creatures' FSMs have of each were read off all of them (reports/fsm-usage.tsv).
+    /// </summary>
+    private static readonly Regex NothingLeftBehindName = new(
+        // Looks about and decides, with numbers of the FSM's own
+        "^(Get|Check|Compare|Find|Has|Can)[A-Z0-9]|^(GameObjectIs|GameObjectCompare|DistanceBetween|RayCast|" +
+        "PlayerData(Bool|Int|Float)Test|Trigger2dEvent|Collision2dEvent|EnumCompare|SendRandomEvent)|" +
+        "^(Bool|Float|Int|String|Vector[23]|Convert|Select)[A-Z]|^Random|^Ease(Float|Vector|Color)|^TimeLimit|" +
+        "^(BuildString|MultiplyIntByFloat)$|^Set(Bool|Float|Int|String|Vector2|Vector3|Object)Value|" +
+        "^Set(GameObject|FloatSign|Vector2XY|Vector3XYZ)$|" +
+        "^(Wait|WaitRandom|WaitBool|NextFrameEvent|NextFixedFrameEvent|Comment)$|" +
+        // Plays a clip, a sound, particles, a shake or a flash
+        "^(Tk2d|Animator|Audio|PlayAudio|PlayRandomAudio|SetAudio|SetRandomAudioClip|FadeAudio|RandomiseAudio|" +
+        "PlayParticle|StopParticle|SetParticleEmission|ScreenFlash|ObjectJitter|EaseSpriteColor|" +
+        "SetSpriteRendererColor|CancelCameraShake)|^DoCameraShake(V[0-9])?$|" +
+        // Turns, moves or steers the creature
+        "Velocity|^(Decelerat|Accelerat|Face|FlipScale|RandomlyFlipScale|MatchScaleSign|Rotate|Tilt|" +
+        "Animate[XYZ]?Position|AnimateRotation|AnimateRigidBody2DPosition|Translate|AddForce|Chase|DistanceFly|" +
+        "IdleBuzz|WalkLeftRight|ShoveFromWall|ClampSpeed|ClampAngle|ClampPosition|FireAtTarget|SetCrawlerSpeed|" +
+        "(Start|Stop)(Walker|Crawler|Climber))|^Set(Rotation|Scale)$"
+    );
+
+    /// <summary>
+    /// Notes from now on the ways that an FSM of the room's own creature goes (see <see cref="FsmWays"/>).
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    private void NoteTheWaysOf(PlayMakerFSM fsm) {
+        RoomFsmWays[fsm] = new FsmWays(this, Object.Host.TryGetComponent<Rigidbody2D>(out var body) ? body : null);
+        if (_doTransitionHook != null) {
+            return;
+        }
+
+        var state = Expression.Parameter(typeof(FsmState), "state");
+        var index = typeof(FsmState).GetField("activeActionIndex", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        _enteredUpTo = Expression.Lambda<Func<FsmState, int>>(Expression.Field(state, index), state).Compile();
+        _doTransitionHook = new Hook(
+            typeof(HutongGames.PlayMaker.Fsm).GetMethod(
+                "DoTransition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                [typeof(FsmTransition), typeof(bool)], null
+            )!,
+            new Func<Func<HutongGames.PlayMaker.Fsm, FsmTransition, bool, bool>, HutongGames.PlayMaker.Fsm,
+                FsmTransition, bool, bool>(OnDoTransition)
+        );
+    }
+
+    /// <summary>
+    /// Hook for an FSM taking a way from its state to another, which notes it for an FSM of a room's own creature (see
+    /// <see cref="Way"/>).
+    /// </summary>
+    private static bool OnDoTransition(
+        Func<HutongGames.PlayMaker.Fsm, FsmTransition, bool, bool> orig,
+        HutongGames.PlayMaker.Fsm self,
+        FsmTransition transition,
+        bool isGlobal
+    ) {
+        if (RoomFsmWays.Count > 0 && self.FsmComponent is { } component &&
+            RoomFsmWays.TryGetValue(component, out var ways) && component.Fsm == self &&
+            self.ActiveState is { } from && transition.ToFsmState is { } to) {
+            ways.Add(
+                self, from, _enteredUpTo!(from), to, transition.FsmEvent, HutongGames.PlayMaker.Fsm.EventData.SentByFsm,
+                isGlobal
+            );
+        }
+
+        return orig(self, transition, isGlobal);
+    }
+
+    /// <summary>
+    /// Puts the FSM of the room's own creature back in the state that the partner's copy took a wound in, which leads
+    /// nowhere from where the FSM is, on the scene host: if it left that state no longer ago than
+    /// <see cref="LateWoundAtMost"/>, and went from there to where it is by itself all the way (see
+    /// <see cref="WentByItself"/>), through states whose actions that it went into leave nothing behind (see
+    /// <see cref="LeftBehindBy"/>). Not when something told it from outside took it on, like a wound of this game's
+    /// player, a stun or another input of the partner's, which would be undone, nor when a state it went through set
+    /// something that stays, like going without gravity, invincible or into a catch of this game's player, which would
+    /// be left so. What its FSM held there, of the numbers that the states it went through work with, and how fast the
+    /// creature moved there are put back: the partner's copy took the wound with those, and drops what it was told of
+    /// them since once the wound is taken. Said in the log either way.
+    /// </summary>
+    /// <param name="hostFsm">The FSM's component.</param>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="at">The state it is in.</param>
+    /// <param name="eventName">The wound event.</param>
+    /// <param name="fromName">The state that the partner's copy took it in.</param>
+    /// <returns>The state it is put back in, or null if it is not.</returns>
+    private FsmState? PutBackWhereTheWoundCameIn(
+        PlayMakerFSM hostFsm,
+        HutongGames.PlayMaker.Fsm fsm,
+        FsmState at,
+        string eventName,
+        string fromName
+    ) {
+        if (fromName == at.Name || fsm.GetState(fromName) is not { } from ||
+            EntityFsmActions.FindTransition(fsm, from, eventName) == null ||
+            !RoomFsmWays.TryGetValue(hostFsm, out var ways)) {
+            return null;
+        }
+
+        var told = $"[Wounds] The '{fsm.Name}' of entity {Id} is in '{at.Name}' as the partner's '{eventName}' " +
+                   $"comes, which their copy took in '{fromName}'";
+        var reached = at;
+        var reachedEntered = _enteredUpTo!(at);
+        for (var back = 0; back < ways.Count; back++) {
+            var way = ways.Back(back);
+            if (way.To != reached) {
+                Logger.Info($"{told}, and it came to '{reached.Name}' by a way it does not note, so it does not take it");
+                return null;
+            }
+
+            if (!WentByItself(fsm, way)) {
+                Logger.Info(
+                    $"{told}, and it went from '{way.From.Name}' to '{way.To.Name}' by what came from outside it, so " +
+                    "it does not take it"
+                );
+                return null;
+            }
+
+            if (LeftBehindBy(reached, reachedEntered) is { } kind) {
+                Logger.Info($"{told}, and it went through '{reached.Name}', whose {kind} stays, so it does not take it");
+                return null;
+            }
+
+            if (way.From != from) {
+                reached = way.From;
+                reachedEntered = way.FromEntered;
+                continue;
+            }
+
+            var ago = Time.unscaledTime - way.At;
+            if (ago > LateWoundAtMost) {
+                Logger.Info($"{told}, which it left {ago:0.00} s ago, so it does not take it");
+                return null;
+            }
+
+            if (ways.Held.Number != way.Number) {
+                Logger.Info($"{told}, which it left before another state that takes wounds, so it does not take it");
+                return null;
+            }
+
+            // A catch of the partner's that it followed before would keep it from going back there (LetsLedFsmGo)
+            EndLeadOf(fsm);
+            PutInWithoutDoing(fsm, from);
+            var putBack = PutBackWhatItSet(ways, at, back);
+            Logger.Info(
+                $"{told}, which it left {ago:0.00} s ago by itself through {back + 1} state(s) that leave nothing " +
+                $"behind, so it takes it from there, with {putBack} number(s) of its FSM put back as they were there"
+            );
+            return from;
+        }
+
+        Logger.Info($"{told}, which it left longer ago than it notes, so it does not take it");
+        return null;
+    }
+
+    /// <summary>
+    /// Whether an FSM of a room's own creature went a way by itself: by an event that it told itself as it ran, like
+    /// the end of its state or of what it waited for, or by one that an action of the state it left told it as the clip
+    /// it played ended or reached a frame, which the game tells it as the clip plays, apart from its FSM; not by one
+    /// that something else told it, like a wound, a stun or an input of the partner's, nor by a way that every state
+    /// takes. (An event that the game hands an FSM without saying who sent it, like one told every FSM at once, keeps
+    /// the sender of the one told before it.)
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="way">The way.</param>
+    private static bool WentByItself(HutongGames.PlayMaker.Fsm fsm, Way way) {
+        if (way.IsGlobal) {
+            return false;
+        }
+
+        if (way.SentBy != null || way.Event == null) {
+            return way.SentBy == fsm;
+        }
+
+        var actions = way.From.Actions;
+        for (var i = 0; i <= way.FromEntered && i < actions.Length; i++) {
+            var action = actions[i];
+            if (!action.Enabled) {
+                continue;
+            }
+
+            foreach (var field in ClipEventFieldsOf(action.GetType())) {
+                if (field.GetValue(action) is FsmEvent told && told.Name == way.Event.Name) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The events that a kind of action that plays a clip tells its FSM as the clip ends or reaches a frame.
+    /// </summary>
+    /// <param name="kind">The kind of action.</param>
+    private static FieldInfo[] ClipEventFieldsOf(Type kind) {
+        if (!ClipEventFields.TryGetValue(kind, out var fields)) {
+            ClipEventFields[kind] = fields = kind.Name.StartsWith("Tk2d", StringComparison.Ordinal)
+                ? Array.FindAll(
+                    kind.GetFields(BindingFlags.Instance | BindingFlags.Public),
+                    field => field.FieldType == typeof(FsmEvent) &&
+                             field.Name.StartsWith("animation", StringComparison.OrdinalIgnoreCase)
+                )
+                : [];
+        }
+
+        return fields;
+    }
+
+    /// <summary>
+    /// The first kind of action that a state went into, of those up to the given index, that leaves something behind
+    /// once the state is left, or null if none does: any but those whose names say they leave nothing behind (see
+    /// <see cref="NothingLeftBehindName"/>), a part that is switched on or off for the state only, and an event told to
+    /// the FSM itself at once.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    /// <param name="enteredUpTo">The index of the last action that the state went into (see
+    /// <see cref="_enteredUpTo"/>).</param>
+    private static string? LeftBehindBy(FsmState state, int enteredUpTo) {
+        var actions = state.Actions;
+        for (var i = 0; i <= enteredUpTo && i < actions.Length; i++) {
+            var action = actions[i];
+            if (!action.Enabled) {
+                continue;
+            }
+
+            var leavesNothing = action switch {
+                ActivateGameObject activate => activate.resetOnExit,
+                SendEvent send => send.eventTarget.target == FsmEventTarget.EventTarget.Self &&
+                                  send.delay.Value <= 0f,
+                SendEventByName send => send.eventTarget.target == FsmEventTarget.EventTarget.Self &&
+                                        send.delay.Value <= 0f,
+                _ => LeavesNothingBehindByName(action.GetType())
+            };
+            if (!leavesNothing) {
+                return action.GetType().Name;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Whether a kind of action leaves nothing behind by its name (see <see cref="NothingLeftBehindName"/>).
+    /// </summary>
+    /// <param name="kind">The kind of action.</param>
+    private static bool LeavesNothingBehindByName(Type kind) {
+        if (!NothingLeftBehindKinds.TryGetValue(kind, out var leavesNothing)) {
+            NothingLeftBehindKinds[kind] = leavesNothing = NothingLeftBehindName.IsMatch(kind.Name);
+        }
+
+        return leavesNothing;
+    }
+
+    /// <summary>
+    /// Puts back what an FSM of a room's own creature held, and how fast the creature moved, as it left the state that
+    /// it is put back in (see <see cref="HeldThere"/>): every number of the FSM that an action that a state it went
+    /// through since went into works with. The rest is left as it is, which something else may have set meanwhile.
+    /// </summary>
+    /// <param name="ways">The ways of the FSM.</param>
+    /// <param name="at">The state that it was in.</param>
+    /// <param name="last">How many ways back from the newest the way out of the state it is put back in is.</param>
+    /// <returns>How many numbers were put back.</returns>
+    private static int PutBackWhatItSet(FsmWays ways, FsmState at, int last) {
+        var held = ways.Held;
+        var putBack = 0;
+        for (var back = 0; back <= last; back++) {
+            var state = back == 0 ? at : ways.Back(back - 1).From;
+            var enteredUpTo = back == 0 ? _enteredUpTo!(at) : ways.Back(back - 1).FromEntered;
+            var actions = state.Actions;
+            for (var i = 0; i <= enteredUpTo && i < actions.Length; i++) {
+                var action = actions[i];
+                if (!action.Enabled) {
+                    continue;
+                }
+
+                foreach (var field in NumberFieldsOf(action.GetType())) {
+                    switch (field.GetValue(action)) {
+                        case NamedVariable { UseVariable: true } number:
+                            putBack += held.PutBack(number) ? 1 : 0;
+                            break;
+                        case NamedVariable[] numbers:
+                            foreach (var number in numbers) {
+                                putBack += number is { UseVariable: true } && held.PutBack(number) ? 1 : 0;
+                            }
+
+                            break;
+                    }
+                }
+            }
+        }
+
+        if (ways.Body != null) {
+            ways.Body.linearVelocity = held.Velocity;
+        }
+
+        return putBack;
+    }
+
+    /// <summary>
+    /// The fields of a kind of action that name numbers of its FSM, singly or in a list.
+    /// </summary>
+    /// <param name="kind">The kind of action.</param>
+    private static FieldInfo[] NumberFieldsOf(Type kind) {
+        if (!NumberFields.TryGetValue(kind, out var fields)) {
+            NumberFields[kind] = fields = Array.FindAll(
+                kind.GetFields(BindingFlags.Instance | BindingFlags.Public),
+                field => typeof(NamedVariable).IsAssignableFrom(field.FieldType) ||
+                         field.FieldType.IsArray &&
+                         typeof(NamedVariable).IsAssignableFrom(field.FieldType.GetElementType())
+            );
+        }
+
+        return fields;
+    }
+
+    /// <summary>
+    /// Whether a wound leads anywhere from a state by a way of its own.
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private static bool HasWoundWay(FsmState state) {
+        foreach (var transition in state.Transitions) {
+            if (IsWoundEvent(transition.EventName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The last ways that an FSM of a room's own creature went from one state to another, as many as
+    /// <see cref="WaysKept"/> (see <see cref="OnDoTransition"/>), and what it held as it last left a state that a wound
+    /// leads somewhere from.
+    /// </summary>
+    /// <param name="owner">The entity whose FSM it is.</param>
+    /// <param name="body">The body of the creature, if it has one.</param>
+    private sealed class FsmWays(Entity owner, Rigidbody2D? body) {
+        /// <summary>
+        /// The ways, going round: the next one is written over the oldest.
+        /// </summary>
+        private readonly Way[] _ways = new Way[WaysKept];
+
+        /// <summary>
+        /// Where the next way goes in <see cref="_ways"/>.
+        /// </summary>
+        private int _next;
+
+        /// <summary>
+        /// How many ways have been noted, which numbers each.
+        /// </summary>
+        private int _noted;
+
+        /// <summary>
+        /// The entity whose FSM it is.
+        /// </summary>
+        public Entity Owner { get; } = owner;
+
+        /// <summary>
+        /// The body of the creature, if it has one.
+        /// </summary>
+        public Rigidbody2D? Body { get; } = body;
+
+        /// <summary>
+        /// How many ways there are.
+        /// </summary>
+        public int Count { get; private set; }
+
+        /// <summary>
+        /// What the FSM held as it last left a state that a wound leads somewhere from.
+        /// </summary>
+        public HeldThere Held { get; } = new();
+
+        /// <summary>
+        /// Notes a way, and what the FSM holds as it goes, if it leaves a state that a wound leads somewhere from.
+        /// </summary>
+        public void Add(
+            HutongGames.PlayMaker.Fsm fsm,
+            FsmState from,
+            int fromEntered,
+            FsmState to,
+            FsmEvent? fsmEvent,
+            HutongGames.PlayMaker.Fsm? sentBy,
+            bool isGlobal
+        ) {
+            var number = ++_noted;
+            _ways[_next] = new Way(from, fromEntered, to, fsmEvent, sentBy, isGlobal, Time.unscaledTime, number);
+            _next = (_next + 1) % WaysKept;
+            Count = Mathf.Min(Count + 1, WaysKept);
+            if (HasWoundWay(from)) {
+                Held.Take(fsm, Body, number);
+            }
+        }
+
+        /// <summary>
+        /// The way that came the given number of ways before the newest, which is 0.
+        /// </summary>
+        public Way Back(int back) => _ways[(_next - 1 - back + WaysKept) % WaysKept];
+    }
+
+    /// <summary>
+    /// A way that an FSM of a room's own creature went: from which state, the index of the last action of it that it
+    /// went into (see <see cref="_enteredUpTo"/>), to which state, by which event, which FSM was running as the event was
+    /// told, or none, whether it is a way that every state takes, when it went in unscaled time, and its number (see
+    /// <see cref="FsmWays"/>).
+    /// </summary>
+    private readonly record struct Way(
+        FsmState From,
+        int FromEntered,
+        FsmState To,
+        FsmEvent? Event,
+        HutongGames.PlayMaker.Fsm? SentBy,
+        bool IsGlobal,
+        float At,
+        int Number
+    );
+
+    /// <summary>
+    /// What an FSM of a room's own creature held as it left a state, of its numbers, yes-or-no's, words, points and
+    /// objects, and how fast the creature moved then, with the number of the way it left by (see
+    /// <see cref="FsmWays"/>).
+    /// </summary>
+    private sealed class HeldThere {
+        /// <summary>
+        /// The FSM whose variables the lists below are of, which the game makes anew for one that comes from a
+        /// template.
+        /// </summary>
+        private HutongGames.PlayMaker.Fsm? _of;
+
+        private FsmFloat[] _floats = [];
+        private float[] _floatValues = [];
+        private FsmInt[] _ints = [];
+        private int[] _intValues = [];
+        private FsmBool[] _bools = [];
+        private bool[] _boolValues = [];
+        private FsmString[] _strings = [];
+        private string[] _stringValues = [];
+        private FsmVector2[] _vector2s = [];
+        private Vector2[] _vector2Values = [];
+        private FsmVector3[] _vector3s = [];
+        private Vector3[] _vector3Values = [];
+        private FsmGameObject[] _gameObjects = [];
+        private GameObject?[] _gameObjectValues = [];
+
+        /// <summary>
+        /// The number of the way that the FSM left the state by.
+        /// </summary>
+        public int Number { get; private set; }
+
+        /// <summary>
+        /// How fast the creature moved.
+        /// </summary>
+        public Vector2 Velocity { get; private set; }
+
+        /// <summary>
+        /// Takes what an FSM holds now, and how fast the creature moves.
+        /// </summary>
+        public void Take(HutongGames.PlayMaker.Fsm fsm, Rigidbody2D? body, int number) {
+            if (_of != fsm) {
+                var variables = fsm.Variables;
+                _floats = variables.FloatVariables;
+                _floatValues = new float[_floats.Length];
+                _ints = variables.IntVariables;
+                _intValues = new int[_ints.Length];
+                _bools = variables.BoolVariables;
+                _boolValues = new bool[_bools.Length];
+                _strings = variables.StringVariables;
+                _stringValues = new string[_strings.Length];
+                _vector2s = variables.Vector2Variables;
+                _vector2Values = new Vector2[_vector2s.Length];
+                _vector3s = variables.Vector3Variables;
+                _vector3Values = new Vector3[_vector3s.Length];
+                _gameObjects = variables.GameObjectVariables;
+                _gameObjectValues = new GameObject?[_gameObjects.Length];
+                _of = fsm;
+            }
+
+            for (var i = 0; i < _floats.Length; i++) {
+                _floatValues[i] = _floats[i].Value;
+            }
+
+            for (var i = 0; i < _ints.Length; i++) {
+                _intValues[i] = _ints[i].Value;
+            }
+
+            for (var i = 0; i < _bools.Length; i++) {
+                _boolValues[i] = _bools[i].Value;
+            }
+
+            for (var i = 0; i < _strings.Length; i++) {
+                _stringValues[i] = _strings[i].Value;
+            }
+
+            for (var i = 0; i < _vector2s.Length; i++) {
+                _vector2Values[i] = _vector2s[i].Value;
+            }
+
+            for (var i = 0; i < _vector3s.Length; i++) {
+                _vector3Values[i] = _vector3s[i].Value;
+            }
+
+            for (var i = 0; i < _gameObjects.Length; i++) {
+                _gameObjectValues[i] = _gameObjects[i].Value;
+            }
+
+            Velocity = body != null ? body.linearVelocity : Vector2.zero;
+            Number = number;
+        }
+
+        /// <summary>
+        /// Puts back what a variable of the FSM held, if it is one of those taken and holds something else now.
+        /// </summary>
+        /// <param name="variable">The variable, as an action names it.</param>
+        /// <returns>Whether it was put back.</returns>
+        public bool PutBack(NamedVariable variable) {
+            var name = variable.Name;
+            int i;
+            switch (variable) {
+                case FsmFloat when (i = IndexOf(_floats, name)) >= 0 && _floats[i].Value != _floatValues[i]:
+                    _floats[i].Value = _floatValues[i];
+                    return true;
+                case FsmInt when (i = IndexOf(_ints, name)) >= 0 && _ints[i].Value != _intValues[i]:
+                    _ints[i].Value = _intValues[i];
+                    return true;
+                case FsmBool when (i = IndexOf(_bools, name)) >= 0 && _bools[i].Value != _boolValues[i]:
+                    _bools[i].Value = _boolValues[i];
+                    return true;
+                case FsmString when (i = IndexOf(_strings, name)) >= 0 && _strings[i].Value != _stringValues[i]:
+                    _strings[i].Value = _stringValues[i];
+                    return true;
+                case FsmVector2 when (i = IndexOf(_vector2s, name)) >= 0 && _vector2s[i].Value != _vector2Values[i]:
+                    _vector2s[i].Value = _vector2Values[i];
+                    return true;
+                case FsmVector3 when (i = IndexOf(_vector3s, name)) >= 0 && _vector3s[i].Value != _vector3Values[i]:
+                    _vector3s[i].Value = _vector3Values[i];
+                    return true;
+                case FsmGameObject when (i = IndexOf(_gameObjects, name)) >= 0 &&
+                                        _gameObjects[i].Value != _gameObjectValues[i]:
+                    _gameObjects[i].Value = _gameObjectValues[i];
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
+        /// <summary>
+        /// The index of the variable with the given name in a list of them, or -1.
+        /// </summary>
+        private static int IndexOf(NamedVariable[] variables, string name) {
+            for (var i = 0; i < variables.Length; i++) {
+                if (variables[i].Name == name) {
+                    return i;
+                }
+            }
+
+            return -1;
+        }
+    }
+}
