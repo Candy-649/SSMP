@@ -260,6 +260,13 @@ internal class HealthManagerComponent : EntityComponent {
     internal static event Action<HealthManager, DamageTag, int, bool>? OwnTagPut;
 
     /// <summary>
+    /// Raised as a creature dies in this game: in the game that runs it as it dies there, and in the others as its copy
+    /// dies of the death they are told. A boss whose FSM plays its own death is told it at every blow on it from then
+    /// on. For a player lying in their cocoon as a boss falls, who stands up at once (CoopSave).
+    /// </summary>
+    internal static event Action<HealthManager>? Died;
+
+    /// <summary>
     /// The copy that a blow just put back at the health last told, with the health the blow had left it. The log of
     /// damage (EnemyHealthCoop) says what a blow took from that, as its hook on blows may run around this one, which
     /// puts the health back before it looks (see <see cref="ForgetPutBack"/>, <see cref="HealthBeforePutBack"/>).
@@ -1490,6 +1497,7 @@ internal class HealthManagerComponent : EntityComponent {
                 Logger.Debug($"HealthManager Die was called on client entity '{self.name}', but it is allowed death");
 
                 InvokeOrig();
+                Died?.Invoke(self);
 
                 _allowDeath = false;
                 _toldRefusedDeath = false;
@@ -1524,6 +1532,8 @@ internal class HealthManagerComponent : EntityComponent {
         if (hasSpecialDeath && !self.isDead) {
             _diedToComeBackAt = Time.frameCount;
         }
+
+        Died?.Invoke(self);
 
         var data = ObjectPool<EntityNetworkData>.Get();
         data.Type = EntityComponentType.Death;

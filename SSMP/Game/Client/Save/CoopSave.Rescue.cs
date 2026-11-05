@@ -6,8 +6,10 @@ using System.Linq;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
 using SSMP.Animation;
+using SSMP.Game.Client.Entity.Component;
 using SSMP.Hooks;
 using SSMP.Networking.Packet.Data;
+using SSMP.Ui;
 using SSMP.Util;
 using GlobalSettings;
 using UnityEngine;
@@ -527,6 +529,7 @@ internal partial class CoopSave {
     private void RegisterRescueHooks() {
         EventHooks.HeroControllerDieWrapper = WrapDeath;
         Entity.Entity.EachGamePartBegan += EndFightOfFallenBoss;
+        HealthManagerComponent.Died += StandUpAsABossDies;
         _hazardRespawnHook = WatchForTheRoomPuttingThePlayerBack();
         _burnHook = WatchForBurns();
         _respawnResetHook = CreateHook(
@@ -1529,10 +1532,8 @@ internal partial class CoopSave {
     /// Ends the fight of a boss that fell, asked when the boss goes into the end that each game plays for its own
     /// player (Entity.EachGamePartBegan), and for any boss once its save has it beaten. Its checkpoint ends: the boss
     /// counts as beaten only once the local player has bound it, and a member dropping out in the middle of that
-    /// took them back to the door with the boss still holding them. And the local player is stood up the way a rescue
-    /// does if they lie in their cocoon. What comes after a boss is for every player, and a game whose player still
-    /// lay there had them miss it: they neither bound the boss nor followed the others into the memory it sends them
-    /// to, and found its room shut when they came back.
+    /// took them back to the door with the boss still holding them. And the local player is stood up if they lie in
+    /// their cocoon, as at the blow that killed the boss (see <see cref="StandUpAsABossDies"/>).
     /// </summary>
     private void EndFightOfFallenBoss() {
         if (GetCurrentMarker() is { BossScene: { } bossScene } marker && bossScene == SceneUtil.GetCurrentSceneName()) {
@@ -1540,8 +1541,31 @@ internal partial class CoopSave {
             ClearCheckpoint(marker);
         }
 
+        StandUpAsTheFightEnds("The boss fell");
+    }
+
+    /// <summary>
+    /// Stands the local player up where they lie, at once, as a boss dies in their room, at the blow that kills it:
+    /// the fight is over, and nobody waits in a cocoon for it (USER 09-28 "下次遇到这种场景直接让她退出假死", and 11-05
+    /// "如果她躺在茧里我打死boss，她应该立刻被释放出来"). What comes after a boss is for every player, and a game whose
+    /// player still lay there had them miss it: they neither bound the boss nor followed the others into the memory it
+    /// sends them to, and found its room shut when they came back, and an end that takes the character of one who
+    /// plays it, which the others watch (BossRoomCoop.Endings), took it lying there. Each game stands up its own
+    /// player: the game that runs the boss as it dies there, the others as its copy is told so.
+    /// </summary>
+    private void StandUpAsABossDies(HealthManager creature) {
+        if (_rescue is { Outcome: RescueOutcome.Waiting } && EnemyHealthBars.IsBoss(creature)) {
+            StandUpAsTheFightEnds($"The boss '{creature.name}' died");
+        }
+    }
+
+    /// <summary>
+    /// Stands the local player up where they lie, if they lie in their cocoon, as the fight of a boss ends.
+    /// </summary>
+    /// <param name="what">What ended it, for the log.</param>
+    private void StandUpAsTheFightEnds(string what) {
         if (_rescue is { Outcome: RescueOutcome.Waiting } rescue) {
-            Logger.Info("The boss fell while the local player lay waiting to be pulled up, so they get up");
+            Logger.Info($"{what} while the local player lay waiting to be pulled up, so they get up");
             rescue.StandUpNote = FightOverNote;
             rescue.Outcome = RescueOutcome.Rescued;
         }
