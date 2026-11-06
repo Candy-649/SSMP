@@ -315,13 +315,6 @@ internal partial class CoopHits {
     private readonly List<(Entity.Entity entity, Transform transform, Vector3 position)> _pulledCopies = [];
 
     /// <summary>
-    /// The knockbacks of the partner's hits that this game plays as the scene host and that are still going, with the
-    /// entity, the tag of the partner's game and what was left on the knockback's clock after its last step, for
-    /// telling the partner how far each has pushed the entity (see <see cref="OnRecoilStep"/>).
-    /// </summary>
-    private readonly Dictionary<Recoil, (Entity.Entity Entity, ushort Tag, float Left)> _partnerPushes = new();
-
-    /// <summary>
     /// The knockbacks of the local player's hits on copies of creatures that the scene host runs that are still going,
     /// with the entity, whose copy is drawn by its positions while it waits for the scene host to have the knockback
     /// too, the knockback carried on top (see <see cref="OnRecoilStep"/>).
@@ -655,7 +648,6 @@ internal partial class CoopHits {
         }
 
         _hooks.Clear();
-        _partnerPushes.Clear();
         _carriedHere.Clear();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= WatchKnocks;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= ReleaseHeldReplays;
@@ -2090,22 +2082,19 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Hook for the step of <see cref="Recoil"/>, which carries the enemy along on each step of physics while it is
-    /// knocked back. For a knockback of the partner's hit that this game plays as the scene host, how far the step
-    /// moved the enemy is noted for the partner (<see cref="Entity.Entity.NotePushed"/>), whose game played the same
-    /// knockback first: their copy goes on moving the way the enemy moves by itself here while they wait for it, which
-    /// is what the positions sent show once that push is taken away. A knockback that something else started over it,
-    /// like the local player's own hit, winds the clock back up, and what it pushes is no longer the partner's.
+    /// knocked back: for the [Knock] lines (WatchKnock), and for a knockback of the local player's hit on a copy, which
+    /// is carried on top of where the copy's positions put it while the scene host takes it in.
     /// </summary>
     private void OnRecoilStep(Action<Recoil, float> orig, Recoil self, float deltaTime) {
         var watch = _knockWatches.Count > 0 && _knockWatches.TryGetValue(self, out var watched) ? watched : null;
         var carrier = _carriedHere.Count > 0 && _carriedHere.TryGetValue(self, out var carrying) ? carrying : null;
         if (watch == null && carrier == null) {
-            StepRecoil(orig, self, deltaTime);
+            orig(self, deltaTime);
             return;
         }
 
         var before = PositionOf(self);
-        StepRecoil(orig, self, deltaTime);
+        orig(self, deltaTime);
         var moved = PositionOf(self) - before;
 
         // How far a knockback that is watched moves the creature at each of its steps (WatchKnock)
@@ -2114,10 +2103,26 @@ internal partial class CoopHits {
             watch.Steps++;
         }
 
-        // A knockback of the local player's hit on a copy, which the copy's positions draw it over, is carried on top
-        // of them while the scene host takes it in (Entity.CarryKnockedHere): left on the copy alone, the step was
-        // drawn over in the next frame
-        if (carrier != null && (moved != Vector2.zero && !carrier.CarryKnockedHere(moved) || !self.IsRecoiling)) {
+        // Left on the copy alone, the step was drawn over in the next frame (Entity.CarryKnockedHere). The object is
+        // moved by the step along with its body: the interpolation set the object where it drew it, which puts the body
+        // back there at the start of the next step of physics, and until the interpolation drew it again, the object
+        // stood short of a step that was carried already (PredictiveInterpolation.DrawnFromItsPositions)
+        if (carrier == null) {
+            return;
+        }
+
+        if (moved != Vector2.zero) {
+            if (!carrier.CarryKnockedHere(moved)) {
+                _carriedHere.Remove(self);
+                return;
+            }
+
+            if (self.body != null) {
+                self.transform.position += (Vector3) moved;
+            }
+        }
+
+        if (!self.IsRecoiling) {
             _carriedHere.Remove(self);
         }
     }
@@ -2131,33 +2136,27 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Takes a step of a knockback (see <see cref="OnRecoilStep"/>), noting for the partner how far a knockback of
-    /// their hit moved the creature.
+    /// The layer of the ground, which is all that a knockback stops at (Recoil.UpdatePhysics).
     /// </summary>
-    private void StepRecoil(Action<Recoil, float> orig, Recoil self, float deltaTime) {
-        if (_partnerPushes.Count == 0 || !_partnerPushes.TryGetValue(self, out var push)) {
-            orig(self, deltaTime);
-            return;
+    private const int TerrainMask = 1 << 8;
+
+    /// <summary>
+    /// Where a knockback that has just started takes its creature: as far as it goes in its time, or as far as the
+    /// ground lets it, checked as the game checks each step of it (Recoil.UpdatePhysics), with nothing for what the
+    /// creature does by itself meanwhile, which the positions show. Where it holds the creature still, where it is.
+    /// </summary>
+    /// <param name="recoil">The knockback.</param>
+    private static Vector2 WhereItLands(Recoil recoil) {
+        var at = (Vector2) recoil.transform.position;
+        if (!recoil.GetIsRecoiling()) {
+            return at;
         }
 
-        if (self.recoilTimeRemaining > push.Left) {
-            _partnerPushes.Remove(self);
-            orig(self, deltaTime);
-            return;
-        }
-
-        // The knockback moves the body if there is one and the object if not
-        var body = self.body;
-        var before = body != null ? body.position : (Vector2) self.transform.position;
-        orig(self, deltaTime);
-        var after = body != null ? body.position : (Vector2) self.transform.position;
-
-        if (!push.Entity.NotePushed(push.Tag, after - before) || !self.IsRecoiling) {
-            _partnerPushes.Remove(self);
-            return;
-        }
-
-        _partnerPushes[self] = push with { Left = self.recoilTimeRemaining };
+        // A step of the length the speed goes in one step of physics at each step while time is left on its clock
+        var step = Time.fixedDeltaTime;
+        var steps = Mathf.CeilToInt(recoil.recoilTimeRemaining / step - 0.001f);
+        recoil.recoilSweep.Check(recoil.recoilSpeed * step * steps, TerrainMask, out var clear);
+        return at + recoil.recoilSweep.Direction * clear;
     }
 
     /// <summary>
@@ -2332,25 +2331,22 @@ internal partial class CoopHits {
 
         var recoilBefore = recoil.recoilTimeRemaining;
         recoil.RecoilByDirection(direction, magnitude);
-        if (KnockbackStarted(recoil, recoilBefore)) {
-            WatchKnock(recoil, entity, false, direction, magnitude, "the partner's hit");
-        }
-
         // What is left on the knockback's clock is how much longer this game goes on carrying the enemy along, and
         // the player waiting on this is told nothing until then. They have already watched their own copy go the
         // whole way; a position from the first moment of the same knockback would only pull it back to the start.
-        entity.NoteAnticipation(tag, id, recoil.recoilTimeRemaining);
-
-        // How far it pushes the enemy is told to the partner beside the positions, as long as they wait on one of
-        // their own knockbacks that their game played first (OnRecoilStep). Only one that started, as the partner's
-        // game takes a number only for one that started there
-        if (id != 0 && KnockbackStarted(recoil, recoilBefore)) {
-            foreach (var gone in _partnerPushes.Keys.Where(other => other == null).ToList()) {
-                _partnerPushes.Remove(gone);
+        // Where it lands they are told at once, beside every position until it is over, and their copy goes there
+        // (Entity.GoOnWhileKnockedBack); only for one that started, as their game takes a number only for one that
+        // started there
+        Vector2? landsAt = KnockbackStarted(recoil, recoilBefore) ? WhereItLands(recoil) : null;
+        if (landsAt is { } landing) {
+            WatchKnock(recoil, entity, false, direction, magnitude, "the partner's hit");
+            if (id != 0) {
+                var watch = _knockWatches[recoil];
+                watch.ToldAlong = Vector2.Dot(landing - watch.From, watch.Axis);
             }
-
-            _partnerPushes[recoil] = (entity, tag, recoil.recoilTimeRemaining);
         }
+
+        entity.NoteAnticipation(tag, id, recoil.recoilTimeRemaining, landsAt);
     }
 
     /// <summary>

@@ -280,6 +280,12 @@ internal class HealthManagerComponent : EntityComponent {
     public event System.Action<bool, bool>? CopyDeathChanged;
 
     /// <summary>
+    /// Raised just before the copy in this game is put where the creature died of nothing a player did in the scene
+    /// host's game (see <see cref="PutCopyWhereItDied"/>).
+    /// </summary>
+    public event System.Action? CopyPutWhereItDied;
+
+    /// <summary>
     /// Whether the copy was dead as this game last looked (see <see cref="CopyDeathChanged"/>).
     /// </summary>
     private bool _copyWasDead;
@@ -1338,6 +1344,8 @@ internal class HealthManagerComponent : EntityComponent {
         if (copy == null) {
             return;
         }
+
+        CopyPutWhereItDied?.Invoke();
 
         var transform = copy.transform;
         var from = (Vector2) transform.position;

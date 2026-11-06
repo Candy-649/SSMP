@@ -116,6 +116,12 @@ internal partial class CoopHits {
         public float DrawnAfter;
 
         /// <summary>
+        /// For a knockback of the partner's hit that this game plays as the scene host, how far the way of the
+        /// knockback it told the partner's game that it lands; null for any other (see ApplyKnockback).
+        /// </summary>
+        public float? ToldAlong;
+
+        /// <summary>
         /// The state that the copy's own FSM ran in here, if one did while it was watched.
         /// </summary>
         public string? RanHere;
@@ -279,6 +285,10 @@ internal partial class CoopHits {
             line.Append($" ({watch.Over})");
         }
 
+        if (watch.ToldAlong is { } told) {
+            line.Append($"; it told the partner's game that it lands {told:0.00} {way}");
+        }
+
         if (watch.IsCopy) {
             AppendCopyKnock(line, watch, way);
         }
@@ -287,9 +297,9 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Adds to a [Knock] line of a copy what else moved it: its own FSM run here, the wait on the scene host for the
-    /// knockback, with how far the scene host said it pushed the creature and how far the copy went on by itself
-    /// meanwhile, and the slide to where the scene host had the creature once the copy followed it again.
+    /// Adds to a [Knock] line of a copy what else moved it: its own FSM run here, the move to where the scene host said
+    /// its own knockback lands, the end of the wait on the scene host for the knockback, and the slide to where the
+    /// scene host had the creature once the copy followed it again.
     /// </summary>
     /// <param name="line">The line.</param>
     /// <param name="watch">The watch of the copy's knockback.</param>
@@ -306,12 +316,16 @@ internal partial class CoopHits {
             line.Append($"; its own FSM ran here in '{watch.RanHere}'");
         }
 
-        if (watch.Entity.LastKnockbackWait is { } wait && wait.At >= watch.StartedAt) {
+        if (watch.Entity.LastLanding is { } landing && landing.At >= watch.StartedAt) {
             line.Append(
-                $"; the wait on the scene host ended {wait.At - watch.StartedAt:0.00} s on as {wait.How}: it said " +
-                $"it pushed it {Vector2.Dot(wait.Told, watch.Axis):0.00} {way} ({wait.Told.magnitude:0.00} in all), " +
-                $"and the copy went on {wait.OwnMoved.magnitude:0.00} by what the creature did by itself"
+                $"; {landing.At - watch.StartedAt:0.00} s on the scene host said where its knockback lands, and the " +
+                $"copy went there, {Vector2.Dot(landing.Moved, watch.Axis):0.00} {way} " +
+                $"({landing.Moved.magnitude:0.00} in all)"
             );
+        }
+
+        if (watch.Entity.LastKnockbackWait is { } wait && wait.At >= watch.StartedAt) {
+            line.Append($"; the wait on the scene host ended {wait.At - watch.StartedAt:0.00} s on as {wait.How}");
         }
 
         if (watch.Entity.LastHandOver is { } handOver && handOver.At >= watch.StartedAt) {

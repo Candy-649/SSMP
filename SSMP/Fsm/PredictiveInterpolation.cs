@@ -647,8 +647,25 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// smoothed away from there like any other distance between where it is drawn and where its positions have it.
     /// </summary>
     public void LetGoOfWhatItCarries() {
-        _visualOffset += _carried;
-        _carried = Vector3.zero;
+        LetGoOf(_carried);
+    }
+
+    /// <summary>
+    /// Stops carrying the object part of the way it is carried (see <see cref="Carry"/>), and leaves it drawn where it
+    /// is, as <see cref="LetGoOfWhatItCarries"/> does with all of it.
+    /// </summary>
+    /// <param name="part">The part.</param>
+    public void LetGoOf(Vector3 part) {
+        _visualOffset += part;
+        _carried -= part;
+    }
+
+    /// <summary>
+    /// Has the object go on as it goes over a position of the sender's that is held back unused, as over one taken:
+    /// the packet that brought it says nothing of the object stopping (see <see cref="StopPackets"/>).
+    /// </summary>
+    public void TookHeldPosition() {
+        _heardAtPosition = LinkWatch.Heard;
     }
 
     /// <summary>
