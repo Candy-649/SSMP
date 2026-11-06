@@ -1282,11 +1282,12 @@ internal partial class CoopHits {
         // the partner as replays of their hits, which arrive through OnCoopHitUpdate. The copy of the partner's attack
         // only shows the attack. It is drawn where this game has the partner, a little off from where they are, so it
         // missed what they hit at the edge of their reach - and an object that counts a hit only while the player is
-        // near counted this game's player, who may be anywhere. A tink still turns away the copy of a thrown tool
+        // near counted this game's player, who may be anywhere. A tink still turns away the copy of a thrown pin
         // that strikes it, as it turned theirs away (see TinkTheCopy).
         if (responder is Component component && IsRoomObject(component)) {
             if (isRemote) {
-                if (component is TinkEffect && damager.GetComponent<ITinkResponder>() != null) {
+                if (component is TinkEffect && damager.GetComponent<ITinkResponder>() != null &&
+                    !ToolCopies.IsThrowerCopy(damager.gameObject)) {
                     TinkTheCopy(responder, hit, damager);
                 }
 
@@ -2472,18 +2473,19 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Whether a tink of the room is being asked about a copy of another player's thrown tool, which it turns away and
-    /// does nothing more (see <see cref="TinkTheCopy"/>): GamePatcher ends its reaction right after the tool's own.
+    /// Whether a tink of the room is being asked about a copy of another player's thrown pin, which it turns away and
+    /// does nothing more (see <see cref="TinkTheCopy"/>): GamePatcher ends its reaction right after the pin's own.
     /// </summary>
     internal static bool TinksTheCopyOnly { get; private set; }
 
     /// <summary>
-    /// Has a tink of the room turn away the copy of another player's thrown tool that strikes it, a pin or claws, as it
-    /// turned theirs away in their game, by the tink's own rules, and do nothing more. The tink is each player's own
-    /// (see <see cref="PersonalTypes"/>) and shows nothing of the partner's strike here, neither its spark and its
-    /// sound nor what it tells the room. A pin that strikes the wall of a tink waits for the tink to turn it away, so
-    /// the copy, of which the tink was never told, slid up along the wall it struck and stayed (USER 11-06 "三重镖！扎在
-    /// 墙上会往上飘！…理应落在那里就是正确的位置").
+    /// Has a tink of the room turn away the copy of another player's thrown pin that strikes it, as it turned theirs
+    /// away in their game, by the tink's own rules, and do nothing more. The tink is each player's own (see
+    /// <see cref="PersonalTypes"/>) and shows nothing of the partner's strike here, neither its spark and its sound nor
+    /// what it tells the room. A pin that strikes the wall of a tink waits for the tink to turn it away, so the copy,
+    /// of which the tink was never told, slid up along the wall it struck and stayed (USER 11-06 "三重镖！扎在墙上会往上
+    /// 飘！…理应落在那里就是正确的位置"). A copy that the thrower's game keeps up to date, as claws are, is not asked:
+    /// it is turned away by the flight that game sends once theirs was.
     /// </summary>
     /// <param name="tink">The tink that the copy strikes.</param>
     /// <param name="hit">The hit of the copy.</param>

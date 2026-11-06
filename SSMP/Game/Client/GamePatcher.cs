@@ -674,7 +674,7 @@ internal partial class GamePatcher {
             c.Emit(OpCodes.Stloc, 6);
             c.MarkLabel(afterRemotePositionLabel);
 
-            // A copy of another player's thrown tool that a tink of the room turns away does nothing more than turn
+            // A copy of another player's thrown pin that a tink of the room turns away does nothing more than turn
             // away (see CoopHits.TinkTheCopy): the tink's spark and sound, and what it tells the room, are left out
             c.GotoNext(
                 MoveType.After,
