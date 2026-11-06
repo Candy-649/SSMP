@@ -718,10 +718,7 @@ internal partial class Entity {
         }
 
         // What the copy does now moves it, rather than what the creature does by itself over there
-        if (_knockbackWait != null) {
-            NoteKnockbackWaitEnd(_knockbackWait, $"its own FSM ran here for '{eventName}'");
-        }
-
+        EndKnockbackWait($"its own FSM ran here for '{eventName}'");
         _runHereAwaited = BeginAnticipation();
         _runHereCatch = _runHereAwaited;
         _runHereExpiry = Time.unscaledTime + AnticipationHoldTime;

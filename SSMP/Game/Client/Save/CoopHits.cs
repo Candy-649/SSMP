@@ -322,6 +322,13 @@ internal partial class CoopHits {
     private readonly Dictionary<Recoil, (Entity.Entity Entity, ushort Tag, float Left)> _partnerPushes = new();
 
     /// <summary>
+    /// The knockbacks of the local player's hits on copies of creatures that the scene host runs that are still going,
+    /// with the entity, whose copy is drawn by its positions while it waits for the scene host to have the knockback
+    /// too, the knockback carried on top (see <see cref="OnRecoilStep"/>).
+    /// </summary>
+    private readonly Dictionary<Recoil, Entity.Entity> _carriedHere = new();
+
+    /// <summary>
     /// The state that each state machine was in before it first changed state during a hit or touch of the local
     /// player's attack, which tells whether the object answered it (see <see cref="AnswersAttack"/>).
     /// </summary>
@@ -649,6 +656,7 @@ internal partial class CoopHits {
 
         _hooks.Clear();
         _partnerPushes.Clear();
+        _carriedHere.Clear();
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= WatchKnocks;
         MonoBehaviourUtil.Instance.OnLateUpdateEvent -= ReleaseHeldReplays;
         _heldReplays.Clear();
@@ -2067,6 +2075,16 @@ internal partial class CoopHits {
         // could not. A number of zero is one that nothing is waiting on, and the scene host answers it with nothing.
         if (!SendKnockback(entity.Id, direction, magnitude, id) && id != 0) {
             entity.EndAnticipation();
+            return;
+        }
+
+        // Each step of it is carried on top of where the copy's positions put it (OnRecoilStep)
+        if (id != 0) {
+            foreach (var gone in _carriedHere.Keys.Where(other => other == null).ToList()) {
+                _carriedHere.Remove(gone);
+            }
+
+            _carriedHere[self] = entity;
         }
     }
 
@@ -2079,20 +2097,29 @@ internal partial class CoopHits {
     /// like the local player's own hit, winds the clock back up, and what it pushes is no longer the partner's.
     /// </summary>
     private void OnRecoilStep(Action<Recoil, float> orig, Recoil self, float deltaTime) {
-        // How far a knockback that is watched moves the creature at each of its steps (WatchKnock)
-        if (_knockWatches.Count > 0 && _knockWatches.TryGetValue(self, out var watch)) {
-            var before = PositionOf(self);
+        var watch = _knockWatches.Count > 0 && _knockWatches.TryGetValue(self, out var watched) ? watched : null;
+        var carrier = _carriedHere.Count > 0 && _carriedHere.TryGetValue(self, out var carrying) ? carrying : null;
+        if (watch == null && carrier == null) {
             StepRecoil(orig, self, deltaTime);
-            var moved = PositionOf(self) - before;
-            if (moved != Vector2.zero) {
-                watch.Pushed += moved;
-                watch.Steps++;
-            }
-
             return;
         }
 
+        var before = PositionOf(self);
         StepRecoil(orig, self, deltaTime);
+        var moved = PositionOf(self) - before;
+
+        // How far a knockback that is watched moves the creature at each of its steps (WatchKnock)
+        if (watch != null && moved != Vector2.zero) {
+            watch.Pushed += moved;
+            watch.Steps++;
+        }
+
+        // A knockback of the local player's hit on a copy, which the copy's positions draw it over, is carried on top
+        // of them while the scene host takes it in (Entity.CarryKnockedHere): left on the copy alone, the step was
+        // drawn over in the next frame
+        if (carrier != null && (moved != Vector2.zero && !carrier.CarryKnockedHere(moved) || !self.IsRecoiling)) {
+            _carriedHere.Remove(self);
+        }
     }
 
     /// <summary>

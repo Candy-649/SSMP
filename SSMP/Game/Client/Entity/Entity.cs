@@ -130,8 +130,8 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether something other than the interpolation was moving the copy on the last frame - something the local
-    /// player did to this entity still waiting to come back from the scene host, the copy moving by itself
-    /// (<see cref="OwnMotionComponent"/>) or a pull of the local player's own moving it - which says when that has
+    /// player did to this entity, but a knockback, still waiting to come back from the scene host, the copy moving by
+    /// itself (<see cref="OwnMotionComponent"/>) or a pull of the local player's own moving it - which says when that has
     /// just stopped and the interpolation is about to take the entity over again.
     /// </summary>
     private bool _wasMovedHere;
@@ -163,6 +163,16 @@ internal partial class Entity {
     /// game played first, or null while it is for nothing like that (see <see cref="BeginKnockbackAnticipation"/>).
     /// </summary>
     private KnockbackWait? _knockbackWait;
+
+    /// <summary>
+    /// The count of how far the local player's knockbacks pushed the creature in the scene host's game, as the last
+    /// position that said it said it, and the number that count is counted from (see
+    /// <see cref="AnticipationReport.Since"/>), or zero when the last position said none (see
+    /// <see cref="PushedSinceLastPosition"/>).
+    /// </summary>
+    private byte _pushSince;
+
+    private Vector2 _pushCount;
 
     /// <summary>
     /// How the last wait on a knockback that the local game played first ended, for the [Knock] lines (CoopHits): when,
@@ -1918,9 +1928,11 @@ internal partial class Entity {
                 // back, what the local game did is what moves it, and the interpolation stays out of the way. So it
                 // does while the copy moves by itself from how the entity set off (OwnMotionComponent), while an FSM
                 // of its that can move it runs here for something the local player did (PlayHere,
-                // RunHereMovesTheCopy), or while a pull of the local player's own moves it (NotePulledHere).
-                var movedHere = IsAnticipating() || MovesByItself() || RunHereMovesTheCopy ||
-                                Time.time < _pulledHereUntil;
+                // RunHereMovesTheCopy), or while a pull of the local player's own moves it (NotePulledHere). Not for a
+                // knockback that the local game played first, which the interpolation draws on top of the creature's
+                // own way (BeginKnockbackAnticipation)
+                var movedHere = IsAnticipating() && _knockbackWait == null || MovesByItself() ||
+                                RunHereMovesTheCopy || Time.time < _pulledHereUntil;
                 if (_wasMovedHere && !movedHere) {
                     // The interpolation did not write this object while that was going on, so it carried on
                     // predicting from where the entity stood before any of it. Picking that up again would put it back
@@ -3962,20 +3974,21 @@ internal partial class Entity {
         _outstandingAnticipation = _nextAnticipation;
         _outstandingExpiry = Time.unscaledTime + AnticipationHoldTime;
 
-        // What is waited for now is this, which moves the copy some other way if it moves it at all
-        _knockbackWait = null;
-
         return _outstandingAnticipation;
     }
 
     /// <summary>
     /// Takes the number for a knockback of the local player's that the local game has just played on the copy, as
-    /// <see cref="BeginAnticipation"/> does, and has the copy go on moving by itself while it waits for the scene host
-    /// to say it has it. The creature does not stop walking while it is knocked back: the scene host's positions show
-    /// it walking on, and from some moment on knocked back by the scene host's own game as well, which says how far
-    /// it has pushed it. What is left once that push is taken away is what the copy goes on doing
-    /// (<see cref="GoOnWhileKnockedBack"/>); standing still instead, it slid the whole way at the end of the wait, and
-    /// a creature that had walked on away from the player looked knocked back much further than the game ever does.
+    /// <see cref="BeginAnticipation"/> does, and has the copy go on the creature's own way while it waits for the scene
+    /// host to say it has it, its own knockback drawn on top (<see cref="CarryKnockedHere"/>). The creature does not
+    /// stop while it is knocked back: the scene host's positions show it going on, and from some moment on knocked back
+    /// by the scene host's own game as well, which says how far it has pushed it. With that push taken away they are
+    /// the creature's own way, which the copy follows as it follows any positions, smoothed and going on between them
+    /// (<see cref="GoOnItsOwnWay"/>). Standing still instead, it slid the whole way at the end of the wait, and a
+    /// creature that had walked on away from the player looked knocked back much further than the game ever does. Moved
+    /// on by bare steps of those positions, with its following held, it kept whatever it was still to be smoothed
+    /// toward its positions as it was hit, and slid it all at the end of the wait: a creature it had been drawn behind
+    /// as it dived at the player flew back to where it was hit (USER 11-06, "直接被拉回主机当时的位置了").
     /// </summary>
     /// <returns>The number to send with it.</returns>
     public byte BeginKnockbackAnticipation() {
@@ -3991,12 +4004,43 @@ internal partial class Entity {
     /// Stops waiting on the last number taken, for something that turned out not to be done after all.
     /// </summary>
     public void EndAnticipation() {
-        if (_knockbackWait != null) {
-            NoteKnockbackWaitEnd(_knockbackWait, "the knockback was not sent");
+        EndKnockbackWait("the knockback was not sent");
+        _outstandingAnticipation = 0;
+    }
+
+    /// <summary>
+    /// Carries the copy a step of a knockback of the local player's that the local game played first, drawn on top of
+    /// the creature's own way, while the local game waits for the scene host to have it (see
+    /// <see cref="BeginKnockbackAnticipation"/>).
+    /// </summary>
+    /// <param name="step">How far the step of the knockback moved the copy.</param>
+    /// <returns>Whether it was carried: not with no such wait.</returns>
+    public bool CarryKnockedHere(Vector2 step) {
+        if (_knockbackWait == null || Object.Client == null ||
+            !Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            return false;
         }
 
-        _outstandingAnticipation = 0;
+        interpolation.Carry(step);
+        return true;
+    }
+
+    /// <summary>
+    /// Ends the wait on a knockback that the local game played first, with the copy left drawn where it is: how far its
+    /// own knockback carried it beyond the creature's own way is smoothed away from there, like any other distance
+    /// between the copy and its positions, and the positions taken from now on are the scene host's whole ones.
+    /// </summary>
+    /// <param name="how">What ended it.</param>
+    private void EndKnockbackWait(string how) {
+        if (_knockbackWait is not { } wait) {
+            return;
+        }
+
         _knockbackWait = null;
+        NoteKnockbackWaitEnd(wait, how);
+        if (Object.Client != null && Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            interpolation.LetGoOfWhatItCarries();
+        }
     }
 
     /// <summary>
@@ -4043,9 +4087,18 @@ internal partial class Entity {
             _stamps.Add(stamp);
         }
 
+        // What still goes on here from something before it, which this number answers for as well, is waited for as
+        // long. A blow's wound comes right behind its knockback, and taken in a step later it said "I have this" for
+        // both from the start of the knockback: the player's copy, which their game had knocked back the whole way,
+        // was pulled back to where it was struck (USER 11-06, "直接被拉回主机当时的位置了")
+        var settledAt = Time.unscaledTime + Mathf.Min(settleTime, AnticipationSettleCap);
+        if (stamp.Pending != 0 && stamp.PendingSettledAt > settledAt) {
+            settledAt = stamp.PendingSettledAt;
+        }
+
         stamp.Pending = anticipation;
         stamp.PendingSinceStep = MonoBehaviourUtil.FixedStep;
-        stamp.PendingSettledAt = Time.unscaledTime + Mathf.Min(settleTime, AnticipationSettleCap);
+        stamp.PendingSettledAt = settledAt;
     }
 
     /// <summary>
@@ -4143,37 +4196,16 @@ internal partial class Entity {
     /// </summary>
     private sealed class KnockbackWait {
         /// <summary>
-        /// Whether a position of the scene host has been heard since the wait began.
-        /// </summary>
-        public bool Heard { get; set; }
-
-        /// <summary>
         /// How far the knockbacks of the local player have pushed the creature in the scene host's game since the wait
         /// began, by the positions heard.
         /// </summary>
         public Vector2 Pushed { get; set; }
 
         /// <summary>
-        /// The number the scene host's count of the push that came with the last position heard is counted from, or
-        /// zero when that position came with none (see <see cref="AnticipationReport.Since"/>).
-        /// </summary>
-        public byte PushedSince { get; set; }
-
-        /// <summary>
-        /// What that count said.
-        /// </summary>
-        public Vector2 PushedCount { get; set; }
-
-        /// <summary>
         /// Where the creature was in the scene host's game without the local player's knockbacks, by the last position
-        /// heard, or null when the copy has nothing to go on from: no position heard yet, or something else moved it.
+        /// the copy went on by, or null when there is none since the wait began or something else moved the copy.
         /// </summary>
         public Vector2? OwnFrom { get; set; }
-
-        /// <summary>
-        /// How fast the creature went by itself, by those positions.
-        /// </summary>
-        public Vector3 OwnVelocity { get; set; }
 
         /// <summary>
         /// How far the copy went on by itself meanwhile, all of it, for the [Knock] lines (CoopHits).
@@ -4186,12 +4218,10 @@ internal partial class Entity {
     /// change means nothing after it: the game that would have answered it is not the one answering now.
     /// </summary>
     private void ResetAnticipation() {
-        if (_knockbackWait != null) {
-            NoteKnockbackWaitEnd(_knockbackWait, "the entity changed hands or started again");
-        }
-
+        EndKnockbackWait("the entity changed hands or started again");
         _outstandingAnticipation = 0;
-        _knockbackWait = null;
+        _pushSince = 0;
+        _pushCount = Vector2.zero;
         _stamps.Clear();
         _wasMovedHere = false;
     }
@@ -4231,12 +4261,8 @@ internal partial class Entity {
     private bool IsAnticipating() {
         // The copy goes back to following the scene host the usual way, however much later the next position comes
         if (_outstandingAnticipation != 0 && Time.unscaledTime > _outstandingExpiry) {
-            if (_knockbackWait != null) {
-                NoteKnockbackWaitEnd(_knockbackWait, "it waited too long");
-            }
-
+            EndKnockbackWait("it waited too long");
             _outstandingAnticipation = 0;
-            _knockbackWait = null;
         }
 
         return _outstandingAnticipation != 0;
@@ -4326,6 +4352,10 @@ internal partial class Entity {
             return;
         }
 
+        // How much further the local player's knockbacks pushed the creature in the scene host's game, as it says
+        // beside this position
+        var pushed = PushedSinceLastPosition(anticipation);
+
         // While something the local player did to this entity is still on its way to the scene host and back, the
         // positions it sends were measured before it had even heard. Letting those through was the whole of the
         // problem: the interpolation went on being told the enemy was standing where it had been, and pulled it
@@ -4334,27 +4364,36 @@ internal partial class Entity {
         // with the first position taken afterwards so that the speed read out of it covers the right stretch of
         // time rather than a single tick.
         //
-        // For a knockback that the local game played first, they still say what the creature did by itself meanwhile,
-        // which the copy goes on doing (GoOnWhileKnockedBack), and the first position taken is taken from where the
-        // copy stands, going on at the speed the creature went by itself: the speed read out of the stretch of the
-        // wait would have the whole of the knockback in it, and slid the copy on past where it stops.
+        // For a knockback that the local game played first, they still say where the creature went by itself once the
+        // scene host's own push of it is taken out, and the copy follows that as it follows any positions
+        // (GoOnItsOwnWay), its own knockback drawn on top. The first position taken whole is taken from where the
+        // copy is drawn, going on at the speed the creature went by itself: the speed read out of the step to it
+        // would have the whole of the scene host's knockback in it, and slid the copy on past where it stops.
         var knockbackWait = _knockbackWait;
+        if (knockbackWait != null) {
+            knockbackWait.Pushed += pushed;
+        }
+
         if (!AcceptsWhileAnticipating(anticipation)) {
-            _positionsHeldBack += packetsCovered;
             if (knockbackWait != null) {
-                GoOnWhileKnockedBack(knockbackWait, unityPos, anticipation, packetsCovered, positionInterpolation);
+                GoOnItsOwnWay(knockbackWait, unityPos, packetsCovered, positionInterpolation);
+            } else {
+                _positionsHeldBack += packetsCovered;
             }
 
             return;
         }
 
         if (knockbackWait != null) {
-            _knockbackWait = null;
-            GoOnWhileKnockedBack(knockbackWait, unityPos, anticipation, packetsCovered, positionInterpolation);
-            NoteKnockbackWaitEnd(knockbackWait, "the scene host had it");
-            positionInterpolation.Rebase(unityPos, knockbackWait.OwnVelocity);
-            _positionsHeldBack = 0;
+            EndKnockbackWait("the scene host had it");
+            positionInterpolation.Rebase(unityPos, positionInterpolation.Velocity);
 
+            // What is left to smooth away of it is all of the slide there is, the two knockbacks apart
+            if (!_wasMovedHere) {
+                LastHandOver = (Time.time, -(Vector2) positionInterpolation.VisualOffset);
+            }
+
+            _positionsHeldBack = 0;
             return;
         }
 
@@ -4364,81 +4403,66 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Moves the copy on by what the creature did by itself, as a position of the scene host's shows it that arrived
-    /// while the local game waits on a knockback it played first (see <see cref="BeginKnockbackAnticipation"/>).
+    /// How much further the scene host says, beside a position, that the local player's knockbacks pushed the creature
+    /// in its game since the last position it said it beside (see <see cref="AnticipationReport"/>): a count that is
+    /// new since then is new all of it, and a position with none was sent while nothing of the local player's moved it
+    /// there. Kept from one position to the next whether a knockback is waited on or not, so that the first count
+    /// heard in a wait says how much of it the wait is to take out: the scene host goes on counting from the same
+    /// number for knockbacks a moment apart, and taken whole, the push of the one before would have moved the copy on.
     /// </summary>
-    /// <param name="wait">The wait.</param>
-    /// <param name="position">The position.</param>
-    /// <param name="reports">What the scene host said beside it of what each game did, or null if nothing.</param>
-    /// <param name="packetsCovered">How many packets of the scene host's the step since the last position took.</param>
-    /// <param name="interpolation">What moves the copy otherwise, which reads how fast it goes.</param>
-    private void GoOnWhileKnockedBack(
-        KnockbackWait wait,
-        Vector3 position,
-        IReadOnlyList<AnticipationReport>? reports,
-        int packetsCovered,
-        PredictiveInterpolation interpolation
-    ) {
-        AnticipationReport? report = null;
+    /// <param name="reports">What the scene host said beside the position of what each game did, or null if nothing.</param>
+    private Vector2 PushedSinceLastPosition(IReadOnlyList<AnticipationReport>? reports) {
         if (reports != null) {
-            foreach (var other in reports) {
-                if (other.Tag == RequestTag) {
-                    report = other;
-                    break;
+            foreach (var report in reports) {
+                if (report.Tag != RequestTag) {
+                    continue;
                 }
+
+                var count = new Vector2(report.PushedX, report.PushedY);
+                var pushed = report.Since == _pushSince ? count - _pushCount : count;
+                _pushSince = report.Since;
+                _pushCount = count;
+                return pushed;
             }
         }
 
-        // How far the local player's knockbacks have pushed the creature over there since the wait began. A count
-        // that is new since the last position started from nothing, and a position with none was sent while nothing of
-        // the local player's was going on there, so that nothing of theirs moved it since the last one
-        if (report is { } told) {
-            var count = new Vector2(told.PushedX, told.PushedY);
-            if (told.Since == wait.PushedSince) {
-                wait.Pushed += count - wait.PushedCount;
-            } else if (wait.Heard) {
-                wait.Pushed += count;
-            }
-
-            wait.PushedSince = told.Since;
-            wait.PushedCount = count;
-        } else {
-            wait.PushedSince = 0;
-        }
-
-        wait.Heard = true;
-
-        // What is left is what the creature did by itself, which the copy does too, unless something else moves it
-        // here: its own FSM run for the local player (RunHereMovesTheCopy), how it set off, or a pull of the local
-        // player's
-        var own = new Vector2(position.x, position.y) - wait.Pushed;
-        if (RunHereMovesTheCopy || MovesByItself() || Time.time < _pulledHereUntil) {
-            wait.OwnFrom = null;
-            return;
-        }
-
-        if (wait.OwnFrom is { } from) {
-            var step = own - from;
-            MoveCopyBy(step);
-            wait.OwnMoved += step;
-            wait.OwnVelocity = interpolation.ReadVelocity(wait.OwnVelocity, step, packetsCovered);
-        }
-
-        wait.OwnFrom = own;
+        _pushSince = 0;
+        _pushCount = Vector2.zero;
+        return Vector2.zero;
     }
 
     /// <summary>
-    /// Moves the copy by a step the way its knockback moves it (Recoil): its body if it has one in the physics, which
-    /// carries the object along on the next step of physics, and the object itself if not.
+    /// Takes a position of the scene host's that came while the local game waits on a knockback it played first, with
+    /// the scene host's own push of the creature for the local player's knockbacks taken out of it: where the creature
+    /// went by itself, which the copy follows as it follows any positions, smoothed and going on between them, with its
+    /// own knockback drawn on top (see <see cref="BeginKnockbackAnticipation"/>). Not while something else moves the
+    /// copy here: its own FSM run for the local player (RunHereMovesTheCopy), how it set off, or a pull of the local
+    /// player's.
     /// </summary>
-    private void MoveCopyBy(Vector2 step) {
-        var copy = Object.Client;
-        if (copy.activeInHierarchy && copy.TryGetComponent<Rigidbody2D>(out var body) && body.simulated) {
-            body.position += step;
+    /// <param name="wait">The wait.</param>
+    /// <param name="position">The position.</param>
+    /// <param name="packetsCovered">How many packets of the scene host's the step since the last position took.</param>
+    /// <param name="interpolation">What draws the copy by its positions.</param>
+    private void GoOnItsOwnWay(
+        KnockbackWait wait,
+        Vector3 position,
+        int packetsCovered,
+        PredictiveInterpolation interpolation
+    ) {
+        if (RunHereMovesTheCopy || MovesByItself() || Time.time < _pulledHereUntil) {
+            wait.OwnFrom = null;
+            _positionsHeldBack += packetsCovered;
             return;
         }
 
-        copy.transform.position += new Vector3(step.x, step.y, 0f);
+        var own = new Vector3(position.x - wait.Pushed.x, position.y - wait.Pushed.y, position.z);
+        if (wait.OwnFrom is { } from) {
+            wait.OwnMoved += (Vector2) own - from;
+        }
+
+        wait.OwnFrom = own;
+        interpolation.SetNewPosition(own, _positionsHeldBack + packetsCovered);
+        _positionsHeldBack = 0;
     }
 
     /// <summary>

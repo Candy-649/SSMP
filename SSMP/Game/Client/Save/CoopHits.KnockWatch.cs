@@ -108,6 +108,14 @@ internal partial class CoopHits {
         public float Furthest, Nearest, Last;
 
         /// <summary>
+        /// For a copy, how far it was drawn from where its positions put it as it was hit, which its following was still
+        /// to smooth away, and how long after the last of them, in seconds; null for no copy.
+        /// </summary>
+        public Vector2? DrawnOff;
+
+        public float DrawnAfter;
+
+        /// <summary>
         /// The state that the copy's own FSM ran in here, if one did while it was watched.
         /// </summary>
         public string? RanHere;
@@ -155,7 +163,10 @@ internal partial class CoopHits {
 
         var way = direction & 3;
         var shown = recoil.transform;
+        var interpolation = isCopy ? shown.GetComponent<SSMP.Fsm.PredictiveInterpolation>() : null;
         _knockWatches[recoil] = new KnockWatch {
+            DrawnOff = interpolation != null ? (Vector2) interpolation.VisualOffset : null,
+            DrawnAfter = interpolation != null ? interpolation.SinceLastPosition : 0f,
             Recoil = recoil,
             Entity = entity,
             Shown = shown,
@@ -284,6 +295,13 @@ internal partial class CoopHits {
     /// <param name="watch">The watch of the copy's knockback.</param>
     /// <param name="way">The name of the way the knockback went.</param>
     private static void AppendCopyKnock(StringBuilder line, KnockWatch watch, string way) {
+        if (watch.DrawnOff is { } drawnOff) {
+            line.Append(
+                $"; as it was hit it was drawn {Vector2.Dot(drawnOff, watch.Axis):0.00} {way} of where its positions " +
+                $"put it ({drawnOff.magnitude:0.00} in all), {watch.DrawnAfter * 1000f:0} ms after the last of them"
+            );
+        }
+
         if (watch.RanHere != null) {
             line.Append($"; its own FSM ran here in '{watch.RanHere}'");
         }

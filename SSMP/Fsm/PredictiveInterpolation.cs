@@ -162,11 +162,17 @@ internal class PredictiveInterpolation : MonoBehaviour {
     public Vector3 Velocity => _velocity * SpeedAfter(_reckoned);
 
     /// <summary>
-    /// How far the object is drawn from where the sender's positions have it, which the smoothing takes away.
+    /// How far the object is drawn from where the sender's positions have it, which the smoothing takes away, but for
+    /// what the local game carries it by (see <see cref="_carried"/>).
     /// </summary>
     public Vector3 VisualOffset => _visualOffset;
 
     private float _timeSinceLastPacket;
+
+    /// <summary>
+    /// How long ago the last position of the object came, in seconds of game time, for the [Knock] lines (CoopHits).
+    /// </summary>
+    public float SinceLastPosition => _timeSinceLastPacket;
     private float _lastUpdateTime;
 
     /// <summary>
@@ -200,6 +206,13 @@ internal class PredictiveInterpolation : MonoBehaviour {
     private Vector3 _visualOffset;
     private Vector3 _visualOffsetVelocity;
 
+    /// <summary>
+    /// How far something of the local game's own carries the object from where its positions put it, drawn on top of
+    /// them while the smoothing and the going on go on under it as at any other time: a knockback that the local game
+    /// played first, while it waits for the sender's game to have it too (Entity.CarryKnockedHere).
+    /// </summary>
+    private Vector3 _carried;
+
     private Transform _cachedTransform = null!;
     private uint _lastServerSequenceId;
     private bool _predictionDisabled;
@@ -222,6 +235,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         // OnEnable takes the fresh-spawn path instead of snapping to stale data
         _isInitialized = false;
         _hasNewServerData = false;
+        _carried = Vector3.zero;
         // Reset sequence tracking so a recycled container doesn't discard the
         // new player's initial packets just because their sequence IDs happen
         // to be lower than the previous player's last seen value.
@@ -238,6 +252,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         _velocity = Vector3.zero;
         _visualOffset = Vector3.zero;
         _visualOffsetVelocity = Vector3.zero;
+        _carried = Vector3.zero;
         _typicalCover = 1f;
         TookPosition();
 
@@ -293,11 +308,11 @@ internal class PredictiveInterpolation : MonoBehaviour {
             _visualOffsetVelocity.z = (_visualOffsetVelocity.z - omega * _visualOffset.z) * exp;
         }
 
-        // 3. Apply Final State - direct position set
+        // 3. Apply Final State - direct position set, with what the local game carries it by on top
         var applied = new Vector3(
-            _logicalPosition.x + _visualOffset.x,
-            _logicalPosition.y + _visualOffset.y,
-            _logicalPosition.z + _visualOffset.z
+            _logicalPosition.x + _visualOffset.x + _carried.x,
+            _logicalPosition.y + _visualOffset.y + _carried.y,
+            _logicalPosition.z + _visualOffset.z + _carried.z
         );
 
         // As far as its own speed takes it in this frame is no jump, however long the frame was
@@ -561,10 +576,10 @@ internal class PredictiveInterpolation : MonoBehaviour {
         }
 
         // 5. Visual Offset Calculation (Continuity Logic)
-        // Maintain visual continuity: VisualPos = LogicalPos + Offset.
+        // Maintain visual continuity: VisualPos = LogicalPos + Offset (+ what the local game carries it by).
         // NewOffset = OldVisualPos - NewLogicalPos (which will be newPos)
         // This ensures the object doesn't visually jump when logical position updates.
-        _visualOffset = _cachedTransform.position - newPos;
+        _visualOffset = DrawnFromItsPositions() - newPos;
 
         // FIX: Dampen velocity slightly on new packet to reduce oscillation from SmoothDamp
         _visualOffsetVelocity *= 0.9f;
@@ -606,32 +621,34 @@ internal class PredictiveInterpolation : MonoBehaviour {
     public void KeepVisualPosition() {
         EnsureTransformCached();
 
-        _visualOffset = _cachedTransform.position - _logicalPosition;
+        _visualOffset = DrawnFromItsPositions() - _logicalPosition;
         _visualOffsetVelocity = Vector3.zero;
     }
 
     /// <summary>
-    /// Works out how fast an object goes from one more step of it, the way SetNewState reads a step between two
-    /// positions of the sender: one too small to be moving at all stops it, one too long to be anything but a jump
-    /// stops it as the snap there does, and any other blends into how fast it went. The ceiling that SetNewState puts
-    /// on the count of ticks by the clock is left out: too many ticks only read the step as slower, which is the side
-    /// to err on (see <see cref="MaxServerDeltaTime"/>).
+    /// Where the object is drawn, but for what the local game carries it by (see <see cref="_carried"/>): where the
+    /// smoothing has it.
     /// </summary>
-    /// <param name="velocity">How fast it went before the step.</param>
+    private Vector3 DrawnFromItsPositions() {
+        return _cachedTransform.position - _carried;
+    }
+
+    /// <summary>
+    /// Carries the object a step further from where its positions put it, drawn on top of them (see
+    /// <see cref="_carried"/>).
+    /// </summary>
     /// <param name="step">The step.</param>
-    /// <param name="ticks">How many ticks of the sender the step took.</param>
-    public Vector3 ReadVelocity(Vector3 velocity, Vector3 step, int ticks) {
-        var stepSq = step.sqrMagnitude;
-        if (stepSq < minPredictionSpeedSq || stepSq > snapThresholdSq) {
-            return Vector3.zero;
-        }
+    public void Carry(Vector3 step) {
+        _carried += step;
+    }
 
-        var instant = step / (Mathf.Max(1, ticks) * serverDeltaTime);
-        if (instant.sqrMagnitude > maxProjectedSpeed * maxProjectedSpeed) {
-            instant = instant.normalized * maxProjectedSpeed;
-        }
-
-        return Vector3.Lerp(velocity, instant, velocityBlendFactor);
+    /// <summary>
+    /// Stops carrying the object (see <see cref="Carry"/>), and leaves it drawn where it is: how far it was carried is
+    /// smoothed away from there like any other distance between where it is drawn and where its positions have it.
+    /// </summary>
+    public void LetGoOfWhatItCarries() {
+        _visualOffset += _carried;
+        _carried = Vector3.zero;
     }
 
     /// <summary>
@@ -639,9 +656,9 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// object is standing as what it looks like, so that the distance between the two is smoothed away.
     ///
     /// For the end of the wait on a knockback that the local game played first (Entity.UpdatePosition). The copy went
-    /// on moving by itself meanwhile, the way the sender's positions showed the creature going without the knockback,
-    /// and that is the velocity it goes on at. Worked out the usual way instead, from the last position taken before
-    /// the wait, it would have the whole of the knockback in it and slide the copy on past where it stops.
+    /// on meanwhile by the sender's positions with the knockback over there taken out of them, the way the creature
+    /// went by itself, and that is the velocity it goes on at. Read from this position instead, the step to it would
+    /// have the whole of that knockback in it and slide the copy on past where it stops.
     /// </summary>
     /// <param name="position">The position.</param>
     /// <param name="velocity">How fast and which way the object goes on from it.</param>
@@ -652,7 +669,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
 
         // Further from where the copy stands than smoothing can carry it in time is a jump either way
         if (!_isInitialized || _predictionDisabled ||
-            (position - _cachedTransform.position).sqrMagnitude > snapThresholdSq) {
+            (position - DrawnFromItsPositions()).sqrMagnitude > snapThresholdSq) {
             _isInitialized = true;
             ForceSnap(position);
             return;
@@ -662,7 +679,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
             velocity = velocity.normalized * maxProjectedSpeed;
         }
 
-        _visualOffset = _cachedTransform.position - position;
+        _visualOffset = DrawnFromItsPositions() - position;
         _visualOffsetVelocity = Vector3.zero;
         _velocity = velocity;
 
@@ -734,14 +751,16 @@ internal class PredictiveInterpolation : MonoBehaviour {
         }
 
         var position = _logicalPosition;
-        if ((position - _cachedTransform.position).sqrMagnitude < BigMoveDistance * BigMoveDistance) {
+        if ((position - DrawnFromItsPositions()).sqrMagnitude < BigMoveDistance * BigMoveDistance) {
             return false;
         }
 
-        SayItMovedALongWay("dropping what the smoothing had left of a step", _cachedTransform.position, position);
+        SayItMovedALongWay(
+            "dropping what the smoothing had left of a step", _cachedTransform.position, position + _carried
+        );
         _visualOffset = Vector3.zero;
         _visualOffsetVelocity = Vector3.zero;
-        _cachedTransform.position = position;
+        _cachedTransform.position = position + _carried;
         return true;
     }
 
@@ -752,7 +771,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
     private void ForceSnap(Vector3 position) {
         EnsureTransformCached();
 
-        SayItMovedALongWay("being put straight there", _cachedTransform.position, position);
+        SayItMovedALongWay("being put straight there", _cachedTransform.position, position + _carried);
 
         _lastServerPosition = position;
         _logicalPosition = position;
@@ -764,7 +783,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         TookPosition();
         _lastUpdateTime = Time.time;
 
-        _cachedTransform.position = position;
+        _cachedTransform.position = position + _carried;
     }
 
     /// <summary>
@@ -775,7 +794,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         EnsureTransformCached();
         _predictionDisabled = !shouldEnable;
         if (_predictionDisabled) {
-            ForceSnap(_cachedTransform.position);
+            ForceSnap(DrawnFromItsPositions());
         }
     }
 
@@ -886,7 +905,7 @@ internal class PredictiveInterpolation : MonoBehaviour {
         }
 
         _coasted = false;
-        _quietLargestCorrection = Mathf.Max(_quietLargestCorrection, (_cachedTransform.position - newPos).magnitude);
+        _quietLargestCorrection = Mathf.Max(_quietLargestCorrection, (DrawnFromItsPositions() - newPos).magnitude);
         if (snapped) {
             _quietSnaps++;
         }
