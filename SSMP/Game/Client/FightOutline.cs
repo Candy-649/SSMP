@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using SSMP.Game.Client.Entity.Component;
+using SSMP.Game.Client.Save;
 using SSMP.Game.Settings;
 using SSMP.Ui;
 using SSMP.Util;
@@ -28,11 +29,19 @@ namespace SSMP.Game.Client;
 /// other player's tools had shown here only as copies, which touch the creature where this game has it, if at all,
 /// and their hits started no fight ("道具命中怪没有成功唤出高亮").
 ///
-/// The fight is over as soon as the creatures that were hit are all dead or gone, or the room changes, and not by any
-/// time: at first it went on for 8 seconds after any last hit, which the user found too long ("感觉8秒后有点久了") and
-/// chose that it ends as the creatures die ("打死就灭"). A time without a hit that was added to that put it out in the
-/// middle of fights, while a creature was out of reach and as a player got back up after a death ("被打死了复活之后
-/// 高亮会消失，但是其实一直在boss战里", "中间boss没死高亮也消失了一会儿"), and it went (USER 11-05 "删掉 5 秒，打死才灭").
+/// The fight is over as the creatures that were hit are all dead or gone, or the room changes. A boss keeps it going for
+/// as long as it lives, told apart the way its bar of health is (EnemyHealthBars.IsBoss). Every other creature stops
+/// keeping it going once <see cref="QuietTime"/> seconds went by in which no player's attack reached a creature and no
+/// creature's attack hurt this player (USER 11-06 "那个高光改回小怪或者精英怪5秒没有攻击或者被攻击就按掉"): with deaths
+/// alone, a creature of the room that a player hit once and left alive kept it lit after the boss of the fight was
+/// beaten. How another player is hurt is not known here, so only this player's hurts count, and that player's game
+/// counts theirs.
+///
+/// At first it went on for 8 seconds after any last hit, which the user found too long ("感觉8秒后有点久了") and chose
+/// that it ends as the creatures die ("打死就灭"). A time without a hit put it out in the middle of boss fights, while
+/// the boss was out of reach and as a player got back up after a death ("被打死了复活之后高亮会消失，但是其实一直在boss战
+/// 里", "中间boss没死高亮也消失了一会儿"), which bosses have been kept out of since; the time went for every creature
+/// (USER 11-05 "删掉 5 秒，打死才灭") and came back for those that are no boss, counting attacks either way.
 /// </summary>
 internal class FightOutline {
     /// <summary>
@@ -57,10 +66,23 @@ internal class FightOutline {
     private OwnFigureOutline? _outline;
 
     /// <summary>
-    /// The creatures in this room that a player hit, for as long as they keep the fight going: each with its name, the
-    /// time of the game of the last hit on it, and what struck that hit, if this game knows.
+    /// How long a fight goes on without an attack either way before the creatures in it that are no boss stop keeping
+    /// it going, in seconds of the game: no attack of a player reaching a creature, and no attack of a creature hurting
+    /// this player.
+    /// </summary>
+    private const float QuietTime = 5f;
+
+    /// <summary>
+    /// The creatures in this room that a player hit, for as long as they keep the fight going: each with its name,
+    /// whether it is a boss, the time of the game of the last hit on it, and what struck that hit, if this game knows.
     /// </summary>
     private readonly List<Hit> _hits = [];
+
+    /// <summary>
+    /// The time of the game of the last attack of the fight either way: an attack of a player that reached a creature,
+    /// or an attack of a creature that hurt this player.
+    /// </summary>
+    private float _lastAttackAt;
 
     /// <summary>
     /// Whether a fight was on as this game last looked, for the log to say as one starts and ends.
@@ -84,6 +106,7 @@ internal class FightOutline {
         MonoBehaviourUtil.Instance.OnUpdateEvent += OnUpdate;
         SceneManager.activeSceneChanged += OnSceneChanged;
         HealthManagerComponent.DamageLanded += NoteCreatureHit;
+        CoopSave.HurtByCreature += NoteHurtByCreature;
     }
 
     /// <summary>
@@ -93,6 +116,7 @@ internal class FightOutline {
         MonoBehaviourUtil.Instance.OnUpdateEvent -= OnUpdate;
         SceneManager.activeSceneChanged -= OnSceneChanged;
         HealthManagerComponent.DamageLanded -= NoteCreatureHit;
+        CoopSave.HurtByCreature -= NoteHurtByCreature;
         Remove();
         _hits.Clear();
         _fightWasOn = false;
@@ -108,6 +132,7 @@ internal class FightOutline {
             return;
         }
 
+        _lastAttackAt = Time.time;
         for (var i = 0; i < _hits.Count; i++) {
             if (_hits[i].Creature == creature) {
                 _hits[i].Time = Time.time;
@@ -116,7 +141,15 @@ internal class FightOutline {
             }
         }
 
-        _hits.Add(new Hit(creature, creature.name, Time.time, source));
+        _hits.Add(new Hit(creature, creature.name, EnemyHealthBars.IsBoss(creature), Time.time, source));
+    }
+
+    /// <summary>
+    /// Notes that an attack of a creature hurt this player, which keeps a fight that is on going as an attack of a
+    /// player that reaches a creature does. It starts none.
+    /// </summary>
+    private void NoteHurtByCreature() {
+        _lastAttackAt = Time.time;
     }
 
     /// <summary>
@@ -159,10 +192,12 @@ internal class FightOutline {
     }
 
     /// <summary>
-    /// Whether a fight is on: a creature that a player hit is still alive and here. The creatures that no longer keep
-    /// the fight going are let go.
+    /// Whether a fight is on: a creature that a player hit is still alive and here, and it is a boss or the fight saw
+    /// an attack either way less than <see cref="QuietTime"/> seconds ago. The creatures that no longer keep the fight
+    /// going are let go.
     /// </summary>
     private bool IsFightOn() {
+        var quiet = Time.time - _lastAttackAt >= QuietTime;
         for (var i = _hits.Count - 1; i >= 0; i--) {
             var hit = _hits[i];
             var creature = hit.Creature;
@@ -173,6 +208,8 @@ internal class FightOutline {
                 why = "died";
             } else if (!creature.gameObject.activeInHierarchy) {
                 why = "was switched off";
+            } else if (!hit.IsBoss && quiet) {
+                why = $"is no boss, and {QuietTime:0} s went by without an attack either way";
             }
 
             if (why != null) {
@@ -196,7 +233,7 @@ internal class FightOutline {
         }
 
         var source = last.Source;
-        return $"[Outline] A fight is on: '{last.Name}' was hit " +
+        return $"[Outline] A fight is on: '{last.Name}'{(last.IsBoss ? ", a boss," : "")} was hit " +
                (source != null ? $"by '{source.name}'" : "by a player, as this game heard of it");
     }
 
@@ -239,7 +276,7 @@ internal class FightOutline {
     /// <summary>
     /// A creature that a player hit, while it keeps the fight going.
     /// </summary>
-    private class Hit(HealthManager creature, string name, float time, GameObject? source) {
+    private class Hit(HealthManager creature, string name, bool isBoss, float time, GameObject? source) {
         /// <summary>
         /// The creature.
         /// </summary>
@@ -249,6 +286,11 @@ internal class FightOutline {
         /// Its name, for the log once it is gone.
         /// </summary>
         public string Name { get; } = name;
+
+        /// <summary>
+        /// Whether it is a boss, which keeps the fight going for as long as it lives.
+        /// </summary>
+        public bool IsBoss { get; } = isBoss;
 
         /// <summary>
         /// The time of the game of the last hit on it.

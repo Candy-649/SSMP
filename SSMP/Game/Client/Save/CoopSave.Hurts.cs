@@ -28,6 +28,13 @@ internal partial class CoopSave {
     private static int _hurtLinesThisMinute;
 
     /// <summary>
+    /// Raised as an attack of a creature, or an explosion, takes health from the local player: the kinds of harm that
+    /// the game does not answer by putting the player back at a safe place (see IsTheRoomsHarm). It keeps the fight of
+    /// the outline of the player's own hero going (Game.Client.FightOutline).
+    /// </summary>
+    internal static event Action? HurtByCreature;
+
+    /// <summary>
     /// Writes down a hurt of the local player that took health, once the game is done with it.
     /// </summary>
     /// <param name="hero">The hero controller.</param>
@@ -56,6 +63,11 @@ internal partial class CoopSave {
         var healthAfter = playerData.health;
         if (healthAfter >= healthBefore) {
             return;
+        }
+
+        if (hazardType is GlobalEnums.HazardType.NON_HAZARD or GlobalEnums.HazardType.ENEMY or
+            GlobalEnums.HazardType.EXPLOSION) {
+            HurtByCreature?.Invoke();
         }
 
         var now = Time.unscaledTime;
