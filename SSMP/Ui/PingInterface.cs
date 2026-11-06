@@ -18,14 +18,17 @@ internal class PingInterface {
     private const float ScreenBorderMargin = 20f;
 
     /// <summary>
-    /// Where the text starts, from the left of the screen: just right of the icon.
+    /// The margin between the icon and the text.
     /// </summary>
-    private const float TextLeft = 40f;
+    private const float IconTextMargin = 25f;
 
     /// <summary>
-    /// The maximum width of the text component, which holds the round trip and the share of packets lost.
+    /// The width of the text component. Its text starts at its left edge and runs on past its right edge, as the share
+    /// of packets lost after the round trip does: a wider box placed further right puts its left edge elsewhere on a
+    /// screen that is not 16:9, as the box is placed by a share of the screen's width and sized in fixed units, and on
+    /// a 3:2 screen it went over the icon.
     /// </summary>
-    private const float TextWidth = 200f;
+    private const float TextWidth = 50f;
 
     /// <summary>
     /// The maximum height of the text component.
@@ -126,7 +129,8 @@ internal class PingInterface {
 
         var pingTextComponent = new TextComponent(
             pingComponentGroup,
-            new Vector2(TextLeft + TextWidth / 2f, 1080f - ScreenBorderMargin),
+            new Vector2(
+                ScreenBorderMargin + IconSize + IconTextMargin, 1080f - ScreenBorderMargin),
             new Vector2(TextWidth, TextHeight),
             "",
             UiManager.NormalFontSize,
