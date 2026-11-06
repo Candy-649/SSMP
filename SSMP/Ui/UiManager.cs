@@ -223,6 +223,15 @@ internal class UiManager : IUiManager {
     private PingInterface _pingInterface = null!;
 
     /// <summary>
+    /// Has the ping display of the player who hosts show what the client that loses the most of what it sends to their
+    /// server loses (see PingInterface.HostedLoss).
+    /// </summary>
+    /// <param name="hostedLoss">That share, or null while no server of this game runs.</param>
+    public void SetHostedLoss(Func<float?> hostedLoss) {
+        _pingInterface.HostedLoss = hostedLoss;
+    }
+
+    /// <summary>
     /// The line in game that offers a two-player save with the other player.
     /// </summary>
     private CoopPromptInterface _coopPromptInterface = null!;

@@ -31,6 +31,11 @@ internal class GameManager {
     private readonly ModServerManager _serverManager;
 
     /// <summary>
+    /// The server of this game, which runs while its player hosts.
+    /// </summary>
+    private readonly NetServer _netServer;
+
+    /// <summary>
     /// The connection of this game to a server, its own or another player's.
     /// </summary>
     private readonly NetClient _netClient;
@@ -46,6 +51,7 @@ internal class GameManager {
         var netClient = new NetClient(packetManager);
         _netClient = netClient;
         var netServer = new NetServer(packetManager);
+        _netServer = netServer;
 
         var clientServerSettings = new ServerSettings();
         if (modSettings.ServerSettings == null) {
@@ -95,6 +101,10 @@ internal class GameManager {
         }
 
         _uiManager.Initialize();
+
+        // The player who hosts sees how much the client that loses the most of what it sends to their server loses,
+        // since their own game is linked to its own server
+        _uiManager.SetHostedLoss(() => _netServer.IsStarted ? _netServer.WorstLossShare() : null);
         _serverManager.Initialize();
         _clientManager.Initialize(_serverManager);
 

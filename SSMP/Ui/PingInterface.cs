@@ -18,14 +18,14 @@ internal class PingInterface {
     private const float ScreenBorderMargin = 20f;
 
     /// <summary>
-    /// The margin between the icon and the text.
+    /// Where the text starts, from the left of the screen: just right of the icon.
     /// </summary>
-    private const float IconTextMargin = 25f;
+    private const float TextLeft = 40f;
 
     /// <summary>
-    /// The maximum width of the text component.
+    /// The maximum width of the text component, which holds the round trip and the share of packets lost.
     /// </summary>
-    private const float TextWidth = 50f;
+    private const float TextWidth = 200f;
 
     /// <summary>
     /// The maximum height of the text component.
@@ -55,9 +55,34 @@ internal class PingInterface {
     private const int QuietShownStep = 100;
 
     /// <summary>
+    /// How often the share of packets lost is read, in seconds: it is of the last few seconds, and read every frame it
+    /// would only flicker.
+    /// </summary>
+    private const float LossReadEvery = 0.5f;
+
+    /// <summary>
     /// The number the display shows, so that its text is made anew only when it changes.
     /// </summary>
     private int _shown = -1;
+
+    /// <summary>
+    /// The share of packets lost that the display shows, in percent, the one read last, and when it is read next.
+    /// </summary>
+    private int _shownLoss = -1;
+
+    /// <inheritdoc cref="_shownLoss" />
+    private int _loss;
+
+    /// <inheritdoc cref="_shownLoss" />
+    private float _lossReadAt;
+
+    /// <summary>
+    /// For the player who hosts, the largest share of what one of the clients sends to their server that does not
+    /// arrive, or null while no server of this game runs (USER 11-06 "主机要不然不显示，或者显示丢包率最高的", "不需要带
+    /// 名字"). Their own game is linked to its own server and loses nothing; another player's game shows what it loses
+    /// of what comes from the server.
+    /// </summary>
+    public Func<float?>? HostedLoss { get; set; }
 
     /// <summary>
     /// The component group for the ping display.
@@ -101,15 +126,15 @@ internal class PingInterface {
 
         var pingTextComponent = new TextComponent(
             pingComponentGroup,
-            new Vector2(
-                ScreenBorderMargin + IconSize + IconTextMargin, 1080f - ScreenBorderMargin),
+            new Vector2(TextLeft + TextWidth / 2f, 1080f - ScreenBorderMargin),
             new Vector2(TextWidth, TextHeight),
             "",
             UiManager.NormalFontSize,
             alignment: TextAnchor.MiddleLeft
         );
 
-        // Register on update so we can set the text to the latest round trip, or to how long the link has been held up
+        // Register on update so we can set the text to the latest round trip, or to how long the link has been held up,
+        // and to the share of packets lost
         MonoBehaviourUtil.Instance.OnUpdateEvent += () => {
             if (!netClient.IsConnected) {
                 return;
@@ -122,10 +147,17 @@ internal class PingInterface {
                 shown = System.Math.Max(shown, (int) (quiet / QuietShownStep) * QuietShownStep);
             }
 
+            var now = Time.unscaledTime;
+            if (now >= _lossReadAt) {
+                _lossReadAt = now + LossReadEvery;
+                _loss = Mathf.RoundToInt((HostedLoss?.Invoke() ?? updateManager.LossShare) * 100f);
+            }
+
             // Made into text only when it changes: text made every frame is garbage every frame
-            if (shown != _shown) {
+            if (shown != _shown || _loss != _shownLoss) {
                 _shown = shown;
-                pingTextComponent.SetText(shown.ToString());
+                _shownLoss = _loss;
+                pingTextComponent.SetText($"{shown}  {Lang.Pick("loss", "丢包")} {_loss}%");
             }
         };
     }

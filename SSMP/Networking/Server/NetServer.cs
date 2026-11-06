@@ -562,6 +562,19 @@ internal class NetServer : INetServer {
     }
 
     /// <summary>
+    /// The largest share of the packets that one of the clients sent over the last few seconds that did not arrive here
+    /// (see UpdateManager.LossShare), for the ping display of the player whose server this is.
+    /// </summary>
+    public float WorstLossShare() {
+        var worst = 0f;
+        foreach (var pair in _clientsById) {
+            worst = System.Math.Max(worst, pair.Value.UpdateManager.LossShare);
+        }
+
+        return worst;
+    }
+
+    /// <summary>
     /// Execute a given action for the update manager of all connected clients.
     /// </summary>
     /// <param name="dataAction">The action to execute with each update manager.</param>

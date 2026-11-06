@@ -525,6 +525,40 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     private ushort _remoteSequence;
 
     /// <summary>
+    /// How many stretches of time what arrives is counted in for <see cref="LossShare"/>, and how long each is, in
+    /// seconds: the share is of the last few seconds, which a stretch that ends lets go of.
+    /// </summary>
+    private const int LossStretches = 10;
+
+    /// <inheritdoc cref="LossStretches" />
+    private const double LossStretchSeconds = 0.5;
+
+    /// <summary>
+    /// How many packets the other side sent in each stretch of time, by their numbers, and how many of them arrived
+    /// (see <see cref="CountArrival"/>), the stretch that goes on now at <see cref="_lossStretch"/>.
+    /// </summary>
+    private readonly int[] _lossSent = new int[LossStretches];
+
+    /// <inheritdoc cref="_lossSent" />
+    private readonly int[] _lossArrived = new int[LossStretches];
+
+    /// <inheritdoc cref="_lossSent" />
+    private int _lossStretch;
+
+    /// <summary>
+    /// When the stretch of time that goes on now began.
+    /// </summary>
+    private DateTime _lossStretchStart;
+
+    /// <summary>
+    /// The number of the newest packet that arrived, which the next one that arrives counts from, and whether any did.
+    /// </summary>
+    private ushort _lossNewest;
+
+    /// <inheritdoc cref="_lossNewest" />
+    private bool _lossCounting;
+
+    /// <summary>
     /// Whether this update manager is actually updating and sending packets.
     /// </summary>
     private bool _isUpdating;
@@ -740,6 +774,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
         var gap = (now - _lastReceiveTime).TotalSeconds;
         _lastReceiveTime = now;
         _timeoutGraceTold = false;
+        CountArrival(packet.Sequence, now);
         if (gap >= ReceiveGapTold) {
             Logger.Info($"Packets arrive again after {gap:F1}s in which none did");
             try {
@@ -1469,6 +1504,79 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     }
 
     /// <summary>
+    /// What share of the packets that the other side sent over the last few seconds did not arrive, from 0 to 1, by the
+    /// numbers they carry (USER 11-06 "丢包率可不可以在左上角显示"). Every transport numbers its packets, and the other
+    /// side sends many times a second whether it has anything to say or not, so a number that is skipped is a packet
+    /// that got lost. Nothing while nothing arrives: how long that has been is what the ping display shows then.
+    /// </summary>
+    public float LossShare {
+        get {
+            lock (Lock) {
+                MoveLossStretches(DateTime.UtcNow);
+
+                var sent = 0;
+                var arrived = 0;
+                for (var i = 0; i < LossStretches; i++) {
+                    sent += _lossSent[i];
+                    arrived += _lossArrived[i];
+                }
+
+                return sent == 0 ? 0f : System.Math.Max(0f, 1f - (float) arrived / sent);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Counts a packet that arrived for <see cref="LossShare"/>: the numbers that the other side sent since the newest
+    /// that arrived before, and this one. One older than that, which came after newer ones, was counted as sent with
+    /// them, and now as arrived.
+    /// </summary>
+    /// <param name="sequence">The number of the packet.</param>
+    /// <param name="now">When it arrived.</param>
+    private void CountArrival(ushort sequence, DateTime now) {
+        lock (Lock) {
+            MoveLossStretches(now);
+
+            if (!_lossCounting) {
+                _lossCounting = true;
+                _lossNewest = sequence;
+                _lossSent[_lossStretch]++;
+                _lossArrived[_lossStretch]++;
+                return;
+            }
+
+            if (IsSequenceGreaterThan(sequence, _lossNewest)) {
+                _lossSent[_lossStretch] += (ushort) (sequence - _lossNewest);
+                _lossNewest = sequence;
+            }
+
+            _lossArrived[_lossStretch]++;
+        }
+    }
+
+    /// <summary>
+    /// Goes on to the stretch of time that goes on at the given time, letting go of what the stretches that ended
+    /// more than a few seconds before it counted.
+    /// </summary>
+    private void MoveLossStretches(DateTime now) {
+        var elapsed = (now - _lossStretchStart).TotalSeconds;
+        if (elapsed < LossStretchSeconds) {
+            return;
+        }
+
+        var moves = elapsed >= LossStretches * LossStretchSeconds
+            ? LossStretches
+            : (int) (elapsed / LossStretchSeconds);
+        for (var i = 0; i < moves; i++) {
+            _lossStretch = (_lossStretch + 1) % LossStretches;
+            _lossSent[_lossStretch] = 0;
+            _lossArrived[_lossStretch] = 0;
+        }
+
+        _lossStretchStart = moves == LossStretches ? now : _lossStretchStart.AddSeconds(moves * LossStretchSeconds);
+    }
+
+    /// <summary>
     /// Resets the update manager state, clearing queues and sequences.
     /// </summary>
     public void Reset() {
@@ -1481,6 +1589,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
             _receivedSequences?.Clear();
             _localSequence = 0;
             _remoteSequence = 0;
+
+            // A new connection numbers its packets from 0 again
+            Array.Clear(_lossSent, 0, LossStretches);
+            Array.Clear(_lossArrived, 0, LossStretches);
+            _lossCounting = false;
             CurrentUpdatePacket = new TOutgoing();
 
             // A new connection numbers its packets from 0 again, which the last one's must not be taken for
