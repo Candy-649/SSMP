@@ -279,6 +279,7 @@ internal partial class CoopSave {
         RegisterRescueHooks();
         RegisterRoomMixHooks();
         RegisterLavaDeathHooks();
+        RegisterMaggotHooks();
         RegisterArrivalHooks();
         RegisterTrapdoorHooks();
         RegisterPrisonCaptureHooks();
@@ -1170,6 +1171,9 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.StartPick:
                 OnStartPick(player, update);
+                break;
+            case CoopSaveUpdateKind.Maggoted:
+                OnMaggoted(player, update);
                 break;
             case CoopSaveUpdateKind.LavaChase:
                 OnLavaChase(player, update);

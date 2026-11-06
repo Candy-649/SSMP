@@ -869,5 +869,12 @@ internal enum CoopSaveUpdateKind : byte {
     /// state it started in. The scene host sends it as the object picks and to whoever walks in later; the other games
     /// start theirs that way instead of picking.
     /// </summary>
-    StartPick
+    StartPick,
+
+    /// <summary>
+    /// Whether the sender is maggoted in their game, which <see cref="CoopSaveUpdate.PartCount"/> says, 1 or 0: sent to the
+    /// members in their room as it changes, and to a member who comes into the room while they are (see
+    /// CoopSave.Maggots).
+    /// </summary>
+    Maggoted
 }

@@ -673,10 +673,12 @@ internal partial class CoopSave {
 
     /// <summary>
     /// A player left the room: a ring that they held here is let go for them, as nothing comes of it from their game
-    /// any more.
+    /// any more, and their character stops showing their maggots.
     /// </summary>
     /// <param name="player">The player.</param>
     internal void OnPlayerLeaveScene(ClientPlayerData player) {
+        HideMaggotsOf(player);
+
         try {
             ForgetRingHoldsOf(player.Id, player.Username);
         } catch (Exception e) {
