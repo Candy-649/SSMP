@@ -647,17 +647,8 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// smoothed away from there like any other distance between where it is drawn and where its positions have it.
     /// </summary>
     public void LetGoOfWhatItCarries() {
-        LetGoOf(_carried);
-    }
-
-    /// <summary>
-    /// Stops carrying the object part of the way it is carried (see <see cref="Carry"/>), and leaves it drawn where it
-    /// is, as <see cref="LetGoOfWhatItCarries"/> does with all of it.
-    /// </summary>
-    /// <param name="part">The part.</param>
-    public void LetGoOf(Vector3 part) {
-        _visualOffset += part;
-        _carried -= part;
+        _visualOffset += _carried;
+        _carried = Vector3.zero;
     }
 
     /// <summary>

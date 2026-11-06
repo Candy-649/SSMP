@@ -166,16 +166,28 @@ internal partial class Entity {
 
     /// <summary>
     /// The number of the knockback of the local player's whose landing in the scene host's game the copy was last sent
-    /// to, in the wait on a knockback, or zero (see <see cref="GoOnWhileKnockedBack"/>).
+    /// to, in the wait on a knockback, or zero (see <see cref="TakeWhileKnockedBack"/>).
     /// </summary>
     private byte _landedFor;
 
     /// <summary>
-    /// How far each knockback of the local player's in the wait carries the copy on top of where its positions put it,
-    /// by its number, oldest first (see <see cref="CarryKnockedHere"/>): sent to where one of them lands, the copy goes
-    /// there with those after it still carried.
+    /// Whether the copy's own knockback, of the latest knockback of the local player's in the wait, still plays here
+    /// (see <see cref="BeginKnockbackAnticipation"/>). What the scene host says meanwhile waits until it is over.
     /// </summary>
-    private readonly List<(byte Number, Vector2 Carried)> _carriedFor = [];
+    private bool _knockedHere;
+
+    /// <summary>
+    /// Where the scene host said the latest knockback of the local player's lands, and when that was heard, in game
+    /// time, heard while the copy's own knockback still played; or null (see <see cref="KnockedHereOver"/>).
+    /// </summary>
+    private (Vector3 At, float HeardAt)? _landingDue;
+
+    /// <summary>
+    /// The last position of the scene host's that had the whole of what the local player did in it, heard while the
+    /// copy's own knockback still played; or null. The wait is over once that knockback is (see
+    /// <see cref="KnockedHereOver"/>).
+    /// </summary>
+    private Vector3? _wholeDue;
 
     /// <summary>
     /// How the last wait on a knockback that the local game played first ended, for the [Knock] lines (CoopHits): when,
@@ -185,9 +197,10 @@ internal partial class Entity {
 
     /// <summary>
     /// When the copy was last sent to where the scene host's game said a knockback of the local player's lands, in
-    /// game time, and how far that was from where the copy was drawn, for the [Knock] lines (CoopHits).
+    /// game time, how far that was from where the copy was drawn, and when it was heard, for the [Knock] lines
+    /// (CoopHits): before it was sent there when the copy's own knockback still played.
     /// </summary>
-    public (float At, Vector2 Moved)? LastLanding { get; private set; }
+    public (float At, Vector2 Moved, float HeardAt)? LastLanding { get; private set; }
 
     /// <summary>
     /// When the copy last went back to following the scene host's positions after the local game had moved it, in game
@@ -2078,7 +2091,8 @@ internal partial class Entity {
                 // then not at all: nobody can still be waiting on it by then, since waiting gives up long before.
                 // Also, from the moment a knockback of a player's starts here, where it lands, beside every position
                 // while it goes on: what is sent meanwhile has some of its push in it, and the copy of that player's
-                // game goes to the landing at once rather than waiting the knockback out (GoOnWhileKnockedBack)
+                // game goes to the landing as soon as its own knockback has played out, rather than waiting this one out
+                // (TakeWhileKnockedBack)
                 if (_stamps.Count > 0) {
                     var reports = new List<AnticipationReport>(_stamps.Count);
                     foreach (var stamp in _stamps) {
@@ -4007,25 +4021,101 @@ internal partial class Entity {
     /// sent before it heard of the knockback, with nothing of it in it, and the copy follows that as it follows any
     /// positions, smoothed and going on between them, its own knockback drawn on top (<see cref="CarryKnockedHere"/>):
     /// the creature does not stop while it is knocked back. Told where the scene host's knockback lands, the copy goes
-    /// there smoothly, and what is sent while that knockback goes on, with some of its push in it, waits until it is over
-    /// (<see cref="GoOnWhileKnockedBack"/>). USER 11-06: "主机收到立刻回话，带着她那边开始击退的位置，然后我这边按照这个
-    /// 位置把落点算出来，平滑挪到那个位置上"; the scene host's game works the landing out, as it knows its own knockback.
-    /// That replaced the count of how far the scene host had pushed the creature, which the copy took out of every
-    /// position (71483e3, 5f77ed7): a knockback that took the creature over an edge in one game and not in the other was
-    /// found out only once the scene host's knockback was over ("你是不是把地形想得太简单了").
+    /// there smoothly once its own knockback has played out, and what is sent while the scene host's goes on, with some
+    /// of its push in it, waits until it is over (<see cref="TakeWhileKnockedBack"/>). USER 11-06: "主机收到立刻回话，
+    /// 带着她那边开始击退的位置，然后我这边按照这个位置把落点算出来，平滑挪到那个位置上"; the scene host's game works the
+    /// landing out, as it knows its own knockback. That replaced the count of how far the scene host had pushed the
+    /// creature, which the copy took out of every position (71483e3, 5f77ed7): a knockback that took the creature over an
+    /// edge in one game and not in the other was found out only once the scene host's knockback was over
+    /// ("你是不是把地形想得太简单了").
     /// </summary>
     /// <returns>The number to send with it.</returns>
     public byte BeginKnockbackAnticipation() {
-        // A knockback in the middle of the wait on another goes on from where that one has got to
+        // The new hit cuts the copy's own knockback short, as it cuts the creature's short over there: what the scene
+        // host already had the whole of is taken now
+        if (_wholeDue is { } whole && Object.Client != null &&
+            Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            _outstandingAnticipation = 0;
+            HandOverAt(whole, "the scene host had it, as the next knockback cut the copy's own short", interpolation);
+        }
+
+        // A knockback in the middle of the wait on another goes on from where that one has got to. Where the one before
+        // it lands over there is not where it ends, as the new one stops it there as it did here
         var goesOn = IsAnticipating() && _knockbackWaits;
         var anticipation = BeginAnticipation();
         _knockbackWaits = true;
+        _knockedHere = true;
+        _landingDue = null;
         if (!goesOn) {
             _landedFor = 0;
-            _carriedFor.Clear();
         }
 
         return anticipation;
+    }
+
+    /// <summary>
+    /// Notes that the copy's own knockback of the latest knockback of the local player's in the wait has played out
+    /// (CoopHits.OnRecoilStep), and takes what the scene host said meanwhile: the copy goes to where its knockback lands,
+    /// or follows its positions again if it has the whole of it by now. USER 11-06, "我这边先演完击退再挪": taken as soon
+    /// as it came, where the scene host's knockback lands cut the copy's own knockback short when it came first, and
+    /// the copy was smoothed the rest of the way, slower than any knockback.
+    /// </summary>
+    public void KnockedHereOver() {
+        if (!_knockedHere) {
+            return;
+        }
+
+        _knockedHere = false;
+        if (Object.Client == null || !Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
+            return;
+        }
+
+        if (_wholeDue is { } whole) {
+            _outstandingAnticipation = 0;
+            HandOverAt(whole, "the scene host had it, once the copy's own knockback had played out", interpolation);
+            return;
+        }
+
+        if (_landingDue is { } landing) {
+            _landingDue = null;
+            Land(landing.At, landing.HeardAt, interpolation);
+        }
+    }
+
+    /// <summary>
+    /// Sends the copy to where the scene host said the latest knockback of the local player's lands in its game,
+    /// smoothly from where it is drawn and going on the way it went, with nothing of its own knockback carried any more:
+    /// the landing has the whole of it (see <see cref="TakeWhileKnockedBack"/>).
+    /// </summary>
+    /// <param name="landing">Where it lands.</param>
+    /// <param name="heardAt">When that was heard, in game time.</param>
+    /// <param name="interpolation">What draws the copy by its positions.</param>
+    private void Land(Vector3 landing, float heardAt, PredictiveInterpolation interpolation) {
+        _landedFor = _outstandingAnticipation;
+        interpolation.LetGoOfWhatItCarries();
+        interpolation.Rebase(landing, interpolation.Velocity);
+        LastLanding = (Time.time, -(Vector2) interpolation.VisualOffset, heardAt);
+    }
+
+    /// <summary>
+    /// Ends the wait on a knockback that the local game played first once the scene host has the whole of it, with the
+    /// copy following its positions again from this one, taken from where the copy is drawn and going on at the speed it
+    /// goes: the speed read out of the step to it would have the whole of the scene host's knockback in it, and slid
+    /// the copy on past where it stops.
+    /// </summary>
+    /// <param name="position">The position.</param>
+    /// <param name="how">How it came to end, for the [Knock] lines (CoopHits).</param>
+    /// <param name="interpolation">What draws the copy by its positions.</param>
+    private void HandOverAt(Vector3 position, string how, PredictiveInterpolation interpolation) {
+        EndKnockbackWait(how);
+        interpolation.Rebase(position, interpolation.Velocity);
+
+        // What is left to smooth away of it is all of the slide there is, the two knockbacks apart
+        if (!_wasMovedHere) {
+            LastHandOver = (Time.time, -(Vector2) interpolation.VisualOffset);
+        }
+
+        _positionsHeldBack = 0;
     }
 
     /// <summary>
@@ -4037,28 +4127,19 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Carries the copy a step of a knockback of the local player's that the local game played first, drawn on top of
-    /// where its positions put it, while the local game waits for the scene host to have it (see
-    /// <see cref="BeginKnockbackAnticipation"/>). The step is the latest knockback's, which is the one the copy's
-    /// knockback plays. Not once the scene host has said where that one lands: the copy went there, and the rest of its
-    /// steps are in it.
+    /// Carries the copy a step of its own knockback of a knockback of the local player's, drawn on top of where its
+    /// positions put it, while the local game waits for the scene host to have it (see
+    /// <see cref="BeginKnockbackAnticipation"/>).
     /// </summary>
     /// <param name="step">How far the step of the knockback moved the copy.</param>
-    /// <returns>Whether it was carried: not with no such wait, or after the landing.</returns>
+    /// <returns>Whether it was carried: not with no such wait.</returns>
     public bool CarryKnockedHere(Vector2 step) {
-        if (!_knockbackWaits || _landedFor == _outstandingAnticipation || Object.Client == null ||
+        if (!_knockbackWaits || Object.Client == null ||
             !Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
             return false;
         }
 
         interpolation.Carry(step);
-        var last = _carriedFor.Count - 1;
-        if (last >= 0 && _carriedFor[last].Number == _outstandingAnticipation) {
-            _carriedFor[last] = (_outstandingAnticipation, _carriedFor[last].Carried + step);
-        } else {
-            _carriedFor.Add((_outstandingAnticipation, step));
-        }
-
         return true;
     }
 
@@ -4074,7 +4155,9 @@ internal partial class Entity {
         }
 
         _knockbackWaits = false;
-        _carriedFor.Clear();
+        _knockedHere = false;
+        _landingDue = null;
+        _wholeDue = null;
         LastKnockbackWait = (Time.time, how);
         if (Object.Client != null && Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
             interpolation.LetGoOfWhatItCarries();
@@ -4139,6 +4222,28 @@ internal partial class Entity {
         stamp.Pending = anticipation;
         stamp.PendingSinceStep = MonoBehaviourUtil.FixedStep;
         stamp.PendingSettledAt = settledAt;
+    }
+
+    /// <summary>
+    /// Notes that a knockback has just started on the entity in this game as the scene host, which stops any knockback
+    /// of a scene client's still going on it, as far as it got: what is sent from here on has the whole of that one in
+    /// it and says so, and the player of that client follows the positions again rather than wait where it would have
+    /// landed, while the creature goes somewhere else (CoopHits.OnRecoilByDirection). Something that player did after
+    /// it is still waited for as long as it takes. A knockback of a scene client's own notes where it lands after this
+    /// (see <see cref="NoteAnticipation"/>).
+    /// </summary>
+    public void KnockbackStartedHere() {
+        foreach (var stamp in _stamps) {
+            if (stamp.Knocking == 0) {
+                continue;
+            }
+
+            if (stamp.Pending == stamp.Knocking) {
+                stamp.PendingSettledAt = Time.unscaledTime;
+            } else {
+                stamp.Knocking = 0;
+            }
+        }
     }
 
     /// <summary>
@@ -4270,6 +4375,21 @@ internal partial class Entity {
             return true;
         }
 
+        if (!HasTheWholeOfIt(stamps)) {
+            return false;
+        }
+
+        _outstandingAnticipation = 0;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether the scene host says beside a position that it has the whole of what the local player did to this entity
+    /// in it (see <see cref="AcceptsWhileAnticipating"/>).
+    /// </summary>
+    /// <param name="stamps">What the scene host said it had taken in of what each game did, by the tag of that game,
+    /// or null if it said nothing.</param>
+    private bool HasTheWholeOfIt(IReadOnlyList<AnticipationReport>? stamps) {
         if (stamps == null) {
             return false;
         }
@@ -4280,8 +4400,6 @@ internal partial class Entity {
         foreach (var stamp in stamps) {
             if (stamp.Tag == RequestTag && stamp.Number != 0 &&
                 (sbyte) (stamp.Number - _outstandingAnticipation) >= 0) {
-                _outstandingAnticipation = 0;
-
                 return true;
             }
         }
@@ -4346,31 +4464,15 @@ internal partial class Entity {
         // time rather than a single tick.
         //
         // For a knockback that the local game played first, they are followed until the scene host's own knockback
-        // starts, and then held while it goes on, with the copy sent to where it lands (GoOnWhileKnockedBack). The
-        // first position taken whole is taken from where the copy is drawn, going on at the speed it goes: the speed
-        // read out of the step to it would have the whole of the scene host's knockback in it, and slid the copy on
-        // past where it stops.
-        var knockbackWaits = _knockbackWaits;
-        if (!AcceptsWhileAnticipating(anticipation)) {
-            if (knockbackWaits) {
-                GoOnWhileKnockedBack(unityPos, anticipation, packetsCovered, positionInterpolation);
-            } else {
-                _positionsHeldBack += packetsCovered;
-            }
-
+        // starts, and then held while it goes on, with the copy sent to where it lands, and nothing the scene host
+        // says moves the copy before the copy's own knockback has played out (TakeWhileKnockedBack)
+        if (_knockbackWaits) {
+            TakeWhileKnockedBack(unityPos, anticipation, packetsCovered, positionInterpolation);
             return;
         }
 
-        if (knockbackWaits) {
-            EndKnockbackWait("the scene host had it");
-            positionInterpolation.Rebase(unityPos, positionInterpolation.Velocity);
-
-            // What is left to smooth away of it is all of the slide there is, the two knockbacks apart
-            if (!_wasMovedHere) {
-                LastHandOver = (Time.time, -(Vector2) positionInterpolation.VisualOffset);
-            }
-
-            _positionsHeldBack = 0;
+        if (!AcceptsWhileAnticipating(anticipation)) {
+            _positionsHeldBack += packetsCovered;
             return;
         }
 
@@ -4381,24 +4483,43 @@ internal partial class Entity {
 
     /// <summary>
     /// Takes a position of the scene host's that came while the local game waits on a knockback it played first (see
-    /// <see cref="BeginKnockbackAnticipation"/>). One sent while a knockback of the local player's goes on over there
-    /// says where it lands, and the copy goes there smoothly, going on the way it went, with the knockbacks after it
-    /// still carried on top; the position itself has some of that push in it, and is held until the knockback is
-    /// over. Any other is followed as any position is, the copy's own knockback drawn on top: sent before the scene
-    /// host's knockback started, it has nothing of it in it, and sent after one ended, all of one whose landing the
-    /// copy went to already. Not while something else moves the copy here: its own FSM run for the local player
-    /// (RunHereMovesTheCopy), how it set off, or a pull of the local player's.
+    /// <see cref="BeginKnockbackAnticipation"/>).
+    ///
+    /// One that has the whole of what the local player did in it ends the wait, and the copy follows the scene host's
+    /// positions again from there, smoothly from where it is drawn. One sent while a knockback of the local player's
+    /// goes on over there has some of its push in it, and is held until it is over; beside it, where it lands, and the
+    /// copy goes there smoothly, going on the way it went. Only where the latest lands: where one before it lands is
+    /// not where it ends over there, as the next one stops it there as it did here. Any other is followed as any
+    /// position is, the copy's own knockback drawn on top, as it was sent before the scene host's knockback started.
+    ///
+    /// The end of the wait and the landing both wait for the copy's own knockback to play out (USER 11-06,
+    /// "我这边先演完击退再挪", see <see cref="KnockedHereOver"/>). Not while something else moves the copy here: its own FSM
+    /// run for the local player (RunHereMovesTheCopy), how it set off, or a pull of the local player's.
     /// </summary>
     /// <param name="position">The position.</param>
     /// <param name="reports">What the scene host said beside it of what each game did, or null if nothing.</param>
     /// <param name="packetsCovered">How many packets of the scene host's the step since the last position took.</param>
     /// <param name="interpolation">What draws the copy by its positions.</param>
-    private void GoOnWhileKnockedBack(
+    private void TakeWhileKnockedBack(
         Vector3 position,
         IReadOnlyList<AnticipationReport>? reports,
         int packetsCovered,
         PredictiveInterpolation interpolation
     ) {
+        // Also once the wait ran out of time (IsAnticipating), which ends it
+        if (_wholeDue != null || !IsAnticipating() || HasTheWholeOfIt(reports)) {
+            if (_knockedHere) {
+                _wholeDue = position;
+                _positionsHeldBack += packetsCovered;
+                interpolation.TookHeldPosition();
+                return;
+            }
+
+            _outstandingAnticipation = 0;
+            HandOverAt(position, "the scene host had it", interpolation);
+            return;
+        }
+
         if (RunHereMovesTheCopy || MovesByItself() || Time.time < _pulledHereUntil) {
             _positionsHeldBack += packetsCovered;
             return;
@@ -4410,23 +4531,13 @@ internal partial class Entity {
                     continue;
                 }
 
-                // Sent there once for each knockback, and never back to one before the last it went to, as a position
-                // sent again can come after newer ones
-                var knocking = report.Knocking;
-                if (_landedFor == 0 || (sbyte) (knocking - _landedFor) > 0) {
-                    _landedFor = knocking;
-
-                    var landed = Vector2.zero;
-                    while (_carriedFor.Count > 0 && (sbyte) (_carriedFor[0].Number - knocking) <= 0) {
-                        landed += _carriedFor[0].Carried;
-                        _carriedFor.RemoveAt(0);
+                if (report.Knocking == _outstandingAnticipation && report.Knocking != _landedFor) {
+                    var landing = new Vector3(report.LandsAtX, report.LandsAtY, position.z);
+                    if (_knockedHere) {
+                        _landingDue ??= (landing, Time.time);
+                    } else {
+                        Land(landing, Time.time, interpolation);
                     }
-
-                    interpolation.LetGoOf(landed);
-                    interpolation.Rebase(
-                        new Vector3(report.LandsAtX, report.LandsAtY, position.z), interpolation.Velocity
-                    );
-                    LastLanding = (Time.time, -(Vector2) interpolation.VisualOffset);
                 }
 
                 _positionsHeldBack += packetsCovered;

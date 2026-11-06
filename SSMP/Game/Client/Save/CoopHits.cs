@@ -2028,6 +2028,13 @@ internal partial class CoopHits {
                 WatchKnock(self, entity, isClientCopy, direction, magnitude, "this player's hit");
             }
 
+            // Anything else that knocks back a creature this game runs as the scene host, a scene client's hit
+            // (ApplyKnockback) among them, stops a knockback of a scene client's that still goes on it
+            if (_hitContext == HitContext.None && HasMembers && KnockbackStarted(self, recoilBefore) &&
+                TryGetEntity(self.gameObject, out var knocked, out _)) {
+                knocked.KnockbackStartedHere();
+            }
+
             return;
         }
 
@@ -2041,7 +2048,13 @@ internal partial class CoopHits {
             WatchKnock(self, entity, isClientCopy, direction, magnitude, "this player's hit");
         }
 
+        // This player's own hit on a creature this game runs as the scene host stops a knockback of a scene client's
+        // that still goes on it
         if (!isClientCopy) {
+            if (KnockbackStarted(self, recoilBefore)) {
+                entity.KnockbackStartedHere();
+            }
+
             return;
         }
 
@@ -2122,8 +2135,10 @@ internal partial class CoopHits {
             }
         }
 
+        // Played out: what the scene host said meanwhile is taken now (Entity.KnockedHereOver)
         if (!self.IsRecoiling) {
             _carriedHere.Remove(self);
+            carrier.KnockedHereOver();
         }
     }
 
@@ -2152,9 +2167,15 @@ internal partial class CoopHits {
             return at;
         }
 
-        // A step of the length the speed goes in one step of physics at each step while time is left on its clock
+        // A step of the length the speed goes in one step of physics, and steps for as long as any time is left on its
+        // clock, counted down as the game counts it: worked out by division, it came a step short where the time was a
+        // whole number of steps, as what the game takes off at each step leaves a little over
         var step = Time.fixedDeltaTime;
-        var steps = Mathf.CeilToInt(recoil.recoilTimeRemaining / step - 0.001f);
+        var steps = 0;
+        for (var left = recoil.recoilTimeRemaining; left > 0f; left -= step) {
+            steps++;
+        }
+
         recoil.recoilSweep.Check(recoil.recoilSpeed * step * steps, TerrainMask, out var clear);
         return at + recoil.recoilSweep.Direction * clear;
     }
@@ -2335,7 +2356,7 @@ internal partial class CoopHits {
         // the player waiting on this is told nothing until then. They have already watched their own copy go the
         // whole way; a position from the first moment of the same knockback would only pull it back to the start.
         // Where it lands they are told at once, beside every position until it is over, and their copy goes there
-        // (Entity.GoOnWhileKnockedBack); only for one that started, as their game takes a number only for one that
+        // (Entity.TakeWhileKnockedBack); only for one that started, as their game takes a number only for one that
         // started there
         Vector2? landsAt = KnockbackStarted(recoil, recoilBefore) ? WhereItLands(recoil) : null;
         if (landsAt is { } landing) {

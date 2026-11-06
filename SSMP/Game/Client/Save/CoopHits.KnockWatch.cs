@@ -318,9 +318,9 @@ internal partial class CoopHits {
 
         if (watch.Entity.LastLanding is { } landing && landing.At >= watch.StartedAt) {
             line.Append(
-                $"; {landing.At - watch.StartedAt:0.00} s on the scene host said where its knockback lands, and the " +
-                $"copy went there, {Vector2.Dot(landing.Moved, watch.Axis):0.00} {way} " +
-                $"({landing.Moved.magnitude:0.00} in all)"
+                $"; {landing.HeardAt - watch.StartedAt:0.00} s on the scene host said where its knockback lands, and " +
+                $"{landing.At - watch.StartedAt:0.00} s on, as the copy's own knockback had played out, the copy went " +
+                $"there, {Vector2.Dot(landing.Moved, watch.Axis):0.00} {way} ({landing.Moved.magnitude:0.00} in all)"
             );
         }
 
