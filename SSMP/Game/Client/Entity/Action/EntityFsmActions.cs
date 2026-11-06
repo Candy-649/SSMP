@@ -258,8 +258,10 @@ internal static partial class EntityFsmActions {
         }
 
         // Unless a talk of the local player handed them over to this very creature, which now does to them what it
-        // does to the player it talks to (Entity.HandOver)
-        if (ActsOnTheLocalPlayer(action) && !Entity.IsHandedOverTo(action)) {
+        // does to the player it talks to (Entity.HandOver), or the replay says whom the scene host's creature aimed it
+        // at, and does it only in the game of that player (see SaysWhomItIsAimedAt)
+        if (ActsOnTheLocalPlayer(action) && !Entity.IsHandedOverTo(action) &&
+            !SaysWhomItIsAimedAt.Contains(actionType)) {
             SayItWasKeptOffThePlayer(action);
             return;
         }
@@ -317,6 +319,15 @@ internal static partial class EntityFsmActions {
         "FindGameObject", "FindAlertRange", "GetPosition", "GetScale", "GetRotation", "SetGameObject",
         "SpawnObjectFromGlobalPool", "FireAtTarget"
     ];
+
+    /// <summary>
+    /// The types whose replay names the player that the scene host's creature aimed it at, and that do to the local
+    /// player what the creature did to them only when they are that player: the silk a creature sucks from the player
+    /// it goes after. Its action is pointed at that player in the game that runs the creature (the action registry),
+    /// where the partner's figure has no silk to lose, so it is lost in the game of the player it was aimed at, as with
+    /// one player, and in no other.
+    /// </summary>
+    private static readonly HashSet<Type> SaysWhomItIsAimedAt = [typeof(TakeSilk)];
 
     /// <summary>
     /// The parameters of each action type that name the object it works on, by type.

@@ -1270,6 +1270,10 @@ internal partial class Entity {
     /// out with the next look at the entity, often in the packet after. A wave of creatures that rested out of sight
     /// until called showed up at its resting place, and only then came flying in from where its wave starts it (USER
     /// 10-21: 出怪的时候我这边怪会先闪一下，然后再出来).
+    /// So are they from one that puts the creature itself somewhere at once (see <see cref="PutsItselfSomewhere"/>),
+    /// like a creature that teleports: the copy was put at the new place by the replay, and the place that came with
+    /// it, taken before the FSM moved the creature, pulled it straight back to where it had been - for one that rested
+    /// in the background until its wave called it, out of sight there - until the next place came.
     /// </summary>
     private List<EntityNetworkData>? _heldUntilPlaced;
 
@@ -1334,6 +1338,13 @@ internal partial class Entity {
             if (_heldUntilPlaced == null && DrawsItselfOn(self)) {
                 _heldUntilPlaced = [];
                 _heldSince = Time.frameCount;
+            } else if (_heldUntilPlaced == null && PutsItselfSomewhere(self)) {
+                _heldUntilPlaced = [];
+                _heldSince = Time.frameCount;
+                SSMP.Logging.Logger.Info(
+                    $"'{Object.Host.name}' ({Id}, {Type}) puts itself somewhere through '{self.State?.Name}' of " +
+                    $"'{self.Fsm?.Name}', so what it does goes out after where it is at the end of the frame"
+                );
             }
 
             SendEntityData(networkData);
@@ -1861,6 +1872,22 @@ internal partial class Entity {
         return !_hasParent && Object.Host != null && action is SetMeshRenderer { active.Value: true } draw &&
                draw.Fsm.GetOwnerDefaultTarget(draw.gameObject) is var drawn && drawn != null &&
                drawn.transform.IsChildOf(Object.Host.transform);
+    }
+
+    /// <summary>
+    /// Whether an action of the creature's FSM puts the creature itself somewhere at once: a place set once, not one
+    /// set every frame, which moves it along and goes with the positions. Not for a part of another entity, whose
+    /// place goes nowhere: the copy of that carries it.
+    /// </summary>
+    private bool PutsItselfSomewhere(FsmStateAction action) {
+        var (target, everyFrame) = action switch {
+            SetPosition set => (set.gameObject, set.everyFrame || set.lateUpdate),
+            SetPosition2d set => (set.gameObject, set.everyFrame || set.lateUpdate),
+            SetPosition2D set => (set.GameObject, set.EveryFrame),
+            _ => ((FsmOwnerDefault?) null, true)
+        };
+        return !everyFrame && !_hasParent && Object.Host != null &&
+               action.Fsm.GetOwnerDefaultTarget(target) == Object.Host;
     }
 
     /// <summary>

@@ -1,6 +1,7 @@
 using System;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Save;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using Object = UnityEngine.Object;
@@ -424,6 +425,49 @@ internal static partial class EntityFsmActions {
         Logger.Info(
             $"'{action.Fsm.GameObjectName}' set the darkness of the room to {level} in the scene host's game, " +
             "and here too"
+        );
+    }
+
+    #endregion
+
+    #region TakeSilk
+
+    /// <summary>Builds network data from the FSM action.</summary>
+    /// <remarks>
+    /// The player whose silk it took, as a throw names them (see ThrownThings.CodeOf), and how much. The action is
+    /// pointed at the player the creature goes after (the action registry), so in the game that runs the creature it
+    /// takes the silk of that game's player only when it goes after them: aimed at the partner, it names their figure,
+    /// which has no silk to take. A creature that sucks silk from a distance drained the player of the game that ran it
+    /// wherever they were, while its threads went to the partner it went after, who lost nothing.
+    /// </remarks>
+    private static bool GetNetworkDataFromAction(EntityNetworkData data, TakeSilk action) {
+        var target = action.Fsm.GetOwnerDefaultTarget(action.target);
+        data.Packet.Write(ThrownThings.CodeOf?.Invoke(target) ?? ThrownThings.NoPlayer);
+        data.Packet.Write(action.amount.Value);
+        return true;
+    }
+
+    /// <summary>
+    /// Applies network data to the FSM action: the silk is taken from the local player only if the creature took it
+    /// from them, which the scene host's game could only aim at their figure (see <see cref="SaysWhomItIsAimedAt"/>).
+    /// Nothing is taken when the creature's first states are set up.
+    /// </summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, TakeSilk action) {
+        if (data == null) {
+            return;
+        }
+
+        var aimedAt = data.Packet.ReadUShort();
+        var amount = data.Packet.ReadInt();
+        var hero = HeroController.instance;
+        if (ThrownThings.FigureOf?.Invoke(aimedAt, data.SenderId) != hero.gameObject) {
+            return;
+        }
+
+        hero.TakeSilk(amount);
+        Logger.Info(
+            $"'{action.Fsm.GameObjectName}' took {amount} silk from the local player through '{action.State?.Name}' " +
+            $"of '{action.Fsm.Name}', as the scene host's creature aimed it at them"
         );
     }
 
