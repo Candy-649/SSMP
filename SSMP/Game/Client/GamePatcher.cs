@@ -9,6 +9,7 @@ using SSMP.Animation.Effects;
 using SSMP.Hooks;
 using SSMP.Networking.Client;
 using SSMP.Game.Client.Entity;
+using SSMP.Game.Client.Save;
 using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -672,6 +673,20 @@ internal partial class GamePatcher {
             c.EmitDelegate<Func<GameObject, Vector3>>(GetHitSourcePosition);
             c.Emit(OpCodes.Stloc, 6);
             c.MarkLabel(afterRemotePositionLabel);
+
+            // A copy of another player's thrown tool that a tink of the room turns away does nothing more than turn
+            // away (see CoopHits.TinkTheCopy): the tink's spark and sound, and what it tells the room, are left out
+            c.GotoNext(
+                MoveType.After,
+                i => i.MatchCallvirt(typeof(ITinkResponder), "Tinked")
+            );
+
+            var afterCopyTurnedLabel = c.DefineLabel();
+            c.EmitDelegate(() => CoopHits.TinksTheCopyOnly);
+            c.Emit(OpCodes.Brfalse, afterCopyTurnedLabel);
+            c.Emit(OpCodes.Ldc_I4_1);
+            c.Emit(OpCodes.Ret);
+            c.MarkLabel(afterCopyTurnedLabel);
 
             // Skip the camera shake block for remote hits.
             c.GotoNext(
