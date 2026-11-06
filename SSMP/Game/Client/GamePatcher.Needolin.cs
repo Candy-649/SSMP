@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq.Expressions;
 using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
@@ -12,8 +13,8 @@ namespace SSMP.Game.Client;
 
 /// <summary>
 /// Needolin co-op patches. Needolin range checks count every performing player, an enemy or NPC that reacts to a song
-/// faces the player it reacts to until its song ends, and songs started by a remote player last as long as that
-/// player's Musician Charm allows.
+/// faces the player it reacts to until its song ends, songs started by a remote player last as long as that player's
+/// Musician Charm allows, and the clockwork hatchlings of the local player sing to the song of any player near them.
 /// </summary>
 internal partial class GamePatcher {
     /// <summary>
@@ -34,6 +35,20 @@ internal partial class GamePatcher {
     /// </summary>
     private static readonly FieldInfo? NeedolinTextOwnerIsPlayingField =
         typeof(NeedolinTextOwner).GetField("isPlaying", InstanceNonPublicFlags | InstancePublicFlags);
+
+    /// <summary>
+    /// The state that a <see cref="ClockworkHatchling"/> goes into as it starts to sing, in its Update right before it
+    /// plays the sing clip of its kind.
+    /// </summary>
+    private const int HatchlingSingState = 9;
+
+    /// <summary>
+    /// The private field of a <see cref="ClockworkHatchling"/> that says that a song is being played, which the game
+    /// sets as the local player starts and stops performing: read and set without boxing, as it is every frame while
+    /// another player plays.
+    /// </summary>
+    private static readonly (Func<ClockworkHatchling, bool> Get, Action<ClockworkHatchling, bool> Set)
+        HatchlingHearsSong = CompileHatchlingHearsSong();
 
     /// <summary>
     /// Reflected private field with the affected state that a <see cref="HeroPerformanceSingReaction"/> read last.
@@ -172,6 +187,11 @@ internal partial class GamePatcher {
     private Hook? _singReactionUpdateHook;
 
     /// <summary>
+    /// Hook for letting the clockwork hatchlings of the local player sing to the song of another player.
+    /// </summary>
+    private Hook? _clockworkHatchlingUpdateHook;
+
+    /// <summary>
     /// Hook for letting NPCs pick the side of their sing animation from their performer when they start singing.
     /// </summary>
     private Hook? _checkPassedTargetEnterHook;
@@ -212,6 +232,9 @@ internal partial class GamePatcher {
         _enemySingControlExitHook = TryCreateHook(typeof(EnemySingControl), "OnExit", OnEnemySingControlExit);
 
         _needolinTextOwnerUpdateHook = TryCreateHook(typeof(NeedolinTextOwner), "Update", OnNeedolinTextOwnerUpdate);
+        _clockworkHatchlingUpdateHook = TryCreateHook(
+            typeof(ClockworkHatchling), "Update", OnClockworkHatchlingUpdate
+        );
 
         _singReactionUpdateHook = TryCreateHook(
             typeof(HeroPerformanceSingReaction), "OnUpdate", OnHeroPerformanceSingReactionUpdate
@@ -254,6 +277,9 @@ internal partial class GamePatcher {
 
         _needolinTextOwnerUpdateHook?.Dispose();
         _needolinTextOwnerUpdateHook = null;
+
+        _clockworkHatchlingUpdateHook?.Dispose();
+        _clockworkHatchlingUpdateHook = null;
 
         _singReactionUpdateHook?.Dispose();
         _singReactionUpdateHook = null;
@@ -751,6 +777,50 @@ internal partial class GamePatcher {
         } finally {
             NeedolinTextOwnerIsPlayingField.SetValue(self, false);
         }
+    }
+
+    /// <summary>
+    /// Lets a clockwork hatchling of the local player sing to the song of another player as it does to its owner's,
+    /// while it is in the inner range of a player who plays (USER 11-06 "想离得近的话我朋友弹琴我的齿轮蜂也能唱歌"). It
+    /// looks at the range only while its flag of a song being played is set, which the game sets as the local player
+    /// starts performing, so the song of another player alone never reached it, though the range counts every player
+    /// (<see cref="OnGetAffectedState"/>). The copies of another player's hatchlings do nothing by themselves and show
+    /// the clip that their thrower's game sends (FlierCopies), the song too.
+    /// </summary>
+    private static void OnClockworkHatchlingUpdate(Action<ClockworkHatchling> orig, ClockworkHatchling self) {
+        if (!NeedolinCoop.HasRemotePerformers || HatchlingHearsSong.Get(self)) {
+            orig(self);
+            return;
+        }
+
+        var before = (int) self.CurrentState;
+        HatchlingHearsSong.Set(self, true);
+        orig(self);
+        HatchlingHearsSong.Set(self, false);
+
+        if (before != HatchlingSingState && (int) self.CurrentState == HatchlingSingState) {
+            var position = self.transform.position;
+            Logger.Info(
+                $"[Needolin] A clockwork hatchling of the local player at ({position.x:0.0}, {position.y:0.0}) sings " +
+                "to the song of another player near it"
+            );
+        }
+    }
+
+    /// <summary>
+    /// Compiles the reading and setting of the field of a <see cref="ClockworkHatchling"/> that says that a song is
+    /// being played.
+    /// </summary>
+    private static (Func<ClockworkHatchling, bool>, Action<ClockworkHatchling, bool>) CompileHatchlingHearsSong() {
+        var field = typeof(ClockworkHatchling).GetField("needolinPlaying", InstanceNonPublicFlags | InstancePublicFlags)!;
+        var self = Expression.Parameter(typeof(ClockworkHatchling), "self");
+        var value = Expression.Parameter(typeof(bool), "value");
+        return (
+            Expression.Lambda<Func<ClockworkHatchling, bool>>(Expression.Field(self, field), self).Compile(),
+            Expression.Lambda<Action<ClockworkHatchling, bool>>(
+                Expression.Assign(Expression.Field(self, field), value), self, value
+            ).Compile()
+        );
     }
 
     /// <summary>
