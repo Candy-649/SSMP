@@ -1977,16 +1977,15 @@ internal partial class Entity {
                 Object.Client.TryGetComponent<PredictiveInterpolation>(out var interpolation)) {
                 interpolation.AdaptToRTT(_netClient.UpdateManager.AverageRtt);
 
-                // While something the local player did to this entity is still on its way to the scene host and
-                // back, what the local game did is what moves it, and the interpolation stays out of the way. So it
-                // does while the copy moves by itself from how the entity set off (OwnMotionComponent), while an FSM
-                // of its that can move it runs here for something the local player did (PlayHere,
-                // RunHereMovesTheCopy), or while a pull of the local player's own moves it (NotePulledHere). Not for a
-                // knockback that the local game played first, which the interpolation draws on top of where the
-                // positions put the copy, and then sends to where the scene host's knockback lands
-                // (BeginKnockbackAnticipation)
-                var movedHere = IsAnticipating() && !_knockbackWaits || MovesByItself() || RunHereMovesTheCopy ||
-                                Time.time < _pulledHereUntil;
+                // What the local game does is what moves the copy, and the interpolation stays out of the way, while
+                // the copy moves by itself from how the entity set off (OwnMotionComponent), while what runs here of
+                // an FSM of its for something the local player did can move it (PlayHere, RunHereMovesTheCopy), or
+                // while a pull of the local player's own moves it (NotePulledHere). Not for the wait alone for the
+                // scene host to answer what the local player did: a boss that nothing moved here stood still for it at
+                // every blow, and then shot across to where it had got to (USER 11-07). Nor for a knockback that the
+                // local game played first, which the interpolation draws on top of where the positions put the copy,
+                // and then sends to where the scene host's knockback lands (BeginKnockbackAnticipation)
+                var movedHere = MovesByItself() || RunHereMovesTheCopy || Time.time < _pulledHereUntil;
                 if (_wasMovedHere && !movedHere) {
                     // The interpolation did not write this object while that was going on, so it carried on
                     // predicting from where the entity stood before any of it. Picking that up again would put it back
@@ -4513,12 +4512,14 @@ internal partial class Entity {
         }
 
         // While something the local player did to this entity is still on its way to the scene host and back, the
-        // positions it sends were measured before it had even heard. Letting those through was the whole of the
-        // problem: the interpolation went on being told the enemy was standing where it had been, and pulled it
-        // straight back there - in front of a player who had just hit it, in a game where walking into an enemy
-        // hurts. They are counted and dropped until the scene host says it has taken that in, and the count goes
-        // with the first position taken afterwards so that the speed read out of it covers the right stretch of
-        // time rather than a single tick.
+        // positions it sends were measured before it had even heard. Where what runs here for it moves the copy
+        // (RunHereMovesTheCopy), they would pull it straight back to where it stood, in front of a player who had
+        // just hit it, in a game where walking into an enemy hurts: they are counted and dropped until the scene host
+        // says it has taken that in, and the count goes with the first position taken afterwards so that the speed
+        // read out of it covers the right stretch of time rather than a single tick. A copy that nothing moves here
+        // follows them as ever, the creature going on with what it does over there: dropped, a boss stood still at
+        // every blow of the local player, slashing on the spot as it set off on a dash, and then shot across to where
+        // it had got to (USER 11-07 "拿刀下划砍的动作的刀光有时候没有").
         //
         // For a knockback that the local game played first, they are followed until the scene host's own knockback
         // starts, and then held while it goes on, with the copy sent to where it lands, and nothing the scene host
@@ -4528,7 +4529,7 @@ internal partial class Entity {
             return;
         }
 
-        if (!AcceptsWhileAnticipating(anticipation)) {
+        if (!AcceptsWhileAnticipating(anticipation) && RunHereMovesTheCopy) {
             _positionsHeldBack += packetsCovered;
             return;
         }
