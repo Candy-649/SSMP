@@ -118,10 +118,13 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private const float BossStartSettleTime = 1f;
 
     /// <summary>
-    /// The bosses whose title the room shows instead of the boss itself, by the name of their object.
+    /// The bosses whose title the room shows instead of the boss itself, by the name of their object. One tells an
+    /// object of its room to fade in a title of its own making, with no title action anywhere, and was taken for a
+    /// common creature (USER 11-07 "…被血条显示那部分当成小怪了"): of the bosses of the game's 36 boss rooms, the only one
+    /// that neither shows a title itself nor was in this list (FsmScan --params DisplayBossTitle, 11-07).
     /// </summary>
     private static readonly HashSet<string> RoomTitledBosses = new(StringComparer.Ordinal) {
-        "Phantom", "Giant Centipede Head", "Conductor Boss", "Bone Beast", "Flower Queen Boss"
+        "Phantom", "Giant Centipede Head", "Conductor Boss", "Bone Beast", "Flower Queen Boss", "Silk Boss"
     };
 
     /// <summary>
