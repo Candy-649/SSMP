@@ -2413,6 +2413,12 @@ internal partial class Entity {
     /// once; for the state it stands in then, and those that only that state leads to, they stay off until it has left
     /// them (see <see cref="LetThePlayerBackIn"/>). A strike or a touch is played as it is: what it sets off can be a
     /// whole round of the creature's attacks, which goes on at this game's player too.
+    ///
+    /// The same goes for the other FSMs of the creature's object, which a catch tells to do their part of it: one of
+    /// them drags the player it caught up to the creature and holds them there for the slashes, and played for the
+    /// partner, it dragged this game's player there from wherever they were (USER 11-07 "我莫名其妙会被移到别的地方，哪怕没
+    /// 有被蕾丝抓住"). Each takes what it is told as it would, so that nothing waits for it in vain, but for what is this
+    /// game's player's own, which stays off while it stands in what the catch took it to.
     /// </summary>
     /// <param name="hostFsm">The FSM.</param>
     /// <param name="isCatch">Whether it is a catch rather than a strike or a touch.</param>
@@ -2447,12 +2453,41 @@ internal partial class Entity {
             KeepOff(action, pointAt);
         }
 
+        var others = new List<(HutongGames.PlayMaker.Fsm Fsm, FsmState? From, List<FsmStateAction> Muted)>();
+        foreach (var other in hostFsm.GetComponents<PlayMakerFSM>()) {
+            if (other == hostFsm) {
+                continue;
+            }
+
+            var otherMuted = EntityFsmActions.PlayersOwnActionsOf(other.Fsm);
+            if (otherMuted.Count == 0) {
+                continue;
+            }
+
+            foreach (var action in otherMuted) {
+                KeepOff(action, pointAt);
+            }
+
+            others.Add((other.Fsm, other.Fsm.ActiveState, otherMuted));
+        }
+
         // Whatever the game's code does on the way, what is switched off is never left off for good
         var from = fsm.ActiveState;
         try {
             play();
         } finally {
             KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm, from) ?? []);
+            foreach (var (otherFsm, otherFrom, otherMuted) in others) {
+                var keptIn = RestOfTheInput(otherFsm, otherFrom) ?? [];
+                if (keptIn.Count > 0) {
+                    Logger.Info(
+                        $"What the partner's catch told '{otherFsm.Name}' of '{hostFsm.gameObject.name}' is played " +
+                        $"here, but for what it does to the local player, kept off in '{otherFsm.ActiveStateName}'"
+                    );
+                }
+
+                KeepOffForWhatIsLeft(otherFsm, otherMuted, keptIn);
+            }
         }
     }
 
@@ -2505,7 +2540,7 @@ internal partial class Entity {
     /// <param name="fsm">The FSM.</param>
     /// <param name="from">The state the input found it in.</param>
     /// <returns>The states, or null if the input left it where it found it.</returns>
-    private static HashSet<FsmState>? RestOfTheInput(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
+    private static HashSet<FsmState>? RestOfTheInput(HutongGames.PlayMaker.Fsm fsm, FsmState? from) {
         if (fsm.ActiveState is not { } reached || reached == from) {
             return null;
         }
