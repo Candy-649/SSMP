@@ -26,11 +26,13 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// </summary>
 internal static class LetGoParts {
     /// <summary>
-    /// Where a part was before it was last let go of: the creature it was under, and its place there.
+    /// Where a part was before it was last let go of: the creature it was under, its place there, and the frame in
+    /// which it was let go of.
     /// </summary>
-    private sealed class Origin(GameObject creature, string place) {
+    private sealed class Origin(GameObject creature, string place, int frame) {
         public readonly GameObject Creature = creature;
         public readonly string Place = place;
+        public readonly int Frame = frame;
     }
 
     /// <summary>
@@ -74,6 +76,10 @@ internal static class LetGoParts {
             typeof(SetTransformParent).GetMethod("OnEnter", flags, null, Type.EmptyTypes, null),
             new Action<Action<SetTransformParent>, SetTransformParent>(OnSetTransformParent)
         );
+        AddHook(
+            typeof(GetGrandparent).GetMethod("OnEnter", flags, null, Type.EmptyTypes, null),
+            new Action<Action<GetGrandparent>, GetGrandparent>(OnGetGrandparent)
+        );
     }
 
     /// <summary>
@@ -100,6 +106,44 @@ internal static class LetGoParts {
     private static void OnSetTransformParent(Action<SetTransformParent> orig, SetTransformParent self) {
         Note(self.Fsm, self.gameObject, self.parent);
         orig(self);
+    }
+
+    private static void OnGetGrandparent(Action<GetGrandparent> orig, GetGrandparent self) {
+        orig(self);
+        try {
+            AnswerFromWhereItWas(self);
+        } catch (Exception e) {
+            SayFailed(e);
+        }
+    }
+
+    /// <summary>
+    /// Gives a part that asks what it is under two steps up, in the frame in which the part above it let go of their
+    /// creature, what that part was under in the creature. The parts of a boss's hands start by asking for the boss
+    /// that way, to see which side of it they rise on, in the same frame as each hand lets go of the boss; in the
+    /// scene host's game they asked first, but in the game of the copy the hands went first. There the parts got
+    /// nothing, never rose, and so never let go of the hands either, hanging from them for the part of the fight in
+    /// which the scene host's had come loose, turned over whenever the hands turned with the boss (USER 11-07 "那个
+    /// 很多针的攻击，有时候是反的"). Which goes first in a frame is not the game's to say, so either way now gives the
+    /// same.
+    /// </summary>
+    private static void AnswerFromWhereItWas(GetGrandparent action) {
+        var owner = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
+        var above = owner == null ? null : owner.transform.parent;
+        if (above == null || !Origins.TryGetValue(above.gameObject, out var origin) ||
+            origin.Frame != Time.frameCount) {
+            return;
+        }
+
+        var cut = origin.Place.LastIndexOf('/');
+        var grandparent = cut < 0
+            ? origin.Creature.transform
+            : origin.Creature.transform.Find(origin.Place.Substring(0, cut));
+        action.storeResult.Value = grandparent.gameObject;
+        Logger.Info(
+            $"[Let go] '{owner!.name}' asked what it is under two steps up in the frame in which '{above.name}' let go " +
+            $"of '{origin.Creature.name}', and is told '{grandparent.name}', where '{above.name}' was"
+        );
     }
 
     /// <summary>
@@ -142,7 +186,7 @@ internal static class LetGoParts {
 
         var place = PlaceUnder(creature, part.transform);
         Origins.Remove(part);
-        Origins.Add(part, new Origin(creature.gameObject, place));
+        Origins.Add(part, new Origin(creature.gameObject, place, Time.frameCount));
         ByPlace[(creature.gameObject, place)] = part;
         Logger.Info(
             $"[Let go] '{creature.name}' lets go of its part '{place}' " +
@@ -260,6 +304,25 @@ internal static class LetGoParts {
             runs |= current.GetComponent<PlayMakerFSM>() != null;
             if (Origins.TryGetValue(current.gameObject, out var origin)) {
                 return runs && origin.Creature == creature;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether something is a part that the room's own object of a creature let go of, or under one. That object
+    /// sleeps in the game that does not run the creature, and so do the parts it let go of: what the creature tells the
+    /// room there is for the parts of the copy, as it is in the scene host's game for the creature's own. The parts of
+    /// a boss's hands that the room's own boss let go of as the room started still took it, and rose, fell and came
+    /// back where that boss slept.
+    /// </summary>
+    /// <param name="thing">The thing.</param>
+    public static bool IsLetGoByTheRoomsOwn(Transform thing) {
+        for (var current = thing; current != null; current = current.parent) {
+            if (Origins.TryGetValue(current.gameObject, out var origin)) {
+                return ByPlace.TryGetValue((origin.Creature, origin.Place), out var latest) &&
+                       latest == current.gameObject && EntityProcessor.IsRoomObject(origin.Creature);
             }
         }
 

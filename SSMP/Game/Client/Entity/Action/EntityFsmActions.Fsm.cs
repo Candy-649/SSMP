@@ -414,7 +414,8 @@ internal static partial class EntityFsmActions {
     /// Whether what is registered for a broadcast is left to the scene host's game:
     /// - a creature's copy, whose own FSMs follow the scene host's through replays and could be switched on by the
     ///   event; the parts under the copy run here as they do there, so they take it like the scene host's parts do;
-    /// - anything in the room's own copy of a creature, which sleeps while the other game runs the creature;
+    /// - anything in the room's own copy of a creature, which sleeps while the other game runs the creature, or that it
+    ///   let go of (LetGoParts.IsLetGoByTheRoomsOwn);
     /// - an arena, which follows the scene host's game its own way: one woken here would lock this game's player in
     ///   even when they are outside it. What lies inside an arena, such as a floor that breaks, takes the event.
     /// </summary>
@@ -429,7 +430,7 @@ internal static partial class EntityFsmActions {
             }
         }
 
-        return false;
+        return LetGoParts.IsLetGoByTheRoomsOwn(register.transform);
     }
 
     #region SendHealthManagerDeathEvent
