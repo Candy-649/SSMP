@@ -54,6 +54,14 @@ internal class FlierState : IToolState {
 
     /// <inheritdoc/>
     public void PrepareCopy(GameObject copy, GameObject character, bool poisoned) {
+        // Switched off, the flier never takes on the look of the pouch as it comes out, which its own code gives it
+        // from the pouch of the local player, so it does here with the thrower's: purple when theirs poisons it (USER
+        // 11-07 "带毒的小蜜蜂是紫的，但是我这里看不到我朋友的小蜜蜂变紫")
+        foreach (var flier in copy.GetComponentsInChildren<ClockworkHatchling>(true)) {
+            flier.hasCheckedPoison = true;
+            flier.isPoison = poisoned;
+            flier.CheckPoison();
+        }
     }
 
     /// <inheritdoc/>
