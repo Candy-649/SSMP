@@ -47,15 +47,6 @@ internal class Bind : DamageAnimationEffect {
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
         var flags = new Flags(effectInfo);
 
-        // The maggot state is cleared by the time the bind burst is sent.
-        // This method keeps track of it, although at a slight possible loss of consistency
-        var playerObjectIdentifier = playerObject.GetInstanceID();
-        if (flags.Maggoted && !(crestType == CrestType.Shaman && BindState == State.ShamanCancel)) {
-            BindBurst.MaggotedPlayers.Add(playerObjectIdentifier);
-        } else {
-            BindBurst.MaggotedPlayers.Remove(playerObjectIdentifier);
-        }
-
         var randomClipAction = GetOrFindBindFsm().GetFirstAction<GetRandomAudioClipFromTable>("Bind Start");
         var playAudioAction = GetOrFindBindFsm().GetFirstAction<PlayAudioEvent>("Bind Start");
 
@@ -311,9 +302,21 @@ internal class Bind : DamageAnimationEffect {
             (byte) (ToolItemManager.IsToolEquipped("Dazzle Bind Upgraded") ? 1 : 0),
             (byte) (ToolItemManager.IsToolEquipped("Quickbind") ? 1 : 0),
             (byte) ((ToolItemManager.IsToolEquipped("Reserve Bind") && !ToolItemManager.GetToolByName("Reserve Bind").IsEmpty) ? 1 : 0),
-            (byte) (HeroController.instance.cState.isMaggoted ? 1 : 0)
+            (byte) (ShookOffMaggots() ? 1 : 0)
         ];
         return effectInfo;
+    }
+
+    /// <summary>
+    /// Whether the local player's bind shook the maggots off them instead of healing them, which only its end can say
+    /// (see <see cref="BindBurst"/>): the game's bind reads whether the player is maggoted just before it would heal,
+    /// keeps it as its "Skip Heal" (states "Maggoted?" and "Witch Tentancles!") and takes the maggots off then, and
+    /// sets it back to false as the next bind begins. Read off the player as the bind began, as it was, it reached the
+    /// other game only with a bind on the ground, whose start alone told the end, so the maggots of a player who bound
+    /// in the air or with the beast crest's rage went without a sign (USER 11-07 "我好像看不到我朋友把蛆甩掉的特效").
+    /// </summary>
+    private bool ShookOffMaggots() {
+        return GetOrFindBindFsm().FsmVariables.FindFsmBool("Skip Heal") is { Value: true };
     }
 
     /// <summary>
@@ -452,7 +455,12 @@ internal class Bind : DamageAnimationEffect {
         public readonly bool UpgradedMirror;
         public readonly bool QuickBind;
         public readonly bool ReserveBind;
-        public bool Maggoted; // Needs to be writable by BindBurst
+
+        /// <summary>
+        /// Whether the bind shook the maggots off the player, which only the end of a bind says (see
+        /// <see cref="ShookOffMaggots"/>).
+        /// </summary>
+        public readonly bool Maggoted;
 
         public Flags(byte[]? info) {
             if (info == null) return;

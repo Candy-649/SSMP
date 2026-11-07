@@ -675,6 +675,8 @@ internal class AnimationManager {
         { AnimationClip.BindChargeHealBurst, BindBurst.Instance },
         { AnimationClip.BindBurstAir, BindBurst.Instance },
         { AnimationClip.RageBindBurst, BindBurst.Instance },
+        { AnimationClip.RageBindBurstQuick, BindBurst.Instance },
+        { AnimationClip.RageBindBurstLong, BindBurst.Instance },
         { AnimationClip.Death, new Death() },
         { AnimationClip.DoubleJump, new FaydownCloak() },
         { AnimationClip.UmbrellaInflate, new DriftersCloak() },

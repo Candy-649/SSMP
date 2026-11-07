@@ -1,4 +1,3 @@
-using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Internals;
 using SSMP.Util;
@@ -23,11 +22,6 @@ internal class BindBurst : Bind {
     /// </summary>
     public static readonly BindBurst Instance = new();
 
-    /// <summary>
-    /// A set of players who recently bound while maggoted
-    /// </summary>
-    public static readonly HashSet<int> MaggotedPlayers = [];
-
     /// <inheritdoc/>
     /// <remarks>
     /// The burst is a moment, but one that the player stands still for, and what it shows is on them: played a few
@@ -38,15 +32,7 @@ internal class BindBurst : Bind {
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
-        // Set maggot info
         var flags = new Flags(effectInfo);
-
-        var playerObjectIdentifier = playerObject.GetInstanceID();
-        if (MaggotedPlayers.Contains(playerObjectIdentifier)) {
-            flags.Maggoted = true;
-            MaggotedPlayers.Remove(playerObjectIdentifier);
-        }
-
         if (!CreateObjects(playerObject, out var bindEffects)) {
             return;
         }
@@ -96,6 +82,12 @@ internal class BindBurst : Bind {
 
         // Play audio
         AudioUtil.PlayAudio(maggotAudio, playerObject);
+
+        var at = playerObject.transform.position;
+        Logger.Info(
+            $"[Maggots] The character at ({at.x:0.0}, {at.y:0.0}) shakes its maggots off with the end of its bind, as " +
+            "its player did in their game"
+        );
     }
 
     /// <summary>
