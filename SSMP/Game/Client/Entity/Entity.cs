@@ -1433,6 +1433,10 @@ internal partial class Entity {
 
         if (_stepState != effect.Action.State) {
             FlushStep();
+
+            // The state goes out as the step into it begins, as it does with an action sent by itself: another FSM can
+            // take this one on into its next state before the step goes (review of 33779f7)
+            SendStateChange(effect.FsmIndex);
             _stepState = effect.Action.State;
             Stepping.Add(this);
         }
@@ -5206,27 +5210,37 @@ internal partial class Entity {
     private List<EntityNetworkData> TakeStep(int fsmIndex, byte stateIndex, EntityNetworkData step) {
         var count = step.Packet.ReadByte();
         var effects = new List<EntityNetworkData>(count);
+
+        // Read in place, after the head of the step and how many it has: the index of each effect's action and how
+        // long what it says is, low byte first as the packet writes it, then that
         var head = _fsms.Client.Count > 1 ? 3 : 2;
+        var at = head + 1;
         for (var i = 0; i < count; i++) {
-            var actionIndex = step.Packet.ReadByte();
-            var said = step.Packet.ReadBytes(step.Packet.ReadUShort());
-            var bytes = new byte[head + said.Length];
+            step.Packet.CopyTo(StepEntryHead, 0, at, StepEntryHead.Length);
+            var length = StepEntryHead[1] | StepEntryHead[2] << 8;
+            var bytes = new byte[head + length];
             if (head == 3) {
                 bytes[0] = (byte) fsmIndex;
             }
 
             bytes[head - 2] = stateIndex;
-            bytes[head - 1] = actionIndex;
-            Array.Copy(said, 0, bytes, head, said.Length);
+            bytes[head - 1] = StepEntryHead[0];
+            step.Packet.CopyTo(bytes, head, at + StepEntryHead.Length, length);
+            at += StepEntryHead.Length + length;
             effects.Add(new EntityNetworkData {
                 Type = EntityComponentType.Fsm,
                 SenderId = step.SenderId,
-                Packet = new global::SSMP.Networking.Packet.Packet(bytes)
+                Packet = new global::SSMP.Networking.Packet.Packet(bytes, 0, bytes.Length)
             });
         }
 
         return effects;
     }
+
+    /// <summary>
+    /// The index of the action of one effect of a step and the length of what it says (see <see cref="TakeStep"/>).
+    /// </summary>
+    private static readonly byte[] StepEntryHead = new byte[3];
 
     /// <summary>
     /// Update the FSMs of the host entity to prepare for host transfer or disconnects.

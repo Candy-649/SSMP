@@ -57,16 +57,7 @@ internal partial class Entity {
     /// activeActionIndex). The game goes into none of the rest once one has taken the FSM on, like a test of a
     /// yes-or-no that sends it to the next state at once, so they were never done.
     /// </summary>
-    private static readonly Func<FsmState, int> EnteredUpTo = CompileEnteredUpTo();
-
-    /// <summary>
-    /// Makes <see cref="EnteredUpTo"/>, which reads what PlayMaker keeps to itself.
-    /// </summary>
-    private static Func<FsmState, int> CompileEnteredUpTo() {
-        var state = Expression.Parameter(typeof(FsmState), "state");
-        var index = typeof(FsmState).GetField("activeActionIndex", BindingFlags.Instance | BindingFlags.NonPublic)!;
-        return Expression.Lambda<Func<FsmState, int>>(Expression.Field(state, index), state).Compile();
-    }
+    private static Func<FsmState, int>? _enteredUpTo;
 
     /// <summary>
     /// Whether each kind of action leaves nothing behind by its name (see <see cref="NothingLeftBehindName"/>), by
@@ -129,6 +120,9 @@ internal partial class Entity {
             return;
         }
 
+        var state = Expression.Parameter(typeof(FsmState), "state");
+        var index = typeof(FsmState).GetField("activeActionIndex", BindingFlags.Instance | BindingFlags.NonPublic)!;
+        _enteredUpTo = Expression.Lambda<Func<FsmState, int>>(Expression.Field(state, index), state).Compile();
         _doTransitionHook = new Hook(
             typeof(HutongGames.PlayMaker.Fsm).GetMethod(
                 "DoTransition", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
@@ -153,7 +147,7 @@ internal partial class Entity {
             RoomFsmWays.TryGetValue(component, out var ways) && component.Fsm == self &&
             self.ActiveState is { } from && transition.ToFsmState is { } to) {
             ways.Add(
-                self, from, EnteredUpTo(from), to, transition.FsmEvent, HutongGames.PlayMaker.Fsm.EventData.SentByFsm,
+                self, from, _enteredUpTo!(from), to, transition.FsmEvent, HutongGames.PlayMaker.Fsm.EventData.SentByFsm,
                 isGlobal
             );
         }
@@ -195,7 +189,7 @@ internal partial class Entity {
         var told = $"[Wounds] The '{fsm.Name}' of entity {Id} is in '{at.Name}' as the partner's '{eventName}' " +
                    $"comes, which their copy took in '{fromName}'";
         var reached = at;
-        var reachedEntered = EnteredUpTo(at);
+        var reachedEntered = _enteredUpTo!(at);
         for (var back = 0; back < ways.Count; back++) {
             var way = ways.Back(back);
             if (way.To != reached) {
@@ -310,7 +304,7 @@ internal partial class Entity {
     /// </summary>
     /// <param name="state">The state.</param>
     /// <param name="enteredUpTo">The index of the last action that the state went into (see
-    /// <see cref="EnteredUpTo"/>).</param>
+    /// <see cref="_enteredUpTo"/>).</param>
     private static string? LeftBehindBy(FsmState state, int enteredUpTo) {
         var actions = state.Actions;
         for (var i = 0; i <= enteredUpTo && i < actions.Length; i++) {
@@ -361,7 +355,7 @@ internal partial class Entity {
         var putBack = 0;
         for (var back = 0; back <= last; back++) {
             var state = back == 0 ? at : ways.Back(back - 1).From;
-            var enteredUpTo = back == 0 ? EnteredUpTo(at) : ways.Back(back - 1).FromEntered;
+            var enteredUpTo = back == 0 ? _enteredUpTo!(at) : ways.Back(back - 1).FromEntered;
             var actions = state.Actions;
             for (var i = 0; i <= enteredUpTo && i < actions.Length; i++) {
                 var action = actions[i];
@@ -495,7 +489,7 @@ internal partial class Entity {
 
     /// <summary>
     /// A way that an FSM of a room's own creature went: from which state, the index of the last action of it that it
-    /// went into (see <see cref="EnteredUpTo"/>), to which state, by which event, which FSM was running as the event was
+    /// went into (see <see cref="_enteredUpTo"/>), to which state, by which event, which FSM was running as the event was
     /// told, or none, whether it is a way that every state takes, when it went in unscaled time, and its number (see
     /// <see cref="FsmWays"/>).
     /// </summary>
