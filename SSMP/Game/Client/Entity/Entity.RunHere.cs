@@ -2478,7 +2478,9 @@ internal partial class Entity {
         } finally {
             KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm, from) ?? []);
             foreach (var (otherFsm, otherFrom, otherMuted) in others) {
-                var keptIn = RestOfTheInput(otherFsm, otherFrom) ?? [];
+                // One that was off and that the catch switched on started over from its beginning, which is none of
+                // the catch's doing: its own catches of the local player hold them again at once
+                HashSet<FsmState> keptIn = otherFrom == null ? [] : RestOfTheInput(otherFsm, otherFrom) ?? [];
                 if (keptIn.Count > 0) {
                     Logger.Info(
                         $"What the partner's catch told '{otherFsm.Name}' of '{hostFsm.gameObject.name}' is played " +
@@ -2540,7 +2542,7 @@ internal partial class Entity {
     /// <param name="fsm">The FSM.</param>
     /// <param name="from">The state the input found it in.</param>
     /// <returns>The states, or null if the input left it where it found it.</returns>
-    private static HashSet<FsmState>? RestOfTheInput(HutongGames.PlayMaker.Fsm fsm, FsmState? from) {
+    private static HashSet<FsmState>? RestOfTheInput(HutongGames.PlayMaker.Fsm fsm, FsmState from) {
         if (fsm.ActiveState is not { } reached || reached == from) {
             return null;
         }
