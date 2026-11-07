@@ -142,11 +142,16 @@ internal static class PartsByClips {
             CutAt = Hurt
         },
 
-        // The silk of a quick craft, which the game starts over each time, and the flash of the tools made anew on a
-        // bench as the crafting is over
+        // The silk of a quick craft, which the game starts over each time, and the silk and the flash of the tools made
+        // anew on a bench: the bench switches its silk on as the crafting begins and off as it is over, before the
+        // silk's own clip is (USER 11-07 "坐椅子修工具那个动作有个丝线特效，我看不到我朋友的"), and the flash then
         new() {
             Path = "Tool Effects/QuickCraft Silk", On = ["Quick Craft Ground", "Quick Craft Air"], Restarts = true,
             CutAt = Hurt
+        },
+        new() {
+            Path = "Tool Effects/Craft Silk", On = ["Sit Craft"], PartClip = "Sit Craft Silk", Through = [],
+            UntilEnd = true
         },
         new() { Path = "Tool Effects/Craft Flash", On = ["Sit Craft"], AtEnd = true },
 
@@ -266,7 +271,7 @@ internal static class PartsByClips {
                 }
 
                 Comings.RemoveAt(i);
-                ComeOut(coming.Character, coming.Id, coming.Rule, coming.ClipName);
+                ComeOut(coming.Character, coming.Id, coming.Rule, coming.ClipName, coming.GoesAt);
             }
         }
 
@@ -274,6 +279,13 @@ internal static class PartsByClips {
             var showing = Out[i];
             if (showing.Character == null || showing.Part == null || !showing.Part.activeSelf) {
                 Out.RemoveAt(i);
+                continue;
+            }
+
+            if (showing.GoesAt is { } goesAt && Time.time >= goesAt) {
+                showing.Part.SetActive(false);
+                Out.RemoveAt(i);
+                Logger.Info($"[Parts] Player {showing.Id}'s clip that brought '{showing.Rule.Path}' out is over: it goes");
                 continue;
             }
 
@@ -342,13 +354,27 @@ internal static class PartsByClips {
         tk2dSpriteAnimationClip clip,
         float startTime
     ) {
-        float into;
-        if (rule.AtEnd) {
-            if (clip.frames == null || clip.frames.Length == 0 || clip.fps <= 0f) {
+        // When the clip is over, for a part that comes out or goes then
+        float? length = clip.frames == null || clip.frames.Length == 0 || clip.fps <= 0f
+            ? null
+            : clip.frames.Length / clip.fps;
+        float? goesAt = null;
+        if (rule.UntilEnd) {
+            // A clip that was put right after it was over leaves nothing to come out for
+            if (length is not { } untilEnd || untilEnd <= startTime) {
                 return;
             }
 
-            into = clip.frames.Length / clip.fps;
+            goesAt = Time.time + untilEnd - startTime;
+        }
+
+        float into;
+        if (rule.AtEnd) {
+            if (length is not { } atEnd) {
+                return;
+            }
+
+            into = atEnd;
         } else if (rule.AtTrigger is { } trigger) {
             if (TriggerTime(clip, trigger) is not { } triggerTime) {
                 WarnOnce(rule, $"'{clipName}' has no frame for '{rule.Path}' to come out at");
@@ -369,7 +395,7 @@ internal static class PartsByClips {
 
         var wait = into - startTime;
         if (wait > 0f) {
-            Comings.Add(new Pending(playerObject, id, rule, clipName, Time.time + wait));
+            Comings.Add(new Pending(playerObject, id, rule, clipName, Time.time + wait, goesAt));
             return;
         }
 
@@ -379,14 +405,19 @@ internal static class PartsByClips {
             return;
         }
 
-        ComeOut(playerObject, id, rule, clipName);
+        ComeOut(playerObject, id, rule, clipName, goesAt);
     }
 
     /// <summary>
     /// Brings a part of a character out from its start, unless it stays out until it is made to go and is out already
     /// for this move.
     /// </summary>
-    private static void ComeOut(GameObject playerObject, ushort id, Rule rule, string clipName) {
+    /// <param name="playerObject">The character.</param>
+    /// <param name="id">The ID of the player, for the log.</param>
+    /// <param name="rule">How the part goes by the clips of the character.</param>
+    /// <param name="clipName">The name of the clip that brings it out.</param>
+    /// <param name="goesAt">When the part goes as that clip is over (see <see cref="Rule.UntilEnd"/>), or null.</param>
+    private static void ComeOut(GameObject playerObject, ushort id, Rule rule, string clipName, float? goesAt) {
         if (rule.If != null && !rule.If(playerObject)) {
             Logger.Info($"[Parts] Player {id} starts '{clipName}': '{rule.Path}' does not come out where it is");
             return;
@@ -427,9 +458,9 @@ internal static class PartsByClips {
             part.transform.position = place;
         }
 
-        if (rule.Through != null || rule.CutAt != null || heldAt != null || rule.WhileOut != null) {
+        if (rule.Through != null || rule.CutAt != null || heldAt != null || rule.WhileOut != null || goesAt != null) {
             Out.RemoveAll(showing => showing.Part == part);
-            Out.Add(new Showing(playerObject, part, rule, heldAt));
+            Out.Add(new Showing(playerObject, id, part, rule, heldAt, goesAt));
             rule.WhileOut?.Invoke(playerObject, part);
         }
 
@@ -595,6 +626,13 @@ internal static class PartsByClips {
         public bool AtEnd;
 
         /// <summary>
+        /// Whether the part goes as the clip that brought it out is over: for a part that the state of the game
+        /// switches on with the clip and off as it leaves once the clip is done, while the character itself stays on
+        /// the last frame of that clip.
+        /// </summary>
+        public bool UntilEnd;
+
+        /// <summary>
         /// The crests whose characters bring the part out with the clips, for a clip that more crests play; all when
         /// null.
         /// </summary>
@@ -662,12 +700,20 @@ internal static class PartsByClips {
     }
 
     /// <summary>
-    /// A part that is to come out on a character a while into its clip.
+    /// A part that is to come out on a character a while into its clip, with when it goes as that clip is over.
     /// </summary>
-    private sealed record Pending(GameObject Character, ushort Id, Rule Rule, string ClipName, float At);
+    private sealed record Pending(GameObject Character, ushort Id, Rule Rule, string ClipName, float At, float? GoesAt);
 
     /// <summary>
-    /// A part that is out on a character, with where it is held when it was put somewhere.
+    /// A part that is out on a character, with where it is held when it was put somewhere and when it goes as the clip
+    /// that brought it out is over.
     /// </summary>
-    private sealed record Showing(GameObject Character, GameObject Part, Rule Rule, Vector3? HeldAt);
+    private sealed record Showing(
+        GameObject Character,
+        ushort Id,
+        GameObject Part,
+        Rule Rule,
+        Vector3? HeldAt,
+        float? GoesAt
+    );
 }

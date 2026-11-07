@@ -79,6 +79,7 @@ internal class HeroChildEffects : AnimationEffect {
         "Tool Effects/Syringe Flash poison",
         "Tool Effects/Syringe Flash",
         "Tool Effects/Craft Flash",
+        "Tool Effects/Craft Silk",
         "Tool Effects/QuickCraft Silk",
         "Tool Effects/Pt QuickCraft",
         "Tool Effects/Screw Attack Burst",
