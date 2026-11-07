@@ -125,13 +125,14 @@ internal static class LetGoParts {
     /// nothing, never rose, and so never let go of the hands either, hanging from them for the part of the fight in
     /// which the scene host's had come loose, turned over whenever the hands turned with the boss (USER 11-07 "那个
     /// 很多针的攻击，有时候是反的"). Which goes first in a frame is not the game's to say, so either way now gives the
-    /// same.
+    /// same. Only a part that the game finds nothing for is told: one whose part above went under something else is
+    /// left with what the game found.
     /// </summary>
     private static void AnswerFromWhereItWas(GetGrandparent action) {
         var owner = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         var above = owner == null ? null : owner.transform.parent;
-        if (above == null || !Origins.TryGetValue(above.gameObject, out var origin) ||
-            origin.Frame != Time.frameCount) {
+        if (above == null || action.storeResult.Value != null ||
+            !Origins.TryGetValue(above.gameObject, out var origin) || origin.Frame != Time.frameCount) {
             return;
         }
 

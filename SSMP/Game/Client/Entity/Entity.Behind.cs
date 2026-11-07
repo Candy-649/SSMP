@@ -198,11 +198,12 @@ internal partial class Entity {
             return null;
         }
 
-        var hostStates = _fsms.Host[_runHereIndex].FsmStates;
+        // Named by the copy's FSM, as in UpdateHostFsmData
+        var states = copyFsm.FsmStates;
         if (update.UpdateTypes.Contains(EntityUpdateType.HostFsm) &&
             update.HostFsmData.TryGetValue(_runHereIndex, out var hostFsm) &&
-            hostFsm.Types.Contains(EntityHostFsmData.Type.State) && hostFsm.CurrentState < hostStates.Length &&
-            copyFsm.Fsm.GetState(hostStates[hostFsm.CurrentState].Name) is { } said &&
+            hostFsm.Types.Contains(EntityHostFsmData.Type.State) && hostFsm.CurrentState < states.Length &&
+            states[hostFsm.CurrentState] is var said &&
             OutOfTheMoveFrom(copyFsm, move, said) is { } from) {
             return (from, said.Name);
         }

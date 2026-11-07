@@ -5060,7 +5060,10 @@ internal partial class Entity {
             var snapshot = _fsmSnapshots[fsmIndex];
 
             if (data.Types.Contains(EntityHostFsmData.Type.State)) {
-                var states = hostFsm.FsmStates;
+                // Named by the copy's FSM, made from the same template as the scene host's: the room's own FSM here
+                // can be the stand-in it was loaded with, never made, whose states can be fewer or in another order
+                // (Entity.WaitForTheFsmToBeMade)
+                var states = _fsms.Client[fsmIndex].FsmStates;
                 if (data.CurrentState == byte.MaxValue) {
                     // No state at all, which is how the scene host sends a state it cannot find: its FSM stopped, as it
                     // does when its creature is switched off or dies. The game's FSM leaves the state it was in as it
