@@ -510,7 +510,13 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// Finds the states of an FSM that deal with the player character (see <see cref="IsAboutThePlayer"/>).
+    /// Finds the states of an FSM that deal with the player character (see <see cref="IsAboutThePlayer"/>): the ones
+    /// that do something to them, the ones in which the creature holds them (see <see cref="HoldStatesOf"/>), and the
+    /// ones entered from all those alone. Counted only as far as the states entered from them alone, a loop in a hold
+    /// was left out, and what a tendril played in it - the shaking, the grunts of the player, the music muffled and put
+    /// back - went to the other game's player too (USER 11-07). A loop is counted inside a hold alone: counted from
+    /// every state that does something to the player, it took in the whole fight of a creature that does something to
+    /// the player as it wakes.
     /// </summary>
     private static HashSet<FsmState> FindPlayerStates(HutongGames.PlayMaker.Fsm fsm) {
         var found = new HashSet<FsmState>();
@@ -520,8 +526,52 @@ internal static partial class EntityFsmActions {
             }
         }
 
+        found.UnionWith(HoldStatesOf(fsm));
         AddStatesEnteredOnlyFrom(fsm, found);
         return found;
+    }
+
+    /// <summary>
+    /// The states of each FSM of the scene host's creatures in which it holds the player character (see
+    /// <see cref="HoldStatesOf"/>).
+    /// </summary>
+    private static readonly ConditionalWeakTable<HutongGames.PlayMaker.Fsm, HashSet<FsmState>> HoldStates = new();
+
+    /// <summary>
+    /// Whether a creature holds the player character in a state (see <see cref="HoldStatesOf"/>).
+    /// </summary>
+    /// <param name="state">The state of the creature.</param>
+    private static bool HoldsThePlayerIn(FsmState state) {
+        return HoldStatesOf(state.Fsm).Contains(state);
+    }
+
+    /// <summary>
+    /// The states of an FSM of a creature in which it holds the player character: the ones that take hold of them, and
+    /// the ones the FSM only gets to through those and before it lets go, loops among them too, like a tendril chewing
+    /// on the player it pulled up, back and forth with their struggling. Found the first time they are asked for, which
+    /// is at the latest as the states that deal with the player are found, before any action is switched off.
+    /// </summary>
+    private static HashSet<FsmState> HoldStatesOf(HutongGames.PlayMaker.Fsm fsm) {
+        if (!HoldStates.TryGetValue(fsm, out var states)) {
+            states = new HashSet<FsmState>();
+            foreach (var state in fsm.States) {
+                if (Entity.GrabsThePlayerIn(state)) {
+                    states.UnionWith(StatesOnlyThrough(fsm, [state], LetsGoOfThePlayerIn));
+                }
+            }
+
+            HoldStates.Add(fsm, states);
+        }
+
+        return states;
+    }
+
+    /// <summary>
+    /// Whether a state of a creature's FSM lets go of the player character it holds (see
+    /// <see cref="LetsGoOfThePlayer"/>).
+    /// </summary>
+    private static bool LetsGoOfThePlayerIn(FsmState state) {
+        return Array.Exists(state.Actions, action => action.Enabled && LetsGoOfThePlayer(action));
     }
 
     /// <summary>
@@ -576,11 +626,31 @@ internal static partial class EntityFsmActions {
     /// <param name="fsm">The FSM.</param>
     /// <param name="through">The state.</param>
     internal static HashSet<FsmState> StatesOnlyThrough(HutongGames.PlayMaker.Fsm fsm, FsmState through) {
-        var found = new HashSet<FsmState> { through };
-        var toGo = new Stack<FsmState>();
-        toGo.Push(through);
+        return StatesOnlyThrough(fsm, [through], null);
+    }
+
+    /// <summary>
+    /// The states of an FSM that it only ever gets to through some of its states: those states, and every state they
+    /// lead to that is entered from those states alone (see the one for a single state above), not going on past the
+    /// states it ends at, which are counted in themselves.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="through">The states, which are all counted in.</param>
+    /// <param name="endsAt">Whether a state is one to end at, or null to go on wherever the states lead.</param>
+    private static HashSet<FsmState> StatesOnlyThrough(
+        HutongGames.PlayMaker.Fsm fsm,
+        HashSet<FsmState> through,
+        Func<FsmState, bool>? endsAt
+    ) {
+        var found = new HashSet<FsmState>(through);
+        var toGo = new Stack<FsmState>(through);
         while (toGo.Count > 0) {
-            foreach (var transition in toGo.Pop().Transitions) {
+            var from = toGo.Pop();
+            if (endsAt != null && endsAt(from)) {
+                continue;
+            }
+
+            foreach (var transition in from.Transitions) {
                 if (transition.ToFsmState is { } to && found.Add(to)) {
                     toGo.Push(to);
                 }
@@ -614,7 +684,7 @@ internal static partial class EntityFsmActions {
         do {
             removed = false;
             foreach (var state in new List<FsmState>(found)) {
-                if (state == through || !entries.Contains(state.Name) &&
+                if (through.Contains(state) || !entries.Contains(state.Name) &&
                     (!sources.TryGetValue(state, out var from) || from.TrueForAll(found.Contains))) {
                     continue;
                 }
@@ -762,10 +832,11 @@ internal static partial class EntityFsmActions {
     /// moves, holds or turns them, tells them or their FSMs something, plays or spawns something at them, looks at
     /// them - or to the camera that follows them, it runs a template that does any of that, like the one that grabs
     /// and hides them, or it tells the room that the player was caught or hurt. So is a shake of the camera, a flash
-    /// of the screen or a change of how the game sounds in a state that deals with them (see
-    /// <see cref="IsAboutThePlayer"/>). An action that may send its FSM on to another state is never counted, so that
-    /// an FSM without these actions still goes where it would have gone - except one that listens for what the player
-    /// presses: whether they struggle is theirs to say, and nobody else's buttons.
+    /// of the screen, a change of how the game sounds or a sound in the player's own voice in a state that deals with
+    /// them (see <see cref="IsAboutThePlayer"/>, <see cref="IsInThePlayersVoice"/>): the scene host, playing a catch of
+    /// the partner, played the partner's grunts as they struggled. An action that may send its FSM on to another state
+    /// is never counted, so that an FSM without these actions still goes where it would have gone - except one that
+    /// listens for what the player presses: whether they struggle is theirs to say, and nobody else's buttons.
     ///
     /// A copy that plays what the local player did, or what caught them, runs these on the local player, whose own
     /// they are (see Entity.IsLeftToSceneHost). The scene host, playing the same for its partner, leaves them out: its
@@ -801,7 +872,8 @@ internal static partial class EntityFsmActions {
             ? action.State != null && IsAboutThePlayer(action.State)
             : PlayerActionNames.Contains(name) || NamesThePlayer(action) ||
               TellsTheRoomAboutThePlayer(action) && BroadcastOf(action) != "FLEA TINKED" ||
-              RunsSomethingOnThePlayer(action) || followTells && StartsSomethingOnThePlayer(action);
+              RunsSomethingOnThePlayer(action) || followTells && StartsSomethingOnThePlayer(action) ||
+              IsInThePlayersVoice(action) && action.State != null && IsAboutThePlayer(action.State);
         return own && !DecidesWhereItGoes(action);
     }
 

@@ -461,13 +461,38 @@ internal static partial class EntityFsmActions {
     }
 
     /// <summary>
-    /// Whether a sound is one of this game's player character being hit or caught: played at the character, in a state
-    /// that is about them (see <see cref="IsAboutThePlayer"/>). Such a sound is not sent: the other game's copy would
-    /// play it at its own player, whom nothing happened to. A sound played at the player in any other state, like a
-    /// roar made loud that way, is heard in both games.
+    /// Whether a sound is one of this game's player character being hit or caught: played at the character, or in the
+    /// character's own voice, in a state that is about them (see <see cref="IsAboutThePlayer"/>). Such a sound is not
+    /// sent: the other game's copy would play it at its own player, whom nothing happened to, and the voice of a
+    /// player is heard in their own game alone, as the rest of what their character does is. A tendril that pulled the
+    /// partner up played her grunts as she struggled in the other game too (USER 11-07 "我会听到我朋友大黄蜂挣扎的声音…原本应该
+    /// 只在她那边放的"). A sound played at the player in any other state, like a roar made loud that way, is heard in both
+    /// games.
     /// </summary>
     private static bool IsPlayerHitSound(FsmStateAction action) {
-        return action.State != null && IsAboutThePlayer(action.State) && PlaysAtThePlayer(action);
+        return action.State != null && IsAboutThePlayer(action.State) &&
+               (PlaysAtThePlayer(action) || IsInThePlayersVoice(action));
+    }
+
+    /// <summary>
+    /// What the names of the game's tables of the player character's own voice have in them, the ones that the hero
+    /// plays from as they are wounded, grunt, talk or call out ("Wound Hornet Voice", "Grunt Hornet Voice"), which a
+    /// creature that holds them plays from too.
+    /// </summary>
+    private const string PlayerVoiceTableName = "Hornet Voice";
+
+    /// <summary>
+    /// Whether an action plays a sound from one of the tables of the player character's own voice (see
+    /// <see cref="PlayerVoiceTableName"/>).
+    /// </summary>
+    private static bool IsInThePlayersVoice(FsmStateAction action) {
+        var table = action switch {
+            PlayRandomAudioClipTable play => play.Table.Value,
+            PlayRandomAudioClipTableV2 play => play.Table.Value,
+            PlayRandomAudioClipTableV3 play => play.Table.Value,
+            _ => null
+        };
+        return table != null && table.name.Contains(PlayerVoiceTableName);
     }
 
     /// <summary>

@@ -3604,8 +3604,8 @@ internal partial class Entity {
     private static readonly HashSet<string> GrabEvents = ["HERO GRAB", "HERO GRAB VULNERABLE"];
 
     /// <summary>
-    /// Whether each state of the FSMs of the parts of copies grabs the player, found the first time a part tells its
-    /// copy anything from there (see <see cref="GrabsThePlayer"/>).
+    /// Whether each state of the FSMs of creatures and their parts grabs the player, found the first time it is asked
+    /// (see <see cref="GrabsThePlayerIn"/>).
     /// </summary>
     private static readonly ConditionalWeakTable<FsmState, StrongBox<bool>> GrabbingStates = new();
 
@@ -3869,22 +3869,28 @@ internal partial class Entity {
     /// local one.
     /// </summary>
     private static bool GrabsThePlayer(HutongGames.PlayMaker.Fsm fsm) {
-        return fsm.ActiveState is { } state && Grabs(state) || fsm.PreviousActiveState is { } previous && Grabs(previous);
+        return fsm.ActiveState is { } state && GrabsThePlayerIn(state) ||
+               fsm.PreviousActiveState is { } previous && GrabsThePlayerIn(previous);
+    }
 
-        static bool Grabs(FsmState state) {
-            if (GrabbingStates.TryGetValue(state, out var known)) {
-                return known.Value;
-            }
-
-            var grabs = Array.Exists(
-                state.Actions,
-                action => AsksOrNamesTheGrab(action) ||
-                          EntityFsmActions.SubFsmOf(action) is { States: { } states } &&
-                          Array.Exists(states, sub => Array.Exists(sub.Actions, AsksOrNamesTheGrab))
-            );
-            GrabbingStates.Add(state, new StrongBox<bool>(grabs));
-            return grabs;
+    /// <summary>
+    /// Whether a state of a creature's FSM grabs the player: it asks whether they can be grabbed or names the game's
+    /// grab (see <see cref="GrabEvents"/>), itself or in a template it runs, like the one that grabs and hides them,
+    /// which picks the name of the grab it sends out of two.
+    /// </summary>
+    internal static bool GrabsThePlayerIn(FsmState state) {
+        if (GrabbingStates.TryGetValue(state, out var known)) {
+            return known.Value;
         }
+
+        var grabs = Array.Exists(
+            state.Actions,
+            action => AsksOrNamesTheGrab(action) ||
+                      EntityFsmActions.SubFsmOf(action) is { States: { } states } &&
+                      Array.Exists(states, sub => Array.Exists(sub.Actions, AsksOrNamesTheGrab))
+        );
+        GrabbingStates.Add(state, new StrongBox<bool>(grabs));
+        return grabs;
 
         static bool AsksOrNamesTheGrab(FsmStateAction action) {
             return action.GetType().Name.StartsWith("CanHeroBeGrabbed", StringComparison.Ordinal) ||

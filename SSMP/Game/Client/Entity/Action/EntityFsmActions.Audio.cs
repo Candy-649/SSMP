@@ -423,9 +423,16 @@ internal static partial class EntityFsmActions {
 
     #region TransitionToAudioSnapshot
 
-    /// <summary>Builds network data from the FSM action.</summary>
+    /// <summary>
+    /// Builds network data from the FSM action, unless the creature changes the mix while it holds the player (see
+    /// <see cref="HoldsThePlayerIn"/>): the music muffled while a tendril chews on the player it pulled up is that
+    /// player's, like their grunts there, and the other game's player heard the music muffled for the partner caught
+    /// far away (USER 11-07 "被抓之后背景音乐会带一个滤镜（？）总之就是那个也同步到我这里来了"). A mix that a creature sets in
+    /// any other state is heard in both games, like the one of the end of a fight that takes its player over, which
+    /// the others watch.
+    /// </summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, TransitionToAudioSnapshot action) {
-        return true;
+        return !HoldsThePlayerIn(action.State);
     }
 
     /// <summary>
