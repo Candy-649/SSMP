@@ -1375,8 +1375,7 @@ internal partial class CoopSave {
         hero.renderer.enabled = false;
         _hurtsKeptOffLyingPlayer = 0;
         _cogTouchesOfLyingPlayer = 0;
-        _maggotWaterSparedLyingPlayer = 0;
-        _silkAcidSparedLyingPlayer = 0;
+        CountSilkWhileLyingAfresh();
 
         if (hero.vibrationCtrl != null) {
             hero.vibrationCtrl.PlayHeroDeath();

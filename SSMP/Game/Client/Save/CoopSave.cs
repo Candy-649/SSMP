@@ -277,7 +277,7 @@ internal partial class CoopSave {
         RegisterLiftHooks();
         RegisterStoryItemHooks();
         RegisterRescueHooks();
-        RegisterLyingInWaterHooks();
+        RegisterSilkWhileLyingHooks();
         RegisterRoomMixHooks();
         RegisterLavaDeathHooks();
         RegisterMaggotHooks();
