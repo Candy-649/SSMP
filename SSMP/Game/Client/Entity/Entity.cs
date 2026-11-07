@@ -159,10 +159,17 @@ internal partial class Entity {
     private float _outstandingExpiry;
 
     /// <summary>
-    /// Whether the wait for <see cref="_outstandingAnticipation"/> is for a knockback that the local game played first
-    /// (see <see cref="BeginKnockbackAnticipation"/>).
+    /// Whether the local game waits on a knockback that it played first (see <see cref="BeginKnockbackAnticipation"/>).
     /// </summary>
     private bool _knockbackWaits;
+
+    /// <summary>
+    /// The number of the knockback that the local game waits on (see <see cref="_knockbackWaits"/>), which the scene
+    /// host says where it lands under. Something the local player did after it that nothing runs here to move the copy
+    /// for waits beside it under a number of its own (Entity.PlayHere), the latest in
+    /// <see cref="_outstandingAnticipation"/>.
+    /// </summary>
+    private byte _knockbackNumber;
 
     /// <summary>
     /// The number of the knockback of the local player's whose landing in the scene host's game the copy was last sent
@@ -4100,6 +4107,7 @@ internal partial class Entity {
         var goesOn = IsAnticipating() && _knockbackWaits;
         var anticipation = BeginAnticipation();
         _knockbackWaits = true;
+        _knockbackNumber = anticipation;
         _knockedHere = true;
         _landingDue = null;
         if (!goesOn) {
@@ -4147,7 +4155,7 @@ internal partial class Entity {
     /// <param name="heardAt">When that was heard, in game time.</param>
     /// <param name="interpolation">What draws the copy by its positions.</param>
     private void Land(Vector3 landing, float heardAt, PredictiveInterpolation interpolation) {
-        _landedFor = _outstandingAnticipation;
+        _landedFor = _knockbackNumber;
         interpolation.LetGoOfWhatItCarries();
         interpolation.Rebase(landing, interpolation.Velocity);
         LastLanding = (Time.time, -(Vector2) interpolation.VisualOffset, heardAt);
@@ -4589,7 +4597,7 @@ internal partial class Entity {
                     continue;
                 }
 
-                if (report.Knocking == _outstandingAnticipation && report.Knocking != _landedFor) {
+                if (report.Knocking == _knockbackNumber && report.Knocking != _landedFor) {
                     var landing = new Vector3(report.LandsAtX, report.LandsAtY, position.z);
                     if (_knockedHere) {
                         _landingDue ??= (landing, Time.time);
@@ -4752,9 +4760,9 @@ internal partial class Entity {
             return;
         }
 
-        // Played by the copy's own FSM until the scene host has answered its input, through the combo of a catch, and
-        // through a talk of the local player, and held till then (PlayHere, TalkHere)
-        if (WaitsForEcho || _runHereCombo != null || _runHereTalk) {
+        // Played by the copy's own FSM until the scene host has answered its input, if what runs here plays any, through
+        // the combo of a catch, and through a talk of the local player, and held till then (PlayHere, TalkHere)
+        if (WaitsForEcho && RunHerePlaysClips || _runHereCombo != null || _runHereTalk) {
             _heldAnimation = (animationId, wrapMode);
             return;
         }
@@ -5009,10 +5017,10 @@ internal partial class Entity {
             }
 
             // How the entity moves by itself, the colours its FSMs leave it in, and whether the damage of its parts is
-            // on, are its own FSM's to say while that runs here, and held until the scene host has answered the input
-            // (PlayHere)
+            // on, are its own FSM's to say while that runs here doing more than decide where it goes, and held until
+            // the scene host has answered the input (PlayHere)
             if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint or
-                    EntityComponentType.DamageHero) && WaitsForEcho) {
+                    EntityComponentType.DamageHero) && WaitsForEcho && RunHereActs) {
                 HoldForEcho(data);
                 continue;
             }

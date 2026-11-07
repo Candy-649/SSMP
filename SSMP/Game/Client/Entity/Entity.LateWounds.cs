@@ -78,6 +78,19 @@ internal partial class Entity {
     private static readonly Dictionary<Type, FieldInfo[]> NumberFields = new();
 
     /// <summary>
+    /// What the name of a kind of action has in it that only looks about and decides, with numbers of the FSM's own, or
+    /// waits, of the kinds that the creatures' FSMs have (reports/fsm-usage.tsv). A name can have this in it and do more
+    /// all the same - one that flips the creature at random - which what reads it looks for first.
+    /// </summary>
+    private const string DecidesPattern =
+        "^(Get|Check|Compare|Find|Has|Can)[A-Z0-9]|^(GameObjectIs|GameObjectCompare|DistanceBetween|RayCast|" +
+        "PlayerData(Bool|Int|Float)Test|Trigger2dEvent|Collision2dEvent|EnumCompare|SendRandomEvent)|" +
+        "^(Bool|Float|Int|String|Vector[23]|Convert|Select)[A-Z]|^Random|^Ease(Float|Vector|Color)|^TimeLimit|" +
+        "^(BuildString|MultiplyIntByFloat)$|^Set(Bool|Float|Int|String|Vector2|Vector3|Object)Value|" +
+        "^Set(GameObject|FloatSign|Vector2XY|Vector3XYZ)$|" +
+        "^(Wait|WaitRandom|WaitBool|NextFrameEvent|NextFixedFrameEvent|Comment)$";
+
+    /// <summary>
     /// What the name of a kind of action has in it that leaves nothing behind once its state is left but the numbers of
     /// its FSM, how the creature looks, sounds and faces, and where it is and how fast it moves, which are put back or
     /// told the other game by themselves: one that looks about and decides, works with the FSM's own numbers or waits;
@@ -85,13 +98,7 @@ internal partial class Entity {
     /// kinds that the creatures' FSMs have of each were read off all of them (reports/fsm-usage.tsv).
     /// </summary>
     private static readonly Regex NothingLeftBehindName = new(
-        // Looks about and decides, with numbers of the FSM's own
-        "^(Get|Check|Compare|Find|Has|Can)[A-Z0-9]|^(GameObjectIs|GameObjectCompare|DistanceBetween|RayCast|" +
-        "PlayerData(Bool|Int|Float)Test|Trigger2dEvent|Collision2dEvent|EnumCompare|SendRandomEvent)|" +
-        "^(Bool|Float|Int|String|Vector[23]|Convert|Select)[A-Z]|^Random|^Ease(Float|Vector|Color)|^TimeLimit|" +
-        "^(BuildString|MultiplyIntByFloat)$|^Set(Bool|Float|Int|String|Vector2|Vector3|Object)Value|" +
-        "^Set(GameObject|FloatSign|Vector2XY|Vector3XYZ)$|" +
-        "^(Wait|WaitRandom|WaitBool|NextFrameEvent|NextFixedFrameEvent|Comment)$|" +
+        DecidesPattern + "|" +
         // Plays a clip, a sound, particles, a shake or a flash
         "^(Tk2d|Animator|Audio|PlayAudio|PlayRandomAudio|SetAudio|SetRandomAudioClip|FadeAudio|RandomiseAudio|" +
         "PlayParticle|StopParticle|SetParticleEmission|ScreenFlash|ObjectJitter|EaseSpriteColor|" +

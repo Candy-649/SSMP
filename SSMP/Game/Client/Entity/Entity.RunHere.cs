@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
-using System.Linq;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using HutongGames.PlayMaker;
@@ -201,21 +200,38 @@ internal partial class Entity {
     private byte _runHereIndex;
 
     /// <summary>
-    /// Whether what runs here of the FSM of <see cref="_runHere"/> can move or turn the creature (see
-    /// <see cref="CanMoveTheCreature(FsmState)"/>): for an input of the local player, the states it went through and
-    /// goes on through (PlayHere); for anything else, every state of the FSM.
+    /// What what runs here of the FSM of <see cref="_runHere"/> can do to the creature (see
+    /// <see cref="KindsOf(FsmState)"/>): for an input of the local player, the states it went through and goes on
+    /// through (PlayHere); for anything else, every state of the FSM. What it cannot do is the scene host's to say
+    /// meanwhile, as ever: the part of a boss that only checks its health at a wound ran here at every blow of the
+    /// local player, and until the scene host answered, the boss stood still, its clips and the parts of it that hurt
+    /// held back, while it set off on a dash over there (USER 11-07 "拿刀下划砍的动作的刀光有时候没有").
     /// </summary>
-    private bool _runHereCanMove;
+    private RunKinds _runHereKinds;
 
     /// <summary>
     /// Whether the copy goes where its own FSM takes it here rather than where the positions of the scene host put it:
-    /// while what runs here of an FSM of its can move or turn it (see <see cref="_runHereCanMove"/>), or while it has
+    /// while what runs here of an FSM of its can move or turn it (see <see cref="_runHereKinds"/>), or while it has
     /// the body of the room's creature, which the physics moves (see <see cref="GiveTheCopyItsBody"/>). An FSM that
     /// cannot leaves it to the positions: the part of a boss that notes that a player binds, and marks it for a moment,
     /// ran here as the local player bound, and the boss stood where it was for as long as the mark lasted, playing its
     /// moves on the spot, and then shot across to where it had got to (USER 11-03, 幽影有时候位置不太稳定).
     /// </summary>
-    private bool RunHereMovesTheCopy => _runHere != null && (_runHereCanMove || _copyBodyBefore != null);
+    private bool RunHereMovesTheCopy =>
+        _runHere != null && ((_runHereKinds & RunKinds.Moves) != 0 || _copyBodyBefore != null);
+
+    /// <summary>
+    /// Whether what runs here of an FSM of the copy can play its clips (see <see cref="_runHereKinds"/>), which are its
+    /// own to play until the scene host has answered the input (UpdateAnimation).
+    /// </summary>
+    private bool RunHerePlaysClips => _runHere != null && (_runHereKinds & RunKinds.PlaysClips) != 0;
+
+    /// <summary>
+    /// Whether what runs here of an FSM of the copy does more than look about and decide where it goes (see
+    /// <see cref="_runHereKinds"/>): how the creature moves by itself, its colours and which of its parts hurt are then
+    /// its own to say until the scene host has answered the input (UpdateData).
+    /// </summary>
+    private bool RunHereActs => _runHere != null && (_runHereKinds & RunKinds.Acts) != 0;
 
     /// <summary>
     /// The state that the last input played here took <see cref="_runHere"/> to.
@@ -681,14 +697,24 @@ internal partial class Entity {
                 ? RestOfTheInput(fsm, from)
                 : null;
 
-        // What can move the copy here is what the input went through, where it holds the FSM, and the combo it goes on
-        // through, not every state of the FSM: the part of a boss that only checks its health at a wound counted as one
-        // that moves it, for the states it staggers in, and at every blow of the local player the boss stood still
-        // until the scene host answered, slashing on the spot as it set off on a dash, and then shot across to where it
-        // had got to (USER 11-07 "拿刀下划砍的动作的刀光有时候没有"). Once what runs here moved the copy, it goes on
-        // doing so
-        _runHereCanMove = ranHere && _runHereCanMove || path.Exists(CanMoveTheCreature) ||
-                          _runHereCombo != null && _runHereCombo.Any(CanMoveTheCreature);
+        // What the copy can be made to do here is what the input went through, where it holds the FSM, and the combo it
+        // goes on through, not every state of the FSM: the part of a boss that only checks its health at a wound
+        // counted as one that moves it, for the states it staggers in, and at every blow of the local player the boss
+        // stood still until the scene host answered, slashing on the spot as it set off on a dash, and then shot across
+        // to where it had got to (USER 11-07 "拿刀下划砍的动作的刀光有时候没有"). What it did already here as it ran
+        // stands
+        var kinds = ranHere ? _runHereKinds : RunKinds.None;
+        foreach (var state in path) {
+            kinds |= KindsOf(state);
+        }
+
+        if (_runHereCombo != null) {
+            foreach (var state in _runHereCombo) {
+                kinds |= KindsOf(state);
+            }
+        }
+
+        _runHereKinds = kinds;
         _runHereFrom = from;
         _runHereStep = 0;
         _runHereExit = null;
@@ -715,9 +741,13 @@ internal partial class Entity {
             BeginAftermath(after, $"went out of the catch to '{reached.Name}' with the catch itself");
         }
 
+        // A catch that was over within the input leaves the copy to the positions again, and so does a wound that
+        // nothing here can move it for: given the body of the room's creature, kinematic as its own is, a boss that
+        // only checked its health here stood still at every blow of the local player until the scene host answered
+        // (USER 11-07 "拿刀下划砍的动作的刀光有时候没有")
         if (!_runHereLed) {
             _moods.Clear();
-            if (led) {
+            if (led || (_runHereKinds & RunKinds.Moves) == 0) {
                 TakeTheCopysBodyBack();
             }
         }
@@ -729,8 +759,13 @@ internal partial class Entity {
             StopSteppingRunHere();
         }
 
-        // What the copy does now moves it, rather than what the creature does by itself over there
-        EndKnockbackWait($"its own FSM ran here for '{eventName}'");
+        // What the copy does now moves it, rather than what the creature does by itself over there. Where nothing
+        // here moves it, a knockback that the local game played first goes on as it did, and so does the wait on it,
+        // beside the wait on this (TakeWhileKnockedBack)
+        if (RunHereMovesTheCopy) {
+            EndKnockbackWait($"its own FSM ran here for '{eventName}'");
+        }
+
         _runHereAwaited = BeginAnticipation();
         _runHereCatch = _runHereAwaited;
         _runHereExpiry = Time.unscaledTime + AnticipationHoldTime;
@@ -2212,54 +2247,87 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether each kind of action that an FSM that ran here had can move or turn the creature (see
-    /// <see cref="CanMoveTheCreature(FsmState)"/>), by kind.
+    /// What an FSM that runs here can do to the creature it runs on (see <see cref="_runHereKinds"/>).
     /// </summary>
-    private static readonly Dictionary<Type, bool> MovingActions = new();
+    [Flags]
+    private enum RunKinds : byte {
+        None = 0,
+
+        /// <summary>Moves or turns it (see <see cref="MovingActionName"/>).</summary>
+        Moves = 1,
+
+        /// <summary>Plays a clip on it or a part of it (see <see cref="ClipActionName"/>).</summary>
+        PlaysClips = 2,
+
+        /// <summary>Anything more than look about and decide where its FSM goes (see DecidesPattern).</summary>
+        Acts = 4
+    }
+
+    /// <summary>
+    /// What each kind of action that an FSM that ran here had can do to the creature (see
+    /// <see cref="KindsOf(FsmState)"/>), by kind.
+    /// </summary>
+    private static readonly Dictionary<Type, RunKinds> ActionKinds = new();
+
+    /// <summary>
+    /// What the name of a kind of action only looks about and decides with (see DecidesPattern).
+    /// </summary>
+    private static readonly Regex DecidesName = new(DecidesPattern);
+
+    /// <summary>
+    /// What the name of a kind of action that can play a clip of the creature or of its parts has in it, or of a call
+    /// into the code of the game, which may.
+    /// </summary>
+    private static readonly Regex ClipActionName = new(
+        "Tk2d|Animator|Animation|SendMessage|CallMethod|CallStaticMethod|RunFSM"
+    );
 
     /// <summary>
     /// What the name of a kind of action that can move or turn the creature has in it: its speed, its place, its kind
-    /// of body or how it falls, its walking, crawling or climbing, its knockback, what it hangs from, which way it
-    /// faces or leans - or a call into the code of the game, which may do any of it.
+    /// of body or how it falls, its walking, crawling or climbing, its hovering about or flying at a target, its
+    /// knockback, what it hangs from, which way it faces or leans - or a call into the code of the game, which may do
+    /// any of it. Judged by the states an input goes through (PlayHere), what is missed here leaves a creature that
+    /// moves to the positions, fought by what moves it here.
     /// </summary>
     private static readonly Regex MovingActionName = new(
         "Velocity|Accelerat|Decelerat|Position|Translate|Force|Gravity|Kinematic|Chase|DistanceFly|DistanceWalk|" +
         "Shove|Parent|Movement|Rigid|Recoil|iTween|Walker|Crawler|Climber|WalkLeftRight|Face|FlipScale|SetScale|" +
-        "ScaleTo|ScaleSign|Rotate|Tilt|SendMessage|CallMethod|CallStaticMethod|RunFSM|HeroControllerMethods"
+        "ScaleTo|ScaleSign|Rotat|Tilt|IdleBuzz|FireAtTarget|ClampSpeed|ClampAngle|SendMessage|CallMethod|" +
+        "CallStaticMethod|RunFSM|HeroControllerMethods"
     );
 
     /// <summary>
-    /// Whether an FSM has a state that can move or turn the creature it runs on (see
-    /// <see cref="RunHereMovesTheCopy"/>).
-    /// </summary>
-    /// <param name="fsm">The FSM.</param>
-    private static bool CanMoveTheCreature(HutongGames.PlayMaker.Fsm fsm) =>
-        Array.Exists(fsm.States, CanMoveTheCreature);
-
-    /// <summary>
-    /// Whether a state has an action that can move or turn the creature it runs on (see
-    /// <see cref="RunHereMovesTheCopy"/>), by the names of its kinds of action, which say what they do (see
-    /// <see cref="MovingActionName"/>), but for one that only reads such a thing, whose name begins with Get or Check.
-    /// Of every kind that the FSMs of the creatures have, the ones that move one have such a name. Wide rather than
-    /// exact: one counted that cannot keeps the copy where its own FSM puts it while it runs here, as every FSM did.
+    /// What the actions of a state can do to the creature it runs on (see <see cref="_runHereKinds"/>), by the names
+    /// of their kinds, which say what they do (see <see cref="MovingActionName"/>, <see cref="ClipActionName"/>), but
+    /// for one that only reads such a thing, whose name begins with Get or Check. Of every kind that the FSMs of the
+    /// creatures have, the ones that do such a thing have such a name. Wide rather than exact: one counted that cannot
+    /// keeps the copy as its own FSM leaves it while it runs here, as every FSM did.
     /// </summary>
     /// <param name="state">The state.</param>
-    private static bool CanMoveTheCreature(FsmState state) {
+    private static RunKinds KindsOf(FsmState state) {
+        var kinds = RunKinds.None;
         foreach (var action in state.Actions) {
             var type = action.GetType();
-            if (!MovingActions.TryGetValue(type, out var moves)) {
+            if (!ActionKinds.TryGetValue(type, out var kind)) {
                 var name = type.Name;
-                MovingActions[type] = moves = !name.StartsWith("Get", StringComparison.Ordinal) &&
-                                              !name.StartsWith("Check", StringComparison.Ordinal) &&
-                                              MovingActionName.IsMatch(name);
+                var reads = name.StartsWith("Get", StringComparison.Ordinal) ||
+                            name.StartsWith("Check", StringComparison.Ordinal);
+                kind = !reads && MovingActionName.IsMatch(name) ? RunKinds.Moves : RunKinds.None;
+                if (!reads && ClipActionName.IsMatch(name)) {
+                    kind |= RunKinds.PlaysClips;
+                }
+
+                if (kind != RunKinds.None || !DecidesName.IsMatch(name)) {
+                    kind |= RunKinds.Acts;
+                }
+
+                ActionKinds[type] = kind;
             }
 
-            if (moves) {
-                return true;
-            }
+            kinds |= kind;
         }
 
-        return false;
+        return kinds;
     }
 
     /// <summary>
@@ -2677,7 +2745,10 @@ internal partial class Entity {
 
         _runHere = copyFsm;
         _runHereFsm = fsm;
-        _runHereCanMove = CanMoveTheCreature(fsm);
+        _runHereKinds = RunKinds.None;
+        foreach (var state in fsm.States) {
+            _runHereKinds |= KindsOf(state);
+        }
         HookSwitchState();
 
         // A talk goes from state to state as the local player talks, until it is over (TalkHere)
