@@ -1,8 +1,10 @@
 using System.Collections;
+using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 
 // ReSharper disable UnusedMember.Local
 // ReSharper disable UnusedParameter.Local
@@ -399,6 +401,10 @@ internal static partial class EntityFsmActions {
 
         var activate = action.activate.Value;
         var recursive = action.recursive.Value;
+        if (activate && gameObject.activeSelf) {
+            SayOnAlready(action, gameObject);
+        }
+
         if (recursive) {
             SetActiveRecursively(gameObject, activate);
         } else {
@@ -421,6 +427,34 @@ internal static partial class EntityFsmActions {
                 }
             });
         }
+    }
+
+    /// <summary>
+    /// The parts with an FSM of their own that a replay switched on while they were on already, said once a room each.
+    /// </summary>
+    private static readonly HashSet<string> SaidOnAlready = [];
+
+    /// <summary>
+    /// Says in the log, once a room for each, that a replay switches on a part of the copy with an FSM of its own that
+    /// is on already, which does not start over as it does from off. The slash of a boss's dash is such a part, which
+    /// plays its slash out as it is switched on, and the copy showed none at some dashes and at the end of some others
+    /// (USER 11-07 "有时候有刀光有时候没有").
+    /// </summary>
+    private static void SayOnAlready(ActivateGameObject action, GameObject part) {
+        if (part.GetComponent<PlayMakerFSM>() is not { } partFsm) {
+            return;
+        }
+
+        var owner = action.Fsm.GameObject;
+        if (!SaidOnAlready.Add($"{owner.name}/{action.State.Name}/{part.name}")) {
+            return;
+        }
+
+        Logger.Info(
+            $"[Replay] '{owner.name}'s ActivateGameObject in '{action.State.Name}' of '{action.Fsm.Name}' switches on " +
+            $"'{part.name}', which is on already with its '{partFsm.FsmName}' in '{partFsm.ActiveStateName}', so that " +
+            "does not start over as it would from off (said once a room)"
+        );
     }
 
     #endregion

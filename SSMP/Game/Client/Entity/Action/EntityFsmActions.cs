@@ -1102,6 +1102,7 @@ internal static partial class EntityFsmActions {
         HostStates.Clear();
         SaidStillGivingOff.Clear();
         SaidLeftAtOnce.Clear();
+        SaidOnAlready.Clear();
         SaidReplayFailed.Clear();
         SaidFoundByName.Clear();
         ScenePath.ForgetUniqueNames();
