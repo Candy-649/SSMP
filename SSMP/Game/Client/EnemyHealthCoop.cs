@@ -97,6 +97,25 @@ internal class EnemyHealthCoop {
     private Hook? _applyExtraHitDamageHook;
 
     /// <summary>
+    /// Hook for scaling what a hit does to the stance of a creature, which all goes through
+    /// <c>HealthManager.ApplyStunDamage</c>: the game's own hits (TakeDamage) and those of the partner that the game
+    /// which runs the creature counts (HitCounters.Count).
+    /// </summary>
+    private Hook? _applyStunDamageHook;
+
+    /// <summary>
+    /// What the co-op scaling made of what the hit that a creature is taking now does to its stance, by the creature's
+    /// instance ID, for the line of the hit in the log: what it was given, the multiplier, and what came of it.
+    /// </summary>
+    private readonly Dictionary<int, (float From, float By, float To)> _stunScaled = new();
+
+    /// <summary>
+    /// How deep the game is in taking a hit of its own (HealthManager.TakeDamage), whose line in the log says what it
+    /// did to the creature's stance: what the partner's hits do to it is written down by itself.
+    /// </summary>
+    private int _takingHitDepth;
+
+    /// <summary>
     /// How many lines of damage are written to the log in a minute at most, so that a long fight does not fill it.
     /// </summary>
     private const int DamageLinesPerMinute = 60;
@@ -152,6 +171,10 @@ internal class EnemyHealthCoop {
             typeof(HealthManager).GetMethod("ApplyExtraDamage", InstanceFlags, null, [typeof(HitInstance)], null),
             new Action<Action<HealthManager, HitInstance>, HealthManager, HitInstance>(OnApplyExtraHitDamage)
         );
+        _applyStunDamageHook = CreateHook(
+            typeof(HealthManager).GetMethod("ApplyStunDamage", InstanceFlags, null, [typeof(float)], null),
+            new Action<Action<HealthManager, float>, HealthManager, float>(OnApplyStunDamage)
+        );
 
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
     }
@@ -171,7 +194,11 @@ internal class EnemyHealthCoop {
 
         _applyExtraHitDamageHook?.Dispose();
         _applyExtraHitDamageHook = null;
+
+        _applyStunDamageHook?.Dispose();
+        _applyStunDamageHook = null;
         _scaled.Clear();
+        _stunScaled.Clear();
 
         SceneManager.activeSceneChanged -= OnActiveSceneChanged;
         _damageRemainders.Clear();
@@ -195,6 +222,7 @@ internal class EnemyHealthCoop {
     private void OnActiveSceneChanged(Scene oldScene, Scene newScene) {
         _damageRemainders.Clear();
         _scaled.Clear();
+        _stunScaled.Clear();
     }
 
     /// <summary>
@@ -231,9 +259,42 @@ internal class EnemyHealthCoop {
     private void OnTakeDamage(Action<HealthManager, HitInstance> orig, HealthManager self, HitInstance hit) {
         var hpBefore = self.hp;
         _scaled.Remove(self.GetInstanceID());
+        _stunScaled.Remove(self.GetInstanceID());
         HealthManagerComponent.ForgetPutBack();
-        orig(self, hit);
+        _takingHitDepth++;
+        try {
+            orig(self, hit);
+        } finally {
+            _takingHitDepth--;
+        }
+
         WriteDamage(self, hpBefore, "a hit", hit.DamageDealt, hit.Source, hit.IsHeroDamage);
+    }
+
+    /// <summary>
+    /// Divides what a hit does to the stance of a creature by the same health multiplier as its damage (USER 11-07
+    /// "联机需要处理怪物韧性，按照血条一样的处理"). A creature loses its stance once what the hits do to it adds up to a
+    /// number of its own, and players together, who had to strike it as many times more as its health was more, dazed
+    /// it as many times more in the fight than one player alone. Each hit adds less instead, and the number stays the
+    /// game's. Written down with the line of the hit, or by itself for a hit of the partner, which the game that runs
+    /// the creature counts without one (HitCounters.Count).
+    /// </summary>
+    private void OnApplyStunDamage(Action<HealthManager, float> orig, HealthManager self, float stunDamage) {
+        var multiplier = GetHealthMultiplier();
+        var scaled = stunDamage / multiplier;
+        orig(self, scaled);
+        if (stunDamage <= 0f || self.stunControlFsm == null) {
+            return;
+        }
+
+        if (_takingHitDepth > 0) {
+            _stunScaled[self.GetInstanceID()] = (stunDamage, multiplier, scaled);
+        } else if (TakeLine()) {
+            Logger.Info(
+                $"[Damage] '{self.name}' takes {stunDamage:0.##} to its stance from a hit of the partner; co-op: " +
+                $"{stunDamage:0.##} / {multiplier:0.###} = {scaled:0.##}"
+            );
+        }
     }
 
     /// <summary>
@@ -272,24 +333,11 @@ internal class EnemyHealthCoop {
         var id = creature.GetInstanceID();
         var wasScaled = _scaled.TryGetValue(id, out var scaled);
         _scaled.Remove(id);
-
-        var now = Time.unscaledTime;
-        if (now - _damageMinuteStart >= 60f) {
-            if (_damageLinesLeftOut > 0) {
-                Logger.Info($"[Damage] {_damageLinesLeftOut} more in the minute before were not written");
-            }
-
-            _damageMinuteStart = now;
-            _damageLinesThisMinute = 0;
-            _damageLinesLeftOut = 0;
-        }
-
-        if (_damageLinesThisMinute >= DamageLinesPerMinute) {
-            _damageLinesLeftOut++;
+        var stanceTook = _stunScaled.TryGetValue(id, out var stance);
+        _stunScaled.Remove(id);
+        if (!TakeLine()) {
             return;
         }
-
-        _damageLinesThisMinute++;
 
         var line = new StringBuilder();
         var hpAfter = HealthManagerComponent.HealthBeforePutBack(creature);
@@ -310,7 +358,36 @@ internal class EnemyHealthCoop {
                 : $"; co-op: {scaled.From} / {scaled.By:0.###} = {scaled.To}");
         }
 
+        if (stanceTook) {
+            line.Append($"; stance: {stance.From:0.##} / {stance.By:0.###} = {stance.To:0.##}");
+        }
+
         Logger.Info(line.ToString());
+    }
+
+    /// <summary>
+    /// Whether another line of what creatures take may be written this minute, counting it if so: at most
+    /// <see cref="DamageLinesPerMinute"/>, and the number left out is written as the next minute begins.
+    /// </summary>
+    private bool TakeLine() {
+        var now = Time.unscaledTime;
+        if (now - _damageMinuteStart >= 60f) {
+            if (_damageLinesLeftOut > 0) {
+                Logger.Info($"[Damage] {_damageLinesLeftOut} more in the minute before were not written");
+            }
+
+            _damageMinuteStart = now;
+            _damageLinesThisMinute = 0;
+            _damageLinesLeftOut = 0;
+        }
+
+        if (_damageLinesThisMinute >= DamageLinesPerMinute) {
+            _damageLinesLeftOut++;
+            return false;
+        }
+
+        _damageLinesThisMinute++;
+        return true;
     }
 
     /// <summary>

@@ -2113,13 +2113,19 @@ internal partial class CoopSave {
             hero.ResetInput();
             hero.ResetLook();
 
-            // Half of the maximum, rounded down, but never nothing: waking up already dead would be absurd.
+            // Half of the maximum, rounded down, but never nothing: waking up already dead would be absurd. A player
+            // under the curse stands up with one mask: half of their health back each time a partner pulled them up
+            // made the curse easy to carry (USER 11-07 "…给畸芽特殊的复活机制，比如说只能回一滴血！不然畸芽就太好打了").
             //
             // Given the game's own way rather than written into the number, because the number is only half of what
             // health is here. The row of masks in the corner is not drawn from the field - it is redrawn when the
             // game says health has changed - so writing the field left a player standing up with health they had no
             // way of seeing, and a corner that still said they were dead.
-            var health = Mathf.Max(1, playerData.maxHealth / 2);
+            var cursed = playerData.IsAnyCursed;
+            var health = cursed ? 1 : Mathf.Max(1, playerData.maxHealth / 2);
+            Logger.Info(
+                $"Standing up with {health} of {playerData.maxHealth} masks{(cursed ? ", one under the curse" : "")}"
+            );
             var missing = health - playerData.health;
             if (missing > 0) {
                 hero.AddHealth(missing);
