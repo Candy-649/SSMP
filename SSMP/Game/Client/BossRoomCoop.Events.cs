@@ -414,7 +414,8 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Whether the local player and every other connected player are in a room. Players in other scenes aren't.
+    /// Whether the local player and every other connected player are in a room. Players in other scenes aren't, nor
+    /// are players in a film of the game.
     /// </summary>
     private bool AreAllInRoom(RoomShape shape) {
         if (!IsHoldActive()) {
@@ -431,9 +432,11 @@ internal partial class BossRoomCoop {
             return false;
         }
 
+        // A player in a film of the game is not there yet, wherever their character stands (see TellCutscene)
         foreach (var playerData in _playerData.Values) {
             var container = playerData.PlayerContainer;
-            if (!playerData.IsInLocalScene || container == null || !shape.Contains(container.transform.position)) {
+            if (!playerData.IsInLocalScene || container == null || !shape.Contains(container.transform.position) ||
+                _playersInCutscene.Contains(playerData.Id)) {
                 return false;
             }
         }
@@ -606,18 +609,40 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
+    /// Whether an action is a test that may come out with nothing to say: one way it comes out sends an event and
+    /// another sends none, like whether the boss was met before, which goes on to the fight it fought before or else
+    /// leaves the state as it is.
+    /// </summary>
+    private static bool MaySayNothing(FsmStateAction action) {
+        var type = action.GetType();
+        var name = type.Name;
+        if (!name.Contains("Test") && !name.Contains("Compare") && !name.EndsWith("IsNull", StringComparison.Ordinal) &&
+            name != "CheckIsInEditor") {
+            return false;
+        }
+
+        var says = false;
+        var saysNothing = false;
+        foreach (var field in GetEventFields(type)) {
+            if (field.FieldType != typeof(FsmEvent)) {
+                continue;
+            }
+
+            if (field.GetValue(action) is FsmEvent { Name: { Length: > 0 } }) {
+                says = true;
+            } else {
+                saysNothing = true;
+            }
+        }
+
+        return says && saysNothing;
+    }
+
+    /// <summary>
     /// Adds the names of the events that an action holds to a set.
     /// </summary>
     private static void AddEventFieldNames(FsmStateAction action, HashSet<string> names) {
-        var type = action.GetType();
-        if (!EventFields.TryGetValue(type, out var fields)) {
-            fields = type.GetFields(InstanceFlags)
-                .Where(field => field.FieldType == typeof(FsmEvent) || field.FieldType == typeof(FsmEvent[]))
-                .ToArray();
-            EventFields[type] = fields;
-        }
-
-        foreach (var field in fields) {
+        foreach (var field in GetEventFields(action.GetType())) {
             switch (field.GetValue(action)) {
                 case FsmEvent { Name: { Length: > 0 } name }:
                     names.Add(name);
@@ -632,6 +657,20 @@ internal partial class BossRoomCoop {
                     break;
             }
         }
+    }
+
+    /// <summary>
+    /// The fields of a type of action that hold events.
+    /// </summary>
+    private static FieldInfo[] GetEventFields(Type type) {
+        if (!EventFields.TryGetValue(type, out var fields)) {
+            fields = type.GetFields(InstanceFlags)
+                .Where(field => field.FieldType == typeof(FsmEvent) || field.FieldType == typeof(FsmEvent[]))
+                .ToArray();
+            EventFields[type] = fields;
+        }
+
+        return fields;
     }
 
     /// <summary>
@@ -1008,6 +1047,15 @@ internal partial class BossRoomCoop {
         private readonly Dictionary<string, FsmState> _statesByName = new();
         private readonly Dictionary<string, HashSet<string>> _ownEvents = new();
         private readonly HashSet<string> _subFsmStates = [];
+
+        /// <summary>
+        /// The states the FSM can stay in however their own steps go: a test of them may come out with nothing to say,
+        /// and nothing takes the FSM on once their actions are done. The boss of a room that tests whether it was met
+        /// before, and waits for the room to start its fight if it was not, waits in such a state, which counted as
+        /// one that starts the fight by itself: so the boss whose fight the room's arrival film starts set off as the
+        /// first player's film ended, with the other player still in theirs (USER 11-07 "我朋友说上去刚开始不知道为什么动不了").
+        /// </summary>
+        private readonly HashSet<string> _stayStates = [];
         private readonly Dictionary<string, List<string>> _sentEvents = new();
         private readonly HashSet<string> _fightStates = [];
         private HashSet<string> _leadingStates = [];
@@ -1022,6 +1070,7 @@ internal partial class BossRoomCoop {
                 _statesByName[state.Name] = state;
                 var ownEvents = new HashSet<string> { FinishedEventName };
                 var sentEvents = new List<string>();
+                var mayStay = false;
                 foreach (var action in state.Actions ?? []) {
                     // Disabled actions never run
                     if (action == null || !action.Enabled) {
@@ -1048,7 +1097,12 @@ internal partial class BossRoomCoop {
                     // Events of actions that notice players are caused by players, not by the state itself
                     if (!IsDetectionAction(action)) {
                         AddEventFieldNames(action, ownEvents);
+                        mayStay |= MaySayNothing(action);
                     }
+                }
+
+                if (mayStay && (state.Transitions ?? []).All(t => t.EventName != FinishedEventName)) {
+                    _stayStates.Add(state.Name);
                 }
 
                 _ownEvents[state.Name] = ownEvents;
@@ -1137,7 +1191,8 @@ internal partial class BossRoomCoop {
             for (var round = 0; round < MaxEventStartSteps; round++) {
                 var added = false;
                 foreach (var state in _states) {
-                    if (inevitableStates.Contains(state.Name) || !_leadingStates.Contains(state.Name)) {
+                    if (inevitableStates.Contains(state.Name) || !_leadingStates.Contains(state.Name) ||
+                        _stayStates.Contains(state.Name)) {
                         continue;
                     }
 

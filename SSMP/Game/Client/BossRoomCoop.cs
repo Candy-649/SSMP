@@ -457,6 +457,12 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        // A player comes out of a film wherever they are, and says what scene they went into one in
+        if (update.Kind is BossRoomUpdateKind.CutsceneBegan or BossRoomUpdateKind.CutsceneEnded) {
+            OnCutsceneReport(update);
+            return;
+        }
+
         // What the end of the boss of a memory wrote is written wherever the player is: one who died in the memory is
         // out of it, and never sees its end
         if (update.Kind == BossRoomUpdateKind.HeartEndRecord) {
@@ -541,6 +547,7 @@ internal partial class BossRoomCoop {
         TellBossEventsToNewPlayer();
         TellUsedChallengeSpotsToNewPlayer();
         ShareDialoguesWithNewPlayers();
+        TellCutsceneToNewPlayer();
     }
 
     /// <summary>
@@ -1007,7 +1014,8 @@ internal partial class BossRoomCoop {
             (SwitchOffUsedChallengeSpots, nameof(SwitchOffUsedChallengeSpots)),
             (DeliverToldChallenges, nameof(DeliverToldChallenges)),
             (ShowHeartRecords, nameof(ShowHeartRecords)),
-            (ShowHeartEndTexts, nameof(ShowHeartEndTexts))
+            (ShowHeartEndTexts, nameof(ShowHeartEndTexts)),
+            (TellCutscene, nameof(TellCutscene))
         ];
 
         if (IsHoldActive()) {

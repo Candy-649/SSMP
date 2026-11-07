@@ -254,5 +254,16 @@ internal enum BossRoomUpdateKind : byte {
     /// The sender's character has control again after a creature's end took it, so the other players in the scene stop
     /// watching.
     /// </summary>
-    EndingGaveBack
+    EndingGaveBack,
+
+    /// <summary>
+    /// The sender went into a film of the game, so they are not in any room of the scene yet (see
+    /// BossRoomCoop.Cutscenes).
+    /// </summary>
+    CutsceneBegan,
+
+    /// <summary>
+    /// The sender came out of the film of the game, wherever they are now.
+    /// </summary>
+    CutsceneEnded
 }
