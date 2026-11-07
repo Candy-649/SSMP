@@ -165,9 +165,19 @@ internal partial class Entity {
     private List<Growth> FindGrowths() {
         var growths = new List<Growth>();
         var byState = new Dictionary<FsmState, List<HookedEntityAction>>();
+
+        // Of all that is sent, also what goes with the step it is in, like a clip played on a thing grown
         foreach (var hooked in _hookedActions.Values) {
+            AddByState(hooked);
+        }
+
+        foreach (var hooked in _stepEffectOf.Values) {
+            AddByState(hooked);
+        }
+
+        void AddByState(HookedEntityAction hooked) {
             if (hooked.Action.State is not { } state) {
-                continue;
+                return;
             }
 
             if (!byState.TryGetValue(state, out var actions)) {

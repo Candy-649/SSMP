@@ -383,6 +383,40 @@ internal partial class Entity {
     private readonly Dictionary<FsmStateAction, HookedEntityAction> _hookedActions;
 
     /// <summary>
+    /// The actions of the room's own creature that only change how it or its parts look, which go to the other games
+    /// with the step of the FSM they are in as it goes into its state, not each by itself (see <see cref="AddToStep"/>,
+    /// EntityFsmActions.StepEffectTypes).
+    /// </summary>
+    private readonly Dictionary<FsmStateAction, HookedEntityAction> _stepEffectOf = new();
+
+    /// <summary>
+    /// The state that the step being put together is of, or null while there is none (see <see cref="AddToStep"/>).
+    /// </summary>
+    private FsmState? _stepState;
+
+    /// <summary>
+    /// The effects of the step being put together, each with what it says, in the order they were done.
+    /// </summary>
+    private readonly List<(HookedEntityAction Effect, byte[] Said)> _stepSaid = [];
+
+    /// <summary>
+    /// The entities that are putting a step together, until its state is through going into its actions (see
+    /// <see cref="OnActivateActions"/>).
+    /// </summary>
+    private static readonly List<Entity> Stepping = [];
+
+    /// <summary>
+    /// The hook on a state going into its actions (see <see cref="OnActivateActions"/>), put in place with the first
+    /// action that goes with a step.
+    /// </summary>
+    private static Hook? _activateActionsHook;
+
+    /// <summary>
+    /// What one effect of a step says, written as it is done (see <see cref="AddToStep"/>).
+    /// </summary>
+    private static readonly EntityNetworkData StepPart = new();
+
+    /// <summary>
     /// The entity that each action of the room's own creatures that throws or tells something is sent for, whose throws
     /// are named for the other game to know them by (see ThrownThings), and so are the parts of the room it tells (see
     /// ToldParts).
@@ -410,7 +444,8 @@ internal partial class Entity {
     /// there do it too.
     /// </summary>
     /// <param name="action">The action.</param>
-    internal bool Sends(FsmStateAction action) => !_isControlled && _hookedActions.ContainsKey(action);
+    internal bool Sends(FsmStateAction action) =>
+        !_isControlled && (_hookedActions.ContainsKey(action) || _stepEffectOf.ContainsKey(action));
 
     /// <summary>
     /// The entity that each action of the room's own creatures that works on objects held in variables is sent for
@@ -887,12 +922,25 @@ internal partial class Entity {
                     continue;
                 }
 
-                _hookedActions[action] = new HookedEntityAction {
+                var hooked = new HookedEntityAction {
                     Action = action,
                     FsmIndex = _fsms.Host.IndexOf(fsm),
                     StateIndex = i,
                     ActionIndex = j
                 };
+
+                // One that only changes how the creature looks goes with the step it is in (AddToStep)
+                if (EntityFsmActions.StepEffectTypes.Contains(action.GetType())) {
+                    _stepEffectOf[action] = hooked;
+                    _activateActionsHook ??= new Hook(
+                        typeof(FsmState).GetMethod(
+                            "ActivateActions", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic
+                        )!,
+                        new Func<Func<FsmState, int, bool>, FsmState, int, bool>(OnActivateActions)
+                    );
+                } else {
+                    _hookedActions[action] = hooked;
+                }
 
                 if (action is SpawnObjectFromGlobalPool or FlingObjectsFromGlobalPool
                     or FlingObjectsFromGlobalPoolVel or SpawnRandomObjectsRadialV2 or FlingObjectsFromGlobalPoolTime
@@ -1309,6 +1357,12 @@ internal partial class Entity {
             return;
         }
 
+        // What only changes how the creature looks goes with the step it is in
+        if (_stepEffectOf.TryGetValue(self, out var effect)) {
+            AddToStep(effect);
+            return;
+        }
+
         if (!_hookedActions.TryGetValue(self, out var hookedEntityAction)) {
             return;
         }
@@ -1362,6 +1416,92 @@ internal partial class Entity {
         if (IsDazeRingSpawn(self)) {
             NoteDazeRingSpawn(sent ? "went to the other game" : "did not go to the other game");
         }
+    }
+
+    /// <summary>
+    /// Adds an action of the room's own creature that only changes how it looks, just done, to the step that its FSM
+    /// takes into its state, with the parts it works on as they are now and what it says (see <see cref="FlushStep"/>):
+    /// the copy in the other games does it itself as it goes into the state with the step (see <see cref="TakeStep"/>).
+    /// </summary>
+    /// <param name="effect">The action.</param>
+    private void AddToStep(HookedEntityAction effect) {
+        StepPart.Packet.Clear();
+        EntityFsmActions.WriteSubject(StepPart, effect.Action);
+        if (!EntityFsmActions.GetNetworkDataFromAction(StepPart, effect.Action)) {
+            return;
+        }
+
+        if (_stepState != effect.Action.State) {
+            FlushStep();
+            _stepState = effect.Action.State;
+            Stepping.Add(this);
+        }
+
+        _stepSaid.Add((effect, StepPart.Packet.ToArray()));
+        NoteReplayed(effect);
+    }
+
+    /// <summary>
+    /// Hook for a state going into its actions from one of them on, as an FSM goes into it, or on through the rest of a
+    /// state that goes into them one after another; it stops after one that sent the FSM on (FsmState.ActivateActions,
+    /// read in its IL). The step that a room's own creature was putting together for the state goes out as it is
+    /// through (see <see cref="FlushStep"/>).
+    /// </summary>
+    private static bool OnActivateActions(Func<FsmState, int, bool> orig, FsmState self, int startIndex) {
+        try {
+            return orig(self, startIndex);
+        } finally {
+            for (var i = Stepping.Count - 1; i >= 0; i--) {
+                if (i < Stepping.Count && Stepping[i]._stepState == self) {
+                    Stepping[i].FlushStep();
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Sends the step that is being put together (see <see cref="AddToStep"/>): the state it is of, ahead of it as
+    /// ahead of any action sent by itself, and its effects, each with what it said. Sent also before anything else of
+    /// the creature goes out in the middle of it, which then goes after what was done before it.
+    /// </summary>
+    private void FlushStep() {
+        if (_stepState == null) {
+            return;
+        }
+
+        _stepState = null;
+        Stepping.Remove(this);
+
+        if (_components.TryGetValue(EntityComponentType.OwnMotion, out var component) &&
+            component is OwnMotionComponent ownMotion) {
+            ownMotion.MarkChanged();
+        }
+
+        var first = _stepSaid[0].Effect;
+        SendStateChange(first.FsmIndex);
+
+        var step = new EntityNetworkData { Type = EntityComponentType.Fsm };
+        if (_fsms.Host.Count > 1) {
+            step.Packet.Write((byte) first.FsmIndex);
+        }
+
+        step.Packet.Write((byte) first.StateIndex);
+        step.Packet.Write(EntityFsmActions.StepMarker);
+        step.Packet.Write((byte) _stepSaid.Count);
+        foreach (var (effect, said) in _stepSaid) {
+            step.Packet.Write((byte) effect.ActionIndex);
+            step.Packet.Write((ushort) said.Length);
+            step.Packet.Write(said);
+
+            // What draws the creature itself goes out after where it is at the end of the frame (_heldUntilPlaced)
+            if (_heldUntilPlaced == null && DrawsItselfOn(effect.Action)) {
+                _heldUntilPlaced = [];
+                _heldSince = Time.frameCount;
+            }
+        }
+
+        _stepSaid.Clear();
+        SendEntityData(step);
     }
 
     /// <summary>
@@ -1905,6 +2045,9 @@ internal partial class Entity {
     /// ahead of the replay of the death that its FSM plays left the body where it fell.
     /// </summary>
     private void SendEntityData(EntityNetworkData data) {
+        // After what was done of a step before it (FlushStep)
+        FlushStep();
+
         if (_heldUntilPlaced != null) {
             _heldUntilPlaced.Add(data);
             return;
@@ -4924,6 +5067,13 @@ internal partial class Entity {
                     continue;
                 }
 
+                // A step of the scene host's FSM, whose effects the copy does with its own actions of the state, in
+                // their order, each taken as any action of the scene host's is
+                if (actionIndex == EntityFsmActions.StepMarker) {
+                    UpdateData(TakeStep(fsmIndex, stateIndex, data), alreadyInSceneUpdate, sequence);
+                    continue;
+                }
+
                 var state = fsm.FsmStates[stateIndex];
                 if (state?.Actions == null || actionIndex >= state.Actions.Length) {
                     continue;
@@ -5043,6 +5193,39 @@ internal partial class Entity {
                 component.Update(data, alreadyInSceneUpdate);
             }
         }
+    }
+
+    /// <summary>
+    /// Takes apart a step of an FSM of the scene host's creature (see <see cref="FlushStep"/>) into what each of its
+    /// effects says, as the data of one action of the state, for the copy's own action there to do: held, left to the
+    /// copy's own FSM where that runs here, or done, as any action of the scene host's.
+    /// </summary>
+    /// <param name="fsmIndex">The index of the FSM.</param>
+    /// <param name="stateIndex">The index of the state.</param>
+    /// <param name="step">The step, read up to its effects.</param>
+    private List<EntityNetworkData> TakeStep(int fsmIndex, byte stateIndex, EntityNetworkData step) {
+        var count = step.Packet.ReadByte();
+        var effects = new List<EntityNetworkData>(count);
+        var head = _fsms.Client.Count > 1 ? 3 : 2;
+        for (var i = 0; i < count; i++) {
+            var actionIndex = step.Packet.ReadByte();
+            var said = step.Packet.ReadBytes(step.Packet.ReadUShort());
+            var bytes = new byte[head + said.Length];
+            if (head == 3) {
+                bytes[0] = (byte) fsmIndex;
+            }
+
+            bytes[head - 2] = stateIndex;
+            bytes[head - 1] = actionIndex;
+            Array.Copy(said, 0, bytes, head, said.Length);
+            effects.Add(new EntityNetworkData {
+                Type = EntityComponentType.Fsm,
+                SenderId = step.SenderId,
+                Packet = new global::SSMP.Networking.Packet.Packet(bytes)
+            });
+        }
+
+        return effects;
     }
 
     /// <summary>
@@ -5223,6 +5406,13 @@ internal partial class Entity {
                 if (RoomFsmWays.TryGetValue(fsm, out var ways) && ways.Owner == this) {
                     RoomFsmWays.Remove(fsm);
                 }
+            }
+
+            // Nor is a step it was putting together its to send
+            if (_stepState != null) {
+                _stepState = null;
+                _stepSaid.Clear();
+                Stepping.Remove(this);
             }
 
             ForgetIn(EntitiesByAnimator, _animator.Host);

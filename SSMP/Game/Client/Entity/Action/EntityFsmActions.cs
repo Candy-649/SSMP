@@ -56,6 +56,34 @@ internal static partial class EntityFsmActions {
     public static readonly HashSet<Type> SupportedActionTypes = [];
 
     /// <summary>
+    /// The kinds of action that only change how a creature or its parts look: shown or hidden, lit, coloured, flashed,
+    /// played, the screen flashed or shaken. They go to the other games with the step of the FSM they are in, as part of
+    /// it, and the copy there does each of the step's own (Entity.AddToStep, Entity.TakeStep), rather than each going
+    /// by itself: the slash of a boss's dash is a part that the step of the dash switches on (USER 11-07 "把特效和攻击合
+    /// 起来，不要单独发了", "为什么特效不能直接收到什么动作，就走游戏原本的函数打开特效").
+    /// </summary>
+    public static readonly HashSet<Type> StepEffectTypes = [
+        typeof(ActivateGameObject), typeof(ActivateGameObjectDelay), typeof(SetMeshRenderer), typeof(SetSpriteRenderer),
+        typeof(PlayParticleEmitter), typeof(PlayParticleEmitterInState), typeof(PlayParticleEmitterChildren),
+        typeof(StopParticleEmitter), typeof(StopParticleEmittersInChildren), typeof(SetParticleEmission),
+        typeof(SetParticleEmissionRate), typeof(SetParticleEmissionSpeed), typeof(SpawnBloodTime),
+        typeof(Tk2dPlayAnimation), typeof(Tk2dPlayAnimationWithEvents), typeof(Tk2dPlayFrame), typeof(AnimatorPlay),
+        typeof(SetAnimatorTrigger), typeof(ResetAnimatorTrigger), typeof(Tk2dSpriteSetColor),
+        typeof(Tk2dSpriteTweenColor), typeof(SetSpriteColor), typeof(EaseSpriteColor), typeof(EaseColor),
+        typeof(SetColorValue), typeof(DoSpriteFlash), typeof(FadeNestedFadeGroup), typeof(CharacterAmbientLightLerp),
+        typeof(ScreenFlash), typeof(ScreenFlashTrobbio), typeof(DoCameraShake), typeof(DoCameraShakeV2),
+        typeof(DoCameraShakeV3), typeof(DoCameraShakeV4), typeof(DoCameraShakeRepeating),
+        typeof(DoCameraShakeRepeatingV2), typeof(CancelCameraShake), typeof(StartRoarEmitter), typeof(StopRoarEmitter)
+    ];
+
+    /// <summary>
+    /// What stands for the index of an action in the data of an FSM of the scene host's creature that is a step of it:
+    /// the effects of a state as the FSM went into it (see <see cref="StepEffectTypes"/>), rather than one action. No
+    /// state has as many actions.
+    /// </summary>
+    public const byte StepMarker = byte.MaxValue;
+
+    /// <summary>
     /// Event that is called when an entity is spawned from an object.
     /// </summary>
     public static event Func<EntitySpawnDetails, bool> EntitySpawnEvent;
