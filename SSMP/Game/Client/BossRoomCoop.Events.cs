@@ -131,7 +131,8 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Passes events that start a fight on to the scene host, when an object of the local player sends them to other
-    /// objects before the fight began, since bosses only move for the scene host.
+    /// objects before the fight began, since bosses only move for the scene host. One that a dialogue sends a boss
+    /// asleep here says that the local player got to its fight (see <see cref="NoteFightReachedForSleeper"/>).
     /// </summary>
     private void OnFsmEvent(
         Action<Fsm, FsmEventTarget, FsmEvent> orig,
@@ -150,6 +151,11 @@ internal partial class BossRoomCoop {
         NoteChallengeTell(self, eventTarget, eventName);
         if (!IsFollower()) {
             return;
+        }
+
+        // The dialogue that sets a boss going can stand outside its room, like a shrine
+        if (_dialogueFsms.Contains(self)) {
+            NoteFightReachedForSleeper(self, eventTarget, eventName);
         }
 
         var room = GetBossRoom(self);
@@ -272,8 +278,9 @@ internal partial class BossRoomCoop {
 
         _heldEventStarts.TryGetValue(fsm, out var held);
         if (held != null && (held.StateName != state.Name || held.EventName != eventName)) {
+            // A creature that waits on in the same state goes on as it was going, to be kept still again as it was
             _heldEventStarts.Remove(fsm);
-            held.LetGo(false);
+            held.LetGo(held.StateName == state.Name);
             held = null;
         }
 

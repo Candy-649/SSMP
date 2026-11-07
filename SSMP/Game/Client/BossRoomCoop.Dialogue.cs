@@ -101,6 +101,14 @@ internal partial class BossRoomCoop {
     private readonly Dictionary<Fsm, HeldFight> _heldFights = new();
 
     /// <summary>
+    /// The bodies of creatures that fight starts which wait keep still (see HeldFight.HoldStill): how each was going
+    /// as it was stopped, and how many waits keep it. One whose start both the dialogue of its room and everyone being
+    /// in the room hold back, which the scene host's game does to an event of the room that another player passes on,
+    /// went on down out of the world as the first of them let it go (review of 766bb64).
+    /// </summary>
+    private static readonly Dictionary<Rigidbody2D, (Vector2 Velocity, int Holds)> StillBodies = new();
+
+    /// <summary>
     /// The FSMs of rooms with dialogue whose fight started, which aren't held back again.
     /// </summary>
     private readonly HashSet<Fsm> _startedFights = [];
@@ -154,54 +162,33 @@ internal partial class BossRoomCoop {
         AddStartDialogueHook<RunDialogueV4>();
         AddStartDialogueHook<RunDialogueV5>();
         Entity.Entity.EachGamePartBegan += OnEachGamePartBegan;
-        _eventSentHook = CreateHook(
-            typeof(Fsm).GetMethod("Event", InstanceFlags, null, [typeof(FsmEventTarget), typeof(FsmEvent)], null),
-            new Action<Action<Fsm, FsmEventTarget, FsmEvent>, Fsm, FsmEventTarget, FsmEvent>(OnEventSent)
-        );
     }
 
     /// <summary>
-    /// The hook on an FSM sending an event to an object (see <see cref="OnEventSent"/>).
+    /// Says that the local player got to the fight of a creature that another game runs, as a dialogue that sets it
+    /// going, like a shrine outside its room, sends the room's own creature the event that starts its fight here. That
+    /// one sleeps in this game, so the event never reaches its FSM, where the fight gate is asked otherwise (see
+    /// <see cref="TryHoldFightGate"/>): this game never said that it got there, and the scene host's game held the
+    /// fight for this player for good (USER 11-07 "我动不了", "我朋友直接跳击败了"). It is said of each FSM of the
+    /// creature that the event starts the fight of from the state the scene host says it is in, as the gate says it of
+    /// an FSM that takes the event.
     /// </summary>
-    private Hook? _eventSentHook;
-
-    /// <summary>
-    /// Notes that the local player got to the fight of a creature that another game runs, as the dialogue of its room
-    /// sends the room's own creature the event that starts its fight here. That one sleeps in this game, so the event
-    /// never reaches its FSM, where the fight gate is asked otherwise (see <see cref="TryHoldFightGate"/>): this game
-    /// never said that it got there, and the scene host's game held the fight for this player for good (USER 11-07
-    /// "我动不了", "我朋友直接跳击败了").
-    /// </summary>
-    private void OnEventSent(
-        Action<Fsm, FsmEventTarget, FsmEvent> orig,
-        Fsm self,
-        FsmEventTarget eventTarget,
-        FsmEvent fsmEvent
-    ) {
-        if (_dialogueFsms.Contains(self) && fsmEvent?.Name is { } eventName &&
-            eventTarget is { target: FsmEventTarget.EventTarget.GameObject or FsmEventTarget.EventTarget.GameObjectFSM } &&
-            self.GetOwnerDefaultTarget(eventTarget.gameObject) is { } target && Entity.Entity.SleepsHere(target)) {
-            NoteFightReachedForSleeper(self, target, eventTarget, eventName);
+    /// <param name="sender">The FSM of the dialogue that sends the event.</param>
+    /// <param name="eventTarget">Where the event goes.</param>
+    /// <param name="eventName">The event.</param>
+    private void NoteFightReachedForSleeper(Fsm sender, FsmEventTarget eventTarget, string eventName) {
+        if (eventTarget.target is not (FsmEventTarget.EventTarget.GameObject or
+                FsmEventTarget.EventTarget.GameObjectFSM) ||
+            sender.GetOwnerDefaultTarget(eventTarget.gameObject) is not { } target ||
+            !Entity.Entity.IsRoomObjectOfAnEntity(target)) {
+            return;
         }
 
-        orig(self, eventTarget, fsmEvent!);
-    }
-
-    /// <summary>
-    /// Says that the local player got to the fight of each FSM of a sleeping creature that an event of its room's
-    /// dialogue starts (see <see cref="OnEventSent"/>), as the fight gate says it of an FSM that takes the event.
-    /// </summary>
-    /// <param name="sender">The FSM of the room's dialogue that sends the event.</param>
-    /// <param name="target">The room's own object of the creature.</param>
-    /// <param name="eventTarget">Where the event goes, which may name one FSM of the creature.</param>
-    /// <param name="eventName">The event.</param>
-    private void NoteFightReachedForSleeper(Fsm sender, GameObject target, FsmEventTarget eventTarget, string eventName) {
         var fsmName = eventTarget.target == FsmEventTarget.EventTarget.GameObjectFSM ? eventTarget.fsmName?.Value : null;
         foreach (var component in target.GetComponents<PlayMakerFSM>()) {
-            var fsm = component.Fsm;
-            if (fsm == null || (fsmName != null && component.FsmName != fsmName) || _startedFights.Contains(fsm) ||
-                GetBossRoom(fsm) is not { } room || !room.EventStarts.TryGetValue(fsm, out var starts) ||
-                !StartsFight(fsm, starts, eventName)) {
+            if ((fsmName != null && component.FsmName != fsmName) || component.Fsm is not { } fsm ||
+                _startedFights.Contains(fsm) || Entity.Entity.StateOfSleeper(component) is not { } state ||
+                GetBossRoom(fsm) is not { } room || !IsEventStart(room, fsm, state, eventName)) {
                 continue;
             }
 
@@ -212,29 +199,11 @@ internal partial class BossRoomCoop {
 
             readiness.Local = true;
             Logger.Info(
-                $"'{GetPath(sender)}' sends '{eventName}' to '{GetPath(fsm)}', which another game runs: the local " +
-                "player got to its fight"
+                $"'{GetPath(sender)}' sends '{eventName}' to '{GetPath(fsm)}' in '{state.Name}', which another game " +
+                "runs: the local player got to its fight"
             );
             Send(BossRoomUpdateKind.Ready, fsm, "", "", "");
         }
-    }
-
-    /// <summary>
-    /// Whether an event starts the fight of an FSM in any of its states, or from any state: of an FSM that sleeps it is
-    /// not known in which it would hear it.
-    /// </summary>
-    private static bool StartsFight(Fsm fsm, HashSet<string> starts, string eventName) {
-        if (starts.Contains(GetTransitionKey("", eventName))) {
-            return true;
-        }
-
-        foreach (var state in fsm.States ?? []) {
-            if (starts.Contains(GetTransitionKey(state.Name, eventName))) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>
@@ -280,8 +249,6 @@ internal partial class BossRoomCoop {
         }
 
         _startDialogueHooks.Clear();
-        _eventSentHook?.Dispose();
-        _eventSentHook = null;
         Entity.Entity.EachGamePartBegan -= OnEachGamePartBegan;
     }
 
@@ -768,7 +735,8 @@ internal partial class BossRoomCoop {
         }
 
         if (held == null || held.StateName != state.Name || held.EventName != eventName) {
-            held?.LetGo(false);
+            // A creature that waits on in the same state goes on as it was going, to be kept still again as it was
+            held?.LetGo(held.StateName == state.Name);
             held = new HeldFight(state.Name, eventName);
             _heldFights[fsm] = held;
             FreeHero(held);
@@ -1276,53 +1244,61 @@ internal partial class BossRoomCoop {
         /// </summary>
         private Rigidbody2D? _body;
 
-        /// <summary>
-        /// How the body of the creature that waits was going as it was stopped.
-        /// </summary>
-        private Vector2 _velocity;
-
         public HeldFight(string stateName, string eventName) {
             StateName = stateName;
             EventName = eventName;
         }
 
         /// <summary>
-        /// Keeps the creature whose FSM waits where it is while it waits, if it is on its way somewhere. Its room may
-        /// have set it going: the room that shoots its boss up out of the ground and down into the arena tells it of
-        /// its fight as it lands, and only the start of the fight stops it, so held there it went on down out of the
-        /// world, where the game took it for dead and the fight for won before anybody fought it (USER 11-07
-        /// "我朋友直接跳击败了…但是我们还没打"). One that stands where it is waits as it always did.
+        /// Keeps the creature whose FSM waits where it is while it waits, if its room set it going: the room that
+        /// shoots its boss up out of the ground and down into the arena tells it of its fight as it lands, and only the
+        /// start of the fight stops it, so held there it went on down out of the world, where the game took it for dead
+        /// and the fight for won before anybody fought it (USER 11-07 "我朋友直接跳击败了…但是我们还没打"). Only a body
+        /// that nothing but its scripts moves is stopped, by its speed alone: one that falls lands by itself, and
+        /// everything of it is still there to hit and be hit while it waits. A creature that another wait already
+        /// keeps still stays so until both let it go (see <see cref="StillBodies"/>).
         /// </summary>
         /// <param name="gameObject">The object of the FSM that waits.</param>
         public void HoldStill(GameObject gameObject) {
-            if (!gameObject.TryGetComponent<Rigidbody2D>(out var body) || !body.simulated ||
-                body.linearVelocity == Vector2.zero) {
+            if (!gameObject.TryGetComponent<Rigidbody2D>(out var body)) {
+                return;
+            }
+
+            if (StillBodies.TryGetValue(body, out var still)) {
+                StillBodies[body] = (still.Velocity, still.Holds + 1);
+            } else if (body.bodyType == RigidbodyType2D.Kinematic && body.linearVelocity != Vector2.zero) {
+                StillBodies[body] = (body.linearVelocity, 1);
+                body.linearVelocity = Vector2.zero;
+            } else {
                 return;
             }
 
             _body = body;
-            _velocity = body.linearVelocity;
-            body.linearVelocity = Vector2.zero;
-            body.simulated = false;
         }
 
         /// <summary>
-        /// Lets the creature that waited move again (see <see cref="HoldStill"/>): going on as it was going when it
-        /// goes on with what it waited for, or only free to move when its FSM went on without it, whose new state
-        /// says how it goes.
+        /// Lets the creature that waited move again once no other wait keeps it still (see <see cref="HoldStill"/>):
+        /// going on as it was going when it goes on with what it waited for, or left as it is when its FSM went on
+        /// without it, whose new state says how it goes.
         /// </summary>
         /// <param name="asItWasGoing">Whether it goes on as it was going.</param>
         public void LetGo(bool asItWasGoing) {
-            if (_body == null) {
+            // Not Unity's ==: a body gone with its room is still counted off
+            if (_body is not { } body) {
                 return;
             }
 
-            _body.simulated = true;
-            if (asItWasGoing) {
-                _body.linearVelocity = _velocity;
+            _body = null;
+            var still = StillBodies[body];
+            if (still.Holds > 1) {
+                StillBodies[body] = (still.Velocity, still.Holds - 1);
+                return;
             }
 
-            _body = null;
+            StillBodies.Remove(body);
+            if (asItWasGoing) {
+                body.linearVelocity = still.Velocity;
+            }
         }
     }
 }

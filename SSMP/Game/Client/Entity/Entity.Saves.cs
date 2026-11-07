@@ -227,12 +227,27 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Whether an object is the room's own object of a creature that another game runs, which sleeps in this one, so
-    /// that what the room sends it never reaches it here.
+    /// Whether the room's own object of the creature sleeps in this game, as another game runs it, so that what the
+    /// room sends it never reaches it here.
     /// </summary>
-    internal static bool SleepsHere(GameObject gameObject) {
-        return EntitiesByRoomObject.TryGetValue(gameObject, out var entity) && entity._isControlled &&
-               !entity._keepsRunning;
+    private bool SleepsHere => _isControlled && !_keepsRunning;
+
+    /// <summary>
+    /// The state that an FSM of a creature that sleeps in this game is in (see <see cref="SleepsHere"/>), as the
+    /// room's own FSM of it: the one the scene host says, or that of its copy while that runs here. Null if the
+    /// creature does not sleep here.
+    /// </summary>
+    /// <param name="roomFsm">The room's own FSM of the creature.</param>
+    internal static HutongGames.PlayMaker.FsmState? StateOfSleeper(PlayMakerFSM roomFsm) {
+        if (!EntitiesByRoomObject.TryGetValue(roomFsm.gameObject, out var entity) || !entity.SleepsHere) {
+            return null;
+        }
+
+        var index = entity._fsms.Host.IndexOf(roomFsm);
+        return index >= 0 && index < entity._fsms.Client.Count &&
+               entity.StateOfCopy(entity._fsms.Client[index]) is { } state
+            ? roomFsm.Fsm.GetState(state.Name)
+            : null;
     }
 
     /// <summary>

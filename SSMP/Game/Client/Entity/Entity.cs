@@ -2572,19 +2572,20 @@ internal partial class Entity {
     private static void OnAnyPositionCheck<TAction>(Action<TAction> check, TAction action, FsmOwnerDefault checkedObject)
         where TAction : FsmStateAction {
         if (EntitiesByRoomObject.Count == 0 || action.Fsm.GetOwnerDefaultTarget(checkedObject) is not { } target ||
-            !EntitiesByRoomObject.TryGetValue(target, out var entity) || !entity._isControlled || entity._keepsRunning ||
+            !EntitiesByRoomObject.TryGetValue(target, out var entity) || !entity.SleepsHere ||
             entity.Object.Client == null) {
             check(action);
             return;
         }
 
+        // Put back as it was to the bit: the world position of one in a parent is worked out again from its own
         var roomsOwn = target.transform;
-        var where = roomsOwn.position;
+        var where = roomsOwn.localPosition;
         roomsOwn.position = entity.Object.Client.transform.position;
         try {
             check(action);
         } finally {
-            roomsOwn.position = where;
+            roomsOwn.localPosition = where;
         }
     }
 
