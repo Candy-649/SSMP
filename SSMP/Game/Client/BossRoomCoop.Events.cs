@@ -273,6 +273,7 @@ internal partial class BossRoomCoop {
         _heldEventStarts.TryGetValue(fsm, out var held);
         if (held != null && (held.StateName != state.Name || held.EventName != eventName)) {
             _heldEventStarts.Remove(fsm);
+            held.LetGo(false);
             held = null;
         }
 
@@ -281,6 +282,7 @@ internal partial class BossRoomCoop {
             if (held != null) {
                 _heldEventStarts.Remove(fsm);
                 RestoreHero(held);
+                held.LetGo(true);
                 EndRoomWaitFor(fsm);
             }
 
@@ -292,6 +294,10 @@ internal partial class BossRoomCoop {
         if (held == null) {
             held = new HeldEventStart(state.Name, eventName, shape);
             _heldEventStarts[fsm] = held;
+            if (fsm.GameObject != null) {
+                held.HoldStill(fsm.GameObject);
+            }
+
             Logger.Info($"Holding back '{eventName}' of '{GetPath(fsm)}' until all players are in the room");
 
             // An interaction that took control from the local player, like talking, gives it back right away, while an
@@ -347,6 +353,7 @@ internal partial class BossRoomCoop {
             var held = pair.Value;
             if (fsm.GameObject == null || fsm.ActiveState?.Name != held.StateName) {
                 _heldEventStarts.Remove(fsm);
+                held.LetGo(false);
                 continue;
             }
 
@@ -359,6 +366,7 @@ internal partial class BossRoomCoop {
             MarkRoomStarted(fsm);
             OnBossFightStarting(fsm);
             RestoreHero(held);
+            held.LetGo(true);
             EndRoomWaitFor(fsm);
             Logger.Info($"All players are in the room of '{GetPath(fsm)}', continuing with '{held.EventName}'");
             fsm.Event(held.EventName);
@@ -841,7 +849,10 @@ internal partial class BossRoomCoop {
             foreach (var pair in heldEventStarts) {
                 if (pair.Key.GameObject != null && pair.Key.ActiveState?.Name == pair.Value.StateName) {
                     RestoreHero(pair.Value);
+                    pair.Value.LetGo(true);
                     pair.Key.Event(pair.Value.EventName);
+                } else {
+                    pair.Value.LetGo(false);
                 }
             }
         } finally {

@@ -227,6 +227,15 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether an object is the room's own object of a creature that another game runs, which sleeps in this one, so
+    /// that what the room sends it never reaches it here.
+    /// </summary>
+    internal static bool SleepsHere(GameObject gameObject) {
+        return EntitiesByRoomObject.TryGetValue(gameObject, out var entity) && entity._isControlled &&
+               !entity._keepsRunning;
+    }
+
+    /// <summary>
     /// Whether the copy died here or is no more, or the creature was told dead. The room's own object, taking the
     /// creature over, never ran in this game and does not know it. A death that was only told is not this game's to
     /// keep either: the partner's game sends one of a creature that comes back (CoopSave.CreatureDeaths), and one that

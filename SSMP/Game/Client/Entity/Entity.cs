@@ -55,6 +55,12 @@ internal partial class Entity {
     private static Hook? _activateGameObjectHook;
 
     /// <summary>
+    /// MonoMod hooks for the checks of where an object stands (see <see cref="OnAnyPositionCheck"/>), one for all
+    /// entities.
+    /// </summary>
+    private static List<Hook>? _positionCheckHooks;
+
+    /// <summary>
     /// The entity of the animator of each creature and of its copy, for the hook on tk2dSpriteAnimator.Play that all
     /// entities share. Each entity used to put hooks of its own on these three methods of the game and take them off as
     /// it went. MonoMod builds and compiles a hook anew each time, and goes over every hook already on the method as
@@ -723,6 +729,12 @@ internal partial class Entity {
             ),
             OnAnyActivateGameObject
         );
+
+        _positionCheckHooks ??= [
+            HookPositionCheck<CheckYPosition>(action => action.gameObject),
+            HookPositionCheck<CheckYPositionV2>(action => action.gameObject),
+            HookPositionCheck<CheckXPosition>(action => action.gameObject)
+        ];
 
         _fsms = new HostClientPair<List<PlayMakerFSM>> {
             Host = Object.Host.GetComponents<PlayMakerFSM>().ToList(),
@@ -2530,6 +2542,50 @@ internal partial class Entity {
         }
 
         orig(obj);
+    }
+
+    /// <summary>
+    /// Hooks how an action that checks where an object stands compares it (DoCompare, read in its IL), for
+    /// <see cref="OnAnyPositionCheck"/>.
+    /// </summary>
+    /// <param name="objectOf">The object that the action checks.</param>
+    private static Hook HookPositionCheck<TAction>(Func<TAction, FsmOwnerDefault> objectOf)
+        where TAction : FsmStateAction {
+        return new Hook(
+            typeof(TAction).GetMethod("DoCompare", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!,
+            new Action<Action<TAction>, TAction>((orig, self) => OnAnyPositionCheck(orig, self, objectOf(self)))
+        );
+    }
+
+    /// <summary>
+    /// Answers a check of the room's of where a creature stands that sleeps in this game, as another game runs it, with
+    /// where its copy stands. The room's own scripts go on here: a room that shoots its boss down into the arena waits
+    /// for it to land before it tells it that its fight starts, and asked of the sleeping one, which stood where the
+    /// room had put it, it never landed. This game's room stood there for good, with its player held still and out of
+    /// harm's way, and never got to the fight that the scene host's room waited at for this player (USER 11-07 "卡住了",
+    /// "我动不了"). The sleeping one is put where the copy is only for the check: what it is set up with as this game
+    /// takes the creature over is done where the room has it (InitializeHost).
+    /// </summary>
+    /// <param name="check">The check.</param>
+    /// <param name="action">The action that checks.</param>
+    /// <param name="checkedObject">What it checks.</param>
+    private static void OnAnyPositionCheck<TAction>(Action<TAction> check, TAction action, FsmOwnerDefault checkedObject)
+        where TAction : FsmStateAction {
+        if (EntitiesByRoomObject.Count == 0 || action.Fsm.GetOwnerDefaultTarget(checkedObject) is not { } target ||
+            !EntitiesByRoomObject.TryGetValue(target, out var entity) || !entity._isControlled || entity._keepsRunning ||
+            entity.Object.Client == null) {
+            check(action);
+            return;
+        }
+
+        var roomsOwn = target.transform;
+        var where = roomsOwn.position;
+        roomsOwn.position = entity.Object.Client.transform.position;
+        try {
+            check(action);
+        } finally {
+            roomsOwn.position = where;
+        }
     }
 
     /// <summary>
