@@ -839,7 +839,7 @@ internal partial class Entity {
     /// <param name="fsm">The Playmaker FSM to process.</param>
     private void ProcessHostFsm(PlayMakerFSM fsm) {
         // One made from a template is made only when its object is first switched on (in its Awake), and what this
-        // hooks until then is a stand-in that never runs (see HookSummoningMadeLater). Whether it has been made yet
+        // hooks until then is a stand-in that never runs (see HookFsmMadeLater). Whether it has been made yet
         // can't be told from the FSM: the room loading it already marks the stand-in set up. An object switched off
         // after its Awake ran only leaves an entry here that never comes due, cleared with the entity (Destroy).
         if (fsm.FsmTemplate != null && !fsm.gameObject.activeInHierarchy) {
@@ -924,7 +924,7 @@ internal partial class Entity {
 
     /// <summary>
     /// The FSMs of the room's own creatures that are made from a template and are not made yet, each with the entity it
-    /// belongs to (see <see cref="HookSummoningMadeLater"/>).
+    /// belongs to (see <see cref="HookFsmMadeLater"/>).
     /// </summary>
     private static readonly Dictionary<PlayMakerFSM, Entity> FsmsMadeLater = new();
 
@@ -962,7 +962,7 @@ internal partial class Entity {
         if (init == null) {
             SSMP.Logging.Logger.Warn(
                 "Could not find how an FSM is made from its template, so what a creature that is switched on late " +
-                "summons stays in the game of the scene host"
+                "does stays in the game of the scene host"
             );
             return;
         }
@@ -980,24 +980,25 @@ internal partial class Entity {
             return;
         }
 
-        entity.HookSummoningMadeLater(self);
+        entity.HookFsmMadeLater(self);
     }
 
     /// <summary>
-    /// Hooks an FSM of the room's own creature that the game has just made from its template, if it summons creatures.
+    /// Hooks an FSM of the room's own creature that the game has just made from its template.
     ///
     /// The game makes such an FSM afresh the first time its object is switched on, with actions of its own, so for a
     /// creature that is switched off when its room loads it was the actions of a stand-in that got hooked, and those
-    /// never run. What the creature summoned was then made in the game of the scene host alone and the other player
-    /// never saw it: the creatures that march into one room only once it has loaded call others in this way. Only an
-    /// FSM that summons is hooked here. Many creatures that are switched on late have FSMs made from templates, and what
-    /// the rest of those do has never been sent - which nobody has reported as missing.
+    /// never run: nothing the creature's own FSM did reached the other game. What it summoned was made in the game of
+    /// the scene host alone, and the creatures that march into one room only once it has loaded call others in this way.
+    /// Hooked at first only for an FSM that summons, the rest still sent nothing: the larvae that a boss's waves call
+    /// out of their eggs, whose fight the room switches on only after it has loaded, broke out of them in the scene
+    /// host's game alone, and in the other game flew about as eggs for the first waves, while the larvae the boss lays
+    /// later, which come with no egg, looked right (USER 11-07 "前几波幼虫在我这里看是个石头").
     /// </summary>
     /// <param name="fsm">The Playmaker FSM, just made.</param>
-    private void HookSummoningMadeLater(PlayMakerFSM fsm) {
+    private void HookFsmMadeLater(PlayMakerFSM fsm) {
         var fsmIndex = _fsms.Host.IndexOf(fsm);
-        if (fsmIndex < 0 || fsmIndex >= _fsmSnapshots.Count || IsRunByEachGame(fsm) ||
-            !EntitySpawner.SpawnsCreatures(fsm)) {
+        if (fsmIndex < 0 || fsmIndex >= _fsmSnapshots.Count || IsRunByEachGame(fsm)) {
             return;
         }
 
@@ -1006,7 +1007,7 @@ internal partial class Entity {
 
         SSMP.Logging.Logger.Info(
             $"'{Object.Host.name}' ({Id}, {Type}) made its '{fsm.FsmName}' only on being switched on, so what it " +
-            "summons is now kept in step"
+            "does is now kept in step"
         );
     }
 

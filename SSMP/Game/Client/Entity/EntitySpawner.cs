@@ -53,27 +53,6 @@ internal static class EntitySpawner {
     }
 
     /// <summary>
-    /// Whether the given FSM spawns anything that is made an entity when spawned, named by the action itself the way
-    /// <see cref="FindPrefab"/> looks for it.
-    /// </summary>
-    /// <param name="fsm">The FSM.</param>
-    public static bool SpawnsCreatures(PlayMakerFSM fsm) {
-        foreach (var state in fsm.FsmStates) {
-            foreach (var action in state.Actions) {
-                var field = PrefabOf(action, out _);
-                var prefab = field is { UseVariable: false } ? field.Value : null;
-                if (prefab != null &&
-                    EntityRegistry.TryGetEntry(prefab, out _) &&
-                    IsSpawnedAsEntity(prefab)) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Whether an action spawns a creature: what it spawns has health. The copy of a creature that first does what its
     /// first states do must not do these: the creature that a copy's first state makes is a real one of the room, apart
     /// from every entity, which the game that runs the creature makes once again and shows the other game as a spawn.
