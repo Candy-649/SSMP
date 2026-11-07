@@ -3463,6 +3463,29 @@ internal partial class Entity {
         : null;
 
     /// <summary>
+    /// The same part of the copy of a creature as a part of the room's own creature (see RoomFollowers), or null for
+    /// anything that is not under the room's own object of a creature.
+    /// </summary>
+    /// <param name="part">The part of the room's own creature, or the creature itself.</param>
+    internal static Transform? CopyOfRoomPart(Transform part) {
+        var path = new List<string>();
+        for (var current = part; current != null; current = current.parent) {
+            if (EntitiesByRoomObject.TryGetValue(current.gameObject, out var entity)) {
+                var copy = entity.Object.Client.transform;
+                for (var i = path.Count - 1; i >= 0 && copy != null; i--) {
+                    copy = copy.Find(path[i]);
+                }
+
+                return copy;
+            }
+
+            path.Add(current.name);
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// The entity that an object is, or is a part of - the room's own object or the copy - or null for anything else.
     /// </summary>
     /// <param name="gameObject">The object.</param>

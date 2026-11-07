@@ -556,6 +556,7 @@ internal class EntityManager {
         var watch = System.Diagnostics.Stopwatch.StartNew();
         EntityProcessor.StartCounting();
         FindEntitiesInScene(newScene, lateLoad: false);
+        RoomFollowers.FollowCopies(newScene);
         var found = watch.Elapsed.TotalMilliseconds;
         var counted = EntityProcessor.DescribeCount();
         _roomCreatures.FindMakers(newScene);
@@ -592,6 +593,7 @@ internal class EntityManager {
 
         Logger.Info($"Additional scene loaded ({scene.name}), looking for entities");
         FindEntitiesInScene(scene, lateLoad: true);
+        RoomFollowers.FollowCopies(scene);
         _roomCreatures.FindMakers(scene);
         DrainPendingUpdates();
     }
