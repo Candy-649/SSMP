@@ -277,7 +277,8 @@ internal class UiManager : IUiManager {
     private Hook? _menuCancelHook;
 
     /// <summary>
-    /// The hook on the game's way back to the main menu, which lets one go at a time.
+    /// The hook on the game's way back to the main menu, which lets one go at a time and leaves the game with the others
+    /// as it starts.
     /// </summary>
     private Hook? _menuReturnHook;
 
@@ -286,6 +287,13 @@ internal class UiManager : IUiManager {
     /// that it ran, so a way back that reaches the menu ends with it, and the next game starts with none.
     /// </summary>
     private static GameManager? _returningManager;
+
+    /// <summary>
+    /// Whether the game is being asked for its way back to the main menu by the mod's own, which is taken for a
+    /// connection that is over: what takes it ends the connection itself, without a word to the server, which knows
+    /// already, so the way back leaves nothing more.
+    /// </summary>
+    private bool _askedForAConnectionOver;
 
     /// <summary>
     /// Whether the save slot selection is open for hosting, which the host reaches from the waiting room with their
@@ -408,7 +416,6 @@ internal class UiManager : IUiManager {
     /// </summary>
     private void RegisterMenuHooks() {
         EventHooks.UIManagerUIGoToMainMenu += TryAddMultiplayerScreen;
-        EventHooks.UIManagerReturnToMainMenu += OnReturnToMainMenu;
         _menuCancelHook = HookMenuCancel();
         _menuReturnHook = HookMenuReturn();
     }
@@ -420,7 +427,7 @@ internal class UiManager : IUiManager {
     /// knows gone with the first scene, and the one of the second is thrown away as a spare. The game's own step into
     /// the main menu threw on that title after it had taken the menu's input away, and nothing could be pressed.
     /// </summary>
-    private static Hook? HookMenuReturn() {
+    private Hook? HookMenuReturn() {
         try {
             var method = typeof(GameManager).GetMethod(
                 nameof(GameManager.ReturnToMainMenu),
@@ -443,9 +450,11 @@ internal class UiManager : IUiManager {
     }
 
     /// <summary>
-    /// Starts the game's way back to the main menu, unless one is under way already.
+    /// Starts the game's way back to the main menu, unless one is under way already, and leaves the game with the
+    /// others as it starts (see <see cref="LeaveTheGame"/>), unless the mod's own way back for a connection that is
+    /// over asks for it (see <see cref="_askedForAConnectionOver"/>).
     /// </summary>
-    private static IEnumerator OnMenuReturn(
+    private IEnumerator OnMenuReturn(
         Func<GameManager, bool, Action<bool>, bool, bool, IEnumerator> orig,
         GameManager self,
         bool willSave,
@@ -459,6 +468,10 @@ internal class UiManager : IUiManager {
         }
 
         _returningManager = self;
+        if (!_askedForAConnectionOver) {
+            LeaveTheGame();
+        }
+
         return ReturnOnce(orig(self, willSave, callback, isEndGame, forceMainMenu), self);
     }
 
@@ -575,9 +588,13 @@ internal class UiManager : IUiManager {
         key == MultiplayerButtonKey && sheet == MainMenuSheet;
 
     /// <summary>
-    /// Handles return to main menu by disconnecting from server.
+    /// Leaves the game with the others, and stops hosting it, as the game goes back to the main menu: by every way
+    /// there, not by the quit of the pause menu alone. After an ending the game goes back to the main menu by itself,
+    /// and both players sat at the main menu still in one game until the host's game was closed (USER 11-07 "通关一个
+    /// 结局之后会回到主菜单，但是没有断开连接，过了好一会儿才断开"); and a quit of the pause menu that the game turns
+    /// down, while it lets no one save and quit, left the game with the others while the player stayed in theirs.
     /// </summary>
-    private void OnReturnToMainMenu() {
+    private void LeaveTheGame() {
         RequestClientDisconnectEvent?.Invoke();
         RequestServerStopHostEvent?.Invoke();
 
@@ -912,7 +929,10 @@ internal class UiManager : IUiManager {
         }
 
         bool? saved = null;
-        yield return GM.ReturnToMainMenu(save, ok => saved = ok);
+        _askedForAConnectionOver = true;
+        var menuReturn = GM.ReturnToMainMenu(save, ok => saved = ok);
+        _askedForAConnectionOver = false;
+        yield return menuReturn;
 
         // The game stays where it is when its save fails, as it was
         if (save && saved == false) {
