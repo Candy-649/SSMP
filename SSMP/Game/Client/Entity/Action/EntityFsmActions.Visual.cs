@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Game.Client.Save;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
@@ -373,18 +374,26 @@ internal static partial class EntityFsmActions {
 
     #region ActivateGameObject
 
-    /// <summary>Builds network data from the FSM action.</summary>
+    /// <summary>Builds network data from the FSM action: the player whose catch the creature switches the object on
+    /// for, if any (see Entity.CaughtIn, <see cref="BeforeSwitchingOn"/>).</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, ActivateGameObject action) {
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
-        if (gameObject == null) {
+        if (gameObject == null || IsObjectInRegistry(gameObject)) {
             return false;
         }
 
-        return !IsObjectInRegistry(gameObject);
+        var caught = action.activate.Value ? Entity.CaughtIn(action.Fsm, action.State) : null;
+        data.Packet.Write(ThrownThings.CodeOf?.Invoke(caught) ?? ThrownThings.NoPlayer);
+        return true;
     }
 
-    /// <summary>Applies network data to the FSM action.</summary>
-    private static void ApplyNetworkDataFromAction(EntityNetworkData data, ActivateGameObject action) {
+    /// <summary>Applies network data to the FSM action. What it switches on for a catch of another player than the
+    /// local one keeps off the local player (see <see cref="BeforeSwitchingOn"/>). The replay that sets up a
+    /// creature's first states has no data, and no catch.</summary>
+    private static void ApplyNetworkDataFromAction(EntityNetworkData? data, ActivateGameObject action) {
+        // Read whatever comes of it, so that what comes after is read from where it starts
+        var caught = data != null ? ThrownThings.FigureOf?.Invoke(data.Packet.ReadUShort(), data.SenderId) : null;
+
         // An object held in a variable has already been named by the scene host (see ReadSubject)
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null) {
@@ -405,10 +414,15 @@ internal static partial class EntityFsmActions {
             SayOnAlready(action, gameObject);
         }
 
+        var kept = BeforeSwitchingOn(gameObject, action.Fsm.GameObject, activate ? caught : null);
         if (recursive) {
             SetActiveRecursively(gameObject, activate);
         } else {
             gameObject.SetActive(activate);
+        }
+
+        if (kept != null) {
+            AfterSwitchingOn(gameObject, kept);
         }
 
         // For the length of the state only, as the game does it: 6530 such switches in the creatures' own FSMs, and the

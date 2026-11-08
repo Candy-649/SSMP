@@ -78,6 +78,12 @@ internal partial class Entity {
     private const byte NotTaken = byte.MaxValue;
 
     /// <summary>
+    /// The state index in an echo that says the scene host's creature plays the same catch on another player, so that
+    /// the partner's game plays its own player's by itself (see <see cref="TakeInput"/>).
+    /// </summary>
+    private const byte PlaysItsOwn = byte.MaxValue - 1;
+
+    /// <summary>
     /// How far an eased movement has got, in seconds, which the scene host moves on to carry an input on.
     /// </summary>
     private static readonly FieldInfo? EaseRunningTimeField = typeof(EaseFsmAction).GetField(
@@ -1069,6 +1075,23 @@ internal partial class Entity {
             return false;
         }
 
+        // A catch that a part of the room told of by an event about the player is the caught player's own (see
+        // HearRoomPartCatch): one of the partner's that comes while the creature plays the same catch on another
+        // player - this game's, or another partner's that it follows - goes on in the partner's game by itself, and
+        // the creature here goes on with the one it plays. Two players that the strands of one boss caught at once are
+        // each slashed in their own game, rather than the scene host's always first, as its catch takes no way over the
+        // network (USER 11-08 "…房主几乎没有可能先收到队友被抓的消息", "最好还是都被抓就都被刀？")
+        if (start.Path is { Length: > 0 } && EntityFsmActions.IsPlayerEvent(eventName) &&
+            EntityFsmActions.StatesOnlyThrough(fsm, into).Contains(state) &&
+            (_leads.Find(led => led.Fsm == fsm) is not { } current || current.LeaderId != leaderId)) {
+            Logger.Info(
+                $"The '{fsm.Name}' of entity {Id} plays '{eventName}' on another player in '{state.Name}', so the " +
+                "partner's game plays theirs by itself"
+            );
+            SendEcho(start.Tag, start.Anticipation, fsmIndex, PlaysItsOwn);
+            return false;
+        }
+
         // A creature that holds this game's own player in the same catch does not take the partner's: one that
         // pounces on the player whole takes its grab from wherever it is, and started over on the partner, it would
         // leave this game's player held for good, with the part that lets them go kept off them. The partner's game
@@ -1218,6 +1241,12 @@ internal partial class Entity {
             return;
         }
 
+        // The scene host's creature plays the same catch on another player (TakeInput)
+        if (stateIndex == PlaysItsOwn && fsmIndex == _runHereIndex && _runHereLed && _aftermath == null) {
+            PlayTheCatchByItself();
+            return;
+        }
+
         var fsm = _runHere!.Fsm;
         var states = fsm.States;
         if (fsmIndex != _runHereIndex || stateIndex >= states.Length || states[stateIndex].Name != _runHereReached) {
@@ -1271,6 +1300,28 @@ internal partial class Entity {
                 UpdateScale(heldScale);
             }
         }
+    }
+
+    /// <summary>
+    /// Plays the catch of the local player that this game leads on here by itself to its end, as the scene host's
+    /// creature plays the same catch on another player (see <see cref="TakeInput"/>): the way what follows a catch is
+    /// played (see <see cref="_aftermath"/>), nothing more of it said to the scene host, and what the scene host sends
+    /// of those states not played here, until the copy has gone through them and follows the scene host again. What
+    /// the scene host sent while the copy waited for its answer is of its own catch, and is dropped.
+    /// </summary>
+    private void PlayTheCatchByItself() {
+        _runHereAwaited = 0;
+        _heldData.Clear();
+        _madeByHeld.Clear();
+        _heldAnimation = null;
+        _heldScale = null;
+        _aftermath = new HashSet<FsmState>(_runHereCombo!);
+        _aftermathDone = false;
+        _aftermathExpiry = Time.unscaledTime + AftermathTime;
+        Logger.Info(
+            $"The scene host's creature of entity {Id} plays the same catch on another player, so its copy plays the " +
+            "local player's here by itself to its end"
+        );
     }
 
     /// <summary>

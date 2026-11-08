@@ -1135,6 +1135,7 @@ internal static partial class EntityFsmActions {
         SaidFoundByName.Clear();
         ScenePath.ForgetUniqueNames();
         LetGoParts.Forget();
+        ForgetKeptForTheCaught();
     }
 
     /// <summary>

@@ -2638,15 +2638,25 @@ internal partial class Entity {
     /// <summary>
     /// The hook on ActivateGameObject.OnEnter that all entities share: an action that switches the room object of an
     /// entity on or off goes to it while it keeps that from it (see <see cref="OnDoActivateGameObject"/>), and any
-    /// other does what it does.
+    /// other does what it does - what a creature that this game runs switches on of the room for a catch of another
+    /// player keeping off this game's player (see EntityFsmActions.BeforeSwitchingOn).
     /// </summary>
     private static void OnAnyActivateGameObject(Action<ActivateGameObject> orig, ActivateGameObject self) {
         var target = self.Fsm.GetOwnerDefaultTarget(self.gameObject);
         if (target is not null && EntitiesByRoomObject.TryGetValue(target, out var entity) &&
             entity._watchesActivation) {
             entity.OnDoActivateGameObject(orig, self);
-        } else {
-            orig(self);
+            return;
+        }
+
+        var kept = target != null
+            ? EntityFsmActions.BeforeSwitchingOn(
+                target, self.Fsm.GameObject, self.activate.Value ? CaughtIn(self.Fsm, self.State) : null
+            )
+            : null;
+        orig(self);
+        if (kept != null) {
+            EntityFsmActions.AfterSwitchingOn(target!, kept);
         }
     }
 

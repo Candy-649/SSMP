@@ -154,9 +154,7 @@ internal partial class Entity {
                 continue;
             }
 
-            var eventName = (int) register.aliasEventMode == 1 && !string.IsNullOrEmpty(register.aliasEvent)
-                ? register.aliasEvent
-                : sign;
+            var eventName = PassedOnAs(register, sign);
             for (var index = 0; index < _fsms.Client.Count && index <= byte.MaxValue; index++) {
                 if (register.targetFsm == null || register.targetFsm == _fsms.Client[index]) {
                     heard.Add((index, eventName));

@@ -28,7 +28,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// plays the same way (see <see cref="OnCopyHeardOwnSign"/>), as does a sign that the creature's own state machine
 /// listens for, like a taunt that wakes a resting boss - but not before every player is in its room (see
 /// Entity.HearOwnSign). What a sign moves of the room's own objects goes the same way in every game (see
-/// <see cref="WalkOwnSign"/>).
+/// <see cref="WalkOwnSign"/>). And a part of the room that caught the local player and tells the creature so, as the
+/// strands of one boss do, is heard by the creature's copy as a catch that this game leads (see
+/// Entity.HearRoomPartCatch).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>
@@ -62,16 +64,28 @@ internal partial class CoopHits {
     /// <summary>
     /// An event told to everything in the game that listens for it (SendEventToRegister): one of the signs of a player
     /// that a state machine of the local player tells is heard of them (see <see cref="Entity.Entity.HearOwnSign"/>),
-    /// and what it moves of the room goes the same way in the others' games (see <see cref="WalkOwnSign"/>).
+    /// and what it moves of the room goes the same way in the others' games (see <see cref="WalkOwnSign"/>); what a
+    /// part of the room tells because it caught the local player is a catch of them (see
+    /// <see cref="Entity.Entity.HearRoomPartCatch"/>).
     /// </summary>
     private void OnSendEventToRegister(Action<SendEventToRegister> orig, SendEventToRegister self) {
-        if (!IsLocalPlayers(self.Fsm) || self.eventName.Value is not { } eventName ||
-            !Entity.Entity.PlayerSigns.Contains(eventName)) {
+        var isLocal = IsLocalPlayers(self.Fsm);
+        if (self.eventName.Value is not { } eventName) {
             orig(self);
             return;
         }
 
-        Entity.Entity.HearOwnSign(eventName, () => WalkOwnSign(eventName, () => orig(self)));
+        if (isLocal && Entity.Entity.PlayerSigns.Contains(eventName)) {
+            Entity.Entity.HearOwnSign(eventName, () => WalkOwnSign(eventName, () => orig(self)));
+            return;
+        }
+
+        if (!isLocal && Entity.Entity.CatchesTheLocalPlayer(self.Fsm, eventName)) {
+            Entity.Entity.HearRoomPartCatch(self.Fsm, eventName, () => orig(self));
+            return;
+        }
+
+        orig(self);
     }
 
     /// <summary>
