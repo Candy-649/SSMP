@@ -140,7 +140,8 @@
       "Rotation"
     ],
     "internal_name": "Sand Centipede",
-    "fsm_names": []
+    "fsm_names": [],
+    "without_health": true
   },
   {
     "base_object_name": "Understore Automaton EX",
@@ -627,6 +628,9 @@
     "fsm_names": [
       "Control",
       "FSM"
+    ],
+    "kept_names": [
+      "Coral Conch Driller Giant Mourn"
     ]
   },
   {
@@ -704,6 +708,9 @@
       "Control",
       "Place Key Item On Death",
       "Z Pos"
+    ],
+    "kept_names": [
+      "Song Automaton Ball Inert"
     ]
   },
   {
@@ -855,6 +862,9 @@
     ],
     "each_game_fsms": [
       "Detect Grab"
+    ],
+    "kept_names": [
+      "Dustroach Pollywog Spawner"
     ]
   },
   {
@@ -1585,7 +1595,8 @@
     ],
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "without_health": true
   },
   {
     "base_object_name": "Pilgrim 01 Song",
@@ -2397,6 +2408,9 @@
       "Control",
       "Grab Cooldown Timer",
       "Rummage Voice"
+    ],
+    "kept_names": [
+      "Rosary Thief Crowd"
     ]
   },
   {
@@ -2485,7 +2499,10 @@
           "Stun Land"
         ]
       }
-    }
+    },
+    "kept_names": [
+      "Vampire Gnat Roosting"
+    ]
   },
   {
     "base_object_name": "First Weaver",
@@ -2510,7 +2527,10 @@
           "Slash 6"
         ]
       }
-    }
+    },
+    "kept_names": [
+      "First Weaver Blast"
+    ]
   },
   {
     "base_object_name": "Spinner Boss",
@@ -2637,6 +2657,9 @@
       "Flap",
       "Flapping Voice",
       "Hero Aggro Detect"
+    ],
+    "kept_names": [
+      "Citadel Bat Flock"
     ]
   },
   {
@@ -2825,7 +2848,10 @@
           "Stun Land"
         ]
       }
-    }
+    },
+    "kept_names": [
+      "Song Knight Sleeping"
+    ]
   },
   {
     "base_object_name": "Abyss Mass",
@@ -3203,7 +3229,8 @@
     ],
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "without_health": true
   },
   {
     "base_object_name": "DropBell",
@@ -3215,7 +3242,8 @@
     "fsm_names": [
       "Control"
     ],
-    "local_first": true
+    "local_first": true,
+    "without_health": true
   },
   {
     "base_object_name": "BoneBeast AtkBell",
@@ -3226,7 +3254,8 @@
     ],
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "without_health": true
   },
   {
     "base_object_name": "FW Pin Projectile",
@@ -3618,7 +3647,8 @@
     "internal_name": "Shakra",
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "without_health": true
   },
   {
     "base_object_name": "Rhino",
@@ -3656,6 +3686,9 @@
     "fsm_names": [
       "Control",
       "FSM"
+    ],
+    "kept_names": [
+      "Mite Trap"
     ]
   },
   {
@@ -3774,7 +3807,8 @@
     "internal_name": "Flea Hunter",
     "fsm_names": [
       "Control"
-    ]
+    ],
+    "without_health": true
   },
   {
     "base_object_name": "JuggleGame",
@@ -3787,7 +3821,8 @@
     "fsm_names": [
       "Control"
     ],
-    "local_first": true
+    "local_first": true,
+    "without_health": true
   },
   {
     "base_object_name": "Black_Thread_Core",

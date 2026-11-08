@@ -55,8 +55,8 @@ internal partial class Entity {
     private static Hook? _activateGameObjectHook;
 
     /// <summary>
-    /// MonoMod hooks for the checks of where an object stands (see <see cref="OnAnyPositionCheck"/>), one for all
-    /// entities.
+    /// MonoMod hooks for the checks of where an object stands (see <see cref="OnAnyPositionCheck"/>), and for putting an
+    /// object where another stands (see <see cref="OnAnyPutAtObject"/>), one for all entities.
     /// </summary>
     private static List<Hook>? _positionCheckHooks;
 
@@ -733,7 +733,13 @@ internal partial class Entity {
         _positionCheckHooks ??= [
             HookPositionCheck<CheckYPosition>(action => action.gameObject),
             HookPositionCheck<CheckYPositionV2>(action => action.gameObject),
-            HookPositionCheck<CheckXPosition>(action => action.gameObject)
+            HookPositionCheck<CheckXPosition>(action => action.gameObject),
+            new Hook(
+                typeof(SetPositionToObject2D).GetMethod(
+                    "DoSetPosition", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance
+                )!,
+                new Action<Action<SetPositionToObject2D>, SetPositionToObject2D>(OnAnyPutAtObject)
+            )
         ];
 
         _fsms = new HostClientPair<List<PlayMakerFSM>> {
@@ -2571,22 +2577,62 @@ internal partial class Entity {
     /// <param name="checkedObject">What it checks.</param>
     private static void OnAnyPositionCheck<TAction>(Action<TAction> check, TAction action, FsmOwnerDefault checkedObject)
         where TAction : FsmStateAction {
-        if (EntitiesByRoomObject.Count == 0 || action.Fsm.GetOwnerDefaultTarget(checkedObject) is not { } target ||
-            !EntitiesByRoomObject.TryGetValue(target, out var entity) || !entity.SleepsHere ||
-            entity.Object.Client == null) {
+        if (!PutAtItsCopy(action.Fsm.GetOwnerDefaultTarget(checkedObject), out var roomsOwn, out var where)) {
             check(action);
             return;
         }
 
-        // Put back as it was to the bit: the world position of one in a parent is worked out again from its own
-        var roomsOwn = target.transform;
-        var where = roomsOwn.localPosition;
-        roomsOwn.position = entity.Object.Client.transform.position;
         try {
             check(action);
         } finally {
             roomsOwn.localPosition = where;
         }
+    }
+
+    /// <summary>
+    /// Puts an object of the room where a creature stands that sleeps in this game, as another game runs it, where its
+    /// copy stands, as a check of where it stands is answered (see <see cref="OnAnyPositionCheck"/>). A part of the
+    /// room that runs in each game puts things at the creature: the key that a guard of a room leaves came up where the
+    /// sleeping one had stood since the room loaded, not where the creature fell (census of the registry rule, D95).
+    /// </summary>
+    /// <param name="put">How the action puts it.</param>
+    /// <param name="action">The action.</param>
+    private static void OnAnyPutAtObject(Action<SetPositionToObject2D> put, SetPositionToObject2D action) {
+        if (action.targetObject == null || action.targetObject.IsNone ||
+            !PutAtItsCopy(action.targetObject.Value, out var roomsOwn, out var where)) {
+            put(action);
+            return;
+        }
+
+        try {
+            put(action);
+        } finally {
+            roomsOwn.localPosition = where;
+        }
+    }
+
+    /// <summary>
+    /// Puts a creature that sleeps in this game, as another game runs it, where its copy stands, for the moment that
+    /// something of the room asks where it is; the caller puts it back as it was to the bit, by its local position, from
+    /// which the world position of one in a parent is worked out again.
+    /// </summary>
+    /// <param name="target">What is asked of.</param>
+    /// <param name="roomsOwn">The room's creature, which was moved.</param>
+    /// <param name="where">Where it was, as its local position.</param>
+    /// <returns>Whether it was a creature that sleeps here, and was moved.</returns>
+    private static bool PutAtItsCopy(GameObject? target, out Transform roomsOwn, out Vector3 where) {
+        roomsOwn = null!;
+        where = default;
+        if (EntitiesByRoomObject.Count == 0 || target == null ||
+            !EntitiesByRoomObject.TryGetValue(target, out var entity) || !entity.SleepsHere ||
+            entity.Object.Client == null) {
+            return false;
+        }
+
+        roomsOwn = target.transform;
+        where = roomsOwn.localPosition;
+        roomsOwn.position = entity.Object.Client.transform.position;
+        return true;
     }
 
     /// <summary>

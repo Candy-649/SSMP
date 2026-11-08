@@ -205,12 +205,21 @@ internal static class EntityRegistry {
     /// Finds the best-matching entry for <paramref name="gameObject"/> within the top-level registry.
     /// Matching prefers the entry with the longest <see cref="EntityRegistryEntry.BaseObjectName"/>
     /// that is a substring of the object's name, optionally filtered by FSM and parent name.
+    ///
+    /// An object whose name has more words than the entry's, and that has no health of its own or above it, is
+    /// something named after the creature rather than the creature: a boss's strands, a fight's floor bumps, a trap
+    /// named after what it catches, a crowd or a dig effect. It is not that entry's, and runs in each game as the
+    /// room's own (D95, USER 11-08 "可以都改"): the strands of one boss, copied from the scene host's, were drawn at
+    /// the wrong slant on a pattern flipped on one axis, and only the scene host's player could be caught by them. An
+    /// entry whose creature has no health by nature keeps such names (<see cref="EntityRegistryEntry.WithoutHealth"/>),
+    /// and so does a name an entry keeps (<see cref="EntityRegistryEntry.KeptNames"/>). A part under a creature has
+    /// the creature's health above it, and stays.
     /// </summary>
     /// <param name="gameObject">The game object to find an entry for.</param>
     /// <param name="foundEntry">The matched entry, or <c>null</c> if none matched.</param>
     /// <returns><c>true</c> if a matching entry was found.</returns>
     public static bool TryGetEntry(GameObject gameObject, [NotNullWhen(true)] out EntityRegistryEntry? foundEntry) {
-        return TryGetEntry(Entries, gameObject, out foundEntry);
+        return TryGetEntry(Entries, gameObject, true, out foundEntry);
     }
 
     /// <summary>
@@ -231,6 +240,23 @@ internal static class EntityRegistry {
         GameObject gameObject,
         [NotNullWhen(true)] out EntityRegistryEntry? foundEntry
     ) {
+        return TryGetEntry(entries, gameObject, false, out foundEntry);
+    }
+
+    /// <summary>
+    /// Finds the best-matching entry for an object within the given entries (see the overloads).
+    /// </summary>
+    /// <param name="entries">The set of entries to search.</param>
+    /// <param name="gameObject">The game object to find an entry for.</param>
+    /// <param name="ofTheRoom">Whether the entries are the top of the registry, for an object of the room or a
+    /// prefab, where a name with more words and no health is not the entry's.</param>
+    /// <param name="foundEntry">The matched entry, or <c>null</c> if none matched.</param>
+    private static bool TryGetEntry(
+        IEnumerable<EntityRegistryEntry> entries,
+        GameObject gameObject,
+        bool ofTheRoom,
+        [NotNullWhen(true)] out EntityRegistryEntry? foundEntry
+    ) {
         foundEntry = null;
         var longestBaseName = 0;
 
@@ -244,8 +270,24 @@ internal static class EntityRegistry {
         // room change took up to 1.7 s on a slow computer (USER 10-16 "我原版可没有这么长的黑屏时间")
         var name = gameObject.name;
 
+        // Whether the object has health of its own or above it, asked of the game only once a name has more words
+        bool? hasHealth = null;
+
         foreach (var entry in entries) {
             if (!name.Contains(entry.BaseObjectName)) {
+                continue;
+            }
+
+            if (ofTheRoom && !entry.WithoutHealth && HasMoreWords(name, entry.BaseObjectName) &&
+                !entry.KeepsName(name) &&
+                !(hasHealth ??= gameObject.GetComponentInParent<HealthManager>(true) != null)) {
+                if (SaidNamedAfter.Add(gameObject.GetInstanceID())) {
+                    Logger.Info(
+                        $"[Registry] '{name}' is named after ({entry.Type}) but has no health of its own or above " +
+                        "it, so it is the room's own in each game"
+                    );
+                }
+
                 continue;
             }
 
@@ -275,6 +317,62 @@ internal static class EntityRegistry {
         // BaseObjectName would always match Contains("") but would never win the length comparison,
         // causing a false negative. foundEntry != null is strictly correct.
         return foundEntry != null;
+    }
+
+    /// <summary>
+    /// The objects said in the log to be named after a creature without being it, by instance ID, each said once.
+    /// </summary>
+    private static readonly HashSet<int> SaidNamedAfter = [];
+
+    /// <summary>
+    /// Whether the name of an object says more than the base name of an entry: anything but spaces, digits, "(n)" and
+    /// "(Clone)" around the first place it holds the base name, which only tell one object of a kind from another.
+    /// </summary>
+    private static bool HasMoreWords(string name, string baseName) {
+        if (name.Length == baseName.Length) {
+            return false;
+        }
+
+        var at = name.IndexOf(baseName, StringComparison.Ordinal);
+        return !IsPlain(name, 0, at) || !IsPlain(name, at + baseName.Length, name.Length);
+    }
+
+    /// <summary>
+    /// Whether a stretch of a name holds only spaces, digits, "(n)" and "(Clone)".
+    /// </summary>
+    private static bool IsPlain(string name, int start, int end) {
+        const string clone = "(Clone)";
+
+        var at = start;
+        while (at < end) {
+            var character = name[at];
+            if (char.IsWhiteSpace(character) || char.IsDigit(character)) {
+                at++;
+                continue;
+            }
+
+            if (character != '(') {
+                return false;
+            }
+
+            if (at + clone.Length <= end && string.CompareOrdinal(name, at, clone, 0, clone.Length) == 0) {
+                at += clone.Length;
+                continue;
+            }
+
+            var digits = at + 1;
+            while (digits < end && char.IsDigit(name[digits])) {
+                digits++;
+            }
+
+            if (digits == at + 1 || digits >= end || name[digits] != ')') {
+                return false;
+            }
+
+            at = digits + 1;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -327,6 +425,22 @@ internal class EntityRegistryEntry {
     /// </summary>
     [JsonProperty("fsm_names")]
     public List<string>? FsmNames { get; set; }
+
+    /// <summary>
+    /// Whether the creature has no health by nature, as the bells and the boulders of some fights have none: an object
+    /// of the room named after it with more words is still it (see EntityRegistry.TryGetEntry).
+    /// </summary>
+    [JsonProperty("without_health")]
+    public bool WithoutHealth { get; set; }
+
+    /// <summary>
+    /// Names of objects without health, named after the creature with more words, that are still taken for it, each
+    /// found to need it: a spawner whose pools grow with the creature's, a crowd whose members follow the scene host's,
+    /// a sleeper whose waking is shared, a trap that waits for a row of its own (see EntityRegistry.TryGetEntry). Null
+    /// for none.
+    /// </summary>
+    [JsonProperty("kept_names")]
+    public List<string>? KeptNames { get; set; }
 
     /// <summary>
     /// Required parent name substring, or null if the parent is not part of the match criteria.
@@ -478,4 +592,21 @@ internal class EntityRegistryEntry {
     /// Always false when <see cref="HasFsmFilter"/> is false.
     /// </summary>
     internal bool ContainsFsmName(string fsmName) => _fsmNameSet?.Contains(fsmName) ?? false;
+
+    /// <summary>
+    /// Whether the name of an object holds one of the names this entry keeps (see <see cref="KeptNames"/>).
+    /// </summary>
+    internal bool KeepsName(string name) {
+        if (KeptNames == null) {
+            return false;
+        }
+
+        foreach (var kept in KeptNames) {
+            if (name.Contains(kept)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
