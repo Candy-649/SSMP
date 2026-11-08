@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using SSMP.Internals;
-using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
@@ -13,7 +12,9 @@ namespace SSMP.Animation.Effects;
 /// of a wall jump, the glow of a charge - which the game switches on and off by themselves, beside the hero's own
 /// animation. Only that animation reached the other players, so they saw the hero taunt without its thread, dash
 /// without its burst and so on. Each of these parts is watched on the local hero, and a copy of it on the character of
-/// the player it belongs to is switched on and off with it.
+/// the player it belongs to is switched on and off with it. The parts whose clip tells when they show go by the clips
+/// of the character instead (<see cref="PartsByClips"/>), and are listed here only so that their copies are switched
+/// off with the rest as a character leaves the room.
 /// </summary>
 internal class HeroChildEffects : AnimationEffect {
     /// <summary>
@@ -22,7 +23,8 @@ internal class HeroChildEffects : AnimationEffect {
     public static readonly HeroChildEffects Instance = new();
 
     /// <summary>
-    /// The watched parts, by their path under the hero. Their place in this list is what they are known by over the
+    /// The watched parts, by their path under the hero, and the parts that go by the clips of the character (see
+    /// <see cref="ByCharacterClips"/>). The place of a watched part in this list is what it is known by over the
     /// network. Left out are the parts that another effect already plays, the parts that
     /// could hurt, touch or be noticed by anything in the room (damagers, colliders, state machines, noise makers),
     /// the parts that show or hide by what the local player has equipped, the parts of the local player's own view
@@ -147,36 +149,15 @@ internal class HeroChildEffects : AnimationEffect {
     private static readonly int DisappearState = Animator.StringToHash("Disappear");
 
     /// <summary>
-    /// How many frames after the watching started the parts that the hero did not have yet are looked for.
-    /// </summary>
-    private const int FramesToLookAgain = 10;
-
-    /// <summary>
-    /// The places of the watched parts that the hero did not have yet as the watching started, which are looked for
-    /// again in the frames after (see <see cref="LookAgain"/>).
-    /// </summary>
-    private static readonly List<int> NotThereYet = [];
-
-    /// <summary>
-    /// The hero whose parts are watched, for the parts that are looked for again.
+    /// The hero whose parts are watched, for the copy of the glow of a song, which is watched as a song starts.
     /// </summary>
     private static Transform? _watchedHero;
 
     /// <summary>
-    /// Sends the effect info of a change to the other players, for the parts that are looked for again and the fading
-    /// out of the glow of a song.
+    /// Sends the effect info of a change to the other players, for the copy of the glow of a song, which is watched as
+    /// a song starts, and for the fading out of the glow.
     /// </summary>
     private static Action<byte[]>? _send;
-
-    /// <summary>
-    /// For how many more frames the parts that the hero did not have yet are looked for.
-    /// </summary>
-    private static int _framesLeftToLook;
-
-    /// <summary>
-    /// Whether <see cref="LookAgain"/> runs every frame now.
-    /// </summary>
-    private static bool _lookingAgain;
 
     /// <summary>
     /// Whether <see cref="OnStartedPerforming"/> and <see cref="OnStoppedPerforming"/> hear the local hero start and
@@ -243,21 +224,13 @@ internal class HeroChildEffects : AnimationEffect {
         var heroTransform = hero.gameObject.transform;
         _watchedHero = heroTransform;
         _send = send;
-        NotThereYet.Clear();
         for (var i = 0; i < Paths.Length; i++) {
-            if (!ByCharacterClips[i] && !WatchPart(heroTransform, i, send)) {
-                NotThereYet.Add(i);
+            if (!ByCharacterClips[i] && !WatchPart(heroTransform, i, send) && Paths[i] != AmplifyCopyPath) {
+                Logger.Warn($"The hero has no part '{Paths[i]}' to show to other players");
             }
         }
 
-        // The game makes some parts in the set-up of the hero's own parts, which can run after this, like the copy of
-        // the glow of a song: by the next frame they are all there
-        _framesLeftToLook = FramesToLookAgain;
-        if (NotThereYet.Count > 0 && !_lookingAgain) {
-            _lookingAgain = true;
-            MonoBehaviourUtil.Instance.OnUpdateEvent += LookAgain;
-        }
-
+        // The copy of the song glow, which HeroPerformanceRegion.Awake can make after this, is watched as songs start
         if (!_hearsSongs) {
             _hearsSongs = true;
             HeroPerformanceRegion.StartedPerforming += OnStartedPerforming;
@@ -289,42 +262,9 @@ internal class HeroChildEffects : AnimationEffect {
     }
 
     /// <summary>
-    /// Looks again, in the frames after the watching started, for the watched parts that the hero did not have yet,
-    /// and watches each that is there now. What is still not there after <see cref="FramesToLookAgain"/> frames is
-    /// not shown to the other players.
-    /// </summary>
-    private static void LookAgain() {
-        var hero = _watchedHero;
-        var send = _send;
-        if (hero != null && send != null) {
-            for (var n = NotThereYet.Count - 1; n >= 0; n--) {
-                if (WatchPart(hero, NotThereYet[n], send)) {
-                    Logger.Info($"The hero's part '{Paths[NotThereYet[n]]}' was made after its parts were first " +
-                                "looked for, and shows to other players from now on");
-                    NotThereYet.RemoveAt(n);
-                }
-            }
-        }
-
-        if (NotThereYet.Count > 0 && hero != null && --_framesLeftToLook > 0) {
-            return;
-        }
-
-        MonoBehaviourUtil.Instance.OnUpdateEvent -= LookAgain;
-        _lookingAgain = false;
-        if (hero != null) {
-            foreach (var index in NotThereYet) {
-                Logger.Warn($"The hero has no part '{Paths[index]}' to show to other players");
-            }
-        }
-
-        NotThereYet.Clear();
-    }
-
-    /// <summary>
     /// Called as the local hero starts playing the needolin, right before the game switches on the glow of the song:
-    /// watches the copy of the glow if it is not watched yet. The song region makes it in its Awake, which may come
-    /// after the frames that <see cref="LookAgain"/> looks in, and has come by the time the region plays a song.
+    /// watches the copy of the glow if it is not watched yet. The song region makes the copy in its Awake, which can
+    /// come after <see cref="Watch"/>, and has made it by the time it plays a song.
     /// </summary>
     private static void OnStartedPerforming() {
         try {
@@ -342,7 +282,6 @@ internal class HeroChildEffects : AnimationEffect {
 
             var index = Array.IndexOf(Paths, AmplifyCopyPath);
             if (WatchPart(hero, index, send)) {
-                NotThereYet.Remove(index);
                 Logger.Info($"The hero's part '{AmplifyCopyPath}' shows to other players from this song on");
             }
         } catch (Exception e) {
@@ -413,10 +352,6 @@ internal class HeroChildEffects : AnimationEffect {
         }
 
         var changed = effectInfo[0];
-        if (ByCharacterClips[changed]) {
-            return;
-        }
-
         var on = effectInfo[1] == SwitchedOn;
         if (effectInfo[1] == FadesOut) {
             // Stays on until the change of it being switched off, as the part there does
