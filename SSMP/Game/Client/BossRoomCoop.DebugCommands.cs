@@ -99,7 +99,7 @@ internal partial class BossRoomCoop {
             UiManager.InternalChatBox.AddMessage(Lang.Pick(
                 "Debug: /0 sets the fight at the top of the lift back to before the first ride up, in every player's " +
                 "save. Type /0 again within 15 seconds to go ahead.",
-                "调试：/0 会把所有人存档里的二见蕾丝改回第一次坐电梯上去之前（没见过、没打过）。确定的话 15 秒内再输一次 /0。"
+                "调试：/0 会把所有人存档里电梯上面那场仗改回第一次坐电梯上去之前（没见过、没打过）。确定的话 15 秒内再输一次 /0。"
             ));
             return;
         }
@@ -130,11 +130,11 @@ internal partial class BossRoomCoop {
             UiManager.InternalChatBox.AddMessage(by == null
                 ? Lang.Pick(
                     "Debug: the fight at the top of the lift is back to before the first ride up. Type /1 to go to the lift.",
-                    "调试：二见蕾丝改回没打过了，输入 /1 去电梯。"
+                    "调试：电梯上面那场仗改回没打过了，输入 /1 去电梯。"
                 )
                 : Lang.Pick(
                     $"{by} set the fight at the top of the lift back to before the first ride up (debug).",
-                    $"{by} 用调试命令把二见蕾丝改回了没打过。"
+                    $"{by} 用调试命令把电梯上面那场仗改回了没打过。"
                 ));
             return;
         }
@@ -162,11 +162,11 @@ internal partial class BossRoomCoop {
             : by == null
                 ? Lang.Pick(
                     "Debug: sending everyone to the challenge of the fight. Winning it skips the ending.",
-                    "调试：正在把大家送到丝母面前，打赢了不进结局。"
+                    "调试：正在把大家送到另一场仗的门口，打赢了不进结局。"
                 )
                 : Lang.Pick(
                     $"{by} sent everyone to the challenge of the fight (debug). Winning it skips the ending.",
-                    $"{by} 用调试命令把大家送到丝母面前，打赢了不进结局。"
+                    $"{by} 用调试命令把大家送到另一场仗的门口，打赢了不进结局。"
                 ));
         QueueDebugTravel(command);
     }
@@ -361,7 +361,7 @@ internal partial class BossRoomCoop {
         );
         UiManager.InternalChatBox.AddMessage(Lang.Pick(
             "Debug: won. The ending is skipped; back to the challenge of the fight.",
-            "调试：打赢了，跳过结局，回到丝母面前。"
+            "调试：打赢了，跳过结局，回到这场仗的门口。"
         ));
         if (_debugTravelPlace == 0 && _debugPlacePlace == 0) {
             Send(BossRoomUpdateKind.DebugCommand, "", "", "", "", "2");
