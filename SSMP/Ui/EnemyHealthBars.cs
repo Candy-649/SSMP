@@ -578,6 +578,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         private bool _isHurt;
 
         /// <summary>
+        /// Whether the creature came to the end of its health without dying and was not given health since (see
+        /// <see cref="FollowHealth"/>).
+        /// </summary>
+        private bool _isSpent;
+
+        /// <summary>
         /// Whether the creature was active in the previous frame.
         /// </summary>
         private bool _wasActive;
@@ -661,6 +667,10 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             }
 
             _wasActive = isActive;
+            if (isActive && !_healthManager.isDead && health <= 0) {
+                _isSpent = true;
+            }
+
             if (isAlive) {
                 FollowHealth(health);
             }
@@ -710,6 +720,20 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                     Logger.Info(
                         $"[Bars] The boss '{_healthManager.name}' was out of reach and starts again with {health} " +
                         $"health, from {_healthBeforeUnbeatable}"
+                    );
+                }
+            }
+
+            // A boss that came to the end of its health without dying starts the next part of its fight with the health it
+            // is given for it, full. Taken as more of what it had, a part with less health than an earlier one started
+            // at that share of the earlier one: the fourth part of a fight at less than half (USER 11-08 "…的血条很奇怪")
+            if (_isSpent) {
+                _isSpent = false;
+                if (IsBoss) {
+                    _fullHealth = health;
+                    Logger.Info(
+                        $"[Bars] The boss '{_healthManager.name}' came to the end of its health without dying and " +
+                        $"starts the next part of its fight with {health} health"
                     );
                 }
             }
