@@ -1,8 +1,7 @@
 using System;
 using System.IO;
-using System.Reflection;
 using GlobalSettings;
-using MonoMod.RuntimeDetour;
+using SSMP.Hooks;
 using SSMP.Internals;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -49,9 +48,9 @@ internal class HeroPartClips : AnimationEffect {
     private static Action<byte[]>? _send;
 
     /// <summary>
-    /// The hook of the method that every way of playing a clip ends in, which stays for as long as the game runs.
+    /// Whether <see cref="OnPlay"/> hears the clips that animators play.
     /// </summary>
-    private static Hook? _playHook;
+    private static bool _hearsPlays;
 
     /// <summary>
     /// Starts watching the parts of the local hero, which may be a new hero or the same one again. This runs while the
@@ -71,47 +70,22 @@ internal class HeroPartClips : AnimationEffect {
             }
         }
 
-        if (_playHook != null) {
-            return;
+        if (!_hearsPlays) {
+            _hearsPlays = true;
+            EventHooks.SpriteAnimatorPlay += OnPlay;
         }
-
-        var method = typeof(tk2dSpriteAnimator).GetMethod(
-            "Play",
-            BindingFlags.Instance | BindingFlags.Public,
-            null,
-            [typeof(tk2dSpriteAnimationClip), typeof(float), typeof(float)],
-            null
-        );
-        if (method == null) {
-            Logger.Error("Could not find the method that plays a clip; the parts of the hero will not animate");
-            return;
-        }
-
-        _playHook = new Hook(method, OnPlay);
     }
 
     /// <summary>
-    /// The method that every way of playing a clip ends in.
-    /// </summary>
-    private delegate void PlayMethod(
-        tk2dSpriteAnimator self,
-        tk2dSpriteAnimationClip clip,
-        float clipStartTime,
-        float overrideFps
-    );
-
-    /// <summary>
-    /// Plays a clip, and sends it to the other players when a watched part of the local hero plays it.
+    /// Called after a clip started playing (<see cref="EventHooks.SpriteAnimatorPlay"/>): sends it to the other players
+    /// when a watched part of the local hero plays it.
     /// </summary>
     private static void OnPlay(
-        PlayMethod orig,
         tk2dSpriteAnimator self,
         tk2dSpriteAnimationClip clip,
         float clipStartTime,
         float overrideFps
     ) {
-        orig(self, clip, clipStartTime, overrideFps);
-
         if (clip == null) {
             return;
         }

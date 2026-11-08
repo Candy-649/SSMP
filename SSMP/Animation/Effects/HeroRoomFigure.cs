@@ -8,6 +8,7 @@ using MonoMod.RuntimeDetour;
 using SSMP.Game.Client;
 using SSMP.Game.Client.Entity;
 using SSMP.Game.Client.Save;
+using SSMP.Hooks;
 using SSMP.Internals;
 using TeamCherry.NestedFadeGroup;
 using UnityEngine;
@@ -143,9 +144,9 @@ internal class HeroRoomFigure : AnimationEffect {
     private static Hook? _activateHook;
 
     /// <summary>
-    /// The hook of the method that every way of playing a clip ends in, which stays for as long as the game runs.
+    /// Whether <see cref="OnPlay"/> hears the clips that animators play.
     /// </summary>
-    private static Hook? _playHook;
+    private static bool _hearsPlays;
 
     /// <summary>
     /// The hook of the routine that seats the hero at the desk that shows the collection, which hides the hero from code
@@ -234,23 +235,10 @@ internal class HeroRoomFigure : AnimationEffect {
             );
         }
 
-        if (_playHook != null) {
-            return;
+        if (!_hearsPlays) {
+            _hearsPlays = true;
+            EventHooks.SpriteAnimatorPlay += OnPlay;
         }
-
-        var play = typeof(tk2dSpriteAnimator).GetMethod(
-            "Play",
-            BindingFlags.Instance | BindingFlags.Public,
-            null,
-            [typeof(tk2dSpriteAnimationClip), typeof(float), typeof(float)],
-            null
-        );
-        if (play == null) {
-            Logger.Error("Could not find the method that plays a clip; figures of the hero in rooms will not animate");
-            return;
-        }
-
-        _playHook = new Hook(play, OnPlay);
     }
 
     /// <summary>
@@ -446,29 +434,15 @@ internal class HeroRoomFigure : AnimationEffect {
     }
 
     /// <summary>
-    /// The method that every way of playing a clip ends in.
-    /// </summary>
-    private delegate void PlayMethod(
-        tk2dSpriteAnimator self,
-        tk2dSpriteAnimationClip clip,
-        float clipStartTime,
-        float overrideFps
-    );
-
-    /// <summary>
-    /// Plays a clip, and tells the other players when it is the figure of the local hero that plays it.
+    /// Called after a clip started playing (<see cref="EventHooks.SpriteAnimatorPlay"/>): tells the other players when
+    /// it is the figure of the local hero that plays it.
     /// </summary>
     private static void OnPlay(
-        PlayMethod orig,
         tk2dSpriteAnimator self,
         tk2dSpriteAnimationClip clip,
         float clipStartTime,
         float overrideFps
-    ) {
-        orig(self, clip, clipStartTime, overrideFps);
-
-        _watcher?.Played(self);
-    }
+    ) => _watcher?.Played(self);
 
     /// <summary>
     /// Writes what the room's figure of the local hero plays to effect info: how many clips it started so far, so that
