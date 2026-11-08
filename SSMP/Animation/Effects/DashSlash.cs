@@ -1,3 +1,4 @@
+using SSMP.Animation.Effects.Tools;
 using SSMP.Internals;
 using SSMP.Networking.Packet;
 using SSMP.Util;
@@ -117,8 +118,7 @@ internal class DashSlash : SlashBase {
             }
 
             FixRemoteAttack(slashObj);
-
-            // TODO: Nail imbuement (see OnPlaySlash in NailAttackBase.cs)
+            ImbuedNail.PlaySlash(slashObj, ElementOf(slashEffects), playerObject.transform.localScale.x > 0 ? 180f : 0f);
             
             // Activate game object in ActivateGameObject action in "Witch?" state
 

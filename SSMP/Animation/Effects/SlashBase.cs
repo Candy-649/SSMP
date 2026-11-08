@@ -210,10 +210,18 @@ internal abstract class SlashBase : ParryableEffect {
 
         // The look of a needle that has taken on an element, or none: the slash is made from the local hero's own,
         // which has the look of the local hero's needle while it slashes
-        var element = slashEffects.Contains(SlashEffect.Flintslate) ? NailElements.Fire
+        ImbuedNail.PlaySlash(slashObj, ElementOf(slashEffects), dir);
+    }
+
+    /// <summary>
+    /// The element that the needle of the player who slashes has taken on, from the effects of their slash.
+    /// </summary>
+    /// <param name="slashEffects">The effects of the slash.</param>
+    /// <returns>The element, or none.</returns>
+    protected static NailElements ElementOf(ISet<SlashEffect> slashEffects) {
+        return slashEffects.Contains(SlashEffect.Flintslate) ? NailElements.Fire
             : slashEffects.Contains(SlashEffect.FlintslatePollip) ? NailElements.Poison
             : NailElements.None;
-        ImbuedNail.PlaySlash(slashObj, element, dir);
     }
 
     /// <summary>
