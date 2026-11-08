@@ -11,13 +11,14 @@ using SSMP.Util;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Wish boards in a checked co-op save. Turning in wishes at a board and donating at it work like key dialogue about
-/// wishes (see CoopSave.WishTalk): they need every other member close by, and each of them pays their own copy of what
-/// the board takes and gets the reward too. Whether they have that copy is asked right then (see CoopSave.WishCopyCheck),
-/// and a wish that any of them is short for stays on the board. Without all of them close by, the board still opens to
-/// look at and accept wishes, and its wishes that are ready to turn in stay on it. Every player can look at a board at
-/// the same time; while one of them turns in or donates there, the others' boards open without turning in and don't take
-/// a donation.
+/// Wish boards in a checked co-op save. Turning in wishes at a board works like key dialogue about wishes (see
+/// CoopSave.WishTalk): it needs every other member close by, and each of them pays their own copy of what the board
+/// takes and gets the reward too. Whether they have that copy is asked right then (see CoopSave.WishCopyCheck), and a
+/// wish that any of them is short for stays on the board. A donation asks every other member in the save in a box,
+/// wherever they are (CoopSave.WishCopyCheck, DonationHold), and only waits while one of them turns in or donates at
+/// that board. Without all of them close by, the board still opens to look at and accept wishes, and its wishes that are
+/// ready to turn in stay on it. Every player can look at a board at the same time; while one of them turns in or donates
+/// there, the others' boards open without turning in and don't take a donation.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>

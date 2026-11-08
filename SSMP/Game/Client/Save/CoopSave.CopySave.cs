@@ -13,8 +13,9 @@ namespace SSMP.Game.Client.Save;
 /// title menu, where the chat opens too (USER 11-08 "但是copy要进存档，可以改一下吗"). A slot that holds a save is never
 /// written over.
 ///
-/// The copy is a normal save, even the copy of a two-player save: two co-op slots with the same partner would each be
-/// merged with the partner's one save. The game's save menu is built anew each time the player quits to it, and in the
+/// The copy is a normal save, even the copy of a two-player save: a co-op save is only a mark on its slot, and the copy
+/// is a new slot without one, so it stays a normal save until someone joins a game with it open or it joins someone's
+/// game. The game's save menu is built anew each time the player quits to it, and in the
 /// title menu it reads the slot anew, so the copy shows there without restarting the game.
 /// </summary>
 internal partial class CoopSave {

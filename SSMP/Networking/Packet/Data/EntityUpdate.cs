@@ -1253,9 +1253,9 @@ internal enum EntityUpdateType {
     /// Only sent for a while after the scene host has been told something, since the rest of the time there is
     /// nothing for anyone to be waiting on.
     ///
-    /// Each also says how far the knockbacks of that client have pushed the entity in the scene host's game, which is
-    /// what lets the client's copy go on moving the way the entity moves by itself while it waits, rather than stand
-    /// still (see <see cref="AnticipationReport"/>).
+    /// Each also says, while a knockback of that client's goes on in the scene host's game, where it lands (Knocking,
+    /// LandsAtX/Y), so that the client's copy goes there once its own knockback is played out (see
+    /// <see cref="AnticipationReport"/>).
     /// </summary>
     Anticipation,
 
