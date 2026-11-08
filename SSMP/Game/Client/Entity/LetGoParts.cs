@@ -169,31 +169,68 @@ internal static class LetGoParts {
     /// <param name="parent">The parent it is about to be given, or null for none.</param>
     /// <param name="itself">Whether the part lets go of itself, for the log.</param>
     public static void NoteLetGo(GameObject? part, GameObject? parent, bool itself = false) {
-        if (part == null || Entity.IsEntityObject(part)) {
+        if (part == null || Entity.IsEntityObject(part) ||
+            !TryFindHolder(part.transform, out var holder, out var creature, out var holderPlace) ||
+            parent != null && (parent.transform.IsChildOf(holder) || parent.transform.IsChildOf(creature.transform))) {
             return;
         }
 
-        Transform? creature = null;
-        for (var current = part.transform.parent; current != null; current = current.parent) {
+        var below = PlaceUnder(holder, part.transform);
+        var place = holderPlace == null ? below : holderPlace + "/" + below;
+        Origins.Remove(part);
+        Origins.Add(part, new Origin(creature, place, Time.frameCount));
+        ByPlace[(creature, place)] = part;
+        Logger.Info(
+            $"[Let go] '{holder.name}'" + (holderPlace == null ? "" : $", which '{creature.name}' let go of,") +
+            $" lets go of its part '{below}' " +
+            (parent == null ? "into the room" : $"to go under '{parent.name}'") +
+            $"{(itself ? ", which lets go of itself" : "")}; it goes by its place under '{creature.name}', " +
+            $"'{place}', from now on"
+        );
+    }
+
+    /// <summary>
+    /// Finds what holds a part for its creature: the creature itself, or a part that the creature let go of in this
+    /// room and that is not back under it. The blades of a boss's hands let go of their hand as they first rise, after
+    /// the hands let go of the boss as the room starts. Loose, a blade was nobody's part, so the scene host's switches
+    /// of a blade's hurting part went on the same blade in the other game (DamageHeroComponent), where it flew at
+    /// another time: a blade there that was stuck in the ground or on its way back hurt the partner while the host's
+    /// flew (USER 11-08 "…收回针的时候打到她了").
+    /// </summary>
+    /// <param name="part">The part.</param>
+    /// <param name="holder">What holds the part: the creature, or the part that the creature let go of.</param>
+    /// <param name="creature">The creature.</param>
+    /// <param name="holderPlace">The place of the holder under the creature, or null if the holder is the creature.
+    /// </param>
+    /// <returns>Whether something holds the part for a creature.</returns>
+    private static bool TryFindHolder(
+        Transform part,
+        out Transform holder,
+        out GameObject creature,
+        out string? holderPlace
+    ) {
+        for (var current = part.parent; current != null; current = current.parent) {
             if (Entity.IsEntityObject(current.gameObject)) {
-                creature = current;
-                break;
+                holder = current;
+                creature = current.gameObject;
+                holderPlace = null;
+                return true;
+            }
+
+            if (Origins.TryGetValue(current.gameObject, out var origin) && origin.Creature != null &&
+                !current.IsChildOf(origin.Creature.transform) &&
+                ByPlace.TryGetValue((origin.Creature, origin.Place), out var latest) && latest == current.gameObject) {
+                holder = current;
+                creature = origin.Creature;
+                holderPlace = origin.Place;
+                return true;
             }
         }
 
-        if (creature == null || parent != null && parent.transform.IsChildOf(creature)) {
-            return;
-        }
-
-        var place = PlaceUnder(creature, part.transform);
-        Origins.Remove(part);
-        Origins.Add(part, new Origin(creature.gameObject, place, Time.frameCount));
-        ByPlace[(creature.gameObject, place)] = part;
-        Logger.Info(
-            $"[Let go] '{creature.name}' lets go of its part '{place}' " +
-            (parent == null ? "into the room" : $"to go under '{parent.name}'") +
-            $"{(itself ? ", which lets go of itself" : "")}; it goes by that place from now on"
-        );
+        holder = null!;
+        creature = null!;
+        holderPlace = null;
+        return false;
     }
 
     /// <summary>
