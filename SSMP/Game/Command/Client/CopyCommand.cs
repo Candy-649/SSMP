@@ -5,7 +5,8 @@ using SSMP.Game.Client.Save;
 namespace SSMP.Game.Command.Client;
 
 /// <summary>
-/// Command for copying the save that the player is in to the next empty save slot, like to keep a save to go back to.
+/// Command for copying a save to the next empty save slot, like to keep a save to go back to: the save that the player
+/// is in, or the save of a slot by its number.
 /// </summary>
 internal class CopyCommand : IClientCommand, ICommandWithDescription {
     /// <summary>
@@ -24,10 +25,12 @@ internal class CopyCommand : IClientCommand, ICommandWithDescription {
     public string[] Aliases => [];
 
     /// <inheritdoc />
-    public string Description => "Save the game and copy your save to the next empty save slot.";
+    public string Description =>
+        "Copy a save to the next empty save slot: /copy in a save saves it and copies it; /copy and a number, 1 to 4 " +
+        "from the top of the save menu, copies that save, in the title menu too.";
 
     /// <inheritdoc />
     public void Execute(string[] arguments) {
-        _coopSave.CopySave();
+        _coopSave.CopySave(arguments);
     }
 }

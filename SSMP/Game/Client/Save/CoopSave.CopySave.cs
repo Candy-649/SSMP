@@ -7,13 +7,15 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Save;
 
 /// <summary>
-/// Copying the save that the local player is in to an empty save slot, with the chat command "/copy". The game saves
-/// first, as it does when the player quits to the menu, so that the copy holds everything up to the command. A slot
-/// that holds a save is never written over.
+/// Copying a save to an empty save slot, with the chat command "/copy": the save that the local player is in, which the
+/// game saves first, as it does when the player quits to the menu, so that the copy holds everything up to the command;
+/// or, with the number of a slot as the game's save menu counts them from the top, the save of that slot, also from the
+/// title menu, where the chat opens too (USER 11-08 "但是copy要进存档，可以改一下吗"). A slot that holds a save is never
+/// written over.
 ///
 /// The copy is a normal save, even the copy of a two-player save: two co-op slots with the same partner would each be
-/// merged with the partner's one save. The game's save menu is built anew each time the player quits to it, so the copy
-/// shows there without restarting the game.
+/// merged with the partner's one save. The game's save menu is built anew each time the player quits to it, and in the
+/// title menu it reads the slot anew, so the copy shows there without restarting the game.
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
@@ -35,20 +37,52 @@ internal partial class CoopSave {
     private float? _copyStarted;
 
     /// <summary>
-    /// Saves the game and copies the save to the first empty slot after its own, going round to the first slot after
-    /// the last one.
+    /// Copies a save to the first empty slot after its own, going round to the first slot after the last one: the save
+    /// that the player is in, saved first, or the save of the slot that the command names.
     /// </summary>
-    public void CopySave() {
+    /// <param name="arguments">The words of the command, the first one being the command itself.</param>
+    public void CopySave(string[] arguments) {
         if (_copyStarted is { } started && Time.unscaledTime - started < CopyTimeout) {
             Chat(Lang.Pick("The save is being copied already.", "存档正在复制中。"));
             return;
         }
 
-        if (!IsInGame()) {
-            Chat(Lang.Pick("Load a save first, then copy it.", "先进入一个存档，再复制它。"));
+        int slot;
+        if (arguments.Length == 1 && IsInGame()) {
+            slot = global::GameManager.instance.profileID;
+        } else if (arguments.Length != 2 || !int.TryParse(arguments[1], out slot) || slot < 1 || slot > MenuSaveSlots) {
+            Chat(Lang.Pick(
+                "Type /copy and the number of the save, 1 to 4, counting from the top of the game's save menu. In a " +
+                "save, /copy alone copies that save.",
+                "输入 /copy 加存档的编号 1~4（选存档界面里从上往下数）。在存档里直接输 /copy 就是复制正在玩的这个。"
+            ));
             return;
         }
 
+        if (IsInGame() && global::GameManager.instance.profileID == slot) {
+            CopyPlayedSave(slot);
+            return;
+        }
+
+        _copyStarted = Time.unscaledTime;
+        Logger.Info($"Copying save slot {slot}, which isn't being played, as it is");
+        Platform.Current.IsSaveSlotInUse(slot, inUse => RunCopyStep(() => {
+            if (!inUse) {
+                EndCopy($"Save slot {slot} is empty, so nothing was copied", Lang.Pick(
+                    $"Save {slot} is empty.",
+                    $"存档 {slot} 是空的。"
+                ));
+                return;
+            }
+
+            FindEmptySlot(slot, 1, target => RunCopyStep(() => OnCopyTargetFound(slot, target)));
+        }));
+    }
+
+    /// <summary>
+    /// Saves the game and copies the save that the player is in.
+    /// </summary>
+    private void CopyPlayedSave(int slot) {
         // Not in the middle of a room change, a death or a scene that the game won't let the player pause in, where
         // the game itself never saves
         var gameManager = global::GameManager.instance;
@@ -63,7 +97,6 @@ internal partial class CoopSave {
             return;
         }
 
-        var slot = gameManager.profileID;
         if (slot < 1 || slot > MenuSaveSlots) {
             Chat(Lang.Pick("This save isn't in a save slot that can be copied.", "这个存档不在能复制的存档槽里。"));
             return;
@@ -142,10 +175,21 @@ internal partial class CoopSave {
             Logger.Info($"Save slot {target} had a co-op mark from an old save, which was dropped for the copy");
         }
 
-        var message = Lang.Pick(
-            $"Copied save {slot} to save slot {target}. It shows in the menu the next time you go there.",
-            $"已把存档 {slot} 复制到存档槽 {target}，回到主菜单就能看到。"
-        );
+        string message;
+        if (IsInGame()) {
+            message = Lang.Pick(
+                $"Copied save {slot} to save slot {target}. It shows in the menu the next time you go there.",
+                $"已把存档 {slot} 复制到存档槽 {target}，回到主菜单就能看到。"
+            );
+        } else {
+            // The save menu reads the slot anew the next time it shows
+            global::UIManager.instance.ClearSaveCache();
+            message = Lang.Pick(
+                $"Copied save {slot} to save slot {target}. It shows in the save menu.",
+                $"已把存档 {slot} 复制到存档槽 {target}，选存档界面里就能看到。"
+            );
+        }
+
         if (GetMarker(slot) != null) {
             message += Lang.Pick(
                 " The copy is a normal save, which becomes a co-op save once someone joins your game with it open, or " +
