@@ -97,8 +97,8 @@ internal partial class CoopSave {
     private void OnCopyTargetFound(int slot, int target) {
         if (target == 0) {
             EndCopy($"No save slot is empty to copy slot {slot} to", Lang.Pick(
-                "Every other save slot holds a save, and none is written over. Clear one in the game's menu first.",
-                "其他存档槽都有存档，不会覆盖任何一个。请先在游戏菜单里清空一个存档槽。"
+                "Every other save slot holds a save, and none is written over. Delete one first: /delete and its number.",
+                "其他存档槽都有存档，不会覆盖任何一个。先用 /delete 加编号删掉一个。"
             ));
             return;
         }

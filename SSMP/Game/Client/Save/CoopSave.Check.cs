@@ -989,32 +989,37 @@ internal partial class CoopSave {
     #region Backups
 
     /// <summary>
-    /// Copies the save file of a slot to the backups of two-player saves, keeping the newest backups.
+    /// Copies the save file of a slot to a folder of backups in the config folder, the backups of two-player saves
+    /// unless another is given, keeping the newest backups of the slot.
     /// </summary>
-    private static void BackUpSave(int slot) {
+    /// <returns>Whether the copy was made.</returns>
+    private static bool BackUpSave(int slot, string folderName = BackupFolderName) {
         try {
             var path = GetSaveFilePath(slot);
             if (path == null || !File.Exists(path)) {
                 Logger.Warn($"Could not find the save file of slot {slot} to back up");
-                return;
+                return false;
             }
 
-            var folder = Path.Combine(FileUtil.GetConfigPath(), BackupFolderName, GetSaveFolderName(), $"slot{slot}");
+            var folder = Path.Combine(FileUtil.GetConfigPath(), folderName, GetSaveFolderName(), $"slot{slot}");
             Directory.CreateDirectory(folder);
             var backup = Path.Combine(
                 folder,
                 $"{Path.GetFileNameWithoutExtension(path)}_{DateTime.Now:yyyyMMdd-HHmmss}{Path.GetExtension(path)}"
             );
             File.Copy(path, backup, true);
-            Logger.Info($"Backed up two-player save to {backup}");
+            Logger.Info($"Backed up save slot {slot} to {backup}");
 
             foreach (var old in new DirectoryInfo(folder).GetFiles()
                          .OrderByDescending(file => file.LastWriteTimeUtc)
                          .Skip(MaxBackups)) {
                 old.Delete();
             }
+
+            return true;
         } catch (Exception e) {
             Logger.Error($"Could not back up the save file of slot {slot}:\n{e}");
+            return false;
         }
     }
 
