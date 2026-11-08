@@ -39,6 +39,13 @@ public partial class SSMPPlugin : BaseUnityPlugin {
         PluginBackups.Tidy();
         StackOverflowRecovery.Apply();
 
+        // A film of the game never drops a frame, while its sound plays on by itself from the start: on a computer that
+        // draws the film slower than it runs, the sound gets further and further ahead (USER 11-08 "每次只要一进动画，音频
+        // 就比动画要快很多", "音画不同步太难受了"). The game's own setting to drop the frames a film is late for is on; only the
+        // switch that lets it count was off.
+        CheatManager.OverrideSkipFrameOnDrop = true;
+        Logging.Logger.Info("Films of the game drop the frames they are late for, so that their picture keeps up with their sound");
+
         // Before CustomizerT2D starts, which chooses its skins then (see CustomizerT2D)
         Game.Client.Skin.CustomizerT2D.Hook();
 
