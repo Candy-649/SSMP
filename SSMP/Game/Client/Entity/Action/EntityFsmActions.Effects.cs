@@ -948,8 +948,9 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// The actions with which a creature puts one of its own things at the player character, turns it the way the
-    /// player faces, or takes where the player is, by the name of their type: the field that names the player, and the
-    /// field that names the thing that goes there or turns, if any.
+    /// player faces, takes where the player is, or puts the player somewhere (see <see cref="PlayerMoves"/>), by the
+    /// name of their type: the field that names the player, and the field that names the thing that goes there or
+    /// turns, if any.
     /// </summary>
     private static readonly Dictionary<string, (string Player, string? Thing)> PlayerReferences = new() {
         ["SetPositionToObject"] = ("targetObject", "gameObject"),
@@ -957,15 +958,27 @@ internal static partial class EntityFsmActions {
         ["MatchScaleSign"] = ("MatchTo", "Target"),
         ["GetPosition"] = ("gameObject", null),
         ["GetPosition2D"] = ("gameObject", null),
-        ["GetPosition2d"] = ("gameObject", null)
+        ["GetPosition2d"] = ("gameObject", null),
+        ["SetPosition"] = ("gameObject", null),
+        ["SetPosition2d"] = ("gameObject", null)
     };
+
+    /// <summary>
+    /// The actions among <see cref="PlayerReferences"/> that put the player somewhere, which are pointed at another
+    /// figure only when they do it once: a figure put somewhere every frame would be pulled away from where the game
+    /// of that player shows them.
+    /// </summary>
+    private static readonly HashSet<string> PlayerMoves = ["SetPosition", "SetPosition2d"];
 
     /// <summary>
     /// Points an action at another figure instead of this game's player character, when with it a creature puts one of
     /// its own things at the player - the creature itself, the stand-in of the player that it carries, a point it
     /// flies to - turns one the way the player faces, or takes where the player is for its own things to go by: the
-    /// stand-in of a player it caught slides to the height it took. Nothing of the camera's is pointed elsewhere: the
-    /// camera follows this game's player, whatever the creature does.
+    /// stand-in of a player it caught slides to the height it took. One that puts the player somewhere once puts the
+    /// figure there, as the game of that player puts them there at the same step: word of the move comes only after
+    /// the step, and what takes where the player is after it would take where they were before - the boss whose
+    /// strands caught the partner would show again by where they were caught, not by where it slashed them. Nothing of
+    /// the camera's is pointed elsewhere: the camera follows this game's player, whatever the creature does.
     /// </summary>
     /// <param name="action">The action.</param>
     /// <param name="figure">The figure.</param>
@@ -981,6 +994,12 @@ internal static partial class EntityFsmActions {
         var heroObject = hero.gameObject;
         var field = type.GetField(names.Player, BindingFlags.Instance | BindingFlags.Public);
         if (field == null || ObjectIn(action, field) != heroObject) {
+            return null;
+        }
+
+        if (PlayerMoves.Contains(type.Name) &&
+            (type.GetField("everyFrame")?.GetValue(action) is true ||
+             type.GetField("lateUpdate")?.GetValue(action) is true)) {
             return null;
         }
 
