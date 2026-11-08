@@ -2905,7 +2905,8 @@ internal partial class Entity {
     /// Stops the copy's FSM running here, after which the copy follows the scene host again from where it is. A catch
     /// that this game led is over with it: a player that the creature still holds is let go, since what lets them go
     /// in the end was the copy's own FSM to do, and the scene host's FSM does not do it to them. Whatever the copy ran,
-    /// what it marked on the player's silk comes off too (see <see cref="TakeOffTheSilkMarks"/>).
+    /// what it marked on the player's silk comes off too (see <see cref="TakeOffTheSilkMarks"/>), and a shake of the
+    /// screen it started that only a later state of it would end ends (see <see cref="EndTheShakesOfTheRun"/>).
     /// </summary>
     /// <param name="letGoOfThePlayer">Whether a player held by a catch that this game led is let go, which they are
     /// not when the room's own creature takes over and goes on holding them.</param>
@@ -2960,6 +2961,7 @@ internal partial class Entity {
         // takes over and goes on holding the player: it goes on with what the scene host last said of its variables,
         // not with the copy's, and would never take the copy's marks off
         TakeOffTheSilkMarks(fsm);
+        EndTheShakesOfTheRun(fsm);
 
         // What the move worked out by itself gives way to what the scene host's FSM holds, which the copy is given
         // again from here (UpdateHostFsmData)
@@ -3021,6 +3023,7 @@ internal partial class Entity {
         StopSteppingRunHere();
         TakeTheCopysBodyBack();
         TakeOffTheSilkMarks(fsm);
+        EndTheShakesOfTheRun(fsm);
 
         if (led) {
             FreeTheLocalPlayer(fsm, !over);
@@ -3079,6 +3082,95 @@ internal partial class Entity {
             }
         }
     }
+
+    /// <summary>
+    /// The shakes of the screen that do not end by themselves which the FSM of the copy started while it ran here: the
+    /// camera that shakes, the shake, what started it and the state it started in (see
+    /// <see cref="EndTheShakesOfTheRun"/>).
+    /// </summary>
+    private readonly List<(CameraManagerReference Camera, ICameraShake Shake, UnityEngine.Object Source, string State)>
+        _shakesOfTheRun = [];
+
+    /// <summary>
+    /// Notes a shake of the screen that does not end by itself, if the FSM of the copy that runs here started it, to be
+    /// ended as the copy stops running here (see <see cref="EndTheShakesOfTheRun"/>). The game runs the copy's own FSM
+    /// as it runs here, which is then the FSM it runs right now; what the scene host's creature does, this game does
+    /// on the copy by itself.
+    /// </summary>
+    /// <param name="camera">The camera that shakes.</param>
+    /// <param name="shake">The shake.</param>
+    /// <param name="source">What started it.</param>
+    internal void NoteShakeOfTheRun(CameraManagerReference camera, ICameraShake shake, UnityEngine.Object source) {
+        if (_runHereFsm == null || FsmExecutionStack.ExecutingFsm != _runHereFsm) {
+            return;
+        }
+
+        var state = _runHereFsm.ActiveStateName;
+        _shakesOfTheRun.Add((camera, shake, source, state));
+        Logger.Info(
+            $"The copy of entity {Id} starts the shake '{ShakeName(shake)}', which goes on until something ends " +
+            $"it, in '{state}' of '{_runHereFsm.Name}' as it runs here"
+        );
+    }
+
+    /// <summary>
+    /// Ends the shakes of the screen that do not end by themselves which the FSM of the copy started while it ran here
+    /// (see <see cref="NoteShakeOfTheRun"/>) and which are still on as it stops, unless the scene host's FSM is in the
+    /// state that started it, which ends it as it goes on, here as there. The creature ends such a shake in a later
+    /// state of its move, like the one that shakes the screen and the pad for as long as a boss's rapid slash holds the
+    /// player it caught. A copy that stops running here never gets there: the scene host did not take the catch, as
+    /// its creature had gone on from the attack by then, or its creature went on to something else, and its FSM, which
+    /// shook nothing for this game's player, says nothing that ends it. The screen and the pad shook until the room
+    /// changed (USER 11-08 "…最后一点尾巴打到我的时候震动不会停"). The game ends a shake by its kind, as the creature's
+    /// own state does.
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    private void EndTheShakesOfTheRun(HutongGames.PlayMaker.Fsm fsm) {
+        var hostState = EntityFsmActions.HostStateOf(fsm);
+        foreach (var (camera, shake, source, state) in _shakesOfTheRun) {
+            if (!IsShaking(camera, shake, source)) {
+                continue;
+            }
+
+            if (state == hostState) {
+                Logger.Info(
+                    $"The copy of entity {Id} stopped running '{fsm.Name}' here with the shake " +
+                    $"'{ShakeName(shake)}' that '{state}' started still on, which is left to end as the scene " +
+                    "host's FSM, in that state too, goes on"
+                );
+                continue;
+            }
+
+            camera.CancelShake(shake);
+            Logger.Info(
+                $"The copy of entity {Id} stopped running '{fsm.Name}' here with the shake '{ShakeName(shake)}' that " +
+                $"'{state}' started still on, which only a later state of it ends, so it is ended, the scene host's " +
+                $"FSM being in '{hostState}'"
+            );
+        }
+
+        _shakesOfTheRun.Clear();
+    }
+
+    /// <summary>
+    /// Whether a camera still shakes with the given shake that the given object started.
+    /// </summary>
+    private static bool IsShaking(CameraManagerReference camera, ICameraShake shake, UnityEngine.Object source) {
+        foreach (var current in camera.EnumerateCurrentShakes()) {
+            if (current.Shake == shake && current.Source == source) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The name of a shake of the screen, for the log.
+    /// </summary>
+    private static string ShakeName(ICameraShake shake) => shake is UnityEngine.Object named
+        ? named.name
+        : shake.GetType().Name;
 
     /// <summary>
     /// Gives the local player back the sound of the game that the FSM of a copy changed while it played a catch that

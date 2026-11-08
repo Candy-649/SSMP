@@ -870,12 +870,14 @@ internal class EntityManager {
 
     /// <summary>
     /// Ends a shake of the screen that does not end by itself once the part of a creature's copy that started it
-    /// goes.
+    /// goes, or, for one that the copy's own FSM started while it ran here, once it stops running here.
     ///
     /// Some shakes run until something tells them to stop. On a scene client the parts of a creature's copy run by
     /// themselves, and a part that catches this player starts such a shake here. What stops it is the creature's
     /// own FSM, which runs in the scene host's game and not here, so the screen shook until the room changed. The
     /// scene host switches that part off when the move is over, which is carried over, so it ends here then too.
+    /// The copy's own FSM, which plays here what a catch of this player sets off, starts one too, which a later state
+    /// of it ends, and a copy that stops running here before that never ends it (see Entity.NoteShakeOfTheRun).
     /// </summary>
     private void OnCameraShake(
         Action<CameraManagerReference, ICameraShake, Object, bool, bool, bool> orig,
@@ -895,26 +897,10 @@ internal class EntityManager {
             UnityEngine.Component component => component.gameObject,
             _ => null
         };
-        if (part == null || !IsPartOfACopy(part.transform)) return;
+        if (part == null || Entity.FindByCopyPart(part) is not { } entity) return;
 
         part.AddComponent<EndShakeWhenGone>().Watch(self, shake);
-    }
-
-    /// <summary>
-    /// Whether the object is the copy of an entity, or a part of one. Copies only run while the scene host runs the
-    /// entity.
-    /// </summary>
-    /// <param name="part">The object.</param>
-    private bool IsPartOfACopy(Transform part) {
-        for (var current = part; current != null; current = current.parent) {
-            foreach (var entity in _entities.Values) {
-                if (entity.Object.Client == current.gameObject) {
-                    return true;
-                }
-            }
-        }
-
-        return false;
+        entity.NoteShakeOfTheRun(self, shake, source);
     }
 
     /// <summary>
