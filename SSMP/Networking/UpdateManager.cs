@@ -43,13 +43,13 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
     /// <summary>
     /// How long, in milliseconds, nothing has to have arrived before the transport's link is opened anew, while it
-    /// still counts as connected (see <see cref="RenewStalledLink"/>). A shorter stretch is left to come back by
-    /// itself, as stretches of 13 to 19 s did in the players' logs (09-21, 09-22, 10-09): Steam keeps what was sent in
-    /// one and delivers it once the stretch is over, for 75 s (SteamRelayMessaging.SessionTimeout), where opening the
-    /// link anew loses it. The two stretches that never came back (10-12, 10-15) went on past
-    /// <see cref="ConnectionTimeoutCeiling"/>.
+    /// still counts as connected (see <see cref="RenewStalledLink"/>). It was 15 s, which left stretches of 13 to 19 s
+    /// (09-21, 09-22, 10-09) to come back by themselves; on 11-08 nothing arrived for 19 s, things arrived again 4 s
+    /// after the link was opened anew at 15 s, and the user chose 10 s (USER 11-08 "10秒呢"). What was on its way over
+    /// the old link is lost; the packets with reliable data among it go again over the new one
+    /// (<see cref="SendAgainAfterRenewal"/>).
     /// </summary>
-    private const int RenewLinkAfter = 15000;
+    private const int RenewLinkAfter = 10000;
 
     /// <summary>
     /// How long, in milliseconds, nothing has arrived since the transport's link was last opened anew before it is
@@ -161,6 +161,28 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// How many times the link was opened anew in this quiet stretch.
     /// </summary>
     private int _renewals;
+
+    /// <summary>
+    /// Until when, in UTC ticks, the send loop sends nothing after this side opened the link anew, or 0 (see
+    /// <see cref="RenewalHoldMs"/>). Only the send loop reads and writes it.
+    /// </summary>
+    private long _heldUntil;
+
+    /// <summary>
+    /// How long, in milliseconds, this side sends nothing after it opened the link anew, unless the link counts as
+    /// connected again before, which the other side opening the new link makes it (see <see cref="HeldAfterRenewal"/>).
+    /// Shorter on the host than in a joining game, so that when both open it anew at once, the host's new link reaches
+    /// the other game while that one still waits.
+    ///
+    /// USER 11-08 "我真的死机了": the game stood still for 1.8 s, with the sound crackling, as the host's game opened the
+    /// link anew. Steam wrote down the state of the whole game at that moment, which stops it, because a check of its own
+    /// failed ('Assert( !IsLocked() )' in Steam's folder 'dumps'), in the code that makes a direct link. The other side,
+    /// told of the close, opens the link anew by its next send, and this side's next send, 16 ms after the close, made a
+    /// second one: in the other game's log of each time its game stood still on such a close (11-01, 11-04, 11-07), Steam
+    /// took apart the old direct link and made a new one in the same moment. With this side waiting, only the other
+    /// side's new link is made, which this side takes (USER 11-08 "steam尝试直连是正常的").
+    /// </summary>
+    protected abstract int RenewalHoldMs { get; }
 
     /// <summary>
     /// Whether <see cref="LinkStalled"/> was raised in this quiet stretch.
@@ -1750,8 +1772,11 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
                     TellStall(lastReceive, quietFor);
                 }
 
-                // Send Packet
-                CreateAndSendPacket();
+                // Send Packet, unless this side waits for the other side's new link: what is set meanwhile goes in the
+                // first packet after, and no number is skipped that the other side would count as lost
+                if (!HeldAfterRenewal()) {
+                    CreateAndSendPacket();
+                }
 
                 // Calculate next target time
                 // Add CurrentSendRate to preserve cadence and avoid drift
@@ -1886,8 +1911,8 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// <summary>
     /// Has the transport open its link to the other side anew, when nothing has arrived over it for
     /// <see cref="RenewLinkAfter"/> although it counts as connected, and again every <see cref="RenewLinkInterval"/>
-    /// while still nothing arrives; the next send opens the new link. Giving up still comes at
-    /// <see cref="QuietLinkKept"/>.
+    /// while still nothing arrives; the other side's next send opens the new link, which this side waits for
+    /// (<see cref="RenewalHoldMs"/>). Giving up still comes at <see cref="QuietLinkKept"/>.
     ///
     /// USER 10-15 "断线去做": nothing from the host reached the joining player for 30 s while what they sent reached the
     /// host throughout, and Steam called the link connected the whole time; it ended the game, and a new lobby two
@@ -1923,13 +1948,50 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
 
         _renewedAtQuiet = (int) quietFor;
         _renewals++;
+        _heldUntil = DateTime.UtcNow.Ticks + RenewalHoldMs * TimeSpan.TicksPerMillisecond;
         Logger.Info(
             $"Nothing has arrived for {quietFor / 1000:F1}s although the link counted as connected, so it was opened " +
-            $"anew (time {_renewals} in this quiet stretch); this is taken as a disconnect only after " +
+            $"anew (time {_renewals} in this quiet stretch), and nothing is sent until the other side's new link " +
+            $"counts as connected, for at most {RenewalHoldMs / 1000}s; this is taken as a disconnect only after " +
             $"{QuietLinkKept / 1000}s"
         );
 
         SendAgainAfterRenewal();
+    }
+
+    /// <summary>
+    /// Whether the send loop sends nothing now, as this side opened the link anew a moment ago (see
+    /// <see cref="RenewalHoldMs"/>): until the link counts as connected again or the time is over, after which the
+    /// next send opens the link from this side. Says in the log which of the two ended it.
+    /// </summary>
+    private bool HeldAfterRenewal() {
+        var until = _heldUntil;
+        if (until == 0) {
+            return false;
+        }
+
+        var connected = false;
+        try {
+            connected = _transportSessionConnected?.Invoke() == true;
+        } catch (Exception) {
+            // Taken as not connected yet, which the time ends
+        }
+
+        var now = DateTime.UtcNow.Ticks;
+        if (!connected && now < until) {
+            return true;
+        }
+
+        _heldUntil = 0;
+        var waited = (double) (now - until) / TimeSpan.TicksPerSecond + RenewalHoldMs / 1000.0;
+        Logger.Info(
+            connected
+                ? $"The link counts as connected again {waited:F1}s after this side opened it anew, so sending goes " +
+                  "on over it"
+                : $"The link did not count as connected in the {RenewalHoldMs / 1000}s after this side opened it " +
+                  "anew, so this side sends again, which opens it from here"
+        );
+        return false;
     }
 
     /// <summary>

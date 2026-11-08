@@ -17,6 +17,9 @@ namespace SSMP.Networking.Client;
 /// </summary>
 internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpdatePacketId> {
     /// <inheritdoc />
+    protected override int RenewalHoldMs => 8000;
+
+    /// <inheritdoc />
     public override void ResendReliableData(ServerUpdatePacket lostPacket) {
         // Transports with built-in reliability (e.g., Steam P2P) don't need app-level resending
         if (!RequiresReliability) {

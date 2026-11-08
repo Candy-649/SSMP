@@ -416,9 +416,10 @@ internal static class SteamRelayMessaging {
     }
 
     /// <summary>
-    /// Closes the session with a player that Steam still calls connected, so that the next message sent to them
-    /// (<c>AutoRestartBrokenSession</c>) opens a new one, which finds its way over the relay network anew. The other
-    /// side's next send opens the new session as well. Steam tells the other side of the close as a failure when
+    /// Closes the session with a player that Steam still calls connected, so that a new one is opened, which finds its
+    /// way over the relay network anew: by the other side's next send (<c>AutoRestartBrokenSession</c>), while this
+    /// side sends nothing for a while (UpdateManager.RenewalHoldMs), or else by this side's next send once that while
+    /// is over. Steam tells the other side of the close as a failure when
     /// something was still on its way over the session, which the server does not take as the player leaving
     /// (SteamRelayTransportServer.OnSessionFailed).
     ///
