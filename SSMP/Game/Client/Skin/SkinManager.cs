@@ -137,7 +137,7 @@ internal class SkinManager {
                 var dressesSheets = pack.Dresses(sheets);
                 if (customizer ? dressesSheets || AtlasSlashes.DrawsAttacks(pack)
                         : !dressesSheets && AtlasSlashes.DrawsAttacks(pack)) {
-                    look.Packs.Add(pack.Ref with { DressesHer = customizer && pack.Dresses(HerSheet) });
+                    look.Packs.Add(pack.Ref);
                 }
             }
         }
@@ -149,11 +149,6 @@ internal class SkinManager {
 
         return look.ToString();
     }
-
-    /// <summary>
-    /// The sheet of sprites of Hornet herself, whose art Player Color goes by for the whole of her.
-    /// </summary>
-    private static readonly string[] HerSheet = [OwnSkin.HornetSheet];
 
     /// <summary>
     /// The names of the sheets of sprites that the player's own hero draws from, or null while there is no hero: its
@@ -256,7 +251,7 @@ internal class SkinManager {
             ));
         }
 
-        if (look.ShownColour != null && !PlayerColorMod.CanDraw) {
+        if (look.PlayerColor != null && !PlayerColorMod.CanDraw) {
             problems.Add(Lang.Pick(
                 $"{username} colours their cloak with the mod Player Color, which isn't fully installed here, so " +
                 $"you see {username}'s cloak in its own colour.",
@@ -685,7 +680,7 @@ internal class SkinManager {
         // No colour on a character in a skin of Hornet, also where that skin isn't found here and the character shows
         // the game's own look in its place: in the game of its player the skin keeps every colour off (USER 10-24:
         // "在她那边我穿的就是斗篷换色了"; USER 11-01: "我们都用其他皮肤了就不要启动这个player color")
-        var shownColour = look.ShownColour;
+        var shownColour = look.PlayerColor;
         var colorShader = shownColour != null ? PlayerColorMod.Shader : null;
 
         // An atlas takes the art of the first skin that has it, as Customizer gives it

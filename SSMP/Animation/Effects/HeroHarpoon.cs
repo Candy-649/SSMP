@@ -551,7 +551,7 @@ internal class HeroHarpoon : AnimationEffect {
                     break;
             }
         } catch (IOException) {
-            // A message cut short, or from a newer version that says more
+            // A message cut short
         }
     }
 

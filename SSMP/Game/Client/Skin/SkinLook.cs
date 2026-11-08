@@ -28,13 +28,6 @@ internal sealed class SkinLook {
     public PlayerColorLook? PlayerColor { get; set; }
 
     /// <summary>
-    /// The colour of Player Color that the player is shown in: none while they wear a skin of Hornet herself, whatever
-    /// colour they chose, as Player Color colours nothing in their own game then (see PlayerColorMod.KeepOffUnderSkins).
-    /// A game of an older version still names its colour in a skin.
-    /// </summary>
-    public PlayerColorLook? ShownColour => Packs.Exists(pack => pack.DressesHer) ? null : PlayerColor;
-
-    /// <summary>
     /// The skin mods that the game of the player has loaded and that no other game can show yet.
     /// </summary>
     public List<string> Unshown { get; } = [];
@@ -56,11 +49,7 @@ internal sealed class SkinLook {
     public override string ToString() {
         var builder = new StringBuilder();
         foreach (var pack in Packs) {
-            if (pack.DressesHer) {
-                Line("c", pack.Name, pack.Fingerprint, "1");
-            } else {
-                Line("c", pack.Name, pack.Fingerprint);
-            }
+            Line("c", pack.Name, pack.Fingerprint);
         }
 
         if (PlayerColor is { } color) {
@@ -101,8 +90,7 @@ internal sealed class SkinLook {
     }
 
     /// <summary>
-    /// Reads a look from the text it travels as. Lines it does not know are left out, so that a newer game can say
-    /// more than an older one reads.
+    /// Reads a look from the text it travels as. Lines it does not know are left out.
     /// </summary>
     public static SkinLook Parse(string? text) {
         var look = new SkinLook();
@@ -114,7 +102,7 @@ internal sealed class SkinLook {
             var fields = line.Split('\t');
             switch (fields[0]) {
                 case "c" when fields.Length >= 3 && fields[1].Length > 0:
-                    look.Packs.Add(new SkinPackRef(fields[1], fields[2], fields.Length >= 4 && fields[3] == "1"));
+                    look.Packs.Add(new SkinPackRef(fields[1], fields[2]));
                     break;
                 case "p" when fields.Length >= 7:
                     if (TryNumbers(fields, 1, 6, out var numbers)) {
@@ -161,12 +149,10 @@ internal sealed class SkinLook {
 }
 
 /// <summary>
-/// A skin of Silksong Customizer as one game names it to another: the name of its folder, a fingerprint of its files
-/// that finds it in a game that keeps it in a folder of another name, and, for a skin worn, whether it dresses the
-/// sheet of Hornet herself, which keeps Player Color off her in the game of the player who wears it, so that a game
-/// that doesn't have the skin keeps it off her too.
+/// A skin of Silksong Customizer as one game names it to another: the name of its folder and a fingerprint of its
+/// files that finds it in a game that keeps it in a folder of another name.
 /// </summary>
-internal readonly record struct SkinPackRef(string Name, string Fingerprint, bool DressesHer = false);
+internal readonly record struct SkinPackRef(string Name, string Fingerprint);
 
 /// <summary>
 /// The colour that Player Color gives the cloak of a player, with the saturation and brightness it draws them with.
