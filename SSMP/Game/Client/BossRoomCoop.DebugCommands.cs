@@ -162,11 +162,11 @@ internal partial class BossRoomCoop {
             : by == null
                 ? Lang.Pick(
                     "Debug: sending everyone to the challenge of the fight. Winning it skips the ending.",
-                    "调试：正在把大家送到另一场仗的门口，打赢了不进结局。"
+                    "调试：正在把大家送到另一场仗开打的地方，打赢了不进结局。"
                 )
                 : Lang.Pick(
                     $"{by} sent everyone to the challenge of the fight (debug). Winning it skips the ending.",
-                    $"{by} 用调试命令把大家送到另一场仗的门口，打赢了不进结局。"
+                    $"{by} 用调试命令把大家送到另一场仗开打的地方，打赢了不进结局。"
                 ));
         QueueDebugTravel(command);
     }
@@ -361,7 +361,7 @@ internal partial class BossRoomCoop {
         );
         UiManager.InternalChatBox.AddMessage(Lang.Pick(
             "Debug: won. The ending is skipped; back to the challenge of the fight.",
-            "调试：打赢了，跳过结局，回到这场仗的门口。"
+            "调试：打赢了，跳过结局，回到这场仗开打的地方。"
         ));
         if (_debugTravelPlace == 0 && _debugPlacePlace == 0) {
             Send(BossRoomUpdateKind.DebugCommand, "", "", "", "", "2");
