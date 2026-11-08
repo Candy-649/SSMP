@@ -290,10 +290,17 @@ internal partial class BossRoomCoop {
     }
 
     /// <summary>
-    /// Sends the local player to the room of a place.
+    /// Sends the local player to the room of a place. The inventory that the room they leave took away, like the win of
+    /// the fight of /2 does for its end, comes back with the trip.
     /// </summary>
     private void DebugTravelNow(int place) {
         var (scene, gate, standAt) = DebugPlaces[place - 1];
+        var playerData = PlayerData.instance;
+        if (playerData.disableInventory) {
+            playerData.disableInventory = false;
+            Logger.Info("Debug: the inventory, which the room took away, is back for the trip");
+        }
+
         var gameManager = global::GameManager.instance;
         HeroController.instance.RecordLeaveSceneCState();
         gameManager.BeginSceneTransition(new global::GameManager.SceneLoadInfo {
@@ -336,8 +343,9 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Takes every player back to the challenge of the fight of /2 as it is won, in a game that went there with /2,
-    /// instead of on to the end that follows (USER 11-08 "…打完会进结局，调试能不能不进结局", "结局太长了"). The win took the
-    /// inventory away for that end, and it is given back.
+    /// instead of on to the end that follows (USER 11-08 "…打完会进结局，调试能不能不进结局", "结局太长了"). The inventory that
+    /// the win took away for that end, in the game that runs the boss and maybe in the other one's copy, comes back with
+    /// the trip (see DebugTravelNow).
     /// </summary>
     /// <returns>Whether the end is skipped, so that its FSM is not to hear the event.</returns>
     private bool SkipsDebugEnd(Fsm fsm, string eventName) {
@@ -347,7 +355,6 @@ internal partial class BossRoomCoop {
             return false;
         }
 
-        PlayerData.instance.disableInventory = false;
         Logger.Info(
             $"Debug: '{GetPath(fsm)}' does not hear '{eventName}': the fight of debug place 2 is won, so every " +
             "player goes back to its challenge instead of on to its end"
