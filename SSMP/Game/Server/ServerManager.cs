@@ -214,9 +214,9 @@ internal abstract class ServerManager : IServerManager {
 
     /// <summary>
     /// Called when something arrives from a player after a stretch of at least two seconds in which nothing did, with
-    /// their ID, name and the length of the stretch in seconds. Called on a thread of the network.
+    /// their ID. Called on a thread of the network.
     /// </summary>
-    internal event Action<ushort, string, double>? PlayerLinkBack;
+    internal event Action<ushort>? PlayerLinkBack;
 
     /// <summary>
     /// Constructs the server manager.
@@ -1635,9 +1635,7 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="gap">How long nothing arrived from them, in seconds.</param>
     private void OnClientReceiveResumed(ushort id, double gap) {
-        if (_playerData.TryGetValue(id, out var player)) {
-            PlayerLinkBack?.Invoke(id, player.Username, gap);
-        }
+        PlayerLinkBack?.Invoke(id);
 
         if (gap < RoomResendGap || !_fullSynchronisation || !_playerData.TryGetValue(id, out var playerData) ||
             !playerData.IsSceneHost || string.IsNullOrEmpty(playerData.CurrentScene)) {

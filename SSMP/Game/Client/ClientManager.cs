@@ -362,8 +362,8 @@ internal class ClientManager : IClientManager {
     private bool _linkStallTold;
 
     /// <summary>
-    /// The players of the server this game hosts whose link this game told its player is being made anew, and not yet
-    /// that it carries things again (see <see cref="OnPlayerLinkStalled"/>). Only used on the main thread.
+    /// The players of the server this game hosts whose link this game told its player is being made anew, from whom
+    /// nothing has come since (see <see cref="OnPlayerLinkStalled"/>). Only used on the main thread.
     /// </summary>
     private readonly HashSet<ushort> _playerLinkStallsTold = [];
 
@@ -593,8 +593,7 @@ internal class ClientManager : IClientManager {
         _netClient.UpdateManager.LinkStalled += () => ThreadUtil.RunActionOnMainThread(OnLinkStalled);
         serverManager.PlayerLinkStalled += (id, username) =>
             ThreadUtil.RunActionOnMainThread(() => OnPlayerLinkStalled(id, username));
-        serverManager.PlayerLinkBack += (id, username, _) =>
-            ThreadUtil.RunActionOnMainThread(() => OnPlayerLinkBack(id, username));
+        serverManager.PlayerLinkBack += id => ThreadUtil.RunActionOnMainThread(() => OnPlayerLinkBack(id));
         SteamManager.LobbyMemberLeftEvent += (lobby, member) =>
             ThreadUtil.RunActionOnMainThread(() => OnLobbyMemberLeft(lobby, member));
 
@@ -1583,17 +1582,14 @@ internal class ClientManager : IClientManager {
     }
 
     /// <summary>
-    /// Tells the player of the game that hosts that things come from another player again, after it told them that the
-    /// link to that player was being made anew (<see cref="OnPlayerLinkStalled"/>).
+    /// Forgets that the player of the game that hosts was told that the link to another player is being made anew
+    /// (<see cref="OnPlayerLinkStalled"/>), as things come from them again, so that the next time is told too. That
+    /// they are back is said once, with how long they were stuck ("X 恢复了", ServerManager.OnClientLinkFreed): a
+    /// second line, "X 重新连上了", said the same again (USER 11-08 "2按你说的改").
     /// </summary>
     /// <param name="id">The ID of the other player.</param>
-    /// <param name="username">The name of the other player.</param>
-    private void OnPlayerLinkBack(ushort id, string username) {
-        if (!_playerLinkStallsTold.Remove(id) || !_netClient.IsConnected) {
-            return;
-        }
-
-        UiManager.InternalChatBox.AddMessage(Lang.Pick($"'{username}' reconnected", $"{username} 重新连上了"));
+    private void OnPlayerLinkBack(ushort id) {
+        _playerLinkStallsTold.Remove(id);
     }
 
     /// <summary>
