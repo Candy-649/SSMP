@@ -687,7 +687,6 @@ internal class ClientManager : IClientManager {
     /// </summary>
     private void RegisterCommands() {
         _commandManager.RegisterCommand(new AddonCommand(_addonManager, _netClient));
-        _commandManager.RegisterCommand(new DebugCommand());
         _commandManager.RegisterCommand(new InviteCommand());
         _commandManager.RegisterCommand(new GiveUpCommand(_arenaCoop));
         _commandManager.RegisterCommand(new MemoryCommand());
