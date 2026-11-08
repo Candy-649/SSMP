@@ -13,9 +13,10 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 
 /// <summary>
 /// Writes down each time the display of the player's health and silk is told to slide away or come back, and what told
-/// it: a step of a state machine, or the game's own code. In a shrine fight that one player waited in for the other,
-/// that player's display never came back, while the partner's did (USER 11-08 "我刚刚根本没有血条", "我这里有的"), and
-/// no step of that fight brings it back. So what does is written down for the next time. Only written down.
+/// it: a step of a state machine, or the game's own code. Not every way back names the display: the game ends an
+/// interaction by force when the player is interrupted, and that brings the display back too
+/// (InteractManager.OnHeroInterrupted), which is how it comes back at a roar after an inspection (USER 11-08
+/// "我刚刚根本没有血条"). Only written down.
 /// </summary>
 internal static class HudWatch {
     /// <summary>

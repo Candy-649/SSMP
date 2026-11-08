@@ -765,8 +765,15 @@ internal partial class BossRoomCoop {
             var heroController = HeroController.instance;
             if (heroController != null) {
                 if (heroController.controlReqlinquished) {
+                    // Giving control back also ends the interaction that holds the player, like the inspection that
+                    // leads to the fight (HeroController.RegainControl), which goes on again when control is taken
+                    freed.Interaction = InteractManager.BlockingInteractable;
                     heroController.RegainControl();
                     freed.RegainedControl = true;
+                    if (freed.Interaction != null) {
+                        Logger.Info($"Giving control back to the waiting player ends their interaction with " +
+                                    $"'{freed.Interaction.name}' until the wait is over");
+                    }
                 }
 
                 if (heroController.AnimCtrl != null && !heroController.AnimCtrl.controlEnabled) {
@@ -795,6 +802,16 @@ internal partial class BossRoomCoop {
             if (heroController != null) {
                 if (freed.RegainedControl) {
                     heroController.RelinquishControl();
+
+                    // The game ends an interaction by force when the player is interrupted
+                    // (InteractManager.OnHeroInterrupted), like by the roar of the boss that the inspection led to,
+                    // and it brings back the health display that the inspection sent away then. With the interaction
+                    // over since the wait, that display never came back (USER 11-08 "…一旦出现等待对方入场，前一个人
+                    // 的状态栏就一直不会回来了")
+                    if (freed.Interaction != null && InteractManager.BlockingInteractable == null) {
+                        InteractManager.BlockingInteractable = freed.Interaction;
+                        Logger.Info($"The interaction with '{freed.Interaction.name}' holds the player again, as before the wait");
+                    }
                 }
 
                 if (freed.StartedAnimation) {
@@ -812,6 +829,7 @@ internal partial class BossRoomCoop {
         freed.RegainedControl = false;
         freed.StartedAnimation = false;
         freed.EnabledPause = false;
+        freed.Interaction = null;
     }
 
     /// <summary>
@@ -1223,6 +1241,11 @@ internal partial class BossRoomCoop {
         /// Whether pausing was allowed again while waiting.
         /// </summary>
         public bool EnabledPause;
+
+        /// <summary>
+        /// The interaction that held the local player when control was given back, which that ended.
+        /// </summary>
+        public InteractableBase? Interaction;
     }
 
     /// <summary>
