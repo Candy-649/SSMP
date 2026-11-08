@@ -145,6 +145,12 @@ internal static class ToolCopies {
     private static Fsm? _letThrough;
 
     /// <summary>
+    /// The actions of the state machines of copies that roll a number that comes from the thrower's game, which are
+    /// switched off (see <see cref="LeaveRollsToThrower"/>), for a copy that goes on by itself to roll for itself.
+    /// </summary>
+    private static readonly Dictionary<Fsm, List<FsmStateAction>> LeftRolls = new();
+
+    /// <summary>
     /// The actions of copies that go by the character of the thrower in place of the hero (see
     /// <see cref="ThrowerOr"/>), which a copy taken from the pool again points at its thrower then.
     /// </summary>
@@ -670,10 +676,11 @@ internal static class ToolCopies {
     /// Makes the change of state of a copy that it held for the thrower's game, whose change never came.
     /// </summary>
     private static void GoOnWithoutThrower(Fsm fsm, string state, FsmTransition transition, float held) {
+        var rolled = RollForCopy(fsm, transition.ToState);
         Logger.Info(
             $"[Tools] A copy of the partner's thing held '{state}' of '{fsm.Name}' for {held:0.0} s for the partner's " +
-            $"change of state, which never came (lost on the way), and goes to '{transition.ToState}' by itself with " +
-            "the numbers it holds (the last the partner's game sent, or its own as it was made)"
+            $"change of state, which never came (lost on the way), and goes to '{transition.ToState}' by itself" +
+            (rolled.Length > 0 ? $", rolling {rolled} itself" : "")
         );
 
         _letThrough = fsm;
@@ -682,6 +689,39 @@ internal static class ToolCopies {
         } finally {
             _letThrough = null;
         }
+    }
+
+    /// <summary>
+    /// Rolls for a copy the numbers that a state rolls as it is entered and that the copy otherwise takes from the
+    /// thrower's game, the way the switched-off actions roll them, for a copy that goes to that state by itself.
+    /// </summary>
+    /// <returns>The names and numbers rolled, or nothing.</returns>
+    private static string RollForCopy(Fsm fsm, string toState) {
+        if (!LeftRolls.TryGetValue(fsm, out var rolls)) {
+            return "";
+        }
+
+        var rolled = "";
+        foreach (var action in rolls) {
+            if (action.State?.Name != toState) {
+                continue;
+            }
+
+            switch (action) {
+                case RandomInt { storeResult: { } whole } roll:
+                    whole.Value = roll.inclusiveMax
+                        ? UnityEngine.Random.Range(roll.min.Value, roll.max.Value + 1)
+                        : UnityEngine.Random.Range(roll.min.Value, roll.max.Value);
+                    rolled += $"{(rolled.Length > 0 ? ", " : "")}{whole.Name} {whole.Value}";
+                    break;
+                case RandomFloat { storeResult: { } number } roll:
+                    number.Value = UnityEngine.Random.Range(roll.min.Value, roll.max.Value);
+                    rolled += $"{(rolled.Length > 0 ? ", " : "")}{number.Name} {number.Value:0.##}";
+                    break;
+            }
+        }
+
+        return rolled;
     }
 
     /// <summary>
@@ -1327,12 +1367,15 @@ internal static class ToolCopies {
     /// <summary>
     /// Switches off the actions of a state machine of a copy that roll a number that comes with the thrower's changes
     /// of state, so that the copy shows what the thrower's thing rolled: the thrower's game rolls, and the other games
-    /// take what came out. A copy that goes on by itself, as the thrower's change never came, keeps the numbers it
-    /// holds.
+    /// take what came out.
     /// </summary>
     private static void LeaveRollsToThrower(Fsm fsm, string[] carried) {
         if (carried.Length == 0 || fsm.States == null) {
             return;
+        }
+
+        if (!LeftRolls.TryGetValue(fsm, out var left)) {
+            LeftRolls[fsm] = left = [];
         }
 
         foreach (var state in fsm.States) {
@@ -1348,6 +1391,9 @@ internal static class ToolCopies {
                 };
                 if (rolled != null && Array.IndexOf(carried, rolled) >= 0) {
                     action.Enabled = false;
+                    if (!left.Contains(action)) {
+                        left.Add(action);
+                    }
                 }
             }
         }
@@ -1359,6 +1405,7 @@ internal static class ToolCopies {
     public static void ForgetCopy(RemoteToolCopy marker) {
         foreach (var fsm in marker.Fsms) {
             CopyFsms.Remove(fsm);
+            LeftRolls.Remove(fsm);
             Holds.Remove(fsm);
         }
 
