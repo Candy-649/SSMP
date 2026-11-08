@@ -66,6 +66,7 @@ public partial class SSMPPlugin : BaseUnityPlugin {
         SceneEventGuard.Initialize();
         LoadWatch.Initialize();
         Game.Client.HarpoonWatch.Initialize();
+        Game.Client.HudWatch.Initialize();
 
         _gameManager = new Game.GameManager();
         _gameManager.Initialize();
