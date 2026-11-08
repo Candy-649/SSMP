@@ -21,7 +21,8 @@ namespace SSMP.Game.Client.Entity;
 internal partial class Entity {
     /// <summary>
     /// The catches of this game's player that the FSMs of the creature play, which a part of the room told it of (see
-    /// <see cref="HearRoomPartCatch"/>), each with its states.
+    /// <see cref="HearRoomPartCatch"/>), each with its states, until the FSM plays a catch of a partner's (see
+    /// BeginLead).
     /// </summary>
     private readonly Dictionary<HutongGames.PlayMaker.Fsm, HashSet<FsmState>> _ownCatches = new();
 
@@ -88,6 +89,23 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether the object of a creature hears an event through a register of its own, as it hears what a part of the
+    /// room tells everything that listens for it (see <see cref="HearRoomPartCatch"/>), rather than from a part of its
+    /// own that tells it directly.
+    /// </summary>
+    /// <param name="creature">The object.</param>
+    /// <param name="eventName">The event, by the name that the register passes it on under.</param>
+    private static bool HearsByRegister(GameObject creature, string eventName) {
+        foreach (var register in creature.GetComponents<EventRegister>()) {
+            if (PassedOnAs(register, register.SubscribedEvent) == eventName) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// Notes, for a creature that this game runs, that each FSM a register of it passes the event of a part that caught
     /// this game's player on to plays a catch of that player from the state the event takes it to (see
     /// <see cref="CaughtIn"/>). Noted before the FSM hears it, which takes it there and on at once.
@@ -144,37 +162,41 @@ internal partial class Entity {
             );
             Logger.Info(
                 $"'{sender.GameObjectName}' of the room caught the local player and tells the copy of entity {Id} " +
-                $"({Type}) '{told}', " + (taken ? "which this game leads" : "which no FSM of the copy takes from where it is")
+                $"({Type}) '{told}', " +
+                (taken ? "which this game leads" : "which no FSM of the copy takes from where it is")
             );
         }
     }
 
     /// <summary>
-    /// The character of the player that an FSM of a creature this game runs plays a catch of in a state: this game's
-    /// own, in a catch that a part of the room told it of (see <see cref="HearRoomPartCatch"/>), or the figure of the
-    /// partner whose game leads it (see <see cref="Lead"/>). Null in no catch, for a copy, and for a partner with no
-    /// figure here.
+    /// The player that an FSM of a creature this game runs plays a catch of in a state, by the code that names them to
+    /// the other games (see ThrownThings): <see cref="ThrownThings.ThrowersPlayer"/> for this game's own, in a catch
+    /// that a part of the room told it of (see <see cref="HearRoomPartCatch"/>); the ID of the partner whose game leads
+    /// it (see <see cref="Lead"/>), also while the creature goes out of it the shortest way as their game no longer
+    /// does (see <see cref="LetGo"/>) - taken for none then, the slashes it walks through would hurt this game's
+    /// player; <see cref="ThrownThings.NoPlayer"/> in no catch, and for a copy.
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="state">The state.</param>
-    internal static GameObject? CaughtIn(HutongGames.PlayMaker.Fsm fsm, FsmState? state) {
+    internal static ushort CaughtIn(HutongGames.PlayMaker.Fsm fsm, FsmState? state) {
         if (state == null || EntitiesByRoomObject.Count == 0 || fsm.GameObject is not { } owner || owner == null ||
             !EntitiesByRoomObject.TryGetValue(owner, out var entity) || entity._isControlled) {
-            return null;
+            return ThrownThings.NoPlayer;
         }
 
         foreach (var lead in entity._leads) {
             if (lead.Fsm == fsm && lead.States.Contains(state)) {
-                return FigureOf?.Invoke(lead.LeaderId);
+                return lead.LeaderId;
             }
         }
 
-        if (entity._ownCatches.Count > 0 && entity._ownCatches.TryGetValue(fsm, out var states) &&
-            states.Contains(state)) {
-            var hero = HeroController.SilentInstance;
-            return hero != null ? hero.gameObject : null;
+        if (entity._lettingGo is { } going && going.Fsm == fsm && going.States.Contains(state)) {
+            return going.LeaderId;
         }
 
-        return null;
+        return entity._ownCatches.Count > 0 && entity._ownCatches.TryGetValue(fsm, out var states) &&
+               states.Contains(state)
+            ? ThrownThings.ThrowersPlayer
+            : ThrownThings.NoPlayer;
     }
 }

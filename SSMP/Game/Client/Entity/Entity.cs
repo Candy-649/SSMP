@@ -2649,9 +2649,12 @@ internal partial class Entity {
             return;
         }
 
+        // For a catch of the partner's, that their game leads or led, and not of this game's own player
+        var caught = self.activate.Value ? CaughtIn(self.Fsm, self.State) : ThrownThings.NoPlayer;
+        var forAnother = caught != ThrownThings.NoPlayer && caught != ThrownThings.ThrowersPlayer;
         var kept = target != null
             ? EntityFsmActions.BeforeSwitchingOn(
-                target, self.Fsm.GameObject, self.activate.Value ? CaughtIn(self.Fsm, self.State) : null
+                target, self.Fsm.GameObject, forAnother, forAnother ? FigureOf?.Invoke(caught) : null
             )
             : null;
         orig(self);

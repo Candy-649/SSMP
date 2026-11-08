@@ -382,8 +382,13 @@ internal static partial class EntityFsmActions {
             return false;
         }
 
-        var caught = action.activate.Value ? Entity.CaughtIn(action.Fsm, action.State) : null;
-        data.Packet.Write(ThrownThings.CodeOf?.Invoke(caught) ?? ThrownThings.NoPlayer);
+        // Whether it is for a catch, and only then whose: nearly every switch is for none
+        var caught = action.activate.Value ? Entity.CaughtIn(action.Fsm, action.State) : ThrownThings.NoPlayer;
+        data.Packet.Write(caught != ThrownThings.NoPlayer);
+        if (caught != ThrownThings.NoPlayer) {
+            data.Packet.Write(caught);
+        }
+
         return true;
     }
 
@@ -391,8 +396,7 @@ internal static partial class EntityFsmActions {
     /// local one keeps off the local player (see <see cref="BeforeSwitchingOn"/>). The replay that sets up a
     /// creature's first states has no data, and no catch.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, ActivateGameObject action) {
-        // Read whatever comes of it, so that what comes after is read from where it starts
-        var caught = data != null ? ThrownThings.FigureOf?.Invoke(data.Packet.ReadUShort(), data.SenderId) : null;
+        var caught = data != null && data.Packet.ReadBool() ? data.Packet.ReadUShort() : ThrownThings.NoPlayer;
 
         // An object held in a variable has already been named by the scene host (see ReadSubject)
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
@@ -414,7 +418,11 @@ internal static partial class EntityFsmActions {
             SayOnAlready(action, gameObject);
         }
 
-        var kept = BeforeSwitchingOn(gameObject, action.Fsm.GameObject, activate ? caught : null);
+        // For a catch of the scene host's player or of another partner's, and not of the local player's own
+        var figure = caught != ThrownThings.NoPlayer ? ThrownThings.FigureOf?.Invoke(caught, data!.SenderId) : null;
+        var hero = HeroController.SilentInstance;
+        var forAnother = activate && caught != ThrownThings.NoPlayer && (hero == null || figure != hero.gameObject);
+        var kept = BeforeSwitchingOn(gameObject, action.Fsm.GameObject, forAnother, figure);
         if (recursive) {
             SetActiveRecursively(gameObject, activate);
         } else {

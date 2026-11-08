@@ -45,10 +45,10 @@ internal partial class Entity {
     private PlayerBeforeTheCatch? _beforeTheCatch;
 
     /// <summary>
-    /// Raised when a catch that the creature watched for itself, which the copy played here for this game, was cut
-    /// short (see <see cref="GiveBackWhatTheCatchTook"/>): it let go of the local player without taking them where it
-    /// would have, whether or not anything had to be given back to them. CoopSave tells the other players, whom the
-    /// catch held too.
+    /// Raised when a catch that the copy played here for this game, which took something from the local player
+    /// themselves, was cut short (see <see cref="GiveBackWhatTheCatchTook"/>): it let go of them without taking them
+    /// where it would have, whether or not anything had to be given back to them. CoopSave tells the other players,
+    /// whom a cage that caught the local player held too.
     /// </summary>
     public static event System.Action? CatchGivenBack;
 
@@ -334,8 +334,9 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// What the local player had before a catch that the creature watches for itself, which this game leads, of what
-    /// the states of that catch take from them themselves and give back only at the end: their control, the drawing of
+    /// What the local player had before a catch that this game leads - one that the creature watches for itself, or
+    /// that a part of the room told it of - of what the states of that catch take from them themselves and give back
+    /// only at the end: their control, the drawing of
     /// their character and its falling, whether they can pause, open their inventory, use their skills or be hurt, the
     /// states of their character that it sets, the marks the game keeps of a player held in a cage, their screen,
     /// which it blacks out, and what shows them their health, which it sends away. A creature that holds the player
@@ -661,7 +662,7 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// What a catch that a creature watches for itself takes from the player themselves (see
+    /// What a catch that this game leads takes from the player themselves (see
     /// <see cref="PlayerBeforeTheCatch"/>): the fields of the player data that hold the state of the player rather than
     /// progress which it writes, as far as they are booleans, the states of the player character that it sets, the
     /// marks that the game keeps of the player until they change rooms which it sets to true or false - like the one of

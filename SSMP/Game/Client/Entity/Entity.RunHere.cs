@@ -315,6 +315,13 @@ internal partial class Entity {
     private bool _runHereEnded;
 
     /// <summary>
+    /// Whether <see cref="_runHere"/> plays a catch of the local player that this game led by itself to its end, as the
+    /// scene host's creature plays the same catch on another player (see <see cref="PlayTheCatchByItself"/>): the
+    /// scene host follows none of it, and it is cut short only if it stops before it is through it.
+    /// </summary>
+    private bool _runHereAlone;
+
+    /// <summary>
     /// How long the FSM of a copy goes through what follows a catch that this game led by itself at the most, in
     /// seconds (see <see cref="_aftermath"/>): what the scene host sends of the rest is held that long.
     /// </summary>
@@ -367,6 +374,12 @@ internal partial class Entity {
     /// The catches of the partner's that FSMs of the room's own object play as the partner's game leads them.
     /// </summary>
     private readonly List<Lead> _leads = [];
+
+    /// <summary>
+    /// The catch of the partner's whose FSM goes out of it the shortest way, as the partner's game no longer leads it
+    /// (see <see cref="LetGo"/>), while it does; null otherwise.
+    /// </summary>
+    private Lead? _lettingGo;
 
     /// <summary>
     /// Whether the FSM of the copy that runs here does so for a catch that this game leads, and is not out of it yet.
@@ -666,10 +679,12 @@ internal partial class Entity {
             HookMoods();
         }
 
-        // So is what a catch that the creature watches for itself takes from the player themselves, from before the
-        // first input of it (see PlayerBeforeTheCatch)
-        if (caught != null && _beforeTheCatch == null && _catchEvents?.Contains(eventName) == true &&
-            EntityFsmActions.FindTransition(fsm, from, eventName) is { } into) {
+        // So is what a catch that this game leads takes from the player themselves, from before the first input of it
+        // (see PlayerBeforeTheCatch): a creature that watches for its catch itself, or a boss whose strands caught
+        // them, takes their control, their falling and the drawing of their character in its own states, and gives
+        // them back only at its end. A catch of the strands cut short - the scene host's blow killed the boss as it
+        // caught them, or no answer came - would have left them hidden in the air for good
+        if (led && _beforeTheCatch == null && EntityFsmActions.FindTransition(fsm, from, eventName) is { } into) {
             NoteThePlayerBeforeTheCatch(fsm, into);
         }
 
@@ -725,6 +740,7 @@ internal partial class Entity {
         _runHereStep = 0;
         _runHereExit = null;
         _aftermath = null;
+        _runHereAlone = false;
         _aftermathEntry = null;
 
         // A catch that was over within the input itself - the creature finished off a player who had nothing left -
@@ -1080,9 +1096,11 @@ internal partial class Entity {
         // player - this game's, or another partner's that it follows - goes on in the partner's game by itself, and
         // the creature here goes on with the one it plays. Two players that the strands of one boss caught at once are
         // each slashed in their own game, rather than the scene host's always first, as its catch takes no way over the
-        // network (USER 11-08 "…房主几乎没有可能先收到队友被抓的消息", "最好还是都被抓就都被刀？")
+        // network (USER 11-08 "…房主几乎没有可能先收到队友被抓的消息", "最好还是都被抓就都被刀？"). Only one that the
+        // creature hears through a register, as it hears a part of the room: a part of its own that grabs the player
+        // tells it directly, and a creature that holds this game's player that way does not take the partner (below)
         if (start.Path is { Length: > 0 } && EntityFsmActions.IsPlayerEvent(eventName) &&
-            EntityFsmActions.StatesOnlyThrough(fsm, into).Contains(state) &&
+            HearsByRegister(Object.Host, eventName) && EntityFsmActions.StatesOnlyThrough(fsm, into).Contains(state) &&
             (_leads.Find(led => led.Fsm == fsm) is not { } current || current.LeaderId != leaderId)) {
             Logger.Info(
                 $"The '{fsm.Name}' of entity {Id} plays '{eventName}' on another player in '{state.Name}', so the " +
@@ -1307,7 +1325,10 @@ internal partial class Entity {
     /// creature plays the same catch on another player (see <see cref="TakeInput"/>): the way what follows a catch is
     /// played (see <see cref="_aftermath"/>), nothing more of it said to the scene host, and what the scene host sends
     /// of those states not played here, until the copy has gone through them and follows the scene host again. What
-    /// the scene host sent while the copy waited for its answer is of its own catch, and is dropped.
+    /// the scene host sent while the copy waited for its answer is of its own catch, and is dropped. It may take as
+    /// long as a catch that the scene host follows (see <see cref="LeadTimeout"/>), not only as long as what follows a
+    /// catch: the slashes of the strands take some 4 s of the game's time, and a moment the game stood still, at a blow
+    /// or for the network, would have stopped them in the middle.
     /// </summary>
     private void PlayTheCatchByItself() {
         _runHereAwaited = 0;
@@ -1317,7 +1338,8 @@ internal partial class Entity {
         _heldScale = null;
         _aftermath = new HashSet<FsmState>(_runHereCombo!);
         _aftermathDone = false;
-        _aftermathExpiry = Time.unscaledTime + AftermathTime;
+        _aftermathExpiry = Time.unscaledTime + LeadTimeout;
+        _runHereAlone = true;
         Logger.Info(
             $"The scene host's creature of entity {Id} plays the same catch on another player, so its copy plays the " +
             "local player's here by itself to its end"
@@ -2968,9 +2990,11 @@ internal partial class Entity {
 
         var led = _runHereLed;
         var over = _aftermath != null || _runHereEnded;
+        var cut = CutShort(fsm, over);
         var (ledIndex, ledCatch, ledStep) = (_runHereIndex, _runHereCatch, _runHereStep);
         var takeVariables = _moveVariablesHeld;
         _runHereEnded = false;
+        _runHereAlone = false;
         _runHere = null;
         _runHereFsm = null;
         _runHereCombo = null;
@@ -3039,7 +3063,19 @@ internal partial class Entity {
             CatchWentOn?.Invoke(this, ledIndex, ledCatch, (byte) (ledStep + 1), "");
         }
 
-        FreeTheLocalPlayer(fsm, !over);
+        FreeTheLocalPlayer(fsm, cut);
+    }
+
+    /// <summary>
+    /// Whether the catch that this game led stops before it is through as <see cref="_runHere"/> stops: it is not over,
+    /// or the copy that played it by itself stops inside it rather than past it (see <see cref="_runHereAlone"/>).
+    /// </summary>
+    /// <param name="fsm">The FSM of the copy.</param>
+    /// <param name="over">Whether it went out into what follows it, or came to its end.</param>
+    private bool CutShort(HutongGames.PlayMaker.Fsm fsm, bool over) {
+        return _runHereAlone
+            ? !_aftermathDone && fsm.ActiveState is { } state && _aftermath!.Contains(state)
+            : !over;
     }
 
     /// <summary>
@@ -3056,8 +3092,9 @@ internal partial class Entity {
         }
 
         var led = _runHereLed;
-        var over = _aftermath != null || _runHereEnded;
+        var cut = CutShort(fsm, _aftermath != null || _runHereEnded);
         _runHereEnded = false;
+        _runHereAlone = false;
         HeldFsms.Remove(fsm);
         ForgetTalkHere(fsm);
         _runHere = null;
@@ -3077,7 +3114,7 @@ internal partial class Entity {
         EndTheShakesOfTheRun(fsm);
 
         if (led) {
-            FreeTheLocalPlayer(fsm, !over);
+            FreeTheLocalPlayer(fsm, cut);
         } else {
             _moods.Clear();
             GiveBackWhatTheCatchTook(true);
@@ -3611,6 +3648,9 @@ internal partial class Entity {
         HookSwitchState();
         _leads.Add(lead);
         LedFsms[lead.Fsm] = lead;
+
+        // A catch of this game's player that it played before is over: what it plays from here is the partner's
+        _ownCatches.Remove(lead.Fsm);
     }
 
     /// <summary>
@@ -3671,7 +3711,8 @@ internal partial class Entity {
     /// player it has nobody to hold for. It goes through each state on the way, so that what they do for the creature
     /// itself is done: taken straight out, a creature went on holding its catch, and when it died later, it let go of
     /// this game's player, with a last bite. What they do to this game's player is kept off (see
-    /// <see cref="PlayForPartner"/>), and so is what the creature does to "the player" beyond the way, when it leads
+    /// <see cref="PlayForPartner"/>), as is what they switch on of the room for the catch (see <see cref="CaughtIn"/>),
+    /// and so is what the creature does to "the player" beyond the way, when it leads
     /// into a state that a global transition leads to: one whose catch always ends in its death dies of it (see
     /// <see cref="KeepOffForTheAftermath"/>).
     /// </summary>
@@ -3728,21 +3769,26 @@ internal partial class Entity {
         }
 
         // Each state may go on by itself at once, along the way or its own way
-        var next = 0;
-        while (next < way.Count) {
-            var active = fsm.ActiveState;
-            var along = active != null ? way.IndexOf(active) : -1;
-            if (along >= next) {
-                next = along + 1;
-                continue;
-            }
+        _lettingGo = lead;
+        try {
+            var next = 0;
+            while (next < way.Count) {
+                var active = fsm.ActiveState;
+                var along = active != null ? way.IndexOf(active) : -1;
+                if (along >= next) {
+                    next = along + 1;
+                    continue;
+                }
 
-            if (active != (next == 0 ? from : way[next - 1])) {
-                break;
-            }
+                if (active != (next == 0 ? from : way[next - 1])) {
+                    break;
+                }
 
-            fsm.SetState(way[next].Name);
-            next++;
+                fsm.SetState(way[next].Name);
+                next++;
+            }
+        } finally {
+            _lettingGo = null;
         }
 
         // Out of the catch, it may go straight back into it for this game's own player
