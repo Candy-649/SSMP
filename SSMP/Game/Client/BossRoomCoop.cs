@@ -475,6 +475,12 @@ internal partial class BossRoomCoop {
             return;
         }
 
+        // TEMPORARY debug: a chat command another player typed is carried out wherever the local player is
+        if (update.Kind == BossRoomUpdateKind.DebugCommand) {
+            OnDebugCommand(update);
+            return;
+        }
+
         if (SceneManager.GetActiveScene().name != update.SceneName) {
             return;
         }
@@ -562,6 +568,11 @@ internal partial class BossRoomCoop {
     ) {
         if (_bypassGates || fsmEvent?.Name is not { } eventName) {
             orig(self, fsmEvent!, eventData);
+            return;
+        }
+
+        // TEMPORARY debug: the win of the fight that /2 goes to leads back to its challenge, not on to its end
+        if (SkipsDebugEnd(self, eventName)) {
             return;
         }
 
@@ -1015,7 +1026,8 @@ internal partial class BossRoomCoop {
             (DeliverToldChallenges, nameof(DeliverToldChallenges)),
             (ShowHeartRecords, nameof(ShowHeartRecords)),
             (ShowHeartEndTexts, nameof(ShowHeartEndTexts)),
-            (TellCutscene, nameof(TellCutscene))
+            (TellCutscene, nameof(TellCutscene)),
+            (UpdateDebugCommands, nameof(UpdateDebugCommands))
         ];
 
         if (IsHoldActive()) {

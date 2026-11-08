@@ -1991,7 +1991,7 @@ internal abstract class ServerManager : IServerManager {
 
         if (update.Kind is BossRoomUpdateKind.Waiting or BossRoomUpdateKind.WaitingAtStory or
             BossRoomUpdateKind.StartedStory or BossRoomUpdateKind.LeftStory or BossRoomUpdateKind.HeartEndRecord or
-            BossRoomUpdateKind.HeartEndText) {
+            BossRoomUpdateKind.HeartEndText or BossRoomUpdateKind.DebugCommand) {
             foreach (var otherId in _playerData.Keys) {
                 if (otherId != id) {
                     _netServer.GetUpdateManagerForClient(otherId)?.AddBossRoomUpdateData(update);
