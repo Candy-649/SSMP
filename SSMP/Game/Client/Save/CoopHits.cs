@@ -1326,6 +1326,7 @@ internal partial class CoopHits {
             var response = default(IHitResponder.HitResponse);
             int[] dice = [];
             var hitName = update != null ? NextHitName() : null;
+            var seeds = update != null ? new NamedSeeds() : null;
 
             // Something that breaks, struck itself or through the part that passes its hits on to it, answers a hit in
             // the moment after another one without counting it. The partner's game counts every hit it is sent (see
@@ -1334,11 +1335,11 @@ internal partial class CoopHits {
             var wasBroken = breakable != null && breakable.isBroken;
             var hitsLeft = breakable != null ? breakable.hitsLeft : 0;
             var answered = AnswersAttack(
-                () => dice = SharedDice.Record(() => response = responder.Hit(hit)), hitName
+                () => dice = SharedDice.Record(() => response = responder.Hit(hit)), hitName, seeds
             ) || response.response != IHitResponder.Response.None &&
                 (breakable == null || wasBroken || breakable.isBroken || breakable.hitsLeft != hitsLeft);
             if (update != null && answered && _netClient.IsConnected) {
-                update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
+                update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
                 SendToRoomMembers(update);
                 NoteTraffic(
                     update.Scene, update.Path,
@@ -1725,10 +1726,11 @@ internal partial class CoopHits {
         var turned = update != null ? TurnThrownToLocalPlayer(receiver.gameObject, out before) : null;
         int[] dice = [];
         var hitName = update != null ? NextHitName() : null;
-        if (!AnswersAttack(() => dice = SharedDice.Record(touch), hitName)) {
+        var seeds = update != null ? new NamedSeeds() : null;
+        if (!AnswersAttack(() => dice = SharedDice.Record(touch), hitName, seeds)) {
             TurnThrownBack(turned, before);
         } else if (update != null && _netClient.IsConnected) {
-            update.Hit = AppendRolls(update.Hit, dice, hitName ?? "");
+            update.Hit = AppendRolls(update.Hit, dice, hitName ?? "", seeds);
             SendToRoomMembers(update);
             NoteTraffic(
                 update.Scene, update.Path,
@@ -1784,7 +1786,9 @@ internal partial class CoopHits {
     /// <param name="attack">Makes the hit or touch.</param>
     /// <param name="hitName">The name of a hit or touch that goes between the games, which what it set going rolls
     /// under from then on (see <see cref="RollByHitName"/>), or null for none.</param>
-    private bool AnswersAttack(Action attack, string? hitName = null) {
+    /// <param name="seeds">For a hit or touch of the local player's that goes to the others: where the seeds rolled
+    /// here for what it set going go, to go with it. Null for a replay, whose seeds came with it.</param>
+    private bool AnswersAttack(Action attack, string? hitName = null, NamedSeeds? seeds = null) {
         _statesBefore.Clear();
         _countsBefore.Clear();
         _lastMoves.Clear();
@@ -1810,7 +1814,7 @@ internal partial class CoopHits {
             answered = true;
             _lastMoves.Add((pair.Key, pair.Value, counts));
             if (hitName != null && pair.Key.FsmComponent is { } machine && machine != null && IsRoomObject(machine)) {
-                RollByHitName(machine.gameObject, hitName);
+                RollByHitName(machine.gameObject, hitName, seeds);
             }
         }
 
@@ -1939,35 +1943,53 @@ internal partial class CoopHits {
     /// </summary>
     /// <param name="gameObject">The object.</param>
     /// <param name="hitName">The name of the hit or touch.</param>
-    private static void RollByHitName(GameObject gameObject, string hitName) {
+    /// <param name="seeds">For a hit or touch of the local player's: where the seeds rolled here for the object go,
+    /// to go with it (see SharedDice.RollByName). Null for a replay.</param>
+    private static void RollByHitName(GameObject gameObject, string hitName, NamedSeeds? seeds) {
         if (ThrownThings.Count > 0 && ThrownThings.IsThrown(gameObject) ||
             SharedDice.NameOf(gameObject) is { } name && !name.StartsWith(HitNameStart, StringComparison.Ordinal)) {
             return;
         }
 
-        SharedDice.RollByName(gameObject, hitName + "|" + ScenePath.Get(gameObject.transform));
+        SharedDice.RollByName(gameObject, hitName + HitPathStart + ScenePath.Get(gameObject.transform), seeds);
     }
 
     /// <summary>
-    /// Adds to the end of what an update of a hit or touch on an object of the room carries what it rolled: the dice
-    /// of the moment, and the name that what it set going rolls under from then on.
+    /// What stands between the name of a hit or touch and the path of an object it named.
     /// </summary>
-    private static byte[] AppendRolls(byte[] data, int[] dice, string hitName) {
+    private const char HitPathStart = '|';
+
+    /// <summary>
+    /// Adds to the end of what an update of a hit or touch on an object of the room carries what it rolled: the dice
+    /// of the moment, the name that what it set going rolls under from then on, and the seeds rolled for each thing it
+    /// named.
+    /// </summary>
+    private static byte[] AppendRolls(byte[] data, int[] dice, string hitName, NamedSeeds? seeds) {
         using var stream = new MemoryStream();
         using var writer = new BinaryWriter(stream);
         writer.Write(data);
         SharedDice.Write(writer, dice);
         writer.Write(hitName);
+        if (hitName.Length > 0) {
+            (seeds ?? NamedSeeds.None).Write(writer, hitName + HitPathStart);
+        }
+
         writer.Flush();
         return stream.ToArray();
     }
 
     /// <summary>
-    /// Reads the name that what a hit or touch set going rolls under, after its dice, or null if there is none.
+    /// Reads the name that what a hit or touch set going rolls under, after its dice, or null if there is none, and has
+    /// the seeds that came with it wait for their names here.
     /// </summary>
     private static string? ReadHitName(BinaryReader reader) {
         var stream = reader.BaseStream;
-        return stream.Length - stream.Position > 0 && reader.ReadString() is { Length: > 0 } name ? name : null;
+        if (stream.Length - stream.Position == 0 || reader.ReadString() is not { Length: > 0 } name) {
+            return null;
+        }
+
+        NamedSeeds.Read(reader, name + HitPathStart);
+        return name;
     }
 
     /// <summary>

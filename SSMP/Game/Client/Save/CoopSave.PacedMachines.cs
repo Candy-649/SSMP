@@ -551,8 +551,11 @@ internal partial class CoopSave {
             if (kind.IsDirector) {
                 partsBefore = TakeParts(fsm);
             } else {
-                // The whole round rolls by a name the other game has from the word, not only its start
-                SharedDice.RollByName(gameObject, RoundRollName(word));
+                // The whole round rolls by a name the other game has from the word, not only its start, the first
+                // rolls of each action from seeds rolled here that go with the word
+                var seeds = new NamedSeeds();
+                SharedDice.RollByName(gameObject, RoundRollName(word), seeds);
+                word.Bytes = seeds.ToBytes();
             }
         } catch (Exception e) {
             LogInteractionError(e);
@@ -701,6 +704,7 @@ internal partial class CoopSave {
             return;
         }
 
+        NamedSeeds.Read(update.Bytes);
         SharedDice.RollByName(fsm.GameObject, RoundRollName(update));
 
         var lastStarting = _startingMachineRound;

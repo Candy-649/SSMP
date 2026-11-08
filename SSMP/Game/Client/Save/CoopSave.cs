@@ -8,6 +8,7 @@ using GlobalEnums;
 using HutongGames.PlayMaker;
 using InControl;
 using MonoMod.RuntimeDetour;
+using SSMP.Animation.Effects.SilkSkills;
 using SSMP.Game.Settings;
 using SSMP.Hooks;
 using SSMP.Networking.Client;
@@ -1145,6 +1146,10 @@ internal partial class CoopSave {
                 break;
             case CoopSaveUpdateKind.MachineRound:
                 OnMachineRound(player, update);
+                break;
+            case CoopSaveUpdateKind.SkillSeeds:
+                // The seeds that a player's game rolled for their Rune Rage, which its copy here plays from
+                NamedSeeds.Read(update.Bytes, RuneRolls.CastStart((ushort) update.Key));
                 break;
             case CoopSaveUpdateKind.MachineStop:
                 OnMachineStop(player, update);

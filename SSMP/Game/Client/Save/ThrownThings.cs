@@ -28,8 +28,9 @@ namespace SSMP.Game.Client.Save;
 /// named after it in both games, by what it is and how many of those it threw before. With the name the two games
 /// share
 /// - the dice: everything that a named thing rolls - where it scatters what it bursts into, how long it lies, how high
-///   it bounces - comes from its name rather than from the game's own dice (see SharedDice and CoopHits), so both games
-///   roll the same without a word between them;
+///   it bounces - comes from seeds that the game that named it rolled and sent with the name, for its first rolls and
+///   bounces, and past those from its name, rather than from each game's own dice (see SharedDice and CoopHits), so
+///   both games roll the same;
 /// - the player it goes after: the one the creature that threw it went after, and from then on whoever touched it last;
 /// - what the players do to it: a player who strikes it, touches it or is hurt by it plays that in their own game at
 ///   once and sends it under its name, with where the thing was and how it moved, and the other game puts its own
@@ -299,7 +300,7 @@ internal static class ThrownThings {
             var number = ++_lastNumber;
             thrown.Numbers.Add(number);
             return $"{Prefix}.{number}";
-        }, thrown.Marks));
+        }, thrown.Marks, thrown.Seeds));
     }
 
     /// <summary>
@@ -333,12 +334,30 @@ internal static class ThrownThings {
 
     /// <summary>
     /// Begins the names of what an action of a creature that this game runs throws on a clock in a run of its state,
-    /// to be sent with the run (see <see cref="WriteSeries"/>).
+    /// to be sent with the run (see <see cref="WriteSeries"/>), with the seeds of the first things of the run: each game
+    /// names the things as they come, so those are rolled now, and wait for their names here as they do there. The
+    /// things past them roll from their names.
     /// </summary>
     /// <param name="target">The player the creature goes after.</param>
-    public static Series BeginSeries(GameObject? target) {
-        return new Series(Prefix, ++_lastNumber, CodeOf?.Invoke(target) ?? NoPlayer, target);
+    /// <param name="prefab">What the run throws.</param>
+    public static Series BeginSeries(GameObject? target, GameObject prefab) {
+        var series = new Series(Prefix, ++_lastNumber, CodeOf?.Invoke(target) ?? NoPlayer, target);
+        var rollers = SharedDice.RollersOf(prefab, true);
+        var bounces = prefab.GetComponentInChildren<ObjectBounce>(true) != null;
+        for (var index = 0; index < SeriesTables; index++) {
+            var key = series.KeyOf(index);
+            var table = SeedTable.Roll(rollers, bounces);
+            SharedDice.Expect(key, table);
+            series.Seeds.Add(key, table);
+        }
+
+        return series;
     }
+
+    /// <summary>
+    /// How many things of a run that throws on a clock take seeds rolled as the run begins.
+    /// </summary>
+    private const int SeriesTables = 8;
 
     /// <summary>
     /// Writes the names of a run for <see cref="ReadSeries"/> in the other game: whether there are any, and their
@@ -355,6 +374,7 @@ internal static class ThrownThings {
         data.Packet.Write(series.Prefix);
         data.Packet.Write(series.Number);
         data.Packet.Write(series.TargetCode);
+        series.Seeds.Write(data.Packet, series.KeyStart);
     }
 
     /// <summary>
@@ -370,7 +390,11 @@ internal static class ThrownThings {
         var prefix = data.Packet.ReadString();
         var number = data.Packet.ReadInt();
         var targetCode = data.Packet.ReadUShort();
-        return new Series(prefix, number, targetCode, FigureOf?.Invoke(targetCode, data.SenderId));
+        var series = new Series(prefix, number, targetCode, FigureOf?.Invoke(targetCode, data.SenderId));
+
+        // The seeds that the game that runs the creature rolled for the first things of the run wait for their names
+        NamedSeeds.Read(data.Packet, series.KeyStart);
+        return series;
     }
 
     /// <summary>
@@ -499,8 +523,8 @@ internal static class ThrownThings {
 
     /// <summary>
     /// Writes what the action of a creature that this game runs threw, under which names and after which player, for
-    /// <see cref="ReadThrows"/> in the other game: its prefix, the number of the first, how many, the player, and what
-    /// was thrown.
+    /// <see cref="ReadThrows"/> in the other game: its prefix, the number of the first, how many, the player, what was
+    /// thrown, and the seeds rolled for each thing.
     /// </summary>
     /// <param name="data">The data that goes with the action.</param>
     /// <param name="action">The action.</param>
@@ -523,6 +547,7 @@ internal static class ThrownThings {
         data.Packet.Write((byte) (hasThrown ? thrown!.Numbers.Count : 0));
         data.Packet.Write(hasThrown ? thrown!.Target : NoPlayer);
         data.Packet.Write(hasThrown ? thrown!.PrefabName : "");
+        (hasThrown ? thrown!.Seeds : NamedSeeds.None).Write(data.Packet, Prefix + ".");
 
         // What goes without its names keeps none here either: what it rolls and what is done to it would go by names
         // that the other game does not know
@@ -588,12 +613,17 @@ internal static class ThrownThings {
         string? prefix = null;
         var number = 0;
         var target = NoPlayer;
+        var seeds = NamedSeeds.None;
         if (thing.TryGetComponent<ThrownMark>(out var mark) && mark.Key is { } key) {
             var dot = key.IndexOf('.');
             if (dot > 0 && dot == key.LastIndexOf('.') &&
                 int.TryParse(key.Substring(dot + 1), NumberStyles.None, CultureInfo.InvariantCulture, out number)) {
                 prefix = key.Substring(0, dot);
                 target = CodeOf?.Invoke(mark.Target) ?? NoPlayer;
+                if (mark.Table != null) {
+                    seeds = new NamedSeeds();
+                    seeds.Add(key, mark.Table);
+                }
             }
         }
 
@@ -602,6 +632,7 @@ internal static class ThrownThings {
         data.Packet.Write((byte) (prefix != null ? 1 : 0));
         data.Packet.Write(target);
         data.Packet.Write(prefix != null ? prefabName : "");
+        seeds.Write(data.Packet, (prefix ?? Prefix) + ".");
     }
 
     /// <summary>
@@ -609,10 +640,14 @@ internal static class ThrownThings {
     /// </summary>
     /// <param name="data">The data that came with the action.</param>
     public static Throws ReadThrows(EntityNetworkData data) {
-        return new Throws(
+        var throws = new Throws(
             data.Packet.ReadString(), data.Packet.ReadInt(), data.Packet.ReadByte(), data.Packet.ReadUShort(),
             data.Packet.ReadString(), data.SenderId
         );
+
+        // The seeds that the thrower's game rolled for each thing wait for its name here
+        NamedSeeds.Read(data.Packet, throws.Prefix + ".");
+        return throws;
     }
 
     /// <summary>
@@ -662,7 +697,17 @@ internal static class ThrownThings {
             Forget(other);
         }
 
-        mark.Begin(key, pending.Target);
+        // The game whose throw goes to the others rolls the thing's seeds as it comes out; a game that was told of the
+        // throw, or of the run that throws it, takes those that came with it
+        var table = pending.Seeds != null
+            ? SharedDice.RollTable(gameObject, true, gameObject.GetComponentInChildren<ObjectBounce>(true) != null)
+            : SharedDice.TakeTable(key);
+        if (table != null) {
+            pending.Seeds?.Add(key, table);
+            SharedDice.SayTable(gameObject, key, table, pending.Seeds != null);
+        }
+
+        mark.Begin(key, pending.Target, table);
         ByKey[key] = mark;
         pending.Marks?.Add(mark);
         GamePatcher.AimThrownAt(mark.Owners, pending.Target);
@@ -768,15 +813,33 @@ internal static class ThrownThings {
         public readonly GameObject? Target = target;
 
         /// <summary>
+        /// The seeds of the first things of the run, by their names, in the game that runs the creature (see
+        /// <see cref="BeginSeries"/>).
+        /// </summary>
+        public readonly NamedSeeds Seeds = new();
+
+        /// <summary>
+        /// What the names of the run's things start with.
+        /// </summary>
+        public string KeyStart => $"{Prefix}.{Number}.";
+
+        /// <summary>
         /// How many things the run named so far.
         /// </summary>
         private int _count;
 
         /// <summary>
+        /// The name of a thing of the run by its place among them.
+        /// </summary>
+        public string KeyOf(int index) {
+            return KeyStart + index.ToString(CultureInfo.InvariantCulture);
+        }
+
+        /// <summary>
         /// The name of the next thing the run throws.
         /// </summary>
         public string NextKey() {
-            return $"{Prefix}.{Number}.{_count++}";
+            return KeyOf(_count++);
         }
     }
 
@@ -789,6 +852,11 @@ internal static class ThrownThings {
         public readonly string PrefabName = prefabName;
         public readonly List<int> Numbers = [];
         public readonly List<ThrownMark> Marks = [];
+
+        /// <summary>
+        /// The seeds rolled for each thing as it came out, by its name.
+        /// </summary>
+        public readonly NamedSeeds Seeds = new();
     }
 
     /// <summary>
@@ -798,11 +866,18 @@ internal static class ThrownThings {
         GameObject prefab,
         GameObject? target,
         Func<string?> nextKey,
-        List<ThrownMark>? marks
+        List<ThrownMark>? marks,
+        NamedSeeds? seeds = null
     ) {
         private readonly string _prefabName = prefab.name;
         public readonly GameObject? Target = target;
         public readonly List<ThrownMark>? Marks = marks;
+
+        /// <summary>
+        /// For a throw of this game's that goes to the others: where the seeds rolled for each thing as it comes out
+        /// go. Null for things named here as another game named them, which take the seeds that came with the name.
+        /// </summary>
+        public readonly NamedSeeds? Seeds = seeds;
 
         /// <summary>
         /// Whether a thing coming out of the pool is one of the prefab, rather than something else that comes out of it
@@ -853,7 +928,7 @@ internal sealed class ThrownMark : MonoBehaviour {
     /// <summary>
     /// What a bounce of the thing is counted under among its rolls.
     /// </summary>
-    private const int BounceRoller = 0x0b0c0e;
+    public const int BounceRoller = 0x0b0c0e;
 
     /// <summary>
     /// The key of the thing, or null while it has none.
@@ -864,6 +939,12 @@ internal sealed class ThrownMark : MonoBehaviour {
     /// The player the thing goes after, or null for no one.
     /// </summary>
     public GameObject? Target { get; set; }
+
+    /// <summary>
+    /// The seeds that the game that named the thing rolled for the first uses of its actions and its first bounces, or
+    /// null for none (see SharedDice.Seeds).
+    /// </summary>
+    public SeedTable? Table { get; private set; }
 
     /// <summary>
     /// How many of each kind of thing it threw in turn, by name.
@@ -886,11 +967,12 @@ internal sealed class ThrownMark : MonoBehaviour {
     public int[] Owners => _owners ??= GamePatcher.ThrownTargetOwners(gameObject);
 
     /// <summary>
-    /// Gives the thing a name.
+    /// Gives the thing a name, with the seeds that go with it.
     /// </summary>
-    public void Begin(string key, GameObject? target) {
+    public void Begin(string key, GameObject? target, SeedTable? table) {
         Key = key;
         Target = target;
+        Table = table;
         _thrown.Clear();
         _rolls.Clear();
     }
@@ -901,6 +983,7 @@ internal sealed class ThrownMark : MonoBehaviour {
     public void End() {
         Key = null;
         Target = null;
+        Table = null;
     }
 
     /// <summary>
@@ -913,13 +996,14 @@ internal sealed class ThrownMark : MonoBehaviour {
     }
 
     /// <summary>
-    /// The dice for the next roll of something of the thing.
+    /// The dice for the next roll of something of the thing: a seed that came with its name, or past those, from the
+    /// name.
     /// </summary>
     /// <param name="roller">What rolls, the same in every game.</param>
     public int NextRoll(int roller) {
         _rolls.TryGetValue(roller, out var times);
         _rolls[roller] = times + 1;
-        return ThrownThings.Seed(Key ?? "", roller, times);
+        return SharedDice.SeedFor(Key ?? "", Table, roller, times, gameObject);
     }
 
     /// <summary>

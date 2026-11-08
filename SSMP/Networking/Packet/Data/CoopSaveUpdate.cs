@@ -876,5 +876,12 @@ internal enum CoopSaveUpdateKind : byte {
     /// members in their room as it changes, and to a member who comes into the room while they are (see
     /// CoopSave.Maggots).
     /// </summary>
-    Maggoted
+    Maggoted,
+
+    /// <summary>
+    /// The seeds that the sender's game rolled for the clusters of a Rune Rage cast and for their blasts (see
+    /// RuneRolls): <see cref="CoopSaveUpdate.Key"/> is the number of the cast and <see cref="CoopSaveUpdate.Bytes"/>
+    /// holds the seeds by name. The other games play the sender's clusters from them.
+    /// </summary>
+    SkillSeeds
 }

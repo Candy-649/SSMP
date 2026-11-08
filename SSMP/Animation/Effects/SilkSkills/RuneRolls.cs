@@ -16,7 +16,10 @@ namespace SSMP.Animation.Effects.SilkSkills;
 /// under the cluster's name and its place among the cluster's blasts (see <see cref="SharedDice.RollByName"/>). The
 /// number of the cast goes to the others with where its clusters are (see <see cref="RuneRage"/>), and their games
 /// play each cluster as its state machine would, from the same names (see <see cref="SharedDice.RollAs{T}"/>): when it
-/// goes off, how it is turned, where each of its blasts comes down and how large each one is.
+/// goes off, how it is turned, where each of its blasts comes down and how large each one is. The local player's game
+/// rolls the seeds of each cluster and of each blast it will put down as the cluster is named, and sends them with the
+/// cast (see <see cref="TakeCastSeeds"/>): every game rolls the first uses of their actions from those, and the rest
+/// from the names.
 /// </summary>
 internal static class RuneRolls {
     /// <summary>
@@ -64,6 +67,12 @@ internal static class RuneRolls {
     private static Expected? _expected;
 
     /// <summary>
+    /// The seeds rolled for the clusters of the local player's cast and for their blasts, by their names, to go to the
+    /// others with the cast.
+    /// </summary>
+    private static NamedSeeds _castSeeds = new();
+
+    /// <summary>
     /// How a cluster plays, read from its state machine once, or null before then.
     /// </summary>
     private static ClusterPlan? _plan;
@@ -98,11 +107,20 @@ internal static class RuneRolls {
     }
 
     /// <summary>
+    /// What the names of the clusters of a cast and of their blasts start with.
+    /// </summary>
+    /// <param name="cast">The number of the cast.</param>
+    public static string CastStart(ushort cast) {
+        return "rune:" + cast.ToString(CultureInfo.InvariantCulture) + ":";
+    }
+
+    /// <summary>
     /// Begins a cast of the local player: the clusters from here on are its own.
     /// </summary>
     public static void BeginCast() {
         _cast++;
         CastClusters.Clear();
+        _castSeeds = new NamedSeeds();
 
         // The pool keeps its clusters, but a room may take its own along when it goes
         if (Clusters.Count > 0) {
@@ -135,6 +153,16 @@ internal static class RuneRolls {
     }
 
     /// <summary>
+    /// Takes the seeds rolled for the clusters of the local player's cast and for their blasts, to go to the others
+    /// with where the clusters are, and forgets them.
+    /// </summary>
+    public static NamedSeeds TakeCastSeeds() {
+        var seeds = _castSeeds;
+        _castSeeds = new NamedSeeds();
+        return seeds;
+    }
+
+    /// <summary>
     /// Has the next thing that comes out of the pool named if it is a cluster of the local player's cast, which the
     /// hero's state machine of the silk skills puts down, or a blast that a cluster of the local player puts down.
     /// </summary>
@@ -152,13 +180,13 @@ internal static class RuneRolls {
                 return null;
             }
 
-            expected = new Expected(prefab.name, null);
+            expected = new Expected(prefab, null);
         } else if (Clusters.Count > 0 && fsm.GameObject is { } owner && owner != null &&
                    Clusters.TryGetValue(owner, out var cluster) &&
                    FsmExecutionStack.ExecutingAction is SpawnObjectFromGlobalPool spawn &&
                    spawn.gameObject?.Value == prefab) {
             // Only what the action puts down, not what a black thread spawns with it
-            expected = new Expected(prefab.name, cluster);
+            expected = new Expected(prefab, cluster);
         } else {
             return null;
         }
@@ -180,14 +208,41 @@ internal static class RuneRolls {
 
         _expected = null;
         if (expected.Cluster is { } cluster) {
+            // Its seeds were rolled with the cluster's, and wait for its name (see RollBlastSeeds)
             SharedDice.RollByName(gameObject, BlastName(cluster.Name, cluster.Blasts++));
             return;
         }
 
         var name = ClusterName(_cast, CastClusters.Count);
-        SharedDice.RollByName(gameObject, name);
+        SharedDice.RollByName(gameObject, name, _castSeeds);
+        RollBlastSeeds(expected.Prefab, name);
         Clusters[gameObject] = new Cluster(name);
         CastClusters.Add(gameObject);
+    }
+
+    /// <summary>
+    /// Rolls the seeds of the blasts that a cluster of the local player's cast will put down, as the cluster is named:
+    /// they come out after the cast went to the others, so their seeds go with the cluster's. A blast is of one of two
+    /// kinds, which the cluster picks as it puts them down, so its seeds cover the actions of both.
+    /// </summary>
+    /// <param name="clusterPrefab">The prefab of the cluster.</param>
+    /// <param name="cluster">The name of the cluster.</param>
+    private static void RollBlastSeeds(GameObject clusterPrefab, string cluster) {
+        if (GetPlan(clusterPrefab) is not { } plan) {
+            return;
+        }
+
+        var rollers = new List<int>();
+        foreach (var blastPrefab in plan.BlastPrefabs) {
+            rollers.AddRange(SharedDice.RollersOf(blastPrefab, false));
+        }
+
+        for (var index = 0; index < plan.Blasts.Count; index++) {
+            var name = BlastName(cluster, index);
+            var table = SeedTable.Roll(rollers, false);
+            SharedDice.Expect(name, table);
+            _castSeeds.Add(name, table);
+        }
     }
 
     /// <summary>
@@ -215,7 +270,9 @@ internal static class RuneRolls {
     /// <summary>
     /// What the pool is to switch on next: a cluster of the cast, or a blast of the given cluster.
     /// </summary>
-    private sealed class Expected(string prefabName, Cluster? cluster) {
+    private sealed class Expected(GameObject prefab, Cluster? cluster) {
+        private readonly string _prefabName = prefab.name;
+        public GameObject Prefab { get; } = prefab;
         public Cluster? Cluster { get; } = cluster;
 
         /// <summary>
@@ -224,7 +281,7 @@ internal static class RuneRolls {
         /// </summary>
         public bool Matches(GameObject gameObject) {
             var name = gameObject.name;
-            return name == prefabName || name.StartsWith(prefabName + "(Clone)", StringComparison.Ordinal);
+            return name == _prefabName || name.StartsWith(_prefabName + "(Clone)", StringComparison.Ordinal);
         }
     }
 
@@ -253,6 +310,11 @@ internal static class RuneRolls {
         /// The blasts of a cluster, in the order it puts them down.
         /// </summary>
         public List<BlastPlan> Blasts { get; } = [];
+
+        /// <summary>
+        /// The prefabs of the two kinds of blast that a cluster picks from as it puts them down.
+        /// </summary>
+        public List<GameObject> BlastPrefabs { get; } = [];
 
         /// <summary>
         /// Reads how a cluster plays from the state machine of its prefab.
@@ -288,6 +350,14 @@ internal static class RuneRolls {
                         break;
                     case RandomVector3 random:
                         shift = new Shift(Roller(BlastsState, place), random.Start.Value, random.End.Value);
+                        break;
+                    case BoolTestToGameObject pick:
+                        foreach (var blastPrefab in new[] { pick.TrueGameObject.Value, pick.FalseGameObject.Value }) {
+                            if (blastPrefab != null && !plan.BlastPrefabs.Contains(blastPrefab)) {
+                                plan.BlastPrefabs.Add(blastPrefab);
+                            }
+                        }
+
                         break;
                     case SpawnObjectFromGlobalPool spawn:
                         // The point of the cluster that the blast comes down at, as the cluster holds it

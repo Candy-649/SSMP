@@ -345,7 +345,9 @@ internal partial class CoopSave {
                     ],
                     Names = [eventName, fsmName, taker.FsmName, taker.Fsm?.ActiveState?.Name ?? ""]
                 };
-                SharedDice.RollByName(part.gameObject, PartRollName(word));
+                var seeds = new NamedSeeds();
+                SharedDice.RollByName(part.gameObject, PartRollName(word), seeds);
+                word.Bytes = seeds.ToBytes();
             }
         } catch (Exception e) {
             LogInteractionError(e);
@@ -724,6 +726,7 @@ internal partial class CoopSave {
             return;
         }
 
+        NamedSeeds.Read(word.Bytes);
         SharedDice.RollByName(part.gameObject, PartRollName(word));
         controller.position = new Vector3(values[4], values[5], controller.position.z);
         part.position = new Vector3(values[1], values[2], part.position.z);

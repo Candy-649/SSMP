@@ -7,6 +7,7 @@ using SSMP.Game.Client.Save;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
 
 namespace SSMP.Animation.Effects.SilkSkills;
@@ -19,6 +20,11 @@ internal class RuneRage : BaseSilkSkill {
     /// Name of the game object for the normal antic.
     /// </summary>
     private const string AnticName = "attack_bomb_cast_antic_thread";
+
+    /// <summary>
+    /// How long a cluster of another player's waits for the seeds that their game rolled for it, in seconds.
+    /// </summary>
+    private const float SeedWait = 1f;
 
     /// <summary>
     /// Name of the game object for the volt filament antic.
@@ -274,6 +280,17 @@ internal class RuneRage : BaseSilkSkill {
         bool isShaman
     ) {
         if (RuneRolls.GetPlan(TryGetClusterPrefab()) is not { } plan) yield break;
+
+        // The seeds that the thrower's game rolled for the cluster come apart from where it is, and are waited for a
+        // little; without them it rolls from its name
+        for (var waited = 0f; !SharedDice.HasTable(name); waited += Time.deltaTime) {
+            if (waited >= SeedWait) {
+                Logger.Info($"[Dice] No seeds came for the rune cluster '{name}' in {SeedWait} s; it rolls from its name");
+                break;
+            }
+
+            yield return null;
+        }
 
         var wait = plan.Wait(name);
         if (wait > 0f) {

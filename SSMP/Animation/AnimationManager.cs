@@ -16,6 +16,7 @@ using SSMP.Game.Settings;
 using SSMP.Hooks;
 using SSMP.Internals;
 using SSMP.Networking.Client;
+using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -1725,6 +1726,18 @@ internal class AnimationManager {
     /// is placed after it comes out of the pool.
     /// </summary>
     private void OnRuneBlastFinished(PlayMakerFSM fsm) {
+        // The seeds rolled for the clusters and their blasts go apart and reliably, as the effect info has no room for
+        // them: the other games play each cluster once its seeds are there (see RuneRage)
+        var seeds = RuneRolls.TakeCastSeeds();
+        if (seeds.Count > 0 && _netClient.IsConnected) {
+            _netClient.UpdateManager.SetCoopSaveUpdate(new CoopSaveUpdate {
+                TargetId = CoopTargets.Everyone,
+                Kind = CoopSaveUpdateKind.SkillSeeds,
+                Key = RuneRolls.Cast,
+                Bytes = seeds.ToBytes(RuneRolls.CastStart(RuneRolls.Cast))
+            });
+        }
+
         var effectInfo = RuneRage.EncodeClusters(
             BaseSilkSkill.GetEffectFlags(),
             RuneRolls.Cast,

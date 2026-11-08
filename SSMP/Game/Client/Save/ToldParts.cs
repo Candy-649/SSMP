@@ -27,7 +27,8 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// runs the creature makes one up as the creature tells a part of the room that rolls or looks at a player, gives it to
 /// the part before the part takes the event, and sends it with the creature's action; the other game gives it to its
 /// own part before it tells it. With the name both games share
-/// - the dice: everything the part rolls from then on comes from its name (see SharedDice.RollByName);
+/// - the dice: the first uses of each action of the part that rolls come from seeds that the game that runs the
+///   creature rolled and sent with the name, and the rest from the name (see SharedDice.RollByName);
 /// - the player it goes after: the one the creature went after as it told the part, whom the part looks at wherever it
 ///   looks at a player, as it already did in the game that runs the creature (GamePatcher.NoteWhatAnEnemySetsOff).
 /// What a named part tells in turn rolls under a name made from the part's own, the same in every game, so a part that
@@ -231,15 +232,18 @@ internal static class ToldParts {
                 }
 
                 HostTells.Add(
-                    action, new HostTell(Time.frameCount, Word.NotTaken, "", ThrownThings.NoPlayer, resting)
+                    action, new HostTell(Time.frameCount, Word.NotTaken, "", ThrownThings.NoPlayer, resting, null)
                 );
                 return;
             }
         }
 
         var key = $"{Prefix}.{++_lastNumber}";
-        NameMachines(told, key);
-        HostTells.Add(action, new HostTell(Time.frameCount, Word.Named, key, CodeOfTarget(creature), takers));
+        var seeds = new NamedSeeds();
+        NameMachines(told, key, seeds);
+        HostTells.Add(
+            action, new HostTell(Time.frameCount, Word.Named, key, CodeOfTarget(creature), takers, seeds)
+        );
         SayOnce(told.Target, "rolls under a name that goes to the other game with what the creature told it");
     }
 
@@ -254,8 +258,9 @@ internal static class ToldParts {
         }
 
         var key = $"{Prefix}.{++_lastNumber}";
-        NameListeners(listeners, key);
-        HostTells.Add(action, new HostTell(Time.frameCount, Word.Named, key, CodeOfTarget(creature), null));
+        var seeds = new NamedSeeds();
+        NameListeners(listeners, key, seeds);
+        HostTells.Add(action, new HostTell(Time.frameCount, Word.Named, key, CodeOfTarget(creature), null, seeds));
     }
 
     /// <summary>
@@ -290,6 +295,7 @@ internal static class ToldParts {
         if (tell.Word == Word.Named) {
             data.Packet.Write(tell.Key);
             data.Packet.Write(tell.Target);
+            (tell.Seeds ?? NamedSeeds.None).Write(data.Packet, tell.Key + PartStart);
         }
 
         var takers = tell.Takers;
@@ -325,6 +331,9 @@ internal static class ToldParts {
         if (word == Word.Named) {
             key = data.Packet.ReadString();
             target = data.Packet.ReadUShort();
+
+            // The seeds that the scene host's game rolled for each part it named wait for the part's name here
+            NamedSeeds.Read(data.Packet, key + PartStart);
         }
 
         var count = data.Packet.ReadByte();
@@ -514,7 +523,12 @@ internal static class ToldParts {
     /// Has the objects of the state machines that were told something roll under names made from a name and where each
     /// is under what was told, but for those that go by the scene host's rounds.
     /// </summary>
-    private static void NameMachines(ToldMachines told, string name) {
+    /// <param name="told">What was told.</param>
+    /// <param name="name">The name.</param>
+    /// <param name="seeds">For the game that runs the creature: where the seeds rolled for each part go, to go with
+    /// the creature's action (see SharedDice.RollByName). Null for the other games, and for what a named part
+    /// tells.</param>
+    private static void NameMachines(ToldMachines told, string name, NamedSeeds? seeds = null) {
         GameObject? last = null;
         foreach (var machine in told.Machines) {
             var gameObject = machine.gameObject;
@@ -523,7 +537,7 @@ internal static class ToldParts {
             }
 
             last = gameObject;
-            SharedDice.RollByName(gameObject, name + PartStart + PathUnder(machine.transform, told.Target));
+            SharedDice.RollByName(gameObject, name + PartStart + PathUnder(machine.transform, told.Target), seeds);
         }
     }
 
@@ -788,10 +802,14 @@ internal static class ToldParts {
     /// Has objects of the room registered for a broadcast roll under names made from a name and their places in the
     /// room, the same in every game.
     /// </summary>
-    private static void NameListeners(List<GameObject> listeners, string name) {
+    /// <param name="listeners">The objects.</param>
+    /// <param name="name">The name.</param>
+    /// <param name="seeds">For the game that runs the creature: where the seeds rolled for each object go (see
+    /// <see cref="NameMachines"/>). Null for the other games.</param>
+    private static void NameListeners(List<GameObject> listeners, string name, NamedSeeds? seeds = null) {
         foreach (var listener in listeners) {
             if (listener != null) {
-                SharedDice.RollByName(listener, name + PartStart + ScenePath.Get(listener.transform));
+                SharedDice.RollByName(listener, name + PartStart + ScenePath.Get(listener.transform), seeds);
             }
         }
     }
@@ -856,12 +874,20 @@ internal static class ToldParts {
     /// <summary>
     /// What an action of a creature that this game runs told, in the frame it ran in.
     /// </summary>
-    private sealed class HostTell(int frame, Word word, string key, ushort target, List<Taker>? takers) {
+    private sealed class HostTell(
+        int frame,
+        Word word,
+        string key,
+        ushort target,
+        List<Taker>? takers,
+        NamedSeeds? seeds
+    ) {
         public int Frame { get; } = frame;
         public Word Word { get; } = word;
         public string Key { get; } = key;
         public ushort Target { get; } = target;
         public List<Taker>? Takers { get; } = takers;
+        public NamedSeeds? Seeds { get; } = seeds;
     }
 
     /// <summary>

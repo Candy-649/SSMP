@@ -49,13 +49,15 @@ namespace SSMP.Game.Client.Save;
 /// back.
 ///
 /// Only an object that is given a name to roll under rolls the same later too, as the things that creatures throw do
-/// (<see cref="RollByName"/>): each roll of each of its actions comes from the name and how many times that action
-/// rolled under it before, whatever the frame rate. A part that a controller of a fight sends off is given one by the
-/// word that tells the other game, for as long as it goes; so is a part of the room that a creature tells to go, by
-/// what goes with the creature's action (see ToldParts), and a machine of the room for each round that the scene host
-/// paces (see CoopSave.PacedMachines). What such a part tells in turn is named after it in every game alike.
+/// (<see cref="RollByName"/>): the game that names it for the others rolls a seed for each of the first uses of each of
+/// its actions that roll and sends them with the name, and past those each roll comes from the name and how many times
+/// that action rolled under it before, whatever the frame rate (see SharedDice.Seeds). A part that a controller of a
+/// fight sends off is given one by the word that tells the other game, for as long as it goes; so is a part of the room
+/// that a creature tells to go, by what goes with the creature's action (see ToldParts), and a machine of the room for
+/// each round that the scene host paces (see CoopSave.PacedMachines). What such a part tells in turn is named after it
+/// in every game alike, and rolls from the name alone.
 /// </summary>
-internal static class SharedDice {
+internal static partial class SharedDice {
     /// <summary>
     /// How many numbers the state of <see cref="Random"/> is.
     /// </summary>
@@ -360,22 +362,42 @@ internal static class SharedDice {
 
     /// <summary>
     /// Has the state machines of an object of the room roll under a name from now on, rather than with the game's own
-    /// dice: each roll of each action from the name and how many times that action rolled under it before, so that
-    /// every game that gives the object the same name rolls the same, at whatever time and in whatever order its
-    /// actions come, as the things that creatures throw do (see ThrownThings). A part that a controller of a fight
-    /// sends off is given one by the word that tells the other game (see CoopSave.ShownParts), and keeps it until it is
-    /// given another or the room is left.
+    /// dice, so that every game that gives the object the same name rolls the same, at whatever time and in whatever
+    /// order its actions come, as the things that creatures throw do (see ThrownThings): the first uses of each action
+    /// from the seeds that the game that named it rolled and sent with the name, and past those from the name and how
+    /// many times that action rolled under it before. A part that a controller of a fight sends off is given one by the
+    /// word that tells the other game (see CoopSave.ShownParts), and keeps it until it is given another or the room is
+    /// left.
     /// </summary>
     /// <param name="gameObject">The object.</param>
     /// <param name="name">The name, the same in every game. The name the object has already keeps what rolled under
     /// it: one game can be given it twice, by the partner's trap and then by the partner's tell that set it off, where
     /// the other gave it once.</param>
-    public static void RollByName(GameObject gameObject, string name) {
+    /// <param name="seeds">For the game that names the object in a word to the others: the tables that go with the
+    /// word, where the object's goes, rolled here unless one came for the name. Null for a game that was given the
+    /// name, which takes the table that came with it, and for a name that every game makes alike, which no table goes
+    /// with.</param>
+    public static void RollByName(GameObject gameObject, string name, NamedSeeds? seeds = null) {
         if (NamedRollers.TryGetValue(gameObject, out var named) && named.Name == name) {
+            if (seeds != null && named.Table != null) {
+                seeds.Add(name, named.Table);
+            }
+
             return;
         }
 
-        NamedRollers[gameObject] = new NamedRoller(name);
+        var table = TakeTable(name);
+        var rolledHere = table == null && seeds != null;
+        if (rolledHere) {
+            table = RollTable(gameObject, false, false);
+        }
+
+        if (table != null) {
+            seeds?.Add(name, table);
+            SayTable(gameObject, name, table, rolledHere);
+        }
+
+        NamedRollers[gameObject] = new NamedRoller(name, table);
     }
 
     /// <summary>
@@ -473,11 +495,13 @@ internal static class SharedDice {
     }
 
     /// <summary>
-    /// Has every object that rolls under a name roll with the game's own dice again, as the room is left.
+    /// Has every object that rolls under a name roll with the game's own dice again, as the room is left, and forgets
+    /// the tables of seeds that wait for names.
     /// </summary>
     public static void ForgetRollNames() {
         NamedRollers.Clear();
         FoundMachines.Clear();
+        ForgetTables();
     }
 
     /// <summary>
@@ -557,7 +581,9 @@ internal static class SharedDice {
             var roller = Identify(self, namedFsm);
             named.Times.TryGetValue(roller, out var times);
             named.Times[roller] = times + 1;
-            ThrownThings.Rolling(ThrownThings.Seed(named.Name, roller, times), EnterCall(orig, self));
+            ThrownThings.Rolling(
+                SeedFor(named.Name, named.Table, roller, times, namedFsm.gameObject), EnterCall(orig, self)
+            );
             return;
         }
 
@@ -831,16 +857,9 @@ internal static class SharedDice {
     /// which is left out, as many times as it is there: the copy of something spawned has it twice.
     /// </summary>
     private static int Identify(FsmStateAction action, PlayMakerFSM fsm) {
-        const string clone = "(Clone)";
-
         var state = action.State;
         var place = state == null ? -1 : Array.IndexOf(state.Actions, action);
-        var name = fsm.gameObject.name;
-        while (name.EndsWith(clone, StringComparison.Ordinal)) {
-            name = name[..^clone.Length];
-        }
-
-        return Identify(name, fsm.FsmName, state?.Name ?? "", place);
+        return Identify(WithoutClone(fsm.gameObject.name), fsm.FsmName, state?.Name ?? "", place);
     }
 
     /// <summary>
@@ -864,14 +883,18 @@ internal static class SharedDice {
 
     /// <summary>
     /// Rolls as an action of an object rolling under a name rolls the first time (see <see cref="RollByName"/>), for a
-    /// game that plays the part of an object that it does not run.
+    /// game that plays the part of an object that it does not run: from the seed that the game that runs it rolled and
+    /// sent with the name, or from the name.
     /// </summary>
     /// <param name="name">The name the object rolls under in the game that runs it.</param>
     /// <param name="action">The number of the action (see <see cref="Identify(string, string, string, int)"/>).</param>
     /// <param name="roll">What the action rolls.</param>
     public static T RollAs<T>(string name, int action, Func<T> roll) {
         var result = default(T)!;
-        ThrownThings.Rolling(ThrownThings.Seed(name, action, 0), () => result = roll());
+        var seed = WaitingTables.TryGetValue(name, out var table) && table.TryGet(action, 0, out var rolled)
+            ? rolled
+            : ThrownThings.Seed(name, action, 0);
+        ThrownThings.Rolling(seed, () => result = roll());
         return result;
     }
 
@@ -898,11 +921,16 @@ internal static class SharedDice {
     /// <summary>
     /// An object of the room that rolls under a name (see <see cref="RollByName"/>).
     /// </summary>
-    private sealed class NamedRoller(string name) {
+    private sealed class NamedRoller(string name, SeedTable? table) {
         /// <summary>
         /// The name, the same in every game.
         /// </summary>
         public string Name { get; } = name;
+
+        /// <summary>
+        /// The seeds that the game that named it rolled for the first uses of its actions, or null for none.
+        /// </summary>
+        public SeedTable? Table { get; } = table;
 
         /// <summary>
         /// How many times each of its actions rolled under the name, by the number of the action.

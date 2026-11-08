@@ -255,14 +255,16 @@ internal partial class CoopSave {
         // the same one, as another trap here told it to go off, or as the partner's trap went off here and only came
         // to this state a frame later (review of the traps that roll under names, 10-13)
         var name = SharedDice.FreshName(gameObject) ?? $"{TrapNamePrefix}.{++_lastTrapName}";
-        SharedDice.RollByName(gameObject, name);
+        var seeds = new NamedSeeds();
+        SharedDice.RollByName(gameObject, name, seeds);
         return new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.WorldTrigger,
             Scene = gameObject.scene.name,
             ObjectPath = ScenePath.Get(gameObject.transform),
             FsmName = fsm.Name,
             StateName = toState.Name,
-            Names = [name]
+            Names = [name],
+            Bytes = seeds.ToBytes()
         };
     }
 
@@ -611,6 +613,8 @@ internal partial class CoopSave {
             return;
         }
 
+        // The seeds that the partner's game rolled for the trap wait for its name here
+        NamedSeeds.Read(update.Bytes);
         MonoBehaviourUtil.Instance.StartCoroutine(SpringWorldTrigger(
             player.Username, update.Scene, update.ObjectPath, update.FsmName, update.StateName, update.Amounts,
             update.Names.Count > 0 ? update.Names[0] : null

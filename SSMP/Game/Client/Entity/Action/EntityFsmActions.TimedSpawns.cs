@@ -309,7 +309,9 @@ internal static partial class EntityFsmActions {
         ThrownThings.Series? names = null;
         if (ThrownThings.CanBeThrown(prefab) && Entity.TryGetThrower(action, out var thrower)) {
             var hero = HeroController.SilentInstance;
-            names = ThrownThings.BeginSeries(GamePatcher.TargetOf(thrower) ?? (hero != null ? hero.gameObject : null));
+            names = ThrownThings.BeginSeries(
+                GamePatcher.TargetOf(thrower) ?? (hero != null ? hero.gameObject : null), prefab
+            );
         }
 
         var seed = Random.Range(int.MinValue, int.MaxValue);
