@@ -470,9 +470,8 @@ internal static partial class SharedDice {
         var rolls = false;
         var aims = false;
         foreach (var state in fsm.States) {
-            // A state machine that hasn't woken has no actions to look at yet: asked for them, the game writes an
-            // error to its log and loads them early
-            if (state.Fsm == null) {
+            // A state machine that hasn't woken has no actions to look at yet (see HasActions)
+            if (!HasActions(state)) {
                 return (false, false);
             }
 

@@ -147,7 +147,7 @@ internal static class ScenePath {
     /// <summary>
     /// Gets the name of an object, followed by the number of earlier siblings with the same name if there are any.
     /// </summary>
-    private static string GetIndexedName(Transform transform) {
+    internal static string GetIndexedName(Transform transform) {
         var index = 0;
         var parent = transform.parent;
         if (parent != null) {

@@ -815,7 +815,10 @@ internal static class ToldParts {
     }
 
     /// <summary>
-    /// The path of a part under what was told, by the names of the objects between them; empty for that itself.
+    /// The path of a part under what was told, by the names of the objects between them, each numbered after the
+    /// earlier siblings of its name (see ScenePath); empty for that itself. Parts of one name told at once each roll
+    /// under a name of their own: under one, only the last one's seeds went with the word, and in the other game the
+    /// first took them and the rest rolled from the name.
     /// </summary>
     private static string PathUnder(Transform part, Transform target) {
         if (part == target) {
@@ -824,7 +827,7 @@ internal static class ToldParts {
 
         var names = new List<string>();
         for (var current = part; current != null && current != target; current = current.parent) {
-            names.Add(current.name);
+            names.Add(ScenePath.GetIndexedName(current));
         }
 
         names.Reverse();

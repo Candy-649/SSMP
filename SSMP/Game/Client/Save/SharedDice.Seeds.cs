@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Reflection;
 using HutongGames.PlayMaker;
 using SSMP.Networking.Packet;
 using UnityEngine;
@@ -94,26 +95,16 @@ internal static partial class SharedDice {
 
     /// <summary>
     /// Adds the numbers of the actions of a state machine that roll as they start (see <see cref="Identify(string, string, string, int)"/>), found
-    /// without waking it: one that hasn't woken has no actions yet, only their names, and one made from a template has
-    /// no states of its own until it wakes.
+    /// without waking it: the state of one that hasn't woken has no actions yet, only their names (see
+    /// <see cref="HasActions"/>), and one made from a template holds a stand-in of its own until it wakes and makes its
+    /// states from the template, which it starts in after (see PlayMakerFSM.InitTemplate).
     /// </summary>
     private static void AddRollers(PlayMakerFSM machine, List<int> rollers) {
-        var fsm = machine.Fsm;
-        var states = machine.FsmTemplate != null && fsm is not { Initialized: true }
-            ? machine.FsmTemplate.fsm?.States
-            : fsm?.States;
-        if (states == null) {
-            return;
-        }
-
+        var fsm = machine.FsmTemplate != null && !machine.Fsm.Started ? machine.FsmTemplate.fsm : machine.Fsm;
         var objectName = WithoutClone(machine.gameObject.name);
         var fsmName = machine.FsmName;
-        foreach (var state in states) {
-            if (state == null) {
-                continue;
-            }
-
-            if (state.Fsm != null) {
+        foreach (var state in fsm.States) {
+            if (HasActions(state)) {
                 var actions = state.Actions;
                 for (var place = 0; place < actions.Length; place++) {
                     if (actions[place] is { } action && RollingActionSet.Contains(action.GetType().Name)) {
@@ -135,6 +126,21 @@ internal static partial class SharedDice {
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// The field of a state that holds its state machine, set once the machine is made.
+    /// </summary>
+    private static readonly FieldInfo StateFsmField =
+        typeof(FsmState).GetField("fsm", BindingFlags.Instance | BindingFlags.NonPublic)!;
+
+    /// <summary>
+    /// Whether the actions of a state can be asked for: its state machine is made. Asked for them before, or for its
+    /// state machine, the game writes an error to its log (FsmState.Actions, FsmState.Fsm), as for every state of a
+    /// prefab that rolls, at every throw of a run and every cluster of Rune Rage.
+    /// </summary>
+    private static bool HasActions(FsmState state) {
+        return StateFsmField.GetValue(state) != null;
     }
 
     /// <summary>
@@ -170,7 +176,8 @@ internal static partial class SharedDice {
 
         if (SaidPastTables.Add(WithoutClone(thing.name))) {
             Logger.Info(
-                $"[Dice] '{thing.name}' rolled past its table under '{name}' (use {times + 1} of an action), from the name"
+                $"[Dice] '{thing.name}' rolled where its table under '{name}' holds no seed (use {times + 1} of an " +
+                "action), from the name"
             );
         }
 
@@ -183,16 +190,18 @@ internal static partial class SharedDice {
     /// <param name="thing">The thing.</param>
     /// <param name="name">The name it rolls under.</param>
     /// <param name="table">The table.</param>
-    /// <param name="rolledHere">Whether this game rolled the table, rather than the partner's.</param>
+    /// <param name="rolledHere">Whether this game rolled the table as it named the thing, rather than taking one that
+    /// waited for the name: one that came with the partner's word, or that this game rolled for a run of throws.
+    /// </param>
     public static void SayTable(GameObject thing, string name, SeedTable table, bool rolledHere) {
         if (!SaidTables.Add(WithoutClone(thing.name))) {
             return;
         }
 
         Logger.Info(
-            $"[Dice] '{thing.name}' rolls under '{name}' from the seeds that " +
-            (rolledHere ? "this game rolled" : "the partner's game rolled") +
-            $" for {table.Count} of its actions"
+            $"[Dice] '{thing.name}' rolls under '{name}' from the seeds " +
+            (rolledHere ? "that this game rolled as it named it" : "that waited for its name") +
+            $", for {table.Count} of its actions"
         );
     }
 
@@ -355,9 +364,14 @@ internal sealed class NamedSeeds {
     public int Count => _tables.Count;
 
     /// <summary>
-    /// Adds the table of a name, in place of one it had.
+    /// Adds the table of a name, in place of one it had. A table that holds no seeds goes nowhere, as the many objects
+    /// hit or told that roll nothing: every game rolls from the name alike.
     /// </summary>
     public void Add(string name, SeedTable table) {
+        if (table.Count == 0) {
+            return;
+        }
+
         for (var i = 0; i < _tables.Count; i++) {
             if (_tables[i].Name == name) {
                 _tables[i] = (name, table);
@@ -374,10 +388,8 @@ internal sealed class NamedSeeds {
     /// <param name="writer">The writer.</param>
     /// <param name="start">What the names start with that the word already says, left out of each that does.</param>
     public void Write(BinaryWriter writer, string start) {
-        var count = System.Math.Min(_tables.Count, byte.MaxValue);
-        writer.Write((byte) count);
-        for (var i = 0; i < count; i++) {
-            var (name, table) = _tables[i];
+        writer.Write((ushort) _tables.Count);
+        foreach (var (name, table) in _tables) {
             var shortened = start.Length > 0 && name.StartsWith(start, StringComparison.Ordinal);
             writer.Write(shortened);
             writer.Write(shortened ? name.Substring(start.Length) : name);
@@ -413,7 +425,7 @@ internal sealed class NamedSeeds {
     /// Reads tables that <see cref="Write(BinaryWriter, string)"/> wrote, and has each wait here for its name.
     /// </summary>
     public static void Read(BinaryReader reader, string start) {
-        var count = reader.ReadByte();
+        var count = reader.ReadUInt16();
         for (var i = 0; i < count; i++) {
             var shortened = reader.ReadBoolean();
             var name = reader.ReadString();
