@@ -3978,6 +3978,10 @@ internal partial class Entity {
         bool sendToChildren,
         bool excludeSelf
     ) {
+        if (go != null && fsmEvent != null) {
+            GoAfterGrabbedPlayer(self, go, null);
+        }
+
         orig(self, go, fsmEvent, eventData, sendToChildren, excludeSelf);
 
         if (go != null && fsmEvent != null) {
@@ -3997,10 +4001,43 @@ internal partial class Entity {
         string fsmName,
         FsmEvent fsmEvent
     ) {
+        if (go != null && fsmEvent != null) {
+            GoAfterGrabbedPlayer(self, go, fsmName);
+        }
+
         orig(self, go, fsmName, fsmEvent);
 
         if (go != null && fsmEvent != null) {
             HearCopyTold(self, go, fsmName, fsmEvent.Name);
+        }
+    }
+
+    /// <summary>
+    /// Has a creature whose own part is telling it that it grabbed the local player go after them, before the creature
+    /// takes the grab (see <see cref="GamePatcher.GoAfterGrabbed"/>): in the game that runs it, and on a copy that
+    /// plays the catch here. A part grabs this game's player alone, as the partner's figure touches nothing (see
+    /// <see cref="GrabsThePlayer"/>). Left to the nearest player it noticed, the catch went to the partner's figure
+    /// where that stood nearer to the creature's body than the player at the end of its tendril: the scene host's
+    /// player was held while the tendril pulled the partner's figure up, and the partner's game, which plays what the
+    /// scene host's creature does, showed them hanging from it where they stood free (USER 11-08,
+    /// "我看到有个我的大黄蜂定格在被藤蔓抓上去的样子，但是实际上我并没有被抓").
+    /// </summary>
+    /// <param name="sender">The FSM that tells the creature.</param>
+    /// <param name="target">The object that it tells.</param>
+    /// <param name="fsmName">The name of the FSM of the object that it tells, or null for all of them.</param>
+    private static void GoAfterGrabbedPlayer(HutongGames.PlayMaker.Fsm sender, GameObject target, string? fsmName) {
+        if (sender.Owner is not PlayMakerFSM { enabled: true } || sender.GameObject is not { } part ||
+            !part.transform.IsChildOf(target.transform) || !GrabsThePlayer(sender) ||
+            HeroController.SilentInstance is not { } hero) {
+            return;
+        }
+
+        // The creature itself watches a grab box of its own and tells the FSM that carries the player off by its name
+        var grabbed = part == target
+            ? !string.IsNullOrEmpty(fsmName) && fsmName != sender.Name && TouchesWhatItWatches(sender)
+            : TouchesTheLocalPlayer(part);
+        if (grabbed) {
+            GamePatcher.GoAfterGrabbed(target, hero.gameObject);
         }
     }
 
@@ -4131,12 +4168,44 @@ internal partial class Entity {
         Collider2D other
     ) {
         var outer = _triggeredFsm;
+        var from = self.ActiveState;
         _triggeredFsm = self;
         try {
             orig(self, other);
         } finally {
             _triggeredFsm = outer;
         }
+
+        SayTouchOfCopyGrabber(self, other, from);
+    }
+
+    /// <summary>
+    /// Says in the log that the local player came into a part of a copy that grabs the player, with the state its FSM
+    /// went to from where it was, whether the game lets the player be grabbed, and where the scene host has the
+    /// creature's own FSMs. A tendril of a copy that never took a scene client standing in it, while it took the scene
+    /// host's player every time, left nothing in the log to tell why (USER 11-08,
+    /// "场景主机碰得到，客机碰不到，后来我当场景主机就能碰到了").
+    /// </summary>
+    /// <param name="fsm">The FSM whose trigger was come into.</param>
+    /// <param name="other">What came into it.</param>
+    /// <param name="from">The state the FSM was in before.</param>
+    private static void SayTouchOfCopyGrabber(HutongGames.PlayMaker.Fsm fsm, Collider2D other, FsmState? from) {
+        if (other == null || HeroController.SilentInstance is not { } hero ||
+            !other.transform.IsChildOf(hero.transform) || fsm.GameObject is not { } part ||
+            FindByPart(part) is not { _isControlled: true } entity || !Array.Exists(fsm.States, GrabsThePlayerIn)) {
+            return;
+        }
+
+        var hostStates = string.Join(
+            ", ", entity._fsms.Client.Where(copy => copy != null)
+                .Select(copy => $"'{copy.FsmName}' in '{entity.StateOfCopy(copy)?.Name}'")
+        );
+        SSMP.Logging.Logger.Info(
+            $"[Catches] The local player came into '{ScenePath.Get(part.transform)}' of the copy of entity " +
+            $"{entity.Id}, whose '{fsm.Name}' went from '{from?.Name}' to '{fsm.ActiveState?.Name}'; the game " +
+            $"lets them be grabbed: {hero.CanBeGrabbed()}, by a tendril: {hero.CanBeBarnacleGrabbed()}; the scene " +
+            $"host has {hostStates}"
+        );
     }
 
     /// <summary>

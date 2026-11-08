@@ -887,6 +887,29 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Has a creature go after the player that a part of its own grabbed (see Entity.GoAfterGrabbedPlayer), held to
+    /// them as after any turn (see <see cref="IsHeldByTime"/>) also when it went after them already: what it does with
+    /// the catch then goes to the player it holds, rather than to whichever player stands nearest to it (see
+    /// <see cref="AcquireNearestNoticed"/>).
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="player">The player it grabbed.</param>
+    public static void GoAfterGrabbed(GameObject creature, GameObject player) {
+        var owner = GetEnemyTargetOwner(creature);
+        if (owner == null) {
+            return;
+        }
+
+        Logger.Info($"{owner.name} grabbed {DescribePlayer(player)} and goes after them through the catch");
+        if (GetApprovedEnemyTarget(owner) == player) {
+            NoteTurn(owner.GetInstanceID(), null);
+            return;
+        }
+
+        ApproveEnemyTarget(owner, player);
+    }
+
+    /// <summary>
     /// Whom a creature that moves by a component of its own - a walker - goes after, by the one rule for every creature:
     /// whom it keeps going after (see <see cref="KeptTarget"/>), or, for one that can be fought, the nearest player it
     /// notices as it first looks for one (see <see cref="AcquireNearestNoticed"/>); otherwise whom it was set on, or
