@@ -10,9 +10,8 @@ namespace SSMP.Game.Client.Entity.Component;
 /// The health of a boss that its FSMs keep instead of a HealthManager, for its bar (Ui.EnemyHealthBars): the one whose
 /// fight is first against the burning parts of its body, each with health of its own, and then against its core, which
 /// opens once they are all broken (census of every boss the user named, 11-10; USER 11-10 "你的血条要能覆盖这些boss",
-/// "一阶段是打几个着火的地方，二阶段才是boss本体好像"). The game that runs the boss reads it from those FSMs, which count
-/// the blows of every player there (HitCounters), and tells the other games, whose copies count none: they show only
-/// what they are told (USER 11-09 "客机也不应该自己摆弄血条").
+/// "一阶段是打几个着火的地方，二阶段才是boss本体好像"). The game that runs the boss reads it from those FSMs and tells the
+/// other games, which show only what they are told (USER 11-09 "客机也不应该自己摆弄血条").
 /// </summary>
 internal class FsmHealthComponent : EntityComponent {
     /// <summary>
@@ -81,6 +80,7 @@ internal class FsmHealthComponent : EntityComponent {
                 PartsFull += fsm.FsmVariables.GetFsmInt(HealthVariable).Value;
             } else if (fsm.FsmName == CoreFsmName && fsm.gameObject == gameObject.Host) {
                 _core = fsm;
+                CoreFull = fsm.FsmVariables.GetFsmInt(HealthVariable).Value;
             }
         }
 
@@ -103,7 +103,7 @@ internal class FsmHealthComponent : EntityComponent {
     public bool IsShown {
         get {
             var shown = IsControlled ? GameObject.Client : GameObject.Host;
-            return shown != null && shown.activeInHierarchy;
+            return Health >= 0 && shown != null && shown.activeInHierarchy;
         }
     }
 
@@ -112,6 +112,16 @@ internal class FsmHealthComponent : EntityComponent {
     /// first part of the fight.
     /// </summary>
     public int PartsFull { get; }
+
+    /// <summary>
+    /// The health of the core as the room was made: the full health of the second part of the fight.
+    /// </summary>
+    public int CoreFull { get; }
+
+    /// <summary>
+    /// The full health of the part of the fight that is on.
+    /// </summary>
+    public int Full => CoreOpen ? CoreFull : PartsFull;
 
     /// <summary>
     /// The health: of the burning parts together, or of the core once it is open; -1 before the game that runs the

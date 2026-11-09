@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using GlobalEnums;
 using MonoMod.RuntimeDetour;
+using SSMP.Game.Client.Entity.Action;
 using SSMP.Game.Client.Entity.Component;
 using SSMP.Game.Settings;
 using SSMP.Util;
@@ -124,13 +125,14 @@ internal class EnemyHealthBars(ModSettings modSettings) {
 
     /// <summary>
     /// The bosses that nothing shows a title of, duels that a character offers, by the name of their object; with the
-    /// event that an FSM of their own takes as their fight starts, and the room where they are a boss when the same
-    /// name is no boss elsewhere: one fights at the player's side in other rooms (census 11-10, USER 11-10 "你的血条要
-    /// 能覆盖这些boss，包括boss特有的底部宽血条规则也要能覆盖这些boss").
+    /// events that an FSM of their own goes on as their fight starts and as it ends with nobody beaten - the player
+    /// walked away - and the room where they are a boss when the same name is no boss elsewhere: one fights at the
+    /// player's side in other rooms (census 11-10, USER 11-10 "你的血条要能覆盖这些boss，包括boss特有的底部宽血条规则
+    /// 也要能覆盖这些boss"). Ended so, the duel left its bar on screen, the duelist alive (review of 4c098c7).
     /// </summary>
-    private static readonly (string Name, string StartEvent, string? Scene)[] UntitledBosses = [
-        ("Mapper Spar NPC", "BATTLE HERO", null),
-        ("Garmond Fighter", "BATTLE START", "library_09")
+    private static readonly (string Name, string StartEvent, string EndEvent, string? Scene)[] UntitledBosses = [
+        ("Mapper Spar NPC", "BATTLE HERO", "MAPPER SPAR END", null),
+        ("Garmond Fighter", "BATTLE START", "UNALERT", "library_09")
     ];
 
     /// <summary>
@@ -149,6 +151,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     /// others show it as their fight starts (census 11-09).
     /// </summary>
     private static bool _fightStarted;
+
+    /// <summary>
+    /// Whether the fight of a boss that started in the room ended with nobody beaten, a duel that the player walked
+    /// away from (see <see cref="UntitledBosses"/>), until a fight starts again: the bars of the bosses are away.
+    /// </summary>
+    private static bool _fightOver;
 
     /// <summary>
     /// The colour of what is left of the health: the white of silk.
@@ -307,9 +315,16 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 HutongGames.PlayMaker.FsmEventData?>((orig, self, fsmEvent, data) => {
                 if (fsmEvent != null && fsmEvent.Name == TitleUpEvent) {
                     NoteFightStarted($"'{self.Name}' of '{self.GameObjectName}' is told to show the name of a boss");
-                } else if (fsmEvent != null && IsUntitledStart(fsmEvent.Name) && self.GameObject is { } owner &&
-                           StartEventOf(owner) == fsmEvent.Name) {
-                    NoteFightStarted($"'{self.Name}' of '{owner.name}' is told '{fsmEvent.Name}', its duel's start");
+                } else if (fsmEvent != null && IsDuelEvent(fsmEvent.Name) && self.GameObject is { } owner &&
+                           self.ActiveState is { } state &&
+                           EntityFsmActions.FindTransition(self, state, fsmEvent.Name) != null &&
+                           DuelOf(owner) is { } duel) {
+                    var what = $"'{self.Name}' of '{owner.name}' goes on '{fsmEvent.Name}' from '{state.Name}'";
+                    if (fsmEvent.Name == duel.StartEvent) {
+                        NoteFightStarted($"{what}, its duel's start");
+                    } else if (fsmEvent.Name == duel.EndEvent) {
+                        NoteFightOver($"{what}, its duel's end with nobody beaten");
+                    }
                 }
 
                 orig(self, fsmEvent, data);
@@ -322,12 +337,26 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     /// </summary>
     /// <param name="what">What started it, for the log.</param>
     internal static void NoteFightStarted(string what) {
-        if (_fightStarted) {
+        if (_fightStarted && !_fightOver) {
             return;
         }
 
         _fightStarted = true;
+        _fightOver = false;
         Logger.Info($"[Bars] The fight of a boss starts here: {what}");
+    }
+
+    /// <summary>
+    /// Takes it that the fight of a boss in the room ended with nobody beaten (see <see cref="_fightOver"/>).
+    /// </summary>
+    /// <param name="what">What ended it, for the log.</param>
+    private static void NoteFightOver(string what) {
+        if (_fightOver) {
+            return;
+        }
+
+        _fightOver = true;
+        Logger.Info($"[Bars] The fight of a boss here is over: {what}");
     }
 
     /// <summary>
@@ -380,6 +409,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         _killRecorded.Clear();
         _blowLanded.Clear();
         _fightStarted = false;
+        _fightOver = false;
     }
 
     /// <summary>
@@ -424,7 +454,8 @@ internal class EnemyHealthBars(ModSettings modSettings) {
 
             if (!_fsmBars.TryGetValue(fsmHealth, out var bar)) {
                 bar = new Bar(
-                    fsmHealth.Creature, () => fsmHealth.Health, () => fsmHealth.IsBeaten, fsmHealth.PartsFull, true
+                    fsmHealth.Creature, () => fsmHealth.Health, () => fsmHealth.IsBeaten, fsmHealth.Full, true,
+                    () => fsmHealth.Full
                 );
                 _fsmBars[fsmHealth] = bar;
             }
@@ -609,12 +640,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     }
 
     /// <summary>
-    /// Whether an event is one that starts the fight of a boss that nothing shows a title of, in an FSM of the boss's
-    /// own (see <see cref="UntitledBosses"/>): looked at first, as every event of every FSM passes by.
+    /// Whether an event is one that starts or ends the fight of a boss that nothing shows a title of, in an FSM of the
+    /// boss's own (see <see cref="UntitledBosses"/>): looked at first, as every event of every FSM passes by.
     /// </summary>
-    private static bool IsUntitledStart(string eventName) {
+    private static bool IsDuelEvent(string eventName) {
         foreach (var boss in UntitledBosses) {
-            if (boss.StartEvent == eventName) {
+            if (boss.StartEvent == eventName || boss.EndEvent == eventName) {
                 return true;
             }
         }
@@ -623,16 +654,16 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     }
 
     /// <summary>
-    /// The event that starts the fight of an object that is a boss that nothing shows a title of, in the room it is
-    /// in (see <see cref="UntitledBosses"/>), or null if it is none.
+    /// The boss that nothing shows a title of which an object is, in the room it is in (see
+    /// <see cref="UntitledBosses"/>), or null if it is none.
     /// </summary>
-    private static string? StartEventOf(GameObject gameObject) {
+    private static (string Name, string StartEvent, string EndEvent, string? Scene)? DuelOf(GameObject gameObject) {
         var name = gameObject.name.Replace("(Clone)", "").Trim();
         foreach (var boss in UntitledBosses) {
             if (boss.Name == name &&
                 (boss.Scene == null ||
                  string.Equals(gameObject.scene.name, boss.Scene, StringComparison.OrdinalIgnoreCase))) {
-                return boss.StartEvent;
+                return boss;
             }
         }
 
@@ -647,8 +678,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     /// </summary>
     internal static bool IsBoss(HealthManager healthManager) {
         var gameObject = healthManager.gameObject;
-        if (RoomTitledBosses.Contains(gameObject.name.Replace("(Clone)", "").Trim()) ||
-            StartEventOf(gameObject) != null) {
+        if (RoomTitledBosses.Contains(gameObject.name.Replace("(Clone)", "").Trim()) || DuelOf(gameObject) != null) {
             return true;
         }
 
@@ -673,7 +703,17 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     /// <param name="isDead">What says whether the creature died.</param>
     /// <param name="initialHealth">The health that the creature starts with.</param>
     /// <param name="isBoss">Whether the creature is a boss.</param>
-    private class Bar(GameObject creature, Func<int> readHealth, Func<bool> isDead, int initialHealth, bool isBoss) {
+    /// <param name="readFull">What reads the full health of the creature, for one whose full health is known (see
+    /// <see cref="FsmHealthComponent.Full"/>); null to learn it from the health (see <see cref="FollowHealth"/>).
+    /// </param>
+    private class Bar(
+        GameObject creature,
+        Func<int> readHealth,
+        Func<bool> isDead,
+        int initialHealth,
+        bool isBoss,
+        Func<int>? readFull = null
+    ) {
         /// <summary>
         /// The object of the creature.
         /// </summary>
@@ -697,7 +737,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         public static Bar Of(HealthManager healthManager, bool isBoss) {
             return new Bar(
                 healthManager.gameObject, () => HealthManagerComponent.ToldHealthOf(healthManager) ?? healthManager.hp,
-                () => healthManager.isDead, GetInitialHealth(healthManager), isBoss
+                () => healthManager == null || healthManager.isDead, GetInitialHealth(healthManager), isBoss
             );
         }
 
@@ -858,7 +898,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             }
 
             IsShown = isAlive && !_isUnbeatable && _fullHealth > 1 && _fullHealth < UnbeatableHealth &&
-                      (IsBoss ? _fightStarted || _isStartSettled : _isHurt);
+                      (IsBoss ? !_fightOver && (_fightStarted || _isStartSettled) : _isHurt);
         }
 
         /// <summary>
@@ -867,6 +907,15 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// <param name="health">The health that the creature has.</param>
         /// <param name="blowLanded">Whether a blow of a player landed on the creature, as this game knows.</param>
         private void FollowHealth(int health, bool blowLanded) {
+            // A creature whose full health is known: a player who came in late saw it full at what was left
+            if (readFull != null) {
+                _fullHealth = readFull();
+                _isStartSettled |= blowLanded;
+                _isHurt |= health < _fullHealth;
+                _lastHealth = health;
+                return;
+            }
+
             // Given a health that it can't be beaten from for a while: a fight puts its boss out of reach between its
             // parts, and a creature that swallowed something it has to spit out can't be hurt until it does. That is
             // no health of the creature's own, so it is never taken for its full health, and the bar is away
