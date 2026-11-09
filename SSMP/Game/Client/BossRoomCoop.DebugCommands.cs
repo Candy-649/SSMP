@@ -98,8 +98,8 @@ internal partial class BossRoomCoop {
             _debugResetAskedAt = Time.unscaledTime;
             UiManager.InternalChatBox.AddMessage(Lang.Pick(
                 "Debug: /0 sets the fight at the top of the lift back to before the first ride up, in every player's " +
-                "save. Type /0 again within 15 seconds to go ahead.",
-                "调试：/0 会把所有人存档里电梯上面那场仗改回第一次坐电梯上去之前（没见过、没打过）。确定的话 15 秒内再输一次 /0。"
+                "save. Type /0 with the key again within 15 seconds to go ahead.",
+                "调试：/0 会把所有人存档里电梯上面那场仗改回第一次坐电梯上去之前（没见过、没打过）。确定的话 15 秒内再输一次 /0 加密钥。"
             ));
             return;
         }

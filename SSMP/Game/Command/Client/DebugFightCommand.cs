@@ -1,3 +1,6 @@
+using System;
+using System.Security.Cryptography;
+using System.Text;
 using SSMP.Api.Command;
 using SSMP.Api.Command.Client;
 using SSMP.Game.Client;
@@ -6,9 +9,18 @@ namespace SSMP.Game.Command.Client;
 
 /// <summary>
 /// TEMPORARY debug commands /0, /1 and /2, for trying two fights again in a copy of a save (see
-/// BossRoomCoop.DebugCommands). To be taken out again once they are tried.
+/// BossRoomCoop.DebugCommands). To be taken out again once they are tried. Each works only with the key after it,
+/// which only the players who test with them know (see <see cref="KeyHash"/>).
 /// </summary>
 internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
+    /// <summary>
+    /// The SHA-256 of the key that has to follow the command, in lowercase hex. The code is public and so is the mod
+    /// page that 0.4.156 went up on with these commands in it, read of in its install notes: without the key a
+    /// command does nothing and says nothing, so nobody else takes the players anywhere or writes into their saves
+    /// (USER 11-09 "看起来下次/0还得带一串密钥才行", "我们还是需要/2的").
+    /// </summary>
+    private const string KeyHash = "7671bac6bb85c237b2c4de95ef1012a16f5305608c2afa3fa1cab071dcfe2e3d";
+
     /// <summary>
     /// The boss rooms, which carry out the command in every player's game.
     /// </summary>
@@ -32,14 +44,29 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
 
     /// <inheritdoc />
     public string Description => _command switch {
-        0 => "Temporary debug: set the fight at the top of the lift back to before the first ride up, in every " +
-             "player's save.",
-        1 => "Temporary debug: take every player to the bottom of the lift.",
-        _ => "Temporary debug: take every player to the challenge of the other fight, whose win then leads back there."
+        0 => "Temporary debug, with the key: set the fight at the top of the lift back to before the first ride up, " +
+             "in every player's save.",
+        1 => "Temporary debug, with the key: take every player to the bottom of the lift.",
+        _ => "Temporary debug, with the key: take every player to the challenge of the other fight, whose win then " +
+             "leads back there."
     };
 
     /// <inheritdoc />
     public void Execute(string[] arguments) {
+        // The command itself comes first
+        if (arguments.Length < 2 || !IsTheKey(arguments[1])) {
+            return;
+        }
+
         _bossRoomCoop.RunDebugCommand(_command);
+    }
+
+    /// <summary>
+    /// Whether the given text is the key (see <see cref="KeyHash"/>).
+    /// </summary>
+    private static bool IsTheKey(string text) {
+        using var sha = SHA256.Create();
+        var hash = BitConverter.ToString(sha.ComputeHash(Encoding.UTF8.GetBytes(text))).Replace("-", "");
+        return string.Equals(hash, KeyHash, StringComparison.OrdinalIgnoreCase);
     }
 }
