@@ -2341,7 +2341,31 @@ internal class ClientManager : IClientManager {
     /// <param name="chatMessage">The ChatMessage packet data.</param>
     private void OnChatMessage(ChatMessage chatMessage) {
         // Convert &-codes to Unity Rich Text so the client renders colors/bold/italic.
-        UiManager.InternalChatBox.AddMessage(ColorCodeParser.ParseToUnityRichText(chatMessage.Message));
+        var text = ColorCodeParser.ParseToUnityRichText(chatMessage.Message);
+        if (IsTypedByAPlayer(chatMessage.Message)) {
+            UiManager.InternalChatBox.AddTypedMessage(text);
+        } else {
+            UiManager.InternalChatBox.AddMessage(text);
+        }
+    }
+
+    /// <summary>
+    /// Whether a line of the chat from the server is one that a player typed, which the server sends as
+    /// "[name]: text" (ServerManager.OnChatMessage); any other is what the server says, which shows in gold.
+    /// </summary>
+    /// <param name="message">The line as the server sent it.</param>
+    private bool IsTypedByAPlayer(string message) {
+        if (message.StartsWith($"[{_username}]: ", StringComparison.Ordinal)) {
+            return true;
+        }
+
+        foreach (var player in _playerData.Values) {
+            if (message.StartsWith($"[{player.Username}]: ", StringComparison.Ordinal)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

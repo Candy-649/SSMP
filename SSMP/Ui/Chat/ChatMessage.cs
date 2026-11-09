@@ -60,7 +60,8 @@ internal class ChatMessage {
     /// <param name="componentGroup">The UI component group this message belongs to.</param>
     /// <param name="position">The screen position of the message.</param>
     /// <param name="text">The message text content (supports Unity rich text).</param>
-    public ChatMessage(ComponentGroup componentGroup, Vector2 position, string text) {
+    /// <param name="color">The color of the text where it names none itself, or null for the chat's own.</param>
+    public ChatMessage(ComponentGroup componentGroup, Vector2 position, string text, Color? color) {
         _textComponent = new ChatTextComponent(
             componentGroup,
             position,
@@ -68,6 +69,10 @@ internal class ChatMessage {
             text,
             UiManager.ChatFontSize
         );
+        if (color is { } textColor) {
+            _textComponent.SetColor(textColor);
+        }
+
         _textComponent.SetActive(false);
     }
 

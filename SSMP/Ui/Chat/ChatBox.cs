@@ -65,6 +65,12 @@ internal class ChatBox : IChatBox {
     private const int MaxWrapPasses = 200;
 
     /// <summary>
+    /// The color of a chat line that no player typed, what the mod or the server says: the gold of the color code
+    /// &amp;6 (USER 11-09 "聊天框里的系统消息改成金色"). A color that a part of the line names shows over it.
+    /// </summary>
+    private static readonly Color SaidColor = new Color32(0xFF, 0xAA, 0x00, 0xFF);
+
+    /// <summary>
     /// A vector for the size of new chat messages.
     /// </summary>
     public static Vector2 MessageSize { get; private set; }
@@ -382,21 +388,38 @@ internal class ChatBox : IChatBox {
     }
 
     /// <summary>
-    /// Add a message to the chat.
+    /// Add a message to the chat that no player typed, which shows in gold (see <see cref="SaidColor"/>).
     /// </summary>
     /// <param name="messageText">The text that the message should have.</param>
     public void AddMessage(string messageText) {
+        AddLines(messageText, SaidColor);
+    }
+
+    /// <summary>
+    /// Add a message that a player typed to the chat, which shows in the chat's own color.
+    /// </summary>
+    /// <param name="messageText">The text that the message should have.</param>
+    public void AddTypedMessage(string messageText) {
+        AddLines(messageText, null);
+    }
+
+    /// <summary>
+    /// Add a message to the chat, in as many lines as it takes.
+    /// </summary>
+    /// <param name="messageText">The text that the message should have.</param>
+    /// <param name="color">The color of its text where it names none itself, or null for the chat's own.</param>
+    private void AddLines(string messageText, Color? color) {
         var remaining = messageText;
 
         for (var pass = 0; pass < MaxWrapPasses && !string.IsNullOrEmpty(remaining); pass++) {
-            var result = WrapTextLine(remaining);
+            var result = WrapTextLine(remaining, color);
 
             if (result.wrapped) {
                 remaining = result.remainder;
             } else {
                 var sanitized = RemoveEmptyColorTags(remaining);
                 if (HasVisibleContent(sanitized)) {
-                    AddTrimmedMessage(sanitized);
+                    AddTrimmedMessage(sanitized, color);
                 }
 
                 break;
@@ -409,8 +432,9 @@ internal class ChatBox : IChatBox {
     /// be returned as a tuple.
     /// </summary>
     /// <param name="text">The string text for the message that needs to be wrapped.</param>
+    /// <param name="color">The color of the line's text (see <see cref="AddLines"/>).</param>
     /// <returns>A tuple containing whether the text was wrapped and if wrapped, the remaining string.</returns>
-    private (bool wrapped, string remainder) WrapTextLine(string text) {
+    private (bool wrapped, string remainder) WrapTextLine(string text, Color? color) {
         var lastSpaceIndex = -1;
 
         for (var i = 0; i < text.Length; i++) {
@@ -430,7 +454,7 @@ internal class ChatBox : IChatBox {
             var width = _textMeasure.GetPreferredWidth(StripRichTextTags(currentText));
 
             if (width > ChatWidth) {
-                return SplitAndWrapLine(text, lastSpaceIndex, i);
+                return SplitAndWrapLine(text, lastSpaceIndex, i, color);
             }
         }
 
@@ -468,9 +492,11 @@ internal class ChatBox : IChatBox {
     /// </param>
     /// <param name="currentIndex">The current index of scanning through the text upon deciding to split the line.
     /// </param>
+    /// <param name="color">The color of the line's text (see <see cref="AddLines"/>).</param>
     /// <returns>A tuple consisting of whether the text was wrapped and if so, a string of the remainder of the text.
     /// </returns>
-    private (bool wrapped, string remainder) SplitAndWrapLine(string text, int lastSpace, int currentIndex) {
+    private (bool wrapped, string remainder) SplitAndWrapLine(string text, int lastSpace, int currentIndex,
+        Color? color) {
         var splitIndex = lastSpace != -1 ? lastSpace : currentIndex + 1;
 
         var firstPart = text.Substring(0, splitIndex);
@@ -479,7 +505,7 @@ internal class ChatBox : IChatBox {
 
         var sanitized = RemoveEmptyColorTags(firstComplete);
         if (HasVisibleContent(sanitized)) {
-            AddTrimmedMessage(sanitized);
+            AddTrimmedMessage(sanitized, color);
         }
 
         var removedSpace = splitIndex == lastSpace && lastSpace != -1;
@@ -496,7 +522,7 @@ internal class ChatBox : IChatBox {
         // Prevent infinite loops
         if (StripRichTextTags(remainder).Length >= StripRichTextTags(text).Length) {
             if (HasVisibleContent(remainder)) {
-                AddTrimmedMessage(remainder);
+                AddTrimmedMessage(remainder, color);
             }
 
             return (false, string.Empty);
@@ -522,7 +548,8 @@ internal class ChatBox : IChatBox {
     /// Add a trimmed message to the chat.
     /// </summary>
     /// <param name="messageText">The text of the message.</param>
-    private void AddTrimmedMessage(string messageText) {
+    /// <param name="color">The color of its text (see <see cref="AddLines"/>).</param>
+    private void AddTrimmedMessage(string messageText, Color? color) {
         messageText = EnsureLeadingCharForRichText(messageText);
         if (!HasVisibleContent(messageText)) return;
 
@@ -535,7 +562,8 @@ internal class ChatBox : IChatBox {
             _chatBoxGroup,
             new Vector2(MessageSize.x / 2f + MarginLeft,
                 InputMarginBottom + InputHeight + BoxInputMargin),
-            messageText
+            messageText,
+            color
         );
         newMessage.Display(IsOpen);
         _messages[0] = newMessage;
