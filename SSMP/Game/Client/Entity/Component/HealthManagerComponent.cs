@@ -341,6 +341,19 @@ internal class HealthManagerComponent : EntityComponent {
     private int _heardHp;
 
     /// <summary>
+    /// The health that the game that runs a creature last told of it, for the copy of it that this game shows: what
+    /// the bar of the copy shows, rather than what the copy has, which a step of its own sets ahead of what it is told
+    /// for a moment (see <see cref="_ownStepKeptUntil"/>); null for any other (USER 11-09 "客机也不应该自己摆弄血条").
+    /// </summary>
+    /// <param name="healthManager">The health of the creature or copy.</param>
+    internal static int? ToldHealthOf(HealthManager healthManager) {
+        return ComponentOf.TryGetValue(healthManager, out var component) && component.IsControlled &&
+               healthManager == component._healthManager.Client
+            ? component._heardHp
+            : null;
+    }
+
+    /// <summary>
     /// On a copy: until when, in unscaled seconds, it keeps the health that a step of its own FSM set against what
     /// the game that runs the creature tells, or -1 when it keeps none (see <see cref="OnRoomHealthStep"/>). That
     /// game takes the same step a moment later, and health that it told before it did came after the copy took it:

@@ -459,6 +459,8 @@ internal partial class ArenaCoop {
             return;
         }
 
+        Ui.EnemyHealthBars.NoteFightStarted($"the arena '{state.Path}' starts its fight");
+
         try {
             BossFightStartedEvent?.Invoke();
         } catch (Exception e) {

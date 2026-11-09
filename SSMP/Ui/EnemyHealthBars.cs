@@ -18,9 +18,11 @@ namespace SSMP.Ui;
 /// Health bars for creatures that were hurt: a small one above the head of a creature, and a wide one along the bottom
 /// of the screen for a boss. They are drawn for the local player only; nothing about them goes over the network.
 ///
-/// A bar shows from the first hit until the creature dies, at the part of its health that is left. The part that a hit
-/// just took lingers for a moment before it drains away, so that a hit can be seen even when both players land them.
-/// The health of a creature is where its own game keeps it, which in co-op is the scene host's health of it.
+/// A bar shows from the first hit until the creature dies, at the part of its health that is left; a boss's only once
+/// its fight started (see <see cref="_fightStarted"/>). The part that a hit just took lingers for a moment before it
+/// drains away, so that a hit can be seen even when both players land them. The health of a creature is where its own
+/// game keeps it, which in co-op is the scene host's health of it: the bar of a copy shows what the scene host told of
+/// it (HealthManagerComponent.ToldHealthOf).
 ///
 /// A boss is full at the health it has as the first blow of a player lands on it, which its room can set below what it
 /// was made with as its fight starts, and a fight that puts its boss out of reach between its parts and then gives it
@@ -109,14 +111,31 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private const int UnbeatableHealth = 9999;
 
     /// <summary>
-    /// The bosses whose title the room shows instead of the boss itself, by the name of their object. One tells an
-    /// object of its room to fade in a title of its own making, with no title action anywhere, and was taken for a
-    /// common creature (USER 11-07 "…被血条显示那部分当成小怪了"): of the bosses of the game's 36 boss rooms, the only one
-    /// that neither shows a title itself nor was in this list (FsmScan --params DisplayBossTitle, 11-07).
+    /// The bosses whose title the room shows instead of the boss itself, by the name of their object. Two tell an
+    /// object of their room to fade in a title of its own making, with no title action anywhere (see
+    /// <see cref="TitleUpEvent"/>), and were taken for common creatures (USER 11-07 "…被血条显示那部分当成小怪了"): of the
+    /// bosses of the game's boss rooms, the only ones that show no title themselves (FsmScan, 11-07 and 11-09).
     /// </summary>
     private static readonly HashSet<string> RoomTitledBosses = new(StringComparer.Ordinal) {
-        "Phantom", "Giant Centipede Head", "Conductor Boss", "Bone Beast", "Flower Queen Boss", "Silk Boss"
+        "Phantom", "Giant Centipede Head", "Conductor Boss", "Bone Beast", "Flower Queen Boss", "Silk Boss",
+        "Lost Lace Boss"
     };
+
+    /// <summary>
+    /// The event with which two bosses tell the title of their room's own making to show itself (see
+    /// <see cref="RoomTitledBosses"/>): no other FSM sends or takes it (BundleGrep, 11-09).
+    /// </summary>
+    private const string TitleUpEvent = "TITLE UP";
+
+    /// <summary>
+    /// Whether the fight of a boss started in the room, in this game: the room started it - an arena that counts as a
+    /// boss (ArenaCoop) - or showed the name of a boss (see <see cref="NoteFightStarted"/>). A boss's bar shows only
+    /// from then on, or from the first blow that landed on it, for a player who came in after its name was shown or a
+    /// way into a fight that shows none: it showed as the room was entered, before anyone fought (USER 11-09 "boss场地
+    /// 就不应该还没开战就显示血条", "开战为什么不能是房间说开战的时候（"). Of the boss rooms, 9 are arenas that start their
+    /// fight, each showing the boss's name after; nearly all others show it as their fight starts (census 11-09).
+    /// </summary>
+    private static bool _fightStarted;
 
     /// <summary>
     /// The colour of what is left of the health: the white of silk.
@@ -195,6 +214,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private Hook? _recordKillHook, _recordKillV2Hook;
 
     /// <summary>
+    /// The hooks with which the name of a boss is shown: the title action, and the event of a title of the room's own
+    /// making (see <see cref="TitleUpEvent"/>).
+    /// </summary>
+    private Hook? _bossTitleHook, _titleUpHook;
+
+    /// <summary>
     /// The creatures of the scene that a blow of a player landed on, as this game knows of it: a blow of its own
     /// player, and one of another player's that the game that runs the creature took (HealthManagerComponent
     /// .DamageLanded). Where a boss starts is settled by the first (see <see cref="Bar"/>).
@@ -241,6 +266,46 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 NoteKillRecorded(self.Fsm);
             })
         );
+
+        // The name of a boss shown by an FSM of the boss, which the copy of it plays too, or of its room
+        _bossTitleHook = new Hook(
+            typeof(HutongGames.PlayMaker.Actions.DisplayBossTitle).GetMethod(
+                nameof(HutongGames.PlayMaker.Actions.DisplayBossTitle.OnEnter), flags
+            ),
+            new Action<Action<HutongGames.PlayMaker.Actions.DisplayBossTitle>,
+                HutongGames.PlayMaker.Actions.DisplayBossTitle>((orig, self) => {
+                orig(self);
+                NoteFightStarted($"'{self.Fsm.Name}' of '{self.Fsm.GameObjectName}' shows the name of a boss");
+            })
+        );
+        _titleUpHook = new Hook(
+            typeof(HutongGames.PlayMaker.Fsm).GetMethod(
+                "ProcessEvent", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic, null,
+                [typeof(HutongGames.PlayMaker.FsmEvent), typeof(HutongGames.PlayMaker.FsmEventData)], null
+            )!,
+            new Action<Action<HutongGames.PlayMaker.Fsm, HutongGames.PlayMaker.FsmEvent?,
+                    HutongGames.PlayMaker.FsmEventData?>, HutongGames.PlayMaker.Fsm, HutongGames.PlayMaker.FsmEvent?,
+                HutongGames.PlayMaker.FsmEventData?>((orig, self, fsmEvent, data) => {
+                if (fsmEvent != null && fsmEvent.Name == TitleUpEvent) {
+                    NoteFightStarted($"'{self.Name}' of '{self.GameObjectName}' is told to show the name of a boss");
+                }
+
+                orig(self, fsmEvent, data);
+            })
+        );
+    }
+
+    /// <summary>
+    /// Takes it that the fight of a boss started in the room (see <see cref="_fightStarted"/>).
+    /// </summary>
+    /// <param name="what">What started it, for the log.</param>
+    internal static void NoteFightStarted(string what) {
+        if (_fightStarted) {
+            return;
+        }
+
+        _fightStarted = true;
+        Logger.Info($"[Bars] The fight of a boss starts here: {what}");
     }
 
     /// <summary>
@@ -287,6 +352,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         _numberedBosses.Clear();
         _killRecorded.Clear();
         _blowLanded.Clear();
+        _fightStarted = false;
     }
 
     /// <summary>
@@ -553,6 +619,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         private int _healthBeforeUnbeatable = -1;
 
         /// <summary>
+        /// The health that the bar shows: what the creature has, or for a copy what it was told (see
+        /// <see cref="Update"/>).
+        /// </summary>
+        private int _health;
+
+        /// <summary>
         /// The share of the full health that is shown as left.
         /// </summary>
         private float _shownShare = 1f;
@@ -654,7 +726,11 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// <param name="isActive">Whether the game counts the creature as active in this frame.</param>
         /// <param name="blowLanded">Whether a blow of a player landed on the creature, as this game knows.</param>
         public void Update(bool isActive, bool blowLanded) {
-            var health = _healthManager.hp;
+            // A copy's own steps can set its health ahead of what it is told for a moment, and are not shown: the
+            // health is the scene host's to say (USER 11-09 "客机也不应该自己摆弄血条，因为客机那边有个复制体，自己搞太容易搞
+            // 砸了")
+            var health = HealthManagerComponent.ToldHealthOf(_healthManager) ?? _healthManager.hp;
+            _health = health;
             var isAlive = isActive && !_healthManager.isDead && health > 0;
 
             // A creature that comes back, like one of a pool that is used again, starts over
@@ -671,7 +747,8 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 FollowHealth(health, blowLanded);
             }
 
-            IsShown = isAlive && _isHurt && !_isUnbeatable && _fullHealth > 1 && _fullHealth < UnbeatableHealth;
+            IsShown = isAlive && _isHurt && !_isUnbeatable && _fullHealth > 1 && _fullHealth < UnbeatableHealth &&
+                      (!IsBoss || _fightStarted || _isStartSettled);
         }
 
         /// <summary>
@@ -823,7 +900,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 _view.SetActive(true);
             }
 
-            var share = Mathf.Clamp01((float) _healthManager.hp / _fullHealth);
+            var share = Mathf.Clamp01((float) _health / _fullHealth);
             if (share < _shownShare) {
                 // A new hit lingers from where the last one left off
                 _lostShare = Mathf.Max(_lostShare, _shownShare);
