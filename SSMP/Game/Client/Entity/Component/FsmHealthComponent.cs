@@ -10,8 +10,10 @@ namespace SSMP.Game.Client.Entity.Component;
 /// The health of a boss that its FSMs keep instead of a HealthManager, for its bar (Ui.EnemyHealthBars): the one whose
 /// fight is first against the burning parts of its body, each with health of its own, and then against its core, which
 /// opens once they are all broken (census of every boss the user named, 11-10; USER 11-10 "你的血条要能覆盖这些boss",
-/// "一阶段是打几个着火的地方，二阶段才是boss本体好像"). The game that runs the boss reads it from those FSMs and tells the
-/// other games, which show only what they are told (USER 11-09 "客机也不应该自己摆弄血条").
+/// "一阶段是打几个着火的地方，二阶段才是boss本体好像"). Each breaks when its health is gone or after a number of blows,
+/// whichever comes first, and its bar shows what is left by the nearer of the two (see <see cref="LeftOf"/>). The game
+/// that runs the boss reads it from those FSMs and tells the other games, which show only what they are told (USER
+/// 11-09 "客机也不应该自己摆弄血条").
 /// </summary>
 internal class FsmHealthComponent : EntityComponent {
     /// <summary>
@@ -32,6 +34,23 @@ internal class FsmHealthComponent : EntityComponent {
     private const string HealthVariable = "HP";
 
     /// <summary>
+    /// The variable of the blows that a burning part and the core counted.
+    /// </summary>
+    private const string HitsVariable = "Total Times Hit";
+
+    /// <summary>
+    /// The blows that break a burning part whatever health it has left: its FSM breaks it once it counted more than
+    /// one fewer, in its state 'Hit'. It counts each blow it takes at rest, not those as it swings back.
+    /// </summary>
+    private const int PartHits = 12;
+
+    /// <summary>
+    /// The blows that break the core whatever health it has left, as <see cref="PartHits"/>: it counts one a half
+    /// second at most.
+    /// </summary>
+    private const int CoreHits = 30;
+
+    /// <summary>
     /// The state of the core's FSM while the core is closed.
     /// </summary>
     private const string ClosedState = "Init";
@@ -47,9 +66,9 @@ internal class FsmHealthComponent : EntityComponent {
     private static readonly List<FsmHealthComponent> Components = [];
 
     /// <summary>
-    /// The FSMs of the burning parts of the room's own object of the boss.
+    /// The FSMs of the burning parts of the room's own object of the boss, with the health each has at the start.
     /// </summary>
-    private readonly List<PlayMakerFSM> _parts = [];
+    private readonly List<(PlayMakerFSM Fsm, int Full)> _parts = [];
 
     /// <summary>
     /// The FSM of the core of the room's own object of the boss.
@@ -76,8 +95,9 @@ internal class FsmHealthComponent : EntityComponent {
     ) : base(netClient, entityId, gameObject) {
         foreach (var fsm in gameObject.Host.GetComponentsInChildren<PlayMakerFSM>(true)) {
             if (fsm.FsmName == PartFsmName) {
-                _parts.Add(fsm);
-                PartsFull += fsm.FsmVariables.GetFsmInt(HealthVariable).Value;
+                var full = fsm.FsmVariables.GetFsmInt(HealthVariable).Value;
+                _parts.Add((fsm, full));
+                PartsFull += full;
             } else if (fsm.FsmName == CoreFsmName && fsm.gameObject == gameObject.Host) {
                 _core = fsm;
                 CoreFull = fsm.FsmVariables.GetFsmInt(HealthVariable).Value;
@@ -124,8 +144,8 @@ internal class FsmHealthComponent : EntityComponent {
     public int Full => CoreOpen ? CoreFull : PartsFull;
 
     /// <summary>
-    /// The health: of the burning parts together, or of the core once it is open; -1 before the game that runs the
-    /// boss told any.
+    /// What is left: of the burning parts together, or of the core once it is open (see <see cref="LeftOf"/>); -1
+    /// before the game that runs the boss told any.
     /// </summary>
     public int Health { get; private set; } = -1;
 
@@ -154,11 +174,11 @@ internal class FsmHealthComponent : EntityComponent {
         var coreOpen = !string.IsNullOrEmpty(coreState) && coreState != ClosedState;
         var health = 0;
         if (!coreOpen) {
-            foreach (var part in _parts) {
-                health += Mathf.Max(part.FsmVariables.GetFsmInt(HealthVariable).Value, 0);
+            foreach (var (part, full) in _parts) {
+                health += LeftOf(part, full, PartHits);
             }
         } else if (coreState != BrokenState) {
-            health = Mathf.Max(_core!.FsmVariables.GetFsmInt(HealthVariable).Value, 0);
+            health = LeftOf(_core!, CoreFull, CoreHits);
         }
 
         Health = health;
@@ -171,10 +191,25 @@ internal class FsmHealthComponent : EntityComponent {
         _toldHealth = health;
         _toldCoreOpen = coreOpen;
         Logger.Info(
-            $"[Health] '{GameObject.Host.name}' has {health} health in its " +
-            (coreOpen ? "core" : $"burning parts, of {PartsFull}") + ", as its FSMs keep it"
+            $"[Health] '{GameObject.Host.name}' has {health} left in its " +
+            (coreOpen ? "core" : $"burning parts, of {PartsFull}") + ", by the health and blows its FSMs keep"
         );
         SendData(Write());
+    }
+
+    /// <summary>
+    /// What is left of a burning part or the core: its health, or less when the blows it counted are nearer to
+    /// breaking it, as the same share of its full health, so that the bar is empty as it breaks. A needle of 5
+    /// damage breaks a burning part at its 12th blow with near half its health left (USER 11-10 "是次数盾吗").
+    /// </summary>
+    /// <param name="fsm">The FSM of the burning part or of the core.</param>
+    /// <param name="full">Its health at the start.</param>
+    /// <param name="hits">The blows that break it.</param>
+    private static int LeftOf(PlayMakerFSM fsm, int full, int hits) {
+        var variables = fsm.FsmVariables;
+        var health = Mathf.Max(variables.GetFsmInt(HealthVariable).Value, 0);
+        var hitsLeft = Mathf.Max(hits - variables.GetFsmInt(HitsVariable).Value, 0);
+        return Mathf.Min(health, full * hitsLeft / hits);
     }
 
     /// <summary>
