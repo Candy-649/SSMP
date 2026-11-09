@@ -2634,14 +2634,9 @@ internal partial class Entity {
             return;
         }
 
-        // For a catch of the partner's, that their game leads or led, and not of this game's own player
-        var caught = self.activate.Value ? CaughtIn(self.Fsm, self.State) : ThrownThings.NoPlayer;
-        var forAnother = caught != ThrownThings.NoPlayer && caught != ThrownThings.ThrowersPlayer;
-        var kept = target != null
-            ? EntityFsmActions.BeforeSwitchingOn(
-                target, self.Fsm.GameObject, forAnother, forAnother ? FigureOf?.Invoke(caught) : null
-            )
-            : null;
+        // For a catch of another player, which this game's player is kept out of
+        var forAnother = self.activate.Value && CatchOf(self.Fsm, self.State) == CatchKind.Another;
+        var kept = target != null ? EntityFsmActions.BeforeSwitchingOn(target, self.Fsm.GameObject, forAnother) : null;
         orig(self);
         if (kept != null) {
             EntityFsmActions.AfterSwitchingOn(target!, kept);
@@ -4115,8 +4110,9 @@ internal partial class Entity {
     /// <param name="sender">The FSM of the part.</param>
     /// <param name="fsmName">The name of the FSM that the part told, or null for all of them.</param>
     /// <param name="eventName">The event with which the part told the copy.</param>
-    /// <param name="grabbedThePlayer">Whether the part grabbed the player themselves, rather than being one that names
-    /// its catch or having caught a thing of theirs.</param>
+    /// <param name="grabbedThePlayer">Whether the part caught the player themselves - grabbed them, or caught them for
+    /// the creature as a part of the room does (see HearRoomPartCatchOnCopy) - rather than being one that names its
+    /// catch or having caught a thing of theirs: what the copy can't play of it goes nowhere.</param>
     /// <returns>Whether any FSM of the copy took the event.</returns>
     private bool OnCopyCaught(HutongGames.PlayMaker.Fsm sender, string? fsmName, string eventName, bool grabbedThePlayer) {
         if (!_isControlled || Object.Client == null) {

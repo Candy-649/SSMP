@@ -78,12 +78,6 @@ internal partial class Entity {
     private const byte NotTaken = byte.MaxValue;
 
     /// <summary>
-    /// The state index in an echo that says the scene host's creature plays the same catch on another player, so that
-    /// the partner's game plays its own player's by itself (see <see cref="TakeInput"/>).
-    /// </summary>
-    private const byte PlaysItsOwn = byte.MaxValue - 1;
-
-    /// <summary>
     /// How far an eased movement has got, in seconds, which the scene host moves on to carry an input on.
     /// </summary>
     private static readonly FieldInfo? EaseRunningTimeField = typeof(EaseFsmAction).GetField(
@@ -315,9 +309,9 @@ internal partial class Entity {
     private bool _runHereEnded;
 
     /// <summary>
-    /// Whether <see cref="_runHere"/> plays a catch of the local player that this game led by itself to its end, as the
-    /// scene host's creature plays the same catch on another player (see <see cref="PlayTheCatchByItself"/>): the
-    /// scene host follows none of it, and it is cut short only if it stops before it is through it.
+    /// Whether <see cref="_runHere"/> plays a catch of the local player by itself to its end, which a part of the room
+    /// told the copy of (see <see cref="PlayTheCatchByItself"/>): the scene host follows none of it, and it is cut
+    /// short only if it stops before it is through it.
     /// </summary>
     private bool _runHereAlone;
 
@@ -1091,22 +1085,20 @@ internal partial class Entity {
             return false;
         }
 
-        // A catch that a part of the room told of by an event about the player is the caught player's own (see
-        // HearRoomPartCatch): one of the partner's that comes while the creature plays the same catch on another
-        // player - this game's, or another partner's that it follows - goes on in the partner's game by itself, and
-        // the creature here goes on with the one it plays. Two players that the strands of one boss caught at once are
-        // each slashed in their own game, rather than the scene host's always first, as its catch takes no way over the
-        // network (USER 11-08 "…房主几乎没有可能先收到队友被抓的消息", "最好还是都被抓就都被刀？"). Only one that the
+        // A catch that a part of the room told of by an event about the player is the caught player's own, which
+        // their game plays on them by itself and says no more of (see HearRoomPartCatchOnCopy). Here the creature plays
+        // it for everyone to see, with this game's player kept out of it, as no catch that their game leads, and none
+        // while it plays one already: each game's own catch of its own player is all that touches them (USER 11-09
+        // "只要有玩家被抓了就演抓人，至于扣不扣血看本机先前的判定", "总之本机自己认吧，没被丝线碰就不扣血"). Only one that the
         // creature hears through a register, as it hears a part of the room: a part of its own that grabs the player
         // tells it directly, and a creature that holds this game's player that way does not take the partner (below)
-        if (start.Path is { Length: > 0 } && EntityFsmActions.IsPlayerEvent(eventName) &&
-            HearsByRegister(Object.Host, eventName) && EntityFsmActions.StatesOnlyThrough(fsm, into).Contains(state) &&
-            (_leads.Find(led => led.Fsm == fsm) is not { } current || current.LeaderId != leaderId)) {
+        var byTheRoom = EntityFsmActions.IsPlayerEvent(eventName) && HearsByRegister(Object.Host, eventName);
+        if (byTheRoom && EntityFsmActions.StatesOnlyThrough(fsm, into).Contains(state)) {
             Logger.Info(
-                $"The '{fsm.Name}' of entity {Id} plays '{eventName}' on another player in '{state.Name}', so the " +
-                "partner's game plays theirs by itself"
+                $"The '{fsm.Name}' of entity {Id} plays '{eventName}' already in '{state.Name}', so it plays none " +
+                "for the partner"
             );
-            SendEcho(start.Tag, start.Anticipation, fsmIndex, PlaysItsOwn);
+            SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
             return false;
         }
 
@@ -1150,7 +1142,7 @@ internal partial class Entity {
         // A catch that the partner's game leads goes the way it went there, and on as it says (TakeCatchState)
         Lead? lead = null;
         var path = start.Path;
-        if (path is { Length: > 0 }) {
+        if (path is { Length: > 0 } && !byTheRoom) {
             lead = new Lead(this, hostFsm, fsmIndex, start.Anticipation, EntityFsmActions.StatesOnlyThrough(fsm, into),
                 state) {
                 Allowed = into,
@@ -1259,12 +1251,6 @@ internal partial class Entity {
             return;
         }
 
-        // The scene host's creature plays the same catch on another player (TakeInput)
-        if (stateIndex == PlaysItsOwn && fsmIndex == _runHereIndex && _runHereLed && _aftermath == null) {
-            PlayTheCatchByItself();
-            return;
-        }
-
         var fsm = _runHere!.Fsm;
         var states = fsm.States;
         if (fsmIndex != _runHereIndex || stateIndex >= states.Length || states[stateIndex].Name != _runHereReached) {
@@ -1321,14 +1307,15 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Plays the catch of the local player that this game leads on here by itself to its end, as the scene host's
-    /// creature plays the same catch on another player (see <see cref="TakeInput"/>): the way what follows a catch is
-    /// played (see <see cref="_aftermath"/>), nothing more of it said to the scene host, and what the scene host sends
-    /// of those states not played here, until the copy has gone through them and follows the scene host again. What
-    /// the scene host sent while the copy waited for its answer is of its own catch, and is dropped. It may take as
-    /// long as a catch that the scene host follows (see <see cref="LeadTimeout"/>), not only as long as what follows a
-    /// catch: the slashes of the strands take some 4 s of the game's time, and a moment the game stood still, at a blow
-    /// or for the network, would have stopped them in the middle.
+    /// Plays the catch of the local player that a part of the room told the copy of on here by itself to its end, from
+    /// where the copy took it at once (see <see cref="HearRoomPartCatchOnCopy"/>): the way what follows a catch is
+    /// played (see <see cref="_aftermath"/>), nothing more of it said to the scene host, which plays it for everyone to
+    /// see with its own player kept out of it (see <see cref="TakeInput"/>), and what the scene host sends of those
+    /// states not played here, until the copy has gone through them and follows the scene host again. Its answer to
+    /// the input is not waited for. It may take as long as a catch that the scene host follows (see
+    /// <see cref="LeadTimeout"/>), not only as long as what follows a catch: the slashes of the strands take some 4 s
+    /// of the game's time, and a moment the game stood still, at a blow or for the network, would have stopped them in
+    /// the middle.
     /// </summary>
     private void PlayTheCatchByItself() {
         _runHereAwaited = 0;
@@ -1341,8 +1328,8 @@ internal partial class Entity {
         _aftermathExpiry = Time.unscaledTime + LeadTimeout;
         _runHereAlone = true;
         Logger.Info(
-            $"The scene host's creature of entity {Id} plays the same catch on another player, so its copy plays the " +
-            "local player's here by itself to its end"
+            $"The copy of entity {Id} plays the catch of the local player here by itself to its end, and the scene " +
+            "host is only told of it"
         );
     }
 
@@ -2602,6 +2589,9 @@ internal partial class Entity {
         var fsm = hostFsm.Fsm;
         var muted = EntityFsmActions.PlayersOwnActionsOf(fsm);
 
+        // A catch of this game's player that it played before is over: what it plays from here is the partner's
+        _ownCatches.Remove(fsm);
+
         // In a catch that the partner's game leads, what the creature puts at the player it caught goes to the
         // partner's figure, and what it takes of where they are is taken from there: the stand-in of them that it
         // carries was left where it was last, far from them, or slid off to the height of this game's player. It is
@@ -3652,9 +3642,6 @@ internal partial class Entity {
         HookSwitchState();
         _leads.Add(lead);
         LedFsms[lead.Fsm] = lead;
-
-        // A catch of this game's player that it played before is over: what it plays from here is the partner's
-        _ownCatches.Remove(lead.Fsm);
     }
 
     /// <summary>
@@ -3715,7 +3702,7 @@ internal partial class Entity {
     /// player it has nobody to hold for. It goes through each state on the way, so that what they do for the creature
     /// itself is done: taken straight out, a creature went on holding its catch, and when it died later, it let go of
     /// this game's player, with a last bite. What they do to this game's player is kept off (see
-    /// <see cref="PlayForPartner"/>), as is what they switch on of the room for the catch (see <see cref="CaughtIn"/>),
+    /// <see cref="PlayForPartner"/>), as is what they switch on of the room for the catch (see <see cref="CatchOf"/>),
     /// and so is what the creature does to "the player" beyond the way, when it leads
     /// into a state that a global transition leads to: one whose catch always ends in its death dies of it (see
     /// <see cref="KeepOffForTheAftermath"/>).

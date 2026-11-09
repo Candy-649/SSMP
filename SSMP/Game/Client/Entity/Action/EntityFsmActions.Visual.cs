@@ -374,29 +374,26 @@ internal static partial class EntityFsmActions {
 
     #region ActivateGameObject
 
-    /// <summary>Builds network data from the FSM action: the player whose catch the creature switches the object on
-    /// for, if any (see Entity.CaughtIn, <see cref="BeforeSwitchingOn"/>).</summary>
+    /// <summary>Builds network data from the FSM action: whether the creature switches the object on for a catch, of
+    /// whomever (see Entity.CatchOf, <see cref="BeforeSwitchingOn"/>).</summary>
     private static bool GetNetworkDataFromAction(EntityNetworkData data, ActivateGameObject action) {
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
         if (gameObject == null || IsObjectInRegistry(gameObject)) {
             return false;
         }
 
-        // Whether it is for a catch, and only then whose: nearly every switch is for none
-        var caught = action.activate.Value ? Entity.CaughtIn(action.Fsm, action.State) : ThrownThings.NoPlayer;
-        data.Packet.Write(caught != ThrownThings.NoPlayer);
-        if (caught != ThrownThings.NoPlayer) {
-            data.Packet.Write(caught);
-        }
-
+        data.Packet.Write(
+            action.activate.Value && Entity.CatchOf(action.Fsm, action.State) != Entity.CatchKind.None
+        );
         return true;
     }
 
-    /// <summary>Applies network data to the FSM action. What it switches on for a catch of another player than the
-    /// local one keeps off the local player (see <see cref="BeforeSwitchingOn"/>). The replay that sets up a
-    /// creature's first states has no data, and no catch.</summary>
+    /// <summary>Applies network data to the FSM action. What it switches on for a catch keeps off the local player
+    /// (see <see cref="BeforeSwitchingOn"/>): a catch of theirs the copy plays by itself, and plays none of what the
+    /// scene host sends of it (Entity.PlayTheCatchByItself). The replay that sets up a creature's first states has no
+    /// data, and no catch.</summary>
     private static void ApplyNetworkDataFromAction(EntityNetworkData? data, ActivateGameObject action) {
-        var caught = data != null && data.Packet.ReadBool() ? data.Packet.ReadUShort() : ThrownThings.NoPlayer;
+        var forACatch = data != null && data.Packet.ReadBool();
 
         // An object held in a variable has already been named by the scene host (see ReadSubject)
         var gameObject = action.Fsm.GetOwnerDefaultTarget(action.gameObject);
@@ -418,11 +415,7 @@ internal static partial class EntityFsmActions {
             SayOnAlready(action, gameObject);
         }
 
-        // For a catch of the scene host's player or of another partner's, and not of the local player's own
-        var figure = caught != ThrownThings.NoPlayer ? ThrownThings.FigureOf?.Invoke(caught, data!.SenderId) : null;
-        var hero = HeroController.SilentInstance;
-        var forAnother = activate && caught != ThrownThings.NoPlayer && (hero == null || figure != hero.gameObject);
-        var kept = BeforeSwitchingOn(gameObject, action.Fsm.GameObject, forAnother, figure);
+        var kept = BeforeSwitchingOn(gameObject, action.Fsm.GameObject, activate && forACatch);
         if (recursive) {
             SetActiveRecursively(gameObject, activate);
         } else {

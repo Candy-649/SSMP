@@ -2910,7 +2910,7 @@ internal partial class CoopHits {
     ) {
         PlayOrSend(
             copied, fsmIndex, eventName,
-            caught == null ? "touched" : grabbedThePlayer ? "was grabbed by" : "had something caught by", caught,
+            caught == null ? "touched" : grabbedThePlayer ? "was caught by" : "had something caught by", caught,
             grabbedThePlayer
         );
     }

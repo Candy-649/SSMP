@@ -29,8 +29,9 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// listens for, like a taunt that wakes a resting boss - but not before every player is in its room (see
 /// Entity.HearOwnSign). What a sign moves of the room's own objects goes the same way in every game (see
 /// <see cref="WalkOwnSign"/>). And a part of the room that caught the local player and tells the creature so, as the
-/// strands of one boss do, is heard by the creature's copy as a catch that this game leads (see
-/// Entity.HearRoomPartCatch).
+/// strands of one boss do, has the creature's copy play the catch on them here by itself (see
+/// Entity.HearRoomPartCatch); only the local player's own body sets such a part off (see
+/// <see cref="OnRoomPartTouched"/>).
 /// </summary>
 internal partial class CoopHits {
     /// <summary>
@@ -59,6 +60,26 @@ internal partial class CoopHits {
             typeof(Fsm).GetMethod("ProcessEvent", InstanceFlags, null, [typeof(FsmEvent), typeof(FsmEventData)], null),
             new Action<Action<Fsm, FsmEvent, FsmEventData>, Fsm, FsmEvent, FsmEventData>(OnProcessEventInSignWalk)
         );
+        foreach (var touch in new[] { "TriggerEnter2D", "TriggerStay2D" }) {
+            AddHook(
+                typeof(Trigger2dEvent).GetMethod(touch, InstanceFlags, null, [typeof(Collider2D)], null),
+                new Action<Action<Trigger2dEvent, Collider2D>, Trigger2dEvent, Collider2D>(OnRoomPartTouched)
+            );
+        }
+    }
+
+    /// <summary>
+    /// Something came into what an FSM watches with a trigger: a part of the room that catches the player is set off
+    /// only by the local player's own body (see <see cref="Entity.Entity.SetsOffRoomPartCatch"/>).
+    /// </summary>
+    private static void OnRoomPartTouched(
+        Action<Trigger2dEvent, Collider2D> orig,
+        Trigger2dEvent self,
+        Collider2D other
+    ) {
+        if (Entity.Entity.SetsOffRoomPartCatch(self, other)) {
+            orig(self, other);
+        }
     }
 
     /// <summary>

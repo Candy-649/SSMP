@@ -1,5 +1,4 @@
 using System.Collections.Generic;
-using System.Reflection;
 using HutongGames.PlayMaker;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -10,13 +9,14 @@ namespace SSMP.Game.Client.Entity.Action;
 /// What a creature switches on of the room for a catch of a player is that player's. The slashes that one boss plays
 /// on the player its strands caught hurt "the player" as they start, with no touch: in the other game, where the copy
 /// of the boss switched them on too, that was the player there, who was not caught (USER 11-08 "每次我被抓她都被抓了",
-/// "…然后扣三血"). Switched on for a catch of another player - in the game that runs the creature, one that the
-/// partner's game leads or led (Entity.CaughtIn); in the others, one of the scene host's player or of another, as the
-/// scene host says with the switch (see the replay of ActivateGameObject) - what the FSMs of the object do to this
-/// game's player is kept off them, and what turns its things the way the player faces turns them the way the caught
-/// player does (see <see cref="PointAtFigure"/>), until the object is switched on again or off; all of it is kept off
-/// for a player who has no figure here, as one who left. Not a part of the creature itself, which is its body and
-/// strikes whoever it touches, nor another creature.
+/// "…然后扣三血"). Switched on for a catch of another player - in the game that runs the creature, one that it plays
+/// for a partner (Entity.CatchOf); in the others, any catch, as the scene host says with the switch (see the replay of
+/// ActivateGameObject), since a game whose own player was caught plays the catch by itself - what the FSMs of the
+/// object do to this game's player is kept off them until the object is switched on again or off. Who was caught is
+/// not asked: each game's own catch of its own player is all that touches them, and a catch that came to the scene
+/// host by some other way hurt both players with these slashes (USER 11-09 "我们两个都有一次被丝母抓人打掉2血",
+/// "总之本机自己认吧，没被丝线碰就不扣血"). Not a part of the creature itself, which is its body and strikes whoever it
+/// touches, nor another creature.
 /// </summary>
 internal static partial class EntityFsmActions {
     /// <summary>
@@ -34,15 +34,9 @@ internal static partial class EntityFsmActions {
     /// <param name="switcher">The object of the FSM that switches it.</param>
     /// <param name="forAnother">Whether the creature switches the object on for a catch of another player than the
     /// local one.</param>
-    /// <param name="figure">The figure of that player here, or null if they have none.</param>
     /// <returns>What is kept off, to go on with once the object is switched on (see <see cref="AfterSwitchingOn"/>),
     /// or null for nothing.</returns>
-    internal static KeptForTheCaught? BeforeSwitchingOn(
-        GameObject target,
-        GameObject? switcher,
-        bool forAnother,
-        GameObject? figure
-    ) {
+    internal static KeptForTheCaught? BeforeSwitchingOn(GameObject target, GameObject? switcher, bool forAnother) {
         if (KeptOffForTheCaught.Count > 0 && KeptOffForTheCaught.Remove(target, out var earlier)) {
             earlier.LetBackIn();
         }
@@ -52,7 +46,7 @@ internal static partial class EntityFsmActions {
             return null;
         }
 
-        var kept = new KeptForTheCaught(figure);
+        var kept = new KeptForTheCaught();
         foreach (var machine in target.GetComponentsInChildren<PlayMakerFSM>(true)) {
             if (machine.Fsm.Started) {
                 kept.KeepOff(machine);
@@ -82,9 +76,8 @@ internal static partial class EntityFsmActions {
 
         KeptOffForTheCaught[target] = kept;
         Logger.Info(
-            $"'{target.name}' is switched on for a catch of " +
-            (kept.Caught != null ? $"'{kept.Caught.name}'" : "a player with no figure here") +
-            $", so {kept.Count} action(s) of its FSMs keep off the local player until it is switched again"
+            $"'{target.name}' is switched on for a catch of another player, so {kept.Count} action(s) of its FSMs " +
+            "keep off the local player until it is switched again"
         );
     }
 
@@ -98,18 +91,11 @@ internal static partial class EntityFsmActions {
     /// <summary>
     /// What is kept off this game's player in the FSMs of an object switched on for a catch of another player.
     /// </summary>
-    /// <param name="caught">The figure of the player caught, or null if they have none here.</param>
-    internal sealed class KeptForTheCaught(GameObject? caught) {
+    internal sealed class KeptForTheCaught {
         /// <summary>
-        /// The actions, each with the field that named the player and what it held, for one pointed at the figure
-        /// rather than switched off.
+        /// The actions, switched off.
         /// </summary>
-        private readonly List<(FsmStateAction Action, FieldInfo? Field, object? Before)> _actions = [];
-
-        /// <summary>
-        /// The figure of the player caught, or null if they have none here.
-        /// </summary>
-        public GameObject? Caught { get; } = caught;
+        private readonly List<FsmStateAction> _actions = [];
 
         /// <summary>
         /// How many actions are kept off.
@@ -117,18 +103,12 @@ internal static partial class EntityFsmActions {
         public int Count => _actions.Count;
 
         /// <summary>
-        /// Keeps off this game's player what an FSM does to them (see <see cref="IsThePlayersOwn"/>), pointing at the
-        /// figure of the player caught what it turns or puts at the player, if they have one here.
+        /// Keeps off this game's player what an FSM does to them (see <see cref="IsThePlayersOwn"/>).
         /// </summary>
         public void KeepOff(PlayMakerFSM machine) {
             foreach (var action in PlayersOwnActionsOf(machine.Fsm)) {
-                if (Caught != null && PointAtFigure(action, Caught) is { } pointed) {
-                    _actions.Add((action, pointed.Field, pointed.Before));
-                    continue;
-                }
-
                 action.Enabled = false;
-                _actions.Add((action, null, null));
+                _actions.Add(action);
             }
         }
 
@@ -136,12 +116,8 @@ internal static partial class EntityFsmActions {
         /// Lets back in what was kept off.
         /// </summary>
         public void LetBackIn() {
-            foreach (var (action, field, before) in _actions) {
-                if (field != null) {
-                    PointBack(action, field, before);
-                } else {
-                    action.Enabled = true;
-                }
+            foreach (var action in _actions) {
+                action.Enabled = true;
             }
         }
     }
