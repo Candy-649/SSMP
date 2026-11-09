@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using GlobalEnums;
 using MonoMod.RuntimeDetour;
+using SSMP.Game.Client.Entity.Component;
 using SSMP.Game.Settings;
 using SSMP.Util;
 using UnityEngine;
@@ -21,8 +22,9 @@ namespace SSMP.Ui;
 /// just took lingers for a moment before it drains away, so that a hit can be seen even when both players land them.
 /// The health of a creature is where its own game keeps it, which in co-op is the scene host's health of it.
 ///
-/// A boss is full at the health its room gives it as the room starts, and a fight that puts its boss out of reach
-/// between its parts and then gives it health for the next part starts that part full.
+/// A boss is full at the health it has as the first blow of a player lands on it, which its room can set below what it
+/// was made with as its fight starts, and a fight that puts its boss out of reach between its parts and then gives it
+/// health for the next part starts that part full.
 ///
 /// A player can switch them off on the settings page of the multiplayer menu (ModSettings.ShowEnemyHealthBars). While
 /// off, no bar is drawn and none follows its creature; switched on again, they take up the health creatures have then.
@@ -105,17 +107,6 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     /// fight. Their bars would never move.
     /// </summary>
     private const int UnbeatableHealth = 9999;
-
-    /// <summary>
-    /// How long, in seconds, the full health of a boss is whatever the boss has after its bar starts following it,
-    /// unless this game's own player hits it sooner.
-    ///
-    /// A room can give its boss the health of the first part of its fight as the room starts, below what the boss was
-    /// made with, and that is where the boss starts rather than a hit. Taken for a hit, the bars of two bosses that are
-    /// given 190 of the 300 they are made with showed, part empty, as soon as their room was entered. The moment
-    /// covers the health of the scene host's room reaching the other game, and a room that sets it a frame late.
-    /// </summary>
-    private const float BossStartSettleTime = 1f;
 
     /// <summary>
     /// The bosses whose title the room shows instead of the boss itself, by the name of their object. One tells an
@@ -204,6 +195,13 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private Hook? _recordKillHook, _recordKillV2Hook;
 
     /// <summary>
+    /// The creatures of the scene that a blow of a player landed on, as this game knows of it: a blow of its own
+    /// player, and one of another player's that the game that runs the creature took (HealthManagerComponent
+    /// .DamageLanded). Where a boss starts is settled by the first (see <see cref="Bar"/>).
+    /// </summary>
+    private readonly HashSet<HealthManager> _blowLanded = [];
+
+    /// <summary>
     /// Creates the canvas of the bars and starts drawing them.
     /// </summary>
     public void Start() {
@@ -226,6 +224,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         // Placed after the camera moved and before the canvases are drawn, so that the bars don't trail the creatures
         Canvas.preWillRenderCanvases += OnPreWillRenderCanvases;
         SceneManager.activeSceneChanged += OnActiveSceneChanged;
+        HealthManagerComponent.DamageLanded += (healthManager, _) => _blowLanded.Add(healthManager);
 
         const BindingFlags flags = BindingFlags.Instance | BindingFlags.Public;
         _recordKillHook = new Hook(
@@ -287,6 +286,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         _bossBars.Clear();
         _numberedBosses.Clear();
         _killRecorded.Clear();
+        _blowLanded.Clear();
     }
 
     /// <summary>
@@ -337,7 +337,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             }
 
             var isActive = bar.SeenFrame == Time.frameCount;
-            bar.Update(isActive);
+            bar.Update(isActive, _blowLanded.Contains(healthManager) || healthManager.HasTakenDamage());
             if (!bar.IsShown || _killRecorded.Contains(healthManager)) {
                 bar.Hide();
                 bossBarsChanged |= _bossBars.Remove(bar);
@@ -531,13 +531,8 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         private int _fullHealth = initialHealth;
 
         /// <summary>
-        /// Until when, in unscaled seconds, the full health of a boss is whatever the boss has (see
-        /// <see cref="BossStartSettleTime"/>).
-        /// </summary>
-        private readonly float _startSettledAt = Time.unscaledTime + BossStartSettleTime;
-
-        /// <summary>
-        /// Whether where a boss starts is settled, after which its full health no longer follows what it has.
+        /// Whether where a boss starts is settled, by the first blow that landed on it, after which its full health no
+        /// longer follows what it has (see <see cref="FollowHealth"/>).
         /// </summary>
         private bool _isStartSettled;
 
@@ -657,7 +652,8 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// Follows the health of the creature.
         /// </summary>
         /// <param name="isActive">Whether the game counts the creature as active in this frame.</param>
-        public void Update(bool isActive) {
+        /// <param name="blowLanded">Whether a blow of a player landed on the creature, as this game knows.</param>
+        public void Update(bool isActive, bool blowLanded) {
             var health = _healthManager.hp;
             var isAlive = isActive && !_healthManager.isDead && health > 0;
 
@@ -672,7 +668,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             }
 
             if (isAlive) {
-                FollowHealth(health);
+                FollowHealth(health, blowLanded);
             }
 
             IsShown = isAlive && _isHurt && !_isUnbeatable && _fullHealth > 1 && _fullHealth < UnbeatableHealth;
@@ -682,7 +678,8 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// Follows the health of a creature that is alive.
         /// </summary>
         /// <param name="health">The health that the creature has.</param>
-        private void FollowHealth(int health) {
+        /// <param name="blowLanded">Whether a blow of a player landed on the creature, as this game knows.</param>
+        private void FollowHealth(int health, bool blowLanded) {
             // Given a health that it can't be beaten from for a while: a fight puts its boss out of reach between its
             // parts, and a creature that swallowed something it has to spit out can't be hurt until it does. That is
             // no health of the creature's own, so it is never taken for its full health, and the bar is away
@@ -738,14 +735,23 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 }
             }
 
-            // Where a boss starts, which its room can set lower than what the boss was made with as the room starts.
-            // Settled at the first hit of this game's own player, so that the hit is not taken for the start; a hit of
-            // the partner's in that moment arrives as health alone and still is
+            // Where a boss starts, which its room can set lower than what the boss was made with as its fight starts:
+            // its full health is what it has until the first blow of a player lands on it, and a bar made after that
+            // starts from what it has then. Taken for a hit, the bars of two bosses that are given 190 of the 300 they
+            // are made with showed, part empty, as soon as their room was entered. A second after the bar was made
+            // used to settle it instead, and a boss given 100 of its 1204 later than that showed a sliver before
+            // anyone struck it (USER 11-09 "去掉“推测”，就是拿到1204当成满血了")
             if (IsBoss && !_isStartSettled) {
-                if (Time.unscaledTime < _startSettledAt && !_healthManager.HasTakenDamage()) {
+                if (!blowLanded || _lastHealth < 0) {
                     _fullHealth = health;
-                } else {
+                }
+
+                if (blowLanded) {
                     _isStartSettled = true;
+                    Logger.Info(
+                        $"[Bars] The boss '{_healthManager.name}' starts its fight full at {_fullHealth}, the first " +
+                        $"blow on it leaving {health}"
+                    );
                 }
             }
 

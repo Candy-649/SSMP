@@ -918,8 +918,8 @@ internal class EntityNetworkData : IPoolable {
 internal static class HealthMessage {
     /// <summary>
     /// The health of the creature, told by the game that runs it: the scene-host epoch, the number of the telling in
-    /// it, the health, whether the creature is dead, and for each copy in another game how much of its damage is in
-    /// the health.
+    /// it, the health, whether the creature is dead, for each copy in another game how much of its damage is in the
+    /// health, and whether a step of the creature's own FSM set the health rather than a blow.
     /// </summary>
     public const byte State = 0;
 

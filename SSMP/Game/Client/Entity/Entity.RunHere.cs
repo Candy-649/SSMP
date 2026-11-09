@@ -2577,8 +2577,7 @@ internal partial class Entity {
     /// them drags the player it caught up to the creature and holds them there for the slashes, and played for the
     /// partner, it dragged this game's player there from wherever they were (USER 11-07 "我莫名其妙会被移到别的地方，哪怕没
     /// 有被蕾丝抓住"). Each takes what it is told as it would, so that nothing waits for it in vain, but for what is this
-    /// game's player's own, which stays off while it stands in what the catch took it to (see
-    /// <see cref="WithTheOthersKeptOff"/>).
+    /// game's player's own, which stays off while it stands in what the catch took it to.
     /// </summary>
     /// <param name="hostFsm">The FSM.</param>
     /// <param name="isCatch">Whether it is a catch rather than a strike or a touch.</param>
@@ -2613,41 +2612,13 @@ internal partial class Entity {
             KeepOff(action, pointAt);
         }
 
-        // Whatever the game's code does on the way, what is switched off is never left off for good
-        var from = fsm.ActiveState;
-        try {
-            WithTheOthersKeptOff(hostFsm, pointAt, play, true);
-        } finally {
-            KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm, from) ?? []);
-        }
-    }
-
-    /// <summary>
-    /// Plays something of a catch of the partner's on an FSM of the room's own object with what the object's other FSMs
-    /// do to this game's player kept off them, or pointed at the partner's figure (see <see cref="KeepOff"/>): the catch
-    /// tells them to do their part of it, at its start and at its later steps. Each takes what it is told as it would,
-    /// so that nothing waits for it in vain. At the start, what is the local player's own stays off while it stands in
-    /// what the catch took it to (see <see cref="RestOfTheInput"/>); at a later step, only while it stands in the state
-    /// the step left it in, and what it goes on to do after that, like whom the creature goes after, is as ever. The
-    /// boss whose strands caught the partner places itself by "the player" as it hides for the slashes, a step after
-    /// the start, to show again there: by this game's player, rather than by the partner it slashed (USER 11-08
-    /// "1改一下吧", to have it show again by the player caught, and no more).
-    /// </summary>
-    /// <param name="hostFsm">The FSM that plays the catch.</param>
-    /// <param name="pointAt">The figure of the partner whose catch it is, or null to keep it all off.</param>
-    /// <param name="play">What plays it on the FSM.</param>
-    /// <param name="start">Whether it is the start of the catch, rather than a later step.</param>
-    private void WithTheOthersKeptOff(PlayMakerFSM hostFsm, GameObject? pointAt, System.Action play, bool start) {
         var others = new List<(HutongGames.PlayMaker.Fsm Fsm, FsmState? From, List<FsmStateAction> Muted)>();
         foreach (var other in hostFsm.GetComponents<PlayMakerFSM>()) {
             if (other == hostFsm) {
                 continue;
             }
 
-            // Not what is off already: what the start keeps off for as long as it stands in what it took the FSM to,
-            // the steps that the start takes at once within it, and what the game itself keeps off
-            var otherMuted = EntityFsmActions.PlayersOwnActionsOf(other.Fsm)
-                .FindAll(action => action.Enabled && !_pointedAtPartner.ContainsKey(action));
+            var otherMuted = EntityFsmActions.PlayersOwnActionsOf(other.Fsm);
             if (otherMuted.Count == 0) {
                 continue;
             }
@@ -2659,24 +2630,24 @@ internal partial class Entity {
             others.Add((other.Fsm, other.Fsm.ActiveState, otherMuted));
         }
 
+        // Whatever the game's code does on the way, what is switched off is never left off for good
+        var from = fsm.ActiveState;
         try {
             play();
         } finally {
+            KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm, from) ?? []);
             foreach (var (otherFsm, otherFrom, otherMuted) in others) {
                 // One that was off and that the catch switched on started over from its beginning, which is none of
                 // the catch's doing: its own catches of the local player hold them again at once
-                HashSet<FsmState>? keptIn = otherFrom == null ? null
-                    : start ? RestOfTheInput(otherFsm, otherFrom)
-                    : otherFsm.ActiveState is { } reached && reached != otherFrom ? [reached]
-                    : null;
-                if (keptIn != null) {
+                HashSet<FsmState> keptIn = otherFrom == null ? [] : RestOfTheInput(otherFsm, otherFrom) ?? [];
+                if (keptIn.Count > 0) {
                     Logger.Info(
                         $"What the partner's catch told '{otherFsm.Name}' of '{hostFsm.gameObject.name}' is played " +
                         $"here, but for what it does to the local player, kept off in '{otherFsm.ActiveStateName}'"
                     );
                 }
 
-                KeepOffForWhatIsLeft(otherFsm, otherMuted, keptIn ?? []);
+                KeepOffForWhatIsLeft(otherFsm, otherMuted, keptIn);
             }
         }
     }
@@ -3586,9 +3557,13 @@ internal partial class Entity {
             return;
         }
 
+        // A later step plays as the game plays it, and so does what the creature's other FSMs do to "the player" with
+        // it: pointed at the partner's figure, a boss's slashes and where it showed again went by the figure, which can
+        // stand apart from where the partner is, and the catch was drawn off to one side
+        // (USER 11-09 "抓人动画都在中间放就行", "乱改动画这块儿太容易出错了")
         lead.Allowed = state;
         try {
-            WithTheOthersKeptOff(lead.HostFsm, FigureOf?.Invoke(lead.LeaderId), () => fsm.SetState(stateName), false);
+            fsm.SetState(stateName);
         } finally {
             lead.Allowed = null;
         }
@@ -3845,7 +3820,6 @@ internal partial class Entity {
         FsmState from
     ) {
         public Entity Owner { get; } = owner;
-        public PlayMakerFSM HostFsm { get; } = hostFsm;
         public HutongGames.PlayMaker.Fsm Fsm { get; } = hostFsm.Fsm;
         public byte FsmIndex { get; } = fsmIndex;
         public byte Number { get; } = number;

@@ -1545,6 +1545,24 @@ internal partial class GamePatcher {
     }
 
     /// <summary>
+    /// Forgets whose targeting an object and what is under it keep, once it was put under another parent: it is found
+    /// from where they are now when it is next asked for. A hand that a boss lets go of into the room, with its blades,
+    /// stayed the boss's, and the blades, which go after whom their hand aims at, went after the boss's target in the
+    /// game that runs it and after the local player in the other: the needles of a boss came at the player of the game
+    /// that did not run it alone, wherever the boss was (USER 11-09 "拿个丝针是不是只瞄本机（…就好像从来没有瞄我朋友").
+    /// </summary>
+    /// <param name="moved">The object that was put under another parent.</param>
+    internal static void ForgetTargetOwnersUnder(GameObject moved) {
+        if (TargetOwnerCache.Count == 0) {
+            return;
+        }
+
+        foreach (var part in moved.GetComponentsInChildren<Transform>(true)) {
+            TargetOwnerCache.Remove(part.gameObject.GetInstanceID());
+        }
+    }
+
+    /// <summary>
     /// Removes cached targeting data for an entity GameObject that is being destroyed.
     /// </summary>
     public static void OnEntityDestroyed(GameObject? obj) {

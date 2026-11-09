@@ -101,11 +101,24 @@ internal static class LetGoParts {
     private static void OnSetParent(Action<SetParent> orig, SetParent self) {
         Note(self.Fsm, self.gameObject, self.parent);
         orig(self);
+        ForgetTargetOwners(self.Fsm, self.gameObject);
     }
 
     private static void OnSetTransformParent(Action<SetTransformParent> orig, SetTransformParent self) {
         Note(self.Fsm, self.gameObject, self.parent);
         orig(self);
+        ForgetTargetOwners(self.Fsm, self.gameObject);
+    }
+
+    /// <summary>
+    /// Has whose targeting the object of an action keeps found again from where it is now that it has another parent
+    /// (GamePatcher.ForgetTargetOwnersUnder).
+    /// </summary>
+    private static void ForgetTargetOwners(Fsm? fsm, FsmOwnerDefault? target) {
+        var moved = fsm == null || target == null ? null : fsm.GetOwnerDefaultTarget(target);
+        if (moved != null) {
+            GamePatcher.ForgetTargetOwnersUnder(moved);
+        }
     }
 
     private static void OnGetGrandparent(Action<GetGrandparent> orig, GetGrandparent self) {
@@ -187,6 +200,17 @@ internal static class LetGoParts {
             $"{(itself ? ", which lets go of itself" : "")}; it goes by its place under '{creature.name}', " +
             $"'{place}', from now on"
         );
+
+        // A part that lets go of itself runs by itself in each game, and moves by itself from then on: on a copy, its
+        // bodies get back the kind the game made them as, which the copy's build made still (EntityInitializer
+        // .GiveBackBodyType). Left still, the blades of a boss's hands, which drop by their own weight as the boss
+        // falls stunned, stayed up in the air in the game of the copy, poised to strike (USER 11-09 "…她的针会和她人一起
+        // 落下去，我这里针没有落下去，保持在要出招的样子")
+        if (itself) {
+            foreach (var body in part.GetComponentsInChildren<Rigidbody2D>(true)) {
+                EntityInitializer.GiveBackBodyType(body);
+            }
+        }
     }
 
     /// <summary>

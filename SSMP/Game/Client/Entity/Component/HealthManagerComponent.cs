@@ -7,7 +7,12 @@ using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
 using UnityEngine;
+using AddHP = HutongGames.PlayMaker.Actions.AddHP;
+using FsmOwnerDefault = HutongGames.PlayMaker.FsmOwnerDefault;
+using FsmStateAction = HutongGames.PlayMaker.FsmStateAction;
 using Logger = SSMP.Logging.Logger;
+using SetHP = HutongGames.PlayMaker.Actions.SetHP;
+using SubtractHP = HutongGames.PlayMaker.Actions.SubtractHP;
 
 #pragma warning disable CS0414 // Field is assigned but its value is never used
 
@@ -315,6 +320,20 @@ internal class HealthManagerComponent : EntityComponent {
     private static Hook? _takeDamageHook, _extraDamageHook, _dieDropFlingHook;
 
     /// <summary>
+    /// Hooks on the steps with which a creature's own FSM sets its health (SetHP, AddHP, SubtractHP), as a fight sets
+    /// the health of its boss for each of its parts. Made once, for every creature (see
+    /// <see cref="OnRoomHealthStep"/>).
+    /// </summary>
+    private static Hook? _setHpHook, _addHpHook, _subtractHpHook;
+
+    /// <summary>
+    /// In the game that runs the creature: whether its health was last changed by a step of its own FSM that sets it
+    /// (see <see cref="OnRoomHealthStep"/>), which is told with the health that comes of it, for the copies to know
+    /// that no blow took it (see <see cref="UpdateHealth"/>).
+    /// </summary>
+    private bool _setByRoom;
+
+    /// <summary>
     /// The blows of this game's player on the copy in the current epoch, as far as the game that runs the creature has
     /// not told that it took them in: how far the copy's damage had come before each and after it (see
     /// <see cref="_ownDamage"/>), and what it kills with. They go with the damage, for that game to kill the creature
@@ -523,6 +542,22 @@ internal class HealthManagerComponent : EntityComponent {
         _extraDamageHook = new Hook(extraDamage, HealthManagerOnExtraDamage);
         _dieDropFlingHook = new Hook(dieDropFling, HealthManagerOnDieDropFling);
 
+        const BindingFlags stepFlags = BindingFlags.Instance | BindingFlags.Public;
+        _setHpHook = new Hook(
+            typeof(SetHP).GetMethod(nameof(SetHP.OnEnter), stepFlags)!,
+            new Action<Action<SetHP>, SetHP>((orig, self) => OnRoomHealthStep(() => orig(self), self, self.target))
+        );
+        _addHpHook = new Hook(
+            typeof(AddHP).GetMethod(nameof(AddHP.OnEnter), stepFlags)!,
+            new Action<Action<AddHP>, AddHP>((orig, self) => OnRoomHealthStep(() => orig(self), self, self.target))
+        );
+        _subtractHpHook = new Hook(
+            typeof(SubtractHP).GetMethod(nameof(SubtractHP.OnEnter), stepFlags)!,
+            new Action<Action<SubtractHP>, SubtractHP>(
+                (orig, self) => OnRoomHealthStep(() => orig(self), self, self.target)
+            )
+        );
+
         var checkForDamage = typeof(HeroBox).GetMethod(
             "CheckForDamage", HookBindingFlags, Type.DefaultBinder, [typeof(GameObject)], null
         );
@@ -574,6 +609,46 @@ internal class HealthManagerComponent : EntityComponent {
                 $"Could not hook HealthManager.ApplyTagDamage; the tags that the others put on creatures don't show: {e}"
             );
         }
+    }
+
+    /// <summary>
+    /// A step with which a creature's own FSM sets its health (SetHP, AddHP, SubtractHP), as a fight sets the health of
+    /// its boss for a part of it, which is no blow of anyone's. Written to the log with the health before and after.
+    /// - On a copy of a creature that another game runs, it is left to that game, which tells the health that comes of
+    ///   it: the health is that game's to say (D15). Taken here, the drop was counted as a blow of this game's player
+    ///   that the hooks on blows had not seen. The copy of a boss that its room gives 100 of the 1204 it is made with
+    ///   was made with 1204 as the room loaded, before the boss's own first step; switched on as the player walked in,
+    ///   it set itself to 100, and 1104 damage of this player went to the scene host, whose boss had not been set to
+    ///   100 at that moment: its health bar had taken 1204 for full by then and showed a sliver, though nobody had
+    ///   struck anything (USER 11-09 "主要是刚传送过来就会显示血条外加只有一点点血了（", "所以绝对不是打到了").
+    /// - On the creature that this game runs, it is taken, and the health that comes of it is told as set by the room
+    ///   (see <see cref="_setByRoom"/>).
+    /// </summary>
+    /// <param name="orig">The game's own step.</param>
+    /// <param name="step">The action.</param>
+    /// <param name="target">The object whose health it sets.</param>
+    private static void OnRoomHealthStep(System.Action orig, FsmStateAction step, FsmOwnerDefault target) {
+        var owner = step.Fsm.GetOwnerDefaultTarget(target);
+        var healthManager = owner != null ? owner.GetComponent<HealthManager>() : null;
+        if (healthManager == null || !ComponentOf.TryGetValue(healthManager, out var component)) {
+            orig();
+            return;
+        }
+
+        var before = healthManager.hp;
+        var where = $"{step.GetType().Name} in '{step.State?.Name}' of '{step.Fsm.Name}'";
+        if (healthManager == component._healthManager.Client && component.IsControlled) {
+            Logger.Info($"[Health] '{healthManager.name}': {where} is left to the game that runs it, at {before} here");
+            step.Finish();
+            return;
+        }
+
+        orig();
+        if (healthManager == component._healthManager.Host) {
+            component._setByRoom = true;
+        }
+
+        Logger.Info($"[Health] '{healthManager.name}': {where} set its health from {before} to {healthManager.hp}");
     }
 
     /// <summary>
@@ -1620,7 +1695,7 @@ internal class HealthManagerComponent : EntityComponent {
         var hpData = new EntityNetworkData {
             Type = EntityComponentType.Health
         };
-        WriteHealthState(hpData);
+        WriteHealthState(hpData, false);
         data.Add(hpData);
     }
 
@@ -1713,6 +1788,10 @@ internal class HealthManagerComponent : EntityComponent {
                 // the health last told, which shows the blow once that game has taken it in. A blow that would have
                 // left the copy no health is no different: the copy dies when the creature does. The hit itself - its
                 // flash, sound and knockback - was played here at once all the same.
+                Logger.Info(
+                    $"[Health] '{observedHealthManager.name}' went from {_lastHp} to {newHp} with no blow that this " +
+                    $"game saw: {_lastHp - newHp} damage of this player, and it is put back at {_toldHp}"
+                );
                 CountOwnBlows();
                 ApplyHp(_toldHp, triggerHostDeath: false);
             } else {
@@ -1822,6 +1901,7 @@ internal class HealthManagerComponent : EntityComponent {
             Logger.Info(
                 $"The room set the health of '{GameObject.Host?.name}' to {currentHp} before it ran, from {copiedHp}"
             );
+            _setByRoom = true;
             SendHealthState();
         }
     }
@@ -1877,14 +1957,16 @@ internal class HealthManagerComponent : EntityComponent {
 
         var hpData = ObjectPool<EntityNetworkData>.Get();
         hpData.Type = EntityComponentType.Health;
-        WriteHealthState(hpData);
+        WriteHealthState(hpData, _setByRoom);
+        _setByRoom = false;
         SendData(hpData);
     }
 
     /// <summary>
-    /// Writes the health of the creature as a new telling (see <see cref="SendHealthState"/>).
+    /// Writes the health of the creature as a new telling (see <see cref="SendHealthState"/>), with whether a step of
+    /// its own FSM set it rather than a blow (see <see cref="_setByRoom"/>).
     /// </summary>
-    private void WriteHealthState(EntityNetworkData data) {
+    private void WriteHealthState(EntityNetworkData data, bool setByRoom) {
         data.Packet.Write(HealthMessage.State);
         data.Packet.Write(_currentHealthEpoch);
         data.Packet.Write(++_tellNumber);
@@ -1901,6 +1983,8 @@ internal class HealthManagerComponent : EntityComponent {
             data.Packet.Write(copyKey);
             data.Packet.Write(damage);
         }
+
+        data.Packet.Write(setByRoom);
     }
 
     /// <summary>
@@ -2214,6 +2298,8 @@ internal class HealthManagerComponent : EntityComponent {
             }
         }
 
+        var setByRoom = data.Packet.ReadBool();
+
         if (!IsControlled) {
             // The game that runs the creature takes its health from another only as it walks into the room after the
             // other ran it - told in an earlier count of who runs the room, before this game told any of its own - and
@@ -2240,10 +2326,16 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         if (epoch == _currentHealthEpoch && number > _toldNumber) {
-            // Lower than told before, as the game moves on: damage landed there, as the room's state that comes with
-            // walking in is not
+            // Lower than told before, as the game moves on: damage landed there, unless a step of the creature's own
+            // FSM set it, as a fight sets the health of its boss (see OnRoomHealthStep). The room's state that comes
+            // with walking in is neither
             if (!alreadyInSceneUpdate && hp < _toldHp && client != null) {
-                DamageLanded?.Invoke(client, null);
+                if (setByRoom) {
+                    Logger.Info($"[Health] '{client.name}' is told {_toldHp} -> {hp}, which its own steps set there");
+                } else {
+                    Logger.Info($"[Health] '{client.name}' is told {_toldHp} -> {hp}: a blow landed there");
+                    DamageLanded?.Invoke(client, null);
+                }
             }
 
             _toldHp = hp;
@@ -2370,6 +2462,10 @@ internal class HealthManagerComponent : EntityComponent {
             // The health runs out where the copy's damage passes what of it is in the health already and the health
             // left: the blow there kills the creature, unless it kills nothing
             var newHp = HealthAfter(health, taken.damage, damage, blows, out var killingBlow);
+            Logger.Info(
+                $"[Health] '{_healthManager.Host?.name}' takes in {damage - taken.damage} damage of the copy in the " +
+                $"game of player {data.SenderId}: {health} -> {newHp}"
+            );
             ApplyHp(newHp, triggerHostDeath: true, killingBlow, new Killer(KillerKind.Copy, copyKey));
             taken.damage = damage;
             if (_healthManager.Host != null) {
