@@ -18,11 +18,11 @@ namespace SSMP.Ui;
 /// Health bars for creatures that were hurt: a small one above the head of a creature, and a wide one along the bottom
 /// of the screen for a boss. They are drawn for the local player only; nothing about them goes over the network.
 ///
-/// A bar shows from the first hit until the creature dies, at the part of its health that is left; a boss's only once
-/// its fight started (see <see cref="_fightStarted"/>). The part that a hit just took lingers for a moment before it
-/// drains away, so that a hit can be seen even when both players land them. The health of a creature is where its own
-/// game keeps it, which in co-op is the scene host's health of it: the bar of a copy shows what the scene host told of
-/// it (HealthManagerComponent.ToldHealthOf).
+/// A bar shows from the first hit until the creature dies, at the part of its health that is left; a boss's from the
+/// start of its fight on, full until it is hit (see <see cref="_fightStarted"/>). The part that a hit just took
+/// lingers for a moment before it drains away, so that a hit can be seen even when both players land them. The health
+/// of a creature is where its own game keeps it, which in co-op is the scene host's health of it: the bar of a copy
+/// shows what the scene host told of it (HealthManagerComponent.ToldHealthOf).
 ///
 /// A boss is full at the health it has as the first blow of a player lands on it, which its room can set below what it
 /// was made with as its fight starts, and a fight that puts its boss out of reach between its parts and then gives it
@@ -129,11 +129,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
 
     /// <summary>
     /// Whether the fight of a boss started in the room, in this game: the room started it - an arena that counts as a
-    /// boss (ArenaCoop) - or showed the name of a boss (see <see cref="NoteFightStarted"/>). A boss's bar shows only
-    /// from then on, or from the first blow that landed on it, for a player who came in after its name was shown or a
-    /// way into a fight that shows none: it showed as the room was entered, before anyone fought (USER 11-09 "boss场地
-    /// 就不应该还没开战就显示血条", "开战为什么不能是房间说开战的时候（"). Of the boss rooms, 9 are arenas that start their
-    /// fight, each showing the boss's name after; nearly all others show it as their fight starts (census 11-09).
+    /// boss (ArenaCoop) - or showed the name of a boss (see <see cref="NoteFightStarted"/>). A boss's bar shows from
+    /// then on, full until it is hit, or from the first blow that landed on it, for a player who came in after its name
+    /// was shown or a way into a fight that shows none. It showed as the room was entered, before anyone fought, and
+    /// then not until the first blow (USER 11-09 "boss场地就不应该还没开战就显示血条", "开战为什么不能是房间说开战的时
+    /// 候（"). Of the boss rooms, 9 are arenas that start their fight, each showing the boss's name after; nearly all
+    /// others show it as their fight starts (census 11-09).
     /// </summary>
     private static bool _fightStarted;
 
@@ -711,7 +712,8 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         public bool IsBoss { get; } = isBoss;
 
         /// <summary>
-        /// Whether the bar is to be shown: the creature is active, alive, can be beaten, and was hurt.
+        /// Whether the bar is to be shown: the creature is active, alive, can be beaten, and was hurt, or for a boss,
+        /// its fight started (see <see cref="_fightStarted"/>).
         /// </summary>
         public bool IsShown { get; private set; }
 
@@ -747,8 +749,8 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 FollowHealth(health, blowLanded);
             }
 
-            IsShown = isAlive && _isHurt && !_isUnbeatable && _fullHealth > 1 && _fullHealth < UnbeatableHealth &&
-                      (!IsBoss || _fightStarted || _isStartSettled);
+            IsShown = isAlive && !_isUnbeatable && _fullHealth > 1 && _fullHealth < UnbeatableHealth &&
+                      (IsBoss ? _fightStarted || _isStartSettled : _isHurt);
         }
 
         /// <summary>
