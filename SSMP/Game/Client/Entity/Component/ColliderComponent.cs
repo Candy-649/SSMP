@@ -13,7 +13,8 @@ namespace SSMP.Game.Client.Entity.Component;
 /// picture that has one. A boss whose first picture had none went without it, and its copy stayed touchable where the
 /// boss hid for the cross slash it makes around a player, which hurt the player of the game that did not run it
 /// outside of the ring (USER 11-09 "三阶段转阶段会释放的那个技能…明明不在范围里却会被打到"). The first collider of
-/// each object is the one carried, which is all that the creatures that hide this way have.
+/// each object is the one carried, which is all that the creatures that hide this way have. What tk2d switches with
+/// each picture is not sent: the copy's own pictures switch it the same way, in their own time (see IsPictureOf).
 internal class ColliderComponent : EntityComponent {
     /// <summary>
     /// The colliders of the room's own creature and of its copy, once each has one.
@@ -79,6 +80,10 @@ internal class ColliderComponent : EntityComponent {
         }
 
         _lastEnabled = enabled;
+        if (IsPictureOf(collider, enabled)) {
+            return;
+        }
+
         Logger.Debug($"Collider of {GameObject.Host!.name} enabled changed to: {enabled}");
 
         var data = new EntityNetworkData {
@@ -87,6 +92,28 @@ internal class ColliderComponent : EntityComponent {
         data.Packet.Write(enabled);
 
         SendData(data);
+    }
+
+    /// <summary>
+    /// Whether the picture that a creature drawn by tk2d shows puts its collider so: tk2d switches the colliders of
+    /// what it draws with each picture whose collider is of a kind (tk2dBaseSprite.UpdateCollider), the box on for a
+    /// box and off for a mesh or none, and the others the other way. The copy's own pictures do the same as it shows
+    /// them, which a copy that plays a move by itself does ahead of the game that runs the creature: told as well, the
+    /// switch came late and put the copy to the picture before, touchable as it hid or not as it struck.
+    /// </summary>
+    private static bool IsPictureOf(Collider2D collider, bool enabled) {
+        if (!collider.TryGetComponent<tk2dBaseSprite>(out var sprite) || sprite.CurrentSprite is not { } picture ||
+            picture.physicsEngine != tk2dSpriteDefinition.PhysicsEngine.Physics2D) {
+            return false;
+        }
+
+        var isBox = collider is BoxCollider2D;
+        return picture.colliderType switch {
+            tk2dSpriteDefinition.ColliderType.Box => enabled == isBox,
+            tk2dSpriteDefinition.ColliderType.Mesh => enabled != isBox,
+            tk2dSpriteDefinition.ColliderType.None => !enabled,
+            _ => false
+        };
     }
 
     /// <inheritdoc />

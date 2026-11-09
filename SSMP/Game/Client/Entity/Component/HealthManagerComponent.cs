@@ -644,7 +644,10 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         orig();
-        if (healthManager == component._healthManager.Host) {
+
+        // Only where it is told from, and only for health that the step changed: a step that changed nothing tells
+        // nothing, and the next health told, which a blow may make, went as set by the room
+        if (healthManager == component._healthManager.Host && !component.IsControlled && healthManager.hp != before) {
             component._setByRoom = true;
         }
 

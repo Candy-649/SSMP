@@ -541,9 +541,11 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Tells a player who entered the local scene which rooms the local player already reached and what their bosses
-    /// told them, and shares the dialogue that is still being read.
+    /// told them, and shares the dialogue that is still being read. A player who told of a film of theirs before they
+    /// came in is kept off the list of whom creatures go after (see KeepInCutsceneOffTargets).
     /// </summary>
     public void OnPlayerEnterScene() {
+        KeepInCutsceneOffTargets();
         foreach (var pair in _arrivals) {
             if (pair.Value.Local && pair.Key.GameObject != null) {
                 Send(BossRoomUpdateKind.Arrived, pair.Key, "", "", "");

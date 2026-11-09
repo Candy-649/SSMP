@@ -86,15 +86,20 @@ internal partial class BossRoomCoop {
     /// </summary>
     private void OnCutsceneReport(BossRoomUpdate update) {
         if (update.Kind == BossRoomUpdateKind.CutsceneBegan) {
-            if (update.SceneName == SceneManager.GetActiveScene().name && _playersInCutscene.Add(update.PlayerId)) {
+            if (update.SceneName != SceneManager.GetActiveScene().name) {
+                return;
+            }
+
+            if (_playersInCutscene.Add(update.PlayerId)) {
                 Logger.Info(
                     $"Player {update.PlayerId} is in a film of the game or still arriving, so they are not in any " +
                     "room here yet and nothing goes after them"
                 );
-                if (BodyInLocalScene(update.PlayerId) is { } body) {
-                    PlayerTargetRegistry.UnregisterRemotePlayer(body);
-                    GamePatcher.ForgetPlayerAsTarget(body);
-                }
+            }
+
+            // Also when they told it before, as their character may have come in on the list since
+            if (BodyInLocalScene(update.PlayerId) is { } body) {
+                KeepOffTargets(body);
             }
 
             return;
@@ -106,6 +111,29 @@ internal partial class BossRoomCoop {
             // Not one lying in a cocoon, whom nothing goes after either (CoopSave.SetPartnerBodyHidden)
             if (BodyInLocalScene(update.PlayerId) is { } body && !CoopSave.IsBodyKeptHidden(update.PlayerId)) {
                 PlayerTargetRegistry.RegisterRemotePlayer(body);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Takes the character of a player in a film of the game, or still arriving, off the list of whom creatures go
+    /// after.
+    /// </summary>
+    private static void KeepOffTargets(GameObject body) {
+        PlayerTargetRegistry.UnregisterRemotePlayer(body);
+        GamePatcher.ForgetPlayerAsTarget(body);
+    }
+
+    /// <summary>
+    /// Keeps the players in a film of the game, or still arriving, off the list of whom creatures go after as their
+    /// characters come into the local scene, which puts them on it. What a player arriving tells the others can reach
+    /// them before their character does: it was told, and their character came in on the list after it, so the boss of
+    /// a fight that was on went after them in the lift in that game alone.
+    /// </summary>
+    private void KeepInCutsceneOffTargets() {
+        foreach (var id in _playersInCutscene) {
+            if (BodyInLocalScene(id) is { } body) {
+                KeepOffTargets(body);
             }
         }
     }
