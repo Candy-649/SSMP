@@ -1462,7 +1462,8 @@
     "type": "FatherOfTheFlame",
     "parent_name": null,
     "components": [
-      "Rotation"
+      "Rotation",
+      "FsmHealth"
     ],
     "internal_name": "Wisp Pyre Effigy",
     "fsm_names": [

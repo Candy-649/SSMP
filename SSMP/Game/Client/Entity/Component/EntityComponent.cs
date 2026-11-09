@@ -187,5 +187,11 @@ internal enum EntityComponentType : ushort {
     /// What the third act does to the creature: whether it turns, whether it turned, its attack, and its strikes (see
     /// <see cref="BlackThreadComponent"/>).
     /// </summary>
-    BlackThread
+    BlackThread,
+
+    /// <summary>
+    /// The health of a boss that its FSMs keep instead of a HealthManager, for its bar (see
+    /// <see cref="FsmHealthComponent"/>).
+    /// </summary>
+    FsmHealth
 }

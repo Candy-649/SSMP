@@ -240,6 +240,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private readonly HashSet<HealthManager> _blowLanded = [];
 
     /// <summary>
+    /// The bars of the bosses whose FSMs keep their health instead of a HealthManager (see
+    /// <see cref="FsmHealthComponent"/>), by what reads it.
+    /// </summary>
+    private readonly Dictionary<FsmHealthComponent, Bar> _fsmBars = new();
+
+    /// <summary>
     /// Creates the canvas of the bars and starts drawing them.
     /// </summary>
     public void Start() {
@@ -364,6 +370,11 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         }
 
         _bars.Clear();
+        foreach (var bar in _fsmBars.Values) {
+            bar.Destroy();
+        }
+
+        _fsmBars.Clear();
         _bossBars.Clear();
         _numberedBosses.Clear();
         _killRecorded.Clear();
@@ -399,8 +410,23 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             if (!_bars.TryGetValue(healthManager, out var bar)) {
                 // Known from the start, so that the full health is known before the first hit, and whether it is a
                 // boss, whose full health is known differently
-                bar = new Bar(healthManager, GetInitialHealth(healthManager), IsBoss(healthManager));
+                bar = Bar.Of(healthManager, IsBoss(healthManager));
                 _bars[healthManager] = bar;
+            }
+
+            bar.SeenFrame = Time.frameCount;
+        }
+
+        foreach (var fsmHealth in FsmHealthComponent.All) {
+            if (!fsmHealth.IsShown) {
+                continue;
+            }
+
+            if (!_fsmBars.TryGetValue(fsmHealth, out var bar)) {
+                bar = new Bar(
+                    fsmHealth.Creature, () => fsmHealth.Health, () => fsmHealth.IsBeaten, fsmHealth.PartsFull, true
+                );
+                _fsmBars[fsmHealth] = bar;
             }
 
             bar.SeenFrame = Time.frameCount;
@@ -418,27 +444,10 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 continue;
             }
 
-            var isActive = bar.SeenFrame == Time.frameCount;
-            bar.Update(isActive, _blowLanded.Contains(healthManager) || healthManager.HasTakenDamage());
-            if (!bar.IsShown || _killRecorded.Contains(healthManager)) {
-                bar.Hide();
-                bossBarsChanged |= _bossBars.Remove(bar);
-                continue;
-            }
-
-            if (!bar.HasView) {
-                bar.CreateView(_canvasTransform);
-            }
-
-            if (bar.IsBoss && !_bossBars.Contains(bar)) {
-                AddBossBar(bar);
-                bossBarsChanged = true;
-            }
-
-            bar.Draw(Time.unscaledTime);
-            if (!bar.IsBoss) {
-                PlaceAboveHead(bar, camera!, scale);
-            }
+            bossBarsChanged |= ShowBar(
+                bar, _blowLanded.Contains(healthManager) || healthManager.HasTakenDamage(),
+                _killRecorded.Contains(healthManager), camera!, scale
+            );
         }
 
         foreach (var healthManager in _gone) {
@@ -446,6 +455,9 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         }
 
         _gone.Clear();
+        foreach (var pair in _fsmBars) {
+            bossBarsChanged |= ShowBar(pair.Value, pair.Key.WasHit, false, camera!, scale);
+        }
         if (bossBarsChanged) {
             PlaceBossBars();
         }
@@ -458,6 +470,40 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 PlaceNumberAboveHead(bossBar, camera!, scale);
             }
         }
+    }
+
+    /// <summary>
+    /// Brings a bar up to date and draws it, or hides it.
+    /// </summary>
+    /// <param name="bar">The bar.</param>
+    /// <param name="blowLanded">Whether a blow of a player landed on its creature, as this game knows.</param>
+    /// <param name="killRecorded">Whether the game recorded the kill of its creature.</param>
+    /// <param name="camera">The camera.</param>
+    /// <param name="scale">The scale of the canvas.</param>
+    /// <returns>Whether the bars of the bosses changed.</returns>
+    private bool ShowBar(Bar bar, bool blowLanded, bool killRecorded, Camera camera, float scale) {
+        bar.Update(bar.SeenFrame == Time.frameCount, blowLanded);
+        if (!bar.IsShown || killRecorded) {
+            bar.Hide();
+            return _bossBars.Remove(bar);
+        }
+
+        if (!bar.HasView) {
+            bar.CreateView(_canvasTransform!);
+        }
+
+        var bossBarsChanged = false;
+        if (bar.IsBoss && !_bossBars.Contains(bar)) {
+            AddBossBar(bar);
+            bossBarsChanged = true;
+        }
+
+        bar.Draw(Time.unscaledTime);
+        if (!bar.IsBoss) {
+            PlaceAboveHead(bar, camera, scale);
+        }
+
+        return bossBarsChanged;
     }
 
     /// <summary>
@@ -622,21 +668,38 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     /// <summary>
     /// The bar of the health of a creature, and what is known about the creature for it.
     /// </summary>
-    private class Bar(HealthManager healthManager, int initialHealth, bool isBoss) {
+    /// <param name="creature">The object of the creature.</param>
+    /// <param name="readHealth">What reads the health that the bar shows.</param>
+    /// <param name="isDead">What says whether the creature died.</param>
+    /// <param name="initialHealth">The health that the creature starts with.</param>
+    /// <param name="isBoss">Whether the creature is a boss.</param>
+    private class Bar(GameObject creature, Func<int> readHealth, Func<bool> isDead, int initialHealth, bool isBoss) {
         /// <summary>
-        /// The health of the creature.
+        /// The object of the creature.
         /// </summary>
-        private readonly HealthManager _healthManager = healthManager;
+        private readonly GameObject _creature = creature;
 
         /// <summary>
         /// The collider of the body of the creature, whose top the bar is drawn above.
         /// </summary>
-        private readonly Collider2D? _body = healthManager.GetComponent<Collider2D>();
+        private readonly Collider2D? _body = creature.GetComponent<Collider2D>();
 
         /// <summary>
         /// The renderer of the creature, for where it is drawn and whether it is drawn at all.
         /// </summary>
-        private readonly Renderer? _renderer = healthManager.GetComponent<Renderer>();
+        private readonly Renderer? _renderer = creature.GetComponent<Renderer>();
+
+        /// <summary>
+        /// The bar of a creature with a HealthManager. A copy's own steps can set its health ahead of what it is told
+        /// for a moment, and are not shown: the health is the scene host's to say (USER 11-09 "客机也不应该自己摆弄血条，
+        /// 因为客机那边有个复制体，自己搞太容易搞砸了").
+        /// </summary>
+        public static Bar Of(HealthManager healthManager, bool isBoss) {
+            return new Bar(
+                healthManager.gameObject, () => HealthManagerComponent.ToldHealthOf(healthManager) ?? healthManager.hp,
+                () => healthManager.isDead, GetInitialHealth(healthManager), isBoss
+            );
+        }
 
         /// <summary>
         /// The full health of the creature: what it started with, or more if it was given more since, like by the
@@ -747,12 +810,12 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// <summary>
         /// The name of the room's own creature, which its copy in the other game has with "(Clone)" after it.
         /// </summary>
-        public string BossName { get; } = healthManager.name.Replace("(Clone)", "").Trim();
+        public string BossName { get; } = creature.name.Replace("(Clone)", "").Trim();
 
         /// <summary>
         /// Whether the creature is dead or gone altogether.
         /// </summary>
-        public bool IsGone => _healthManager == null || _healthManager.isDead;
+        public bool IsGone => _creature == null || isDead();
 
         /// <summary>
         /// Whether the creature is a boss, whose bar is along the bottom of the screen.
@@ -776,12 +839,9 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// <param name="isActive">Whether the game counts the creature as active in this frame.</param>
         /// <param name="blowLanded">Whether a blow of a player landed on the creature, as this game knows.</param>
         public void Update(bool isActive, bool blowLanded) {
-            // A copy's own steps can set its health ahead of what it is told for a moment, and are not shown: the
-            // health is the scene host's to say (USER 11-09 "客机也不应该自己摆弄血条，因为客机那边有个复制体，自己搞太容易搞
-            // 砸了")
-            var health = HealthManagerComponent.ToldHealthOf(_healthManager) ?? _healthManager.hp;
+            var health = readHealth();
             _health = health;
-            var isAlive = isActive && !_healthManager.isDead && health > 0;
+            var isAlive = isActive && !isDead() && health > 0;
 
             // A creature that comes back, like one of a pool that is used again, starts over
             if (isActive && !_wasActive && health >= _fullHealth) {
@@ -789,7 +849,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
             }
 
             _wasActive = isActive;
-            if (isActive && !_healthManager.isDead && health <= 0) {
+            if (isActive && !isDead() && health <= 0) {
                 _isSpent = true;
             }
 
@@ -842,7 +902,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                     }
 
                     Logger.Info(
-                        $"[Bars] The boss '{_healthManager.name}' was out of reach and starts again with {health} " +
+                        $"[Bars] The boss '{_creature.name}' was out of reach and starts again with {health} " +
                         $"health, from {_healthBeforeUnbeatable}"
                     );
                 }
@@ -856,7 +916,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 if (IsBoss) {
                     _fullHealth = health;
                     Logger.Info(
-                        $"[Bars] The boss '{_healthManager.name}' came to the end of its health without dying and " +
+                        $"[Bars] The boss '{_creature.name}' came to the end of its health without dying and " +
                         $"starts the next part of its fight with {health} health"
                     );
                 }
@@ -876,7 +936,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 if (blowLanded) {
                     _isStartSettled = true;
                     Logger.Info(
-                        $"[Bars] The boss '{_healthManager.name}' starts its fight full at {_fullHealth}, the first " +
+                        $"[Bars] The boss '{_creature.name}' starts its fight full at {_fullHealth}, the first " +
                         $"blow on it leaving {health}"
                     );
                 }
@@ -973,7 +1033,7 @@ internal class EnemyHealthBars(ModSettings modSettings) {
         /// </summary>
         /// <returns>Whether the creature can be seen, so that its bar is drawn.</returns>
         public bool TryGetTop(out Vector3 top) {
-            var position = _healthManager.transform.position;
+            var position = _creature.transform.position;
             if (_renderer != null && !_renderer.enabled) {
                 top = position;
                 return false;
