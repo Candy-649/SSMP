@@ -376,9 +376,10 @@ internal partial class Entity {
     private Lead? _lettingGo;
 
     /// <summary>
-    /// Whether the FSM of the copy that runs here does so for a catch that this game leads, and is not out of it yet.
+    /// Whether the FSM of the copy that runs here does so for a catch that this game leads, and is not out of it yet:
+    /// one that it plays by itself to its end holds the player all the way (see <see cref="PlayTheCatchByItself"/>).
     /// </summary>
-    public bool LeadsACatch => _runHere != null && _runHereLed && _aftermath == null;
+    public bool LeadsACatch => _runHere != null && _runHereLed && (_aftermath == null || _runHereAlone);
 
     /// <summary>
     /// Whether the FSM of the copy that runs here plays the combo of a catch that one of the game's catching parts
@@ -2625,7 +2626,12 @@ internal partial class Entity {
         try {
             play();
         } finally {
-            KeepOffForWhatIsLeft(fsm, muted, catchStates ?? RestOfTheInput(fsm, from) ?? []);
+            var left = catchStates ?? RestOfTheInput(fsm, from) ?? [];
+            if (catchStates == null && left.Count > 0) {
+                AddTheAftermaths(fsm, left, from);
+            }
+
+            KeepOffForWhatIsLeft(fsm, muted, left);
             foreach (var (otherFsm, otherFrom, otherMuted) in others) {
                 // One that was off and that the catch switched on started over from its beginning, which is none of
                 // the catch's doing: its own catches of the local player hold them again at once
@@ -2675,6 +2681,45 @@ internal partial class Entity {
         } else {
             _playedForPartner[index].States.UnionWith(states);
             _playedForPartner[index].Muted.AddRange(muted);
+        }
+    }
+
+    /// <summary>
+    /// Adds to the states of a catch of the partner's that an FSM plays with no lead of their game's (see
+    /// <see cref="PlayForPartner"/>) those that a global transition takes it to out of the catch, and the states only
+    /// they lead to: nothing holds it in the catch, and a stun or the next part of a fight takes it there, where it
+    /// lets go of the player it held, who here is the partner, as for a catch that their game leads (see
+    /// <see cref="KeepOffForTheAftermath"/>). A boss stunned as it held the partner gave the scene host's player back
+    /// control, drew them and made them hurtable, lying in their cocoon too (review of 36c252a, 11-10). Not those that
+    /// take it back to where it was before the catch, which is its own life again.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="states">The states of the catch, which those are added to.</param>
+    /// <param name="from">The state that the catch found the FSM in.</param>
+    private void AddTheAftermaths(HutongGames.PlayMaker.Fsm fsm, HashSet<FsmState> states, FsmState from) {
+        var added = new List<string>();
+        foreach (var transition in fsm.GlobalTransitions ?? []) {
+            if (transition.ToFsmState is not { } to || states.Contains(to)) {
+                continue;
+            }
+
+            var after = EntityFsmActions.StatesOnlyThrough(fsm, to);
+            if (after.Contains(from)) {
+                continue;
+            }
+
+            foreach (var state in after) {
+                if (states.Add(state)) {
+                    added.Add(state.Name);
+                }
+            }
+        }
+
+        if (added.Count > 0) {
+            Logger.Info(
+                $"What is the local player's own in '{fsm.Name}' of entity {Id} also stays off in " +
+                $"'{string.Join("', '", added)}', which a global transition takes it to out of the partner's catch"
+            );
         }
     }
 
