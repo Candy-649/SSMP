@@ -431,11 +431,10 @@ function New-ReleaseZip($stage) {
 
 # --- The notes ----------------------------------------------------------------------------------------------------
 
-# The titles of the install notes marked with this version, e.g. "* [title](0.4.99)" in full-width brackets
+# The titles of the changes marked with this version, e.g. "* [title](0.4.99)" in full-width brackets, from the list
+# of changes beside this script, which stays out of the packages (USER 11-10 "只留安装吧")
 function Get-ChangelogLines([string] $version) {
-    $notes = Join-Path $StageDir 'INSTALL.txt'
-    if (-not (Test-Path $notes)) { return , @() }
-    $text = [System.IO.File]::ReadAllText($notes, [System.Text.Encoding]::UTF8)
+    $text = [System.IO.File]::ReadAllText((Join-Path $PSScriptRoot 'CHANGES.txt'), [System.Text.Encoding]::UTF8)
     $header = '^\* \u3010(?<title>.+?)\u3011\uFF08(?<note>[^\uFF09]*)\uFF09\s*$'
     $marked = '(^|[^0-9.])' + [regex]::Escape($version) + '($|[^0-9])'
     $lines = @()

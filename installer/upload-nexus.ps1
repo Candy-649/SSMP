@@ -18,9 +18,9 @@
 #   4. reads which versions the page's changelog already has;
 #   5. uploads the zip, waits for Nexus Mods to check it, and adds it to the file as its newest version in the main
 #      category, archiving the previous version and setting the mod's version to match;
-#   6. fills the page's changelog: every version that INSTALL.txt marks, from the oldest version on the file up to
+#   6. fills the page's changelog: every version that CHANGES.txt marks, from the oldest version on the file up to
 #      this one, that the changelog does not have yet, each under its own version, oldest first, with the titles of
-#      the INSTALL.txt entries marked with that version. Every version goes to npm, but only some go to Nexus Mods,
+#      the CHANGES.txt lines marked with that version. Every version goes to npm, but only some go to Nexus Mods,
 #      and the page's changelog should still name the versions in between.
 #
 # The v3 API can only add to a changelog (adding a version twice lists its lines twice) and cannot read one, so step
@@ -30,7 +30,7 @@
 #
 # With -ChangelogsOnly it uploads nothing and does only steps 2, 4 and 6, filling the changelog up to the newest
 # version already on the file (never past it: the page should not describe a version it does not offer). That reads
-# only the INSTALL.txt in the newest zip.
+# only the version of the newest zip, and CHANGES.txt.
 #
 # It only adds versions to a file that exists; the page's first file goes up on the website. Uploading is public, so
 # it is run by the page's owner, after npm publish, never by a build.
@@ -55,7 +55,7 @@ param(
     [switch] $NoChangelog,
 
     # Upload nothing; only add to the changelog the versions it lacks, up to the newest version already on the file.
-    # Reads only the INSTALL.txt in the newest zip.
+    # Reads only the version of the newest zip, and CHANGES.txt.
     [switch] $ChangelogsOnly,
 
     # Ask again which mod and file take the upload, instead of using the remembered answer.
@@ -88,8 +88,9 @@ $VersionPattern = '^[a-zA-Z0-9.-]{1,50}$'
 # The zip is read into memory whole. It is about 4 MB, so anything near this size is the wrong file.
 $MaxZipBytes = 100MB
 
-# The text of the INSTALL.txt in the zip (see Get-Release), which the changelog is made from
-$ZipNotes = $null
+# The list of changes that the changelog is made from, one line each, "* [title](version)" in full-width brackets. It
+# stays out of the packages: the install notes say only how to install and play (USER 11-10 "只留安装吧").
+$ChangesFile = Join-Path $PSScriptRoot 'CHANGES.txt'
 
 # How long Nexus Mods may take to check an upload before the script gives up waiting
 $CheckTimeout = [TimeSpan]::FromMinutes(15)
@@ -221,7 +222,7 @@ function Get-Sha256Hex([System.IO.Stream] $stream) {
 }
 
 # The zip of the newest version in dist-nexus, which pack-nexus.ps1 makes only for a version that goes to the mod page,
-# with the version that the SSMP.dll in it says; the INSTALL.txt in it goes to $ZipNotes
+# with the version that the SSMP.dll in it says
 function Get-Release {
     $found = $null
     $foundNumber = $null
@@ -243,7 +244,6 @@ function Get-Release {
     Add-Type -AssemblyName System.IO.Compression
     Add-Type -AssemblyName System.IO.Compression.FileSystem
     $product = $null
-    $noteText = $null
     $archive = [System.IO.Compression.ZipFile]::OpenRead($zip)
     try {
         # Laid out as the game folder (see pack-nexus.ps1)
@@ -266,12 +266,6 @@ function Get-Release {
         } finally {
             Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue
         }
-
-        $notes = $entries | Where-Object { $_.FullName -eq 'INSTALL.txt' } | Select-Object -First 1
-        if ($notes) {
-            $reader = New-Object System.IO.StreamReader -ArgumentList $notes.Open(), ([System.Text.Encoding]::UTF8)
-            try { $noteText = $reader.ReadToEnd() } finally { $reader.Dispose() }
-        }
     } finally {
         $archive.Dispose()
     }
@@ -281,14 +275,12 @@ function Get-Release {
 
     $bytes = [System.IO.File]::ReadAllBytes($zip)
     if ($bytes.Length -gt $MaxZipBytes) { throw "$($found.Name) is over 100 MB, which this script does not upload." }
-    $script:ZipNotes = $noteText
     return @{ Version = $version; Name = $found.Name; Path = $zip; Bytes = $bytes; Product = $product }
 }
 
-# The titles of the install notes marked with this version, e.g. "* [title](0.4.99)" in full-width brackets
+# The titles of the changes marked with this version, e.g. "* [title](0.4.99)" in full-width brackets
 function Get-ChangelogLines([string] $version) {
-    $text = $script:ZipNotes
-    if (-not $text) { return , @() }
+    $text = [System.IO.File]::ReadAllText($ChangesFile, [System.Text.Encoding]::UTF8)
     $header = '^\* \u3010(?<title>.+?)\u3011\uFF08(?<note>[^\uFF09]*)\uFF09\s*$'
     $marked = '(^|[^0-9.])' + [regex]::Escape($version) + '($|[^0-9])'
     $lines = @()
@@ -466,10 +458,9 @@ function Wait-Checked([string] $uploadId, [string] $key) {
 
 # --- The changelog ------------------------------------------------------------------------------------------------
 
-# Every version some install note's header marks, as text. A note can name more than one ("0.4.83, 0.4.84 ...").
+# Every version some change marks, as text. A note can name more than one ("0.4.83, 0.4.84 ...").
 function Get-MarkedVersions {
-    $text = $script:ZipNotes
-    if (-not $text) { return , @() }
+    $text = [System.IO.File]::ReadAllText($ChangesFile, [System.Text.Encoding]::UTF8)
     $header = '^\* \u3010(?<title>.+?)\u3011\uFF08(?<note>[^\uFF09]*)\uFF09\s*$'
     $found = @{}
     foreach ($line in ($text -split "\r?\n")) {
@@ -529,7 +520,7 @@ function Get-PageChangelogVersions($mod, [string] $key, $fileNumbers) {
     return , $names
 }
 
-# What to add to the changelog: each version INSTALL.txt marks from $from up to $upTo ([version]s, both included)
+# What to add to the changelog: each version CHANGES.txt marks from $from up to $upTo ([version]s, both included)
 # that the page's changelog lacks, oldest first, with its lines. When the changelog cannot be read and $mustRead is
 # not set, only the versions after $after (the file's newest before this upload) are taken, since those cannot be
 # on the page yet; with $mustRead set it answers $null instead. A version text that is not a plain number is taken
@@ -627,10 +618,10 @@ try {
     if ($ChangelogsOnly -and $NoChangelog) { throw "-ChangelogsOnly and -NoChangelog ask for opposite things." }
 
     if ($ChangelogsOnly) {
-        Write-Step 'Reading the install notes'
+        Write-Step 'Reading the changes'
         $release = Get-Release
-        if (-not $ZipNotes) { throw "$($release.Name) has no INSTALL.txt." }
-        Write-Ok "INSTALL.txt in $($release.Name)"
+        if (-not (Test-Path -LiteralPath $ChangesFile)) { throw "There is no $ChangesFile." }
+        Write-Ok "CHANGES.txt, up to $($release.Version)"
     } else {
         Write-Step 'Checking the zip'
         $release = Get-Release
