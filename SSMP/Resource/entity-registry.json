@@ -1993,6 +1993,16 @@
     "internal_name": "Swamp Barnacle",
     "fsm_names": [
       "Control"
+    ],
+    "runs_here": {
+      "Control": {
+        "Reset Tendril": [
+          "Reset"
+        ]
+      }
+    },
+    "catch_events": [
+      "GRAB HERO"
     ]
   },
   {
