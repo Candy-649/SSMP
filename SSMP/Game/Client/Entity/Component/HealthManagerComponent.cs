@@ -334,6 +334,29 @@ internal class HealthManagerComponent : EntityComponent {
     private bool _setByRoom;
 
     /// <summary>
+    /// On a copy: the health that the game that runs the creature last told. <see cref="_toldHp"/> is the same but
+    /// for a step of the copy's own FSM that set its health since, which it keeps until
+    /// <see cref="_ownStepKeptUntil"/>.
+    /// </summary>
+    private int _heardHp;
+
+    /// <summary>
+    /// On a copy: until when, in unscaled seconds, it keeps the health that a step of its own FSM set against what
+    /// the game that runs the creature tells, or -1 when it keeps none (see <see cref="OnRoomHealthStep"/>). That
+    /// game takes the same step a moment later, and health that it told before it did came after the copy took it:
+    /// shown, it put the copy back to before its step, and its FSM ended the same part of the fight again with the
+    /// next blow. Told the health of that game's own step, the copy shows what it is told again; told none in
+    /// <see cref="OwnStepKeepTime"/>, it goes back to what it was told.
+    /// </summary>
+    private float _ownStepKeptUntil = -1f;
+
+    /// <summary>
+    /// How long, in seconds, a copy keeps the health that a step of its own FSM set for the game that runs the creature
+    /// to tell the health of its own (see <see cref="_ownStepKeptUntil"/>).
+    /// </summary>
+    private const float OwnStepKeepTime = 1f;
+
+    /// <summary>
     /// The blows of this game's player on the copy in the current epoch, as far as the game that runs the creature has
     /// not told that it took them in: how far the copy's damage had come before each and after it (see
     /// <see cref="_ownDamage"/>), and what it kills with. They go with the damage, for that game to kill the creature
@@ -464,6 +487,7 @@ internal class HealthManagerComponent : EntityComponent {
         _lastInvincible = healthManager.Host.IsInvincible;
         _lastHp = healthManager.Host.hp;
         _toldHp = _lastHp;
+        _heardHp = _lastHp;
         _hadHealth = _lastHp > 0;
         _lastInvincibleFromDirection = healthManager.Host.InvincibleFromDirection;
 
@@ -613,16 +637,19 @@ internal class HealthManagerComponent : EntityComponent {
 
     /// <summary>
     /// A step with which a creature's own FSM sets its health (SetHP, AddHP, SubtractHP), as a fight sets the health of
-    /// its boss for a part of it, which is no blow of anyone's. Written to the log with the health before and after.
-    /// - On a copy of a creature that another game runs, it is left to that game, which tells the health that comes of
-    ///   it: the health is that game's to say (D15). Taken here, the drop was counted as a blow of this game's player
-    ///   that the hooks on blows had not seen. The copy of a boss that its room gives 100 of the 1204 it is made with
-    ///   was made with 1204 as the room loaded, before the boss's own first step; switched on as the player walked in,
-    ///   it set itself to 100, and 1104 damage of this player went to the scene host, whose boss had not been set to
-    ///   100 at that moment: its health bar had taken 1204 for full by then and showed a sliver, though nobody had
-    ///   struck anything (USER 11-09 "主要是刚传送过来就会显示血条外加只有一点点血了（", "所以绝对不是打到了").
-    /// - On the creature that this game runs, it is taken, and the health that comes of it is told as set by the room
-    ///   (see <see cref="_setByRoom"/>).
+    /// its boss for each part of it, which is no blow of anyone's. Taken wherever the FSM runs, as the game takes it,
+    /// and written to the log with the health before and after.
+    /// - On a copy of a creature that another game runs, what the step changed goes into the health that the copy was
+    ///   last told and is put back at after a blow, as that game takes the same step: the copy's FSM goes on from that
+    ///   health, as the game's own does, and keeps it until that game tells the health of its own step (see
+    ///   <see cref="_ownStepKeptUntil"/>). Counted as a blow of this player, the drop of a boss given 100 of the 1204
+    ///   it is made with went to the scene host as 1104 damage (USER 11-09 "主要是刚传送过来就会显示血条外加只有一点点血了（",
+    ///   "所以绝对不是打到了"). Left to the scene host instead, the step gave the copy none of the health of the next
+    ///   part of the fight: the next blow ended that part there too, and at the last part the boss went to its death
+    ///   in that game alone, its bar gone and no longer to be struck (USER 11-09 "我朋友说她后面直接打不到丝母了",
+    ///   "血条也没了").
+    /// - On the creature that this game runs, the health that comes of it is told as set by the room (see
+    ///   <see cref="_setByRoom"/>).
     /// </summary>
     /// <param name="orig">The game's own step.</param>
     /// <param name="step">The action.</param>
@@ -636,18 +663,26 @@ internal class HealthManagerComponent : EntityComponent {
         }
 
         var before = healthManager.hp;
+        orig();
+        var change = healthManager.hp - before;
         var where = $"{step.GetType().Name} in '{step.State?.Name}' of '{step.Fsm.Name}'";
         if (healthManager == component._healthManager.Client && component.IsControlled) {
-            Logger.Info($"[Health] '{healthManager.name}': {where} is left to the game that runs it, at {before} here");
-            step.Finish();
+            component._toldHp += change;
+            component._lastHp += change;
+            if (change != 0) {
+                component._ownStepKeptUntil = Time.unscaledTime + OwnStepKeepTime;
+            }
+
+            Logger.Info(
+                $"[Health] '{healthManager.name}': {where} set its health from {before} to {healthManager.hp} here, " +
+                $"kept as told until the game that runs it tells the health of its own step"
+            );
             return;
         }
 
-        orig();
-
         // Only where it is told from, and only for health that the step changed: a step that changed nothing tells
         // nothing, and the next health told, which a blow may make, went as set by the room
-        if (healthManager == component._healthManager.Host && !component.IsControlled && healthManager.hp != before) {
+        if (healthManager == component._healthManager.Host && !component.IsControlled && change != 0) {
             component._setByRoom = true;
         }
 
@@ -1768,7 +1803,36 @@ internal class HealthManagerComponent : EntityComponent {
             _killer = default;
         }
 
+        // The game that runs the creature told nothing of a step that the copy took, so it did not take it then: the
+        // copy goes back to the health that game told
+        if (IsControlled && _ownStepKeptUntil >= 0f && Time.unscaledTime >= _ownStepKeptUntil) {
+            _ownStepKeptUntil = -1f;
+            if (_toldHp != _heardHp) {
+                Logger.Info(
+                    $"[Health] '{observedHealthManager.name}' kept {_toldHp} of a step of its own for " +
+                    $"{OwnStepKeepTime} s with none told by the game that runs it, and goes back to {_heardHp}, as told"
+                );
+                CountOwnBlows();
+                _toldHp = _heardHp;
+                ApplyHp(_toldHp, triggerHostDeath: false);
+                newHp = observedHealthManager.hp;
+            }
+        }
+
         if (newHp != _lastHp) {
+            // A copy that is off can be struck by nobody, so what changed its health then is no blow. The copy of a
+            // boss that its room gives 100 of the 1204 it is made with was at 100 while it was still off, and the drop
+            // went to the game that runs the room as 1104 damage of this player, in the games of both players: its
+            // bar showed a sliver as the room was entered, and the game that took the room over with that damage in
+            // it killed the boss with it (USER 11-09 "血条依旧", "进场就减少")
+            if (IsControlled && !observedHealthManager.gameObject.activeInHierarchy) {
+                Logger.Info(
+                    $"[Health] '{observedHealthManager.name}' went from {_lastHp} to {newHp} while it was off: no blow"
+                );
+                _lastHp = newHp;
+                return;
+            }
+
             if (IsControlled && newHp > _lastHp) {
                 if (_hasPendingControlledHealCorrection) {
                     if (Time.unscaledTime >= _pendingControlledHealCorrectionAt) {
@@ -2155,6 +2219,8 @@ internal class HealthManagerComponent : EntityComponent {
     private void ResetHealthOrderingForEpoch(uint sceneHostEpoch) {
         if (sceneHostEpoch != _currentHealthEpoch) {
             _toldHp = GetCurrentHp();
+            _heardHp = _toldHp;
+            _ownStepKeptUntil = -1f;
             _toldNumber = 0;
             _toldDead = false;
             _ownDamage = 0;
@@ -2332,16 +2398,26 @@ internal class HealthManagerComponent : EntityComponent {
             // Lower than told before, as the game moves on: damage landed there, unless a step of the creature's own
             // FSM set it, as a fight sets the health of its boss (see OnRoomHealthStep). The room's state that comes
             // with walking in is neither
-            if (!alreadyInSceneUpdate && hp < _toldHp && client != null) {
+            if (!alreadyInSceneUpdate && hp < _heardHp && client != null) {
                 if (setByRoom) {
-                    Logger.Info($"[Health] '{client.name}' is told {_toldHp} -> {hp}, which its own steps set there");
+                    Logger.Info($"[Health] '{client.name}' is told {_heardHp} -> {hp}, which its own steps set there");
                 } else {
-                    Logger.Info($"[Health] '{client.name}' is told {_toldHp} -> {hp}: a blow landed there");
+                    Logger.Info($"[Health] '{client.name}' is told {_heardHp} -> {hp}: a blow landed there");
                     DamageLanded?.Invoke(client, null);
                 }
             }
 
-            _toldHp = hp;
+            // Heard, and shown unless the copy keeps the health of a step of its own, which the health of that game's
+            // own step ends (see _ownStepKeptUntil)
+            _heardHp = hp;
+            if (setByRoom) {
+                _ownStepKeptUntil = -1f;
+            }
+
+            if (_ownStepKeptUntil < 0f) {
+                _toldHp = hp;
+            }
+
             _toldNumber = number;
             _toldDead = dead;
             _ownDamageTaken = ownDamageTaken;
@@ -2360,6 +2436,7 @@ internal class HealthManagerComponent : EntityComponent {
             // Told before the room last changed hands, and nothing since, as the copy walks in: nearer the health of
             // the creature than the health the copy was made with. The damage in it was counted against another.
             _toldHp = hp;
+            _heardHp = hp;
             _toldDead = dead;
         } else if (!alreadyInSceneUpdate) {
             return;
