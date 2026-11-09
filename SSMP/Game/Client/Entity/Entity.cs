@@ -1228,25 +1228,10 @@ internal partial class Entity {
             );
         }
 
-        var hostCollider = Object.Host.GetComponent<Collider2D>();
-        var clientCollider = Object.Client.GetComponent<Collider2D>();
-        if (hostCollider != null && clientCollider != null) {
-            var collider = new HostClientPair<Collider2D> {
-                Host = hostCollider,
-                Client = clientCollider
-            };
-
-            _components[EntityComponentType.Collider] = new ColliderComponent(
-                _netClient,
-                Id,
-                Object,
-                collider
-            );
-        }
-
-        // What a collider of the creature can be hit by goes with the layer it is on, and so for one that has no collider
-        // yet as the room loads: a creature drawn by tk2d gets the collider of the picture it shows, the first time it
-        // shows a picture that has one (see LayerComponent)
+        // Whether the creature can be touched goes with whether its collider is on and with the layer it is on, and so
+        // for one that has no collider yet as the room loads: a creature drawn by tk2d gets the collider of the picture
+        // it shows, the first time it shows a picture that has one (see ColliderComponent, LayerComponent)
+        _components[EntityComponentType.Collider] = new ColliderComponent(_netClient, Id, Object);
         _components[EntityComponentType.Layer] = new LayerComponent(_netClient, Id, Object);
 
         var hostBody = Object.Host.GetComponent<Rigidbody2D>();

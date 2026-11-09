@@ -70,6 +70,11 @@ internal partial class BossRoomCoop {
     private int _debugTravelPlace;
 
     /// <summary>
+    /// The scene in which the trip to <see cref="_debugTravelPlace"/> was asked for, by its handle.
+    /// </summary>
+    private int _debugTravelScene;
+
+    /// <summary>
     /// Until when, by Time.unscaledTime, the local player waits to be able to go.
     /// </summary>
     private float _debugTravelUntil;
@@ -191,6 +196,7 @@ internal partial class BossRoomCoop {
     /// </summary>
     private void QueueDebugTravel(int place) {
         _debugTravelPlace = place;
+        _debugTravelScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle;
         _debugTravelUntil = Time.unscaledTime + DebugTravelWaitTime;
         _debugPlacePlace = 0;
     }
@@ -200,7 +206,16 @@ internal partial class BossRoomCoop {
     /// </summary>
     private void UpdateDebugCommands() {
         if (_debugTravelPlace != 0) {
-            if (Time.unscaledTime > _debugTravelUntil) {
+            // Asked for while busy, like on the way up in the lift, a trip that ran once the player was free took them
+            // back down from where they had gone by then (USER 11-09 chat "怎么又松下来了")
+            if (UnityEngine.SceneManagement.SceneManager.GetActiveScene().handle != _debugTravelScene) {
+                Logger.Info($"Debug: the local player left the room before going to debug place {_debugTravelPlace}");
+                UiManager.InternalChatBox.AddMessage(Lang.Pick(
+                    "Debug: you went to another room first, so you are not sent. Type the command again to go.",
+                    "调试：你先去了别的房间，这次就不传送了，要去的话再输一次命令。"
+                ));
+                _debugTravelPlace = 0;
+            } else if (Time.unscaledTime > _debugTravelUntil) {
                 Logger.Info(
                     $"Debug: the local player could not go to debug place {_debugTravelPlace} in time: " +
                     DescribeWhyNotFree()

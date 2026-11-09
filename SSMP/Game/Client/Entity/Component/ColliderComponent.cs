@@ -6,25 +6,36 @@ using Logger = SSMP.Logging.Logger;
 namespace SSMP.Game.Client.Entity.Component;
 
 /// <inheritdoc />
-/// This component manages the <see cref="Collider2D"/> unity component of an entity.
+/// This component carries whether the collider of the entity is on, which decides whether it can be touched: a creature
+/// that hides switches it off in its FSM, and on again as it comes out, and the copy in the game that does not run the
+/// creature is told so. Every creature has it, whether or not it has a collider as the room loads, as with its layer
+/// (see LayerComponent): one drawn by tk2d gets the collider of the picture it shows, made the first time it shows a
+/// picture that has one. A boss whose first picture had none went without it, and its copy stayed touchable where the
+/// boss hid for the cross slash it makes around a player, which hurt the player of the game that did not run it
+/// outside of the ring (USER 11-09 "三阶段转阶段会释放的那个技能…明明不在范围里却会被打到"). The first collider of
+/// each object is the one carried, which is all that the creatures that hide this way have.
 internal class ColliderComponent : EntityComponent {
     /// <summary>
-    /// Host-client pair for the box collider of the entity.
+    /// The colliders of the room's own creature and of its copy, once each has one.
     /// </summary>
-    private readonly HostClientPair<Collider2D> _collider;
+    private Collider2D? _hostCollider, _clientCollider;
 
     /// <summary>
-    /// Optional bool indicating whether the collider was last enabled.
+    /// Whether the collider was last on, as sent, or null before it was sent.
     /// </summary>
     private bool? _lastEnabled;
+
+    /// <summary>
+    /// Whether the collider is on as the game that runs the creature last told, or null before it told: put on a
+    /// collider that the copy only gets later.
+    /// </summary>
+    private bool? _toldEnabled;
 
     public ColliderComponent(
         NetClient netClient,
         ushort entityId,
-        HostClientPair<GameObject> gameObject,
-        HostClientPair<Collider2D> collider
+        HostClientPair<GameObject> gameObject
     ) : base(netClient, entityId, gameObject) {
-        _collider = collider;
     }
 
     /// <inheritdoc />
@@ -33,31 +44,49 @@ internal class ColliderComponent : EntityComponent {
     }
 
     /// <summary>
-    /// Callback for checking the collider each update.
+    /// The collider of an object, kept once it has one.
+    /// </summary>
+    private static Collider2D? Find(ref Collider2D? kept, GameObject? owner) {
+        if (kept == null && owner != null) {
+            kept = owner.GetComponent<Collider2D>();
+        }
+
+        return kept;
+    }
+
+    /// <summary>
+    /// Sends whether the collider is on as it changes, in the game that runs the creature; in the other, has a
+    /// collider that the copy gets only later, with the first picture that has one, start as told.
     /// </summary>
     /// <inheritdoc />
     public override void OnUpdate() {
         if (IsControlled) {
+            if (_toldEnabled is { } told && _clientCollider == null &&
+                Find(ref _clientCollider, GameObject.Client) is { } late) {
+                late.enabled = told;
+            }
+
             return;
         }
 
-        if (_collider.Host == null) {
+        if (Find(ref _hostCollider, GameObject.Host) is not { } collider) {
             return;
         }
 
-        var newEnabled = _collider.Host.enabled;
-        if (!_lastEnabled.HasValue || newEnabled != _lastEnabled.Value) {
-            var hostName = GameObject?.Host != null ? GameObject.Host.name : "Unknown";
-            Logger.Debug($"Collider of {hostName} enabled changed to: {newEnabled}");
-            _lastEnabled = newEnabled;
-
-            var data = new EntityNetworkData {
-                Type = EntityComponentType.Collider
-            };
-            data.Packet.Write(newEnabled);
-
-            SendData(data);
+        var enabled = collider.enabled;
+        if (_lastEnabled == enabled) {
+            return;
         }
+
+        _lastEnabled = enabled;
+        Logger.Debug($"Collider of {GameObject.Host!.name} enabled changed to: {enabled}");
+
+        var data = new EntityNetworkData {
+            Type = EntityComponentType.Collider
+        };
+        data.Packet.Write(enabled);
+
+        SendData(data);
     }
 
     /// <inheritdoc />
@@ -66,29 +95,21 @@ internal class ColliderComponent : EntityComponent {
 
     /// <inheritdoc />
     public override void Update(EntityNetworkData data, bool alreadyInSceneUpdate) {
-        var clientName = GameObject?.Client != null ? GameObject.Client.name : "Unknown";
-        Logger.Debug($"Received collider update for {clientName}");
-
         if (!IsControlled) {
-            Logger.Debug("  Entity was not controlled");
-            return;
-        }
-
-        if (data.Packet.Length < 1) {
-            Logger.Warn($"Received empty collider update for entity {clientName}, ignoring");
             return;
         }
 
         var enabled = data.Packet.ReadBool();
-        if (_collider.Host != null) {
-            _collider.Host.enabled = enabled;
+        _toldEnabled = enabled;
+
+        // The room's own copy as well, so that it is already so if this game takes the creature over
+        if (Find(ref _hostCollider, GameObject.Host) is { } host) {
+            host.enabled = enabled;
         }
 
-        if (_collider.Client != null) {
-            _collider.Client.enabled = enabled;
+        if (Find(ref _clientCollider, GameObject.Client) is { } copy) {
+            copy.enabled = enabled;
         }
-
-        Logger.Debug($"  Enabled: {enabled}");
     }
 
     /// <inheritdoc />

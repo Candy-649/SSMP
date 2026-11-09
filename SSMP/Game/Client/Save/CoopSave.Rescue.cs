@@ -100,6 +100,12 @@ internal partial class CoopSave {
     private static readonly Dictionary<ushort, int> BodiesKeptHidden = new();
 
     /// <summary>
+    /// Whether the body of a player is kept off the screen as they lie in a cocoon (see
+    /// <see cref="SetPartnerBodyHidden"/>), in which nothing goes after them.
+    /// </summary>
+    internal static bool IsBodyKeptHidden(ushort playerId) => BodiesKeptHidden.ContainsKey(playerId);
+
+    /// <summary>
     /// How long the screen takes to come back, in seconds.
     /// </summary>
     private const float RescueFadeTime = 0.5f;

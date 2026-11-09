@@ -447,7 +447,8 @@ internal partial class BossRoomCoop {
             return false;
         }
 
-        // A player in a film of the game is not there yet, wherever their character stands (see TellCutscene)
+        // A player in a film of the game, or still arriving, is not there yet, wherever their character stands (see
+        // TellCutscene)
         foreach (var playerData in _playerData.Values) {
             var container = playerData.PlayerContainer;
             if (!playerData.IsInLocalScene || container == null || !shape.Contains(container.transform.position) ||
@@ -621,36 +622,6 @@ internal partial class BossRoomCoop {
                GetActionField(action, "gameObject") is not FsmOwnerDefault {
                    OwnerOption: OwnerDefaultOption.UseOwner
                };
-    }
-
-    /// <summary>
-    /// Whether an action is a test that may come out with nothing to say: one way it comes out sends an event and
-    /// another sends none, like whether the boss was met before, which goes on to the fight it fought before or else
-    /// leaves the state as it is.
-    /// </summary>
-    private static bool MaySayNothing(FsmStateAction action) {
-        var type = action.GetType();
-        var name = type.Name;
-        if (!name.Contains("Test") && !name.Contains("Compare") && !name.EndsWith("IsNull", StringComparison.Ordinal) &&
-            name != "CheckIsInEditor") {
-            return false;
-        }
-
-        var says = false;
-        var saysNothing = false;
-        foreach (var field in GetEventFields(type)) {
-            if (field.FieldType != typeof(FsmEvent)) {
-                continue;
-            }
-
-            if (field.GetValue(action) is FsmEvent { Name: { Length: > 0 } }) {
-                says = true;
-            } else {
-                saysNothing = true;
-            }
-        }
-
-        return says && saysNothing;
     }
 
     /// <summary>
@@ -1066,14 +1037,6 @@ internal partial class BossRoomCoop {
         private readonly Dictionary<string, HashSet<string>> _ownEvents = new();
         private readonly HashSet<string> _subFsmStates = [];
 
-        /// <summary>
-        /// The states the FSM can stay in however their own steps go: a test of them may come out with nothing to say,
-        /// and nothing takes the FSM on once their actions are done. The boss of a room that tests whether it was met
-        /// before, and waits for the room to start its fight if it was not, waits in such a state, which counted as
-        /// one that starts the fight by itself: so the boss whose fight the room's arrival film starts set off as the
-        /// first player's film ended, with the other player still in theirs (USER 11-07 "我朋友说上去刚开始不知道为什么动不了").
-        /// </summary>
-        private readonly HashSet<string> _stayStates = [];
         private readonly Dictionary<string, List<string>> _sentEvents = new();
         private readonly HashSet<string> _fightStates = [];
         private HashSet<string> _leadingStates = [];
@@ -1088,14 +1051,23 @@ internal partial class BossRoomCoop {
                 _statesByName[state.Name] = state;
                 var ownEvents = new HashSet<string> { FinishedEventName };
                 var sentEvents = new List<string>();
-                var mayStay = false;
                 foreach (var action in state.Actions ?? []) {
                     // Disabled actions never run
                     if (action == null || !action.Enabled) {
                         continue;
                     }
 
+                    // Nor does the test of whether the game runs in its editor say anything in the game itself. Taken
+                    // for a step of the state's own, the event it would say there made the state in which a boss
+                    // waits for the lift's own FSM to wake it one that starts the fight by itself, so the event was
+                    // never held for the other player: the fight that the walk out of the lift starts, once it was
+                    // fought before, began with that player in another room
+                    // (USER 11-09 "而且一开始我朋友上去了就直接开打了？明明我下去了"), and the one that the arrival film starts,
+                    // the first time, as the first player's film ended (USER 11-07 "我朋友说上去刚开始不知道为什么动不了")
                     var actionName = action.GetType().Name;
+                    if (actionName == "CheckIsInEditor") {
+                        continue;
+                    }
                     if (GetSentEventName(action) is { } sentEvent) {
                         sentEvents.Add(sentEvent);
                         if (CloseEventNames.Contains(sentEvent)) {
@@ -1115,12 +1087,7 @@ internal partial class BossRoomCoop {
                     // Events of actions that notice players are caused by players, not by the state itself
                     if (!IsDetectionAction(action)) {
                         AddEventFieldNames(action, ownEvents);
-                        mayStay |= MaySayNothing(action);
                     }
-                }
-
-                if (mayStay && (state.Transitions ?? []).All(t => t.EventName != FinishedEventName)) {
-                    _stayStates.Add(state.Name);
                 }
 
                 _ownEvents[state.Name] = ownEvents;
@@ -1209,8 +1176,7 @@ internal partial class BossRoomCoop {
             for (var round = 0; round < MaxEventStartSteps; round++) {
                 var added = false;
                 foreach (var state in _states) {
-                    if (inevitableStates.Contains(state.Name) || !_leadingStates.Contains(state.Name) ||
-                        _stayStates.Contains(state.Name)) {
+                    if (inevitableStates.Contains(state.Name) || !_leadingStates.Contains(state.Name)) {
                         continue;
                     }
 
