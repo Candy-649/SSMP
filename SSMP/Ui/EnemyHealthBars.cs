@@ -111,15 +111,27 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     private const int UnbeatableHealth = 9999;
 
     /// <summary>
-    /// The bosses whose title the room shows instead of the boss itself, by the name of their object. Two tell an
-    /// object of their room to fade in a title of its own making, with no title action anywhere (see
-    /// <see cref="TitleUpEvent"/>), and were taken for common creatures (USER 11-07 "…被血条显示那部分当成小怪了"): of the
-    /// bosses of the game's boss rooms, the only ones that show no title themselves (FsmScan, 11-07 and 11-09).
+    /// The bosses whose title the room or another part of their body shows instead of the boss itself, by the name of
+    /// their object. Two tell an object of their room to fade in a title of its own making, with no title action
+    /// anywhere (see <see cref="TitleUpEvent"/>), and were taken for common creatures (USER 11-07 "…被血条显示那部分当成
+    /// 小怪了"). Of one the body that its head is part of shows the title, and the head is all of it that has health;
+    /// one has a second part to strike, with health of its own (census of every boss the user named, 11-10).
     /// </summary>
     private static readonly HashSet<string> RoomTitledBosses = new(StringComparer.Ordinal) {
-        "Phantom", "Giant Centipede Head", "Conductor Boss", "Bone Beast", "Flower Queen Boss", "Silk Boss",
-        "Lost Lace Boss"
+        "Phantom", "Giant Centipede Head", "Giant Centipede Butt", "Conductor Boss", "Bone Beast", "Flower Queen Boss",
+        "Silk Boss", "Lost Lace Boss", "SG_head"
     };
+
+    /// <summary>
+    /// The bosses that nothing shows a title of, duels that a character offers, by the name of their object; with the
+    /// event that an FSM of their own takes as their fight starts, and the room where they are a boss when the same
+    /// name is no boss elsewhere: one fights at the player's side in other rooms (census 11-10, USER 11-10 "你的血条要
+    /// 能覆盖这些boss，包括boss特有的底部宽血条规则也要能覆盖这些boss").
+    /// </summary>
+    private static readonly (string Name, string StartEvent, string? Scene)[] UntitledBosses = [
+        ("Mapper Spar NPC", "BATTLE HERO", null),
+        ("Garmond Fighter", "BATTLE START", "library_09")
+    ];
 
     /// <summary>
     /// The event with which two bosses tell the title of their room's own making to show itself (see
@@ -289,6 +301,9 @@ internal class EnemyHealthBars(ModSettings modSettings) {
                 HutongGames.PlayMaker.FsmEventData?>((orig, self, fsmEvent, data) => {
                 if (fsmEvent != null && fsmEvent.Name == TitleUpEvent) {
                     NoteFightStarted($"'{self.Name}' of '{self.GameObjectName}' is told to show the name of a boss");
+                } else if (fsmEvent != null && IsUntitledStart(fsmEvent.Name) && self.GameObject is { } owner &&
+                           StartEventOf(owner) == fsmEvent.Name) {
+                    NoteFightStarted($"'{self.Name}' of '{owner.name}' is told '{fsmEvent.Name}', its duel's start");
                 }
 
                 orig(self, fsmEvent, data);
@@ -548,13 +563,46 @@ internal class EnemyHealthBars(ModSettings modSettings) {
     }
 
     /// <summary>
+    /// Whether an event is one that starts the fight of a boss that nothing shows a title of, in an FSM of the boss's
+    /// own (see <see cref="UntitledBosses"/>): looked at first, as every event of every FSM passes by.
+    /// </summary>
+    private static bool IsUntitledStart(string eventName) {
+        foreach (var boss in UntitledBosses) {
+            if (boss.StartEvent == eventName) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// The event that starts the fight of an object that is a boss that nothing shows a title of, in the room it is
+    /// in (see <see cref="UntitledBosses"/>), or null if it is none.
+    /// </summary>
+    private static string? StartEventOf(GameObject gameObject) {
+        var name = gameObject.name.Replace("(Clone)", "").Trim();
+        foreach (var boss in UntitledBosses) {
+            if (boss.Name == name &&
+                (boss.Scene == null ||
+                 string.Equals(gameObject.scene.name, boss.Scene, StringComparison.OrdinalIgnoreCase))) {
+                return boss.StartEvent;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Whether a creature is a boss: one of its FSMs shows the title of a boss, as an FSM of almost every boss's own
-    /// does, or the room shows its title. Also what keeps a fight going for the outline of the player's own hero for as
-    /// long as the creature lives (Game.Client.FightOutline).
+    /// does, or the room or another part of it shows its title, or it is a duel that shows none (see
+    /// <see cref="RoomTitledBosses"/>, <see cref="UntitledBosses"/>). Also what keeps a fight going for the outline of
+    /// the player's own hero for as long as the creature lives (Game.Client.FightOutline).
     /// </summary>
     internal static bool IsBoss(HealthManager healthManager) {
         var gameObject = healthManager.gameObject;
-        if (RoomTitledBosses.Contains(gameObject.name.Replace("(Clone)", "").Trim())) {
+        if (RoomTitledBosses.Contains(gameObject.name.Replace("(Clone)", "").Trim()) ||
+            StartEventOf(gameObject) != null) {
             return true;
         }
 
