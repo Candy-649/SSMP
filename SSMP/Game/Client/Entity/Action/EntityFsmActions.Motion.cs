@@ -1732,24 +1732,49 @@ internal static partial class EntityFsmActions {
     /// </summary>
     /// <param name="why">Why, for the log.</param>
     internal static void LetGoOfTheHeldLocalPlayer(string why) {
+        if (HoldOfTheLocalPlayer() is not { } hold) {
+            return;
+        }
+
+        SSMP.Logging.Logger.Info($"Letting the player go from the hold of a creature: {why}");
+        hold.SendEvent("HERO GRAB RELEASE");
+    }
+
+    /// <summary>
+    /// Ends the hold of a creature on the local player as they go down in it, the way the room that the game loads
+    /// after a death ends it (the hold's LEVEL LOADED), and takes back the invulnerability that the hold gave them, as
+    /// the game's own release does. A creature that kills the player it holds - the one that chews them in its mouth -
+    /// never lets go of them: the game counts on the room being loaded again. A player lying in their cocoon gets no
+    /// such load: pulled up, they would still be held, hidden every frame and out of reach of every blow until they
+    /// left the room, and a copy that plays the catch here, letting go of them as it ends, would show their character
+    /// in the creature's mouth while they lie.
+    /// </summary>
+    internal static void EndTheHoldOfTheLocalPlayer() {
+        if (HoldOfTheLocalPlayer() is not { } hold) {
+            return;
+        }
+
+        SSMP.Logging.Logger.Info("Ending the hold of a creature on the local player, who goes down in it");
+        hold.SendEvent("LEVEL LOADED");
+        PlayerData.instance.isInvincible = false;
+    }
+
+    /// <summary>
+    /// The FSM of the local player's character that keeps them in the hold of a creature, if it holds them now.
+    /// </summary>
+    private static PlayMakerFSM? HoldOfTheLocalPlayer() {
         var hero = HeroController.instance;
         if (hero == null) {
-            return;
+            return null;
         }
 
         foreach (var fsm in hero.GetComponents<PlayMakerFSM>()) {
-            if (fsm.FsmName != "Roar and Wound States") {
-                continue;
+            if (fsm.FsmName == "Roar and Wound States") {
+                return fsm.ActiveStateName == "Hero Grab" ? fsm : null;
             }
-
-            if (fsm.ActiveStateName != "Hero Grab") {
-                return;
-            }
-
-            SSMP.Logging.Logger.Info($"Letting the player go from the hold of a creature: {why}");
-            fsm.SendEvent("HERO GRAB RELEASE");
-            return;
         }
+
+        return null;
     }
 
     #region MoveLiftChain

@@ -1344,7 +1344,9 @@ internal partial class CoopSave {
         hero.audioCtrl.StopSound(GlobalEnums.HeroSounds.FOOTSTEPS_RUN, true);
 
         // Whatever the player was in the middle of - a swing, a skill, a tool - stops, as it does for a death. Before
-        // control is taken, since some of what stops hands control back as it goes.
+        // control is taken, since some of what stops hands control back as it goes. So does the hold of a creature
+        // that killed them in it, which only the room that a death loads would end.
+        Entity.Action.EntityFsmActions.EndTheHoldOfTheLocalPlayer();
         EventRegister.SendEvent(EventRegisterEvents.FsmCancel, null);
         hero.RelinquishControl();
         hero.StopAnimationControl();
