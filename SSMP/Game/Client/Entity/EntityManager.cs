@@ -66,7 +66,7 @@ internal class EntityManager {
 
     /// <summary>
     /// The creatures of the room that died, by their health managers: the shakes they start from then on are their
-    /// death's own (see <see cref="EndTheLoopsOfTheDead"/>).
+    /// death's own (see <see cref="EndTheLoopsOfTheDying"/>).
     /// </summary>
     private readonly HashSet<HealthManager> _dead = [];
 
@@ -193,7 +193,7 @@ internal class EntityManager {
             typeof(CameraManagerReference).GetMethod(nameof(CameraManagerReference.CancelShake)),
             OnCancelShake
         );
-        HealthManagerComponent.Died += EndTheLoopsOfTheDead;
+        HealthManagerComponent.Dying += EndTheLoopsOfTheDying;
 
         const BindingFlags instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
         _flockFlyerAwakeHook = new Hook(
@@ -230,7 +230,7 @@ internal class EntityManager {
         _cameraShakeHook = null;
         _cancelShakeHook?.Dispose();
         _cancelShakeHook = null;
-        HealthManagerComponent.Died -= EndTheLoopsOfTheDead;
+        HealthManagerComponent.Dying -= EndTheLoopsOfTheDying;
 
         _flockFlyerAwakeHook?.Dispose();
         _flockFlyerAwakeHook = null;
@@ -910,7 +910,7 @@ internal class EntityManager {
     /// of it ends, and a copy that stops running here before that never ends it (see Entity.NoteShakeOfTheRun).
     /// A part that the creature let go of into the room is its part still, which goes as it is switched off too, like
     /// the hands of a boss that float about it on their own (LetGoParts). Every such shake of a creature is noted, in
-    /// the game that runs it too, to be ended if it dies with it still on (see <see cref="EndTheLoopsOfTheDead"/>).
+    /// the game that runs it too, to be ended if it dies with it still on (see <see cref="EndTheLoopsOfTheDying"/>).
     /// </summary>
     private void OnCameraShake(
         Action<CameraManagerReference, ICameraShake, Object, bool, bool, bool> orig,
@@ -944,7 +944,7 @@ internal class EntityManager {
     /// <summary>
     /// Notes a shake of the screen that does not end by itself which a creature that is an entity started, the room's
     /// own or a copy, by a part of it or one that it let go of, to be ended if the creature dies with it still on (see
-    /// <see cref="EndTheLoopsOfTheDead"/>). Not one that its death started, which is the death's own.
+    /// <see cref="EndTheLoopsOfTheDying"/>). Not one that its death started, which is the death's own.
     /// </summary>
     /// <param name="camera">The camera that shakes.</param>
     /// <param name="shake">The shake.</param>
@@ -1006,14 +1006,16 @@ internal class EntityManager {
 
     /// <summary>
     /// Ends the shakes of the screen that do not end by themselves which a creature started and which are still on as
-    /// it first dies (see <see cref="NoteLoop"/>), in each game. The creature ends such a shake in a later state of
-    /// its move, which its death takes it out of: the rumble of a boss's combo on a player it caught, which no blow of
-    /// theirs breaks into, as they are held, goes on for good once another player's blow kills the boss in the middle
-    /// of it. What its death starts after that is the death's own, and is left to it (a boss that plays its own death
-    /// is told it again at every blow on it).
+    /// it first starts to die (see <see cref="NoteLoop"/>), in each game. The creature ends such a shake in a later
+    /// state of its move, which its death takes it out of: the rumble of a boss's combo on a player it caught, which no
+    /// blow of theirs breaks into, as they are held, goes on for good once another player's blow kills the boss in the
+    /// middle of it. Before the game's own death of it runs (HealthManagerComponent.Dying): what that death starts, in
+    /// its first state as in any later one, is the death's own and is left to it, and a shake of the same kind that
+    /// it starts again is not ended with the one before, as the game ends a shake by its kind (a boss that plays its
+    /// own death is told it again at every blow on it).
     /// </summary>
     /// <param name="health">The health manager of the creature.</param>
-    private void EndTheLoopsOfTheDead(HealthManager health) {
+    private void EndTheLoopsOfTheDying(HealthManager health) {
         if (!_dead.Add(health) || !_loops.TryGetValue(health, out var loops)) {
             return;
         }

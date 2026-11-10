@@ -272,6 +272,13 @@ internal class HealthManagerComponent : EntityComponent {
     internal static event Action<HealthManager>? Died;
 
     /// <summary>
+    /// Raised as a creature starts to die in this game, just before the game's own death of it runs, as often as
+    /// <see cref="Died"/> is raised once it has: what the creature was doing until then is over, and what its death
+    /// sets going, even in the call that starts it, is the death's own (EntityManager.EndTheLoopsOfTheDying).
+    /// </summary>
+    internal static event Action<HealthManager>? Dying;
+
+    /// <summary>
     /// The copy that a blow just put back at the health last told, with the health the blow had left it. The log of
     /// damage (EnemyHealthCoop) says what a blow took from that, as its hook on blows may run around this one, which
     /// puts the health back before it looks (see <see cref="ForgetPutBack"/>, <see cref="HealthBeforePutBack"/>).
@@ -1630,6 +1637,7 @@ internal class HealthManagerComponent : EntityComponent {
             } else {
                 Logger.Debug($"HealthManager Die was called on client entity '{self.name}', but it is allowed death");
 
+                Dying?.Invoke(self);
                 InvokeOrig();
                 Died?.Invoke(self);
 
@@ -1659,6 +1667,7 @@ internal class HealthManagerComponent : EntityComponent {
         var diedAt = (Vector2) self.transform.position;
 
         _hostCorpse = null;
+        Dying?.Invoke(self);
         InvokeOrig();
 
         // A death of its own that left it alive, which its FSM played out in that call: what it went on to, it went on

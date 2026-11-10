@@ -1086,21 +1086,24 @@ internal partial class Entity {
         }
 
         // A catch of the partner's for a combo is the catch of the step of the FSM that their copy took it in, and
-        // of no later one: one that the FSM went on from by itself since is taken from there, and one that it left
-        // by a catch of someone else's struck the partner only, as they passed (see PutBackWhereTheCatchCameIn).
+        // of no later one: one that the FSM left by a catch of someone else's struck the partner only, as they
+        // passed, and one that it went on from by itself since is taken from there (see
+        // PutBackWhereTheCatchCameIn), or else where it is, if it takes the catch there too.
         // By the name of the state alone, one that came once the FSM had gone on from that state was not taken at
         // all, and the boss let go of the partner it had caught there: 8 of the 14 catches of the evening (11-10).
         // USER 11-10 "一次反击抓了什么人，什么人在反击的时候路过被打了都得靠序号"
         if (CatchEvents.Contains(eventName) && start.Path is not { Length: > 0 } && start.FromStep != 0 &&
             RoomFsmWays.TryGetValue(hostFsm, out var ways) && !ways.IsIn(start.FromStep)) {
-            var caughtIn = PutBackWhereTheCatchCameIn(fsm, ways, state, eventName, start.From, start.FromStep);
-            if (caughtIn == null) {
+            var caughtIn = PutBackWhereTheCatchCameIn(fsm, ways, state, eventName, start, into != null, out var passed);
+            if (passed) {
                 SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
                 return false;
             }
 
-            state = caughtIn;
-            into = EntityFsmActions.FindTransition(fsm, state, eventName);
+            if (caughtIn != null) {
+                state = caughtIn;
+                into = EntityFsmActions.FindTransition(fsm, state, eventName);
+            }
         }
 
         // What a wound sets off is taken where the creature is, from now: the partner struck it where their game

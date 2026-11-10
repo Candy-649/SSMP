@@ -202,7 +202,7 @@ internal partial class Entity {
 
         var told = $"[Wounds] The '{fsm.Name}' of entity {Id} is in '{at.Name}' as the partner's '{eventName}' " +
                    $"comes, which their copy took in '{fromName}'";
-        return PutBack(fsm, at, from, ways, null, told);
+        return PutBack(fsm, at, from, ways, null, told, "so it does not take it");
     }
 
     /// <summary>
@@ -212,37 +212,42 @@ internal partial class Entity {
     /// left the step by a catch, of this game's player or of another's: the combo of that step is someone else's, and
     /// the partner, who passed through as it struck, is only struck, as the game has it (USER 11-10 "她的设定就是这样，抓人
     /// 只是为了反击吃满伤害，反击的时候还要惩罚跳来跳去不小心路过的人"). Each step is told apart by its number (see
-    /// <see cref="FsmWays"/>), which the copy had of the scene host's FSM with the state it took the catch in. Said in
-    /// the log either way.
+    /// <see cref="FsmWays"/>), which the copy had of the scene host's FSM with the state it took the catch in. One
+    /// that can't be put back there is taken where the FSM is, if it takes the catch there too: put back through a
+    /// state of a combo of slashes that switches its hurting part, or past another state that takes a catch, it was
+    /// not taken at all, and the boss let go of the partner it had caught as it went on to its next slash (review of
+    /// ce8e5e6). Said in the log either way.
     /// </summary>
     /// <param name="fsm">The FSM.</param>
     /// <param name="ways">The ways of the FSM.</param>
     /// <param name="at">The state it is in.</param>
     /// <param name="eventName">The catch event.</param>
-    /// <param name="fromName">The state that the partner's copy took it in.</param>
-    /// <param name="step">The number of the step of the FSM that the copy took it in.</param>
-    /// <returns>The state it is put back in, or null if the catch is not taken.</returns>
+    /// <param name="start">What the partner's game sent with it: the state and the step that the copy took it in.
+    /// </param>
+    /// <param name="takenHere">Whether the state that the FSM is in takes the catch, for the log.</param>
+    /// <param name="passedBy">Whether it left that step by a catch of someone else's, which refuses the catch.
+    /// </param>
+    /// <returns>The state it is put back in, or null if it is not.</returns>
     private FsmState? PutBackWhereTheCatchCameIn(
         HutongGames.PlayMaker.Fsm fsm,
         FsmWays ways,
         FsmState at,
         string eventName,
-        string fromName,
-        ushort step
+        InputStart start,
+        bool takenHere,
+        out bool passedBy
     ) {
+        passedBy = false;
         var told = $"[Catches] The '{fsm.Name}' of entity {Id} is in '{at.Name}' as the partner's '{eventName}' " +
-                   $"comes, which their copy took in '{fromName}' as step {step} of it";
-        if (fsm.GetState(fromName) is not { } from || EntityFsmActions.FindTransition(fsm, from, eventName) == null) {
-            Logger.Info($"{told}, which leads nowhere from there here, so it does not take it");
-            return null;
-        }
-
-        if (ways.LeftBy(step) is not { } wayOut) {
-            Logger.Info($"{told}, which it left longer ago than it notes, so it does not take it");
+                   $"comes, which their copy took in '{start.From}' as step {start.FromStep} of it";
+        var otherwise = takenHere ? "so it takes it where it is" : "so it does not take it";
+        if (ways.LeftBy(start.FromStep) is not { } wayOut) {
+            Logger.Info($"{told}, which it left longer ago than it notes, {otherwise}");
             return null;
         }
 
         if (wayOut.Event is { } left && CatchEvents.Contains(left.Name)) {
+            passedBy = true;
             Logger.Info(
                 $"{told}, which it left by a catch of someone else's, to '{wayOut.To.Name}', so the partner was only " +
                 "struck as they passed"
@@ -250,7 +255,12 @@ internal partial class Entity {
             return null;
         }
 
-        return PutBack(fsm, at, from, ways, wayOut, told);
+        if (fsm.GetState(start.From) is not { } from || EntityFsmActions.FindTransition(fsm, from, eventName) == null) {
+            Logger.Info($"{told}, which leads nowhere from there here, {otherwise}");
+            return null;
+        }
+
+        return PutBack(fsm, at, from, ways, wayOut, told, otherwise);
     }
 
     /// <summary>
@@ -267,6 +277,7 @@ internal partial class Entity {
     /// <param name="ways">The ways of the FSM.</param>
     /// <param name="wayOut">The way it left that state by, for a catch; null for a wound.</param>
     /// <param name="told">What the log says of it first.</param>
+    /// <param name="otherwise">What the log says becomes of it if it is not put back.</param>
     /// <returns>The state it is put back in, or null if it is not.</returns>
     private FsmState? PutBack(
         HutongGames.PlayMaker.Fsm fsm,
@@ -274,7 +285,8 @@ internal partial class Entity {
         FsmState from,
         FsmWays ways,
         Way? wayOut,
-        string told
+        string told,
+        string otherwise
     ) {
         var (held, takes) = wayOut == null ? (ways.Held, "wounds") : (ways.HeldForACatch, "catches");
         var reached = at;
@@ -282,20 +294,20 @@ internal partial class Entity {
         for (var back = 0; back < ways.Count; back++) {
             var way = ways.Back(back);
             if (way.To != reached) {
-                Logger.Info($"{told}, and it came to '{reached.Name}' by a way it does not note, so it does not take it");
+                Logger.Info($"{told}, and it came to '{reached.Name}' by a way it does not note, {otherwise}");
                 return null;
             }
 
             if (!WentByItself(fsm, way)) {
                 Logger.Info(
-                    $"{told}, and it went from '{way.From.Name}' to '{way.To.Name}' by what came from outside it, so " +
-                    "it does not take it"
+                    $"{told}, and it went from '{way.From.Name}' to '{way.To.Name}' by what came from outside it, " +
+                    otherwise
                 );
                 return null;
             }
 
             if (LeftBehindBy(reached, reachedEntered) is { } kind) {
-                Logger.Info($"{told}, and it went through '{reached.Name}', whose {kind} stays, so it does not take it");
+                Logger.Info($"{told}, and it went through '{reached.Name}', whose {kind} stays, {otherwise}");
                 return null;
             }
 
@@ -306,18 +318,18 @@ internal partial class Entity {
             }
 
             if (way.From != from) {
-                Logger.Info($"{told}, and it was in '{way.From.Name}' in that step here, so it does not take it");
+                Logger.Info($"{told}, and it was in '{way.From.Name}' in that step here, {otherwise}");
                 return null;
             }
 
             var ago = Time.unscaledTime - way.At;
             if (ago > LateWoundAtMost) {
-                Logger.Info($"{told}, which it left {ago:0.00} s ago, so it does not take it");
+                Logger.Info($"{told}, which it left {ago:0.00} s ago, {otherwise}");
                 return null;
             }
 
             if (held.Number != way.Number) {
-                Logger.Info($"{told}, which it left before another state that takes {takes}, so it does not take it");
+                Logger.Info($"{told}, which it left before another state that takes {takes}, {otherwise}");
                 return null;
             }
 
@@ -332,7 +344,7 @@ internal partial class Entity {
             return from;
         }
 
-        Logger.Info($"{told}, which it left longer ago than it notes, so it does not take it");
+        Logger.Info($"{told}, which it left longer ago than it notes, {otherwise}");
         return null;
     }
 
