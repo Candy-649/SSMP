@@ -173,6 +173,28 @@ internal class SettingsPanel : IRootedComponent {
     private readonly RectTransform _lightRow;
     private readonly RectTransform _codeRow;
 
+    /// <summary>
+    /// The part of the skin's page for the skins that change nothing of Hornet herself, several of which can be on at
+    /// once (see <see cref="OwnSkin.Others"/>): the row of its name and status, a row for each skin found, made as they
+    /// are found, and what they come to.
+    /// </summary>
+    private readonly RectTransform _otherHeadRow;
+    private readonly Text _otherStatusText;
+    private readonly Text _otherNoteText;
+    private readonly List<OtherSkinRow> _otherRows = [];
+
+    /// <summary>The skins that the first rows of <see cref="_otherRows"/> show, in the same order.</summary>
+    private List<SkinPack> _otherShown = [];
+
+    /// <summary>
+    /// The row of a skin that changes nothing of Hornet herself: the button that switches it, with its background and
+    /// its label, and the skin's name beside it.
+    /// </summary>
+    private sealed record OtherSkinRow(RectTransform Row, Button Button, Image Image, Text State, Text Name);
+
+    /// <summary>The tab of the skin's page, which its first row goes up to with a gamepad.</summary>
+    private readonly Button _skinTabButton;
+
     /// <summary>Whether this player wears a skin, which keeps its own colours, as the skin's part last drew it.</summary>
     private bool _wearingSkin;
 
@@ -205,9 +227,9 @@ internal class SettingsPanel : IRootedComponent {
 
     /// <summary>
     /// What the controls of the colour of the cloak were last linked for, for a gamepad: where the colour chosen is in
-    /// the row of colours, and whether the row of the slashes is over them.
+    /// the row of colours, whether the row of the slashes is over them, and how many rows of other skins.
     /// </summary>
-    private (int Pressed, bool OverSlashes)? _linkedFor;
+    private (int Pressed, bool OverSlashes, int Others)? _linkedFor;
 
     /// <summary>The box that takes the code of a colour, and the swatch beside it of the colour chosen.</summary>
     private readonly InputField _cloakCodeField;
@@ -407,6 +429,7 @@ internal class SettingsPanel : IRootedComponent {
             out _
         );
         PlaceInRow(skinTab, HeaderHeight + 1f, NoteHeight - 2f);
+        _skinTabButton = skinTab.GetComponent<Button>();
 
         var roomTab = WaitingRoomPanel.CreateButton(
             GameObject.transform,
@@ -951,6 +974,49 @@ internal class SettingsPanel : IRootedComponent {
             TextAnchor.UpperLeft
         );
 
+        // The skins that change nothing of Hornet herself, as those of her cogflies: each on a row of its own with a
+        // button that switches it, as several can be on at once (USER 11-10: "真要管那肯定是单独列一项换大黄蜂以外的，
+        // 允许可以启用多个"). The rows are made as the skins are found
+        _otherHeadRow = CreateRow(_skinContent, "OtherSkinHead", RowHeight);
+        WaitingRoomPanel.CreateLabel(
+            _otherHeadRow,
+            "OtherSkinLabel",
+            Lang.Pick("OTHER SKINS", "其他皮肤"),
+            new Vector2(0.03f, 1f),
+            new Vector2(0.40f, 1f),
+            new Vector2(0f, RowHeight),
+            new Vector2(0f, -1f),
+            14,
+            WaitingRoomPanel.Accent,
+            TextAnchor.MiddleLeft
+        );
+
+        _otherStatusText = WaitingRoomPanel.CreateLabel(
+            _otherHeadRow,
+            "OtherSkinStatus",
+            "",
+            new Vector2(0.40f, 1f),
+            new Vector2(0.97f, 1f),
+            new Vector2(0f, RowHeight),
+            new Vector2(0f, -1f),
+            13,
+            Muted,
+            TextAnchor.MiddleRight
+        );
+
+        _otherNoteText = WaitingRoomPanel.CreateLabel(
+            _skinContent,
+            "OtherSkinNote",
+            "",
+            new Vector2(0.03f, 1f),
+            new Vector2(0.97f, 1f),
+            Vector2.zero,
+            Vector2.zero,
+            13,
+            Muted,
+            TextAnchor.UpperLeft
+        );
+
         // The colour of the cloak, which Player Color draws: the colours of before, one press each like the colours of
         // the name, then a strip of every hue, a strip of how light, from black to white, and a box that takes the code
         // of any colour (USER 10-24: "只能在几个里面换太局限了", "或者加个色盘？色带？")
@@ -1290,7 +1356,8 @@ internal class SettingsPanel : IRootedComponent {
 
     /// <summary>
     /// Lays the rows of the skin's part of the page out from its top, each under the one before: the slashes only where
-    /// there are skins to draw them from, and each note as tall as its text; the page is as tall as all of them.
+    /// there are skins to draw them from, the other skins only where a skin can be worn, and each note as tall as its
+    /// text; the page is as tall as all of them.
     /// </summary>
     private void LayOutSkinPage() {
         var top = 0f;
@@ -1301,6 +1368,15 @@ internal class SettingsPanel : IRootedComponent {
         }
 
         PlaceRow(_skinNoteText.rectTransform, ref top, NoteHeightOf(_skinNoteText), 10f);
+        if (_otherHeadRow.gameObject.activeSelf) {
+            PlaceRow(_otherHeadRow, ref top, RowHeight, 4f);
+            for (var i = 0; i < _otherShown.Count; i++) {
+                PlaceRow(_otherRows[i].Row, ref top, RowHeight, 4f);
+            }
+
+            PlaceRow(_otherNoteText.rectTransform, ref top, NoteHeightOf(_otherNoteText), 10f);
+        }
+
         PlaceRow(_cloakHeadRow, ref top, RowHeight, 3f);
         PlaceRow(_cloakPresetRow, ref top, RowHeight, 8f);
         PlaceRow(_hueRow, ref top, StripHeight, 8f);
@@ -1579,6 +1655,51 @@ internal class SettingsPanel : IRootedComponent {
     }
 
     /// <summary>
+    /// Makes the row of a skin that changes nothing of Hornet herself: the button that switches it on and off, and its
+    /// name beside it.
+    /// </summary>
+    /// <param name="index">Where the row is among them, which says the skin that it switches.</param>
+    private OtherSkinRow CreateOtherRow(int index) {
+        var row = CreateRow(_skinContent, $"OtherSkin{index}", RowHeight);
+        var button = WaitingRoomPanel.CreateButton(
+            row,
+            "Switch",
+            "",
+            new Vector2(0.03f, 1f),
+            new Vector2(0.17f, 1f),
+            WaitingRoomPanel.ReadyOff,
+            () => SwitchOther(index),
+            out var image,
+            out var state
+        );
+        PlaceInRow(button, 0f, RowHeight);
+
+        var name = WaitingRoomPanel.CreateLabel(
+            row,
+            "Name",
+            "",
+            new Vector2(0.20f, 1f),
+            new Vector2(0.97f, 1f),
+            new Vector2(0f, RowHeight),
+            Vector2.zero,
+            15,
+            Color.white,
+            TextAnchor.MiddleLeft
+        );
+        return new OtherSkinRow(row, button.GetComponent<Button>(), image, state, name);
+    }
+
+    /// <summary>
+    /// Switches the skin of a row of those that change nothing of Hornet herself on or off.
+    /// </summary>
+    /// <param name="index">Where the row is among them.</param>
+    private void SwitchOther(int index) {
+        var pack = _otherShown[index];
+        OwnSkin.Switch(pack, !pack.IsActive);
+        Refresh();
+    }
+
+    /// <summary>
     /// Has the cloak drawn in the given colour, or in its own for null.
     /// </summary>
     private void ChooseCloak(Color? colour) {
@@ -1727,23 +1848,29 @@ internal class SettingsPanel : IRootedComponent {
 
     /// <summary>
     /// Links the controls of the colour of the cloak for a gamepad by hand, up and down from the colours to press to the
-    /// strips and the code. Unity's own choice goes by how far the middle of each control is, and the middle of a strip
-    /// as wide as the row is far from the colours at its left: down from those went past both strips to the code, a box
-    /// that a gamepad can't type into (review of 6f65520). Left and right on a strip, which lead nowhere, move it.
+    /// strips and the code, and the rows of the skin over them (see <see cref="LinkSkinRows"/>). Unity's own choice
+    /// goes by how far the middle of each control is, and the middle of a strip as wide as the row is far from the
+    /// colours at its left: down from those went past both strips to the code, a box that a gamepad can't type into
+    /// (review of 6f65520). Left and right on a strip, which lead nowhere, move it.
     /// </summary>
     /// <param name="pressed">Where the colour chosen is in the row of colours, the cloak's own first: the strip of hues
     /// goes up to it.</param>
     private void LinkCloakControls(int pressed) {
         // Linked again only when what they link to changes, and not at every frame of a strip moving
-        if (_linkedFor is { } linked && linked.Pressed == pressed && linked.OverSlashes == _slashRow.activeSelf) {
+        var others = _otherShown.Count;
+        if (_linkedFor is { } linked && linked.Pressed == pressed && linked.OverSlashes == _slashRow.activeSelf &&
+            linked.Others == others) {
             return;
         }
 
-        _linkedFor = (pressed, _slashRow.activeSelf);
+        _linkedFor = (pressed, _slashRow.activeSelf, others);
 
-        // Over the colours, the row of the slashes, or of the skin where there are no slashes to choose
-        Selectable overLeft = _slashRow.activeSelf ? _slashBackButton : _skinBackButton;
-        Selectable overRight = _slashRow.activeSelf ? _slashOnButton : _skinOnButton;
+        // Over the colours, the last of the other skins, else the row of the slashes, or of the skin where there are no
+        // slashes to choose
+        Selectable overLeft = others > 0 ? _otherRows[others - 1].Button
+            : _slashRow.activeSelf ? _slashBackButton : _skinBackButton;
+        Selectable overRight = others > 0 ? _otherRows[others - 1].Button
+            : _slashRow.activeSelf ? _slashOnButton : _skinOnButton;
 
         var row = new List<Selectable>(_cloakSwatches.Count + 1) { _cloakOwnButton };
         foreach (var swatch in _cloakSwatches) {
@@ -1773,6 +1900,46 @@ internal class SettingsPanel : IRootedComponent {
         _cloakCodeField.navigation = new Navigation {
             mode = Navigation.Mode.Explicit,
             selectOnUp = _lightStrip
+        };
+
+        LinkSkinRows(row[0], row[row.Count - 1]);
+    }
+
+    /// <summary>
+    /// Links the rows of the skin for a gamepad by hand, each to the rows over and under it: the skin, the slashes, the
+    /// skins that change nothing of Hornet herself, then the colours of the cloak. Unity's own choice goes by how far
+    /// the middle of each control is: down from the button at the right of the row of the skin went past the other
+    /// skins, whose buttons are at the left, to the colours.
+    /// </summary>
+    /// <param name="cloakLeft">The control at the left of the colours of the cloak.</param>
+    /// <param name="cloakRight">The control at the right of the colours of the cloak.</param>
+    private void LinkSkinRows(Selectable cloakLeft, Selectable cloakRight) {
+        var others = _otherShown.Count;
+        var slashes = _slashRow.activeSelf;
+        Selectable underLeft = others > 0 ? _otherRows[0].Button : cloakLeft;
+        Selectable underRight = others > 0 ? _otherRows[0].Button : cloakRight;
+
+        _skinBackButton.navigation = Link(_skinTabButton, slashes ? _slashBackButton : underLeft, null, _skinOnButton);
+        _skinOnButton.navigation = Link(_skinTabButton, slashes ? _slashOnButton : underRight, _skinBackButton, null);
+        _slashBackButton.navigation = Link(_skinBackButton, underLeft, null, _slashOnButton);
+        _slashOnButton.navigation = Link(_skinOnButton, underRight, _slashBackButton, null);
+
+        Selectable over = slashes ? _slashBackButton : _skinBackButton;
+        for (var i = 0; i < others; i++) {
+            _otherRows[i].Button.navigation = Link(
+                i > 0 ? _otherRows[i - 1].Button : over,
+                i < others - 1 ? _otherRows[i + 1].Button : cloakLeft,
+                null,
+                null
+            );
+        }
+
+        static Navigation Link(Selectable up, Selectable down, Selectable? left, Selectable? right) => new() {
+            mode = Navigation.Mode.Explicit,
+            selectOnUp = up,
+            selectOnDown = down,
+            selectOnLeft = left,
+            selectOnRight = right
         };
     }
 
@@ -1858,11 +2025,100 @@ internal class SettingsPanel : IRootedComponent {
             );
         }
 
+        RefreshOther(canChoose);
+
         // The colour of the cloak under it, which a skin keeps its own colours over, and the page laid out for what
         // the notes say
         _wearingSkin = current != null;
         RefreshCloak();
         LayOutSkinPage();
+    }
+
+    /// <summary>
+    /// Draws the skins that change nothing of Hornet herself, each on its row with whether it is on, how many are on,
+    /// and what they come to; none of it where no skin can be worn.
+    /// </summary>
+    /// <param name="canChoose">Whether a skin can be worn.</param>
+    private void RefreshOther(bool canChoose) {
+        _otherShown = canChoose ? OwnSkin.Others() : new List<SkinPack>();
+        _otherHeadRow.gameObject.SetActive(canChoose);
+        _otherNoteText.gameObject.SetActive(canChoose);
+        while (_otherRows.Count < _otherShown.Count) {
+            _otherRows.Add(CreateOtherRow(_otherRows.Count));
+        }
+
+        var on = 0;
+        for (var i = 0; i < _otherRows.Count; i++) {
+            var row = _otherRows[i];
+            row.Row.gameObject.SetActive(i < _otherShown.Count);
+            if (i >= _otherShown.Count) {
+                continue;
+            }
+
+            var active = _otherShown[i].IsActive;
+            if (active) {
+                on++;
+            }
+
+            row.Image.color = active ? WaitingRoomPanel.ReadyOn : WaitingRoomPanel.ReadyOff;
+            row.State.text = active ? Lang.Pick("ON", "开") : Lang.Pick("OFF", "关");
+            row.Name.text = _otherShown[i].Name;
+        }
+
+        _otherStatusText.text = _otherShown.Count == 0
+            ? ""
+            : Lang.Pick($"{_otherShown.Count} installed, {on} on", $"装了 {_otherShown.Count} 个，开着 {on} 个");
+        _otherNoteText.text = OtherNote(_otherShown);
+    }
+
+    /// <summary>
+    /// What the skins that change nothing of Hornet herself come to: that several can be on, what the other player
+    /// sees of them, that whole pages change only as the game starts, and where two that are on have art for the same
+    /// thing, whose shows there.
+    /// </summary>
+    /// <param name="others">The skins.</param>
+    private static string OtherNote(List<SkinPack> others) {
+        if (others.Count == 0) {
+            return Lang.Pick(
+                "No skin was found that changes only what isn't Hornet herself, as her cogflies. A skin goes in a " +
+                "folder of its own in Hollow Knight Silksong_Data\\Mods\\Customizer in the game's folder.",
+                "没找到只改大黄蜂以外东西的皮肤（比如换齿轮蜂样子的）。皮肤放在游戏目录的 " +
+                "Hollow Knight Silksong_Data\\Mods\\Customizer 里，一个皮肤一个文件夹。"
+            );
+        }
+
+        var lines = new List<string> {
+            Lang.Pick(
+                "Several can be on at once, beside the skin above. Switched at once, and the same the next time the " +
+                "game starts. What they change of what you throw and set off, as your cogflies, the other player " +
+                "sees if they have the same skins.",
+                "可以同时开好几个，和上面的皮肤一起用。开关马上生效，下次开游戏也还是这样。你放出来的东西（比如齿轮蜂）" +
+                "换了的样子，队友也装了同样的皮肤才看得到。"
+            )
+        };
+        if (CustomizerT2D.IsLoaded && others.Exists(pack => SkinImages.Of(pack.Dir).Count > 0)) {
+            lines.Add(Lang.Pick(
+                "Whole pages of pictures, as those of the inventory, change only as the game starts again.",
+                "整页的图（比如物品栏里的）要重开游戏才换。"
+            ));
+        }
+
+        foreach (var overlap in OwnSkin.Overlaps()) {
+            var hidden = overlap.Hidden.Name;
+            var shown = overlap.Shown.Name;
+            lines.Add(overlap.Page
+                ? Lang.Pick(
+                    $"\"{hidden}\" and \"{shown}\" have the same whole page of pictures: \"{shown}\"'s shows once " +
+                    "the game starts again.",
+                    $"「{hidden}」和「{shown}」带了同一整页图，重开游戏后这页用的是「{shown}」的。"
+                )
+                : Lang.Pick(
+                    $"\"{hidden}\" and \"{shown}\" change some of the same pictures: those show \"{shown}\"'s.",
+                    $"「{hidden}」和「{shown}」改了一些同样的图，重了的地方用的是「{shown}」的。"
+                ));
+        }
+
+        return string.Join("\n", lines);
     }
 
     /// <summary>

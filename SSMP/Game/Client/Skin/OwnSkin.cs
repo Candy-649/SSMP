@@ -15,6 +15,9 @@ namespace SSMP.Game.Client.Skin;
 /// skins switched on together showed the one that came first. A choice here leaves an active.txt in the chosen skin
 /// alone of the skins of Hornet, so that Customizer dresses the game with it from then on, also after a restart, and
 /// dresses what the game has loaded already at once, as Customizer would after a restart.
+///
+/// Beside it, each skin that changes nothing of Hornet herself, as one of her cogflies, is switched on or off on its
+/// own, several at once (see <see cref="Others"/>).
 /// </summary>
 internal static class OwnSkin {
     /// <summary>
@@ -36,6 +39,12 @@ internal static class OwnSkin {
     /// The name that the file of a skin switched off here is kept under, to be put back when it is chosen again.
     /// </summary>
     private const string SwitchedOffFile = "active.txt.off";
+
+    /// <summary>
+    /// The folder of a skin that holds the images that CustomizerT2D dresses whole pages of atlases with, which is no
+    /// sheet of sprites.
+    /// </summary>
+    private const string PagesFolder = "Texture2D";
 
     /// <summary>
     /// The art of each skin loaded here, by the folder of the skin.
@@ -172,33 +181,133 @@ internal static class OwnSkin {
     /// </summary>
     public static void Choose(SkinPack? chosen) {
         foreach (var pack in Choices()) {
-            var wear = chosen != null && string.Equals(pack.Dir, chosen.Dir, StringComparison.OrdinalIgnoreCase);
-            var active = Path.Combine(pack.Dir, ActiveFile);
-            var off = Path.Combine(pack.Dir, SwitchedOffFile);
-            try {
-                if (wear && !File.Exists(active)) {
-                    if (File.Exists(off)) {
-                        File.Move(off, active);
-                    } else {
-                        File.WriteAllText(active, "");
-                    }
-                } else if (!wear && File.Exists(active)) {
-                    // One switched off here before gives way to the newer one, which was put back by hand since
-                    if (File.Exists(off)) {
-                        File.Delete(off);
-                    }
-
-                    File.Move(active, off);
-                }
-            } catch (Exception e) {
-                Logger.Warn($"Could not switch the skin '{pack.Name}' {(wear ? "on" : "off")}: {e.Message}");
-            }
+            SetActive(pack, chosen != null && string.Equals(pack.Dir, chosen.Dir, StringComparison.OrdinalIgnoreCase));
         }
 
         Logger.Info($"Chose to wear {(chosen == null ? "the game's own look" : $"the skin '{chosen.Name}'")}");
         ReadWorn();
         DressLoaded();
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// The skins on this computer that change nothing of Hornet herself, in Customizer's order: what she throws and
+    /// sets off, as her cogflies, and whatever else the game draws. Any of them can be on beside her skin and beside
+    /// each other (USER 11-10: "真要管那肯定是单独列一项换大黄蜂以外的，允许可以启用多个").
+    /// </summary>
+    public static List<SkinPack> Others() {
+        var others = new List<SkinPack>();
+        foreach (var pack in CustomizerPacks.FindAll()) {
+            if (!pack.SheetNames().Exists(IsHornetSheet)) {
+                others.Add(pack);
+            }
+        }
+
+        return others;
+    }
+
+    /// <summary>
+    /// Switches one of the skins that change nothing of Hornet herself on or off (see <see cref="Others"/>), leaving
+    /// every other skin as it is, and dresses what the game has loaded at once.
+    /// </summary>
+    public static void Switch(SkinPack pack, bool on) {
+        SetActive(pack, on);
+        Logger.Info($"Switched the skin '{pack.Name}' {(on ? "on" : "off")} beside what Hornet wears");
+        DressLoaded();
+        Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Has Customizer dress the game with a skin or not: an active.txt in its folder, or kept there as active.txt.off
+    /// to be put back when it is switched on again.
+    /// </summary>
+    private static void SetActive(SkinPack pack, bool on) {
+        var active = Path.Combine(pack.Dir, ActiveFile);
+        var off = Path.Combine(pack.Dir, SwitchedOffFile);
+        try {
+            if (on && !File.Exists(active)) {
+                if (File.Exists(off)) {
+                    File.Move(off, active);
+                } else {
+                    File.WriteAllText(active, "");
+                }
+            } else if (!on && File.Exists(active)) {
+                // One switched off here before gives way to the newer one, which was put back by hand since
+                if (File.Exists(off)) {
+                    File.Delete(off);
+                }
+
+                File.Move(active, off);
+            }
+        } catch (Exception e) {
+            Logger.Warn($"Could not switch the skin '{pack.Name}' {(on ? "on" : "off")}: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Where two skins that are on have art for the same thing, one of them at least changing nothing of Hornet
+    /// herself (see <see cref="Others"/>), with the skin whose art shows there: Customizer dresses each sheet of
+    /// sprites from the first skin in its order that has it, and CustomizerT2D each whole page of an atlas from the
+    /// last skin by name in the game's folder of skins that has it, as the game starts (see CustomizerT2D).
+    /// </summary>
+    public static List<SkinOverlap> Overlaps() {
+        var others = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pack in Others()) {
+            others.Add(pack.Dir);
+        }
+
+        var active = CustomizerPacks.FindAll().FindAll(pack => pack.IsActive);
+        var overlaps = new List<SkinOverlap>();
+        var firstOf = new Dictionary<string, SkinPack>(StringComparer.Ordinal);
+        foreach (var pack in active) {
+            foreach (var sheet in pack.SheetNames()) {
+                if (sheet == PagesFolder) {
+                    continue;
+                }
+
+                if (firstOf.TryGetValue(sheet, out var first)) {
+                    Add(pack, first, false);
+                } else {
+                    firstOf[sheet] = pack;
+                }
+            }
+        }
+
+        if (!CustomizerT2D.IsLoaded) {
+            return overlaps;
+        }
+
+        var folder = Path.GetFullPath(Path.Combine(Application.dataPath, "Mods", "Customizer"));
+        var byName = active.FindAll(pack => string.Equals(
+            Path.GetFullPath(Path.GetDirectoryName(pack.Dir)!), folder, StringComparison.OrdinalIgnoreCase
+        ));
+        byName.Sort((one, other) => string.Compare(
+            Path.GetFileName(one.Dir), Path.GetFileName(other.Dir), StringComparison.OrdinalIgnoreCase
+        ));
+        var lastOf = new Dictionary<string, SkinPack>(StringComparer.OrdinalIgnoreCase);
+        var covered = new List<(SkinPack Pack, string Page)>();
+        foreach (var pack in byName) {
+            foreach (var page in SkinImages.Of(pack.Dir).Keys) {
+                if (lastOf.TryGetValue(page, out var before)) {
+                    covered.Add((before, page));
+                }
+
+                lastOf[page] = pack;
+            }
+        }
+
+        foreach (var (pack, page) in covered) {
+            Add(pack, lastOf[page], true);
+        }
+
+        return overlaps;
+
+        void Add(SkinPack hidden, SkinPack shown, bool page) {
+            var overlap = new SkinOverlap(hidden, shown, page);
+            if ((others.Contains(hidden.Dir) || others.Contains(shown.Dir)) && !overlaps.Contains(overlap)) {
+                overlaps.Add(overlap);
+            }
+        }
     }
 
     /// <summary>
@@ -474,3 +583,10 @@ internal static class OwnSkin {
         }
     }
 }
+
+/// <summary>
+/// Two skins that are on with art for the same thing: the one whose art doesn't show there, the one whose art does, and
+/// whether the thing is a whole page of an atlas, which CustomizerT2D dresses as the game starts, rather than a sheet
+/// of sprites (see <see cref="OwnSkin.Overlaps"/>).
+/// </summary>
+internal readonly record struct SkinOverlap(SkinPack Hidden, SkinPack Shown, bool Page);

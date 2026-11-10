@@ -1164,6 +1164,15 @@ internal static class ToolCopies {
     }
 
     /// <summary>
+    /// The prefabs of every copied thing (see <see cref="FindPrefabs"/>), found again, as what the hero spawns as it is
+    /// hurt is only known with a hero.
+    /// </summary>
+    public static ICollection<GameObject> AllPrefabs() {
+        _prefabs = FindPrefabs();
+        return _prefabs.Values;
+    }
+
+    /// <summary>
     /// Finds the prefabs of the copied things: what each copied tool throws, in either of its states for a tool that
     /// can be switched between two, what the hero's handling of their tools spawns, and what the hero spawns as they are
     /// hurt with a tool on.

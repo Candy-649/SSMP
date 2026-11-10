@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using SSMP.Animation.Effects.Tools;
 using SSMP.Util;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -117,9 +118,9 @@ internal class SkinManager {
 
     /// <summary>
     /// What the player's own hero wears, as the text that tells the other games. The skins of Customizer count only
-    /// once the hero is there, as only those with art for the hero's sheets change how the player looks, or with images
-    /// of the pages of atlases that its attacks draw from (see AtlasSlashes), which CustomizerT2D dresses: a skin of
-    /// those alone counts too.
+    /// once the hero is there, as only those with art for the sheets of the hero and of what it throws and sets off
+    /// change how the player looks, or with images of the pages of atlases that its attacks draw from (see
+    /// AtlasSlashes), which CustomizerT2D dresses: a skin of those alone counts too.
     /// </summary>
     public string LocalLook() {
         var look = new SkinLook();
@@ -152,9 +153,10 @@ internal class SkinManager {
 
     /// <summary>
     /// The names of the sheets of sprites that the player's own hero draws from, or null while there is no hero: its
-    /// own, its crests', and those of everything on it, its slashes, strikes, silk skills, binds and the rest, which
-    /// the games of other players show copies of in what the player wears (see HeroCopies). A skin that dresses only
-    /// some of those, the slashes alone, still changes how the player looks to the others.
+    /// own, its crests', those of everything on it, its slashes, strikes, silk skills, binds and the rest, and those
+    /// of what it throws and sets off with its tools, which the games of other players show copies of in what the
+    /// player wears (see HeroCopies). A skin that dresses only some of those, the slashes or the cogflies alone, still
+    /// changes how the player looks to the others (USER 11-10: "一个人如果active了，能不能让其他人也能看到").
     /// </summary>
     private HashSet<string>? HeroSheets() {
         if (_heroSheets != null) {
@@ -181,6 +183,19 @@ internal class SkinManager {
         foreach (var sprite in hero.GetComponentsInChildren<tk2dBaseSprite>(true)) {
             if (sprite.Collection != null) {
                 sheets.Add(sprite.Collection.name);
+            }
+        }
+
+        // What it throws and sets off, as its cogflies, which are made apart from it
+        foreach (var prefab in ToolCopies.AllPrefabs()) {
+            foreach (var sprite in prefab.GetComponentsInChildren<tk2dBaseSprite>(true)) {
+                if (sprite.Collection != null) {
+                    sheets.Add(sprite.Collection.name);
+                }
+            }
+
+            foreach (var thrownAnimator in prefab.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
+                AddSheetsOf(thrownAnimator.Library, sheets);
             }
         }
 
@@ -231,11 +246,12 @@ internal class SkinManager {
         if (look.Packs.Count > 0) {
             var packs = CustomizerPacks.FindAll();
             foreach (var wanted in look.Packs) {
+                // Said alike of a skin of Hornet herself and of one of what she throws and sets off alone
                 if (CustomizerPacks.Find(packs, wanted) == null) {
                     problems.Add(Lang.Pick(
-                        $"{username} wears the skin \"{wanted.Name}\", which isn't found on this computer, so " +
-                        $"you see {username} without it.",
-                        $"{username} 穿着皮肤「{wanted.Name}」，你这边没找到这个皮肤，所以你看到的 {username} 没穿它。"
+                        $"{username} has the skin \"{wanted.Name}\" on, which isn't found on this computer, so you " +
+                        "don't see what it changes.",
+                        $"{username} 开着皮肤「{wanted.Name}」，你这边没找到这个皮肤，所以你这边看不到它换的样子。"
                     ));
                 }
             }
