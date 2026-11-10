@@ -246,9 +246,10 @@ internal static class OwnSkin {
 
     /// <summary>
     /// Where two skins that are on have art for the same thing, one of them at least changing nothing of Hornet
-    /// herself (see <see cref="Others"/>), with the skin whose art shows there: Customizer dresses each sheet of
-    /// sprites from the first skin in its order that has it, and CustomizerT2D each whole page of an atlas from the
-    /// last skin by name in the game's folder of skins that has it, as the game starts (see CustomizerT2D).
+    /// herself (see <see cref="Others"/>), with the skin whose art shows there: Customizer dresses each atlas of a
+    /// sheet of sprites from the first skin in its order that has an image of it, and CustomizerT2D each whole page of
+    /// an atlas from the last skin by name in the game's folder of skins that has it, as the game starts (see
+    /// CustomizerT2D).
     /// </summary>
     public static List<SkinOverlap> Overlaps() {
         var others = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -258,17 +259,24 @@ internal static class OwnSkin {
 
         var active = CustomizerPacks.FindAll().FindAll(pack => pack.IsActive);
         var overlaps = new List<SkinOverlap>();
-        var firstOf = new Dictionary<string, SkinPack>(StringComparer.Ordinal);
+        var firstOf = new Dictionary<(string Sheet, string Atlas), SkinPack>();
         foreach (var pack in active) {
             foreach (var sheet in pack.SheetNames()) {
                 if (sheet == PagesFolder) {
                     continue;
                 }
 
-                if (firstOf.TryGetValue(sheet, out var first)) {
-                    Add(pack, first, false);
-                } else {
-                    firstOf[sheet] = pack;
+                foreach (var file in Directory.GetFiles(Path.Combine(pack.Dir, sheet), "*.png")) {
+                    if (!file.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) {
+                        continue;
+                    }
+
+                    var atlas = (sheet, Path.GetFileNameWithoutExtension(file));
+                    if (firstOf.TryGetValue(atlas, out var first)) {
+                        Add(pack, first, false);
+                    } else {
+                        firstOf[atlas] = pack;
+                    }
                 }
             }
         }

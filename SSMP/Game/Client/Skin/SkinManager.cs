@@ -50,6 +50,11 @@ internal class SkinManager {
     private HashSet<string>? _heroSheets;
 
     /// <summary>
+    /// The names of the sheets of sprites of what the player's own hero throws and sets off, once known.
+    /// </summary>
+    private HashSet<string>? _thingSheets;
+
+    /// <summary>
     /// What stops watching the settings of Player Color, or null while nothing watches them.
     /// </summary>
     private Action? _stopWatchingPlayerColor;
@@ -118,9 +123,9 @@ internal class SkinManager {
 
     /// <summary>
     /// What the player's own hero wears, as the text that tells the other games. The skins of Customizer count only
-    /// once the hero is there, as only those with art for the sheets of the hero and of what it throws and sets off
-    /// change how the player looks, or with images of the pages of atlases that its attacks draw from (see
-    /// AtlasSlashes), which CustomizerT2D dresses: a skin of those alone counts too.
+    /// once the hero is there, as only those with art for the hero's sheets change how the player looks, or for the
+    /// sheets of what it throws and sets off (see <see cref="ThingSheets"/>), or with images of the pages of atlases
+    /// that its attacks draw from (see AtlasSlashes), which CustomizerT2D dresses: a skin of those alone counts too.
     /// </summary>
     public string LocalLook() {
         var look = new SkinLook();
@@ -136,7 +141,7 @@ internal class SkinManager {
                 // Without Customizer, a skin with art for the hero's sheets dresses none of them here, and listed it
                 // would dress the character in the other games: it isn't worn then, its attack images neither
                 var dressesSheets = pack.Dresses(sheets);
-                if (customizer ? dressesSheets || AtlasSlashes.DrawsAttacks(pack)
+                if (customizer ? dressesSheets || pack.Dresses(ThingSheets()) || AtlasSlashes.DrawsAttacks(pack)
                         : !dressesSheets && AtlasSlashes.DrawsAttacks(pack)) {
                     look.Packs.Add(pack.Ref);
                 }
@@ -153,10 +158,9 @@ internal class SkinManager {
 
     /// <summary>
     /// The names of the sheets of sprites that the player's own hero draws from, or null while there is no hero: its
-    /// own, its crests', those of everything on it, its slashes, strikes, silk skills, binds and the rest, and those
-    /// of what it throws and sets off with its tools, which the games of other players show copies of in what the
-    /// player wears (see HeroCopies). A skin that dresses only some of those, the slashes or the cogflies alone, still
-    /// changes how the player looks to the others (USER 11-10: "一个人如果active了，能不能让其他人也能看到").
+    /// own, its crests', and those of everything on it, its slashes, strikes, silk skills, binds and the rest, which
+    /// the games of other players show copies of in what the player wears (see HeroCopies). A skin that dresses only
+    /// some of those, the slashes alone, still changes how the player looks to the others.
     /// </summary>
     private HashSet<string>? HeroSheets() {
         if (_heroSheets != null) {
@@ -186,7 +190,21 @@ internal class SkinManager {
             }
         }
 
-        // What it throws and sets off, as its cogflies, which are made apart from it
+        return _heroSheets = sheets;
+    }
+
+    /// <summary>
+    /// The names of the sheets of sprites of what the player's own hero throws and sets off with its tools, as its
+    /// cogflies, which are made apart from it and which the games of other players show copies of in what the player
+    /// wears too (see ThrownTool): a skin of the cogflies alone changes how the player's cogflies look to the others
+    /// (USER 11-10: "一个人如果active了，能不能让其他人也能看到"). Read once there is a hero.
+    /// </summary>
+    private HashSet<string> ThingSheets() {
+        if (_thingSheets != null) {
+            return _thingSheets;
+        }
+
+        var sheets = new HashSet<string>(StringComparer.Ordinal);
         foreach (var prefab in ToolCopies.AllPrefabs()) {
             foreach (var sprite in prefab.GetComponentsInChildren<tk2dBaseSprite>(true)) {
                 if (sprite.Collection != null) {
@@ -194,12 +212,12 @@ internal class SkinManager {
                 }
             }
 
-            foreach (var thrownAnimator in prefab.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
-                AddSheetsOf(thrownAnimator.Library, sheets);
+            foreach (var animator in prefab.GetComponentsInChildren<tk2dSpriteAnimator>(true)) {
+                AddSheetsOf(animator.Library, sheets);
             }
         }
 
-        return _heroSheets = sheets;
+        return _thingSheets = sheets;
     }
 
     /// <summary>

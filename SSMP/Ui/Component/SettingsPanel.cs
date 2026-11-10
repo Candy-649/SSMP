@@ -1865,12 +1865,12 @@ internal class SettingsPanel : IRootedComponent {
 
         _linkedFor = (pressed, _slashRow.activeSelf, others);
 
-        // Over the colours, the last of the other skins, else the row of the slashes, or of the skin where there are no
-        // slashes to choose
+        // Over the colours, the last of the other skins, else the row of the slashes, or the tab of the page where
+        // there are no skins of Hornet's, as the buttons of the skin then choose nothing
         Selectable overLeft = others > 0 ? _otherRows[others - 1].Button
-            : _slashRow.activeSelf ? _slashBackButton : _skinBackButton;
+            : _slashRow.activeSelf ? _slashBackButton : _skinTabButton;
         Selectable overRight = others > 0 ? _otherRows[others - 1].Button
-            : _slashRow.activeSelf ? _slashOnButton : _skinOnButton;
+            : _slashRow.activeSelf ? _slashOnButton : _skinTabButton;
 
         var row = new List<Selectable>(_cloakSwatches.Count + 1) { _cloakOwnButton };
         foreach (var swatch in _cloakSwatches) {
@@ -1924,7 +1924,7 @@ internal class SettingsPanel : IRootedComponent {
         _slashBackButton.navigation = Link(_skinBackButton, underLeft, null, _slashOnButton);
         _slashOnButton.navigation = Link(_skinOnButton, underRight, _slashBackButton, null);
 
-        Selectable over = slashes ? _slashBackButton : _skinBackButton;
+        Selectable over = slashes ? _slashBackButton : _skinTabButton;
         for (var i = 0; i < others; i++) {
             _otherRows[i].Button.navigation = Link(
                 i > 0 ? _otherRows[i - 1].Button : over,
