@@ -21,6 +21,7 @@ namespace SSMP.Game.Client.Skin;
 /// the images of the Texture2D folder of each skin in the game's folder of skins that holds an active.txt, or of every
 /// skin there when none does, the last skin by name winning each texture; then, as each texture shows, it loads the
 /// image of the same name and size into it, so that the game's own art of that texture is gone until the game quits.
+/// Here the skins of Hornet's come last, so that hers win a page that another skin has as well.
 ///
 /// This hooks in before that: it keeps the game's own art of the pages that the hero's attacks draw from as they are
 /// about to be dressed, so that a player whose charged slash is drawn in the game's own art shows it on every screen
@@ -355,6 +356,13 @@ internal static class CustomizerT2D {
                             $"none of the {__result.Count} skins, rather than of every one");
                 __result = [];
             }
+
+            // A whole page that a skin of Hornet's has as well as a skin of what else the game draws is hers, as the
+            // skin she wears takes in more than that page (USER 11-10: "先按照大黄蜂皮肤优先吧"): the last skin wins it
+            var hers = __result.FindAll(skin => OwnSkin.IsOfHornet(new SkinPack(Path.GetFileName(skin), skin)));
+            __result = [..__result.FindAll(skin => !hers.Contains(skin)), ..hers];
+            Logger.Info($"CustomizerT2D takes the images of {__result.Count} skins, each page from the last that has " +
+                        $"it, the skins of Hornet's last: {string.Join(", ", __result.ConvertAll(Path.GetFileName))}");
 
             // The images are read again: a texture it didn't dress before may be dressed now
             _skins = [..__result];

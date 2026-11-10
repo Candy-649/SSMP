@@ -126,7 +126,7 @@ internal static class OwnSkin {
     public static List<SkinPack> Choices() {
         var choices = new List<SkinPack>();
         foreach (var pack in CustomizerPacks.FindAll()) {
-            if (pack.SheetNames().Exists(IsHornetSheet)) {
+            if (IsOfHornet(pack)) {
                 choices.Add(pack);
             }
         }
@@ -198,13 +198,19 @@ internal static class OwnSkin {
     public static List<SkinPack> Others() {
         var others = new List<SkinPack>();
         foreach (var pack in CustomizerPacks.FindAll()) {
-            if (!pack.SheetNames().Exists(IsHornetSheet)) {
+            if (!IsOfHornet(pack)) {
                 others.Add(pack);
             }
         }
 
         return others;
     }
+
+    /// <summary>
+    /// Whether a skin has art for Hornet herself (see <see cref="IsHornetSheet"/>): one of hers, which is worn alone of
+    /// those, rather than one of <see cref="Others"/>.
+    /// </summary>
+    public static bool IsOfHornet(SkinPack pack) => pack.SheetNames().Exists(IsHornetSheet);
 
     /// <summary>
     /// Switches one of the skins that change nothing of Hornet herself on or off (see <see cref="Others"/>), leaving
@@ -248,8 +254,8 @@ internal static class OwnSkin {
     /// Where two skins that are on have art for the same thing, one of them at least changing nothing of Hornet
     /// herself (see <see cref="Others"/>), with the skin whose art shows there: Customizer dresses each atlas of a
     /// sheet of sprites from the first skin in its order that has an image of it, and CustomizerT2D each whole page of
-    /// an atlas from the last skin by name in the game's folder of skins that has it, as the game starts (see
-    /// CustomizerT2D).
+    /// an atlas from the last skin that has it in the game's folder of skins, by name, with the skins of Hornet's last
+    /// (see CustomizerT2D), as the game starts.
     /// </summary>
     public static List<SkinOverlap> Overlaps() {
         var others = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -292,6 +298,7 @@ internal static class OwnSkin {
         byName.Sort((one, other) => string.Compare(
             Path.GetFileName(one.Dir), Path.GetFileName(other.Dir), StringComparison.OrdinalIgnoreCase
         ));
+        byName = [..byName.FindAll(pack => !IsOfHornet(pack)), ..byName.FindAll(IsOfHornet)];
         var lastOf = new Dictionary<string, SkinPack>(StringComparer.OrdinalIgnoreCase);
         var covered = new List<(SkinPack Pack, string Page)>();
         foreach (var pack in byName) {
