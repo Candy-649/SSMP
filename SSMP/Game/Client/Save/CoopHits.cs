@@ -3101,6 +3101,7 @@ internal partial class CoopHits {
         using var writer = new BinaryWriter(stream);
         writer.Write(input.State);
         writer.Write(input.From);
+        writer.Write(input.FromStep);
         writer.Write(input.Position.x);
         writer.Write(input.Position.y);
         writer.Write(input.Anticipation);
@@ -3161,6 +3162,7 @@ internal partial class CoopHits {
             using var reader = new BinaryReader(new MemoryStream(update.Hit));
             var state = reader.ReadString();
             var from = reader.ReadString();
+            var fromStep = reader.ReadUInt16();
             var position = new Vector2(reader.ReadSingle(), reader.ReadSingle());
             var anticipation = reader.ReadByte();
             partnerRtt = reader.ReadUInt16();
@@ -3187,7 +3189,9 @@ internal partial class CoopHits {
 
             setOff = reader.ReadBoolean();
             var tag = reader.ReadUInt16();
-            input = new Entity.InputStart(state, from, position, motion, dice, anticipation, caught, path, tag);
+            input = new Entity.InputStart(
+                state, from, fromStep, position, motion, dice, anticipation, caught, path, tag
+            );
         } catch (IOException e) {
             Logger.Warn($"Could not read what the partner did to the copy of entity {update.EntityId}: {e.Message}");
             return;

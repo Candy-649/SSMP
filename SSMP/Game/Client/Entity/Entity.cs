@@ -1718,6 +1718,7 @@ internal partial class Entity {
             snapshot.CurrentState = fsm.ActiveStateName;
             data.Types.Add(EntityHostFsmData.Type.State);
             data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
+            data.StateStep = StepOf(fsm);
 
             // A move that the copy in the other game plays by itself starts there from where the creature is as it
             // goes into it (RunMoveHere), and from what the FSM holds (below). Sent with the next look at the entity,
@@ -2392,6 +2393,7 @@ internal partial class Entity {
                 data = ObjectPool<EntityHostFsmData>.Get();
                 data.Types.Add(EntityHostFsmData.Type.State);
                 data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
+                data.StateStep = StepOf(fsm);
             }
 
             data = AddVariableChanges(fsm, snapshot, all, data);
@@ -2809,6 +2811,7 @@ internal partial class Entity {
         var data = new EntityHostFsmData();
         data.Types.Add(EntityHostFsmData.Type.State);
         data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
+        data.StateStep = StepOf(fsm);
 
         var variables = fsm.FsmVariables;
         for (var i = 0; i < variables.FloatVariables.Length && i < byte.MaxValue; i++) {
@@ -5444,6 +5447,7 @@ internal partial class Entity {
                     // every frame was never taken off. Only that number means it: the FSM here can be a stand-in with
                     // fewer states than the scene host's (Entity.WaitForTheFsmToBeMade)
                     snapshot.CurrentState = "";
+                    snapshot.CurrentStep = 0;
                     EntityFsmActions.RegisterStateChange(_fsms.Client[fsmIndex].Fsm, "");
                 } else if (states.Length > data.CurrentState) {
                     var stateName = states[data.CurrentState].Name;
@@ -5451,6 +5455,10 @@ internal partial class Entity {
                     SayStunned(hostFsm, snapshot.CurrentState, stateName, false);
                     var before = snapshot.CurrentState;
                     snapshot.CurrentState = stateName;
+                    snapshot.CurrentStep = data.StateStep;
+                    if (_runHereMove && fsmIndex == _runHereIndex) {
+                        _moveHostSteps[stateName] = data.StateStep;
+                    }
 
                     // Also propagate this state change to the EntityFsmActions class with the client FSM for the
                     // same index

@@ -12,6 +12,7 @@ internal readonly struct InputStart {
     public InputStart(
         string state,
         string from,
+        ushort fromStep,
         Vector2 position,
         BodyMotion? motion,
         int[] dice,
@@ -22,6 +23,7 @@ internal readonly struct InputStart {
     ) {
         State = state;
         From = from;
+        FromStep = fromStep;
         Position = position;
         Motion = motion;
         Dice = dice;
@@ -41,6 +43,13 @@ internal readonly struct InputStart {
     /// (see <see cref="Entity.PutBackWhereTheWoundCameIn"/>).
     /// </summary>
     public string From { get; }
+
+    /// <summary>
+    /// The number of the step of the scene host's FSM that the scene host had said it was in as the copy took the
+    /// input in <see cref="From"/>, or zero for a state of the copy's own run (see EntityHostFsmData.StateStep). A
+    /// catch of a combo is that step's, and no later one's (see <see cref="Entity.PutBackWhereTheCatchCameIn"/>).
+    /// </summary>
+    public ushort FromStep { get; }
 
     /// <summary>
     /// Where the copy was.

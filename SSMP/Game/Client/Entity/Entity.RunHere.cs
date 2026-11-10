@@ -456,6 +456,13 @@ internal partial class Entity {
     private readonly HashSet<FsmState> _moveEntered = [];
 
     /// <summary>
+    /// The steps by which the scene host's FSM went into the states of the move that the copy plays by itself, as
+    /// it was heard to since the move began (see EntityHostFsmData.StateStep), by state: what the local player does
+    /// to the copy in one of them goes to the scene host with that step (see <see cref="PlayHere"/>).
+    /// </summary>
+    private readonly Dictionary<string, ushort> _moveHostSteps = new();
+
+    /// <summary>
     /// Whether the scene host's writes of the variables of <see cref="_runHere"/> were kept off the copy for a move it
     /// played by itself, which it is given all of once it no longer runs here, also when the move went on as what the
     /// local player did to it (see <see cref="PlayHere"/>).
@@ -628,6 +635,14 @@ internal partial class Entity {
             return null;
         }
 
+        // The step of the scene host's FSM that the copy shows it in, by which the scene host tells whether its FSM
+        // is in it still as this comes, and what it did since (TakeInput): in a move that the copy plays by itself,
+        // the step by which the scene host's went into that state of the move, if it was heard to. None for any
+        // other state of the copy's own run, which is ahead of the scene host's
+        var fromStep = _runHere == null ? _fsmSnapshots[fsmIndex].CurrentStep
+            : _runHereMove && _moveHostSteps.TryGetValue(fromName, out var heard) ? heard
+            : (ushort) 0;
+
         // Whether the copy moves as its body and the room take it while it plays this (see below)
         var led = caught != null && !CatchEvents.Contains(eventName);
         var withItsBody = led || setOff && caught == null && IsWoundEvent(eventName) &&
@@ -787,7 +802,7 @@ internal partial class Entity {
         _runHereCatch = _runHereAwaited;
         _runHereExpiry = Time.unscaledTime + AnticipationHoldTime;
         return new InputStart(
-            _runHereReached, from.Name, position, motion, dice, _runHereAwaited, caught,
+            _runHereReached, from.Name, fromStep, position, motion, dice, _runHereAwaited, caught,
             _runHereLed ? path.ConvertAll(state => state.Name).ToArray() : null
         );
     }
@@ -1067,6 +1082,24 @@ internal partial class Entity {
             EndLeadOf(fsm);
             PutInWithoutDoing(fsm, watchedFrom);
             state = watchedFrom;
+            into = EntityFsmActions.FindTransition(fsm, state, eventName);
+        }
+
+        // A catch of the partner's for a combo is the catch of the step of the FSM that their copy took it in, and
+        // of no later one: one that the FSM went on from by itself since is taken from there, and one that it left
+        // by a catch of someone else's struck the partner only, as they passed (see PutBackWhereTheCatchCameIn).
+        // By the name of the state alone, one that came once the FSM had gone on from that state was not taken at
+        // all, and the boss let go of the partner it had caught there: 8 of the 14 catches of the evening (11-10).
+        // USER 11-10 "一次反击抓了什么人，什么人在反击的时候路过被打了都得靠序号"
+        if (CatchEvents.Contains(eventName) && start.Path is not { Length: > 0 } && start.FromStep != 0 &&
+            RoomFsmWays.TryGetValue(hostFsm, out var ways) && !ways.IsIn(start.FromStep)) {
+            var caughtIn = PutBackWhereTheCatchCameIn(fsm, ways, state, eventName, start.From, start.FromStep);
+            if (caughtIn == null) {
+                SendEcho(start.Tag, start.Anticipation, fsmIndex, NotTaken);
+                return false;
+            }
+
+            state = caughtIn;
             into = EntityFsmActions.FindTransition(fsm, state, eventName);
         }
 
@@ -1683,14 +1716,18 @@ internal partial class Entity {
     /// Only the rest of a step longer than anyone could miss (PredictiveInterpolation.DropWhatIsLeftOfAStep): a boss
     /// that the scene host moved under the lava to a floor beside the one it went in at, short of a jump, would come up
     /// here a floor away from where it did there and from where the lava had shown it would. Not while something of
-    /// the local game's own moves the copy: a knockback it played first, or a pull of the local player.
+    /// the local game's own moves the copy: a knockback it played first, its FSM run here for the local player with
+    /// the positions that came meanwhile held back, or a pull of the local player. A blow of theirs that nothing here
+    /// moved the copy for, still waiting on the scene host, is none of these: kept from there for it, a boss that
+    /// the blow stunned hopped off from where the copy was drawn, 2.8 units short of where the scene host's did, and
+    /// was put there in one go as it landed (11-10).
     /// </summary>
     private void StartWhereTheSceneHostDid() {
         if (Object.Client == null) {
             return;
         }
 
-        if (!IsAnticipating() && !MovesByItself() && Time.time >= _pulledHereUntil &&
+        if (!_knockbackWaits && _positionsHeldBack == 0 && !MovesByItself() && Time.time >= _pulledHereUntil &&
             Object.Client.TryGetComponent<global::SSMP.Fsm.PredictiveInterpolation>(out var interpolation)) {
             interpolation.DropWhatIsLeftOfAStep();
         }
@@ -2172,6 +2209,8 @@ internal partial class Entity {
         _moveHostAt = from;
         _moveEntered.Clear();
         _moveEntered.Add(from);
+        _moveHostSteps.Clear();
+        _moveHostSteps[_fsmSnapshots[fsmIndex].CurrentState] = _fsmSnapshots[fsmIndex].CurrentStep;
         _moveVariablesHeld = true;
         _moveFinishBy = null;
         _moveAtItsEnd = false;
@@ -3278,7 +3317,7 @@ internal partial class Entity {
     /// <summary>
     /// Whether a camera still shakes with the given shake that the given object started.
     /// </summary>
-    private static bool IsShaking(CameraManagerReference camera, ICameraShake shake, UnityEngine.Object source) {
+    internal static bool IsShaking(CameraManagerReference camera, ICameraShake shake, UnityEngine.Object source) {
         foreach (var current in camera.EnumerateCurrentShakes()) {
             if (current.Shake == shake && current.Source == source) {
                 return true;
@@ -3291,7 +3330,7 @@ internal partial class Entity {
     /// <summary>
     /// The name of a shake of the screen, for the log.
     /// </summary>
-    private static string ShakeName(ICameraShake shake) => shake is UnityEngine.Object named
+    internal static string ShakeName(ICameraShake shake) => shake is UnityEngine.Object named
         ? named.name
         : shake.GetType().Name;
 

@@ -392,6 +392,24 @@ internal static class LetGoParts {
     }
 
     /// <summary>
+    /// The creature that let go of a part in this room, of what the part is, or of what it is under, while it is the
+    /// latest part from its place there; null for anything else, which the creature still holds or nobody let go of.
+    /// </summary>
+    /// <param name="thing">The thing.</param>
+    public static GameObject? CreatureOf(GameObject thing) {
+        for (var current = thing.transform; current != null; current = current.parent) {
+            if (Origins.TryGetValue(current.gameObject, out var origin)) {
+                return ByPlace.TryGetValue((origin.Creature, origin.Place), out var latest) &&
+                       latest == current.gameObject
+                    ? origin.Creature
+                    : null;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// Forgets the parts of the room that was left.
     /// </summary>
     public static void Forget() {

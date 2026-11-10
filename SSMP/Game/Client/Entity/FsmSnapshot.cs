@@ -16,6 +16,12 @@ internal class FsmSnapshot {
     /// The name of the current (or last) state of the FSM.
     /// </summary>
     public string CurrentState { get; set; }
+
+    /// <summary>
+    /// On a scene client, the number of the step by which the scene host's FSM went into the state it last said it is
+    /// in (see EntityHostFsmData.StateStep), or zero.
+    /// </summary>
+    public ushort CurrentStep { get; set; }
     
     /// <summary>
     /// Dictionary of names of float variables and corresponding (current/last) value.

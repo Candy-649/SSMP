@@ -23,7 +23,9 @@ namespace SSMP.Game.Client.Entity;
 /// the numbers of its FSM that those states set, and how fast the creature moved, are put back as they were there (see
 /// <see cref="PutBackWhereTheWoundCameIn"/>). The wound is taken from there with the partner's dice, so that the
 /// creature goes the way it went there. What it had gone on to here is cut off instead, which the scene host's player
-/// sees as the partner's blow breaking into the start of a move.
+/// sees as the partner's blow breaking into the start of a move. A catch of the partner's for a combo that comes
+/// late is put back the same way, to the very step of the FSM that their copy took it in, told by its number (see
+/// <see cref="PutBackWhereTheCatchCameIn"/>).
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -134,6 +136,18 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// The number of the step by which an FSM of the room's own creature went into the state it is in, the number of
+    /// the way it went in by (see <see cref="FsmWays"/>), which goes to the other games with the state
+    /// (EntityHostFsmData.StateStep): zero if it went in by a way that is not noted.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    private static ushort StepOf(PlayMakerFSM fsm) {
+        return RoomFsmWays.TryGetValue(fsm, out var ways) && ways.Count > 0 && ways.Back(0).To == fsm.Fsm.ActiveState
+            ? (ushort) ways.Back(0).Number
+            : (ushort) 0;
+    }
+
+    /// <summary>
     /// Hook for an FSM taking a way from its state to another, which notes it for an FSM of a room's own creature (see
     /// <see cref="Way"/>).
     /// </summary>
@@ -188,6 +202,81 @@ internal partial class Entity {
 
         var told = $"[Wounds] The '{fsm.Name}' of entity {Id} is in '{at.Name}' as the partner's '{eventName}' " +
                    $"comes, which their copy took in '{fromName}'";
+        return PutBack(fsm, at, from, ways, null, told);
+    }
+
+    /// <summary>
+    /// Puts the FSM of the room's own creature back in the step of it that the partner's copy took a catch for a combo
+    /// in (see <see cref="CatchEvents"/>), on the scene host, once the FSM has gone on from that step: as a wound is
+    /// put back (see <see cref="PutBackWhereTheWoundCameIn"/>), to the way by which it left that very step. Not when it
+    /// left the step by a catch, of this game's player or of another's: the combo of that step is someone else's, and
+    /// the partner, who passed through as it struck, is only struck, as the game has it (USER 11-10 "她的设定就是这样，抓人
+    /// 只是为了反击吃满伤害，反击的时候还要惩罚跳来跳去不小心路过的人"). Each step is told apart by its number (see
+    /// <see cref="FsmWays"/>), which the copy had of the scene host's FSM with the state it took the catch in. Said in
+    /// the log either way.
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="ways">The ways of the FSM.</param>
+    /// <param name="at">The state it is in.</param>
+    /// <param name="eventName">The catch event.</param>
+    /// <param name="fromName">The state that the partner's copy took it in.</param>
+    /// <param name="step">The number of the step of the FSM that the copy took it in.</param>
+    /// <returns>The state it is put back in, or null if the catch is not taken.</returns>
+    private FsmState? PutBackWhereTheCatchCameIn(
+        HutongGames.PlayMaker.Fsm fsm,
+        FsmWays ways,
+        FsmState at,
+        string eventName,
+        string fromName,
+        ushort step
+    ) {
+        var told = $"[Catches] The '{fsm.Name}' of entity {Id} is in '{at.Name}' as the partner's '{eventName}' " +
+                   $"comes, which their copy took in '{fromName}' as step {step} of it";
+        if (fsm.GetState(fromName) is not { } from || EntityFsmActions.FindTransition(fsm, from, eventName) == null) {
+            Logger.Info($"{told}, which leads nowhere from there here, so it does not take it");
+            return null;
+        }
+
+        if (ways.LeftBy(step) is not { } wayOut) {
+            Logger.Info($"{told}, which it left longer ago than it notes, so it does not take it");
+            return null;
+        }
+
+        if (wayOut.Event is { } left && CatchEvents.Contains(left.Name)) {
+            Logger.Info(
+                $"{told}, which it left by a catch of someone else's, to '{wayOut.To.Name}', so the partner was only " +
+                "struck as they passed"
+            );
+            return null;
+        }
+
+        return PutBack(fsm, at, from, ways, wayOut, told);
+    }
+
+    /// <summary>
+    /// Puts an FSM of the room's own creature back in the state that the partner's copy took something in, on the scene
+    /// host: back through the ways it went since, to the given way out of that state - for a catch, whose step is known
+    /// by its number - or else to the latest, if it went every one of them by itself (see <see cref="WentByItself"/>),
+    /// through states whose actions that it went into leave nothing behind (see <see cref="LeftBehindBy"/>), and left
+    /// that state no longer ago than <see cref="LateWoundAtMost"/>. What its FSM held there is put back (see
+    /// <see cref="PutBackWhatItSet"/>).
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    /// <param name="at">The state it is in.</param>
+    /// <param name="from">The state that the partner's copy took it in.</param>
+    /// <param name="ways">The ways of the FSM.</param>
+    /// <param name="wayOut">The way it left that state by, for a catch; null for a wound.</param>
+    /// <param name="told">What the log says of it first.</param>
+    /// <returns>The state it is put back in, or null if it is not.</returns>
+    private FsmState? PutBack(
+        HutongGames.PlayMaker.Fsm fsm,
+        FsmState at,
+        FsmState from,
+        FsmWays ways,
+        Way? wayOut,
+        string told
+    ) {
+        var (held, takes) = wayOut == null ? (ways.Held, "wounds") : (ways.HeldForACatch, "catches");
         var reached = at;
         var reachedEntered = _enteredUpTo!(at);
         for (var back = 0; back < ways.Count; back++) {
@@ -210,10 +299,15 @@ internal partial class Entity {
                 return null;
             }
 
-            if (way.From != from) {
+            if (wayOut is { } outOf ? way.Number != outOf.Number : way.From != from) {
                 reached = way.From;
                 reachedEntered = way.FromEntered;
                 continue;
+            }
+
+            if (way.From != from) {
+                Logger.Info($"{told}, and it was in '{way.From.Name}' in that step here, so it does not take it");
+                return null;
             }
 
             var ago = Time.unscaledTime - way.At;
@@ -222,15 +316,15 @@ internal partial class Entity {
                 return null;
             }
 
-            if (ways.Held.Number != way.Number) {
-                Logger.Info($"{told}, which it left before another state that takes wounds, so it does not take it");
+            if (held.Number != way.Number) {
+                Logger.Info($"{told}, which it left before another state that takes {takes}, so it does not take it");
                 return null;
             }
 
             // A catch of the partner's that it followed before would keep it from going back there (LetsLedFsmGo)
             EndLeadOf(fsm);
             PutInWithoutDoing(fsm, from);
-            var putBack = PutBackWhatItSet(ways, at, back);
+            var putBack = PutBackWhatItSet(ways, held, at, back);
             Logger.Info(
                 $"{told}, which it left {ago:0.00} s ago by itself through {back + 1} state(s) that leave nothing " +
                 $"behind, so it takes it from there, with {putBack} number(s) of its FSM put back as they were there"
@@ -347,11 +441,11 @@ internal partial class Entity {
     /// through since went into works with. The rest is left as it is, which something else may have set meanwhile.
     /// </summary>
     /// <param name="ways">The ways of the FSM.</param>
+    /// <param name="held">What it held as it left the state that it is put back in.</param>
     /// <param name="at">The state that it was in.</param>
     /// <param name="last">How many ways back from the newest the way out of the state it is put back in is.</param>
     /// <returns>How many numbers were put back.</returns>
-    private static int PutBackWhatItSet(FsmWays ways, FsmState at, int last) {
-        var held = ways.Held;
+    private static int PutBackWhatItSet(FsmWays ways, HeldThere held, FsmState at, int last) {
         var putBack = 0;
         for (var back = 0; back <= last; back++) {
             var state = back == 0 ? at : ways.Back(back - 1).From;
@@ -418,9 +512,23 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether a catch for a combo leads anywhere from a state by a way of its own (see <see cref="CatchEvents"/>).
+    /// </summary>
+    /// <param name="state">The state.</param>
+    private static bool HasCatchWay(FsmState state) {
+        foreach (var transition in state.Transitions) {
+            if (CatchEvents.Contains(transition.EventName)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The last ways that an FSM of a room's own creature went from one state to another, as many as
-    /// <see cref="WaysKept"/> (see <see cref="OnDoTransition"/>), and what it held as it last left a state that a wound
-    /// leads somewhere from.
+    /// <see cref="WaysKept"/> (see <see cref="OnDoTransition"/>), numbered one after another, and what it held as it
+    /// last left a state that a wound leads somewhere from, and one that a catch for a combo does.
     /// </summary>
     /// <param name="owner">The entity whose FSM it is.</param>
     /// <param name="body">The body of the creature, if it has one.</param>
@@ -461,7 +569,14 @@ internal partial class Entity {
         public HeldThere Held { get; } = new();
 
         /// <summary>
-        /// Notes a way, and what the FSM holds as it goes, if it leaves a state that a wound leads somewhere from.
+        /// What the FSM held as it last left a state that a catch for a combo leads somewhere from (see
+        /// <see cref="CatchEvents"/>).
+        /// </summary>
+        public HeldThere HeldForACatch { get; } = new();
+
+        /// <summary>
+        /// Notes a way, and what the FSM holds as it goes, if it leaves a state that a wound or a catch for a combo
+        /// leads somewhere from.
         /// </summary>
         public void Add(
             HutongGames.PlayMaker.Fsm fsm,
@@ -479,12 +594,38 @@ internal partial class Entity {
             if (HasWoundWay(from)) {
                 Held.Take(fsm, Body, number);
             }
+
+            if (HasCatchWay(from)) {
+                HeldForACatch.Take(fsm, Body, number);
+            }
         }
 
         /// <summary>
         /// The way that came the given number of ways before the newest, which is 0.
         /// </summary>
         public Way Back(int back) => _ways[(_next - 1 - back + WaysKept) % WaysKept];
+
+        /// <summary>
+        /// Whether the FSM is in the step with the given number still: the newest way is the one it went in by.
+        /// </summary>
+        /// <param name="step">The number, as the other games have it (see <see cref="StepOf"/>).</param>
+        public bool IsIn(ushort step) => Count > 0 && (ushort) Back(0).Number == step;
+
+        /// <summary>
+        /// The way by which the FSM left the step with the given number, the next one after it, or null if that is
+        /// not among those kept: it is in that step still, or left it longer ago than they go back.
+        /// </summary>
+        /// <param name="step">The number, as the other games have it (see <see cref="StepOf"/>).</param>
+        public Way? LeftBy(ushort step) {
+            for (var back = 0; back < Count; back++) {
+                var way = Back(back);
+                if ((ushort) (way.Number - 1) == step) {
+                    return way;
+                }
+            }
+
+            return null;
+        }
     }
 
     /// <summary>

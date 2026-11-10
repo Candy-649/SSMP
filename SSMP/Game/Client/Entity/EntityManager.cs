@@ -51,6 +51,26 @@ internal class EntityManager {
     private Hook? _cameraShakeHook;
 
     /// <summary>
+    /// Detour hook for a shake of the screen being ended, to say in the log which of those noted it was (see
+    /// <see cref="NoteLoop"/>).
+    /// </summary>
+    private Hook? _cancelShakeHook;
+
+    /// <summary>
+    /// The shakes of the screen that do not end by themselves which the creatures of the room that are entities
+    /// started, the room's own or copies, by the health manager of the creature: the camera that shakes, the shake,
+    /// what started it and the name of the creature (see <see cref="NoteLoop"/>).
+    /// </summary>
+    private readonly Dictionary<HealthManager, List<(CameraManagerReference Camera, ICameraShake Shake, Object Source,
+        string Creature)>> _loops = new();
+
+    /// <summary>
+    /// The creatures of the room that died, by their health managers: the shakes they start from then on are their
+    /// death's own (see <see cref="EndTheLoopsOfTheDead"/>).
+    /// </summary>
+    private readonly HashSet<HealthManager> _dead = [];
+
+    /// <summary>
     /// Detour hooks for a flock flyer waking up and coming out, which roll the same in both games
     /// (<see cref="RollAlike"/>).
     /// </summary>
@@ -169,6 +189,11 @@ internal class EntityManager {
             typeof(CameraManagerReference).GetMethod(nameof(CameraManagerReference.DoShake)),
             OnCameraShake
         );
+        _cancelShakeHook = new Hook(
+            typeof(CameraManagerReference).GetMethod(nameof(CameraManagerReference.CancelShake)),
+            OnCancelShake
+        );
+        HealthManagerComponent.Died += EndTheLoopsOfTheDead;
 
         const BindingFlags instance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
         _flockFlyerAwakeHook = new Hook(
@@ -203,6 +228,9 @@ internal class EntityManager {
 
         _cameraShakeHook?.Dispose();
         _cameraShakeHook = null;
+        _cancelShakeHook?.Dispose();
+        _cancelShakeHook = null;
+        HealthManagerComponent.Died -= EndTheLoopsOfTheDead;
 
         _flockFlyerAwakeHook?.Dispose();
         _flockFlyerAwakeHook = null;
@@ -536,6 +564,8 @@ internal class EntityManager {
         ClearEntities();
         _picksLeftToTheOtherGame.Clear();
         _spawnsTold.Clear();
+        _loops.Clear();
+        _dead.Clear();
 
         if (!_netClient.IsConnected) return;
 
@@ -878,6 +908,9 @@ internal class EntityManager {
     /// scene host switches that part off when the move is over, which is carried over, so it ends here then too.
     /// The copy's own FSM, which plays here what a catch of this player sets off, starts one too, which a later state
     /// of it ends, and a copy that stops running here before that never ends it (see Entity.NoteShakeOfTheRun).
+    /// A part that the creature let go of into the room is its part still, which goes as it is switched off too, like
+    /// the hands of a boss that float about it on their own (LetGoParts). Every such shake of a creature is noted, in
+    /// the game that runs it too, to be ended if it dies with it still on (see <see cref="EndTheLoopsOfTheDead"/>).
     /// </summary>
     private void OnCameraShake(
         Action<CameraManagerReference, ICameraShake, Object, bool, bool, bool> orig,
@@ -897,10 +930,106 @@ internal class EntityManager {
             UnityEngine.Component component => component.gameObject,
             _ => null
         };
-        if (part == null || Entity.FindByCopyPart(part) is not { } entity) return;
+        if (part == null) return;
 
-        part.AddComponent<EndShakeWhenGone>().Watch(self, shake);
-        entity.NoteShakeOfTheRun(self, shake, source);
+        var creature = LetGoParts.CreatureOf(part);
+        if ((Entity.FindByCopyPart(part) ?? Entity.FindByCopyPart(creature)) is { } entity) {
+            part.AddComponent<EndShakeWhenGone>().Watch(self, shake);
+            entity.NoteShakeOfTheRun(self, shake, source);
+        }
+
+        NoteLoop(self, shake, source, part, creature);
+    }
+
+    /// <summary>
+    /// Notes a shake of the screen that does not end by itself which a creature that is an entity started, the room's
+    /// own or a copy, by a part of it or one that it let go of, to be ended if the creature dies with it still on (see
+    /// <see cref="EndTheLoopsOfTheDead"/>). Not one that its death started, which is the death's own.
+    /// </summary>
+    /// <param name="camera">The camera that shakes.</param>
+    /// <param name="shake">The shake.</param>
+    /// <param name="source">What started it.</param>
+    /// <param name="part">The object of what started it.</param>
+    /// <param name="creature">The creature that let go of the part, or of what it is under, or null.</param>
+    private void NoteLoop(
+        CameraManagerReference camera,
+        ICameraShake shake,
+        Object source,
+        GameObject part,
+        GameObject? creature
+    ) {
+        var holder = (creature != null ? creature : part).transform;
+        while (holder != null && !Entity.IsEntityObject(holder.gameObject)) {
+            holder = holder.parent;
+        }
+
+        if (holder == null || !holder.TryGetComponent<HealthManager>(out var health) || _dead.Contains(health)) {
+            return;
+        }
+
+        if (!_loops.TryGetValue(health, out var loops)) {
+            _loops[health] = loops = [];
+        }
+
+        loops.Add((camera, shake, source, health.name));
+        Logger.Info(
+            $"[Shakes] '{health.name}' starts the shake '{Entity.ShakeName(shake)}' by '{part.name}', which goes on " +
+            "until something ends it"
+        );
+    }
+
+    /// <summary>
+    /// Says in the log that a shake of the screen noted (see <see cref="NoteLoop"/>) is over, as it is ended: by the
+    /// creature's own state that ends it, by the part that started it going, or by any other end.
+    /// </summary>
+    private void OnCancelShake(
+        Action<CameraManagerReference, ICameraShake> orig,
+        CameraManagerReference self,
+        ICameraShake shake
+    ) {
+        orig(self, shake);
+
+        foreach (var loops in _loops.Values) {
+            for (var i = loops.Count - 1; i >= 0; i--) {
+                var loop = loops[i];
+                if (Entity.IsShaking(loop.Camera, loop.Shake, loop.Source)) {
+                    continue;
+                }
+
+                loops.RemoveAt(i);
+                Logger.Info(
+                    $"[Shakes] The shake '{Entity.ShakeName(loop.Shake)}' that '{loop.Creature}' started is over"
+                );
+            }
+        }
+    }
+
+    /// <summary>
+    /// Ends the shakes of the screen that do not end by themselves which a creature started and which are still on as
+    /// it first dies (see <see cref="NoteLoop"/>), in each game. The creature ends such a shake in a later state of
+    /// its move, which its death takes it out of: the rumble of a boss's combo on a player it caught, which no blow of
+    /// theirs breaks into, as they are held, goes on for good once another player's blow kills the boss in the middle
+    /// of it. What its death starts after that is the death's own, and is left to it (a boss that plays its own death
+    /// is told it again at every blow on it).
+    /// </summary>
+    /// <param name="health">The health manager of the creature.</param>
+    private void EndTheLoopsOfTheDead(HealthManager health) {
+        if (!_dead.Add(health) || !_loops.TryGetValue(health, out var loops)) {
+            return;
+        }
+
+        _loops.Remove(health);
+        foreach (var (camera, shake, source, creature) in loops) {
+            if (!Entity.IsShaking(camera, shake, source)) {
+                continue;
+            }
+
+            Logger.Info(
+                $"[Shakes] '{creature}' died with the shake '{Entity.ShakeName(shake)}' that it started still on, " +
+                "which only a later state of its own ends, so it is ended"
+            );
+            camera.CancelShake(shake);
+        }
     }
 
     /// <summary>

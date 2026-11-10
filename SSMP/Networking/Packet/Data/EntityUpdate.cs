@@ -975,6 +975,14 @@ internal class EntityHostFsmData : IPoolable {
     public byte CurrentState { get; set; }
 
     /// <summary>
+    /// The number of the step by which the FSM went into that state, which the game that runs the creature counts
+    /// for each FSM of it as it goes from state to state (Entity.FsmWays), or zero where it counts none. What a scene
+    /// client's player does to the copy in that state goes to the scene host with it, which tells by it whether its
+    /// FSM is in that step still, and what it did since (Entity.TakeInput).
+    /// </summary>
+    public ushort StateStep { get; set; }
+
+    /// <summary>
     /// Dictionary containing indices of float variables to their respective values.
     /// </summary>
     public Dictionary<byte, float> Floats { get; } = new();
@@ -1008,6 +1016,7 @@ internal class EntityHostFsmData : IPoolable {
     public void Reset() {
         Types.Clear();
         CurrentState = 0;
+        StateStep = 0;
         Floats.Clear();
         Ints.Clear();
         Bools.Clear();
@@ -1027,6 +1036,7 @@ internal class EntityHostFsmData : IPoolable {
         if (Types.Contains(Type.State) && !newerData.Types.Contains(Type.State)) {
             clone.Types.Add(Type.State);
             clone.CurrentState = CurrentState;
+            clone.StateStep = StateStep;
         }
 
         CopyNonSuperseded(Type.Floats, Types, Floats, newerData.Floats, clone.Floats, clone.Types);
@@ -1084,6 +1094,7 @@ internal class EntityHostFsmData : IPoolable {
             Types.Add(Type.State);
 
             CurrentState = otherData.CurrentState;
+            StateStep = otherData.StateStep;
         }
 
         if (otherData.Types.Contains(Type.Floats)) {
@@ -1157,6 +1168,7 @@ internal class EntityHostFsmData : IPoolable {
 
         if (Types.Contains(Type.State)) {
             packet.Write(CurrentState);
+            packet.Write(StateStep);
         }
 
         WriteVarDict(Type.Floats, Floats, packet.Write);
@@ -1199,6 +1211,7 @@ internal class EntityHostFsmData : IPoolable {
 
         if (Types.Contains(Type.State)) {
             CurrentState = packet.ReadByte();
+            StateStep = packet.ReadUShort();
         }
 
         void ReadVarDict<T>(Type type, Dictionary<byte, T> dict, Func<T> readValue) {
