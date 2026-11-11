@@ -240,10 +240,10 @@ internal partial class Entity {
 
     /// <summary>
     /// The states that <see cref="_runHere"/> goes through by itself after a catch of the local player: the state the
-    /// catch took it to, and the states that only that state leads to, which are the rest of the combo the catch starts
-    /// (see <see cref="CatchEvents"/>). The scene host's game plays them too, leaving out what they do to its own
-    /// player (see <see cref="PlayForPartner"/>), and what it sends of them is not played again here. Null for any
-    /// other input.
+    /// catch took it to, and the states it leads to that only it and catches lead to, which are the rest of the combo
+    /// the catch starts (see <see cref="RestOfTheInput"/>). The scene host's game plays them too, leaving out what they
+    /// do to its own player (see <see cref="PlayForPartner"/>), and what it sends of them is not played again here.
+    /// Null for any other input.
     /// </summary>
     private HashSet<FsmState>? _runHereCombo;
 
@@ -393,9 +393,9 @@ internal partial class Entity {
     /// <summary>
     /// Whether the FSM of the copy that runs here plays the combo of a catch of the local player by itself to its end,
     /// which the scene host's creature plays elsewhere or not at all (see <see cref="PlayTheCatchByItself"/>): what
-    /// the scene host says meanwhile of where its creature is, how it moves by itself, its colours, whether its parts
-    /// hurt and which move it starts waits until the copy is through (UpdatePosition, UpdateData,
-    /// <see cref="StartsAMove"/>).
+    /// the scene host says meanwhile of how its creature moves by itself, its colours, whether its parts hurt and
+    /// which move it starts waits until the copy is through (UpdateData, <see cref="StartsAMove"/>), as where it is
+    /// does for any combo of a catch of the local player (UpdatePosition).
     /// </summary>
     private bool PlaysAComboByItself => PlaysACombo && _runHereAlone;
 
@@ -2797,7 +2797,11 @@ internal partial class Entity {
 
     /// <summary>
     /// The rest of what an input does to an FSM once it has played: the state it took the FSM to, and the states that
-    /// only that state leads to - for a catch, the rest of its combo. Not the state that the input found the FSM in:
+    /// only that state and the FSM's catches lead to - for a catch, the rest of its combo. The last slash that two
+    /// catches of a boss end in is entered from both: counted from the one that came alone, it was left out, and the
+    /// scene host's FSM, which plays none of a catch it does not take, never played it either, so the local player was
+    /// pulled to the boss and dropped (USER 11-11 "无论如何都不应该我没被抓的时候拉我人啊"). A catch on the way is an
+    /// input of its own, and what it leads to is not counted. Not the state that the input found the FSM in:
     /// back there, the FSM is through with it (see HearStateFromSceneHost), and an input that left it there at once
     /// left nothing to run here at all, like the part of a creature that notes a hit in one step and goes back to wait
     /// for the next. Counted in, as the state that only the noting leads back to, it kept the run going for good, and
@@ -2813,9 +2817,43 @@ internal partial class Entity {
             return null;
         }
 
+        var only = new HashSet<FsmState> { reached };
+        only.UnionWith(CatchStatesOf(fsm));
+        only.Remove(from);
+        EntityFsmActions.AddStatesEnteredOnlyFrom(fsm, only, from);
+
         var states = new HashSet<FsmState> { reached };
-        EntityFsmActions.AddStatesEnteredOnlyFrom(fsm, states, from);
+        var toGo = new Stack<FsmState>(states);
+        while (toGo.Count > 0) {
+            foreach (var transition in toGo.Pop().Transitions) {
+                if (transition.ToFsmState is { } to && only.Contains(to) &&
+                    !CatchEvents.Contains(transition.EventName) && states.Add(to)) {
+                    toGo.Push(to);
+                }
+            }
+        }
+
         return states;
+    }
+
+    /// <summary>
+    /// The states of an FSM that a catch for a combo takes it to (see <see cref="CatchEvents"/>).
+    /// </summary>
+    /// <param name="fsm">The FSM.</param>
+    private static IEnumerable<FsmState> CatchStatesOf(HutongGames.PlayMaker.Fsm fsm) {
+        foreach (var state in fsm.States) {
+            foreach (var transition in state.Transitions) {
+                if (CatchEvents.Contains(transition.EventName) && transition.ToFsmState is { } to) {
+                    yield return to;
+                }
+            }
+        }
+
+        foreach (var transition in fsm.GlobalTransitions) {
+            if (CatchEvents.Contains(transition.EventName) && transition.ToFsmState is { } to) {
+                yield return to;
+            }
+        }
     }
 
     /// <summary>
