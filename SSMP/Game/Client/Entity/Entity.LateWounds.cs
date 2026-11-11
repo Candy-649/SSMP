@@ -210,8 +210,8 @@ internal partial class Entity {
     /// in (see <see cref="CatchEvents"/>), on the scene host, once the FSM has gone on from that step: as a wound is
     /// put back (see <see cref="PutBackWhereTheWoundCameIn"/>), to the way by which it left that very step. Not when it
     /// left the step by a catch, of this game's player or of another's: the combo of that step is someone else's, and
-    /// the partner, who passed through as it struck, is only struck, as the game has it (USER 11-10 "她的设定就是这样，抓人
-    /// 只是为了反击吃满伤害，反击的时候还要惩罚跳来跳去不小心路过的人"). Each step is told apart by its number (see
+    /// the creature plays none of it for the partner, whose game plays theirs on them by itself if it caught them (USER
+    /// 11-11 "本地几乎肯定抓本地大黄蜂"). Each step is told apart by its number (see
     /// <see cref="FsmWays"/>), which the copy had of the scene host's FSM with the state it took the catch in. One
     /// that can't be put back there is taken where the FSM is, if it takes the catch there too: put back through a
     /// state of a combo of slashes that switches its hurting part, or past another state that takes a catch, it was
@@ -225,8 +225,8 @@ internal partial class Entity {
     /// <param name="start">What the partner's game sent with it: the state and the step that the copy took it in.
     /// </param>
     /// <param name="takenHere">Whether the state that the FSM is in takes the catch, for the log.</param>
-    /// <param name="passedBy">Whether it left that step by a catch of someone else's, which refuses the catch.
-    /// </param>
+    /// <param name="passedBy">Whether it left that step by a catch of someone else's, which plays none of the
+    /// partner's.</param>
     /// <returns>The state it is put back in, or null if it is not.</returns>
     private FsmState? PutBackWhereTheCatchCameIn(
         HutongGames.PlayMaker.Fsm fsm,
@@ -249,8 +249,8 @@ internal partial class Entity {
         if (wayOut.Event is { } left && CatchEvents.Contains(left.Name)) {
             passedBy = true;
             Logger.Info(
-                $"{told}, which it left by a catch of someone else's, to '{wayOut.To.Name}', so the partner was only " +
-                "struck as they passed"
+                $"{told}, which it left by a catch of someone else's, to '{wayOut.To.Name}', so it plays none " +
+                "of it for the partner"
             );
             return null;
         }

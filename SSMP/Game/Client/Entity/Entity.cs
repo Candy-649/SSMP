@@ -4853,7 +4853,10 @@ internal partial class Entity {
             return;
         }
 
-        if (!AcceptsWhileAnticipating(anticipation) && RunHereMovesTheCopy) {
+        // Nor while the copy plays the combo of a catch of the local player by itself, which the scene host's
+        // creature plays elsewhere or not at all (PlayTheCatchByItself): the copy strikes the player where it
+        // caught them
+        if ((!AcceptsWhileAnticipating(anticipation) || PlaysACombo && _runHereAlone) && RunHereMovesTheCopy) {
             _positionsHeldBack += packetsCovered;
             return;
         }

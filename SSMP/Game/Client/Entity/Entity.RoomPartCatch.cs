@@ -203,7 +203,7 @@ internal partial class Entity {
                 sender, register.targetFsm != null ? register.targetFsm.FsmName : null, told, true
             );
             if (taken && _runHereLed) {
-                PlayTheCatchByItself();
+                PlayTheCatchByItself("the scene host is only told of it");
             }
 
             Logger.Info(

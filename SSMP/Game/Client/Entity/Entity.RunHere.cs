@@ -284,15 +284,17 @@ internal partial class Entity {
 
     /// <summary>
     /// The states that <see cref="_runHere"/> goes through by itself out of the catch that this game led, as far as
-    /// they still have to do with the player it held (see <see cref="GoesIntoTheAftermath"/>), or null while it has
-    /// not gone out of it that way. The catch is over then, and nothing more of it is said to the scene host. What the
-    /// scene host sends meanwhile of anything past those states is held, and given the copy once it is through them
-    /// (see <see cref="UpdateAftermath"/>).
+    /// they still have to do with the player it held (see <see cref="GoesIntoTheAftermath"/>), or those of a catch of
+    /// the local player that it plays to its end by itself (see <see cref="PlayTheCatchByItself"/>); null while it
+    /// plays neither. Nothing more of the catch is said to the scene host then. What the scene host sends meanwhile of
+    /// anything past those states is held, and given the copy once it is through them (see
+    /// <see cref="UpdateAftermath"/>).
     /// </summary>
     private HashSet<FsmState>? _aftermath;
 
     /// <summary>
-    /// Whether <see cref="_runHere"/> would have gone on past <see cref="_aftermath"/>, which it is through then.
+    /// Whether <see cref="_runHere"/> would have gone on past <see cref="_aftermath"/>, or past the states of the
+    /// input that it waits at the end of, which it is through then.
     /// </summary>
     private bool _aftermathDone;
 
@@ -309,9 +311,9 @@ internal partial class Entity {
     private bool _runHereEnded;
 
     /// <summary>
-    /// Whether <see cref="_runHere"/> plays a catch of the local player by itself to its end, which a part of the room
-    /// told the copy of (see <see cref="PlayTheCatchByItself"/>): the scene host follows none of it, and it is cut
-    /// short only if it stops before it is through it.
+    /// Whether <see cref="_runHere"/> plays a catch of the local player by itself to its end (see
+    /// <see cref="PlayTheCatchByItself"/>): the scene host follows none of it, and it is cut short only if it stops
+    /// before it is through it.
     /// </summary>
     private bool _runHereAlone;
 
@@ -383,7 +385,8 @@ internal partial class Entity {
 
     /// <summary>
     /// Whether the FSM of the copy that runs here plays the combo of a catch that one of the game's catching parts
-    /// named (see <see cref="CatchEvents"/>), which the scene host plays by itself.
+    /// named (see <see cref="CatchEvents"/>), which the scene host plays by itself if its creature is free for it,
+    /// and which the copy plays here to its end either way (see <see cref="HearEcho"/>).
     /// </summary>
     private bool PlaysACombo => _runHere != null && !_runHereLed && !_runHereForGood && _runHereCombo != null;
 
@@ -750,6 +753,7 @@ internal partial class Entity {
         _runHereStep = 0;
         _runHereExit = null;
         _aftermath = null;
+        _aftermathDone = false;
         _runHereAlone = false;
         _aftermathEntry = null;
 
@@ -994,12 +998,11 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Has the copy follow the scene host again once the FSM that runs here is through what follows the catch that
-    /// this game led (see <see cref="_aftermath"/>): it would have gone on past it, or its state has done all it does
-    /// and waits for nothing of its own any more, or it has taken too long. Left running, a creature that had let go
-    /// of the player stood where it died, or went on dying and coming back by itself, apart from the scene host's. What
-    /// the scene host sent meanwhile of the rest - the creature's death, its coming back - is given the copy then, in
-    /// order.
+    /// Has the copy follow the scene host again once the FSM that runs here is through what it plays by itself (see
+    /// <see cref="_aftermath"/>): it would have gone on past it, or its state has done all it does and waits for
+    /// nothing of its own any more, or it has taken too long. Left running, a creature that had let go of the player
+    /// stood where it died, or went on dying and coming back by itself, apart from the scene host's. What the scene
+    /// host sent meanwhile of the rest - the creature's death, its coming back - is given the copy then, in order.
     /// </summary>
     private void UpdateAftermath() {
         // Not before the scene host has answered the input, if it went that far with it: what it sent meanwhile is
@@ -1016,8 +1019,8 @@ internal partial class Entity {
         }
 
         Logger.Info(
-            $"The copy of entity {Id} is through what followed the catch this game led" +
-            (late ? " (it took too long)" : "") + ", and follows the scene host again"
+            $"The copy of entity {Id} is through what it played by itself" + (late ? " (it took too long)" : "") +
+            ", and follows the scene host again"
         );
         FollowSceneHost();
     }
@@ -1086,11 +1089,12 @@ internal partial class Entity {
         }
 
         // A catch of the partner's for a combo is the catch of the step of the FSM that their copy took it in, and
-        // of no later one: one that the FSM left by a catch of someone else's struck the partner only, as they
-        // passed, and one that it went on from by itself since is taken from there (see
-        // PutBackWhereTheCatchCameIn), or else where it is, if it takes the catch there too.
-        // By the name of the state alone, one that came once the FSM had gone on from that state was not taken at
-        // all, and the boss let go of the partner it had caught there: 8 of the 14 catches of the evening (11-10).
+        // of no later one: one that it went on from by itself since is taken from there (see
+        // PutBackWhereTheCatchCameIn), or else where it is, if it takes the catch there too. By the name of the
+        // state alone, one that came once the FSM had gone on from that state was not taken at all: 8 of the 14
+        // catches of the evening (11-10). One that the FSM left by a catch of someone else's is played for nobody
+        // here: the creature is busy with that one. Their game plays a catch of theirs on them by itself all the
+        // same where the creature here plays none of it (HearEcho).
         // USER 11-10 "一次反击抓了什么人，什么人在反击的时候路过被打了都得靠序号"
         if (CatchEvents.Contains(eventName) && start.Path is not { Length: > 0 } && start.FromStep != 0 &&
             RoomFsmWays.TryGetValue(hostFsm, out var ways) && !ways.IsIn(start.FromStep)) {
@@ -1272,7 +1276,8 @@ internal partial class Entity {
     /// Takes the scene host's answer to an input played here (see <see cref="SendEcho"/>). If it is the answer to the
     /// last one and its FSM went where the copy's went, what was held is dropped - the copy has done all of it - and
     /// the copy runs on in step with the scene host until it says more of that FSM. If not, the copy follows the scene
-    /// host again at once, with all that was held.
+    /// host again at once, with all that was held - but for the combo of a catch of the local player, which it plays
+    /// on them by itself to its end (see <see cref="PlayTheCatchByItself"/>).
     /// </summary>
     /// <param name="data">The echo.</param>
     private void HearEcho(EntityNetworkData data) {
@@ -1291,6 +1296,14 @@ internal partial class Entity {
         var fsm = _runHere!.Fsm;
         var states = fsm.States;
         if (fsmIndex != _runHereIndex || stateIndex >= states.Length || states[stateIndex].Name != _runHereReached) {
+            // A catch of the local player counts here as their game had it, wherever the scene host's creature was:
+            // let go of as the scene host took none of it, they were pulled to the creature and dropped as it went
+            // on (USER 11-11 "正常打，突然就被往右拉了一段", "本地几乎肯定抓本地大黄蜂")
+            if (PlaysACombo) {
+                PlayTheCatchByItself($"the scene host did not take it to '{_runHereReached}'");
+                return;
+            }
+
             Logger.Info(
                 $"The scene host did not take the input on entity {Id} to '{_runHereReached}', so its copy follows " +
                 "the scene host again"
@@ -1344,44 +1357,45 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Plays the catch of the local player that a part of the room told the copy of on here by itself to its end, from
-    /// where the copy took it at once (see <see cref="HearRoomPartCatchOnCopy"/>): the way what follows a catch is
-    /// played (see <see cref="_aftermath"/>), nothing more of it said to the scene host, which plays it for everyone to
-    /// see with its own player kept out of it (see <see cref="TakeInput"/>), and what the scene host sends of those
-    /// states not played here, until the copy has gone through them and follows the scene host again. Its answer to
-    /// the input is not waited for. It may take as long as a catch that the scene host follows (see
-    /// <see cref="LeadTimeout"/>), not only as long as what follows a catch: the slashes of the strands take some 4 s
-    /// of the game's time, and a moment the game stood still, at a blow or for the network, would have stopped them in
-    /// the middle.
+    /// Plays the catch of the local player that the copy runs here on by itself to its end, from where it is: one that
+    /// a part of the room told the copy of, whose answer is not waited for (see <see cref="HearRoomPartCatchOnCopy"/>),
+    /// or the combo of a catch that the scene host's creature plays none of for them, catching someone else at that
+    /// step or gone on from it, or that it never answered (see <see cref="HearEcho"/>): one that the copy came to the
+    /// end of while it waited is over at once (see <see cref="_aftermathDone"/>). The scene host plays what it takes
+    /// of it for everyone to see with its own player kept out of it (see <see cref="TakeInput"/>), and nothing more of
+    /// it is said to it. It goes the way what follows a catch is played (see <see cref="_aftermath"/>): what the scene
+    /// host sends of those states is not played here, and the rest is held, with what was held before, until the copy
+    /// has gone through them and follows the scene host again; the positions too, for a combo (UpdatePosition). It
+    /// may take as long as a catch that the scene host follows (see <see cref="LeadTimeout"/>), not only as long as
+    /// what follows a catch: the slashes of the strands take some 4 s of the game's time, and a moment the game stood
+    /// still, at a blow or for the network, would have stopped them in the middle.
     /// </summary>
-    private void PlayTheCatchByItself() {
+    /// <param name="why">Why the scene host follows none of it, for the log.</param>
+    private void PlayTheCatchByItself(string why) {
         _runHereAwaited = 0;
-        _heldData.Clear();
-        _madeByHeld.Clear();
-        _heldAnimation = null;
-        _heldScale = null;
         _aftermath = new HashSet<FsmState>(_runHereCombo!);
-        _aftermathDone = false;
         _aftermathExpiry = Time.unscaledTime + LeadTimeout;
         _runHereAlone = true;
-        Logger.Info(
-            $"The copy of entity {Id} plays the catch of the local player here by itself to its end, and the scene " +
-            "host is only told of it"
-        );
+        Logger.Info($"The copy of entity {Id} plays the catch of the local player here by itself to its end, as {why}");
     }
 
     /// <summary>
     /// Runs the FSM of the copy that runs here on by a frame, unless waiting for the scene host to answer its input
-    /// has gone on longer than any answer takes, which it only does when the scene host never heard of it. A copy
-    /// that is switched off while it plays a catch that this game leads stops playing it, and lets go of the local
-    /// player: its FSM would never run again to do so.
+    /// has gone on longer than any answer takes, which it only does when the scene host never heard of it: the combo
+    /// of a catch of the local player is played on by itself then (see <see cref="PlayTheCatchByItself"/>), and the
+    /// copy follows the scene host again for anything else. A copy that is switched off while it plays a catch that
+    /// this game leads stops playing it, and lets go of the local player: its FSM would never run again to do so.
     /// </summary>
     private void UpdateRunHere() {
         RunEachGamePart();
 
         if (WaitsForEcho && Time.unscaledTime > _runHereExpiry) {
-            Logger.Info($"The scene host never answered an input on entity {Id}, so its copy follows it again");
-            FollowSceneHost();
+            if (PlaysACombo) {
+                PlayTheCatchByItself("the scene host never answered it");
+            } else {
+                Logger.Info($"The scene host never answered an input on entity {Id}, so its copy follows it again");
+                FollowSceneHost();
+            }
         }
 
         if (_runHere == null) {
@@ -3513,6 +3527,10 @@ internal partial class Entity {
 
             SwitchToStateField!.SetValue(self, null);
             entity.TellCatchLeft(self, toState);
+
+            // Through what it plays, it waits at the end for the scene host's FSM: the combo of a catch, played on by
+            // itself after all, is over at once then (PlayTheCatchByItself)
+            entity._aftermathDone = true;
 
             // A move that the copy plays by itself waits at its end for the scene host's FSM (UpdateMoveEnd), standing
             // where it got to
