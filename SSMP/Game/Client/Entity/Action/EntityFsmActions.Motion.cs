@@ -1659,6 +1659,9 @@ internal static partial class EntityFsmActions {
     /// live for one state stayed live for good. The worst of them is a grab: a boss that switches on the box of a
     /// grab for the length of one attack left it on here after the first time, and it caught the player every time
     /// they came near her, took a mask, held them in the wounded pose and let go, only to catch them again at once.
+    /// A player that the box caught here is not let go as it goes off: the copy plays that catch on them to its end
+    /// itself (Entity.PlayHere). Let go as the scene host's attack ended, they were pulled up to the boss and dropped
+    /// in the very frame its catch began (USER 11-11 "我真求你了，不要再听房主说抓没抓到了").
     /// </summary>
     /// <param name="action">The action that was replayed.</param>
     /// <param name="resetOnExit">Whether the action switches the collider back when its state is left.</param>
@@ -1678,48 +1681,11 @@ internal static partial class EntityFsmActions {
             Fsm = action.Fsm,
             StateName = action.State.Name,
             ExitAction = () => {
-                if (collider == null) {
-                    return;
-                }
-
-                collider.enabled = !active;
-
-                if (active) {
-                    LetGoOfTheLocalPlayer(collider.gameObject);
+                if (collider != null) {
+                    collider.enabled = !active;
                 }
             }
         }.Register();
-    }
-
-    /// <summary>
-    /// Lets the local player out of the wounded pose that a grab by this object put them in, now that the attack the
-    /// grab belonged to is over in the scene host's game.
-    ///
-    /// On the scene client such a grab cannot be finished: the flurry and the last blow that end it belong to the
-    /// creature's own FSM, which only runs in the other game. Nothing but the pose's own four seconds let the player
-    /// go, so they stood frozen long after the attack was gone. The game ends a grab it does not finish the way a boss
-    /// does when she is knocked out of one: the grab box goes off and the player is sent WOUND END.
-    /// </summary>
-    /// <param name="grabber">The object whose grab box just closed.</param>
-    private static void LetGoOfTheLocalPlayer(GameObject grabber) {
-        var hero = HeroController.instance;
-        if (hero == null) {
-            return;
-        }
-
-        foreach (var fsm in hero.GetComponents<PlayMakerFSM>()) {
-            if (fsm.FsmName != "Roar and Wound States") {
-                continue;
-            }
-
-            if (fsm.ActiveStateName != "Wound Start" || fsm.FsmVariables.FindFsmGameObject("Wound Sender")?.Value != grabber) {
-                return;
-            }
-
-            SSMP.Logging.Logger.Info($"Letting the player go from the grab of '{grabber.name}', whose attack is over");
-            fsm.SendEvent("WOUND END");
-            return;
-        }
     }
 
     /// <summary>

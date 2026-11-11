@@ -4853,12 +4853,11 @@ internal partial class Entity {
             return;
         }
 
-        // Nor while the copy plays the combo of a catch of the local player (PlaysACombo, not a move), which the
-        // scene host's creature may play elsewhere or not at all: the copy strikes the player where it caught them.
-        // Held only once the scene host's answer said it played none of it, they were taken again as soon as it had
-        // heard of the catch, before that answer came, and the boss was put straight over to where the scene host's
-        // was, away from the player it had just pulled in (USER 11-11 "这局被莫名其妙拉过去的次数更多了")
-        if ((!AcceptsWhileAnticipating(anticipation) || PlaysACombo && !_runHereMove) && RunHereMovesTheCopy) {
+        // Nor while the copy plays the combo of a catch of the local player, which it plays by itself whatever the
+        // scene host's creature does (PlaysAComboByItself): the copy strikes the player where it caught them. Held
+        // only once the scene host had answered, they were taken in between, and the boss was put straight over to
+        // where the scene host's was, away from the player it had just pulled in (USER 11-11 "这局被莫名其妙拉过去的次数更多了")
+        if ((!AcceptsWhileAnticipating(anticipation) || PlaysAComboByItself) && RunHereMovesTheCopy) {
             _positionsHeldBack += packetsCovered;
             return;
         }
