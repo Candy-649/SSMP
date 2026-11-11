@@ -14,15 +14,18 @@ namespace SSMP.Game.Client.Entity;
 /// the partner's input took to come back: a fast creature that caught the partner jumped back by a few units in the
 /// host's game, in front of its player (USER 10-13: 没被卷死的人那边看会闪，就是整个旋风和里面的boss往旁边移了一点).
 ///
-/// Right before each frame is drawn, the creature is moved by what is left of the way back to where it was drawn
-/// before, and as soon as the frame is drawn it is put back where it is. Everything else - its state machines, its
-/// body and what it hits, what this game sends of it - has it where it is all along, so the event the partner's input
-/// played went from the copy's place as before.
+/// Right before each frame is drawn, and before each step of physics, the creature is moved by what is left of the
+/// way back to where it was drawn before, and as soon as the frame is drawn, or the step is done, it is put back where
+/// it is: what it hits and what hits it are where it is seen. Moved for the drawing alone, its body stood where it was
+/// put at once while it was drawn sliding there, and struck the player standing there before they saw it come (USER
+/// 11-11 "既然画面0.2秒移过去，那碰撞体积也应该同样移过去啊"). Everything else - its state machines, what this game sends
+/// of it - has it where it is all along, so the event the partner's input played went from the copy's place as before.
 ///
 /// Physics takes a body whose object was moved as moved there, and puts it where its object is at its next step. That
 /// is where the body is already for a body drawn where physics left it, but not for one drawn between the steps of
 /// physics, or one put somewhere by its body since the last step: a creature with such a body anywhere under it is not
-/// shown sliding, or stops sliding, and goes the rest of the way at once as before.
+/// shown sliding, or stops sliding, and goes the rest of the way at once as before. Moved for a step of physics, the
+/// bodies go there with it, and are put back with it after the step.
 /// </summary>
 internal static class ShownSlide {
     /// <summary>
@@ -73,6 +76,11 @@ internal static class ShownSlide {
     private static int _putBackFrame;
 
     /// <summary>
+    /// Whether what puts the creatures back after each step of physics runs.
+    /// </summary>
+    private static bool _puttingBackAfterPhysics;
+
+    /// <summary>
     /// Whether something went wrong here already and was said in the log, which is said once.
     /// </summary>
     private static bool _failed;
@@ -107,8 +115,8 @@ internal static class ShownSlide {
         public readonly float Duration = duration;
 
         /// <summary>
-        /// While the creature is moved for the frame being drawn: where it was before and where it was moved to, to be
-        /// put back; null when it isn't moved.
+        /// While the creature is moved for the frame being drawn or the step of physics being done: where it was before
+        /// and where it was moved to, to be put back; null when it isn't moved.
         /// </summary>
         public (Vector3 From, Vector3 To)? Moved;
 
@@ -156,6 +164,7 @@ internal static class ShownSlide {
         if (!_registered) {
             _registered = true;
             Application.onBeforeRender += OnBeforeRender;
+            MonoBehaviourUtil.Instance.OnFixedUpdateEvent += OnBeforePhysics;
         }
 
         KeepPuttingBack();
@@ -170,29 +179,82 @@ internal static class ShownSlide {
         }
 
         try {
-            // Any that were not put back after the last frame are put back first, so as not to be moved twice
-            PutBack();
-
-            var time = Time.time;
-            for (var i = Slides.Count - 1; i >= 0; i--) {
-                var slide = Slides[i];
-                if (slide.Target == null || time - slide.StartedAt >= slide.Duration || !BodiesInPlace(slide)) {
-                    Slides.RemoveAt(i);
-                    continue;
-                }
-
-                var position = slide.Target.position;
-                var left = slide.LeftAt(time);
-                var shown = new Vector3(position.x + left.x, position.y + left.y, position.z);
-                slide.Target.position = shown;
-                slide.Moved = (position, shown);
-            }
-
+            MoveWhereShown();
             if (Slides.Count > 0) {
                 KeepPuttingBack();
             }
         } catch (Exception e) {
             SayFailed(e);
+        }
+    }
+
+    /// <summary>
+    /// Right before a step of physics: moves each creature shown sliding by what is left of its way, where it is
+    /// drawn, so that the step has it there (see <see cref="ShownSlide"/>).
+    /// </summary>
+    private static void OnBeforePhysics() {
+        if (Slides.Count == 0) {
+            return;
+        }
+
+        try {
+            MoveWhereShown();
+            if (Slides.Count > 0 && !_puttingBackAfterPhysics) {
+                _puttingBackAfterPhysics =
+                    MonoBehaviourUtil.Instance.StartCoroutine(PutBackAfterPhysics()) != null;
+            }
+        } catch (Exception e) {
+            SayFailed(e);
+        }
+    }
+
+    /// <summary>
+    /// Moves each creature shown sliding by what is left of its way, putting back first any that were not put back
+    /// yet, so as not to move them twice; one whose slide is over, or whose bodies are not with it, slides no more.
+    /// </summary>
+    private static void MoveWhereShown() {
+        PutBack();
+
+        var time = Time.time;
+        for (var i = Slides.Count - 1; i >= 0; i--) {
+            var slide = Slides[i];
+            if (slide.Target == null || time - slide.StartedAt >= slide.Duration || !BodiesInPlace(slide)) {
+                Slides.RemoveAt(i);
+                continue;
+            }
+
+            var position = slide.Target.position;
+            var left = slide.LeftAt(time);
+            var shown = new Vector3(position.x + left.x, position.y + left.y, position.z);
+            slide.Target.position = shown;
+            slide.Moved = (position, shown);
+        }
+    }
+
+    /// <summary>
+    /// Puts the creatures moved for each step of physics back where they are once it is done, for as long as any
+    /// slides, with their bodies, which the step left where it moved them.
+    /// </summary>
+    private static IEnumerator PutBackAfterPhysics() {
+        var afterPhysics = new WaitForFixedUpdate();
+        try {
+            while (Slides.Count > 0) {
+                yield return afterPhysics;
+
+                if (!PutBack()) {
+                    continue;
+                }
+
+                foreach (var slide in Slides) {
+                    foreach (var body in slide.Bodies) {
+                        if (body != null) {
+                            body.position = body.transform.position;
+                        }
+                    }
+                }
+            }
+        } finally {
+            _puttingBackAfterPhysics = false;
         }
     }
 
