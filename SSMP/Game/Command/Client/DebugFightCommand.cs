@@ -10,7 +10,7 @@ using SSMP.Util;
 namespace SSMP.Game.Command.Client;
 
 /// <summary>
-/// TEMPORARY debug commands /0, /1 and /2, for trying two fights again in a copy of a save (see
+/// TEMPORARY debug commands /0 to /3, for trying two fights again in a copy of a save (see
 /// BossRoomCoop.DebugCommands). To be taken out again once they are tried. They work only once /0 came with the
 /// key after it in this run of the game, which only the players who test with them know (see <see cref="KeyHash"/>).
 /// </summary>
@@ -24,8 +24,8 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
     private const string KeyHash = "7671bac6bb85c237b2c4de95ef1012a16f5305608c2afa3fa1cab071dcfe2e3d";
 
     /// <summary>
-    /// Whether /0 came with the key in this run of the game: from then on until the game is closed, /0, /1 and /2
-    /// need no key (USER 11-09 "似乎有点要打的太多了（，要不然改成/0后面要加密钥，/1和/2只有本次游戏输入过/0才能用").
+    /// Whether /0 came with the key in this run of the game: from then on until the game is closed, /0 to /3 need
+    /// no key (USER 11-09 "似乎有点要打的太多了（，要不然改成/0后面要加密钥，/1和/2只有本次游戏输入过/0才能用").
     /// </summary>
     private static bool _unlocked;
 
@@ -35,7 +35,7 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
     private readonly BossRoomCoop _bossRoomCoop;
 
     /// <summary>
-    /// The number of the command, 0 to 2.
+    /// The number of the command, 0 to 3.
     /// </summary>
     private readonly int _command;
 
@@ -55,8 +55,9 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
         0 => "Temporary debug, with the key the first time: set the fight at the top of the lift back to before the " +
              "first ride up, in every player's save.",
         1 => "Temporary debug, after /0 with the key: take every player to the bottom of the lift.",
-        _ => "Temporary debug, after /0 with the key: take every player to the challenge of the other fight, whose " +
-             "win then leads back there."
+        2 => "Temporary debug, after /0 with the key: take every player to the challenge of the other fight, whose " +
+             "win then leads back there.",
+        _ => "Temporary debug, after /0 with the key: give every player 100 shell shards."
     };
 
     /// <inheritdoc />
@@ -69,8 +70,8 @@ internal class DebugFightCommand : IClientCommand, ICommandWithDescription {
 
             _unlocked = true;
             UiManager.InternalChatBox.AddMessage(Lang.Pick(
-                "Debug: the debug commands are on until the game is closed; /0, /1 and /2 need no key from now on.",
-                "调试：调试命令已打开，关游戏之前 /0 /1 /2 都不用再加密钥。"
+                "Debug: the debug commands are on until the game is closed; /0 to /3 need no key from now on.",
+                "调试：调试命令已打开，关游戏之前 /0 到 /3 都不用再加密钥。"
             ));
         }
 

@@ -694,7 +694,7 @@ internal class ClientManager : IClientManager {
         _commandManager.RegisterCommand(new DeleteCommand(_coopSave));
 
         // TEMPORARY debug commands for trying two fights again, to be taken out again once they are tried
-        for (var command = 0; command <= 2; command++) {
+        for (var command = 0; command <= 3; command++) {
             _commandManager.RegisterCommand(new DebugFightCommand(_bossRoomCoop, command));
         }
     }

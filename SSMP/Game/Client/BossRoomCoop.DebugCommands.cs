@@ -23,8 +23,15 @@ using Fsm = HutongGames.PlayMaker.Fsm;
 /// - /1 takes every player to the bottom of that lift, coming down in it the way the game brings them back from the top.
 /// - /2 takes every player to the challenge of the other fight. In a game that went there, winning that fight takes every
 ///   player back to the challenge instead of on to the end that follows it.
+/// - /3 gives every player 100 shell shards, for the tools spent on a try (USER 11-11 "增加一个/0进入调试状态后按/3碎片加100的
+///   功能"). Each player has shards of their own.
 /// </summary>
 internal partial class BossRoomCoop {
+    /// <summary>
+    /// How many shell shards /3 gives each player, as far as the most they can carry.
+    /// </summary>
+    private const int DebugShards = 100;
+
     /// <summary>
     /// How long, in seconds, a second /0 goes ahead after the first one.
     /// </summary>
@@ -95,7 +102,7 @@ internal partial class BossRoomCoop {
     private bool _debugSkipsEnd;
 
     /// <summary>
-    /// Carries out the debug chat command /0, /1 or /2 that the local player typed, in every player's game.
+    /// Carries out the debug chat command /0 to /3 that the local player typed, in every player's game.
     /// </summary>
     /// <param name="command">The number of the command.</param>
     public void RunDebugCommand(int command) {
@@ -140,6 +147,25 @@ internal partial class BossRoomCoop {
                 : Lang.Pick(
                     $"{by} set the fight at the top of the lift back to before the first ride up (debug).",
                     $"{by} 用调试命令把电梯上面那场仗改回了没打过。"
+                ));
+            return;
+        }
+
+        // The game's own way of adding shards, as a shard picked up does: the counter shows it, and no more than the
+        // most a player can carry are kept
+        if (command == 3) {
+            Logger.Info(
+                $"Debug: {DebugShards} shell shards go to the local player, who has {PlayerData.instance.ShellShards}"
+            );
+            CurrencyManager.AddShards(DebugShards);
+            UiManager.InternalChatBox.AddMessage(by == null
+                ? Lang.Pick(
+                    $"Debug: everyone gets {DebugShards} shell shards.",
+                    $"调试：给大家各加了 {DebugShards} 甲壳碎片。"
+                )
+                : Lang.Pick(
+                    $"{by} gave everyone {DebugShards} shell shards (debug).",
+                    $"{by} 用调试命令给大家各加了 {DebugShards} 甲壳碎片。"
                 ));
             return;
         }

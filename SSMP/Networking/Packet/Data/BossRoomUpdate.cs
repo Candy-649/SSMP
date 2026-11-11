@@ -268,7 +268,7 @@ internal enum BossRoomUpdateKind : byte {
     CutsceneEnded,
 
     /// <summary>
-    /// TEMPORARY debug: the sender typed one of the chat commands /0, /1 and /2 (see BossRoomCoop.DebugCommands), whose
+    /// TEMPORARY debug: the sender typed one of the chat commands /0 to /3 (see BossRoomCoop.DebugCommands), whose
     /// number <see cref="BossRoomUpdate.EventName"/> holds. The other players hear about it in any scene.
     /// </summary>
     DebugCommand
