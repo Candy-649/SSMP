@@ -391,6 +391,15 @@ internal partial class Entity {
     private bool PlaysACombo => _runHere != null && !_runHereLed && !_runHereForGood && _runHereCombo != null;
 
     /// <summary>
+    /// Whether the FSM of the copy that runs here plays the combo of a catch of the local player by itself to its end,
+    /// which the scene host's creature plays elsewhere or not at all (see <see cref="PlayTheCatchByItself"/>): what
+    /// the scene host says meanwhile of where its creature is, how it moves by itself, its colours, whether its parts
+    /// hurt and which move it starts waits until the copy is through (UpdatePosition, UpdateData,
+    /// <see cref="StartsAMove"/>).
+    /// </summary>
+    private bool PlaysAComboByItself => PlaysACombo && _runHereAlone;
+
+    /// <summary>
     /// The states of catches that the partner's game leads which came before the input they belong to - the packet of
     /// the input was lost on the way and sent again - kept for a while for the input to take (see
     /// <see cref="TakeEarlyCatchStates"/>).
@@ -1384,7 +1393,8 @@ internal partial class Entity {
     /// has gone on longer than any answer takes, which it only does when the scene host never heard of it: the combo
     /// of a catch of the local player is played on by itself then (see <see cref="PlayTheCatchByItself"/>), and the
     /// copy follows the scene host again for anything else. A copy that is switched off while it plays a catch that
-    /// this game leads stops playing it, and lets go of the local player: its FSM would never run again to do so.
+    /// this game leads, or one that it plays by itself, stops playing it, and lets go of the local player: its FSM
+    /// would never run again to do so.
     /// </summary>
     private void UpdateRunHere() {
         RunEachGamePart();
@@ -1405,6 +1415,9 @@ internal partial class Entity {
         if (!_runHere.gameObject.activeInHierarchy) {
             if (_runHereLed) {
                 Logger.Info($"The copy of entity {Id} was switched off while it played the catch this game led");
+                FollowSceneHost();
+            } else if (_runHereAlone) {
+                Logger.Info($"The copy of entity {Id} was switched off while it played a catch by itself");
                 FollowSceneHost();
             } else if (_runHereTalk) {
                 Logger.Info($"The copy of entity {Id} was switched off while the local player talked to it");
@@ -1889,7 +1902,10 @@ internal partial class Entity {
     /// once that it was behind with (see <see cref="_catchingUp"/>), nor while the local player talks to the creature
     /// or the copy runs the part of the FSM that each game runs by itself, nor while it runs another of the creature's
     /// FSMs here, nor for a move that the copy's FSM goes through another way (see <see cref="StatesOfTheMove"/>),
-    /// which it follows the scene host through.
+    /// which it follows the scene host through. Nor while the copy plays the combo of a catch of the local player by
+    /// itself, which goes to its end first (see <see cref="PlaysAComboByItself"/>): the scene host's creature, which
+    /// nobody else saw catch them, sets off on its next move or is stunned on its own, and cut there, the copy would
+    /// let go of the player half way. It follows the scene host through the move once it is through.
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state the scene host's FSM went to.</param>
@@ -1906,7 +1922,7 @@ internal partial class Entity {
         first = stateName;
         move = null;
         if (FromRoomState || _catchingUp || _eachGamePartWaiting != null || _runHereTalk || _runHereForGood ||
-            _runHere != null && _runHere != fsm) {
+            _runHere != null && _runHere != fsm || PlaysAComboByItself) {
             return false;
         }
 

@@ -4854,9 +4854,9 @@ internal partial class Entity {
         }
 
         // Nor while the copy plays the combo of a catch of the local player by itself, which the scene host's
-        // creature plays elsewhere or not at all (PlayTheCatchByItself): the copy strikes the player where it
+        // creature plays elsewhere or not at all (PlaysAComboByItself): the copy strikes the player where it
         // caught them
-        if ((!AcceptsWhileAnticipating(anticipation) || PlaysACombo && _runHereAlone) && RunHereMovesTheCopy) {
+        if ((!AcceptsWhileAnticipating(anticipation) || PlaysAComboByItself) && RunHereMovesTheCopy) {
             _positionsHeldBack += packetsCovered;
             return;
         }
@@ -5344,9 +5344,11 @@ internal partial class Entity {
 
             // How the entity moves by itself, the colours its FSMs leave it in, and whether the damage of its parts is
             // on, are its own FSM's to say while that runs here doing more than decide where it goes, and held until
-            // the scene host has answered the input (PlayHere)
+            // the scene host has answered the input (PlayHere), or through the combo of a catch that the copy plays
+            // by itself (PlaysAComboByItself): the scene host's creature, at another move, would switch the slashes
+            // of the combo off on the player it strikes, or its own on
             if ((data.Type is EntityComponentType.OwnMotion or EntityComponentType.Tint or
-                    EntityComponentType.DamageHero) && WaitsForEcho && RunHereActs) {
+                    EntityComponentType.DamageHero) && (WaitsForEcho || PlaysAComboByItself) && RunHereActs) {
                 HoldForEcho(data);
                 continue;
             }
