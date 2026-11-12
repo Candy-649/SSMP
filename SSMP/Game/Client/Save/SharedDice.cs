@@ -6,6 +6,7 @@ using System.Reflection;
 using System.Runtime.InteropServices;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 using Random = UnityEngine.Random;
@@ -829,12 +830,7 @@ internal static partial class SharedDice {
         };
 
         // FNV-1a, since the hash of a string is not promised to be the same in another process
-        var hash = 2166136261u;
-        foreach (var character in text) {
-            hash = unchecked((hash ^ character) * 16777619u);
-        }
-
-        return unchecked((int) hash);
+        return unchecked((int) StableHash.Of(text));
     }
 
     /// <summary>
@@ -867,17 +863,12 @@ internal static partial class SharedDice {
     /// that plays the part of an object that it does not run, and rolls as that object's action would.
     /// </summary>
     public static int Identify(string objectName, string fsmName, string stateName, int place) {
-        // FNV-1a, since the hash of a string is not promised to be the same in another process
-        var hash = Hash(Hash(Hash(2166136261u, objectName), fsmName), stateName);
-        return unchecked((int) ((hash ^ (uint) place) * 16777619u));
-
-        static uint Hash(uint hash, string text) {
-            foreach (var character in text) {
-                hash = unchecked((hash ^ character) * 16777619u);
-            }
-
-            return unchecked((hash ^ '/') * 16777619u);
-        }
+        // FNV-1a, since the hash of a string is not promised to be the same in another process; each name is
+        // followed by a '/'
+        var hash = StableHash.Add(StableHash.Add(StableHash.Start, objectName), '/');
+        hash = StableHash.Add(StableHash.Add(hash, fsmName), '/');
+        hash = StableHash.Add(StableHash.Add(hash, stateName), '/');
+        return unchecked((int) StableHash.Add(hash, (uint) place));
     }
 
     /// <summary>

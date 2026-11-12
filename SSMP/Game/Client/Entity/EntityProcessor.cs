@@ -490,19 +490,17 @@ internal class EntityProcessor {
     /// while with it two pairs in one room did, the second of each never registered (FsmScan --stableids).
     /// </summary>
     private static ushort GetStableSceneId(GameObject gameObject) {
-        const uint offset = 2166136261;
-        const uint prime = 16777619;
-        var hash = offset;
+        var hash = StableHash.Start;
         var hierarchy = new Stack<Transform>();
 
         for (var current = gameObject.transform; current != null; current = current.parent) {
             hierarchy.Push(current);
         }
 
-        AddString(gameObject.scene.name);
+        hash = StableHash.Add(hash, gameObject.scene.name);
         while (hierarchy.Count > 0) {
             var current = hierarchy.Pop();
-            AddString(current.name);
+            hash = StableHash.Add(hash, current.name);
             var position = current.localPosition;
             AddInt(BitConverter.SingleToInt32Bits(position.x));
             AddInt(BitConverter.SingleToInt32Bits(position.y));
@@ -510,18 +508,12 @@ internal class EntityProcessor {
 
         return (ushort) (hash ^ hash >> 16);
 
-        void AddString(string value) {
-            foreach (var character in value) {
-                hash = (hash ^ character) * prime;
-            }
-        }
-
         void AddInt(int value) {
             unchecked {
-                hash = (hash ^ (byte) value) * prime;
-                hash = (hash ^ (byte) (value >> 8)) * prime;
-                hash = (hash ^ (byte) (value >> 16)) * prime;
-                hash = (hash ^ (byte) (value >> 24)) * prime;
+                hash = StableHash.Add(hash, (byte) value);
+                hash = StableHash.Add(hash, (byte) (value >> 8));
+                hash = StableHash.Add(hash, (byte) (value >> 16));
+                hash = StableHash.Add(hash, (byte) (value >> 24));
             }
         }
     }

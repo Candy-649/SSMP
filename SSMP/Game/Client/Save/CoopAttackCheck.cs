@@ -1220,14 +1220,7 @@ internal class CoopAttackCheck {
     /// <summary>
     /// The FNV-1a hash of a text, which is the same in every game, unlike the hash of a string in .NET.
     /// </summary>
-    private static uint Hash(string text) {
-        var hash = 2166136261u;
-        foreach (var character in text) {
-            hash = (hash ^ character) * 16777619u;
-        }
-
-        return hash;
-    }
+    private static uint Hash(string text) => StableHash.Of(text);
 
     /// <summary>
     /// Whether a thing that can hurt was on at the last look, and when it last went off.

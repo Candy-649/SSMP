@@ -1745,14 +1745,7 @@ internal class CoopStateCheck {
     /// <summary>
     /// The FNV-1a hash of a text, which is the same in every game, unlike the hash of a string in .NET.
     /// </summary>
-    private static uint Hash(string text) {
-        var hash = 2166136261u;
-        foreach (var character in text) {
-            hash = (hash ^ character) * 16777619u;
-        }
-
-        return hash;
-    }
+    private static uint Hash(string text) => StableHash.Of(text);
 
     /// <summary>
     /// Mixes the hashes of a name and its value into one, so that the sum of a group can add them up in any order.

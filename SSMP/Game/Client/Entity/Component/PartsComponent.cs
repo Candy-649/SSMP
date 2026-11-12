@@ -4,6 +4,7 @@ using System.Text;
 using HutongGames.PlayMaker.Actions;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 
@@ -174,13 +175,10 @@ internal class PartsComponent : EntityComponent {
     /// </summary>
     internal static int HashPaths(IReadOnlyList<string> paths) {
         unchecked {
-            var hash = 2166136261u;
+            var hash = StableHash.Start;
             foreach (var path in paths) {
-                foreach (var c in path) {
-                    hash = (hash ^ c) * 16777619u;
-                }
-
-                hash = (hash ^ '\n') * 16777619u;
+                hash = StableHash.Add(hash, path);
+                hash = StableHash.Add(hash, '\n');
             }
 
             return (int) hash;

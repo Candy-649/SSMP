@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 using HutongGames.PlayMaker;
 using SSMP.Game.Client.Entity.Component;
 using SSMP.Networking.Packet.Data;
+using SSMP.Util;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
 using Random = UnityEngine.Random;
@@ -753,13 +754,9 @@ internal static class ThrownThings {
     /// </summary>
     public static int Seed(string key, int roller, int times) {
         unchecked {
-            var hash = 2166136261u;
-            foreach (var character in key) {
-                hash = (hash ^ character) * 16777619u;
-            }
-
-            hash = (hash ^ (uint) roller) * 16777619u;
-            hash = (hash ^ (uint) times) * 16777619u;
+            var hash = StableHash.Add(StableHash.Start, key);
+            hash = StableHash.Add(hash, (uint) roller);
+            hash = StableHash.Add(hash, (uint) times);
             return (int) hash;
         }
     }
