@@ -427,7 +427,7 @@ internal static class SteamRelayMessaging {
     /// the host throughout, and Steam called the session connected the whole time, counting dozens of end-to-end
     /// timeouts; a new lobby two minutes later connected at once. What either side still had on its way over the old
     /// session is sent again over the new one, in order, as far as it carried reliable data: the packets with it are
-    /// numbered (UpdateManager.ReliableNumbering), and those the other side did not take in go again
+    /// numbered (ReliableNumbering), and those the other side did not take in go again
     /// (UpdateManager.SendAgainAfterRenewal).
     /// </summary>
     /// <param name="steamId">The player.</param>

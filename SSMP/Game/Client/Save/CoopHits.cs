@@ -3355,10 +3355,10 @@ internal partial class CoopHits {
     }
 
     /// <summary>
-    /// Sends an entity the event that the partner's copy of it was touched, struck or caught them or a thing of theirs
-    /// with, if this game is the scene host and so runs it (see <see cref="Entity.Entity.PlayForPartner"/>), after what
-    /// the part that caught set on the FSM along with a catch. An FSM that has already moved on from where the event
-    /// leads anywhere takes no notice of it.
+    /// Sends an entity the event that the partner's copy of it was touched or struck with, or set off by, if this game
+    /// is the scene host and so runs it (see <see cref="Entity.Entity.PlayForPartner"/>). An FSM that has already
+    /// moved on from where the event leads anywhere takes no notice of it. A catch never comes this way: the caught
+    /// player's game plays it, and sends it with what it played (see <see cref="PlayOrSend"/>).
     /// </summary>
     /// <param name="update">The update of the partner's touch.</param>
     private void ApplyEntityTouch(CoopHitUpdate update) {
@@ -3383,23 +3383,9 @@ internal partial class CoopHits {
             $"sent '{update.Responder}' here too"
         );
 
-        // A catch comes with what the part that caught set on the FSM along with it
-        Entity.ToldValues? caught = null;
-        if (update.Hit.Length > 0) {
-            try {
-                caught = Entity.ToldValues.Read(new BinaryReader(new MemoryStream(update.Hit)));
-            } catch (IOException e) {
-                Logger.Warn($"Could not read what caught the partner's thing on entity {update.EntityId}: {e.Message}");
-                return;
-            }
-        }
-
         void Play() {
-            caught?.ApplyTo(fsm.Fsm);
             SharedDice.JudgeFor(fsm.Fsm, CrestOf(update.PlayerId), () => entity.PlayForPartner(
-                fsm,
-                caught != null || Entity.Entity.CatchEvents.Contains(update.Responder),
-                () => fsm.SendEvent(update.Responder)
+                fsm, false, () => fsm.SendEvent(update.Responder)
             ));
         }
 
