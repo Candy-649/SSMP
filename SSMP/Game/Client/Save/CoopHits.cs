@@ -3062,9 +3062,11 @@ internal partial class CoopHits {
             return;
         }
 
-        // What a creature does with a player that one of its parts grabbed is up to that player's game (PlayHere). Sent
-        // on its own, the scene host would hold nobody and wait on their struggles for good, so it is dropped here,
-        // and a player that the part already held is let go, unless a copy plays a catch of them already
+        // What a creature does with a player that one of its parts grabbed or caught is up to that player's game
+        // (PlayHere), and nothing is sent of one that the copy could not take here: sent on its own, the scene host
+        // would hold nobody and wait on their struggles for good, or play a combo on a player nobody caught. A player
+        // that the part already held is let go, unless a copy plays a catch of them already, as nothing else ends a
+        // hold
         if (grabbedThePlayer) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which could not take '{eventName}' here, so " +
@@ -3079,17 +3081,15 @@ internal partial class CoopHits {
             return;
         }
 
-        Logger.Info($"The local player {what} the copy of entity {copied.Id}, so the scene host is sent '{eventName}'");
-
-        // A catch goes with what the part that caught set on the FSM along with it
-        byte[] told = [];
         if (caught != null) {
-            using var stream = new MemoryStream();
-            using var writer = new BinaryWriter(stream);
-            caught.Write(writer);
-            writer.Flush();
-            told = stream.ToArray();
+            Logger.Info(
+                $"The local player {what} the copy of entity {copied.Id}, which could not take '{eventName}' here, so " +
+                "nothing comes of it"
+            );
+            return;
         }
+
+        Logger.Info($"The local player {what} the copy of entity {copied.Id}, so the scene host is sent '{eventName}'");
 
         // One that the local player set off goes after them over there all the same
         SendToRoomMembers(new CoopHitUpdate {
@@ -3097,7 +3097,7 @@ internal partial class CoopHits {
             EntityId = copied.Id,
             Index = fsmIndex,
             Responder = eventName,
-            Hit = told
+            Hit = []
         });
     }
 

@@ -639,6 +639,19 @@ internal partial class Entity {
             caught ??= ToldValues.None;
         }
 
+        // Whatever else the copy runs here gives way to a catch of the local player by another of its FSMs, unless that
+        // is a catch it plays by itself already: one blow of the player that waited for its answer kept a catch from
+        // being played here, which let them go or went to the scene host on its own and was played on nobody it caught
+        // (USER 11-09 "我们两个都有一次被丝母抓人打掉2血")
+        if (caught != null && _runHere != null && !PlaysACatchByItself && fsmIndex < _fsms.Client.Count &&
+            _runHere != _fsms.Client[fsmIndex]) {
+            Logger.Info(
+                $"The copy of entity {Id} gives up what its '{_runHere.FsmName}' runs here, as another of its FSMs " +
+                $"caught the local player with '{eventName}'"
+            );
+            FollowSceneHost();
+        }
+
         if (!_isControlled || !EntityRegistry.IsLocalFirst(Type) && caught == null && !setOff ||
             SwitchToStateField == null ||
             fsmIndex >= _fsms.Client.Count || _fsms.Client[fsmIndex] is not { } copyFsm || copyFsm == null ||

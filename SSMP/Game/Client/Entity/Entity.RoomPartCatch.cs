@@ -169,10 +169,9 @@ internal partial class Entity {
     /// Has the copy play what a part of the room that caught the local player told everything that listens for it, as
     /// each register of the creature passes it on to the FSM it names, or to all of them: on the local player, here, by
     /// itself to its end, the game that runs the creature being only told of it (see
-    /// <see cref="PlayTheCatchByItself"/>, TakeInput). Whatever else the copy plays here gives way to it: one blow of
-    /// the player that waited for its answer kept a catch from being played here, which went to the scene host on its
-    /// own and was played on nobody it caught (USER 11-09 "我们两个都有一次被丝母抓人打掉2血"). Nothing is sent of one
-    /// that the copy can't play, and another part that caught the player in the same catch changes nothing.
+    /// <see cref="PlayTheCatchByItself"/>, TakeInput). Whatever else the copy plays here gives way to it, as it does to
+    /// any catch of the local player (see <see cref="PlayHere"/>). Nothing is sent of one that the copy can't play, and
+    /// another part that caught the player in the same catch changes nothing.
     /// </summary>
     /// <param name="sender">The FSM of the part.</param>
     /// <param name="eventName">The event.</param>
@@ -192,10 +191,6 @@ internal partial class Entity {
                     $"{Id} ({Type}) plays a catch already"
                 );
                 return;
-            }
-
-            if (_runHere != null) {
-                FollowSceneHost();
             }
 
             var told = PassedOnAs(register, eventName);
