@@ -2755,7 +2755,7 @@ internal partial class CoopSave {
         // death that crosses over is an animation like any other, and the animation of a death simply stops on its
         // last frame. Their own game hides their body the moment they die, and until a death could be held they
         // were gone from the room a few seconds later anyway, so a body frozen mid-death was never on screen long
-        // enough to be noticed. A wait lasts up to three quarters of a minute.
+        // enough to be noticed. A wait lasts until the cocoon is broken, everyone is down, or the player gives up.
         SetPartnerBodyHidden(playerId, true);
     }
 

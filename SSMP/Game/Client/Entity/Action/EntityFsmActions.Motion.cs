@@ -1692,8 +1692,9 @@ internal static partial class EntityFsmActions {
     /// Lets the local player out of the hold of a creature that grabbed them with the game's own grab (HERO GRAB),
     /// when nothing in this game is left to let them go. The hold hides the player, stuns them and takes their
     /// control away, and it has no end of its own: only the creature that holds them ends it, with the blow, the spit
-    /// or the release that its own FSM comes to. A copy that stopped playing such a creature before that - the scene
-    /// host went another way, or never took the catch - left the player hidden and frozen for good. They are let go
+    /// or the release that its own FSM comes to. A copy that stopped playing such a creature before that - it was
+    /// switched off or went with its room, its run was cut short, or this game took over - left the player hidden and
+    /// frozen for good. They are let go
     /// the way a creature lets go of a player who struggled free.
     /// </summary>
     /// <param name="why">Why, for the log.</param>

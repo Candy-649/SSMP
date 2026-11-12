@@ -711,7 +711,7 @@ internal partial class Entity {
         // (see PlayerBeforeTheCatch): a creature that watches for its catch itself, or a boss whose strands caught
         // them, takes their control, their falling and the drawing of their character in its own states, and gives
         // them back only at its end. A catch of the strands cut short - the scene host's blow killed the boss as it
-        // caught them, or no answer came - would have left them hidden in the air for good
+        // caught them - would have left them hidden in the air for good
         if (led && _beforeTheCatch == null && EntityFsmActions.FindTransition(fsm, from, eventName) is { } into) {
             NoteThePlayerBeforeTheCatch(fsm, into);
         }
@@ -3336,8 +3336,9 @@ internal partial class Entity {
     /// Takes off the local player's silk the marks that the FSM of a copy that ran here put on it and had not taken off
     /// again when it stopped (see <see cref="AddUsingSilk"/>), like the one that shows the silk drained while a
     /// creature holds the player and sucks it: the creature takes its mark off only as it lets go of them its own way,
-    /// and nothing else in the game does, so the silk of a player let go any other way - the scene host did not take
-    /// the catch, the copy went away with its room - shone on for good, through deaths and benches
+    /// and nothing else in the game does, so the silk of a player let go any other way - the copy was switched off or
+    /// went away with its room, its run was cut short, or this game took over - shone on for good, through deaths and
+    /// benches
     /// (USER 11-01 "这个丝常亮"). Which marks are still on is what the FSM itself notes as it puts one on and clears as
     /// it takes it off. A room's own creature that takes over from the copy goes on without them: it would never take
     /// them off, and the silk only stops shining before the creature lets go.
@@ -3400,9 +3401,9 @@ internal partial class Entity {
     /// (see <see cref="NoteShakeOfTheRun"/>) and which are still on as it stops, unless the scene host's FSM is in the
     /// state that started it, which ends it as it goes on, here as there. The creature ends such a shake in a later
     /// state of its move, like the one that shakes the screen and the pad for as long as a boss's rapid slash holds the
-    /// player it caught. A copy that stops running here never gets there: the scene host did not take the catch, as
-    /// its creature had gone on from the attack by then, or its creature went on to something else, and its FSM, which
-    /// shook nothing for this game's player, says nothing that ends it. The screen and the pad shook until the room
+    /// player it caught. A copy that stops running here never gets there - it is switched off or goes with its room,
+    /// its run is cut short, or this game takes over - and the scene host's FSM, which shook nothing for this game's
+    /// player, says nothing that ends it. The screen and the pad shook until the room
     /// changed (USER 11-08 "…最后一点尾巴打到我的时候震动不会停"). The game ends a shake by its kind, as the creature's
     /// own state does.
     /// </summary>
