@@ -20,7 +20,9 @@ namespace SSMP.Game.Client.Entity;
 /// nothing that shows comes sooner; whatever the local player does to the creature first takes in the rest at once
 /// (see <see cref="CatchUpWithWhatCameSince"/>), so that it goes from where the creature is over there now. Both as the
 /// user chose (11-03). Its health and the music go as they come all the same, and its death after all that the copy
-/// kept (see <see cref="TakeInAsItComes"/>).
+/// kept (see <see cref="TakeInAsItComes"/>). So it goes too while the copy plays on to its end an input of the local
+/// player that the scene host's creature did not take, rather than cut it short for what that creature did instead
+/// (see <see cref="PlayOnPastTheRefusal"/>, USER 11-12).
 /// </summary>
 internal partial class Entity {
     /// <summary>
@@ -42,6 +44,7 @@ internal partial class Entity {
     /// <summary>
     /// Whether <see cref="_cameSince"/> waits for the copy to get through a move that it plays by itself, which the
     /// scene host's FSM came out of first (see <see cref="_moveFinishBy"/>): the word that said so is the first of it.
+    /// Or through an input of the local player that the scene host did not take (see <see cref="_playOnUntil"/>).
     /// </summary>
     private bool _cameSinceWaits;
 
@@ -98,7 +101,9 @@ internal partial class Entity {
     /// <summary>
     /// Whether the copy keeps what the scene host sent of it for later rather than take it in now: it is behind with
     /// what came since a move, or this is the word that the scene host's FSM came out of a move that the copy plays by
-    /// itself first, after which what comes waits for the copy to get through the move too. What it keeps is its own
+    /// itself first, after which what comes waits for the copy to get through the move too, or the word that it went
+    /// into a move while the copy waits for its answer to an input of the local player, which the copy plays on to its
+    /// end first (see <see cref="PlayOnPastTheRefusal"/>). What it keeps is its own
     /// until it is taken in, but for the health and the music in it (see <see cref="TakeInAsItComes"/>). A death is
     /// taken in now, after all that the copy kept, and so is anything once the first of what it kept came longer ago
     /// than it goes behind at the most (see <see cref="MostBehind"/>), which a copy that took in nothing of it since
@@ -108,11 +113,21 @@ internal partial class Entity {
     public bool KeepsForLater(BaseEntityUpdate update) {
         var reliable = update as ReliableEntityUpdate;
         if (!IsBehind) {
-            if (reliable == null || ComesOutOfTheMoveFirst(reliable) is not { } way || Dies(reliable)) {
+            if (reliable == null || Dies(reliable)) {
                 return false;
             }
 
-            WaitOutTheMove(way);
+            if (ComesOutOfTheMoveFirst(reliable) is { } way) {
+                WaitOutTheMove(way);
+            } else if (WaitsForEcho && GoesIntoAMove(reliable)) {
+                // Taken in now if the copy is through the input already, and follows the scene host into the move
+                PlayOnPastTheRefusal("the scene host's FSM went into a move before it answered");
+                if (_playOnUntil == null) {
+                    return false;
+                }
+            } else {
+                return false;
+            }
         } else if (reliable != null && Dies(reliable)) {
             CatchUpWithWhatCameSince("the scene host's creature died");
             return false;
@@ -237,6 +252,25 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Whether a word of the scene host's says that its FSM went into a move that the copy plays by itself (see
+    /// <see cref="StartsAMove"/>): the FSM that runs here for an input of the local player, which the scene host's
+    /// creature, at the move by the time the input came, does not take.
+    /// </summary>
+    /// <param name="update">The word.</param>
+    private bool GoesIntoAMove(ReliableEntityUpdate update) {
+        if (_runHere is not { } copyFsm || copyFsm == null || !update.UpdateTypes.Contains(EntityUpdateType.HostFsm) ||
+            !update.HostFsmData.TryGetValue(_runHereIndex, out var hostFsm) ||
+            !hostFsm.Types.Contains(EntityHostFsmData.Type.State)) {
+            return false;
+        }
+
+        var states = copyFsm.FsmStates;
+        return hostFsm.CurrentState < states.Length && StartsAMove(
+            copyFsm, states[hostFsm.CurrentState].Name, _fsmSnapshots[_runHereIndex].CurrentState, out _, out _
+        );
+    }
+
+    /// <summary>
     /// The state of an FSM of the copy that what the scene host sent of an action is of, read the way
     /// <see cref="UpdateData"/> reads it without taking anything of it in, or null if it is not of the FSM at the given
     /// index.
@@ -277,9 +311,9 @@ internal partial class Entity {
 
     /// <summary>
     /// Takes in what came since, each as it is due (see <see cref="_behind"/>): from the copy's end of the move that it
-    /// waited for, the word that said the scene host's FSM was out of it at once, and the rest as far apart as it came
-    /// - again behind a move that the copy plays by itself, heard of in that, which the scene host's FSM came out of
-    /// first too. Made up a little at a time as the copy stands still.
+    /// waited for, or of the input that the scene host did not take, the first word at once, and the rest as far apart
+    /// as it came - again behind a move that the copy plays by itself, heard of in that, which the scene host's FSM
+    /// came out of first too. Made up a little at a time as the copy stands still.
     /// </summary>
     private void PlayOnWhatCameSince() {
         if (!IsBehind) {
@@ -289,11 +323,16 @@ internal partial class Entity {
         var now = Time.unscaledTime;
         if (_cameSinceWaits) {
             // Still playing on
-            if (_moveFinishBy != null) {
+            if (_moveFinishBy != null || _playOnUntil != null) {
                 return;
             }
 
+            // An input that the scene host did not take can be played on with nothing come meanwhile
             _cameSinceWaits = false;
+            if (_cameSince.Count == 0) {
+                return;
+            }
+
             _behind = now - _cameSince.Peek().At;
             Logger.Info(
                 $"The copy of entity {Id} goes on with the {_cameSince.Count} word(s) of the scene host's that came " +
@@ -328,8 +367,8 @@ internal partial class Entity {
     /// Takes in at once all that the copy is behind with, in the order it came, for what goes from where the scene
     /// host's creature is now: what the local player does to it, which the scene host plays there (see
     /// <see cref="PlayHere"/>, CoopHits), this game taking over the room, and the creature's death. A move that the
-    /// copy plays on with stops where it is, and one that the scene host's FSM went into meanwhile is not played here
-    /// from its start (see <see cref="_catchingUp"/>).
+    /// copy plays on with stops where it is, and so does an input that the scene host did not take, and a move that
+    /// the scene host's FSM went into meanwhile is not played here from its start (see <see cref="_catchingUp"/>).
     /// </summary>
     /// <param name="why">Why, for the log.</param>
     public void CatchUpWithWhatCameSince(string why) {
@@ -339,7 +378,8 @@ internal partial class Entity {
 
         Logger.Info(
             $"The copy of entity {Id} takes in at once the {_cameSince.Count} word(s) of the scene host's that it " +
-            (_cameSinceWaits ? "was to play after its move" : $"is {_behind:0.00} s behind with") + $", as {why}"
+            (_cameSinceWaits ? "was to play after what it plays on" : $"is {_behind:0.00} s behind with") +
+            $", as {why}"
         );
         var waited = _cameSinceWaits;
         _cameSinceWaits = false;
@@ -347,6 +387,9 @@ internal partial class Entity {
         _madeUp = 0f;
         if (waited && _runHereMove) {
             CatchUpWithSceneHost("what the scene host sent since is taken in at once");
+        } else if (_playOnUntil != null) {
+            Logger.Info($"The copy of entity {Id} stops playing on the input that the scene host did not take");
+            FollowSceneHost();
         }
 
         _catchingUp = true;
@@ -366,6 +409,8 @@ internal partial class Entity {
     public void MakeWayForTheRoomState() {
         if (_cameSinceWaits && _runHereMove) {
             CatchUpWithSceneHost("the state of the room came");
+        } else if (_playOnUntil != null) {
+            FollowSceneHost();
         }
 
         ForgetWhatCameSince("the state of the room came, which is newer");

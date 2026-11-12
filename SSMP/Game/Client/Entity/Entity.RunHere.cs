@@ -36,11 +36,13 @@ namespace SSMP.Game.Client.Entity;
 ///
 /// Until the echo comes, what the scene host sends of that FSM, of how the entity moves by itself and of what it plays
 /// is from before, and is held. If the scene host's FSM went where the copy's went, all of that is dropped, since the
-/// copy has done it; if not - the flea had already landed over there - the copy follows the scene host again at once,
-/// with all of it. Either way the copy's FSM goes to no other state by itself after the input: where the entity goes
-/// next is the scene host's to say, and the copy follows it again as soon as it says anything more of that FSM. Run on
-/// by itself, the copy would do each of those states a moment before the scene host does, and again when the scene
-/// host's game sends them. A catch is the one input that goes on further: the states that only the catch leads to are
+/// copy has done it; if not - the flea had already landed over there - the copy plays on to its end what the input
+/// started, and then follows the scene host again with all of it, and with what the scene host sent since as far
+/// apart as it came (see <see cref="PlayOnPastTheRefusal"/>). Either way the copy's FSM goes to no other state by
+/// itself after the input: where the entity goes next is the scene host's to say, and the copy follows it again as
+/// soon as it says anything more of that FSM. Run on by itself, the copy would do each of those states a moment
+/// before the scene host does, and again when the scene host's game sends them. A catch is the one input that goes
+/// on further: the states that only the catch leads to are
 /// the combo it starts, all of it about the player caught, so the copy plays them by itself and takes none of them
 /// from the scene host, which leaves the player's part of them out (see <see cref="_runHereCombo"/>).
 ///
@@ -330,7 +332,8 @@ internal partial class Entity {
     /// <summary>
     /// How long a copy that plays a move by itself may still take to come to the end of it, once the scene host's FSM
     /// came out of it first, in seconds: as long as the copy started it later, by the scene host's sends taking longer
-    /// then (see <see cref="_moveFinishBy"/>).
+    /// then (see <see cref="_moveFinishBy"/>). So long may it play on an input of the local player that the scene host
+    /// did not take, too (see <see cref="_playOnUntil"/>).
     /// </summary>
     private const float MoveFinishTime = 1f;
 
@@ -544,6 +547,13 @@ internal partial class Entity {
     private float _runHereExpiry;
 
     /// <summary>
+    /// When the copy, playing on to its end an input of the local player that the scene host did not take, follows the
+    /// scene host again even if it is not through it yet; null while it plays on none (see
+    /// <see cref="PlayOnPastTheRefusal"/>). What the scene host sent since waits for it (see <see cref="_cameSince"/>).
+    /// </summary>
+    private float? _playOnUntil;
+
+    /// <summary>
     /// Whether the copy's FSM runs here for an input that the scene host has not answered yet. What it sends meanwhile
     /// of that FSM, of how the entity moves by itself and of what it plays is from before the input, and is held.
     /// </summary>
@@ -712,6 +722,10 @@ internal partial class Entity {
                 TakeTheCopysBodyBack();
             }
         }
+
+        // An input that the scene host did not take, which the copy plays on, goes on as this catch of the local
+        // player: anything else took in at once what the copy was behind with, which stopped that (above)
+        _playOnUntil = null;
 
         // Taken before the input, which the scene host plays from the same start
         Vector2 position = Object.Client.transform.position;
@@ -1375,8 +1389,9 @@ internal partial class Entity {
     /// <summary>
     /// Takes the scene host's answer to an input played here (see <see cref="SendEcho"/>). If it is the answer to the
     /// last one and its FSM went where the copy's went, what was held is dropped - the copy has done all of it - and
-    /// the copy runs on in step with the scene host until it says more of that FSM. If not, the copy follows the scene
-    /// host again at once, with all that was held. A catch of the local player waits for no answer (see
+    /// the copy runs on in step with the scene host until it says more of that FSM. If not, the copy plays on to its
+    /// end what the input started, and then follows the scene host again with all that was held (see
+    /// <see cref="PlayOnPastTheRefusal"/>). A catch of the local player waits for no answer (see
     /// <see cref="PlayHere"/>).
     /// </summary>
     /// <param name="data">The echo.</param>
@@ -1396,11 +1411,7 @@ internal partial class Entity {
         var fsm = _runHere!.Fsm;
         var states = fsm.States;
         if (fsmIndex != _runHereIndex || stateIndex >= states.Length || states[stateIndex].Name != _runHereReached) {
-            Logger.Info(
-                $"The scene host did not take the input on entity {Id} to '{_runHereReached}', so its copy follows " +
-                "the scene host again"
-            );
-            FollowSceneHost();
+            PlayOnPastTheRefusal("the scene host did not take it");
             return;
         }
 
@@ -1449,6 +1460,37 @@ internal partial class Entity {
     }
 
     /// <summary>
+    /// Plays on to its end what the copy plays of an input of the local player that the scene host's creature did not
+    /// take, rather than cut it short for what that creature does instead: it was at something else by the time the
+    /// input came - it had gone into a move, or the flea had landed - or went another way with it. The copy's FSM goes
+    /// on in the state the input took it to until it would go out of it (see <see cref="OnSwitchState"/>), for
+    /// <see cref="MoveFinishTime"/> at the most, and then follows the scene host again (see
+    /// <see cref="UpdateRunHere"/>). What the scene host sends from here on waits for that, and is taken in after it as
+    /// far apart as it came, made up as the copy stands still (see <see cref="PlayOnWhatCameSince"/>), as after a move
+    /// that the copy played on to its end (USER 11-12 "我觉得先演完，然后不是会有一个追赶的过程吗，加快一点来追赶上房主").
+    /// One that the copy is through already follows the scene host at once.
+    /// </summary>
+    /// <param name="why">Why the scene host's creature is not in it, for the log.</param>
+    private void PlayOnPastTheRefusal(string why) {
+        if (_aftermathDone) {
+            Logger.Info(
+                $"The copy of entity {Id} is through the input to '{_runHereReached}', and {why}, so it follows the " +
+                "scene host again"
+            );
+            FollowSceneHost();
+            return;
+        }
+
+        _runHereAwaited = 0;
+        _playOnUntil = Time.unscaledTime + MoveFinishTime;
+        _cameSinceWaits = true;
+        Logger.Info(
+            $"The copy of entity {Id} plays the input to '{_runHereReached}' on to its end, as {why}, and what the " +
+            "scene host sends from here on waits for that"
+        );
+    }
+
+    /// <summary>
     /// Plays the catch of the local player that the copy runs here on by itself to its end, from where it is: one that
     /// a part of the room told the copy of (see <see cref="HearRoomPartCatchOnCopy"/>), or the combo of any catch of
     /// theirs, from the moment it caught them (see <see cref="PlayHere"/>), whose answer is not waited for. The scene
@@ -1473,15 +1515,25 @@ internal partial class Entity {
     /// <summary>
     /// Runs the FSM of the copy that runs here on by a frame, unless waiting for the scene host to answer its input
     /// has gone on longer than any answer takes, which it only does when the scene host never heard of it: the copy
-    /// follows the scene host again then. A copy that is switched off while it plays a catch that
-    /// this game leads, or one that it plays by itself, stops playing it, and lets go of the local player: its FSM
-    /// would never run again to do so.
+    /// follows the scene host again then, and so it does once it is through an input that the scene host did not take
+    /// (see <see cref="PlayOnPastTheRefusal"/>). A copy that is switched off while it plays a catch that this game
+    /// leads, or one that it plays by itself, stops playing it, and lets go of the local player: its FSM would never
+    /// run again to do so.
     /// </summary>
     private void UpdateRunHere() {
         RunEachGamePart();
 
         if (WaitsForEcho && Time.unscaledTime > _runHereExpiry) {
             Logger.Info($"The scene host never answered an input on entity {Id}, so its copy follows it again");
+            FollowSceneHost();
+        }
+
+        // Through an input that the scene host did not take, which it played on (PlayOnPastTheRefusal)
+        if (_playOnUntil is { } until && (_aftermathDone || Time.unscaledTime > until)) {
+            Logger.Info(
+                $"The copy of entity {Id} {(_aftermathDone ? "is through" : "took too long to get through")} the " +
+                $"input to '{_runHereReached}' that the scene host did not take, and follows the scene host again"
+            );
             FollowSceneHost();
         }
 
@@ -1934,19 +1986,13 @@ internal partial class Entity {
         // A move that the copy plays by itself starts as the scene host's FSM goes into it (see StartsAMove), once the
         // rest of what came along is taken in too: what the scene host's FSM worked out on its way into the move, and
         // what it sent of the states it went through to get there (StartMoveHeard). Whatever the copy plays here of
-        // that FSM ends, as the scene host's FSM is past it, whatever it makes of it: what the copy played of an input
-        // of the local player, waiting for the scene host's answer, ends now rather than once the answer comes, which
-        // the scene host sent only after it went into the move. A catch that this game plays by itself starts no move
+        // that FSM ends, as the scene host's FSM is past it, whatever it makes of it - but for an input of the local
+        // player still waiting for the scene host's answer, which the copy plays on to its end first, the move waiting
+        // for that with all that came along (KeepsForLater). A catch that this game plays by itself starts no move
         // here (StartsAMove): it goes on to its end
         if (StartsAMove(fsm, stateName, before, out var first, out var move)) {
             _moveHeard = (fsm, first, move, stateName);
-            if (WaitsForEcho) {
-                Logger.Info(
-                    $"The scene host's FSM of entity {Id} went into the move from '{first}', so its copy stops " +
-                    "what it played here, and plays the move by itself"
-                );
-                FollowSceneHost();
-            } else if (_runHere != null) {
+            if (_runHere != null) {
                 CatchUpWithSceneHost($"the scene host's FSM went into the move from '{first}'");
             }
 
@@ -3240,6 +3286,7 @@ internal partial class Entity {
         _moveVariablesHeld = false;
         _moveFinishBy = null;
         _moveAtItsEnd = false;
+        _playOnUntil = null;
         _runHereAwaited = 0;
         _heldData.Clear();
         _heldForTheCopy.Clear();
@@ -3338,6 +3385,7 @@ internal partial class Entity {
         _moveVariablesHeld = false;
         _moveFinishBy = null;
         _moveAtItsEnd = false;
+        _playOnUntil = null;
         _aftermath = null;
         StopSteppingRunHere();
         TakeTheCopysBodyBack();

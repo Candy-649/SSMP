@@ -5206,6 +5206,15 @@ internal partial class Entity {
                 continue;
             }
 
+            // What came after the answer to an input that the copy plays on to its end waits for that (see
+            // PlayOnPastTheRefusal), but for the creature's health, its death and the music of the room, which go as
+            // they come (TakeInAsItComes)
+            if (_playOnUntil != null && data.Type is not (EntityComponentType.Health or EntityComponentType.Death or
+                    EntityComponentType.Music)) {
+                HoldForEcho(data);
+                continue;
+            }
+
             // An angle that the creature turned to, in one order with its turn as it goes on (UpdateRotation) and with
             // the replays of the turns that the copy makes by itself: one sent again after a newer one came is not
             // taken, and one that came beside the newest is the newer (RotationComponent)
