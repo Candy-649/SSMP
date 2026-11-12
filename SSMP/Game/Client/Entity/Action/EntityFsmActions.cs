@@ -1071,9 +1071,15 @@ internal static partial class EntityFsmActions {
         System.Action? step = null;
         if (everyStep && !action.Finished) {
             // Like its updates, the game runs an action in the steps of physics only until it finishes
+            var more = 0f;
             step = () => {
                 var owner = action.Fsm.GameObject;
-                if (owner != null && owner.activeInHierarchy && !action.Finished) {
+                if (owner == null || !owner.activeInHierarchy || action.Finished) {
+                    return;
+                }
+
+                action.OnFixedUpdate();
+                for (more += Entity.PaceOf(owner) - 1f; more >= 1f && !action.Finished; more -= 1f) {
                     action.OnFixedUpdate();
                 }
             };
@@ -1091,6 +1097,7 @@ internal static partial class EntityFsmActions {
 
         // An FSM stops running its state when its object is switched off or gone, and so does this
         System.Collections.IEnumerator UpdateUntilFinished() {
+            var more = 0f;
             while (!action.Finished) {
                 yield return null;
 
@@ -1100,6 +1107,11 @@ internal static partial class EntityFsmActions {
                 }
 
                 action.OnUpdate();
+
+                // As often as the copy plays the creature, whose state ends that much sooner (Entity.PaceOf)
+                for (more += Entity.PaceOf(owner) - 1f; more >= 1f && !action.Finished; more -= 1f) {
+                    action.OnUpdate();
+                }
             }
         }
     }

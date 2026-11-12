@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using HutongGames.PlayMaker;
 using SSMP.Game.Client.Entity.Component;
+using SSMP.Game.Client.Save;
 using SSMP.Networking.Packet.Data;
 using UnityEngine;
 using Logger = SSMP.Logging.Logger;
@@ -17,7 +18,8 @@ namespace SSMP.Game.Client.Entity;
 /// short where it stood, and a boss that the scene host's player had seen go on from its parry into a rise stood at the
 /// end of the copy's parry and was then put 16 units up in one go (log of 11-03). The copy goes on that much behind the
 /// scene host's creature, and makes it up by playing all of it half as fast again - one move after another, where the
-/// creature goes and the clips it plays - until it has caught up (see <see cref="MakeUpRate"/>). Made up only as the
+/// creature goes, its clips, effects and parts (see <see cref="PlayAllOfItFaster"/>) - until it has caught up (see
+/// <see cref="MakeUpRate"/>). Made up only as the
 /// copy stood still between two moves, it never was for a creature that goes from one move into the next (USER 11-12
 /// "极端一点的怪，几乎没有发呆的时间，又不能加快出招的话，那岂不是永远追不上了"). Whatever the local player does to the creature
 /// first takes in the rest at once (see <see cref="CatchUpWithWhatCameSince"/>), so that it goes from where the
@@ -57,10 +59,53 @@ internal partial class Entity {
     private float _madeUp;
 
     /// <summary>
-    /// The clip that the copy plays faster to make up being behind (see <see cref="MakeUpRate"/>), given its own speed
-    /// back once the copy has caught up (see <see cref="ClipAtItsOwnSpeed"/>); or null.
+    /// The particles that play half as fast again with the copy while it makes up being behind, each with the speed it
+    /// had, which it gets back once the copy no longer makes up (see <see cref="PlayAllOfItFaster"/>).
     /// </summary>
-    private tk2dSpriteAnimationClip? _clipMadeUp;
+    private readonly Dictionary<ParticleSystem, float> _particlesFaster = new();
+
+    /// <summary>
+    /// What the pool put out for the copy's replays while it makes up being behind that is not thrown: its effects,
+    /// which play half as fast again with it (see <see cref="NotePutOut"/>).
+    /// </summary>
+    private readonly List<GameObject> _putOut = [];
+
+    /// <summary>
+    /// How many updates of the FSMs that run by themselves on what shows the creature are due on top of this game's
+    /// own while the copy makes up being behind (see <see cref="PlayAllOfItFaster"/>).
+    /// </summary>
+    private float _extraUpdates;
+
+    /// <summary>
+    /// Whether playing something that shows the creature faster threw, which is only said once.
+    /// </summary>
+    private bool _fasterFailed;
+
+    /// <summary>
+    /// The entity whose copy takes in a replay of what the scene host's creature did now, for what the pool puts out
+    /// meanwhile (see <see cref="NotePutOut"/>); or null.
+    /// </summary>
+    private static Entity? _replaying;
+
+    /// <summary>
+    /// What the copy goes through to play it faster: the objects it starts from (see <see cref="PlayAllOfItFaster"/>).
+    /// </summary>
+    private static readonly List<GameObject> ShownWith = [];
+
+    /// <summary>
+    /// What is still to be gone through of what shows the creature (see <see cref="PlayAllOfItFaster"/>).
+    /// </summary>
+    private static readonly Stack<Transform> ToGoThrough = new();
+
+    /// <summary>
+    /// What was gone through of what shows the creature this frame, each once (see <see cref="PlayAllOfItFaster"/>).
+    /// </summary>
+    private static readonly HashSet<Transform> GoneThrough = [];
+
+    /// <summary>
+    /// The FSMs on an object that shows the creature (see <see cref="PlayAllOfItFaster"/>).
+    /// </summary>
+    private static readonly List<PlayMakerFSM> FsmsOn = [];
 
     /// <summary>
     /// Whether the copy takes in at once all that it was behind with (see <see cref="CatchUpWithWhatCameSince"/>): a
@@ -70,9 +115,9 @@ internal partial class Entity {
     private bool _catchingUp;
 
     /// <summary>
-    /// How much faster than it came the copy takes in what it is behind with, and plays the clips it starts meanwhile
-    /// (see <see cref="UpdateAnimation"/>), until it has caught up: half as fast again (USER 11-12 "1.5倍吧"). It was
-    /// three times as fast while the copy stood still ("三倍速会不会太多了（", "这用力过猛了吧").
+    /// How much faster than it came the copy takes in what it is behind with, and plays all that shows the creature
+    /// meanwhile (see <see cref="PlayAllOfItFaster"/>), until it has caught up: half as fast again (USER 11-12
+    /// "1.5倍吧"). It was three times as fast while the copy stood still ("三倍速会不会太多了（", "这用力过猛了吧").
     /// </summary>
     private const float MakeUpRate = 1.5f;
 
@@ -99,17 +144,20 @@ internal partial class Entity {
     private bool IsBehind => _cameSince.Count > 0 || _cameSinceWaits || _behind > 0f;
 
     /// <summary>
-    /// Whether the copy makes up being behind now by playing faster (see <see cref="PlayOnWhatCameSince"/>): not while
-    /// it waits for a move or an answer, nor while it moves by itself by the physics.
+    /// Whether the copy makes up being behind now, playing all of it faster (see <see cref="PlayOnWhatCameSince"/>,
+    /// <see cref="PlayAllOfItFaster"/>): not while it plays a move or an input by itself, which goes at its own speed -
+    /// a catch of the local player too, whose letting go comes as the game's own FSM plays it - nor while it waits for
+    /// one to end, nor while it moves by itself by the physics, whose arcs go at their own speed: taken in sooner, the
+    /// next launch came before the copy got there, and put it there in one go (OwnMotionComponent).
     /// </summary>
-    private bool MakesUp => _behind > 0f && !_cameSinceWaits && !WaitsForEcho && !MovesByItself();
+    private bool MakesUp => _behind > 0f && _runHere == null && !_cameSinceWaits && !MovesByItself();
 
     /// <summary>
     /// How fast the copy whose object this is plays the creature, against how fast it went in the game that runs it:
-    /// half as fast again while it makes up being behind (see <see cref="MakeUpRate"/>), else as fast. A throw on a
-    /// clock goes at that pace, as its state ends that much sooner, and throws as many (EntityFsmActions.RunTimed);
-    /// what the creature threw flies at its own speed, by each game's own physics (USER 11-12 "投掷物按照我们的规则受
-    /// 物理，应该不被加速").
+    /// half as fast again while it makes up being behind (see <see cref="MakeUpRate"/>), else as fast. What the copy
+    /// runs of a state by itself goes at that pace, as the state ends that much sooner: a throw on a clock throws as
+    /// many (EntityFsmActions.RunTimed), a part moves as far (RunInState). What the creature threw flies at its own
+    /// speed, by each game's own physics (USER 11-12 "投掷物按照我们的规则受物理，应该不被加速").
     /// </summary>
     /// <param name="copy">The object of the copy.</param>
     internal static float PaceOf(GameObject copy) =>
@@ -405,16 +453,10 @@ internal partial class Entity {
                 $"The copy of entity {Id} goes on with the {_cameSince.Count} word(s) of the scene host's that came " +
                 $"since, {_behind:0.00} s later than they came"
             );
-        } else if (_behind > 0f) {
-            // Not while the copy moves by itself by the physics, whose arcs go at their own speed: taken in sooner, the
-            // next launch came before the copy got there, and put it there in one go (OwnMotionComponent)
-            if (MovesByItself()) {
-                ClipAtItsOwnSpeed();
-            } else {
-                var madeUp = Mathf.Min(_behind, Time.unscaledDeltaTime * (MakeUpRate - 1f));
-                _behind -= madeUp;
-                _madeUp += madeUp;
-            }
+        } else if (MakesUp) {
+            var madeUp = Mathf.Min(_behind, Time.unscaledDeltaTime * (MakeUpRate - 1f));
+            _behind -= madeUp;
+            _madeUp += madeUp;
         }
 
         while (_cameSince.Count > 0 && _cameSince.Peek().At + _behind <= now) {
@@ -433,7 +475,6 @@ internal partial class Entity {
                 "playing faster"
             );
             _madeUp = 0f;
-            ClipAtItsOwnSpeed();
         }
     }
 
@@ -459,7 +500,7 @@ internal partial class Entity {
         _cameSinceWaits = false;
         _behind = 0f;
         _madeUp = 0f;
-        ClipAtItsOwnSpeed();
+        GiveBackItsSpeed();
         if (waited && _runHereMove) {
             CatchUpWithSceneHost("what the scene host sent since is taken in at once");
         } else if (_playOnUntil != null) {
@@ -495,20 +536,127 @@ internal partial class Entity {
         _cameSinceWaits = false;
         _behind = 0f;
         _madeUp = 0f;
-        ClipAtItsOwnSpeed();
+        GiveBackItsSpeed();
     }
 
     /// <summary>
-    /// Gives the clip that the copy played faster to make up being behind its own speed back, if it still plays it
-    /// (see <see cref="_clipMadeUp"/>).
+    /// Plays all that shows the creature half as fast again while the copy makes up being behind (see
+    /// <see cref="MakesUp"/>), as its moves come that much sooner: the clips and particles of what is under the copy -
+    /// its own clip, a slash, a flash, a part it holds - of the parts it let go of, and of what the pool put out
+    /// for its replays (see <see cref="NotePutOut"/>), and the FSMs that run by themselves on those, the let-go parts'
+    /// above all, which the creature's word reaches that much sooner too. Not what the creature threw, which flies at
+    /// its own speed, nor a creature of its own, nor the creature's own FSMs, which follow the scene host's word or
+    /// answer the local player (USER 11-12 "刀光，特效之类的会加速吗，正确答案是加速", "某些boss离体但是实际上是boss一部分的部件会加速
+    /// 吗，正确答案也应该是加速"). Once the copy no longer makes up, its particles get their own speed back.
     /// </summary>
-    private void ClipAtItsOwnSpeed() {
-        if (_clipMadeUp != null && _animator.Client is { } animator && animator != null &&
-            animator.CurrentClip == _clipMadeUp) {
-            animator.ClipFps = _clipMadeUp.fps;
+    private void PlayAllOfItFaster() {
+        // A copy that the game destroyed shows nothing more
+        if (!MakesUp || Object.Client == null) {
+            GiveBackItsSpeed();
+            return;
         }
 
-        _clipMadeUp = null;
+        var copy = Object.Client.transform;
+        var extraTime = Time.deltaTime * (MakeUpRate - 1f);
+        _extraUpdates += MakeUpRate - 1f;
+        var updates = (int) _extraUpdates;
+        _extraUpdates -= updates;
+
+        _putOut.RemoveAll(thing => thing == null || !thing.activeInHierarchy);
+        ShownWith.Clear();
+        ShownWith.Add(Object.Client);
+        LetGoParts.PartsOf(Object.Client, ShownWith);
+        ShownWith.AddRange(_putOut);
+
+        GoneThrough.Clear();
+        foreach (var root in ShownWith) {
+            ToGoThrough.Push(root.transform);
+        }
+
+        while (ToGoThrough.Count > 0) {
+            var current = ToGoThrough.Pop();
+            if (current == null || !current.gameObject.activeInHierarchy || !GoneThrough.Add(current) ||
+                current != copy && IsEntityObject(current.gameObject) ||
+                current.TryGetComponent<ThrownMark>(out var mark) && mark.Key != null) {
+                continue;
+            }
+
+            // The game's own code runs here, which throws at times: as when the game runs it, what throws stops only
+            // itself
+            try {
+                PlayFaster(current, current != copy, extraTime, updates);
+            } catch (Exception e) {
+                if (!_fasterFailed) {
+                    _fasterFailed = true;
+                    Logger.Error($"Could not play '{current.name}' of entity {Id} faster:\n{e}");
+                }
+            }
+
+            for (var i = 0; i < current.childCount; i++) {
+                ToGoThrough.Push(current.GetChild(i));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Plays one object that shows the creature faster (see <see cref="PlayAllOfItFaster"/>): its clip by the time
+    /// that it plays on top of this game's frame, its particles half as fast again, and its FSMs, but on the copy
+    /// itself, as many updates more as are due.
+    /// </summary>
+    /// <param name="thing">The object.</param>
+    /// <param name="withFsms">Whether its FSMs are played faster too.</param>
+    /// <param name="extraTime">How long its clip plays on top of this game's frame.</param>
+    /// <param name="updates">How many updates of its FSMs are due on top of this game's own.</param>
+    private void PlayFaster(Transform thing, bool withFsms, float extraTime, int updates) {
+        if (thing.TryGetComponent<tk2dSpriteAnimator>(out var animator) && animator.Playing) {
+            animator.UpdateAnimation(extraTime);
+        }
+
+        if (thing.TryGetComponent<ParticleSystem>(out var particles) && !_particlesFaster.ContainsKey(particles)) {
+            var main = particles.main;
+            _particlesFaster[particles] = main.simulationSpeed;
+            main.simulationSpeed *= MakeUpRate;
+        }
+
+        if (updates == 0 || !withFsms) {
+            return;
+        }
+
+        thing.GetComponents(FsmsOn);
+        foreach (var fsm in FsmsOn) {
+            for (var i = 0; i < updates && fsm.enabled && !fsm.Fsm.Finished && !fsm.Fsm.ManualUpdate; i++) {
+                fsm.Fsm.Update();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Gives the particles that played half as fast again with the copy their own speed back, and forgets what the pool
+    /// put out for it (see <see cref="PlayAllOfItFaster"/>).
+    /// </summary>
+    private void GiveBackItsSpeed() {
+        foreach (var pair in _particlesFaster) {
+            if (pair.Key != null) {
+                var main = pair.Key.main;
+                main.simulationSpeed = pair.Value;
+            }
+        }
+
+        _particlesFaster.Clear();
+        _putOut.Clear();
+        _extraUpdates = 0f;
+    }
+
+    /// <summary>
+    /// Notes what the pool puts out for a copy's replay of what the scene host's creature did: an effect of the
+    /// creature unless it is thrown, which plays half as fast again with the copy while it makes up being behind (see
+    /// <see cref="PlayAllOfItFaster"/>).
+    /// </summary>
+    /// <param name="thing">What the pool puts out.</param>
+    internal static void NotePutOut(GameObject thing) {
+        if (_replaying is { MakesUp: true } entity && !ThrownThings.IsThrown(thing)) {
+            entity._putOut.Add(thing);
+        }
     }
 
     /// <summary>

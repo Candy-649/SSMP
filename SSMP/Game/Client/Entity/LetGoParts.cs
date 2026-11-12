@@ -410,6 +410,19 @@ internal static class LetGoParts {
     }
 
     /// <summary>
+    /// Adds the parts that a creature of this room let go of to a list, the latest from each place.
+    /// </summary>
+    /// <param name="creature">The creature.</param>
+    /// <param name="parts">The list.</param>
+    public static void PartsOf(GameObject creature, List<GameObject> parts) {
+        foreach (var pair in ByPlace) {
+            if (pair.Key.Creature == creature && pair.Value != null) {
+                parts.Add(pair.Value);
+            }
+        }
+    }
+
+    /// <summary>
     /// Forgets the parts of the room that was left.
     /// </summary>
     public static void Forget() {

@@ -189,12 +189,13 @@ internal partial class CoopHits {
 
     /// <summary>
     /// Hook for the pool switching on what comes out of it, which gives a thrown thing its name first, so that the
-    /// first rolls of its state machines go by it.
+    /// first rolls of its state machines go by it, and notes an effect put out for a copy (Entity.NotePutOut).
     /// </summary>
     private void OnActivateSpawningObject(Action<GameObject, bool> orig, GameObject gameObject, bool alreadyActive) {
         try {
             ThrownThings.OnActivating(gameObject);
             RuneRolls.OnActivating(gameObject);
+            Entity.Entity.NotePutOut(gameObject);
         } catch (Exception e) {
             if (!_thrownFailed) {
                 _thrownFailed = true;

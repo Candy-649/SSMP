@@ -2128,6 +2128,7 @@ internal partial class Entity {
             SayWhyTheCopyIsOff();
             UpdateRunHere();
             PlayOnWhatCameSince();
+            PlayAllOfItFaster();
             CheckWokenByLocalPlayer();
             CheckCaughtByCopy();
 
@@ -4889,12 +4890,6 @@ internal partial class Entity {
 
         // Otherwise, default to just playing the clip
         _animator.Client.Play(clipName);
-
-        // Faster while the copy makes up being behind the scene host (MakeUpRate)
-        if (MakesUp && _animator.Client.CurrentClip is { } playing) {
-            _animator.Client.ClipFps = playing.fps * MakeUpRate;
-            _clipMadeUp = playing;
-        }
     }
 
     /// <summary>
@@ -5107,7 +5102,9 @@ internal partial class Entity {
                 }
 
                 EntityFsmActions.ReadSubject(data, action);
+                _replaying = this;
                 EntityFsmActions.ApplyNetworkDataFromAction(data, action);
+                _replaying = null;
 
                 // A turn that the copy makes by itself from here on is newer than any angle sent before it, which a
                 // packet lost on the way may bring after it (UpdateRotation)
