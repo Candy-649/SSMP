@@ -129,6 +129,14 @@ internal partial class CoopSave {
         new(["Courier Scene"], "Save Courier", "", "Send Event", ["Count Enemies"], ["Idle", "Count Enemies"],
             lasting: true),
 
+        // Not a trap either: a flea asleep in the open, which wakes and flies off as a player walks into it, sings
+        // near it or strikes it in sight of it. Only the game of the player who woke it saw that. The other was told
+        // only that it was saved, which its flea reads as it settles back to sleep, as a strike that it cannot see
+        // puts it back, and there it vanished without flying off (USER 11-12 "有个跳蚤，我这边打了一下直接没了，没有那个
+        // 飞走的动画"). The game of a player who walks in afterwards has it gone, as the save says.
+        new(["Flea Rescue Sleeping"], "Call Out", "RESCUE", "Rescue 1", ["Sleeping", "Range Check", "Check LOS"],
+            ["Sleeping", "Range Check", "Check LOS"]),
+
         // Crows perched about a room for show, which fly off when the crows there that fight wake up, and are gone
         // until the room loads again. While both players are in the room the waking plays in both games, so nothing is
         // sent at the moment itself. A partner who walked in later had them perched again with nothing left to wake
