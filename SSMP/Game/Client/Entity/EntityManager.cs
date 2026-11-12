@@ -414,8 +414,12 @@ internal class EntityManager {
             return false;
         }
 
-        // What the copy is behind with waits (Entity.KeepsForLater), but not the state of the room it walks into
-        if (!alreadyInSceneUpdate && entity.KeepsForLater(update)) {
+        // What the copy is behind with waits (Entity.KeepsForLater), and is all taken in before the state of the room
+        // it walks into, which is newer: a late entrant's copy can be behind already with what came before the answer
+        // (InitializeSceneClient), and so can one that hears that answer twice
+        if (alreadyInSceneUpdate) {
+            entity.CatchUpWithWhatCameSince("the state of the room it walks into came");
+        } else if (entity.KeepsForLater(update)) {
             return false;
         }
 
@@ -435,8 +439,12 @@ internal class EntityManager {
         }
 
         // As the unreliable kind (HandleEntityUpdate)
-        if (!IsSceneHost && !alreadyInSceneUpdate && entity.KeepsForLater(update)) {
-            return false;
+        if (!IsSceneHost) {
+            if (alreadyInSceneUpdate) {
+                entity.CatchUpWithWhatCameSince("the state of the room it walks into came");
+            } else if (entity.KeepsForLater(update)) {
+                return false;
+            }
         }
 
         entity.TakeIn(update, alreadyInSceneUpdate, IsSceneHost);
