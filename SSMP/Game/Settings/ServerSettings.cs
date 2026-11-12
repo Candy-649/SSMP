@@ -1,6 +1,5 @@
 using System;
 using SSMP.Api.Server;
-using SSMP.Ui.Menu;
 
 // ReSharper disable UnusedAutoPropertyAccessor.Global
 // ReSharper disable AutoPropertyCanBeMadeGetOnly.Global
@@ -15,7 +14,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("pvp")]
-    [ModMenuSetting("PvP", "Player versus Player damage")]
     public bool IsPvpEnabled {
         get;
         set {
@@ -27,7 +25,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("globalmapicons")]
-    [ModMenuSetting("Global Map Icons", "Always show map icons for all players")]
     public bool AlwaysShowMapIcons {
         get;
         set {
@@ -39,7 +36,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("compassicon", "compassicons")]
-    [ModMenuSetting("Compass Map Icons", "Only show map icons when Compass is equipped")]
     public bool OnlyBroadcastMapIconWithCompass {
         get;
         init {
@@ -51,7 +47,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("names")]
-    [ModMenuSetting("Show Names", "Show names of player above their characters")]
     public bool DisplayNames {
         get;
         init {
@@ -63,7 +58,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("teams")]
-    [ModMenuSetting("Teams", "Whether players can join teams")]
     public bool TeamsEnabled {
         get;
         set {
@@ -75,7 +69,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("skins")]
-    [ModMenuSetting("Skins", "Whether players can have skins")]
     public bool AllowSkins {
         get;
         init {
@@ -87,7 +80,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("needledmg")]
-    [ModMenuSetting("Needle Damage", "The number of masks of damage that a player's needle swing deals")]
     public byte NeedleDamage {
         get;
         init {
@@ -99,7 +91,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("needlestrikedmg", "strikedmg", "artdmg")]
-    [ModMenuSetting("Needle Strike Damage", "The number of masks of damage that Needle Strikes deal")]
     public byte NeedleStrikeDamage {
         get;
         init {
@@ -111,7 +102,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("voltfilamentdmg", "voltdmg", "filamentdmg", "voltmodifier", "voltmod")]
-    [ModMenuSetting("Volt Filament Damage Modifier (Half)", "The number of extra half-masks of damage that silk skills with volt filament should deal")]
     public byte VoltFilamentDamage {
         get;
         init {
@@ -123,7 +113,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("shamandmg", "shamanmodifier", "shamanmod")]
-    [ModMenuSetting("Shaman Crest Damage Modifier (Half)", "The number of extra half-masks of damage that silk skills on shaman crest should deal")]
     public byte ShamanDamage {
         get;
         init {
@@ -135,7 +124,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("crossstitchdmg", "stitchdmg", "parrydmg")]
-    [ModMenuSetting("Cross Stitch Damage", "The number of masks of damage that Cross Stitch deals")]
     public byte CrossStitchDamage {
         get;
         init {
@@ -147,7 +135,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("palenailsdmg", "palenaildmg", "paledmg")]
-    [ModMenuSetting("Pale Nails Damage", "The number of masks of damage that Pale Nails deals")]
     public byte PaleNailsDamage {
         get;
         init {
@@ -159,7 +146,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("runeragedmg")]
-    [ModMenuSetting("Rune Rage Damage", "The number of masks of damage that Rune Rage deals")]
     public byte RuneRageDamage {
         get;
         init {
@@ -171,7 +157,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("sharpdartdmg", "dartdmg")]
-    [ModMenuSetting("Sharpdart Damage", "The number of masks of damage that Sharpdart deals")]
     public byte SharpDartDamage {
         get;
         init {
@@ -183,7 +168,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("silkspeardmg", "speardmg")]
-    [ModMenuSetting("Silk Spear Damage", "The number of masks of damage that Silk Spear deals")]
     public byte SilkSpearDamage {
         get;
         init {
@@ -195,7 +179,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("threadstormdmg", "stormdmg")]
-    [ModMenuSetting("Thread Storm Damage", "The number of masks of damage that Thread Storm deals")]
     public byte ThreadStormDamage {
         get;
         init {
@@ -207,7 +190,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("wardingbelldmg", "bindbelldmg", "belldmg")]
-    [ModMenuSetting("Warding Bell Damage", "The number of masks of damage that the Warding Bell deals")]
     public byte WardingBellDamage {
         get;
         init {
@@ -219,7 +201,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("clawmirrordmg", "mirrordmg", "mirror1dmg")]
-    [ModMenuSetting("Claw Mirror Damage", "The number of masks of damage that the base Claw Mirror deals")]
     public byte ClawMirrorDamage {
         get;
         init {
@@ -231,7 +212,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("clawmirrorupgradeddmg", "mirror2dmg")]
-    [ModMenuSetting("Claw Mirror Upgraded Damage", "The number of masks of damage that the upgraded Claw Mirror deals")]
     public byte ClawMirrorUpgradedDamage {
         get;
         init {
@@ -243,7 +223,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("sawtoothcircletdmg", "circletdmg", "umbrelladmg")]
-    [ModMenuSetting("Sawtooth Circlet Damage", "The number of masks of damage that Sawtooth Circlet deals")]
     public byte SawtoothCircletDamage {
         get;
         init {
@@ -255,7 +234,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("poisonbrewdmg", "brewdmg", "fleabrewdmg")]
-    [ModMenuSetting("Poisoned Flea Brew Damage", "The number of masks of damage that a cloud from the poisoned Flea Brew deals")]
     public byte PoisonBrewDamage {
         get;
         init {
@@ -267,7 +245,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("straightpindmg", "pindmg", "pindamage")]
-    [ModMenuSetting("Straight Pin Damage", "The number of masks of damage that a Straight Pin deals")]
     public byte StraightPinDamage {
         get;
         init {
@@ -279,7 +256,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("threefoldpindmg", "threepindmg", "threepindamage")]
-    [ModMenuSetting("Threefold Pin Damage", "The number of masks of damage that a Threefold Pin deals")]
     public byte ThreefoldPinDamage {
         get;
         init {
@@ -291,7 +267,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("longpindmg")]
-    [ModMenuSetting("Longpin Damage", "The number of masks of damage that a Longpin deals")]
     public byte LongpinDamage {
         get;
         init {
@@ -303,7 +278,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("tackdmg", "tacksdmg", "tackdamage")]
-    [ModMenuSetting("Tacks Damage", "The number of masks of damage that Tacks deal")]
     public byte TacksDamage {
         get;
         init {
@@ -315,7 +289,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("enemyhp", "enemyhpmode")]
-    [ModMenuSetting("Enemy Health", "How enemy health grows with the players: 0 default, 1 power, 2 linear, 3 fixed")]
     public byte EnemyHealthMode {
         get;
         set {
@@ -327,7 +300,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("enemyhppower", "enemyhpexp")]
-    [ModMenuSetting("Enemy Health Power", "Tenths of what each extra player multiplies enemy health by")]
     public byte EnemyHealthExponentialFactor {
         get;
         set {
@@ -339,7 +311,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("enemyhplinear")]
-    [ModMenuSetting("Enemy Health Linear", "Tenths of the solo enemy health that each extra player adds")]
     public byte EnemyHealthLinearFactor {
         get;
         set {
@@ -351,7 +322,6 @@ public class ServerSettings : IServerSettings, IEquatable<ServerSettings> {
 
     /// <inheritdoc />
     [SettingAlias("enemyhpfixed")]
-    [ModMenuSetting("Enemy Health Fixed", "Tenths of what enemy health is multiplied by however many play")]
     public byte EnemyHealthFixedFactor {
         get;
         set {
