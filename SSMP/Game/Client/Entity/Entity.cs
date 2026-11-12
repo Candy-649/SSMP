@@ -3338,6 +3338,19 @@ internal partial class Entity {
         // (ResumeState) without doing again what that did on its way there (TakeWhatWaitsInTheMove)
         TakeWhatWaitsInTheMove();
 
+        // A catch of the local player that the copy plays by itself goes on in the room's own creature from where the
+        // copy has got to in it, with what the copy's FSM holds: it is the local player's game's (D35), and the scene
+        // host's FSM was never sent it if nobody was in the room to be sent it, or did not take it. Gone on from the
+        // state that the scene host last said, the room's own creature never let go of the player that the copy left
+        // to it (StopRunningHere below), who stayed hidden and without control
+        if (PlaysACatchByItself && _runHere != null) {
+            _fsmSnapshots[_runHereIndex] = TakeSnapshot(_runHere);
+            SSMP.Logging.Logger.Info(
+                $"Entity {Id} goes on from '{_runHere.ActiveStateName}' of '{_runHere.FsmName}', where its copy " +
+                "plays a catch of the local player by itself"
+            );
+        }
+
         // Make sure that the sprite animator doesn't play the default clip after enabling the object
         if (_animator.Host != null) {
             _animator.Host.playAutomatically = false;
