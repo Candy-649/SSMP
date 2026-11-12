@@ -225,18 +225,6 @@ internal class FsmHealthComponent : EntityComponent {
     }
 
     /// <inheritdoc />
-    public override void SendAgain() {
-        _told = false;
-    }
-
-    /// <inheritdoc />
-    public override void AddToRoomSnapshot(List<EntityNetworkData> data) {
-        if (!IsControlled && _told) {
-            data.Add(Write());
-        }
-    }
-
-    /// <inheritdoc />
     public override void Update(EntityNetworkData data, bool alreadyInSceneUpdate) {
         Health = data.Packet.ReadInt();
         CoreOpen = data.Packet.ReadBool();

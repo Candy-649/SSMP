@@ -1738,27 +1738,6 @@ internal class HealthManagerComponent : EntityComponent {
         }
     }
 
-    /// <inheritdoc />
-    public override void SendAgain() {
-        if (_healthManager.Host != null) {
-            _lastInvincible = !_healthManager.Host.IsInvincible;
-        }
-    }
-
-    /// <inheritdoc />
-    public override void AddToRoomSnapshot(System.Collections.Generic.List<EntityNetworkData> data) {
-        if (IsControlled || !HasHealthToTell()) {
-            return;
-        }
-
-        // The health as it is, told anew: the copies take it as they take any (UpdateHealth)
-        var hpData = new EntityNetworkData {
-            Type = EntityComponentType.Health
-        };
-        WriteHealthState(hpData, false);
-        data.Add(hpData);
-    }
-
     /// <summary>
     /// Callback method for updates to check whether health or invincibility changes.
     /// </summary>
@@ -2394,9 +2373,9 @@ internal class HealthManagerComponent : EntityComponent {
         if (!IsControlled) {
             // The game that runs the creature takes its health from another only as it walks into the room after the
             // other ran it - told in an earlier count of who runs the room, before this game told any of its own - and
-            // tells it on as its own. What the server keeps of a room this game ran all along came from it, and an
-            // answer to walking in that came twice would set the creature back to it, undoing the hits since.
-            if (alreadyInSceneUpdate && !Entity.FromRoomState && epoch < _currentHealthEpoch && _tellNumber == 0) {
+            // tells it on as its own. An answer to walking in that came twice would set the creature back to it,
+            // undoing the hits since.
+            if (alreadyInSceneUpdate && epoch < _currentHealthEpoch && _tellNumber == 0) {
                 ApplyHp(hp, triggerHostDeath: false);
                 SendHealthState();
             }
@@ -2468,15 +2447,13 @@ internal class HealthManagerComponent : EntityComponent {
         ApplyHp(_toldHp, triggerHostDeath: false);
 
         // Walking into a room that the other player already cleared sends the health of everything in it, but never
-        // the deaths themselves - the server keeps health and whether an object is active, and drops death data. The
-        // same for the state of the room told again after a stretch in which nothing arrived, which can be all there
-        // is of a death that went missing. Health alone leaves a copy that is alive with nothing left, which then asks
-        // to die every frame and is turned down every frame, for as long as the room lasts. Its death is played out
-        // once here instead, the same way one that arrives over the network is - for a creature told dead, not one
-        // told it has no health, which some are alive at. A player who is scene host needs none of this: their own
-        // object dies by itself and tells the others.
+        // the deaths themselves - the server keeps health and whether an object is active, and drops death data. Health
+        // alone leaves a copy that is alive with nothing left, which then asks to die every frame and is turned down
+        // every frame, for as long as the room lasts. Its death is played out once here instead, the same way one that
+        // arrives over the network is - for a creature told dead, not one told it has no health, which some are alive
+        // at. A player who is scene host needs none of this: their own object dies by itself and tells the others.
         if (alreadyInSceneUpdate && _toldDead && client != null && !client.GetIsDead()) {
-            _copyKilledOnWalkIn = !Entity.FromRoomState;
+            _copyKilledOnWalkIn = true;
             _allowDeath = true;
             _clientCorpse = null;
             client.Die(null, AttackTypes.Generic, true);

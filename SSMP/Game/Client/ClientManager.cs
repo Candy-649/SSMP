@@ -333,22 +333,6 @@ internal class ClientManager : IClientManager {
     private int _sceneResyncsAsked;
 
     /// <summary>
-    /// The shortest stretch without anything arriving from the server, in seconds, after which this game asks for the
-    /// state of its room again (see <see cref="OnReceiveResumed"/>).
-    /// </summary>
-    private const float RoomStateGap = 3f;
-
-    /// <summary>
-    /// The least time between two requests for the state of the room, in seconds.
-    /// </summary>
-    private const float RoomStateAskInterval = 5f;
-
-    /// <summary>
-    /// When the state of the room was last asked for, in unscaled seconds.
-    /// </summary>
-    private float _roomStateAskedAt = float.MinValue;
-
-    /// <summary>
     /// Whether this game told its player that the link to the server is being made anew, and not yet that it carries
     /// things again (see <see cref="OnLinkStalled"/>). Only used on the main thread.
     /// </summary>
@@ -364,31 +348,6 @@ internal class ClientManager : IClientManager {
     /// The server that this game runs when it hosts, which says how the links of its players stand.
     /// </summary>
     private ServerManager? _ownServer;
-
-    /// <summary>
-    /// The least time between two answers to the server asking for the state of the room this game runs, in seconds.
-    /// </summary>
-    private const float RoomResendInterval = 3f;
-
-    /// <summary>
-    /// When the state of the room this game runs was last sent for the server, in unscaled seconds.
-    /// </summary>
-    private float _roomResentAt = float.MinValue;
-
-    /// <summary>
-    /// When this game last heard that each other player came into or left its room, in unscaled seconds.
-    /// </summary>
-    private readonly Dictionary<ushort, float> _roomEventAt = new();
-
-    /// <summary>
-    /// How recently something must have been heard as it happened for the state of the room to leave it be, in
-    /// seconds. The server puts the state of the room together when asked, and whatever reaches it after that goes out
-    /// in the same packet - and is taken in first, since a packet's contents are taken in in the order of their kind
-    /// (BasePacket.ReadPacketData), the state of the room last. Taken in after it, the state of the room undid what was
-    /// newer: a partner who had just come in was taken out again, one who had just left was drawn again, and a game
-    /// just made the scene host was made the scene client again, with nobody running the room after that.
-    /// </summary>
-    private const float RoomStateYieldTime = 1f;
 
     #endregion
 
@@ -708,14 +667,6 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.PlayerAlreadyInScene,
             OnPlayerAlreadyInScene
         );
-        _packetManager.RegisterClientUpdatePacketHandler<ClientPlayerAlreadyInScene>(
-            ClientUpdatePacketId.RoomState,
-            OnRoomState
-        );
-        _packetManager.RegisterClientUpdatePacketHandler(
-            ClientUpdatePacketId.RoomResendRequest,
-            OnRoomResendRequest
-        );
         _packetManager.RegisterClientUpdatePacketHandler<ClientPlayerLeaveScene>(
             ClientUpdatePacketId.PlayerLeaveScene,
             OnPlayerLeaveScene
@@ -803,8 +754,6 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerDisconnect);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerEnterScene);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerAlreadyInScene);
-        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.RoomState);
-        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.RoomResendRequest);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerLeaveScene);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerRoom);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.PlayerUpdate);
@@ -1404,7 +1353,7 @@ internal class ClientManager : IClientManager {
             _entityManager.InitializeSceneClient(alreadyInScene.SceneHostEpoch);
         }
 
-        TakeRoomCreatures(alreadyInScene, true);
+        TakeRoomCreatures(alreadyInScene);
 
         // Whether there were players in the scene or not, we have now determined whether
         // we are the scene host
@@ -1421,14 +1370,12 @@ internal class ClientManager : IClientManager {
     /// partner were seen in it until it was left (USER 10-31 "她那边没怪").
     /// </summary>
     /// <param name="state">The state of the room.</param>
-    /// <param name="logSpawns">Whether each creature made during play is written down as it is taken in.</param>
-    private void TakeRoomCreatures(ClientPlayerAlreadyInScene state, bool logSpawns) {
+    private void TakeRoomCreatures(ClientPlayerAlreadyInScene state) {
         foreach (var entitySpawn in state.EntitySpawnList) {
-            if (logSpawns) {
-                Logger.Info(
-                    $"Updating already in scene spawned entity with ID: {entitySpawn.Id}, types: {entitySpawn.SpawningType}, {entitySpawn.SpawnedType}"
-                );
-            }
+            Logger.Info(
+                $"Updating already in scene spawned entity with ID: {entitySpawn.Id}, types: " +
+                $"{entitySpawn.SpawningType}, {entitySpawn.SpawnedType}"
+            );
 
             try {
                 _entityManager.SpawnEntity(
@@ -1461,11 +1408,8 @@ internal class ClientManager : IClientManager {
     }
 
     /// <summary>
-    /// Asks for the state of the room again once things arrive after a stretch in which nothing did (USER 10-10:
-    /// "当然要同步啊"). On 10-09 nothing arrived for 19 seconds, and of what the scene host's game sent in that time
-    /// none ever came: an enemy killed in it stayed alive here for good. What the server keeps of the room - who is
-    /// in it, whether each creature is there, how much health it has, where it stands, what state the scene host's
-    /// FSMs are in - is the state to come back to.
+    /// Tells the player once things arrive after a stretch in which nothing did, and keeps the creatures of a room that
+    /// another game runs from hurting the local player for a moment while they catch up (CoopSave.KeepCreaturesOff).
     /// </summary>
     /// <param name="gap">How long nothing arrived, in seconds.</param>
     private void OnReceiveResumed(double gap) {
@@ -1493,15 +1437,6 @@ internal class ClientManager : IClientManager {
                 $"和房主之间断了 {gap:F0} 秒，{keptOffText}"
             ));
         }
-
-        if (gap < RoomStateGap || !_netClient.IsConnected || !_sceneHostDetermined ||
-            Time.unscaledTime - _roomStateAskedAt < RoomStateAskInterval) {
-            return;
-        }
-
-        _roomStateAskedAt = Time.unscaledTime;
-        Logger.Info($"Nothing arrived for {gap:F1}s, so asking for the state of this room again");
-        _netClient.UpdateManager.SetRoomStateRequest();
     }
 
     /// <summary>
@@ -1554,116 +1489,6 @@ internal class ClientManager : IClientManager {
     }
 
     /// <summary>
-    /// Callback for the server asking for the state of the room that this game runs: nothing of this game's reached it
-    /// for a while, and what this game sent then may never come (ServerManager.OnClientReceiveResumed) - an enemy killed
-    /// here stayed alive for the other player. The state goes in one piece (EntityManager.MakeRoomSnapshot), which the
-    /// server keeps and tells the other players of the room; and what the components of each creature last said is said
-    /// again as it is now (Entity.SendStateAgain).
-    /// </summary>
-    private void OnRoomResendRequest() {
-        if (!_sceneHostDetermined || !_entityManager.IsSceneHost) {
-            Logger.Info("The server asked for the state of this room, which this game does not run, so nothing is sent");
-            return;
-        }
-
-        if (Time.unscaledTime - _roomResentAt < RoomResendInterval) {
-            return;
-        }
-
-        _roomResentAt = Time.unscaledTime;
-        var sceneName = SceneManager.GetActiveScene().name;
-        var snapshot = _entityManager.MakeRoomSnapshot(sceneName);
-        if (snapshot != null) {
-            _netClient.UpdateManager.SetRoomSnapshot(snapshot);
-        }
-
-        _entityManager.SendStateAgain();
-        Logger.Info(
-            $"The server asked for the state of {sceneName}, which this game runs, so it is sent again: " +
-            (snapshot != null
-                ? $"{snapshot.ReliableEntityUpdateList.Count} entities, {snapshot.EntitySpawnList.Count} spawned"
-                : "what each creature's parts are only")
-        );
-    }
-
-    /// <summary>
-    /// Callback for the state of the room asked for again after a gap in what arrived (see
-    /// <see cref="OnReceiveResumed"/>). It is the answer to walking into the room, taken as a correction of a room this
-    /// game is in: a player shown here is not shown again, which would lose the cocoon they lie in or the catch that
-    /// holds them, and only one missing is drawn; the role of this game changes only if the server has another; a
-    /// creature takes what it is missing, and nothing it is in the middle of is done over (Entity.FromRoomState).
-    /// </summary>
-    /// <param name="roomState">The state of the room.</param>
-    private void OnRoomState(ClientPlayerAlreadyInScene roomState) {
-        var now = Time.unscaledTime;
-        var sceneName = SceneManager.GetActiveScene().name;
-        if (roomState.SceneName != sceneName || !_sceneHostDetermined) {
-            Logger.Info(
-                $"The state of '{roomState.SceneName}' came while this game is in '{sceneName}'" +
-                (_sceneHostDetermined ? "" : " and has not heard what is in it yet") + ", so it is not taken"
-            );
-            return;
-        }
-
-        bool HeardJustNow(ushort id) => _roomEventAt.TryGetValue(id, out var at) && now - at < RoomStateYieldTime;
-
-        var inRoom = new HashSet<ushort>();
-        foreach (var playerEnterScene in roomState.PlayerEnterSceneList) {
-            inRoom.Add(playerEnterScene.Id);
-            if (_playerData.TryGetValue(playerEnterScene.Id, out var playerData) && !playerData.IsInLocalScene &&
-                !HeardJustNow(playerEnterScene.Id)) {
-                Logger.Info($"Player {playerEnterScene.Id} is in this room without being shown here, so they are now");
-                OnPlayerEnterScene(playerEnterScene);
-            }
-        }
-
-        foreach (var playerData in new List<ClientPlayerData>(_playerData.Values)) {
-            if (playerData.IsInLocalScene && !inRoom.Contains(playerData.Id) && !HeardJustNow(playerData.Id)) {
-                Logger.Info($"Player {playerData.Id} left this room without that being heard here, so they are taken out");
-                OnPlayerLeaveScene(new ClientPlayerLeaveScene { Id = playerData.Id, SceneName = sceneName });
-            }
-        }
-
-        // Every change of who runs a room counts it on by one (ServerManager.GetNextSceneHostEpoch), and this game
-        // has been in the room all along: only a later count is a change it did not hear of
-        if (roomState.SceneHost != _entityManager.IsSceneHost) {
-            if (roomState.SceneHostEpoch > _entityManager.SceneHostEpoch) {
-                Logger.Info(
-                    $"The server has this game as the {(roomState.SceneHost ? "scene host" : "scene client")} of " +
-                    $"this room (epoch {roomState.SceneHostEpoch}), which it did not know, so it is that now"
-                );
-                if (roomState.SceneHost) {
-                    _entityManager.BecomeSceneHost(roomState.SceneHostEpoch);
-                    _arenaCoop.OnBecomeSceneHost();
-                } else {
-                    _entityManager.InitializeSceneClient(roomState.SceneHostEpoch);
-                }
-            } else {
-                Logger.Info(
-                    $"The state of this room has this game as the " +
-                    $"{(roomState.SceneHost ? "scene host" : "scene client")} as of epoch {roomState.SceneHostEpoch}, " +
-                    $"which is not newer than what it heard since (epoch {_entityManager.SceneHostEpoch}), so it stays"
-                );
-            }
-        }
-
-        // What the server keeps of the creatures came from the scene host's game, which runs them itself
-        if (_entityManager.IsSceneHost) {
-            Logger.Info("Took the state of this room again, for its players");
-            return;
-        }
-
-        Entity.Entity.FromRoomState = true;
-        try {
-            TakeRoomCreatures(roomState, false);
-        } finally {
-            Entity.Entity.FromRoomState = false;
-        }
-
-        Logger.Info($"Took the state of this room again, for its players and {roomState.EntityUpdateList.Count} entities");
-    }
-
-    /// <summary>
     /// Callback method for when the server says that another player entered a scene that this game is in.
     /// </summary>
     /// <param name="enterSceneData">The ClientPlayerEnterScene packet data.</param>
@@ -1689,7 +1514,7 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="enterSceneData">The ClientPlayerEnterScene packet data.</param>
     /// <param name="cameIn">Whether they just came into the scene, which their game loaded for it, rather than were in
-    /// it already as this game came in or without this game having heard of them.</param>
+    /// it already as this game came in.</param>
     private void OnPlayerEnterScene(ClientPlayerEnterScene enterSceneData, bool cameIn = false) {
         // Read ID from player data
         var id = enterSceneData.Id;
@@ -1700,7 +1525,6 @@ internal class ClientManager : IClientManager {
         }
 
         Logger.Info($"Player {id} entered scene");
-        _roomEventAt[id] = Time.unscaledTime;
 
         playerData.IsInLocalScene = true;
 
@@ -1787,8 +1611,6 @@ internal class ClientManager : IClientManager {
             Logger.Info($"Player is leaving other scene than we are currently in ({data.SceneName}), ignoring");
             return;
         }
-
-        _roomEventAt[id] = Time.unscaledTime;
 
         // Tell the animation manager that the player left the scene
         _animationManager.OnPlayerLeaveScene(playerData);

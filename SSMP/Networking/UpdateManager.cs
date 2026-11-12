@@ -1918,8 +1918,7 @@ internal abstract class UpdateManager<TOutgoing, TPacketId>
     /// host throughout, and Steam called the link connected the whole time; it ended the game, and a new lobby two
     /// minutes later connected at once. What was still on its way over the old link is lost with it, which the
     /// numbering of the packets with reliable data makes good: what either side has not taken in goes again, in order
-    /// (see <see cref="ReliableNumbering"/>). For the room, the catching up after a gap in what arrives
-    /// (<see cref="ReceiveResumed"/>) makes it good as well.
+    /// (see <see cref="ReliableNumbering"/>).
     /// </summary>
     /// <param name="quietFor">How long nothing has arrived, in milliseconds.</param>
     private void RenewStalledLink(double quietFor) {

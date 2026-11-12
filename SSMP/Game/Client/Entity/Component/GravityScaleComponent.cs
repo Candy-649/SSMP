@@ -40,11 +40,6 @@ internal class GravityScaleComponent : EntityComponent {
         _lastScale = rigidbody.gravityScale;
     }
 
-    /// <inheritdoc />
-    public override void SendAgain() {
-        _lastScale = float.NaN;
-    }
-
     /// <summary>
     /// Callback for checking the gravity scale each update.
     /// </summary>

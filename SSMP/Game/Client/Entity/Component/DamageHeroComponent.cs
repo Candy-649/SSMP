@@ -55,13 +55,6 @@ internal class DamageHeroComponent : EntityComponent {
         _lastEnabled = _hostDamageHeroes.Select(damageHero => damageHero != null && damageHero.enabled).ToArray();
     }
 
-    /// <inheritdoc />
-    public override void SendAgain() {
-        for (var i = 0; i < _lastDamageDealt.Length; i++) {
-            _lastDamageDealt[i] = int.MinValue;
-        }
-    }
-
     /// <summary>
     /// Callback method to check for damage hero updates.
     /// </summary>

@@ -67,12 +67,6 @@ internal class RotationComponent : EntityComponent {
         _hostBody = gameObject.Host.GetComponent<Rigidbody2D>();
     }
 
-    /// <inheritdoc />
-    public override void SendAgain() {
-        _sentAsData = float.NaN;
-        _turning = true;
-    }
-
     /// <summary>
     /// Callback method to check for rotation updates.
     /// </summary>

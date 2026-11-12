@@ -39,11 +39,6 @@ internal class ColliderComponent : EntityComponent {
     ) : base(netClient, entityId, gameObject) {
     }
 
-    /// <inheritdoc />
-    public override void SendAgain() {
-        _lastEnabled = null;
-    }
-
     /// <summary>
     /// The collider of an object, kept once it has one.
     /// </summary>

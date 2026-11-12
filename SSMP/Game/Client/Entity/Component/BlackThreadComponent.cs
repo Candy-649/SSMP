@@ -419,11 +419,6 @@ internal class BlackThreadComponent : EntityComponent {
         }
     }
 
-    /// <inheritdoc />
-    public override void SendAgain() {
-        _hasSent = false;
-    }
-
     /// <summary>
     /// Has a followed state that was switched on take what the game that runs the creature said, which it could not
     /// while it was off, for the hook on OnEnable.

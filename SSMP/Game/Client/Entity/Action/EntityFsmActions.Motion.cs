@@ -635,8 +635,8 @@ internal static partial class EntityFsmActions {
 
     /// <summary>
     /// Starts on the copy a turn that it makes by itself (see <see cref="CopyMakesTheTurn"/>) in a state of the
-    /// creature's FSM that this game was told of with the state of the room, walking in or after a gap, unless the copy
-    /// makes it already: the replay that starts it went before, and nothing of the turn comes while it lasts
+    /// creature's FSM that this game was told of with the state of the room it walks into, unless the copy makes it
+    /// already: the replay that starts it went before, and nothing of the turn comes while it lasts
     /// (Entity.CopyTurnsItself). A creature that spun as a player walked in stood still in that player's game for as
     /// long as it spun.
     /// </summary>

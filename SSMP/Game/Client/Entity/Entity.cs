@@ -2728,167 +2728,6 @@ internal partial class Entity {
     }
 
     /// <summary>
-    /// Puts what this game's creature is now into the state of the room this game runs, which the server asked for
-    /// after a stretch in which nothing of this game's reached it (ClientManager.OnRoomResendRequest): whether it is on,
-    /// where it stands and which way it faces, the clip it shows, its health, and the state and variables of its FSMs.
-    /// A copy here of a creature that the other game runs is not this game's to say.
-    /// </summary>
-    /// <param name="snapshot">The state of the room.</param>
-    internal void AddToRoomSnapshot(ClientPlayerAlreadyInScene snapshot) {
-        if (_isControlled) {
-            return;
-        }
-
-        var update = new EntityUpdate { Id = Id };
-        var reliable = new ReliableEntityUpdate { Id = Id };
-
-        var host = Object.Host;
-        reliable.UpdateTypes.Add(EntityUpdateType.Active);
-        reliable.IsActive = host != null && (_hasParent ? host.activeSelf : host.activeInHierarchy);
-
-        if (host != null) {
-            // A part of another entity is carried by the copy of its parent, as when it moves (OnUpdate); and a body
-            // that moves by itself is moved the same way by its copy, which was told where it set off from
-            // (OwnMotionComponent), so where it is now is not sent either
-            if (!_hasParent) {
-                if (!HostMovesByItself()) {
-                    var position = host.transform.position;
-                    update.UpdateTypes.Add(EntityUpdateType.Position);
-                    update.Position = new Math_Vector3(position.x, position.y, position.z);
-                }
-
-                var scale = host.transform.lossyScale;
-                update.UpdateTypes.Add(EntityUpdateType.Scale);
-                update.Scale = new EntityUpdate.ScaleData {
-                    origin = true,
-                    x = true,
-                    y = true,
-                    xScale = scale.x,
-                    yScale = scale.y
-                };
-            }
-
-            if (_animator.Host != null && _animator.Host.CurrentClip is { } clip &&
-                _animationClipNameIds.TryGetValue(clip.name, out var animationId)) {
-                update.UpdateTypes.Add(EntityUpdateType.Animation);
-                update.AnimationId = animationId;
-                update.AnimationWrapMode = (byte) clip.wrapMode;
-            }
-        }
-
-        foreach (var component in _components.Values.Distinct()) {
-            component.AddToRoomSnapshot(reliable.GenericData);
-        }
-
-        for (var fsmIndex = 0; fsmIndex < _fsms.Host.Count && fsmIndex < byte.MaxValue; fsmIndex++) {
-            var fsm = _fsms.Host[fsmIndex];
-            if (fsm != null && !IsRunByEachGame(fsm)) {
-                reliable.HostFsmData[(byte) fsmIndex] = WholeFsmData(fsm);
-            }
-        }
-
-        if (reliable.GenericData.Count > 0) {
-            reliable.UpdateTypes.Add(EntityUpdateType.Data);
-        }
-
-        if (reliable.HostFsmData.Count > 0) {
-            reliable.UpdateTypes.Add(EntityUpdateType.HostFsm);
-        }
-
-        if (update.UpdateTypes.Count > 0) {
-            snapshot.EntityUpdateList.Add(update);
-        }
-
-        snapshot.ReliableEntityUpdateList.Add(reliable);
-    }
-
-    /// <summary>
-    /// The whole of what an FSM of this game's creature holds now: its state, and every variable of the kinds that are
-    /// sent as they change (see <see cref="OnUpdate"/>).
-    /// </summary>
-    /// <param name="fsm">The FSM.</param>
-    private static EntityHostFsmData WholeFsmData(PlayMakerFSM fsm) {
-        var data = new EntityHostFsmData();
-        data.Types.Add(EntityHostFsmData.Type.State);
-        data.CurrentState = (byte) Array.IndexOf(fsm.FsmStates, fsm.Fsm.ActiveState);
-        data.StateStep = StepOf(fsm);
-
-        var variables = fsm.FsmVariables;
-        for (var i = 0; i < variables.FloatVariables.Length && i < byte.MaxValue; i++) {
-            data.Floats[(byte) i] = variables.FloatVariables[i].Value;
-        }
-
-        for (var i = 0; i < variables.IntVariables.Length && i < byte.MaxValue; i++) {
-            data.Ints[(byte) i] = variables.IntVariables[i].Value;
-        }
-
-        for (var i = 0; i < variables.BoolVariables.Length && i < byte.MaxValue; i++) {
-            data.Bools[(byte) i] = variables.BoolVariables[i].Value;
-        }
-
-        for (var i = 0; i < variables.StringVariables.Length && i < byte.MaxValue; i++) {
-            if (variables.StringVariables[i].Value is { } text) {
-                data.Strings[(byte) i] = text;
-            }
-        }
-
-        for (var i = 0; i < variables.Vector2Variables.Length && i < byte.MaxValue; i++) {
-            data.Vec2s[(byte) i] = (Math_Vector2) variables.Vector2Variables[i].Value;
-        }
-
-        for (var i = 0; i < variables.Vector3Variables.Length && i < byte.MaxValue; i++) {
-            data.Vec3s[(byte) i] = (Math_Vector3) variables.Vector3Variables[i].Value;
-        }
-
-        if (data.Floats.Count > 0) {
-            data.Types.Add(EntityHostFsmData.Type.Floats);
-        }
-
-        if (data.Ints.Count > 0) {
-            data.Types.Add(EntityHostFsmData.Type.Ints);
-        }
-
-        if (data.Bools.Count > 0) {
-            data.Types.Add(EntityHostFsmData.Type.Bools);
-        }
-
-        if (data.Strings.Count > 0) {
-            data.Types.Add(EntityHostFsmData.Type.Strings);
-        }
-
-        if (data.Vec2s.Count > 0) {
-            data.Types.Add(EntityHostFsmData.Type.Vector2s);
-        }
-
-        if (data.Vec3s.Count > 0) {
-            data.Types.Add(EntityHostFsmData.Type.Vector3s);
-        }
-
-        return data;
-    }
-
-    /// <summary>
-    /// Has the components of this game's creature say again what they are now, as if it had all just changed, and how
-    /// it moves by itself: what they said while nothing of this game's reached the server may never have come.
-    /// </summary>
-    internal void SendStateAgain() {
-        if (_isControlled) {
-            return;
-        }
-
-        // Whether it is on, which goes out only as it changes: the server's state of the room keeps what it last
-        // heard, and a value that came there otherwise stayed for good, while this game's creature never changed
-        _lastIsActive = Object.Host != null && (_hasParent ? Object.Host.activeSelf : Object.Host.activeInHierarchy);
-        _netClient.UpdateManager.UpdateEntityIsActive(Id, _lastIsActive);
-
-        foreach (var component in _components.Values.Distinct()) {
-            component.SendAgain();
-        }
-
-        SendOwnMotionAgain();
-    }
-
-    /// <summary>
     /// Sends the clip that the room's own creature shows now, for the other game's copy and for whoever walks in later.
     /// A clip played before this game was settled to run the room was never sent: the sprite animator only says what it
     /// plays at the moment it plays it, and nothing goes out before then. One that lies in wait plays its waiting clip
@@ -3554,49 +3393,6 @@ internal partial class Entity {
     /// The entities, by the object of their copy (see <see cref="OnBroadcastToObject"/>).
     /// </summary>
     private static readonly Dictionary<GameObject, Entity> EntitiesByCopy = new();
-
-    /// <summary>
-    /// Whether what is being taken in is the state of a room this game is already in, asked for again after a gap in
-    /// what reached it (ClientManager.OnRoomState), rather than the state of a room being walked into. What that
-    /// already is is not done again, and what plays out once is not played again.
-    /// </summary>
-    internal static bool FromRoomState;
-
-    /// <summary>
-    /// When this game last took in each kind of thing the scene host said of this entity as it happened, in unscaled
-    /// seconds: whether it is on, the clip it shows, each kind of data, the variables of each FSM.
-    /// </summary>
-    private readonly Dictionary<int, float> _heardAt = new();
-
-    /// <summary>
-    /// How recently a kind of thing must have been heard as it happened for the state of the room to leave it be, in
-    /// seconds (see <see cref="YieldsToNewer"/>).
-    /// </summary>
-    private const float RoomStateYieldTime = 1f;
-
-    /// <summary>
-    /// The kinds of things heard of an entity besides its data, which go by their component type (see
-    /// <see cref="_heardAt"/>): whether it is on, its clip, and the variables of each FSM from this one on.
-    /// </summary>
-    private const int HeardActive = -1, HeardClip = -2, HeardScale = -3, HeardPosition = -4, HeardFsmVariables = 1000;
-
-    /// <summary>
-    /// Notes that a kind of thing was heard as it happened, or says whether the state of the room is to leave it be.
-    /// The server puts the state of the room together when asked, and what reaches it after that goes out in the same
-    /// packet - and is taken in first, since a packet's contents are taken in in the order of their kind
-    /// (BasePacket.ReadPacketData), the state of the room last. So what was heard as it happened just before is the
-    /// newer of the two: a creature that had just been switched on was switched off again.
-    /// </summary>
-    /// <param name="kind">The kind of thing.</param>
-    /// <returns>Whether the state of the room leaves it be.</returns>
-    private bool YieldsToNewer(int kind) {
-        if (!FromRoomState) {
-            _heardAt[kind] = Time.unscaledTime;
-            return false;
-        }
-
-        return _heardAt.TryGetValue(kind, out var at) && Time.unscaledTime - at < RoomStateYieldTime;
-    }
 
     /// <summary>
     /// The entities, by the room's own object of each.
@@ -4814,11 +4610,6 @@ internal partial class Entity {
         ushort sequence,
         IReadOnlyList<AnticipationReport>? anticipation
     ) {
-        // Newer when heard just before the state of the room (see YieldsToNewer)
-        if (YieldsToNewer(HeardPosition)) {
-            return;
-        }
-
         // An older position arriving after a newer one is thrown away: nothing below this transport orders what it
         // carries, so one that had to be sent again lands after ones sent later, and applying it puts the entity
         // back where it was that much earlier.
@@ -4972,18 +4763,10 @@ internal partial class Entity {
     /// <param name="scale">The new scale data.</param>
     /// <param name="sequence">The number of the packet it came in, or 0 for none.</param>
     public void UpdateScale(EntityUpdate.ScaleData scale, ushort sequence = 0) {
-        // Newer when heard just before the state of the room (see YieldsToNewer). A turn alone, which rides along with
-        // every position, says nothing of the size and does not count as one heard: while the creature moved, the state
-        // of the room would never again put right a change of size that was lost
-        if ((scale.HasSize || FromRoomState) && YieldsToNewer(HeardScale)) {
-            return;
-        }
-
         // An older scale arriving after a newer one is thrown away, as an older position is (UpdatePosition): with the
         // facing riding along with every position, one held back on the way would turn the copy back for a moment, and
-        // a turn held back past the last of them would for good. What the state of a room says is not numbered by the
-        // packet that carries it, and YieldsToNewer sees to it.
-        if (!FromRoomState && !_scaleSequence.Accepts(sequence, out _)) {
+        // a turn held back past the last of them would for good.
+        if (!_scaleSequence.Accepts(sequence, out _)) {
             return;
         }
 
@@ -5086,13 +4869,6 @@ internal partial class Entity {
             return;
         }
 
-        // The state of a room this game is in already plays only a clip the copy is not playing: played again, the
-        // clip it is in the middle of would start over or jump to its end
-        if (FromRoomState && _animator.Client != null && _animator.Client.CurrentClip?.name == clipName ||
-            YieldsToNewer(HeardClip)) {
-            return;
-        }
-
         // Played by the copy's own FSM until the scene host has answered its input, if what runs here plays any, through
         // the combo of a catch, and through a talk of the local player, and held till then (PlayHere, TalkHere)
         if (WaitsForEcho && RunHerePlaysClips || _runHereCombo != null || _runHereTalk) {
@@ -5156,10 +4932,6 @@ internal partial class Entity {
     /// </summary>
     /// <param name="active">The new value for active.</param>
     public void UpdateIsActive(bool active) {
-        if (YieldsToNewer(HeardActive)) {
-            return;
-        }
-
         _sceneHostHasItOn = active;
         _timesToldIfOn++;
         _lastToldIfOn = Time.unscaledTime;
@@ -5219,18 +4991,6 @@ internal partial class Entity {
             // the replays of the turns that the copy makes by itself: one sent again after a newer one came is not
             // taken, and one that came beside the newest is the newer (RotationComponent)
             if (data.Type == EntityComponentType.Rotation && !_rotationSequence.Accepts(sequence, out _, true)) {
-                continue;
-            }
-
-            // What plays something out once - a prompt to a challenge, a spawner moving into place, a jar breaking, a
-            // platform showing - is played on walking into the room, and not again for a room this game is in
-            if (FromRoomState && data.Type is EntityComponentType.ChallengePrompt or EntityComponentType.EnemySpawner
-                    or EntityComponentType.SpawnJar or EntityComponentType.DreamPlatform) {
-                continue;
-            }
-
-            // Newer when heard just before the state of the room (see YieldsToNewer); a death is a death either way
-            if (data.Type != EntityComponentType.Health && YieldsToNewer((int) data.Type)) {
                 continue;
             }
 
@@ -5455,14 +5215,9 @@ internal partial class Entity {
     /// Update the FSMs of the host entity to prepare for host transfer or disconnects.
     /// </summary>
     /// <param name="hostFsmData">Dictionary mapping FSM index to data.</param>
-    /// <param name="fromTheRoom">Whether it came with the state of the room, walking in or after a gap.</param>
+    /// <param name="fromTheRoom">Whether it came with the state of the room this game walks into.</param>
     public void UpdateHostFsmData(Dictionary<byte, EntityHostFsmData> hostFsmData, bool fromTheRoom) {
         foreach (var (fsmIndex, data) in hostFsmData) {
-            // Newer when heard just before the state of the room (see YieldsToNewer)
-            if (YieldsToNewer(HeardFsmVariables + fsmIndex)) {
-                continue;
-            }
-
             if (_fsms.Host.Count <= fsmIndex) {
                 continue;
             }

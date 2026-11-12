@@ -30,13 +30,6 @@ internal class MeshRendererComponent : EntityComponent {
         _lastEnabled = meshRenderer.Host.enabled;
     }
 
-    /// <inheritdoc />
-    public override void SendAgain() {
-        if (_meshRenderer.Host != null) {
-            _lastEnabled = !_meshRenderer.Host.enabled;
-        }
-    }
-
     /// <summary>
     /// Callback method to check for mesh renderer updates.
     /// </summary>

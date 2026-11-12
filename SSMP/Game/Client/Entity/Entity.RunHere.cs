@@ -2028,10 +2028,9 @@ internal partial class Entity {
     /// a state of the move that the first one goes on to, which it passed over between two sends: only the latest state
     /// of an FSM is sent, also again for one that was lost, and a stun starts in a state that it is out of the next
     /// frame - but only one that nothing outside the move goes to, and not where it was heard in the move already, the
-    /// copy having left the move to it then: the move is under way there. Not from the state of a room asked for again
-    /// after a gap, which says where the scene host's FSM is but not since when, nor from what the copy takes in at
-    /// once that it was behind with (see <see cref="_catchingUp"/>), nor while the local player talks to the creature
-    /// or the copy runs the part of the FSM that each game runs by itself, nor while it runs another of the creature's
+    /// copy having left the move to it then: the move is under way there. Not from what the copy takes in at once that
+    /// it was behind with (see <see cref="_catchingUp"/>), nor while the local player talks to the creature or the copy
+    /// runs the part of the FSM that each game runs by itself, nor while it runs another of the creature's
     /// FSMs here, nor for a move that the copy's FSM goes through another way (see <see cref="StatesOfTheMove"/>),
     /// which it follows the scene host through. Nor while the copy plays a catch of the local player by itself, which
     /// goes to its end first (see <see cref="PlaysACatchByItself"/>): the scene host's creature, which nobody else saw
@@ -2052,7 +2051,7 @@ internal partial class Entity {
     ) {
         first = stateName;
         move = null;
-        if (FromRoomState || _catchingUp || _eachGamePartWaiting != null || _runHereTalk || _runHereForGood ||
+        if (_catchingUp || _eachGamePartWaiting != null || _runHereTalk || _runHereForGood ||
             _runHere != null && _runHere != fsm || PlaysACatchByItself) {
             return false;
         }

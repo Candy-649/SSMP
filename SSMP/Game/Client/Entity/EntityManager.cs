@@ -135,13 +135,6 @@ internal class EntityManager {
         _spawnsToTell = [];
 
     /// <summary>
-    /// The entities that this game told the server were spawned in this room, which the state of the room it sends again
-    /// names too (see <see cref="MakeRoomSnapshot"/>).
-    /// </summary>
-    private readonly List<(ushort Id, EntityType SpawningType, EntityType SpawnedType, Math_Vector3? Position)>
-        _spawnsTold = [];
-
-    /// <summary>
     /// Gets all currently registered active entities.
     /// </summary>
     public Dictionary<ushort, Entity>.ValueCollection ActiveEntities => _entities.Values;
@@ -322,7 +315,7 @@ internal class EntityManager {
     }
 
     /// <summary>
-    /// Tells the server that an entity was spawned in this room, and keeps that it did.
+    /// Tells the server that an entity was spawned in this room.
     /// </summary>
     /// <param name="id">The ID of the spawned entity.</param>
     /// <param name="spawningType">The type of what spawned it, or the room.</param>
@@ -330,91 +323,7 @@ internal class EntityManager {
     /// <param name="position">Where it was made, or null for one that the room made (see EntitySpawn.Position).
     /// </param>
     internal void TellSpawn(ushort id, EntityType spawningType, EntityType spawnedType, Math_Vector3? position) {
-        _spawnsTold.Add((id, spawningType, spawnedType, position));
         _netClient.UpdateManager.SetEntitySpawn(id, spawningType, spawnedType, position);
-    }
-
-    /// <summary>
-    /// The state of the room that this game runs, which the server asked for after a stretch in which nothing of this
-    /// game's reached it (ClientManager.OnRoomResendRequest), or null when this game does not run it: what each of its
-    /// creatures is now (Entity.AddToRoomSnapshot), and which of them were spawned.
-    /// </summary>
-    /// <param name="sceneName">The name of the room.</param>
-    public ClientPlayerAlreadyInScene? MakeRoomSnapshot(string sceneName) {
-        if (!_sceneRoleDetermined || !IsSceneHost) {
-            return null;
-        }
-
-        var snapshot = new ClientPlayerAlreadyInScene {
-            SceneHost = true,
-            SceneHostEpoch = SceneHostEpoch,
-            SceneName = sceneName
-        };
-
-        // The latest of them, as many as the state of a room carries
-        for (var i = System.Math.Max(0, _spawnsTold.Count - byte.MaxValue); i < _spawnsTold.Count; i++) {
-            var (id, spawningType, spawnedType, position) = _spawnsTold[i];
-            snapshot.EntitySpawnList.Add(new EntitySpawn {
-                Id = id,
-                SpawningType = spawningType,
-                SpawnedType = spawnedType,
-                Position = position
-            });
-        }
-
-        foreach (var entity in _entities.Values) {
-            entity.AddToRoomSnapshot(snapshot);
-        }
-
-        // The variables of the FSMs are most of it, and are left out first
-        var size = SizeOf(snapshot);
-        if (size > RoomSnapshotMaxBytes) {
-            foreach (var update in snapshot.ReliableEntityUpdateList) {
-                update.HostFsmData.Clear();
-                update.UpdateTypes.Remove(EntityUpdateType.HostFsm);
-            }
-
-            var sizeWithoutFsms = SizeOf(snapshot);
-            Logger.Warn(
-                $"The state of {sceneName} came to {size} bytes, so it goes without the FSMs of its creatures " +
-                $"({sizeWithoutFsms} bytes)"
-            );
-            if (sizeWithoutFsms > RoomSnapshotMaxBytes) {
-                Logger.Warn($"The state of {sceneName} is still too big, so it is not sent");
-                return null;
-            }
-        }
-
-        return snapshot;
-    }
-
-    /// <summary>
-    /// The most that the state of a room may take up, in bytes. The rooms measured came to at most about 25 KB, but a
-    /// packet holds at most 65535 bytes, what else goes at the same time shares them, and a packet that is too big is
-    /// lost whole.
-    /// </summary>
-    private const int RoomSnapshotMaxBytes = 32768;
-
-    /// <summary>
-    /// How many bytes the state of a room takes up once written.
-    /// </summary>
-    private static int SizeOf(ClientPlayerAlreadyInScene snapshot) {
-        var packet = new SSMP.Networking.Packet.Packet();
-        snapshot.WriteData(packet);
-        return packet.ToArray().Length;
-    }
-
-    /// <summary>
-    /// Has every creature that this game runs say again what its components are now (see Entity.SendStateAgain).
-    /// </summary>
-    public void SendStateAgain() {
-        if (!_sceneRoleDetermined || !IsSceneHost) {
-            return;
-        }
-
-        foreach (var entity in _entities.Values) {
-            entity.SendStateAgain();
-        }
     }
 
     /// <summary>
@@ -501,20 +410,12 @@ internal class EntityManager {
         if (IsSceneHost) return true;
 
         if (!_entities.TryGetValue(update.Id, out var entity) || !_sceneRoleDetermined) {
-            // The state of a room this game is in corrects what is here now; kept for later, it would be taken in as
-            // if it had just happened
-            if (Entity.FromRoomState) {
-                return true;
-            }
-
             _pendingUpdates.Enqueue(update);
             return false;
         }
 
-        // What the copy is behind with waits (Entity.KeepsForLater), and gives way to the state of the room
-        if (alreadyInSceneUpdate) {
-            entity.MakeWayForTheRoomState();
-        } else if (entity.KeepsForLater(update)) {
+        // What the copy is behind with waits (Entity.KeepsForLater), but not the state of the room it walks into
+        if (!alreadyInSceneUpdate && entity.KeepsForLater(update)) {
             return false;
         }
 
@@ -529,23 +430,13 @@ internal class EntityManager {
     /// </summary>
     public bool HandleReliableEntityUpdate(ReliableEntityUpdate update, bool alreadyInSceneUpdate = false) {
         if (!_entities.TryGetValue(update.Id, out var entity) || !_sceneRoleDetermined) {
-            // Not kept for later either, like the unreliable kind (HandleEntityUpdate): a stored health would be
-            // taken in again as a blow, and what plays out once would play again
-            if (Entity.FromRoomState) {
-                return true;
-            }
-
             _pendingUpdates.Enqueue(update);
             return false;
         }
 
         // As the unreliable kind (HandleEntityUpdate)
-        if (!IsSceneHost) {
-            if (alreadyInSceneUpdate) {
-                entity.MakeWayForTheRoomState();
-            } else if (entity.KeepsForLater(update)) {
-                return false;
-            }
+        if (!IsSceneHost && !alreadyInSceneUpdate && entity.KeepsForLater(update)) {
+            return false;
         }
 
         entity.TakeIn(update, alreadyInSceneUpdate, IsSceneHost);
@@ -563,7 +454,6 @@ internal class EntityManager {
         EntityFsmActions.ForgetActionsInState();
         ClearEntities();
         _picksLeftToTheOtherGame.Clear();
-        _spawnsTold.Clear();
         _loops.Clear();
         _dead.Clear();
 

@@ -107,7 +107,7 @@ internal partial class Entity {
     /// until it is taken in, but for the health and the music in it (see <see cref="TakeInAsItComes"/>). A death is
     /// taken in now, after all that the copy kept, and so is anything once the first of what it kept came longer ago
     /// than it goes behind at the most (see <see cref="MostBehind"/>), which a copy that took in nothing of it since
-    /// would be. Not asked of the state of a room (see <see cref="MakeWayForTheRoomState"/>).
+    /// would be. Not asked of the state of the room this game walks into, which is taken in at once.
     /// </summary>
     /// <param name="update">What the scene host sent.</param>
     public bool KeepsForLater(BaseEntityUpdate update) {
@@ -398,22 +398,6 @@ internal partial class Entity {
         }
 
         _catchingUp = false;
-    }
-
-    /// <summary>
-    /// Makes way for the state of the room, which comes after all that the copy is behind with and puts right what the
-    /// copy shows now: what it kept is older, and goes untaken. Taken in first, everything in it would have counted as
-    /// heard just before the state of the room, which then left all of it be (see <see cref="YieldsToNewer"/>). A move
-    /// that the copy plays on with stops where it is.
-    /// </summary>
-    public void MakeWayForTheRoomState() {
-        if (_cameSinceWaits && _runHereMove) {
-            CatchUpWithSceneHost("the state of the room came");
-        } else if (_playOnUntil != null) {
-            FollowSceneHost();
-        }
-
-        ForgetWhatCameSince("the state of the room came, which is newer");
     }
 
     /// <summary>

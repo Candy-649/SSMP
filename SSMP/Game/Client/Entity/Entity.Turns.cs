@@ -33,7 +33,7 @@ internal partial class Entity {
 
     /// <summary>
     /// Starts on the copy the turns that it makes by itself in a state of an FSM of the creature told with the state of
-    /// the room, walking in or after a gap (see EntityFsmActions.StartTurnHeardLate).
+    /// the room this game walks into (see EntityFsmActions.StartTurnHeardLate).
     /// </summary>
     /// <param name="fsm">The FSM of the copy.</param>
     /// <param name="stateName">The state.</param>

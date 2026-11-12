@@ -12,9 +12,8 @@ namespace SSMP.Game.Client.Save;
 /// </summary>
 internal partial class CoopSave {
     /// <summary>
-    /// How long the creatures cannot hurt the local player once things come again after a gap, in seconds. The state of
-    /// the room, asked for again after such a gap, came 0.4 s after the first packet on 11-04, and with it the last of
-    /// what had been held up on the way.
+    /// How long the creatures cannot hurt the local player once things come again after a gap, in seconds. On 11-04 the
+    /// last of what had been held up on the way came 0.4 s after the first packet.
     /// </summary>
     public const float KeptOffAfterGap = 1.5f;
 

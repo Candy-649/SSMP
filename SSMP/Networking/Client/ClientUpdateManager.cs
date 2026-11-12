@@ -454,30 +454,6 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
-    /// Asks for the state of the room this player is in, after a stretch in which nothing reached them, in the current
-    /// packet.
-    /// </summary>
-    public void SetRoomStateRequest() {
-        lock (Lock) {
-            CurrentUpdatePacket.SetSendingPacketData(
-                ServerUpdatePacketId.RoomStateRequest,
-                new ReliableEmptyData()
-            );
-        }
-    }
-
-    /// <summary>
-    /// Sends the state of the room this game runs, which the server asked for, in the current packet (see
-    /// <see cref="ServerUpdatePacketId.RoomSnapshot"/>).
-    /// </summary>
-    /// <param name="snapshot">The state of the room.</param>
-    public void SetRoomSnapshot(ClientPlayerAlreadyInScene snapshot) {
-        lock (Lock) {
-            CurrentUpdatePacket.SetSendingPacketData(ServerUpdatePacketId.RoomSnapshot, snapshot);
-        }
-    }
-
-    /// <summary>
     /// Set that the player rested at a bench or died, which respawns semi-persistent objects, in the current packet.
     /// </summary>
     public void SetSemiPersistentReset() {
