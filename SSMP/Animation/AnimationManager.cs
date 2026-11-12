@@ -671,6 +671,7 @@ internal class AnimationManager {
         { AnimationClip.SlashChargedLoop, new NeedleStrike(true) },
         { AnimationClip.NeedleArtDash, new NeedleStrike(false) },
         { AnimationClip.BindChargeGround, new Bind() },
+        { AnimationClip.BindChargeAir, new Bind { BindState = Bind.State.Cursed } },
         { AnimationClip.BindChargeGroundLand, new Bind { BindState = Bind.State.ShamanDoneFalling } },
         { AnimationClip.BindBurstGround, BindBurst.Instance },
         { AnimationClip.BindChargeHealBurst, BindBurst.Instance },

@@ -20,6 +20,11 @@ internal class Bind : DamageAnimationEffect {
     protected const string ShamanFallAnticObjectName = "Shaman_Bind_antic_silk";
     private const string BeastCrestAnticObjectName = "Warrior_Bind_antic_silk";
     private const string CursedBindFailObjectName = "Cursed Bind Hornet";
+
+    // The clips of the curse, played one after the other
+    private const string CursedStartClip = "Bind Cursed Start";
+    private const string CursedMidClip = "Bind Cursed Mid";
+    private const string CursedEndClip = "Bind Cursed End";
     private const string WitchBindObjectName = "Whip_Bind_silk_antic";
 
     /// <summary>
@@ -45,6 +50,17 @@ internal class Bind : DamageAnimationEffect {
 
     /// <inheritdoc/>
     public override void Play(GameObject playerObject, CrestType crestType, byte[]? effectInfo) {
+        // Every bind in the air goes on to this clip after "BindCharge Ground" began it with its effect, and a bind
+        // under the curse plays it alone: the Bind FSM goes from "Do Bind" straight to "Cursed Bind Start" (USER 11-12
+        // "那个我朋友在畸芽状态下尝试敷丝的时候会有一个特效，那个特效也没同步", "只要敷丝的时候得到畸芽状态就可以了")
+        if (BindState == State.Cursed) {
+            if (crestType == CrestType.Cursed && CreateObjects(playerObject, out var cursedEffects)) {
+                PlayCursedFail(playerObject, cursedEffects);
+            }
+
+            return;
+        }
+
         var flags = new Flags(effectInfo);
 
         var randomClipAction = GetOrFindBindFsm().GetFirstAction<GetRandomAudioClipFromTable>("Bind Start");
@@ -66,9 +82,6 @@ internal class Bind : DamageAnimationEffect {
             case CrestType.Beast:
                 PlayBeastBindStart(bindEffects);
                 break;
-            case CrestType.Cursed:
-                PlayCursedFail(bindEffects);
-                return;
             case CrestType.Witch:
                 PlayWitchAnimationAntic(bindEffects);
                 break;
@@ -163,10 +176,11 @@ internal class Bind : DamageAnimationEffect {
     }
 
     /// <summary>
-    /// Starts the Cursed Crest bind animation
+    /// Starts the Cursed Crest bind animation, which shows in place of the body of the character until it ends (see
+    /// <see cref="ShowsCurse"/>).
     /// </summary>
-    private void PlayCursedFail(GameObject bindEffects) {
-        Logger.Debug("Playing Cursed Crest bind fail animation");
+    private static void PlayCursedFail(GameObject playerObject, GameObject bindEffects) {
+        Logger.Info("Playing the curse of a bind of another player");
         var failAntic = bindEffects.FindGameObjectInChildren(CursedBindFailObjectName);
 
         tk2dSpriteAnimator animator;
@@ -188,7 +202,7 @@ internal class Bind : DamageAnimationEffect {
             failAntic.transform.SetLocalPositionZ(failAntic.transform.localPosition.z - 0.25f);
 
             animator = failAntic.GetComponent<tk2dSpriteAnimator>();
-            animator.AnimationCompletedEvent += PlayNextCursedPart;
+            animator.AnimationCompletedEvent += (completed, clip) => PlayNextCursedPart(playerObject, completed, clip);
         } else {
             animator = failAntic.GetComponent<tk2dSpriteAnimator>();
         }
@@ -196,18 +210,38 @@ internal class Bind : DamageAnimationEffect {
         failAntic.SetActive(false);
         failAntic.SetActive(true);
 
-        animator.Play("Bind Cursed Start");
+        animator.Play(CursedStartClip);
+        HeroChildEffects.ShowBodyUnlessHidden(playerObject);
     }
 
     /// <summary>
-    /// Starts the next part of the Cursed Crest animation
+    /// Starts the next part of the Cursed Crest animation. Its end shows the body of the character again, as the game
+    /// shows the hero's own sprite again as it plays the end ("Cursed Bind End pt2"); the end switches the copy off.
     /// </summary>
-    private void PlayNextCursedPart(tk2dSpriteAnimator animator, tk2dSpriteAnimationClip clip) {
-        if (clip.name == "Bind Cursed Start") {
-            animator.Play("Bind Cursed Mid");
-        } else if (clip.name == "Bind Cursed Mid") {
-            animator.Play("Bind Cursed End");
+    private static void PlayNextCursedPart(
+        GameObject playerObject,
+        tk2dSpriteAnimator animator,
+        tk2dSpriteAnimationClip clip
+    ) {
+        if (clip.name == CursedStartClip) {
+            animator.Play(CursedMidClip);
+        } else if (clip.name == CursedMidClip) {
+            animator.Play(CursedEndClip);
+            HeroChildEffects.ShowBodyUnlessHidden(playerObject);
         }
+    }
+
+    /// <summary>
+    /// Whether the curse of a bind shows on the character of another player in place of its body. The game hides the
+    /// hero's own sprite while the curse, a figure of the hero itself, plays its start and middle (Bind FSM "Cursed
+    /// Bind Start pt2" to "Cursed Bind End pt2").
+    /// </summary>
+    internal static bool ShowsCurse(GameObject playerObject) {
+        var bindEffects = playerObject.FindGameObjectInChildren("Bind Effects");
+        var curse = bindEffects == null ? null : bindEffects.FindGameObjectInChildren(CursedBindFailObjectName);
+        return curse != null && curse.activeInHierarchy &&
+               curse.TryGetComponent<tk2dSpriteAnimator>(out var animator) &&
+               (animator.IsPlaying(CursedStartClip) || animator.IsPlaying(CursedMidClip));
     }
 
     /// <summary>
@@ -443,7 +477,12 @@ internal class Bind : DamageAnimationEffect {
     public enum State {
         Normal,
         ShamanCancel,
-        ShamanDoneFalling
+        ShamanDoneFalling,
+
+        /// <summary>
+        /// "BindCharge Air", which is the curse when the player binds under it (see <see cref="Play"/>).
+        /// </summary>
+        Cursed
     }
 
     /// <summary>
