@@ -398,12 +398,20 @@ internal partial class Entity {
     /// Whether the FSM of the copy that runs here plays a catch of the local player, which it plays by itself to its
     /// end whatever the scene host's creature does: the combo of a catch, one that a part of the room told it of (see
     /// <see cref="PlayTheCatchByItself"/>), or one that this game leads (see <see cref="_runHereLed"/>). What the scene
-    /// host says meanwhile of where its creature is, how it moves by itself, its colours, whether its parts hurt and
-    /// which move it starts waits until the copy is through (UpdatePosition, UpdateData, <see cref="StartsAMove"/>):
+    /// host says meanwhile of where its creature is, how it moves by itself, its colours, whether its parts hurt,
+    /// which move it starts and that it is switched off waits until the copy is through (UpdatePosition, UpdateData,
+    /// <see cref="StartsAMove"/>, <see cref="UpdateIsActive"/>):
     /// what catches a player is their own game's to say, and the scene host's game never takes it back from them
     /// (USER 11-12 "凭什么一切风险都要客机承担呢").
     /// </summary>
     private bool PlaysACatchByItself => _runHereAlone || _runHereLed;
+
+    /// <summary>
+    /// Whether the scene host switched its creature off while the copy played a catch of the local player by itself,
+    /// which the copy is then only once the catch is through (see <see cref="UpdateIsActive"/>,
+    /// <see cref="FollowSceneHost"/>).
+    /// </summary>
+    private bool _offAfterTheCatch;
 
     /// <summary>
     /// The states of catches that the partner's game leads which came before the input they belong to - the packet of
@@ -1556,7 +1564,13 @@ internal partial class Entity {
         var heldAnimation = _heldAnimation;
         var heldScale = _heldScale;
         var fsmIndex = _runHereIndex;
+        var off = _offAfterTheCatch;
         StopRunningHere();
+
+        // As the scene host said while the copy played a catch by itself (_offAfterTheCatch)
+        if (off && Object.Client != null) {
+            Object.Client.SetActive(false);
+        }
 
         TakeVariablesOfSceneHost(fsmIndex);
         if (waited != null) {
@@ -3211,6 +3225,7 @@ internal partial class Entity {
         var takeVariables = _moveVariablesHeld;
         _runHereEnded = false;
         _runHereAlone = false;
+        _offAfterTheCatch = false;
         _runHere = null;
         _runHereFsm = null;
         _runHereCombo = null;

@@ -5176,6 +5176,18 @@ internal partial class Entity {
                 Object.Client.AddComponent<SaysWhoSwitchesTheCopyOff>().Entity = this;
             }
 
+            // Not while the copy plays a catch of the local player by itself, which goes on to its end whatever the
+            // scene host's creature does (D35): switched off, the copy let go of them at once. It goes off as the
+            // catch is through (FollowSceneHost)
+            _offAfterTheCatch = !active && PlaysACatchByItself;
+            if (_offAfterTheCatch) {
+                SSMP.Logging.Logger.Info(
+                    $"The scene host switched entity {Id} off, which its copy is once the catch of the local player " +
+                    "that it plays by itself is through"
+                );
+                return;
+            }
+
             Object.Client.SetActive(active);
         }
     }
