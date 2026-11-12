@@ -59,10 +59,17 @@ internal partial class Entity {
     private float _madeUp;
 
     /// <summary>
-    /// The particles that play half as fast again with the copy while it makes up being behind, each with the speed it
-    /// had, which it gets back once the copy no longer makes up (see <see cref="PlayAllOfItFaster"/>).
+    /// The particles that play half as fast again with the copy while it makes up being behind, which get their speed
+    /// back once the copy no longer makes up (see <see cref="PlayAllOfItFaster"/>), unless another copy still plays
+    /// them faster (see <see cref="ParticlesFaster"/>).
     /// </summary>
-    private readonly Dictionary<ParticleSystem, float> _particlesFaster = new();
+    private readonly HashSet<ParticleSystem> _particlesHeld = [];
+
+    /// <summary>
+    /// The particles that play half as fast again with copies that make up being behind, each with the speed it had and
+    /// how many copies play it faster: a thing of the pool that one copy put out may come round again for another.
+    /// </summary>
+    private static readonly Dictionary<ParticleSystem, (float Speed, int Holders)> ParticlesFaster = new();
 
     /// <summary>
     /// What the pool put out for the copy's replays while it makes up being behind that is not thrown: its effects,
@@ -601,31 +608,41 @@ internal partial class Entity {
     /// <summary>
     /// Plays one object that shows the creature faster (see <see cref="PlayAllOfItFaster"/>): its clip by the time
     /// that it plays on top of this game's frame, its particles half as fast again, and its FSMs, but on the copy
-    /// itself, as many updates more as are due.
+    /// itself and on what moves by the physics now, as many updates more as are due.
     /// </summary>
     /// <param name="thing">The object.</param>
     /// <param name="withFsms">Whether its FSMs are played faster too.</param>
     /// <param name="extraTime">How long its clip plays on top of this game's frame.</param>
     /// <param name="updates">How many updates of its FSMs are due on top of this game's own.</param>
     private void PlayFaster(Transform thing, bool withFsms, float extraTime, int updates) {
-        if (thing.TryGetComponent<tk2dSpriteAnimator>(out var animator) && animator.Playing) {
+        // As its own late update moves it on, which one that is switched off has not
+        if (thing.TryGetComponent<tk2dSpriteAnimator>(out var animator) && animator.enabled && animator.Playing) {
             animator.UpdateAnimation(extraTime);
         }
 
-        if (thing.TryGetComponent<ParticleSystem>(out var particles) && !_particlesFaster.ContainsKey(particles)) {
-            var main = particles.main;
-            _particlesFaster[particles] = main.simulationSpeed;
-            main.simulationSpeed *= MakeUpRate;
+        if (thing.TryGetComponent<ParticleSystem>(out var particles) && _particlesHeld.Add(particles)) {
+            if (ParticlesFaster.TryGetValue(particles, out var held)) {
+                ParticlesFaster[particles] = (held.Speed, held.Holders + 1);
+            } else {
+                var main = particles.main;
+                ParticlesFaster[particles] = (main.simulationSpeed, 1);
+                main.simulationSpeed *= MakeUpRate;
+            }
         }
 
-        if (updates == 0 || !withFsms) {
+        // Nor the FSMs of what moves by the physics now, whose arcs go at their own speed: timed faster, a part that
+        // flies for a while stopped short of where it does in the game that runs the creature
+        if (updates == 0 || !withFsms ||
+            thing.TryGetComponent<Rigidbody2D>(out var body) && body.simulated && body.linearVelocity != Vector2.zero) {
             return;
         }
 
         thing.GetComponents(FsmsOn);
         foreach (var fsm in FsmsOn) {
-            for (var i = 0; i < updates && fsm.enabled && !fsm.Fsm.Finished && !fsm.Fsm.ManualUpdate; i++) {
-                fsm.Fsm.Update();
+            // One that has not started yet would go into its first state now, and again as it starts
+            var run = fsm.Fsm;
+            for (var i = 0; i < updates && fsm.enabled && run.Started && !run.Finished && !run.ManualUpdate; i++) {
+                run.Update();
             }
         }
     }
@@ -635,26 +652,34 @@ internal partial class Entity {
     /// put out for it (see <see cref="PlayAllOfItFaster"/>).
     /// </summary>
     private void GiveBackItsSpeed() {
-        foreach (var pair in _particlesFaster) {
-            if (pair.Key != null) {
-                var main = pair.Key.main;
-                main.simulationSpeed = pair.Value;
+        foreach (var particles in _particlesHeld) {
+            var held = ParticlesFaster[particles];
+            if (held.Holders > 1) {
+                ParticlesFaster[particles] = (held.Speed, held.Holders - 1);
+                continue;
+            }
+
+            ParticlesFaster.Remove(particles);
+            if (particles != null) {
+                var main = particles.main;
+                main.simulationSpeed = held.Speed;
             }
         }
 
-        _particlesFaster.Clear();
+        _particlesHeld.Clear();
         _putOut.Clear();
         _extraUpdates = 0f;
     }
 
     /// <summary>
     /// Notes what the pool puts out for a copy's replay of what the scene host's creature did: an effect of the
-    /// creature unless it is thrown, which plays half as fast again with the copy while it makes up being behind (see
+    /// creature unless it can be touched, as what it throws can, named for the other games or not
+    /// (ThrownThings.CanBeThrown), which plays half as fast again with the copy while it makes up being behind (see
     /// <see cref="PlayAllOfItFaster"/>).
     /// </summary>
     /// <param name="thing">What the pool puts out.</param>
     internal static void NotePutOut(GameObject thing) {
-        if (_replaying is { MakesUp: true } entity && !ThrownThings.IsThrown(thing)) {
+        if (_replaying is { MakesUp: true } entity && !ThrownThings.CanBeThrown(thing)) {
             entity._putOut.Add(thing);
         }
     }

@@ -2640,6 +2640,11 @@ internal partial class Entity {
         _runHereCombo.Remove(from);
 
         Logger.Info($"The copy of entity {Id} runs '{copyFsm.FsmName}' by itself from '{from.Name}' for this player");
+
+        // What the copy kept of the scene host's goes in at once: it follows the scene host's FSM no more, so nothing
+        // would make up for it, and all that comes after would wait as long for the rest of the room. What it kept of
+        // that FSM is not taken now, as the part runs here
+        CatchUpWithWhatCameSince("the copy runs the rest by itself from here");
     }
 
     /// <summary>

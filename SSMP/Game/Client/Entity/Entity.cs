@@ -5102,9 +5102,13 @@ internal partial class Entity {
                 }
 
                 EntityFsmActions.ReadSubject(data, action);
+                // What the pool puts out meanwhile is the copy's (NotePutOut); an action of a kind not known throws
                 _replaying = this;
-                EntityFsmActions.ApplyNetworkDataFromAction(data, action);
-                _replaying = null;
+                try {
+                    EntityFsmActions.ApplyNetworkDataFromAction(data, action);
+                } finally {
+                    _replaying = null;
+                }
 
                 // A turn that the copy makes by itself from here on is newer than any angle sent before it, which a
                 // packet lost on the way may bring after it (UpdateRotation)
