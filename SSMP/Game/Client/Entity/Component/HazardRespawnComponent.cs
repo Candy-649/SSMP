@@ -16,11 +16,6 @@ namespace SSMP.Game.Client.Entity.Component;
 /// This component manages the hazard respawn changes within certain bossfights.
 internal class HazardRespawnComponent : EntityComponent {
     /// <summary>
-    /// The offset of the climb hazard respawn indices.
-    /// </summary>
-    private const int ClimbRespawnOffset = 1;
-
-    /// <summary>
     /// The Control FSM of the host entity.
     /// </summary>
     private readonly PlayMakerFSM _hostControlFsm;

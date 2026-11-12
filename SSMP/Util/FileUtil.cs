@@ -69,25 +69,6 @@ internal static class FileUtil {
     }
 
     /// <summary>
-    /// Load an object from a JSON file at the given resource path.
-    /// </summary>
-    /// <param name="resourcePath">The path of the embedded resource.</param>
-    /// <typeparam name="T">The type of the object to load.</typeparam>
-    /// <returns>An instance of the loaded object, or the default value if it could not be loaded.</returns>
-    public static T? LoadObjectFromResourcePath<T>(string resourcePath) {
-        var resourceStream = Assembly.GetExecutingAssembly().GetManifestResourceStream(resourcePath);
-        if (resourceStream == null) {
-            Logger.Warn($"Could not read resource at path: {resourcePath}");
-            return default;
-        }
-
-        using var streamReader = new StreamReader(resourceStream);
-        var fileString = streamReader.ReadToEnd();
-
-        return JsonConvert.DeserializeObject<T>(fileString);
-    }
-
-    /// <summary>
     /// Get the path of the SSMP config directory within Silksong's config directory. If we are on desktop, this uses
     /// the save directory from the 'platform', which includes an intermediate directory for the "UserId".
     /// </summary>

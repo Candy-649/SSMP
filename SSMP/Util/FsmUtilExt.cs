@@ -109,31 +109,6 @@ public static class FsmUtilExt {
     }
 
     /// <summary>
-    /// Removes an action from a specific state in a FSM.
-    /// </summary>
-    /// <param name="fsm">The FSM.</param>
-    /// <param name="stateName">The name of the state with the action to remove.</param>
-    /// <param name="index">The index of the action within the state.</param>
-    public static void RemoveAction(this PlayMakerFSM fsm, string stateName, int index) {
-        var state = fsm.GetState(stateName);
-        if (state == null) {
-            throw new ArgumentException("FSM does not have a state with the given name", nameof(stateName));
-        }
-
-        var origActions = state.Actions;
-        var actions = new FsmStateAction[origActions.Length - 1];
-        for (var i = 0; i < index; i++) {
-            actions[i] = origActions[i];
-        }
-
-        for (var i = index; i < actions.Length; i++) {
-            actions[i] = origActions[i + 1];
-        }
-
-        state.Actions = actions;
-    }
-
-    /// <summary>
     /// Removes the first action in the given state of the given type from the FSM.
     /// </summary>
     /// <param name="fsm">The FSM.</param>

@@ -106,24 +106,6 @@ internal static class GameObjectUtil {
     }
 
     /// <summary>
-    /// Find an inactive GameObject with the given name.
-    /// </summary>
-    /// <param name="name">The name of the GameObject.</param>
-    /// <returns>The GameObject is it exists, null otherwise.</returns>
-    public static GameObject? FindInactiveGameObject(string name) {
-        var transforms = Resources.FindObjectsOfTypeAll<Transform>();
-        foreach (var transform in transforms) {
-            if (transform.hideFlags == HideFlags.None) {
-                if (transform.name == name) {
-                    return transform.gameObject;
-                }
-            }
-        }
-
-        return null;
-    }
-
-    /// <summary>
     /// Destroy given object after given time (in seconds).
     /// </summary>
     /// <param name="obj">The game object to destroy.</param>

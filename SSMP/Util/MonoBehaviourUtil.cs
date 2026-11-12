@@ -1,5 +1,4 @@
 ﻿using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace SSMP.Util;
@@ -82,34 +81,5 @@ internal class MonoBehaviourUtil : MonoBehaviour {
     public void FixedUpdate() {
         FixedStep++;
         _fixedUpdate.Invoke();
-    }
-
-    /// <summary>
-    /// Destroys all children of a given GameObject.
-    /// </summary>
-    /// <param name="gameObject">The GameObject to destroy all children of.</param>
-    public static void DestroyAllChildren(GameObject gameObject) {
-        DestroyAllChildren(gameObject, new List<string>());
-    }
-
-    /// <summary>
-    /// Destroys all children of the given GameObject, excluding game objects that match the names in the
-    /// given list.
-    /// </summary>
-    /// <param name="gameObject">The GameObject to destroy all children of.</param>
-    /// <param name="exclude">The list of names to exclude.</param>
-    public static void DestroyAllChildren(
-        GameObject gameObject,
-        List<string> exclude
-    ) {
-        for (var i = 0; i < gameObject.transform.childCount; i++) {
-            var child = gameObject.transform.GetChild(i);
-
-            if (exclude.Contains(child.name)) {
-                continue;
-            }
-
-            Destroy(child.gameObject);
-        }
     }
 }

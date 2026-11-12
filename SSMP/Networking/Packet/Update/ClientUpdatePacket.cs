@@ -40,8 +40,6 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new PacketDataCollection<ReliableEntityUpdate>();
             case ClientUpdatePacketId.SceneHostTransfer:
                 return new HostTransfer();
-            case ClientUpdatePacketId.PlayerDeath:
-                return new PacketDataCollection<GenericClientData>();
             case ClientUpdatePacketId.PlayerSetting:
                 return new PacketDataCollection<ClientPlayerSettingUpdate>();
             case ClientUpdatePacketId.ServerSettingsUpdated:
