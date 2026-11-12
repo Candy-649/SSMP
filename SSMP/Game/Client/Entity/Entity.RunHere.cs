@@ -1462,7 +1462,8 @@ internal partial class Entity {
     /// <summary>
     /// Plays on to its end what the copy plays of an input of the local player that the scene host's creature did not
     /// take, rather than cut it short for what that creature does instead: it was at something else by the time the
-    /// input came - it had gone into a move, or the flea had landed - or went another way with it. The copy's FSM goes
+    /// input came - it had gone into a move, or the flea had landed - or went another way with it. The answer may come
+    /// in what waits for the copy already, and is heard as it comes all the same (KeepsForLater). The copy's FSM goes
     /// on in the state the input took it to until it would go out of it (see <see cref="OnSwitchState"/>), for
     /// <see cref="MoveFinishTime"/> at the most, and then follows the scene host again (see
     /// <see cref="UpdateRunHere"/>). What the scene host sends from here on waits for that, and is taken in after it as
@@ -1987,9 +1988,9 @@ internal partial class Entity {
         // rest of what came along is taken in too: what the scene host's FSM worked out on its way into the move, and
         // what it sent of the states it went through to get there (StartMoveHeard). Whatever the copy plays here of
         // that FSM ends, as the scene host's FSM is past it, whatever it makes of it - but for an input of the local
-        // player still waiting for the scene host's answer, which the copy plays on to its end first, the move waiting
-        // for that with all that came along (KeepsForLater). A catch that this game plays by itself starts no move
-        // here (StartsAMove): it goes on to its end
+        // player still waiting for the scene host's answer, for which the move waits with all that came along
+        // (KeepsForLater): taken, the copy goes on with the input; not taken, it plays the input on to its end first.
+        // A catch that this game plays by itself starts no move here (StartsAMove): it goes on to its end
         if (StartsAMove(fsm, stateName, before, out var first, out var move)) {
             _moveHeard = (fsm, first, move, stateName);
             if (_runHere != null) {

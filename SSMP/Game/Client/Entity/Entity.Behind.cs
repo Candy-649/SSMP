@@ -102,12 +102,13 @@ internal partial class Entity {
     /// Whether the copy keeps what the scene host sent of it for later rather than take it in now: it is behind with
     /// what came since a move, or this is the word that the scene host's FSM came out of a move that the copy plays by
     /// itself first, after which what comes waits for the copy to get through the move too, or the word that it went
-    /// into a move while the copy waits for its answer to an input of the local player, which the copy plays on to its
-    /// end first (see <see cref="PlayOnPastTheRefusal"/>). What it keeps is its own
-    /// until it is taken in, but for the health and the music in it (see <see cref="TakeInAsItComes"/>). A death is
-    /// taken in now, after all that the copy kept, and so is anything once the first of what it kept came longer ago
-    /// than it goes behind at the most (see <see cref="MostBehind"/>), which a copy that took in nothing of it since
-    /// would be. Not asked of the state of the room this game walks into, which is taken in at once.
+    /// into a move while the copy waits for its answer to an input of the local player, after which what comes waits
+    /// for that answer, which is heard as it comes all the same (see <see cref="AnswersTheInput"/>). What it keeps is
+    /// its own until it is taken in, but for the health and the music in it (see <see cref="TakeInAsItComes"/>). A
+    /// death is taken in now, after all that the copy kept, and so is anything once the first of what it kept came
+    /// longer ago than it goes behind at the most (see <see cref="MostBehind"/>), which a copy that took in nothing of
+    /// it since would be. Not asked of the state of the room this game walks into, which comes after all that the copy
+    /// kept (EntityManager.HandleEntityUpdate).
     /// </summary>
     /// <param name="update">What the scene host sent.</param>
     public bool KeepsForLater(BaseEntityUpdate update) {
@@ -120,11 +121,12 @@ internal partial class Entity {
             if (ComesOutOfTheMoveFirst(reliable) is { } way) {
                 WaitOutTheMove(way);
             } else if (WaitsForEcho && GoesIntoAMove(reliable)) {
-                // Taken in now if the copy is through the input already, and follows the scene host into the move
-                PlayOnPastTheRefusal("the scene host's FSM went into a move before it answered");
-                if (_playOnUntil == null) {
-                    return false;
-                }
+                // Kept with all that comes after it until the answer says what became of the input (below)
+                _cameSinceWaits = true;
+                Logger.Info(
+                    $"The scene host's FSM of entity {Id} went into a move before it answered the input to " +
+                    $"'{_runHereReached}', so what it sends from here on waits for its answer"
+                );
             } else {
                 return false;
             }
@@ -134,6 +136,20 @@ internal partial class Entity {
         } else if (_cameSince.Count > 0 && Time.unscaledTime - _cameSince.Peek().At > MostBehind) {
             CatchUpWithWhatCameSince("what it kept came too long ago");
             return false;
+        }
+
+        // The answer to the input that the copy waits for is heard as it comes, though what came before it waits: the
+        // scene host's creature went into a move first, from which it may still have taken the input. Taken, all that
+        // waited goes in at once before the answer, as what the copy holds for an answer goes (HearEcho), and the move
+        // is not played from its start; not taken, the copy plays the input on to its end first, and the rest waits
+        // for that
+        if (WaitsForEcho && reliable != null && AnswersTheInput(reliable) is { } taken) {
+            if (taken) {
+                CatchUpWithWhatCameSince("the scene host took the input after all");
+                return false;
+            }
+
+            PlayOnPastTheRefusal("the scene host did not take it");
         }
 
         if (reliable != null) {
@@ -254,7 +270,7 @@ internal partial class Entity {
     /// <summary>
     /// Whether a word of the scene host's says that its FSM went into a move that the copy plays by itself (see
     /// <see cref="StartsAMove"/>): the FSM that runs here for an input of the local player, which the scene host's
-    /// creature, at the move by the time the input came, does not take.
+    /// creature, at the move by the time the input came, may not take.
     /// </summary>
     /// <param name="update">The word.</param>
     private bool GoesIntoAMove(ReliableEntityUpdate update) {
@@ -268,6 +284,38 @@ internal partial class Entity {
         return hostFsm.CurrentState < states.Length && StartsAMove(
             copyFsm, states[hostFsm.CurrentState].Name, _fsmSnapshots[_runHereIndex].CurrentState, out _, out _
         );
+    }
+
+    /// <summary>
+    /// What a word of the scene host's answers to the input of the local player that the copy waits for (see
+    /// <see cref="HearEcho"/>), read without taking it in: whether its FSM took it where the copy's went, or null if
+    /// the word holds no answer to it.
+    /// </summary>
+    /// <param name="update">The word.</param>
+    private bool? AnswersTheInput(ReliableEntityUpdate update) {
+        if (!update.UpdateTypes.Contains(EntityUpdateType.Data)) {
+            return null;
+        }
+
+        foreach (var data in update.GenericData) {
+            if (data.Type != EntityComponentType.Echo) {
+                continue;
+            }
+
+            var echo = new global::SSMP.Networking.Packet.Packet(data.Packet.ToArray());
+            var anticipation = echo.ReadByte();
+            var fsmIndex = echo.ReadByte();
+            var stateIndex = echo.ReadByte();
+            if (echo.ReadUShort() != RequestTag || (sbyte) (anticipation - _runHereAwaited) < 0) {
+                continue;
+            }
+
+            var states = _runHere!.Fsm.States;
+            return fsmIndex == _runHereIndex && stateIndex < states.Length &&
+                   states[stateIndex].Name == _runHereReached;
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -316,7 +364,9 @@ internal partial class Entity {
     /// came out of first too. Made up a little at a time, taken in faster than it came (see <see cref="MakeUpRate"/>).
     /// </summary>
     private void PlayOnWhatCameSince() {
-        if (!IsBehind) {
+        // Nor while the copy waits for the scene host's answer to an input of the local player, which says what becomes
+        // of what waits (KeepsForLater)
+        if (!IsBehind || WaitsForEcho) {
             return;
         }
 
@@ -339,9 +389,15 @@ internal partial class Entity {
                 $"since, {_behind:0.00} s later than they came"
             );
         } else if (_behind > 0f) {
-            var madeUp = Mathf.Min(_behind, Time.unscaledDeltaTime * (MakeUpRate - 1f));
-            _behind -= madeUp;
-            _madeUp += madeUp;
+            // Not while the copy moves by itself by the physics, whose arcs go at their own speed: taken in sooner, the
+            // next launch came before the copy got there, and put it there in one go (OwnMotionComponent)
+            if (MovesByItself()) {
+                ClipAtItsOwnSpeed();
+            } else {
+                var madeUp = Mathf.Min(_behind, Time.unscaledDeltaTime * (MakeUpRate - 1f));
+                _behind -= madeUp;
+                _madeUp += madeUp;
+            }
         }
 
         while (_cameSince.Count > 0 && _cameSince.Peek().At + _behind <= now) {
