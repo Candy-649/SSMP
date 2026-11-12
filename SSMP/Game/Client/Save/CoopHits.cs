@@ -2942,7 +2942,9 @@ internal partial class CoopHits {
     /// <summary>
     /// Plays at once what a wound of the local player makes the copy of an entity do, in each FSM of it that goes
     /// somewhere on it (see Entity.FindWoundReactions), and sends the scene host the same, where the creature answers
-    /// it at the local player as the copy does (see PlaySetOff).
+    /// it at the local player as the copy does (see PlaySetOff). One that takes the creature into a choice of what it
+    /// does next is only sent: the creature chooses in the scene host's game, with its dice, if the wound still leads
+    /// anywhere there, and takes no notice of it otherwise (USER 11-12 "客机就不应该挑招啊").
     /// </summary>
     /// <param name="struck">The entity.</param>
     private void SetOffByWound(Entity.Entity struck) {
@@ -2956,8 +2958,15 @@ internal partial class CoopHits {
             GamePatcher.SetTargetOf(struck.Object.Client, HeroController.instance.gameObject);
         }
 
-        foreach (var (fsmIndex, eventName) in reactions) {
-            PlayOrSend(struck, fsmIndex, eventName, "wounded", setOff: true);
+        foreach (var (fsmIndex, eventName, chooses) in reactions) {
+            if (chooses) {
+                Logger.Info(
+                    $"'{eventName}' takes the copy of entity {struck.Id} into a choice of what it does next, which " +
+                    "the scene host's game makes, so it is not played here"
+                );
+            }
+
+            PlayOrSend(struck, fsmIndex, eventName, "wounded", setOff: true, here: !chooses);
         }
     }
 
@@ -3009,6 +3018,7 @@ internal partial class CoopHits {
     /// creature, and has the creature go after them in the scene host's game.</param>
     /// <param name="goAfter">Whether the creature goes after them in the scene host's game, where that is not what
     /// <paramref name="setOff"/> says.</param>
+    /// <param name="here">Whether the copy may play it here at all; one that it may not is only sent.</param>
     private void PlayOrSend(
         Entity.Entity copied,
         byte fsmIndex,
@@ -3017,7 +3027,8 @@ internal partial class CoopHits {
         Entity.ToldValues? caught = null,
         bool grabbedThePlayer = false,
         bool setOff = false,
-        bool? goAfter = null
+        bool? goAfter = null,
+        bool here = true
     ) {
         if (!CanSendEntityTouch()) {
             // Alone in the room nothing goes on with the catch, which the part may have started on the player already
@@ -3031,7 +3042,7 @@ internal partial class CoopHits {
         }
 
         var wentAfter = goAfter ?? setOff;
-        if (copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } input) {
+        if (here && copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } input) {
             Logger.Info(
                 $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
                 $"went to '{input.State}', and the scene host is sent it with where the copy was"
@@ -3347,14 +3358,19 @@ internal partial class CoopHits {
             return;
         }
 
-        Logger.Info(
-            $"The partner touched or struck the copy of entity {update.EntityId} in its '{fsm.ActiveStateName}', so " +
-            $"it is sent '{update.Responder}' here too"
-        );
         if (fsm.Fsm.ActiveState is not { } state ||
             Entity.Action.EntityFsmActions.FindTransition(fsm.Fsm, state, update.Responder) == null) {
+            Logger.Info(
+                $"The partner touched or struck the copy of entity {update.EntityId} with '{update.Responder}', " +
+                $"which leads nowhere from its '{fsm.ActiveStateName}' here, so it takes no notice of it"
+            );
             return;
         }
+
+        Logger.Info(
+            $"The partner touched or struck the copy of entity {update.EntityId} in its '{state.Name}', so it is " +
+            $"sent '{update.Responder}' here too"
+        );
 
         // A catch comes with what the part that caught set on the FSM along with it
         Entity.ToldValues? caught = null;
