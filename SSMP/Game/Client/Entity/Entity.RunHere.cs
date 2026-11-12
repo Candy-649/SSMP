@@ -631,12 +631,18 @@ internal partial class Entity {
     /// it (CoopHits.TellCopy) - which is played here whatever the creature's registry entry says.</param>
     /// <returns>What the scene host is sent to play the same, or null if it was not played here.</returns>
     public InputStart? PlayHere(byte fsmIndex, string eventName, ToldValues? caught = null, bool setOff = false) {
-        // Whatever the local player does to the creature goes from where it is over there now: played here, or sent to
-        // the scene host, which plays it there (CoopHits.PlayOrSend)
-        CatchUpWithWhatCameSince("the local player does something to it");
-
         if (CatchEvents.Contains(eventName)) {
             caught ??= ToldValues.None;
+        }
+
+        // Whatever the local player does to the creature goes from where it is over there now: played here, or sent to
+        // the scene host, which plays it there (CoopHits.PlayOrSend). Not a catch of the local player, which is played
+        // from where the copy shows the creature, as their game had it: a move that the copy plays by itself goes on
+        // as the catch (below, from the step heard for that state of it), and what the copy is behind with is taken in
+        // after it, held as any word of the scene host's is while the copy plays the catch by itself
+        // (PlayOnWhatCameSince, FollowSceneHost, PlaysACatchByItself)
+        if (caught == null) {
+            CatchUpWithWhatCameSince("the local player does something to it");
         }
 
         // Whatever else the copy runs here gives way to a catch of the local player by another of its FSMs, unless that
