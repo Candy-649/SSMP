@@ -59,12 +59,6 @@ internal class ServerEntityData {
     public Dictionary<byte, EntityHostFsmData> HostFsmData { get; }
 
     /// <summary>
-    /// When the server last took in each kind of thing about this entity as it happened, by the kind (see
-    /// ServerManager.OnRoomSnapshot).
-    /// </summary>
-    public Dictionary<int, System.DateTime> HeardAt { get; } = new();
-
-    /// <summary>
     /// The player whose packets <see cref="_order"/> counts.
     /// </summary>
     private ushort _orderOf;

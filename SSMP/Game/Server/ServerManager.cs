@@ -349,10 +349,6 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.SceneResyncRequest,
             OnSceneResyncRequest
         );
-        _packetManager.RegisterServerUpdatePacketHandler(
-            ServerUpdatePacketId.RoomStateRequest,
-            OnRoomStateRequest
-        );
         _packetManager.RegisterServerUpdatePacketHandler<BattleSceneUpdate>(
             ServerUpdatePacketId.BattleSceneUpdate,
             OnBattleSceneUpdate
@@ -398,10 +394,6 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.ReliableEntityUpdate,
             OnReliableEntityUpdate
         );
-        _packetManager.RegisterServerUpdatePacketHandler<ClientPlayerAlreadyInScene>(
-            ServerUpdatePacketId.RoomSnapshot,
-            OnRoomSnapshot
-        );
     }
 
     /// <summary>
@@ -417,8 +409,6 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerDisconnect);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SemiPersistentReset);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SceneResyncRequest);
-        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.RoomStateRequest);
-        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.RoomSnapshot);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BattleSceneUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.BossRoomUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.CoopSaveUpdate);
@@ -564,14 +554,7 @@ internal abstract class ServerManager : IServerManager {
     /// than a fresh one. Nothing is decided over: the room keeps the host it has and the other player, who was told
     /// the first time, is not told twice.
     /// </param>
-    /// <param name="roomState">
-    /// Whether this answers a player who has been in the room all along and asks for its state after a gap in what
-    /// reached them (<see cref="OnRoomStateRequest"/>), which is sent as <see cref="ClientUpdatePacketId.RoomState"/>.
-    /// It is answered like <paramref name="resync"/>, and without a line in the log for every entity.
-    /// </param>
-    private void OnClientEnterScene(ServerPlayerData playerData, bool resync = false, bool roomState = false) {
-        resync |= roomState;
-
+    private void OnClientEnterScene(ServerPlayerData playerData, bool resync = false) {
         var enterSceneList = new List<ClientPlayerEnterScene>();
         var alreadyPlayersInScene = false;
 
@@ -627,11 +610,9 @@ internal abstract class ServerManager : IServerManager {
             }
 
             if (entityData.Spawned) {
-                if (!roomState) {
-                    Logger.Info(
-                        $"Sending that entity '{entityKey.EntityId}' has spawned in the scene to '{playerData.Id}'"
-                    );
-                }
+                Logger.Info(
+                    $"Sending that entity '{entityKey.EntityId}' has spawned in the scene to '{playerData.Id}'"
+                );
 
                 var entitySpawn = new EntitySpawn {
                     Id = entityKey.EntityId,
@@ -698,7 +679,7 @@ internal abstract class ServerManager : IServerManager {
             reliableEntityUpdateList.Add(reliableEntityUpdate);
         }
 
-        if (!roomState && entityUpdateList.Count > 0) {
+        if (entityUpdateList.Count > 0) {
             Logger.Info(
                 $"Sending the {entityUpdateList.Count} entities already in '{playerData.CurrentScene}' to " +
                 $"'{playerData.Id}'"
@@ -724,16 +705,8 @@ internal abstract class ServerManager : IServerManager {
             reliableEntityUpdateList,
             makeEnteringPlayerHost,
             sceneHostEpoch,
-            playerData.CurrentScene,
-            roomState ? ClientUpdatePacketId.RoomState : ClientUpdatePacketId.PlayerAlreadyInScene
+            playerData.CurrentScene
         );
-
-        if (roomState) {
-            Logger.Info(
-                $"Told ({playerData.Id}, {playerData.Username}) the state of '{playerData.CurrentScene}' again: " +
-                $"{enterSceneList.Count} other players, {entityUpdateList.Count} entities"
-            );
-        }
     }
 
     /// <summary>
@@ -988,8 +961,6 @@ internal abstract class ServerManager : IServerManager {
             _entityData[serverEntityKey] = entityData;
         }
 
-        var now = DateTime.UtcNow;
-
         // Each kind only when it is newer than the one of that kind last taken from this player
         // (ServerEntityData.TakesNewer). What is passed on is numbered again on the way out, so the game it goes to
         // cannot tell a stale one from a new one any more.
@@ -1005,7 +976,6 @@ internal abstract class ServerManager : IServerManager {
             );
 
             entityData.Position = entityUpdate.Position;
-            entityData.HeardAt[HeardPosition] = now;
         }
 
         // Not kept for players who walk in later, unlike the position: this says how far the scene host has got
@@ -1034,13 +1004,8 @@ internal abstract class ServerManager : IServerManager {
             );
 
             // Taken in rather than put in place of what is kept, which a facing alone, riding with every position,
-            // would otherwise strip of the size it was kept with (ScaleData.TakeNewer). A facing alone is not a size
-            // heard either: the state of the room would otherwise never put a lost change of size right while the
-            // creature moves (OnRoomSnapshot)
+            // would otherwise strip of the size it was kept with (ScaleData.TakeNewer)
             entityData.Scale.TakeNewer(entityUpdate.Scale);
-            if (entityUpdate.Scale.HasSize) {
-                entityData.HeardAt[HeardScale] = now;
-            }
         }
 
         // A turn as it goes on, the newest only, like a position. None is kept for the players who walk in later: the
@@ -1080,8 +1045,6 @@ internal abstract class ServerManager : IServerManager {
             _entityData[serverEntityKey] = entityData;
         }
 
-        var now = DateTime.UtcNow;
-
         // The clip that the entity started to play first, as the copy takes it in (EntityManager), and only when it is
         // newer than the one last taken from this player (ServerEntityData.TakesNewer), by the packet it was first sent
         // in (ReliableEntityUpdate.ReceivedSequence): over a transport that does not keep order, one sent again because
@@ -1098,7 +1061,6 @@ internal abstract class ServerManager : IServerManager {
 
             entityData.AnimationId = entityUpdate.AnimationId;
             entityData.AnimationWrapMode = entityUpdate.AnimationWrapMode;
-            entityData.HeardAt[HeardClip] = now;
         }
 
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Active)) {
@@ -1124,7 +1086,6 @@ internal abstract class ServerManager : IServerManager {
             }
 
             entityData.IsActive = entityUpdate.IsActive;
-            entityData.HeardAt[HeardActive] = now;
         }
 
         if (entityUpdate.UpdateTypes.Contains(EntityUpdateType.Data)) {
@@ -1174,7 +1135,6 @@ internal abstract class ServerManager : IServerManager {
                         KeepNewerHealthState(entityData, updateData);
                     } else if (updateData.Type > EntityComponentType.Death) {
                         KeepGenericData(entityData, updateData);
-                        entityData.HeardAt[(int) updateData.Type] = now;
                     }
                 }
             }
@@ -1188,7 +1148,6 @@ internal abstract class ServerManager : IServerManager {
                 }
 
                 existingData.MergeData(data);
-                entityData.HeardAt[HeardFsmVariables + fsmIndex] = now;
 
                 SendDataInSameScene(
                     id,
@@ -1498,7 +1457,7 @@ internal abstract class ServerManager : IServerManager {
 
     /// <summary>
     /// Keeps the data of a kind about an entity in place of what was kept of that kind before, for a player who walks in
-    /// later and for the state of the room told again.
+    /// later.
     /// </summary>
     /// <param name="entityData">What the server keeps of the entity.</param>
     /// <param name="updateData">The data.</param>
@@ -1547,18 +1506,10 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
-    /// The kinds of things heard of an entity besides its data, which go by their component type (see
-    /// <see cref="ServerEntityData.HeardAt"/>): whether it is on, its clip, its scale, where it stands, its turn as it
-    /// goes on, and the variables of each FSM from this one on.
+    /// The kinds of things heard of an entity that are taken only when newer than the last one of their kind (see
+    /// <see cref="ServerEntityData.TakesNewer"/>): its clip, its scale, where it stands, and its turn as it goes on.
     /// </summary>
-    private const int HeardActive = -1, HeardClip = -2, HeardScale = -3, HeardPosition = -4, HeardRotation = -5,
-        HeardFsmVariables = 1000;
-
-    /// <summary>
-    /// How recently a kind of thing must have been heard as it happened for the state of a room to leave it be, in
-    /// seconds (see <see cref="OnRoomSnapshot"/>).
-    /// </summary>
-    private const double RoomSnapshotYieldTime = 1.0;
+    private const int HeardClip = -2, HeardScale = -3, HeardPosition = -4, HeardRotation = -5;
 
     /// <summary>
     /// Whether the server has a creature on or off, as it reads in a log line: on, off, or not heard of yet.
@@ -1573,49 +1524,12 @@ internal abstract class ServerManager : IServerManager {
     }
 
     /// <summary>
-    /// The shortest stretch without anything arriving from the player whose game runs a room, in seconds, after which
-    /// that player is asked for the state of it (see <see cref="OnClientReceiveResumed"/>).
-    /// </summary>
-    private const double RoomResendGap = 3.0;
-
-    /// <summary>
-    /// The least time between two requests to the same player for the state of the room their game runs, in seconds.
-    /// </summary>
-    private const double RoomResendMinInterval = 5.0;
-
-    /// <summary>
-    /// When each player was last asked for the state of the room their game runs.
-    /// </summary>
-    private readonly ConcurrentDictionary<ushort, DateTime> _roomResendAskedAt = new();
-
-    /// <summary>
-    /// Callback for something arriving from a player after a stretch in which nothing did. What their game sent in it
-    /// may never come, and for the room it runs that is what every other player sees of it, and what a player who walks
-    /// in later is given: an enemy killed there stays alive for everyone else. So the player is asked for the state of
-    /// the room (USER 10-10: "把反方向也做了"). The other way round - a player who missed what the server sent - is
-    /// that player's to ask for (ClientManager.OnReceiveResumed).
+    /// Callback for something arriving from a player after a stretch in which nothing did, which the game that hosts
+    /// hears of (<see cref="PlayerLinkBack"/>).
     /// </summary>
     /// <param name="id">The ID of the player.</param>
-    /// <param name="gap">How long nothing arrived from them, in seconds.</param>
-    private void OnClientReceiveResumed(ushort id, double gap) {
+    private void OnClientReceiveResumed(ushort id) {
         PlayerLinkBack?.Invoke(id);
-
-        if (gap < RoomResendGap || !_playerData.TryGetValue(id, out var playerData) ||
-            !playerData.IsSceneHost || string.IsNullOrEmpty(playerData.CurrentScene)) {
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-        if (_roomResendAskedAt.TryGetValue(id, out var askedAt) && (now - askedAt).TotalSeconds < RoomResendMinInterval) {
-            return;
-        }
-
-        _roomResendAskedAt[id] = now;
-        Logger.Info(
-            $"Nothing arrived from ({id}, {playerData.Username}) for {gap:F1}s, and their game runs " +
-            $"'{playerData.CurrentScene}', so they are asked for the state of it"
-        );
-        _netServer.GetUpdateManagerForClient(id)?.SetRoomResendRequest();
     }
 
     /// <summary>
@@ -1694,181 +1608,6 @@ internal abstract class ServerManager : IServerManager {
                 _netServer.GetUpdateManagerForClient(other)?.AddChatMessage(line);
             }
         }
-    }
-
-    /// <summary>
-    /// Callback for the state of a room from the game that runs it, which the server asked for (see
-    /// <see cref="OnClientReceiveResumed"/>). It is kept in place of what the server had of the room, except what was
-    /// heard as it happened just before: that came in the same packet and was taken in first, since a packet's contents
-    /// are taken in in the order of their kind, so it is the newer of the two. The room's other players are then told
-    /// the state of the room again, which they take as a correction (ClientManager.OnRoomState).
-    /// </summary>
-    /// <param name="id">The ID of the player whose game runs the room.</param>
-    /// <param name="snapshot">The state of the room.</param>
-    private void OnRoomSnapshot(ushort id, ClientPlayerAlreadyInScene snapshot) {
-        if (!_playerData.TryGetValue(id, out var playerData)) {
-            return;
-        }
-
-        var sceneName = playerData.CurrentScene;
-        if (string.IsNullOrEmpty(sceneName) || snapshot.SceneName != sceneName || !playerData.IsSceneHost) {
-            Logger.Info(
-                $"The state of '{snapshot.SceneName}' came from ({id}, {playerData.Username}), who " +
-                (snapshot.SceneName != sceneName ? $"is in '{sceneName}' now" : "does not run it any more") +
-                ", so it is not kept"
-            );
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-
-        bool HeardJustNow(ServerEntityData data, int kind) =>
-            data.HeardAt.TryGetValue(kind, out var at) && (now - at).TotalSeconds < RoomSnapshotYieldTime;
-
-        ServerEntityData DataOf(ushort entityId) {
-            var key = new ServerEntityKey(sceneName, entityId);
-            if (!_entityData.TryGetValue(key, out var data)) {
-                data = new ServerEntityData();
-                _entityData[key] = data;
-            }
-
-            return data;
-        }
-
-        foreach (var spawn in snapshot.EntitySpawnList) {
-            var data = DataOf(spawn.Id);
-            data.Spawned = true;
-            data.SpawningType = spawn.SpawningType;
-            data.SpawnedType = spawn.SpawnedType;
-            data.SpawnPosition = spawn.Position;
-        }
-
-        foreach (var update in snapshot.EntityUpdateList) {
-            var data = DataOf(update.Id);
-            if (update.UpdateTypes.Contains(EntityUpdateType.Position) && !HeardJustNow(data, HeardPosition)) {
-                data.Position = update.Position;
-            }
-
-            if (update.UpdateTypes.Contains(EntityUpdateType.Scale) && !HeardJustNow(data, HeardScale)) {
-                data.Scale.Merge(update.Scale);
-            }
-
-            if (update.UpdateTypes.Contains(EntityUpdateType.Animation) && !HeardJustNow(data, HeardClip)) {
-                data.AnimationId = update.AnimationId;
-                data.AnimationWrapMode = update.AnimationWrapMode;
-            }
-        }
-
-        foreach (var update in snapshot.ReliableEntityUpdateList) {
-            var data = DataOf(update.Id);
-            if (update.UpdateTypes.Contains(EntityUpdateType.Active)) {
-                var yields = HeardJustNow(data, HeardActive);
-
-                // What the state of the room changes of whether a creature is on, or would have changed but for what
-                // was heard just before it, which is what the other players are told next (USER 10-24 "凭空多出来了一个怪")
-                if (data.IsActive != update.IsActive) {
-                    Logger.Info(
-                        $"[Room state] Entity {update.Id} in '{sceneName}' is {(update.IsActive ? "on" : "off")} in " +
-                        $"the state from ({id}, {playerData.Username}); the server had it " +
-                        $"{DescribeActive(data.IsActive)}" +
-                        (yields ? ", heard just before, which is kept" : "")
-                    );
-                }
-
-                if (!yields) {
-                    data.IsActive = update.IsActive;
-                }
-            }
-
-            if (update.UpdateTypes.Contains(EntityUpdateType.Data)) {
-                foreach (var genericData in update.GenericData) {
-                    // Health goes by the order it was told in, whenever it was heard (KeepNewerHealthState)
-                    if (genericData.Type > EntityComponentType.Death &&
-                        (genericData.Type == EntityComponentType.Health ||
-                         !HeardJustNow(data, (int) genericData.Type))) {
-                        genericData.SenderId = id;
-                        KeepGenericData(data, genericData);
-                    }
-                }
-            }
-
-            if (update.UpdateTypes.Contains(EntityUpdateType.HostFsm)) {
-                foreach (var (fsmIndex, fsmData) in update.HostFsmData) {
-                    if (HeardJustNow(data, HeardFsmVariables + fsmIndex)) {
-                        continue;
-                    }
-
-                    if (!data.HostFsmData.TryGetValue(fsmIndex, out var kept)) {
-                        kept = new EntityHostFsmData();
-                        data.HostFsmData[fsmIndex] = kept;
-                    }
-
-                    kept.MergeData(fsmData);
-                }
-            }
-        }
-
-        var told = 0;
-        foreach (var otherPlayerData in _playerData.Values) {
-            if (otherPlayerData.Id != id && otherPlayerData.CurrentScene == sceneName) {
-                OnClientEnterScene(otherPlayerData, roomState: true);
-                told++;
-            }
-        }
-
-        Logger.Info(
-            $"Kept the state of '{sceneName}' from ({id}, {playerData.Username}): " +
-            $"{snapshot.ReliableEntityUpdateList.Count} entities, {snapshot.EntitySpawnList.Count} spawned; told " +
-            $"{told} other players"
-        );
-    }
-
-    /// <summary>
-    /// When each player was last told the state of their room again (see <see cref="OnRoomStateRequest"/>).
-    /// </summary>
-    private readonly ConcurrentDictionary<ushort, DateTime> _roomStateToldAt = new();
-
-    /// <summary>
-    /// The least time between two answers to the same player's requests for the state of their room, in seconds.
-    /// </summary>
-    private const double RoomStateMinInterval = 3.0;
-
-    /// <summary>
-    /// How many seconds of what was kept of a player's link are written down when they ask for the state of their
-    /// room: the stretch that made them ask is under a minute, as a longer one ends their connection, and the seconds
-    /// before it show how it began.
-    /// </summary>
-    private const int RoomStateRecordSeconds = 75;
-
-    /// <summary>
-    /// Callback for when a player who has been in their room all along asks for its state, after a stretch in which
-    /// nothing reached them. What was sent in it may never come: the death of an enemy, a creature switched off, the
-    /// other player leaving. The answer holds what the answer to entering the room holds, and decides nothing over.
-    /// </summary>
-    /// <param name="id">The ID of the player asking.</param>
-    private void OnRoomStateRequest(ushort id) {
-        if (!_playerData.TryGetValue(id, out var playerData)) {
-            return;
-        }
-
-        // Only the player's game knows that nothing from here reached it for a while; this is where this game hears of
-        // it, while what it kept of the link through that stretch is still there to write down
-        _netServer.GetUpdateManagerForClient(id)?.RecordTransportSession(
-            "they asked for the state of their room after a stretch in which nothing from here reached them",
-            RoomStateRecordSeconds
-        );
-
-        if (string.IsNullOrEmpty(playerData.CurrentScene)) {
-            return;
-        }
-
-        var now = DateTime.UtcNow;
-        if (_roomStateToldAt.TryGetValue(id, out var toldAt) && (now - toldAt).TotalSeconds < RoomStateMinInterval) {
-            return;
-        }
-
-        _roomStateToldAt[id] = now;
-        OnClientEnterScene(playerData, roomState: true);
     }
 
     /// <summary>

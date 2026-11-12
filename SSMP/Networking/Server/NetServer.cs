@@ -97,9 +97,9 @@ internal class NetServer : INetServer {
 
     /// <summary>
     /// Event that is called when something arrives from a client after a stretch in which nothing did, with the ID of
-    /// the client and the length of the stretch in seconds. What the client sent in it may never come.
+    /// the client.
     /// </summary>
-    public event Action<ushort, double>? ClientReceiveResumedEvent;
+    public event Action<ushort>? ClientReceiveResumedEvent;
 
     /// <summary>
     /// Event that is called once in a stretch in which nothing arrives from a client whose link has carried things, as
@@ -278,9 +278,9 @@ internal class NetServer : INetServer {
         netServerClient.ConnectionManager.StartAcceptingConnection();
 
         netServerClient.UpdateManager.TimeoutEvent += () => HandleClientTimeout(netServerClient);
-        netServerClient.UpdateManager.ReceiveResumed += gap => {
+        netServerClient.UpdateManager.ReceiveResumed += _ => {
             if (netServerClient.IsRegistered) {
-                ClientReceiveResumedEvent?.Invoke(netServerClient.Id, gap);
+                ClientReceiveResumedEvent?.Invoke(netServerClient.Id);
             }
         };
         netServerClient.UpdateManager.LinkStalled += () => {

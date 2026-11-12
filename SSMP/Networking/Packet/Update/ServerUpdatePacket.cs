@@ -43,8 +43,6 @@ internal class ServerUpdatePacket : UpdatePacket<ServerUpdatePacketId> {
                 return new PacketDataCollection<CoopHitUpdate>();
             case ServerUpdatePacketId.CoopCheckUpdate:
                 return new PacketDataCollection<CoopCheckUpdate>();
-            case ServerUpdatePacketId.RoomSnapshot:
-                return new ClientPlayerAlreadyInScene();
             default:
                 return new EmptyData();
         }

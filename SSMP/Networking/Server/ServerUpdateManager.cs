@@ -206,8 +206,6 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
     /// <param name="sceneHost">Whether the player is the scene host.</param>
     /// <param name="sceneHostEpoch">The current scene host epoch.</param>
     /// <param name="sceneName">The name of the scene that this is the state of.</param>
-    /// <param name="packetId">Whether it answers entering the room, or a request for the state of the room the player
-    /// is in (<see cref="ClientUpdatePacketId.RoomState"/>).</param>
     public void AddPlayerAlreadyInSceneData(
         IEnumerable<ClientPlayerEnterScene> playerEnterSceneList,
         IEnumerable<EntitySpawn> entitySpawnList,
@@ -215,8 +213,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
         IEnumerable<ReliableEntityUpdate> reliableEntityUpdateList,
         bool sceneHost,
         uint sceneHostEpoch,
-        string sceneName,
-        ClientUpdatePacketId packetId = ClientUpdatePacketId.PlayerAlreadyInScene
+        string sceneName
     ) {
         var alreadyInScene = new ClientPlayerAlreadyInScene {
             SceneHost = sceneHost,
@@ -229,7 +226,7 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
         alreadyInScene.ReliableEntityUpdateList.AddRange(reliableEntityUpdateList);
 
         lock (Lock) {
-            CurrentUpdatePacket.SetSendingPacketData(packetId, alreadyInScene);
+            CurrentUpdatePacket.SetSendingPacketData(ClientUpdatePacketId.PlayerAlreadyInScene, alreadyInScene);
         }
     }
 
@@ -527,16 +524,6 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
 
         lock (Lock) {
             CurrentUpdatePacket.SetSendingPacketData(ClientUpdatePacketId.SceneHostTransfer, hostTransfer);
-        }
-    }
-
-    /// <summary>
-    /// Asks this player, whose game runs their room, for the state of it, in the current packet (see
-    /// <see cref="ClientUpdatePacketId.RoomResendRequest"/>).
-    /// </summary>
-    public void SetRoomResendRequest() {
-        lock (Lock) {
-            CurrentUpdatePacket.SetSendingPacketData(ClientUpdatePacketId.RoomResendRequest, new ReliableEmptyData());
         }
     }
 
