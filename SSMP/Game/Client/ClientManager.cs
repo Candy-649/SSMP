@@ -244,7 +244,7 @@ internal class ClientManager : IClientManager {
     /// <summary>
     /// How often the position of the local player is sent while it stays the same, in milliseconds.
     /// </summary>
-    private const int StillPositionEvery = 250;
+    internal const int StillPositionEvery = 250;
 
     /// <summary>
     /// Keeps track of the last updated scale of the local player object.

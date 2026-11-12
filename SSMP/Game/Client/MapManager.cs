@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Diagnostics;
 using GlobalEnums;
 using GlobalSettings;
 using SSMP.Api.Client;
@@ -41,6 +42,11 @@ internal class MapManager : IMapManager {
     /// The last sent map position.
     /// </summary>
     private Vector2 _lastPosition;
+
+    /// <summary>
+    /// The time since the map position was last sent.
+    /// </summary>
+    private readonly Stopwatch _mapPositionStopwatch = Stopwatch.StartNew();
 
     /// <summary>
     /// The value of the last sent whether the map icon was active. If true, we have sent to the server
@@ -140,14 +146,18 @@ internal class MapManager : IMapManager {
             return;
         }
     
-        // Only send update if the position changed
-        if (newPosition != _lastPosition) {
+        // Send it if it changed, and again every quarter second while it stays the same, as the position of the body
+        // is: it rides in an update that is not sent again if it goes missing, so a lost last change left the icon
+        // where the player had been for as long as they stayed where they were
+        if (newPosition != _lastPosition ||
+            _mapPositionStopwatch.ElapsedMilliseconds > ClientManager.StillPositionEvery) {
             var vec2 = new Math_Vector2(newPosition.x, newPosition.y);
     
             _netClient.UpdateManager.UpdatePlayerMapPosition(vec2);
     
-            // Update the last position, since it changed
+            // Update the last position and when it was sent
             _lastPosition = newPosition;
+            _mapPositionStopwatch.Restart();
         }
     }
 
