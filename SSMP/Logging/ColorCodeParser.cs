@@ -10,48 +10,9 @@ namespace SSMP.Logging;
 /// <para>Supported color codes: &amp;0 through &amp;9 (digits) and &amp;a through &amp;f (hex).</para>
 /// <para>Supported style codes: &amp;l (bold), &amp;o (italic), &amp;m (strikethrough), &amp;n (underline).</para>
 /// <para>Special codes: &amp;r (reset all formatting), &amp;&amp; (escape sequence for literal ampersand).</para>
-/// <para>
-/// This parser supports three output formats:
-/// <list type="bullet">
-/// <item><description>ANSI escape sequences for console output</description></item>
-/// <item><description>Unity rich text tags for UI rendering</description></item>
-/// <item><description>Plain text with all codes stripped</description></item>
-/// </list>
-/// </para>
+/// <para>The codes are turned into Unity rich text tags for UI rendering.</para>
 /// </remarks>
 public static class ColorCodeParser {
-    /// <summary>
-    /// Maps Minecraft color/style codes to their corresponding ANSI escape sequences.
-    /// </summary>
-    private static readonly Dictionary<char, string> AnsiCodes = new() {
-        // Color codes (0-9, a-f)
-        { '0', "\x1b[97m" }, // Black → Bright White (legacy mapping for visibility)
-        { '1', "\x1b[34m" }, // Dark Blue
-        { '2', "\x1b[32m" }, // Dark Green
-        { '3', "\x1b[36m" }, // Dark Aqua
-        { '4', "\x1b[31m" }, // Dark Red
-        { '5', "\x1b[35m" }, // Dark Purple
-        { '6', "\x1b[33m" }, // Gold
-        { '7', "\x1b[37m" }, // Gray
-        { '8', "\x1b[90m" }, // Dark Gray
-        { '9', "\x1b[94m" }, // Blue
-        { 'a', "\x1b[92m" }, // Green
-        { 'b', "\x1b[96m" }, // Aqua
-        { 'c', "\x1b[91m" }, // Red
-        { 'd', "\x1b[95m" }, // Light Purple
-        { 'e', "\x1b[93m" }, // Yellow
-        { 'f', "\x1b[30m" }, // White → Black (legacy mapping)
-
-        // Style codes
-        { 'l', "\x1b[1m" }, // Bold
-        { 'm', "\x1b[9m" }, // Strikethrough
-        { 'n', "\x1b[4m" }, // Underline
-        { 'o', "\x1b[3m" }, // Italic
-
-        // Control codes
-        { 'r', "\x1b[0m" } // Reset
-    };
-
     /// <summary>
     /// Maps Minecraft color codes to their corresponding hex color values for Unity.
     /// </summary>
@@ -61,57 +22,6 @@ public static class ColorCodeParser {
         { '8', "555555" }, { '9', "5555FF" }, { 'a', "55FF55" }, { 'b', "55FFFF" },
         { 'c', "FF5555" }, { 'd', "FF55FF" }, { 'e', "FFFF55" }, { 'f', "FFFFFF" }
     };
-
-    /// <summary>
-    /// Converts Minecraft color codes to ANSI escape sequences for console output.
-    /// </summary>
-    /// <param name="message">The input string containing Minecraft color codes.</param>
-    /// <returns>A string with color codes replaced by ANSI escape sequences.</returns>
-    /// <remarks>
-    /// Unrecognized codes are left as-is. Use &amp;&amp; to output a literal ampersand.
-    /// </remarks>
-    public static string ParseToAnsi(string message) {
-        if (string.IsNullOrEmpty(message))
-            return message;
-
-        var sb = new StringBuilder(message.Length);
-
-        for (var i = 0; i < message.Length; i++) {
-            var ch = message[i];
-
-            if (ch != '&') {
-                sb.Append(ch);
-                continue;
-            }
-
-            // Check if there's a character after '&'
-            if (i + 1 >= message.Length) {
-                sb.Append('&');
-                continue;
-            }
-
-            var next = message[i + 1];
-
-            // Handle escaped ampersand (&&)
-            if (next == '&') {
-                sb.Append('&');
-                i++;
-                continue;
-            }
-
-            // Try to parse as a color/style code
-            var code = char.ToLower(next);
-            if (AnsiCodes.TryGetValue(code, out var ansi)) {
-                sb.Append(ansi);
-                i++; // Skip the code character
-            } else {
-                // Unknown code, keep the ampersand
-                sb.Append('&');
-            }
-        }
-
-        return sb.ToString();
-    }
 
     /// <summary>
     /// Converts Minecraft color codes to Unity rich text tags.
@@ -279,59 +189,6 @@ public static class ColorCodeParser {
             sb.Append("</s>");
         if (activeColor != null)
             sb.Append("</color>");
-
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Removes all Minecraft color codes from a string, leaving only plain text.
-    /// </summary>
-    /// <param name="message">The input string containing Minecraft color codes.</param>
-    /// <returns>A string with all recognized color codes removed.</returns>
-    /// <remarks>
-    /// Recognized codes are silently removed. Unrecognized codes are preserved.
-    /// Use &amp;&amp; to output a literal ampersand.
-    /// </remarks>
-    public static string StripColorCodes(string message) {
-        if (string.IsNullOrEmpty(message))
-            return message;
-
-        var sb = new StringBuilder(message.Length);
-
-        for (var i = 0; i < message.Length; i++) {
-            var ch = message[i];
-
-            if (ch != '&') {
-                sb.Append(ch);
-                continue;
-            }
-
-            // Check if there's a character after '&'
-            if (i + 1 >= message.Length) {
-                sb.Append('&');
-                continue;
-            }
-
-            var next = message[i + 1];
-
-            // Handle escaped ampersand (&&)
-            if (next == '&') {
-                sb.Append('&');
-                i++;
-                continue;
-            }
-
-            // Check if this is a recognized code
-            var code = char.ToLower(next);
-            if (AnsiCodes.ContainsKey(code)) {
-                // Recognized code: skip both '&' and the code character
-                i++;
-                continue;
-            }
-
-            // Unknown sequence: preserve the ampersand
-            sb.Append('&');
-        }
 
         return sb.ToString();
     }

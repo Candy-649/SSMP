@@ -90,27 +90,6 @@ the server or execute commands that require higher permission.
 - `/auth <name|auth key>`: Authorize a player.
 - `/deauth <name|auth key>`: De-authorize a player.
 
-### Standalone server
-It is possible to run a standalone server on Windows, Linux and Mac.
-The latest executable of the server can be found on the [releases page](https://github.com/Extremelyd1/SSMP/releases).
-Make sure to download the correct version for your OS.
-
-The standalone server can be run using .NET 9.0.
-If you are only concerned with running it, then download the latest [.NET 9.0 runtime](https://dotnet.microsoft.com/en-us/download/dotnet/9.0).
-
-After installing the .NET runtime, the executable can be run from a terminal using `./SSMPServer [port]`.
-The port argument is optional and defaults to `26960` if omitted.
-
-The server will read/create a console settings file called `consolesettings.json`, which can be changed to alter the default startup settings of the server.
-This includes which port to default to if omitted on the command line.
-The other setting in this file (`fullSynchronisation`) is currently unused.
-
-The server will also read/create a server settings file called `serversettings.json`, which can be changed to control the server settings as listed in the following section.
-Alternatively, settings can be changed by running the settings command on the command line.
-In addition to the commands described above, the standalone server also has the following commands:
-- `exit`: Will gracefully exit the server and disconnect its users.
-- `log [log level(s)]`: Adjusts which log messages are output to the console.
-
 ### Settings
 There are a lot of configurable settings that can change how the mod functions.
 

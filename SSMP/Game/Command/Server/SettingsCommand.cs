@@ -39,7 +39,7 @@ internal class SettingsCommand : IServerCommand, ICommandWithDescription {
     }
 
     /// <inheritdoc />
-    public virtual void Execute(ICommandSender commandSender, string[] args) {
+    public void Execute(ICommandSender commandSender, string[] args) {
         if (args.Length < 2) {
             commandSender.SendMessage($"Usage: {Trigger} <name> [value]");
             return;

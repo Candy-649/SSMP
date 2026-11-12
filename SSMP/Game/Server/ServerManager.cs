@@ -453,7 +453,7 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="port">The port the server should run on.</param>
     /// <param name="fullSynchronisation">Whether full synchronisation should be enabled.</param>
     /// <param name="transportServer">The transport server to use.</param>
-    public virtual void Start(int port, bool fullSynchronisation, IEncryptedTransportServer transportServer) {
+    public void Start(int port, bool fullSynchronisation, IEncryptedTransportServer transportServer) {
         lock (_serverStateLock) {
             // Stop existing server (including deregistering commands)
             if (_netServer.IsStarted) {

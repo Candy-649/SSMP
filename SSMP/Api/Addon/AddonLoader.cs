@@ -18,7 +18,7 @@ internal abstract class AddonLoader {
 
     /// <summary>
     /// List of file names (including extension) of files that should be skipped when trying to load addons.
-    /// These are dependencies of either SSMP or SSMPServer.
+    /// These are SSMP and its dependencies.
     /// </summary>
     private static readonly string[] ExcludedFileNames = [
         "SSMP.dll",
