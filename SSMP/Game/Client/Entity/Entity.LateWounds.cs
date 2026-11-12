@@ -37,12 +37,14 @@ internal partial class Entity {
     private const int WaysKept = 16;
 
     /// <summary>
-    /// How long ago, at most, the room's own creature may have left the state that the partner's copy took a wound in,
-    /// in seconds, for the wound to be taken from there: longer than the round trips of the evening that this was for
-    /// (0.36 to 0.79 s, 11-04), and short enough that a stalled connection does not take back a whole move that the
-    /// scene host's player saw the creature make.
+    /// How long ago, at most, the room's own creature may have left the state that the partner's copy took a wound or
+    /// a catch in, in seconds, for it to be taken from there: longer than any taken back from 11-05 to 11-11 (at most
+    /// 0.20 s) and than a round trip on a clean evening (0.17 to 0.25 s), and too short for a whole move that the scene
+    /// host's player saw the creature make. A second, which the round trips of a lossy evening called for (0.36 to
+    /// 0.79 s, 11-04), was long enough for one (USER 11-12 "回退最多1秒是不是太久了，感觉一秒都要够蕾丝打完一招了"); a
+    /// wound or a catch that comes as late as that is not taken back.
     /// </summary>
-    private const float LateWoundAtMost = 1f;
+    private const float LateWoundAtMost = 0.3f;
 
     /// <summary>
     /// The ways that each FSM of a room's own creature went lately (see <see cref="OnDoTransition"/>), by the FSM's
