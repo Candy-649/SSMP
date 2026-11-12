@@ -5479,12 +5479,14 @@ internal partial class Entity {
             // What the scene host's FSM held before it took the local player's input is not written into the copy's
             // FSM that runs here for it meanwhile, which has gone on from there: the copy is given it only if the
             // scene host went another way (PlayHere). Nor is anything written into the part that each game runs by
-            // itself, whose count of binds left is the local player's (RunEachGamePart), nor into a catch that this
-            // game leads, whose count of struggles is (_runHereLed), nor into a move that the copy plays by itself,
-            // whose clock and place are its own (RunMoveHere).
+            // itself, whose count of binds left is the local player's (RunEachGamePart), nor into a catch of the local
+            // player that the copy plays by itself, one this game leads or the combo of any catch, whose numbers are
+            // its own until it is through, when FollowSceneHost gives it the scene host's (PlaysACatchByItself), nor
+            // into a move that the copy plays by itself, whose clock and place are its own (RunMoveHere).
             var clientFsm = _fsms.Client[fsmIndex];
             var writesCopy = clientFsm != _runHere ||
-                             !WaitsForEcho && !_runHereForGood && !_runHereLed && !_runHereTalk && !_runHereMove;
+                             !WaitsForEcho && !_runHereForGood && !PlaysACatchByItself && !_runHereTalk &&
+                             !_runHereMove;
 
             if (data.Types.Contains(EntityHostFsmData.Type.Floats)) {
                 foreach (var (index, val) in data.Floats) {
