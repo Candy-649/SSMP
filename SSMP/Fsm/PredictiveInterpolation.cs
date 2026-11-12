@@ -476,8 +476,11 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// were deliberately put aside, so that the speed worked out from the distance is not worked out against the
     /// length of a single tick and come out several times too fast.
     /// </param>
-    public void SetNewPosition(Vector3 newPos, int snapshotsSinceLast = 1) {
-        SetNewState(newPos, snapshotsSinceLast);
+    /// <param name="late">Whether it is taken in later than it came, and sooner after the last one than it came after
+    /// it, as a copy makes up being behind its sender (Entity.PlayOnWhatCameSince): the time between the two then says
+    /// nothing of the sender's ticks.</param>
+    public void SetNewPosition(Vector3 newPos, int snapshotsSinceLast = 1, bool late = false) {
+        SetNewState(newPos, snapshotsSinceLast, late: late);
     }
 
     /// <summary>
@@ -487,11 +490,13 @@ internal class PredictiveInterpolation : MonoBehaviour {
     /// <param name="snapshotsSinceLast">Number of ticks since the last update (for velocity calc).</param>
     /// <param name="sequenceId">Optional sequence ID to discard out-of-order packets.</param>
     /// <param name="isTeleport">If true, snaps immediately without smoothing.</param>
+    /// <param name="late">As in <see cref="SetNewPosition"/>.</param>
     public void SetNewState(
         Vector3 newPos,
         int snapshotsSinceLast = 1,
         uint sequenceId = 0,
-        bool isTeleport = false
+        bool isTeleport = false,
+        bool late = false
     ) {
         EnsureTransformCached();
 
@@ -522,8 +527,9 @@ internal class PredictiveInterpolation : MonoBehaviour {
         // Only gaps between two positions that came one after the other are measured, and only those that could be
         // one tick at all. A gap longer than the ceiling is something that had nothing to say in between, since
         // nothing sends a position while it stands still; a gap shorter than the floor is two that arrived together
-        // after one of them was held up. Neither is a tick, and neither is counted.
-        if (snapshotsSinceLast == 1 && _lastUpdateTime > 0f) {
+        // after one of them was held up. Neither is a tick, and neither is counted, nor is the gap before a position
+        // taken in late, faster than it came, as a copy makes up being behind (late).
+        if (!late && snapshotsSinceLast == 1 && _lastUpdateTime > 0f) {
             var gap = now - _lastUpdateTime;
             if (gap >= minServerDeltaTime && gap <= MaxServerDeltaTime) {
                 serverDeltaTime += (gap - serverDeltaTime) * ServerDeltaTimeLearnRate;
@@ -534,8 +540,9 @@ internal class PredictiveInterpolation : MonoBehaviour {
         // not every case: a large message that has to be cut into pieces sends several packets where there would
         // usually be one, and the numbering counts them all. Left alone, a burst of those would be read as a long
         // silence and everything moving through it would be read as crawling. The clock cannot be argued with, so it
-        // is the ceiling: however many packets went by, no more time passed than has passed.
-        if (snapshotsSinceLast > 1 && _lastUpdateTime > 0f && serverDeltaTime > 0f) {
+        // is the ceiling: however many packets went by, no more time passed than has passed - but for a position taken
+        // in late, faster than it came (late).
+        if (!late && snapshotsSinceLast > 1 && _lastUpdateTime > 0f && serverDeltaTime > 0f) {
             var ticksOnTheClock = Mathf.CeilToInt((now - _lastUpdateTime) / serverDeltaTime);
             if (ticksOnTheClock >= 1 && snapshotsSinceLast > ticksOnTheClock) {
                 snapshotsSinceLast = ticksOnTheClock;

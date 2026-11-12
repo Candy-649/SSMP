@@ -16,10 +16,13 @@ namespace SSMP.Game.Client.Entity;
 /// and picks its next move with, and only its latest state is sent: the copy that heard it several states on was cut
 /// short where it stood, and a boss that the scene host's player had seen go on from its parry into a rise stood at the
 /// end of the copy's parry and was then put 16 units up in one go (log of 11-03). The copy goes on that much behind the
-/// scene host's creature, and makes it up as it stands still between two moves (see <see cref="StandsStill"/>), where
-/// nothing that shows comes sooner; whatever the local player does to the creature first takes in the rest at once
-/// (see <see cref="CatchUpWithWhatCameSince"/>), so that it goes from where the creature is over there now. Both as the
-/// user chose (11-03). Its health and the music go as they come all the same, and its death after all that the copy
+/// scene host's creature, and makes it up by playing all of it half as fast again - one move after another, where the
+/// creature goes and the clips it plays - until it has caught up (see <see cref="MakeUpRate"/>). Made up only as the
+/// copy stood still between two moves, it never was for a creature that goes from one move into the next (USER 11-12
+/// "极端一点的怪，几乎没有发呆的时间，又不能加快出招的话，那岂不是永远追不上了"). Whatever the local player does to the creature
+/// first takes in the rest at once (see <see cref="CatchUpWithWhatCameSince"/>), so that it goes from where the
+/// creature is over there now, as the user chose (11-03). Its health and the music go as they come all the same, and
+/// its death after all that the copy
 /// kept (see <see cref="TakeInAsItComes"/>). So it goes too while the copy plays on to its end an input of the local
 /// player that the scene host's creature did not take, rather than cut it short for what that creature did instead
 /// (see <see cref="PlayOnPastTheRefusal"/>, USER 11-12).
@@ -37,7 +40,7 @@ internal partial class Entity {
     /// <summary>
     /// How much later than it came the copy takes in what the scene host sends of it, in seconds: as much later as the
     /// copy came to the end of a move after the word that the scene host's FSM had come out of it, less what it has
-    /// made up since by standing still (see <see cref="StandsStill"/>).
+    /// made up since by playing faster (see <see cref="MakeUpRate"/>).
     /// </summary>
     private float _behind;
 
@@ -49,14 +52,15 @@ internal partial class Entity {
     private bool _cameSinceWaits;
 
     /// <summary>
-    /// How much of how far it was behind the copy has made up by standing still, in seconds, said once it caught up.
+    /// How much of how far it was behind the copy has made up by playing faster, in seconds, said once it caught up.
     /// </summary>
     private float _madeUp;
 
     /// <summary>
-    /// Where the copy was a frame ago (see <see cref="StandsStill"/>).
+    /// The clip that the copy plays faster to make up being behind (see <see cref="MakeUpRate"/>), given its own speed
+    /// back once the copy has caught up (see <see cref="ClipAtItsOwnSpeed"/>); or null.
     /// </summary>
-    private Vector3 _lastAt;
+    private tk2dSpriteAnimationClip? _clipMadeUp;
 
     /// <summary>
     /// Whether the copy takes in at once all that it was behind with (see <see cref="CatchUpWithWhatCameSince"/>): a
@@ -66,9 +70,11 @@ internal partial class Entity {
     private bool _catchingUp;
 
     /// <summary>
-    /// How much faster than it came the copy takes in what it is behind with while it stands still.
+    /// How much faster than it came the copy takes in what it is behind with, and plays the clips it starts meanwhile
+    /// (see <see cref="UpdateAnimation"/>), until it has caught up: half as fast again (USER 11-12 "1.5倍吧"). It was
+    /// three times as fast while the copy stood still ("三倍速会不会太多了（", "这用力过猛了吧").
     /// </summary>
-    private const float MakeUpRate = 3f;
+    private const float MakeUpRate = 1.5f;
 
     /// <summary>
     /// How long the copy keeps what the scene host sent at the most, in seconds: as long as a move that it played on
@@ -81,12 +87,6 @@ internal partial class Entity {
     /// (see <see cref="TakeInAsItComes"/>).
     /// </summary>
     private readonly List<EntityNetworkData> _asItComes = [];
-
-    /// <summary>
-    /// How fast the copy may still drift as it stands still, in units a second: what is left of the smoothing of a
-    /// step.
-    /// </summary>
-    private const float StillSpeed = 0.5f;
 
     /// <summary>
     /// The first bytes of what the scene host sent of an action of an FSM (see <see cref="StateOfTheAction"/>).
@@ -148,8 +148,8 @@ internal partial class Entity {
     /// Takes in now what the scene host sent of the creature's health and of the music of the room in something that
     /// the copy keeps for later: the health is the scene host's to settle as it comes, which the blows of the partner,
     /// seen to land where their figure is now, bring down - a boss whose health waited went on with what it had been,
-    /// and a creature that never stands still would have shown it late for the whole fight - and the music is the
-    /// room's. They are taken out of it and given back.
+    /// and showed it late for as long as the copy was behind - and the music is the room's. They are taken out of it
+    /// and given back.
     /// </summary>
     /// <param name="update">What the scene host sent.</param>
     private void TakeInAsItComes(ReliableEntityUpdate update) {
@@ -313,7 +313,7 @@ internal partial class Entity {
     /// Takes in what came since, each as it is due (see <see cref="_behind"/>): from the copy's end of the move that it
     /// waited for, or of the input that the scene host did not take, the first word at once, and the rest as far apart
     /// as it came - again behind a move that the copy plays by itself, heard of in that, which the scene host's FSM
-    /// came out of first too. Made up a little at a time as the copy stands still.
+    /// came out of first too. Made up a little at a time, taken in faster than it came (see <see cref="MakeUpRate"/>).
     /// </summary>
     private void PlayOnWhatCameSince() {
         if (!IsBehind) {
@@ -338,7 +338,7 @@ internal partial class Entity {
                 $"The copy of entity {Id} goes on with the {_cameSince.Count} word(s) of the scene host's that came " +
                 $"since, {_behind:0.00} s later than they came"
             );
-        } else if (StandsStill() && _behind > 0f) {
+        } else if (_behind > 0f) {
             var madeUp = Mathf.Min(_behind, Time.unscaledDeltaTime * (MakeUpRate - 1f));
             _behind -= madeUp;
             _madeUp += madeUp;
@@ -356,10 +356,11 @@ internal partial class Entity {
 
         if (_cameSince.Count == 0 && _behind <= 0f) {
             Logger.Info(
-                $"The copy of entity {Id} has caught up with the scene host, {_madeUp:0.00} s of it made up as it " +
-                "stood still"
+                $"The copy of entity {Id} has caught up with the scene host, {_madeUp:0.00} s of it made up by " +
+                "playing faster"
             );
             _madeUp = 0f;
+            ClipAtItsOwnSpeed();
         }
     }
 
@@ -385,6 +386,7 @@ internal partial class Entity {
         _cameSinceWaits = false;
         _behind = 0f;
         _madeUp = 0f;
+        ClipAtItsOwnSpeed();
         if (waited && _runHereMove) {
             CatchUpWithSceneHost("what the scene host sent since is taken in at once");
         } else if (_playOnUntil != null) {
@@ -420,39 +422,20 @@ internal partial class Entity {
         _cameSinceWaits = false;
         _behind = 0f;
         _madeUp = 0f;
+        ClipAtItsOwnSpeed();
     }
 
     /// <summary>
-    /// Whether the copy stands still as it goes on behind the scene host's creature: nothing of its own runs here, it
-    /// has not moved since the last frame, and its clip goes round or is through, so that what comes next can come
-    /// sooner without cutting short anything that shows. A creature that waits between two moves, not one that walks or
-    /// flies, nor one in the middle of a move. Asked every frame that the copy is behind, for where it was.
+    /// Gives the clip that the copy played faster to make up being behind its own speed back, if it still plays it
+    /// (see <see cref="_clipMadeUp"/>).
     /// </summary>
-    private bool StandsStill() {
-        if (Object.Client == null) {
-            return false;
+    private void ClipAtItsOwnSpeed() {
+        if (_clipMadeUp != null && _animator.Client is { } animator && animator != null &&
+            animator.CurrentClip == _clipMadeUp) {
+            animator.ClipFps = _clipMadeUp.fps;
         }
 
-        var at = Object.Client.transform.position;
-        var drift = StillSpeed * Time.unscaledDeltaTime;
-        var moved = (at - _lastAt).sqrMagnitude > drift * drift;
-        _lastAt = at;
-        if (moved || _runHere != null || MovesByItself()) {
-            return false;
-        }
-
-        var animator = _animator.Client;
-        if (animator == null || !animator.Playing || animator.CurrentClip == null) {
-            return true;
-        }
-
-        var clip = animator.CurrentClip;
-        return clip.wrapMode switch {
-            tk2dSpriteAnimationClip.WrapMode.Loop or tk2dSpriteAnimationClip.WrapMode.PingPong
-                or tk2dSpriteAnimationClip.WrapMode.RandomLoop => true,
-            tk2dSpriteAnimationClip.WrapMode.LoopSection => animator.CurrentFrame >= clip.loopStart,
-            _ => false
-        };
+        _clipMadeUp = null;
     }
 
     /// <summary>

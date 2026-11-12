@@ -4666,7 +4666,7 @@ internal partial class Entity {
             return;
         }
 
-        positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + packetsCovered);
+        positionInterpolation.SetNewPosition(unityPos, _positionsHeldBack + packetsCovered, _behind > 0f);
         _positionsHeldBack = 0;
         StartWhereTheSceneHostDidAfterAll();
     }
@@ -4736,7 +4736,7 @@ internal partial class Entity {
             }
         }
 
-        interpolation.SetNewPosition(position, _positionsHeldBack + packetsCovered);
+        interpolation.SetNewPosition(position, _positionsHeldBack + packetsCovered, _behind > 0f);
         _positionsHeldBack = 0;
     }
 
@@ -4889,6 +4889,12 @@ internal partial class Entity {
 
         // Otherwise, default to just playing the clip
         _animator.Client.Play(clipName);
+
+        // Faster while the copy makes up being behind the scene host (MakeUpRate)
+        if (_behind > 0f && _animator.Client.CurrentClip is { } playing) {
+            _animator.Client.ClipFps = playing.fps * MakeUpRate;
+            _clipMadeUp = playing;
+        }
     }
 
     /// <summary>

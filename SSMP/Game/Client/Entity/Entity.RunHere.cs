@@ -1466,7 +1466,7 @@ internal partial class Entity {
     /// on in the state the input took it to until it would go out of it (see <see cref="OnSwitchState"/>), for
     /// <see cref="MoveFinishTime"/> at the most, and then follows the scene host again (see
     /// <see cref="UpdateRunHere"/>). What the scene host sends from here on waits for that, and is taken in after it as
-    /// far apart as it came, made up as the copy stands still (see <see cref="PlayOnWhatCameSince"/>), as after a move
+    /// far apart as it came, made up by playing it faster (see <see cref="PlayOnWhatCameSince"/>), as after a move
     /// that the copy played on to its end (USER 11-12 "我觉得先演完，然后不是会有一个追赶的过程吗，加快一点来追赶上房主").
     /// One that the copy is through already follows the scene host at once.
     /// </summary>
