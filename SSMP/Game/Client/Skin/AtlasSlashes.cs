@@ -42,6 +42,32 @@ internal static class CustomizerT2D {
     private const string PluginTypeName = "CustomizerT2DOnly.CustomizerT2DOnly";
 
     /// <summary>
+    /// The folder of a skin that holds the images that CustomizerT2D dresses whole pages of atlases with, which is no
+    /// sheet of sprites.
+    /// </summary>
+    public const string PagesFolder = "Texture2D";
+
+    /// <summary>
+    /// The folder of the game's mods that Customizer's skins are kept in, one folder for each skin.
+    /// </summary>
+    public static string ModFolder => Path.Combine(Application.dataPath, "Mods", "Customizer");
+
+    /// <summary>
+    /// The given skins with those of Hornet's last, each part in the order it had: a whole page that a skin of
+    /// Hornet's has as well as a skin of what else the game draws is hers, as the skin she wears takes in more than
+    /// that page (USER 11-10: "先按照大黄蜂皮肤优先吧"), and the last skin wins it.
+    /// </summary>
+    internal static List<T> HornetsLast<T>(List<T> skins, Func<T, bool> isOfHornet) {
+        var others = new List<T>();
+        var hers = new List<T>();
+        foreach (var skin in skins) {
+            (isOfHornet(skin) ? hers : others).Add(skin);
+        }
+
+        return [..others, ..hers];
+    }
+
+    /// <summary>
     /// The atlases whose pages hold the pictures of the hero's attacks (see <see cref="AtlasSlashPictures"/>): the
     /// charged slashes of most crests and two more attacks on "Hornet", the beast's charged slash on "Beast_Slash", the
     /// shaman's blades on "Tools", the architect's charged slash on "Core". Named here for the pages that CustomizerT2D
@@ -357,10 +383,8 @@ internal static class CustomizerT2D {
                 __result = [];
             }
 
-            // A whole page that a skin of Hornet's has as well as a skin of what else the game draws is hers, as the
-            // skin she wears takes in more than that page (USER 11-10: "先按照大黄蜂皮肤优先吧"): the last skin wins it
-            var hers = __result.FindAll(skin => OwnSkin.IsOfHornet(new SkinPack(Path.GetFileName(skin), skin)));
-            __result = [..__result.FindAll(skin => !hers.Contains(skin)), ..hers];
+            // A whole page that a skin of Hornet's has too is hers: the last skin wins it
+            __result = HornetsLast(__result, skin => OwnSkin.IsOfHornet(new SkinPack(Path.GetFileName(skin), skin)));
             Logger.Info($"CustomizerT2D takes the images of {__result.Count} skins, each page from the last that has " +
                         $"it, the skins of Hornet's last: {string.Join(", ", __result.ConvertAll(Path.GetFileName))}");
 
@@ -415,7 +439,7 @@ internal static class SkinImages {
 
         images = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         try {
-            var folder = Path.Combine(skin, "Texture2D");
+            var folder = Path.Combine(skin, CustomizerT2D.PagesFolder);
             if (Directory.Exists(folder)) {
                 foreach (var file in Directory.GetFiles(folder, "*.png")) {
                     if (file.EndsWith(".png", StringComparison.OrdinalIgnoreCase)) {

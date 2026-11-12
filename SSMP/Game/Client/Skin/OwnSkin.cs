@@ -41,12 +41,6 @@ internal static class OwnSkin {
     private const string SwitchedOffFile = "active.txt.off";
 
     /// <summary>
-    /// The folder of a skin that holds the images that CustomizerT2D dresses whole pages of atlases with, which is no
-    /// sheet of sprites.
-    /// </summary>
-    private const string PagesFolder = "Texture2D";
-
-    /// <summary>
     /// The art of each skin loaded here, by the folder of the skin.
     /// </summary>
     private static readonly Dictionary<string, PackArt> Art = new(StringComparer.OrdinalIgnoreCase);
@@ -268,7 +262,7 @@ internal static class OwnSkin {
         var firstOf = new Dictionary<(string Sheet, string Atlas), SkinPack>();
         foreach (var pack in active) {
             foreach (var sheet in pack.SheetNames()) {
-                if (sheet == PagesFolder) {
+                if (sheet == CustomizerT2D.PagesFolder) {
                     continue;
                 }
 
@@ -291,14 +285,14 @@ internal static class OwnSkin {
             return overlaps;
         }
 
-        var folder = Path.GetFullPath(Path.Combine(Application.dataPath, "Mods", "Customizer"));
+        var folder = Path.GetFullPath(CustomizerT2D.ModFolder);
         var byName = active.FindAll(pack => string.Equals(
             Path.GetFullPath(Path.GetDirectoryName(pack.Dir)!), folder, StringComparison.OrdinalIgnoreCase
         ));
         byName.Sort((one, other) => string.Compare(
             Path.GetFileName(one.Dir), Path.GetFileName(other.Dir), StringComparison.OrdinalIgnoreCase
         ));
-        byName = [..byName.FindAll(pack => !IsOfHornet(pack)), ..byName.FindAll(IsOfHornet)];
+        byName = CustomizerT2D.HornetsLast(byName, IsOfHornet);
         var lastOf = new Dictionary<string, SkinPack>(StringComparer.OrdinalIgnoreCase);
         var covered = new List<(SkinPack Pack, string Page)>();
         foreach (var pack in byName) {

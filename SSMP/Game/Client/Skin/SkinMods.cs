@@ -73,7 +73,7 @@ internal static class CustomizerPacks {
             Logger.Warn($"Could not look for skins of Customizer in the plugins: {e.Message}");
         }
 
-        var modDir = Path.Combine(Application.dataPath, "Mods", "Customizer");
+        var modDir = CustomizerT2D.ModFolder;
         try {
             if (Directory.Exists(modDir)) {
                 foreach (var dir in Directory.GetDirectories(modDir)) {
