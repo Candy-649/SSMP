@@ -99,6 +99,23 @@ internal partial class Entity {
     private bool IsBehind => _cameSince.Count > 0 || _cameSinceWaits || _behind > 0f;
 
     /// <summary>
+    /// Whether the copy makes up being behind now by playing faster (see <see cref="PlayOnWhatCameSince"/>): not while
+    /// it waits for a move or an answer, nor while it moves by itself by the physics.
+    /// </summary>
+    private bool MakesUp => _behind > 0f && !_cameSinceWaits && !WaitsForEcho && !MovesByItself();
+
+    /// <summary>
+    /// How fast the copy whose object this is plays the creature, against how fast it went in the game that runs it:
+    /// half as fast again while it makes up being behind (see <see cref="MakeUpRate"/>), else as fast. A throw on a
+    /// clock goes at that pace, as its state ends that much sooner, and throws as many (EntityFsmActions.RunTimed);
+    /// what the creature threw flies at its own speed, by each game's own physics (USER 11-12 "投掷物按照我们的规则受
+    /// 物理，应该不被加速").
+    /// </summary>
+    /// <param name="copy">The object of the copy.</param>
+    internal static float PaceOf(GameObject copy) =>
+        EntitiesByCopy.TryGetValue(copy, out var entity) && entity.MakesUp ? MakeUpRate : 1f;
+
+    /// <summary>
     /// Whether the copy keeps what the scene host sent of it for later rather than take it in now: it is behind with
     /// what came since a move, or this is the word that the scene host's FSM came out of a move that the copy plays by
     /// itself first, after which what comes waits for the copy to get through the move too, or the word that it went

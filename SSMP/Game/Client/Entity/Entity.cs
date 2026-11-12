@@ -4890,9 +4890,8 @@ internal partial class Entity {
         // Otherwise, default to just playing the clip
         _animator.Client.Play(clipName);
 
-        // Faster while the copy makes up being behind the scene host (MakeUpRate), which it does not while it moves by
-        // itself by the physics (PlayOnWhatCameSince)
-        if (_behind > 0f && !MovesByItself() && _animator.Client.CurrentClip is { } playing) {
+        // Faster while the copy makes up being behind the scene host (MakeUpRate)
+        if (MakesUp && _animator.Client.CurrentClip is { } playing) {
             _animator.Client.ClipFps = playing.fps * MakeUpRate;
             _clipMadeUp = playing;
         }

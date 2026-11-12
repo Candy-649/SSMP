@@ -352,6 +352,9 @@ internal static partial class EntityFsmActions {
     /// Runs a replayed action that throws on a clock on the copy, the way its state runs it in the game (see
     /// <see cref="RunInState"/>), with its run: OnEnter at once, its clock set to where the game that runs the creature
     /// had it, and OnUpdate once for each frame of that game that went by, until the scene host's FSM leaves the state.
+    /// Its clock goes at the pace the copy plays the creature at (see <see cref="Entity.PaceOf"/>): half as fast again
+    /// while the copy makes up being behind, as the state ends that much sooner, so that as many things come out as in
+    /// that game - each of which flies at its own speed.
     /// </summary>
     private static void RunTimed(FsmStateAction action, GameObject? prefab, TimedRun run) {
         if (prefab == null) {
@@ -396,7 +399,7 @@ internal static partial class EntityFsmActions {
                     continue;
                 }
 
-                due = Mathf.Min(due + Time.deltaTime, MostTimedCatchUp);
+                due = Mathf.Min(due + Time.deltaTime * Entity.PaceOf(owner), MostTimedCatchUp);
                 while (due >= run.Step) {
                     due -= run.Step;
                     var last = _timedStep;
