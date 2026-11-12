@@ -2480,11 +2480,11 @@ internal partial class CoopSave {
                 return;
             }
 
-            // Another member is still on their feet, who can pull both of them up
+            // Another member is still on their feet, who can pull up everyone who is down
             var standing = JoinNames(GetStandingMembers().Select(member => member.Username));
             Chat(Lang.Pick(
-                $"{player.Username} went down as well. {standing} can still break you both out.",
-                $"{player.Username} 也倒下了。{standing} 还能把你们两个都救起来。"
+                $"{player.Username} went down as well. {standing} can still break out everyone who is down.",
+                $"{player.Username} 也倒下了。{standing} 还能把倒下的人都救起来。"
             ));
         }
 

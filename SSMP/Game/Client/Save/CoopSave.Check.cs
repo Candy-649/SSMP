@@ -379,8 +379,8 @@ internal partial class CoopSave {
             // The games disagree about who is who, which the server hands out: something no player can fix in game
             Chat(Lang.Pick(
                 $"Your game and the game of {player.Username} don't agree on who is who, so they can't keep in step. " +
-                "Both of you should leave and join again, with the same version of the mod.",
-                $"你的游戏和 {player.Username} 的游戏对不上身份，没法同步。两个人都退出重进，并确认 mod 版本一样。"
+                "Both of you should leave and join again.",
+                $"你的游戏和 {player.Username} 的游戏对不上身份，没法同步。两个人都退出重进。"
             ));
             return;
         }

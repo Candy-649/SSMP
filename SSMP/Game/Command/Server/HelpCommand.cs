@@ -49,13 +49,13 @@ internal class HelpCommand : IServerCommand, ICommandWithDescription {
     }
 
     private static void SendCommandList(ICommandSender sender, List<IServerCommand> commands) {
-        sender.SendMessage($"&6Available commands &8(&f{commands.Count}&8)&r:");
+        sender.SendMessage($"Available commands ({commands.Count}):");
 
         foreach (var command in commands) {
             var description = GetCommandDescription(command);
             var line = string.IsNullOrEmpty(description)
-                ? $"&a - &b{command.Trigger}"
-                : $"&a - &b{command.Trigger}&8 : &7{description}";
+                ? $" - {command.Trigger}"
+                : $" - {command.Trigger} : {description}";
             
             sender.SendMessage(line);
         }

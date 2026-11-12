@@ -49,15 +49,15 @@ internal class AddonCommand : IClientCommand, ICommandWithDescription {
             string message;
             var addons = _addonManager.GetLoadedAddons();
             if (addons.Count == 0) {
-                message = "No addons loaded.";
+                message = Lang.Pick("No addons loaded.", "没有加载附加组件。");
             } else {
-                message = "Loaded addons: ";
+                message = Lang.Pick("Loaded addons: ", "已加载的附加组件：");
                 message += string.Join(
                     ", ",
                     addons.Select(addon => {
                         var msg = $"{addon.GetName()} {addon.GetVersion()}";
                         if (addon is TogglableClientAddon { Disabled: true }) {
-                            msg += " (disabled)";
+                            msg += Lang.Pick(" (disabled)", "（已停用）");
                         }
 
                         return msg;
