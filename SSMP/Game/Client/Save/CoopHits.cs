@@ -3001,9 +3001,10 @@ internal partial class CoopHits {
     /// <summary>
     /// Plays at once what the local player's strike or touch told an FSM of the copy of an entity, where the entity
     /// says so (see <see cref="Entity.Entity.PlayHere"/>), and sends the scene host all that it needs to play the same;
-    /// otherwise sends it only the event, and the copy shows what the scene host's game then does. Only while the scene
-    /// host is there to take it: played here alone, the copy would go off by itself and wait for an answer that never
-    /// comes.
+    /// otherwise sends it only the event, and the copy shows what the scene host's game then does. A catch of the local
+    /// player is played here even while nobody is there to be sent it, as it waits for no answer: what catches a player
+    /// is their own game's to say. Anything else needs someone to send it to: played here alone, the copy would go off
+    /// by itself and wait for an answer that never comes.
     /// </summary>
     /// <param name="copied">The entity.</param>
     /// <param name="fsmIndex">The index of the FSM of the entity that the event is for.</param>
@@ -3031,10 +3032,20 @@ internal partial class CoopHits {
         bool here = true
     ) {
         if (!CanSendEntityTouch()) {
-            // Alone in the room nothing goes on with the catch, which the part may have started on the player already
+            // A catch is played here all the same, and nothing of it sent: between the scene host leaving the room and
+            // this game taking the creature over, a player was let go of as soon as they were caught
+            if (caught != null && here && copied.PlayHere(fsmIndex, eventName, caught, setOff) is { } alone) {
+                Logger.Info(
+                    $"The local player {what} the copy of entity {copied.Id}, which took '{eventName}' here at once and " +
+                    $"went to '{alone.State}', with nobody in the room to be sent it"
+                );
+                return;
+            }
+
+            // The copy could not take it, so nothing would ever let go of a player that the part started it on already
             if (grabbedThePlayer && !Entity.Entity.AnyLeadsACatch()) {
                 Entity.Action.EntityFsmActions.LetGoOfTheHeldLocalPlayer(
-                    $"the partner is not there to take the catch on entity {copied.Id}"
+                    $"the copy of entity {copied.Id} could not take the catch, with nobody in the room to be sent it"
                 );
             }
 
