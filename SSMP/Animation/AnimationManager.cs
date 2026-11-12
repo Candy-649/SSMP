@@ -1800,7 +1800,7 @@ internal class AnimationManager {
     }
 
     /// <summary>
-    /// Sends an update to fire a set of nails at a specific target.
+    /// Sends an update to fire a set of nails, at a specific target or without one.
     /// </summary>
     private void OnPaleNailFire(PlayMakerFSM fsm) {
         // Only get info from one needle position (the first one)
@@ -1808,14 +1808,10 @@ internal class AnimationManager {
         // ReSharper disable once CompareOfFloatsByEqualityOperator
         if (needleOffset.Value.x != 3) return;
 
-        // Don't send if no target, it'll go off on its own.
+        // Send it with no target too: the copy of the nails fires when this game fired them, and only fires by
+        // itself if this word never comes.
         var target = fsm.FsmVariables.FindFsmGameObject("Target").Value;
-        if (target == null) {
-            return;
-        }
-
-        // Send nail target info
-        var effectInfo = PaleNails.EncodeTargetInfo(target);
+        var effectInfo = target == null ? PaleNails.NoTargetInfo() : PaleNails.EncodeTargetInfo(target);
         _netClient.UpdateManager.UpdatePlayerAnimation(AnimationClip.SilkBossNeedleFire, 0, effectInfo);
     }
 

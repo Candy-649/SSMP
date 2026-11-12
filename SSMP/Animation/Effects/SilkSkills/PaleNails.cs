@@ -9,6 +9,7 @@ using SSMP.Fsm;
 using SSMP.Internals;
 using SSMP.Util;
 using UnityEngine;
+using Logger = SSMP.Logging.Logger;
 using Object = UnityEngine.Object;
 
 namespace SSMP.Animation.Effects.SilkSkills;
@@ -36,6 +37,13 @@ internal class PaleNails : BaseSilkSkill {
     /// Scale used to keep a higher level of precision when converting a float to a short.
     /// </summary>
     private const int PositionScale = 5;
+
+    /// <summary>
+    /// How long the copy of a player's nails waits for the word that the player's own nails fired before it fires
+    /// them by itself without a target: the 1.8 s that the nails hover in the player's game, and 0.5 s for the word,
+    /// which may be lost on the way.
+    /// </summary>
+    private const float NailFireFallback = 2.3f;
 
     /// <summary>
     /// Determines if this animation is for the summoning antic.
@@ -264,11 +272,13 @@ internal class PaleNails : BaseSilkSkill {
         // Store nails for firing later
         PlayerNails[id] = nails;
 
-        // Wait for nail hover time to expire
-        yield return new WaitForSeconds(1.8f);
-        
-        // Fire them
-        PlayNailFireUnguided(nails, isVolt, id);
+        // The player's game says when its nails fire (see Play); fire them by itself only if that word never came
+        yield return new WaitForSeconds(NailFireFallback);
+
+        if (PlayerNails.TryGetValue(id, out var still) && ReferenceEquals(still, nails)) {
+            Logger.Info("The word that a player's pale nails fired never came, so their copy fires them without a target");
+            PlayNailFireUnguided(nails, isVolt, id);
+        }
     }
 
     /// <summary>
@@ -506,6 +516,13 @@ internal class PaleNails : BaseSilkSkill {
         ];
 
     }
+
+    /// <summary>
+    /// The bytes sent over the network when a set of nails fires without a target: only the volt filament status,
+    /// which <see cref="DecodeTargetInfo"/> reads as no target.
+    /// </summary>
+    /// <returns>The bytes to send over the network.</returns>
+    public static byte[] NoTargetInfo() => [GetEffectFlags()[0]];
 
     /// <summary>
     /// Converts a byte array to information about a nail target.
