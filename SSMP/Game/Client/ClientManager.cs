@@ -24,7 +24,6 @@ using SSMP.Networking.Packet.Data;
 using SSMP.Networking.Packet.Update;
 using SSMP.Networking.Transport.Common;
 using SSMP.Networking.Transport.HolePunch;
-using SSMP.Networking.Transport.SteamP2P;
 using SSMP.Networking.Transport.SteamRelay;
 using SSMP.Networking.Transport.UDP;
 using SSMP.Ui;
@@ -855,12 +854,12 @@ internal class ClientManager : IClientManager {
         // game connecting to somewhere nobody asked for.
         _lastFallbackAddress = transportType == TransportType.HolePunch ? fallbackAddress : null;
         // If we are hosting and using Steam, we need to connect to our own Steam ID
-        if (_autoConnect && transportType is TransportType.Steam or TransportType.SteamRelay) {
+        if (_autoConnect && transportType == TransportType.SteamRelay) {
             address = SteamUser.GetSteamID().ToString();
         }
 
         // Log connection details based on transport type
-        if (transportType is TransportType.Steam or TransportType.SteamRelay) {
+        if (transportType == TransportType.SteamRelay) {
             Logger.Info($"Connecting client via Steam to {address} as {username}");
         } else {
             var fallbackString = fallbackAddress == null ? "" : $" (Fallback: {fallbackAddress})";
@@ -870,7 +869,7 @@ internal class ClientManager : IClientManager {
         // Stop existing client
         if (_netClient.IsConnected) {
             // Not the lobby the next connection is made through as well, as when an invite to it is accepted again
-            if (transportType is TransportType.Steam or TransportType.SteamRelay &&
+            if (transportType == TransportType.SteamRelay &&
                 SteamManager.IsInitialized && _connectionLobby == SteamManager.Lobby) {
                 _connectionLobby = CSteamID.Nil;
             }
@@ -882,7 +881,7 @@ internal class ClientManager : IClientManager {
         // Taken after the connection before was let go of, which left the lobby it was made through
         _connectionLobby = SteamManager.IsInitialized ? SteamManager.Lobby : CSteamID.Nil;
         _hostSteamId = 0;
-        if (transportType is TransportType.Steam or TransportType.SteamRelay && SteamManager.IsInitialized &&
+        if (transportType == TransportType.SteamRelay && SteamManager.IsInitialized &&
             ulong.TryParse(address, out var hostSteamId) && hostSteamId != SteamUser.GetSteamID().m_SteamID) {
             _hostSteamId = hostSteamId;
         }
@@ -891,10 +890,8 @@ internal class ClientManager : IClientManager {
         _username = username;
 
         // Create the appropriate transport
-        // Create the appropriate transport
         IEncryptedTransport transport = transportType switch {
             TransportType.Udp => new UdpEncryptedTransport(),
-            TransportType.Steam => new SteamEncryptedTransport(),
             TransportType.HolePunch => new HolePunchEncryptedTransport(),
             TransportType.SteamRelay => new SteamRelayTransport(),
             _ => throw new ArgumentOutOfRangeException(

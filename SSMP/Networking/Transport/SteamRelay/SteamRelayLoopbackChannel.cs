@@ -6,10 +6,6 @@ namespace SSMP.Networking.Transport.SteamRelay;
 /// <summary>
 /// Carries packets between the local client and the local server when one player hosts and plays at the same time.
 /// Steam will not open a session with yourself, so the host's own connection never touches the network at all.
-///
-/// This is a second copy of the same idea that <see cref="SteamP2P.SteamLoopbackChannel"/> implements, because that
-/// one names the old transport's types in its fields. Leaving it alone keeps the old transport working exactly as it
-/// did, which matters while both are selectable.
 /// </summary>
 internal class SteamRelayLoopbackChannel {
     /// <summary>

@@ -2072,7 +2072,7 @@ internal class ConnectInterface {
 
     /// <summary>
     /// Finalizes a hosted Steam lobby after the local host has fully connected.
-    /// Public lobbies are registered with MMS only after the Steam P2P server is actually live.
+    /// Public lobbies are registered with MMS only after the Steam relay server is actually live.
     /// </summary>
     private IEnumerator FinalizeHostedSteamLobbyCoroutine(string steamLobbyId, bool isPublic) {
         if (isPublic) {
@@ -2416,7 +2416,7 @@ internal class ConnectInterface {
 
     /// <summary>
     /// Called when successfully joined a Steam lobby.
-    /// Initiates connection to the lobby host via Steam P2P.
+    /// Initiates connection to the lobby host over the Steam relay.
     /// </summary>
     /// <param name="lobbyId">The Steam ID of the joined lobby.</param>
     private void OnLobbyJoined(CSteamID lobbyId) {

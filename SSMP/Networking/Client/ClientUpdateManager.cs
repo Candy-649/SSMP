@@ -21,7 +21,7 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
 
     /// <inheritdoc />
     public override void ResendReliableData(ServerUpdatePacket lostPacket) {
-        // Transports with built-in reliability (e.g., Steam P2P) don't need app-level resending
+        // Transports with built-in reliability (e.g., the Steam relay) don't need app-level resending
         if (!RequiresReliability) {
             return;
         }

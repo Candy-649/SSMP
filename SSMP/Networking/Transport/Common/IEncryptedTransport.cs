@@ -29,13 +29,13 @@ internal interface IEncryptedTransport {
 
     /// <summary>
     /// Indicates whether the application must handle reliability (retransmission).
-    /// Returns false for transports with built-in reliable delivery (e.g., Steam P2P).
+    /// Returns false for transports with built-in reliable delivery (e.g., the Steam relay).
     /// </summary>
     bool RequiresReliability { get; }
 
     /// <summary>
     /// Indicates whether the application must handle packet sequencing.
-    /// Returns false for transports with built-in ordering (e.g., Steam P2P).
+    /// Returns false for transports with built-in ordering (e.g., the Steam relay).
     /// </summary>
     bool RequiresSequencing { get; }
 
