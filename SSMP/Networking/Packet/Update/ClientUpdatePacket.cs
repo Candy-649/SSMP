@@ -46,8 +46,6 @@ internal class ClientUpdatePacket : UpdatePacket<ClientUpdatePacketId> {
                 return new ServerSettingsUpdate();
             case ClientUpdatePacketId.ChatMessage:
                 return new PacketDataCollection<ChatMessage>();
-            case ClientUpdatePacketId.SaveUpdate:
-                return new PacketDataCollection<SaveUpdate>();
             case ClientUpdatePacketId.SemiPersistentReset:
                 return new PacketDataCollection<GenericClientData>();
             case ClientUpdatePacketId.BattleSceneUpdate:

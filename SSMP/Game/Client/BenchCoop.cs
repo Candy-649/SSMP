@@ -4,7 +4,6 @@ using System.Reflection;
 using HutongGames.PlayMaker;
 using HutongGames.PlayMaker.Actions;
 using MonoMod.RuntimeDetour;
-using SSMP.Game.Client.Save;
 using SSMP.Networking.Client;
 using SSMP.Networking.Packet.Data;
 using SSMP.Util;
@@ -110,9 +109,9 @@ internal class BenchCoop {
     private readonly Dictionary<ushort, ClientPlayerData> _playerData;
 
     /// <summary>
-    /// The save manager, which knows whether the local player hosts the server.
+    /// Whether the local player hosts the server.
     /// </summary>
-    private readonly SaveManager _saveManager;
+    private readonly Func<bool> _isHosting;
 
     /// <summary>
     /// The X position that the hero was moved to on waking up, per bench object instance ID. Both wake-up states can
@@ -153,12 +152,12 @@ internal class BenchCoop {
     public BenchCoop(
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
-        SaveManager saveManager,
+        Func<bool> isHosting,
         Func<string> getLocalKey
     ) {
         _netClient = netClient;
         _playerData = playerData;
-        _saveManager = saveManager;
+        _isHosting = isHosting;
         _getLocalKey = getLocalKey;
     }
 
@@ -441,7 +440,7 @@ internal class BenchCoop {
     /// </summary>
     private float GetSeatOffset() {
         if (_playerData.Count <= 1) {
-            return _saveManager.IsHostingServer ? SeatOffset : -SeatOffset;
+            return _isHosting() ? SeatOffset : -SeatOffset;
         }
 
         var localKey = _getLocalKey();

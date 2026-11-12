@@ -559,23 +559,6 @@ internal class ClientUpdateManager : UpdateManager<ServerUpdatePacket, ServerUpd
     }
 
     /// <summary>
-    /// Set save update data.
-    /// </summary>
-    /// <param name="index">The index of the save data entry.</param>
-    /// <param name="value">The array of bytes that represents the changed value.</param>
-    public void SetSaveUpdate(ushort index, byte[] value) {
-        lock (Lock) {
-            var saveUpdateCollection = GetOrCreateCollection<SaveUpdate>(ServerUpdatePacketId.SaveUpdate);
-            saveUpdateCollection.DataInstances.Add(
-                new SaveUpdate {
-                    SaveDataIndex = index,
-                    Value = value
-                }
-            );
-        }
-    }
-
-    /// <summary>
     /// Set server settings update.
     /// </summary>
     /// <param name="serverSettings">The server settings instance that contains the updated values.</param>

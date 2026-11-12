@@ -43,11 +43,6 @@ internal class ServerInfo : IPacketData {
     public ServerSettingsUpdate ServerSettingsUpdate { get; set; } = null!;
 
     /// <summary>
-    /// The save data currently used on the server.
-    /// </summary>
-    public CurrentSave CurrentSave { get; set; } = null!;
-
-    /// <summary>
     /// List of ID, username pairs for each connected client.
     /// </summary>
     public List<PlayerInfo> PlayerInfos { get; set; } = null!;

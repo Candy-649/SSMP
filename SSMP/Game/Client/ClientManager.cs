@@ -95,9 +95,9 @@ internal class ClientManager : IClientManager {
     private readonly EntityManager _entityManager;
 
     /// <summary>
-    /// The save manager instance.
+    /// Whether the local player hosts the server.
     /// </summary>
-    private readonly SaveManager _saveManager;
+    private bool _isHostingServer;
 
     /// <summary>
     /// The pause manager instance.
@@ -186,7 +186,6 @@ internal class ClientManager : IClientManager {
 
     /// <summary>
     /// Whether we are automatically connected to an in-game hosted server.
-    /// This is used to determine whether to apply save data from the server to the client and warp them to a bench.
     /// </summary>
     private bool _autoConnect;
 
@@ -463,12 +462,10 @@ internal class ClientManager : IClientManager {
         ToolCopies.IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost;
         _entityManager.IsAnyoneElseIn = IsAnyoneElseIn;
 
-        _saveManager = new SaveManager(netClient, _entityManager);
-
         _pauseManager = new PauseManager(netClient);
         _gamePatcher = new GamePatcher(netClient, _entityManager);
         _benchCoop = new BenchCoop(
-            netClient, _playerData, _saveManager, () => AuthUtil.GetSaveKey(_modSettings.AuthKey)
+            netClient, _playerData, () => _isHostingServer, () => AuthUtil.GetSaveKey(_modSettings.AuthKey)
         );
         _enemyHealthCoop = new EnemyHealthCoop(_playerData, _serverSettings);
         _fightOutline = new FightOutline(modSettings, _playerData);
@@ -500,7 +497,7 @@ internal class ClientManager : IClientManager {
             EndSharedDialogue = () => _bossRoomCoop.EndSharedDialogueNow(),
             IsSceneHost = () => _entityManager.IsSceneRoleDetermined && _entityManager.IsSceneHost,
             IsSceneClient = () => _entityManager.IsSceneRoleDetermined && !_entityManager.IsSceneHost,
-            IsHosting = () => _saveManager.IsHostingServer
+            IsHosting = () => _isHostingServer
         };
         _bossRoomCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
         _arenaCoop.BossFightStartedEvent += _coopSave.OnBossFightStarted;
@@ -566,8 +563,8 @@ internal class ClientManager : IClientManager {
                 Connect(address, port, username, transportType, fallbackAddress);
             };
         _uiManager.RequestClientDisconnectEvent += Disconnect;
-        _uiManager.RequestServerStartHostEvent += (_, _, _, _, _) => { _saveManager.IsHostingServer = true; };
-        _uiManager.RequestServerStopHostEvent += () => { _saveManager.IsHostingServer = false; };
+        _uiManager.RequestServerStartHostEvent += (_, _, _, _, _) => { _isHostingServer = true; };
+        _uiManager.RequestServerStopHostEvent += () => { _isHostingServer = false; };
         _uiManager.HostSaveLoadedEvent += SendCrest;
         _uiManager.ReadyToggledEvent += ready => _coopSave.SendWaitingRoomReady(ready);
         _uiManager.BothReadyEvent += OpenSaveAfterReady;
@@ -795,10 +792,6 @@ internal class ClientManager : IClientManager {
             ClientUpdatePacketId.SceneHostTransfer,
             OnSceneHostTransfer
         );
-        _packetManager.RegisterClientUpdatePacketHandler<SaveUpdate>(
-            ClientUpdatePacketId.SaveUpdate,
-            OnSaveUpdate
-        );
     }
 
     /// <summary>
@@ -830,7 +823,6 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntityUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.ReliableEntityUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SceneHostTransfer);
-        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SaveUpdate);
     }
 
     /// <summary>
@@ -2376,15 +2368,6 @@ internal class ClientManager : IClientManager {
             Logger.Info($"Received crest update for player: {id}, {settingUpdate.CrestType}");
             playerData.CrestType = settingUpdate.CrestType;
         }
-    }
-
-    /// <summary>
-    /// Callback method for when a save update is received.
-    /// </summary>
-    /// <param name="saveUpdate">The SaveUpdate packet data.</param>
-    private void OnSaveUpdate(SaveUpdate saveUpdate) {
-        // Left unapplied on purpose: this copies raw player data between the players field by field, which goes
-        // against what a two-player save shares deliberately (see CoopSave). Nothing sends these any more either.
     }
 
     /// <summary>

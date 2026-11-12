@@ -29,8 +29,6 @@ internal class ServerUpdatePacket : UpdatePacket<ServerUpdatePacketId> {
                 return new ServerPlayerLeaveScene();
             case ServerUpdatePacketId.ChatMessage:
                 return new ChatMessage();
-            case ServerUpdatePacketId.SaveUpdate:
-                return new PacketDataCollection<SaveUpdate>();
             case ServerUpdatePacketId.ServerSettings:
                 return new ServerSettingsUpdate();
             case ServerUpdatePacketId.PlayerSetting:

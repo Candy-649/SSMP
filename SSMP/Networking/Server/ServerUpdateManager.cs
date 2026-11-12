@@ -772,21 +772,4 @@ internal class ServerUpdateManager : UpdateManager<ClientUpdatePacket, ClientUpd
             packetDataCollection.DataInstances.Add(new ChatMessage { Message = message });
         }
     }
-
-    /// <summary>
-    /// Set save update data.
-    /// </summary>
-    /// <param name="index">The index of the save data entry.</param>
-    /// <param name="value">The array of bytes that represents the changed value.</param>
-    public void SetSaveUpdate(ushort index, byte[] value) {
-        lock (Lock) {
-            var saveUpdateCollection = GetOrCreateCollection<SaveUpdate>(ClientUpdatePacketId.SaveUpdate);
-            saveUpdateCollection.DataInstances.Add(
-                new SaveUpdate {
-                    SaveDataIndex = index,
-                    Value = value
-                }
-            );
-        }
-    }
 }

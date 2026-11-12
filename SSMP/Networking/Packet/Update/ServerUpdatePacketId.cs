@@ -67,6 +67,7 @@ public enum ServerUpdatePacketId {
     
     /// <summary>
     /// Value in the save file has updated.
+    /// Unused: nothing sends it; it keeps the numbers of the IDs after it.
     /// </summary>
     SaveUpdate = 12,
     

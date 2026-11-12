@@ -402,10 +402,6 @@ internal abstract class ServerManager : IServerManager {
             ServerUpdatePacketId.RoomSnapshot,
             OnRoomSnapshot
         );
-        _packetManager.RegisterServerUpdatePacketHandler<SaveUpdate>(
-            ServerUpdatePacketId.SaveUpdate,
-            OnSaveUpdate
-        );
     }
 
     /// <summary>
@@ -435,7 +431,6 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.EntitySpawn);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.EntityUpdate);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ReliableEntityUpdate);
-        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SaveUpdate);
     }
 
     /// <summary>
@@ -2623,14 +2618,6 @@ internal abstract class ServerManager : IServerManager {
                 SendPlayerSettings(playerData, false);
             }
         }
-    }
-
-    /// <summary>
-    /// Callback method for when a save update is received from a player.
-    /// </summary>
-    /// <param name="id">The ID of the player.</param>
-    /// <param name="packet">The SaveUpdate packet data.</param>
-    protected virtual void OnSaveUpdate(ushort id, SaveUpdate packet) {
     }
 
     #endregion
