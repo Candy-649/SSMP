@@ -1004,7 +1004,7 @@ internal partial class Entity {
     /// <param name="stateName">A state that the scene host's FSM went to, or one it sent something of.</param>
     /// <returns>Whether the copy went that way.</returns>
     private bool FollowIntoTheAftermath(string stateName) {
-        if (_runHere is not { } copyFsm || copyFsm == null || !_runHereLed || _aftermath != null || WaitsForEcho) {
+        if (_runHere is not { } copyFsm || copyFsm == null || !_runHereLed || _aftermath != null) {
             return false;
         }
 
@@ -1077,9 +1077,7 @@ internal partial class Entity {
     /// host sent meanwhile of the rest - the creature's death, its coming back - is given the copy then, in order.
     /// </summary>
     private void UpdateAftermath() {
-        // Not before the scene host has answered the input, if it went that far with it: what it sent meanwhile is
-        // from before
-        if (_aftermath == null || _runHere == null || WaitsForEcho) {
+        if (_aftermath == null || _runHere == null) {
             return;
         }
 
@@ -1498,7 +1496,7 @@ internal partial class Entity {
         // there, with the room. Not for catches of other kinds, whose states may wait for what the whole FSM listens
         // for to let go of the player.
         var gameManager = global::GameManager.instance;
-        if (_runHere != null && _catchEvents != null && LeadsACatch && !WaitsForEcho &&
+        if (_runHere != null && _catchEvents != null && LeadsACatch &&
             _runHere.Fsm.ActiveState is { } end && end.Transitions.Length == 0 &&
             StateFinishedField?.GetValue(end) is true && gameManager != null && !gameManager.IsInSceneTransition) {
             Logger.Info(
@@ -1902,11 +1900,11 @@ internal partial class Entity {
         // what it sent of the states it went through to get there (StartMoveHeard). Whatever the copy plays here of
         // that FSM ends, as the scene host's FSM is past it, whatever it makes of it: what the copy played of an input
         // of the local player, waiting for the scene host's answer, ends now rather than once the answer comes, which
-        // the scene host sent only after it went into the move - a creature that caught the local player held them
-        // that much longer, and jumped from where it held them to where the scene host's creature had got to by then
+        // the scene host sent only after it went into the move. A catch that this game plays by itself starts no move
+        // here (StartsAMove): it goes on to its end
         if (StartsAMove(fsm, stateName, before, out var first, out var move)) {
             _moveHeard = (fsm, first, move, stateName);
-            if (WaitsForEcho || _aftermath != null) {
+            if (WaitsForEcho) {
                 Logger.Info(
                     $"The scene host's FSM of entity {Id} went into the move from '{first}', so its copy stops " +
                     "what it played here, and plays the move by itself"
