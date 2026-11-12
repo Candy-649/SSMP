@@ -82,6 +82,13 @@ internal partial class CoopSave {
     private const string ReturnCurrencyStateName = "Return Currency";
 
     /// <summary>
+    /// The state of that FSM which picks how the cocoon looks, and the variable it picks it from.
+    /// </summary>
+    private const string AppearanceStateName = "Appearance?";
+
+    private const string CorpseTypeVariableName = "Hero Corpse Type";
+
+    /// <summary>
     /// The clip played on a body that was taken off the screen to bring it back, for the case where the player it
     /// belongs to never sends another animation of their own.
     /// </summary>
@@ -318,10 +325,11 @@ internal partial class CoopSave {
     /// Another member who is lying down waiting to be pulled back up, as far as this game has heard.
     /// </summary>
     private sealed class WaitingMember {
-        public WaitingMember(string scene, Vector2 position, ulong key) {
+        public WaitingMember(string scene, Vector2 position, ulong key, bool cursed) {
             Scene = scene;
             Position = position;
             Key = key;
+            Cursed = cursed;
         }
 
         /// <summary>
@@ -339,6 +347,11 @@ internal partial class CoopSave {
         /// taken as being about a later death of the same player, or about the cocoon of another.
         /// </summary>
         public ulong Key { get; }
+
+        /// <summary>
+        /// Whether they went down under the curse, which their cocoon shows.
+        /// </summary>
+        public bool Cursed { get; }
 
         /// <summary>
         /// How many hits the local player landed on their cocoon.
@@ -1480,10 +1493,13 @@ internal partial class CoopSave {
             Key = ++_lastRescueKey,
             Chase = chase
         };
+
+        // Whether the player went down under the curse, which their cocoon shows here and in the games of the members
+        var cursed = hero.playerData.IsAnyCursed;
         SendToMembers(new CoopSaveUpdate {
             Kind = CoopSaveUpdateKind.RescueOffer,
             Scene = scene,
-            Values = chase ? [position.x, position.y, 1f] : [position.x, position.y],
+            Values = [position.x, position.y, chase ? 1f : 0f, cursed ? 1f : 0f],
             Key = _rescue.Key
         });
         SayTheLocalPlayerIsDown(true);
@@ -1497,7 +1513,7 @@ internal partial class CoopSave {
 
         // Shown to the player themselves as well, not only to the ones who can open it. Watching the room you died in
         // with nothing where you fell reads as the game having lost you, rather than as you lying there waiting.
-        _rescueOwnCocoon = SpawnRescueCocoon(position, null);
+        _rescueOwnCocoon = SpawnRescueCocoon(position, null, cursed);
 
         Logger.Info($"Waiting for {standing} to open the cocoon in '{scene}'");
 
@@ -2437,16 +2453,13 @@ internal partial class CoopSave {
 
         RemoveRescueTarget(player.Id);
 
-        if (update.Values.Count < 2) {
-            return;
-        }
-
         // Noted whichever room they died in: it decides whether a death of this player can wait for them at all, and
         // it is what lets their cocoon appear when this player walks into that room later. A death in the chase of a
         // lava leaves no cocoon to show, now or on walking into that room later.
-        var chase = update.Values.Count >= 3 && update.Values[2] > 0f;
+        var chase = update.Values[2] > 0f;
+        var cursed = update.Values[3] > 0f;
         _waitingMembers[player.Id] = new WaitingMember(
-            chase ? "" : update.Scene, new Vector2(update.Values[0], update.Values[1]), update.Key
+            chase ? "" : update.Scene, new Vector2(update.Values[0], update.Values[1]), update.Key, cursed
         );
 
         // A death in the chase of a lava says that it has started there, which stands up the local player lying in
@@ -2608,11 +2621,17 @@ internal partial class CoopSave {
     /// into "Appearance?", which reads <c>HeroCorpseType</c> and switches on the matching child of its "Appearances
     /// parent" - no hit needed. With every FSM gone that step never ran, nothing was switched on, and the cocoon
     /// showed the form it has after it has already burst.
+    ///
+    /// What "Appearance?" picks from is whether the player lying in it went down under the curse. The game reads it
+    /// from the save of the game the cocoon is shown in, where only a death that is played out notes it
+    /// (HeroController.Die), and a death held for a rescue is not: every cocoon looked the way this game's own player
+    /// last died for good (USER 11-12 "我的茧不是畸芽状态下的那个茧，我朋友倒是畸芽状态下的").
     /// </summary>
     /// <param name="position">Where the player died.</param>
     /// <param name="openableFor">The member whom hits on it pull back up, or null for one that takes no hits.</param>
+    /// <param name="cursed">Whether the player lying in it went down under the curse.</param>
     /// <returns>The object, or null if it could not be made.</returns>
-    private GameObject? SpawnRescueCocoon(Vector2 position, ushort? openableFor) {
+    private GameObject? SpawnRescueCocoon(Vector2 position, ushort? openableFor, bool cursed) {
         var gameManager = global::GameManager.instance;
         var sceneManager = gameManager == null ? null : gameManager.GetSceneManager();
         var prefab = sceneManager == null ? null : sceneManager.GetComponent<CustomSceneManager>()?.heroCorpsePrefab;
@@ -2650,6 +2669,17 @@ internal partial class CoopSave {
         // cannot hand this player the money and silk of the one lying in it, or wipe their own cocoon's record,
         // even if something later finds another way into that state.
         RemoveCocoonPayout(cocoon);
+
+        // In place of the read of the save, the look of the one lying in it
+        var appearance = cocoon.LocateMyFSM(BreakFsmName);
+        var read = Array.FindIndex(
+            appearance.GetState(AppearanceStateName).Actions, action => action is GetPlayerDataVariable
+        );
+        appearance.RemoveFirstAction<GetPlayerDataVariable>(AppearanceStateName);
+        var look = cursed ? GlobalEnums.HeroDeathCocoonTypes.Cursed : GlobalEnums.HeroDeathCocoonTypes.Normal;
+        appearance.InsertMethod(
+            AppearanceStateName, read, () => appearance.FsmVariables.GetFsmEnum(CorpseTypeVariableName).Value = look
+        );
 
         cocoon.SetActive(true);
 
@@ -2745,7 +2775,7 @@ internal partial class CoopSave {
             return;
         }
 
-        if (SpawnRescueCocoon(waiting.Position, playerId) is not { } cocoon) {
+        if (SpawnRescueCocoon(waiting.Position, playerId, waiting.Cursed) is not { } cocoon) {
             return;
         }
 
