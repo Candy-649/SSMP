@@ -514,10 +514,10 @@ internal partial class ArenaCoop {
 
     /// <summary>
     /// Whether boss arenas wait for other players: other players are connected, or the partner of a two-player save is
-    /// expected, and the server synchronises entities.
+    /// expected.
     /// </summary>
     private bool IsBossHoldActive() {
-        return (_playerData.Count > 0 || _isPartnerMissing()) && _netClient.IsConnected && _isFullSynchronisation();
+        return (_playerData.Count > 0 || _isPartnerMissing()) && _netClient.IsConnected;
     }
 
     /// <summary>

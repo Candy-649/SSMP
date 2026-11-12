@@ -30,9 +30,4 @@ public interface IModSettings {
     /// Whether to display a UI element for the ping.
     /// </summary>
     bool DisplayPing { get; }
-
-    /// <summary>
-    /// Whether full synchronisation of bosses, enemies, worlds, and saves is enabled.
-    /// </summary>
-    bool FullSynchronisation { get; }
 }

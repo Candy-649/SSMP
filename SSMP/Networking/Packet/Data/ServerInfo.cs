@@ -43,11 +43,6 @@ internal class ServerInfo : IPacketData {
     public ServerSettingsUpdate ServerSettingsUpdate { get; set; } = null!;
 
     /// <summary>
-    /// Whether full synchronisation is enabled for the server.
-    /// </summary>
-    public bool FullSynchronisation { get; set; }
-
-    /// <summary>
     /// The save data currently used on the server.
     /// </summary>
     public CurrentSave CurrentSave { get; set; } = null!;
@@ -69,8 +64,6 @@ internal class ServerInfo : IPacketData {
             }
 
             ServerSettingsUpdate.WriteData(packet);
-            
-            packet.Write(FullSynchronisation);
 
             packet.Write((ushort) PlayerInfos.Count);
 
@@ -111,8 +104,6 @@ internal class ServerInfo : IPacketData {
 
             ServerSettingsUpdate = new ServerSettingsUpdate();
             ServerSettingsUpdate.ReadData(packet);
-
-            FullSynchronisation = packet.ReadBool();
 
             var length = packet.ReadUShort();
 

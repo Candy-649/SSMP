@@ -132,11 +132,6 @@ internal partial class BossRoomCoop {
     private readonly EntityManager _entityManager;
 
     /// <summary>
-    /// Whether the server synchronises entities. Without it, every player fights their own bosses.
-    /// </summary>
-    private readonly Func<bool> _isFullSynchronisation;
-
-    /// <summary>
     /// What this class found out about the FSMs in the current scene.
     /// </summary>
     private readonly Dictionary<Fsm, FsmInfo> _fsmInfos = new();
@@ -295,14 +290,12 @@ internal partial class BossRoomCoop {
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
-        Func<bool> isFullSynchronisation,
         Func<bool> isPartnerMissing,
         Func<Fsm, bool> isSharedTalk
     ) {
         _netClient = netClient;
         _playerData = playerData;
         _entityManager = entityManager;
-        _isFullSynchronisation = isFullSynchronisation;
         _isPartnerMissing = isPartnerMissing;
         _isSharedTalk = isSharedTalk;
 
@@ -432,10 +425,6 @@ internal partial class BossRoomCoop {
     /// </summary>
     /// <param name="update">The BossRoomUpdate packet data.</param>
     public void OnBossRoomUpdate(BossRoomUpdate update) {
-        if (!_isFullSynchronisation()) {
-            return;
-        }
-
         // Players hear that a teammate waits for them wherever they are
         if (update.Kind == BossRoomUpdateKind.Waiting) {
             OnTeammateWaiting();
@@ -1517,17 +1506,17 @@ internal partial class BossRoomCoop {
 
     /// <summary>
     /// Whether rooms wait for other players, because other players are connected, or the partner of a two-player save
-    /// is expected, and the server synchronises entities.
+    /// is expected.
     /// </summary>
     private bool IsHoldActive() {
-        return (_playerData.Count > 0 || _isPartnerMissing()) && _netClient.IsConnected && _isFullSynchronisation();
+        return (_playerData.Count > 0 || _isPartnerMissing()) && _netClient.IsConnected;
     }
 
     /// <summary>
-    /// Whether another player shares the local scene while the server synchronises entities.
+    /// Whether another player shares the local scene.
     /// </summary>
     private bool IsCoopActive() {
-        return _netClient.IsConnected && _isFullSynchronisation() && IsOtherPlayerInScene();
+        return _netClient.IsConnected && IsOtherPlayerInScene();
     }
 
     /// <summary>

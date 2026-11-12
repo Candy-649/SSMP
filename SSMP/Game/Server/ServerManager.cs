@@ -123,11 +123,6 @@ internal abstract class ServerManager : IServerManager {
     /// </summary>
     protected readonly ServerAddonManager AddonManager;
 
-    /// <summary>
-    /// Whether full synchronisation is enabled for the server.
-    /// </summary>
-    private bool _fullSynchronisation;
-
     #endregion
 
     #region Internal server manager commands
@@ -391,28 +386,26 @@ internal abstract class ServerManager : IServerManager {
             OnPlayerSettingUpdate
         );
 
-        if (_fullSynchronisation) {
-            _packetManager.RegisterServerUpdatePacketHandler<EntitySpawn>(
-                ServerUpdatePacketId.EntitySpawn,
-                OnEntitySpawn
-            );
-            _packetManager.RegisterServerUpdatePacketHandler<EntityUpdate>(
-                ServerUpdatePacketId.EntityUpdate,
-                OnEntityUpdate
-            );
-            _packetManager.RegisterServerUpdatePacketHandler<ReliableEntityUpdate>(
-                ServerUpdatePacketId.ReliableEntityUpdate,
-                OnReliableEntityUpdate
-            );
-            _packetManager.RegisterServerUpdatePacketHandler<ClientPlayerAlreadyInScene>(
-                ServerUpdatePacketId.RoomSnapshot,
-                OnRoomSnapshot
-            );
-            _packetManager.RegisterServerUpdatePacketHandler<SaveUpdate>(
-                ServerUpdatePacketId.SaveUpdate,
-                OnSaveUpdate
-            );
-        }
+        _packetManager.RegisterServerUpdatePacketHandler<EntitySpawn>(
+            ServerUpdatePacketId.EntitySpawn,
+            OnEntitySpawn
+        );
+        _packetManager.RegisterServerUpdatePacketHandler<EntityUpdate>(
+            ServerUpdatePacketId.EntityUpdate,
+            OnEntityUpdate
+        );
+        _packetManager.RegisterServerUpdatePacketHandler<ReliableEntityUpdate>(
+            ServerUpdatePacketId.ReliableEntityUpdate,
+            OnReliableEntityUpdate
+        );
+        _packetManager.RegisterServerUpdatePacketHandler<ClientPlayerAlreadyInScene>(
+            ServerUpdatePacketId.RoomSnapshot,
+            OnRoomSnapshot
+        );
+        _packetManager.RegisterServerUpdatePacketHandler<SaveUpdate>(
+            ServerUpdatePacketId.SaveUpdate,
+            OnSaveUpdate
+        );
     }
 
     /// <summary>
@@ -439,29 +432,24 @@ internal abstract class ServerManager : IServerManager {
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ServerSettings);
         _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.PlayerSetting);
 
-        if (_fullSynchronisation) {
-            _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.EntitySpawn);
-            _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.EntityUpdate);
-            _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ReliableEntityUpdate);
-            _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SaveUpdate);
-        }
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.EntitySpawn);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.EntityUpdate);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.ReliableEntityUpdate);
+        _packetManager.DeregisterServerUpdatePacketHandler(ServerUpdatePacketId.SaveUpdate);
     }
 
     /// <summary>
     /// Starts a server with the given port.
     /// </summary>
     /// <param name="port">The port the server should run on.</param>
-    /// <param name="fullSynchronisation">Whether full synchronisation should be enabled.</param>
     /// <param name="transportServer">The transport server to use.</param>
-    public void Start(int port, bool fullSynchronisation, IEncryptedTransportServer transportServer) {
+    public void Start(int port, IEncryptedTransportServer transportServer) {
         lock (_serverStateLock) {
             // Stop existing server (including deregistering commands)
             if (_netServer.IsStarted) {
                 Logger.Info("Server was running, shutting it down before starting");
                 StopInternal();
             }
-
-            _fullSynchronisation = fullSynchronisation;
 
             RegisterCommands();
             RegisterPacketHandlers();
@@ -637,111 +625,109 @@ internal abstract class ServerManager : IServerManager {
         var makeEnteringPlayerHost = false;
         var sceneHostEpoch = 0u;
 
-        if (_fullSynchronisation) {
-            foreach (var (entityKey, entityData) in _entityData) {
-                // Check which entities are actually in the scene that the player is entering
-                if (!entityKey.Scene.Equals(playerData.CurrentScene)) {
-                    continue;
+        foreach (var (entityKey, entityData) in _entityData) {
+            // Check which entities are actually in the scene that the player is entering
+            if (!entityKey.Scene.Equals(playerData.CurrentScene)) {
+                continue;
+            }
+
+            if (entityData.Spawned) {
+                if (!roomState) {
+                    Logger.Info(
+                        $"Sending that entity '{entityKey.EntityId}' has spawned in the scene to '{playerData.Id}'"
+                    );
                 }
 
-                if (entityData.Spawned) {
-                    if (!roomState) {
-                        Logger.Info(
-                            $"Sending that entity '{entityKey.EntityId}' has spawned in the scene to '{playerData.Id}'"
-                        );
-                    }
-
-                    var entitySpawn = new EntitySpawn {
-                        Id = entityKey.EntityId,
-                        SpawningType = entityData.SpawningType,
-                        SpawnedType = entityData.SpawnedType,
-                        Position = entityData.SpawnPosition
-                    };
-
-                    entitySpawnList.Add(entitySpawn);
-                }
-
-                var entityUpdate = new EntityUpdate {
-                    Id = entityKey.EntityId
+                var entitySpawn = new EntitySpawn {
+                    Id = entityKey.EntityId,
+                    SpawningType = entityData.SpawningType,
+                    SpawnedType = entityData.SpawnedType,
+                    Position = entityData.SpawnPosition
                 };
 
-                if (entityData.Position != null) {
-                    entityUpdate.UpdateTypes.Add(EntityUpdateType.Position);
-                    entityUpdate.Position = entityData.Position;
-                }
-
-                // Copies of what is kept, here and for the FSMs below: the packet is written on another thread, while
-                // what is kept goes on changing on this one as it is heard
-                if (!entityData.Scale.IsEmpty) {
-                    entityUpdate.UpdateTypes.Add(EntityUpdateType.Scale);
-                    entityUpdate.Scale = new EntityUpdate.ScaleData();
-                    entityUpdate.Scale.Merge(entityData.Scale);
-                }
-
-                if (entityData.AnimationId.HasValue) {
-                    entityUpdate.UpdateTypes.Add(EntityUpdateType.Animation);
-
-                    entityUpdate.AnimationId = entityData.AnimationId.Value;
-                    entityUpdate.AnimationWrapMode = entityData.AnimationWrapMode;
-                }
-
-                var reliableEntityUpdate = new ReliableEntityUpdate {
-                    Id = entityKey.EntityId
-                };
-
-                if (entityData.IsActive.HasValue) {
-                    reliableEntityUpdate.UpdateTypes.Add(EntityUpdateType.Active);
-                    reliableEntityUpdate.IsActive = entityData.IsActive.Value;
-                }
-
-                if (entityData.GenericData.Count > 0) {
-                    reliableEntityUpdate.UpdateTypes.Add(EntityUpdateType.Data);
-
-                    foreach (var genericData in entityData.GenericData) {
-                        reliableEntityUpdate.GenericData.Add(genericData.Clone());
-                    }
-                }
-
-                if (entityData.HostFsmData.Count > 0) {
-                    reliableEntityUpdate.UpdateTypes.Add(EntityUpdateType.HostFsm);
-
-                    foreach (var pair in entityData.HostFsmData) {
-                        var fsmData = new EntityHostFsmData();
-                        fsmData.MergeData(pair.Value);
-                        reliableEntityUpdate.HostFsmData[pair.Key] = fsmData;
-                    }
-                }
-
-                entityUpdateList.Add(entityUpdate);
-                reliableEntityUpdateList.Add(reliableEntityUpdate);
+                entitySpawnList.Add(entitySpawn);
             }
 
-            if (!roomState && entityUpdateList.Count > 0) {
-                Logger.Info(
-                    $"Sending the {entityUpdateList.Count} entities already in '{playerData.CurrentScene}' to " +
-                    $"'{playerData.Id}'"
-                );
+            var entityUpdate = new EntityUpdate {
+                Id = entityKey.EntityId
+            };
+
+            if (entityData.Position != null) {
+                entityUpdate.UpdateTypes.Add(EntityUpdateType.Position);
+                entityUpdate.Position = entityData.Position;
             }
 
-            // Answering again decides nothing again: the room keeps whoever has been running it, and this player
-            // keeps whatever they already were. Running the choice a second time would hand the room to the player
-            // whose first answer went missing, taking it off the one that has been playing it all along.
-            makeEnteringPlayerHost = resync ? playerData.IsSceneHost : !alreadyPlayersInScene;
-
-            if (makeEnteringPlayerHost) {
-                Logger.Debug($"Making {playerData.Id} the scene host");
-                playerData.IsSceneHost = true;
+            // Copies of what is kept, here and for the FSMs below: the packet is written on another thread, while
+            // what is kept goes on changing on this one as it is heard
+            if (!entityData.Scale.IsEmpty) {
+                entityUpdate.UpdateTypes.Add(EntityUpdateType.Scale);
+                entityUpdate.Scale = new EntityUpdate.ScaleData();
+                entityUpdate.Scale.Merge(entityData.Scale);
             }
 
-            sceneHostEpoch = _sceneHostEpochs.GetOrAdd(playerData.CurrentScene, 0u);
+            if (entityData.AnimationId.HasValue) {
+                entityUpdate.UpdateTypes.Add(EntityUpdateType.Animation);
+
+                entityUpdate.AnimationId = entityData.AnimationId.Value;
+                entityUpdate.AnimationWrapMode = entityData.AnimationWrapMode;
+            }
+
+            var reliableEntityUpdate = new ReliableEntityUpdate {
+                Id = entityKey.EntityId
+            };
+
+            if (entityData.IsActive.HasValue) {
+                reliableEntityUpdate.UpdateTypes.Add(EntityUpdateType.Active);
+                reliableEntityUpdate.IsActive = entityData.IsActive.Value;
+            }
+
+            if (entityData.GenericData.Count > 0) {
+                reliableEntityUpdate.UpdateTypes.Add(EntityUpdateType.Data);
+
+                foreach (var genericData in entityData.GenericData) {
+                    reliableEntityUpdate.GenericData.Add(genericData.Clone());
+                }
+            }
+
+            if (entityData.HostFsmData.Count > 0) {
+                reliableEntityUpdate.UpdateTypes.Add(EntityUpdateType.HostFsm);
+
+                foreach (var pair in entityData.HostFsmData) {
+                    var fsmData = new EntityHostFsmData();
+                    fsmData.MergeData(pair.Value);
+                    reliableEntityUpdate.HostFsmData[pair.Key] = fsmData;
+                }
+            }
+
+            entityUpdateList.Add(entityUpdate);
+            reliableEntityUpdateList.Add(reliableEntityUpdate);
         }
+
+        if (!roomState && entityUpdateList.Count > 0) {
+            Logger.Info(
+                $"Sending the {entityUpdateList.Count} entities already in '{playerData.CurrentScene}' to " +
+                $"'{playerData.Id}'"
+            );
+        }
+
+        // Answering again decides nothing again: the room keeps whoever has been running it, and this player
+        // keeps whatever they already were. Running the choice a second time would hand the room to the player
+        // whose first answer went missing, taking it off the one that has been playing it all along.
+        makeEnteringPlayerHost = resync ? playerData.IsSceneHost : !alreadyPlayersInScene;
+
+        if (makeEnteringPlayerHost) {
+            Logger.Debug($"Making {playerData.Id} the scene host");
+            playerData.IsSceneHost = true;
+        }
+
+        sceneHostEpoch = _sceneHostEpochs.GetOrAdd(playerData.CurrentScene, 0u);
 
         _netServer.GetUpdateManagerForClient(playerData.Id)?.AddPlayerAlreadyInSceneData(
             enterSceneList,
             entitySpawnList,
             entityUpdateList,
             reliableEntityUpdateList,
-            _fullSynchronisation && makeEnteringPlayerHost,
+            makeEnteringPlayerHost,
             sceneHostEpoch,
             playerData.CurrentScene,
             roomState ? ClientUpdatePacketId.RoomState : ClientUpdatePacketId.PlayerAlreadyInScene
@@ -937,10 +923,6 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="entitySpawn">The EntitySpawn packet data.</param>
     private void OnEntitySpawn(ushort id, EntitySpawn entitySpawn) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
         if (!_playerData.TryGetValue(id, out var playerData)) {
             Logger.Info($"Received EntitySpawn data, but player with ID {id} is not in mapping");
             return;
@@ -993,10 +975,6 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="entityUpdate">The EntityUpdate packet data.</param>
     private void OnEntityUpdate(ushort id, EntityUpdate entityUpdate) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
         if (!_playerData.TryGetValue(id, out var playerData)) {
             Logger.Warn($"Received EntityUpdate data, but player with ID {id} is not in mapping");
             return;
@@ -1089,10 +1067,6 @@ internal abstract class ServerManager : IServerManager {
     /// <param name="id">The ID of the player.</param>
     /// <param name="entityUpdate">The ReliableEntityUpdate packet data.</param>
     private void OnReliableEntityUpdate(ushort id, ReliableEntityUpdate entityUpdate) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
         if (!_playerData.TryGetValue(id, out var playerData)) {
             Logger.Warn($"Received ReliableEntityUpdate data, but player with ID {id} is not in mapping");
             return;
@@ -1312,7 +1286,7 @@ internal abstract class ServerManager : IServerManager {
 
         // Run on by a player alive in it: one who died there for good is on their way out of it as well
         var newHost = scenePlayers.Find(pair => !pair.Value.DiedForGood).Value;
-        if (_fullSynchronisation && playerData.IsSceneHost && newHost != null) {
+        if (playerData.IsSceneHost && newHost != null) {
             HandOverSceneHost(playerData, newHost, room, scenePlayers.ConvertAll(pair => pair.Value), "left scene");
         }
 
@@ -1326,26 +1300,24 @@ internal abstract class ServerManager : IServerManager {
             }
         }
 
-        if (_fullSynchronisation) {
-            // In case there were no other players to make scene host, we still need to reset the leaving
-            // player's status of scene host
-            playerData.IsSceneHost = false;
+        // In case there were no other players to make scene host, we still need to reset the leaving
+        // player's status of scene host
+        playerData.IsSceneHost = false;
 
-            // If the scene is now empty, we can remove all data from stored entities in that scene
-            if (isSceneNowEmpty) {
-                foreach (var keyDataPair in _entityData) {
-                    if (keyDataPair.Key.Scene == room) {
-                        _entityData.TryRemove(keyDataPair.Key, out _);
-                    }
+        // If the scene is now empty, we can remove all data from stored entities in that scene
+        if (isSceneNowEmpty) {
+            foreach (var keyDataPair in _entityData) {
+                if (keyDataPair.Key.Scene == room) {
+                    _entityData.TryRemove(keyDataPair.Key, out _);
                 }
-
-                if (room != SceneOf(room)) {
-                    _sceneHostEpochs.TryRemove(room, out _);
-                }
-            } else if (newHost == null && room.Length > 0 && room == SceneOf(room)) {
-                // Everyone left in it died there for good
-                EndRoom(room);
             }
+
+            if (room != SceneOf(room)) {
+                _sceneHostEpochs.TryRemove(room, out _);
+            }
+        } else if (newHost == null && room.Length > 0 && room == SceneOf(room)) {
+            // Everyone left in it died there for good
+            EndRoom(room);
         }
 
         if (disconnected) {
@@ -1392,10 +1364,6 @@ internal abstract class ServerManager : IServerManager {
                 ? "with nobody on their feet left in it"
                 : $"with ({alive.Id}, {alive.Username}) on their feet in it")
         );
-
-        if (!_fullSynchronisation) {
-            return;
-        }
 
         if (alive == null) {
             EndRoom(room);
@@ -1637,7 +1605,7 @@ internal abstract class ServerManager : IServerManager {
     private void OnClientReceiveResumed(ushort id, double gap) {
         PlayerLinkBack?.Invoke(id);
 
-        if (gap < RoomResendGap || !_fullSynchronisation || !_playerData.TryGetValue(id, out var playerData) ||
+        if (gap < RoomResendGap || !_playerData.TryGetValue(id, out var playerData) ||
             !playerData.IsSceneHost || string.IsNullOrEmpty(playerData.CurrentScene)) {
             return;
         }
@@ -2378,8 +2346,6 @@ internal abstract class ServerManager : IServerManager {
         serverInfo.ServerSettingsUpdate = new ServerSettingsUpdate {
             ServerSettings = InternalServerSettings
         };
-
-        serverInfo.FullSynchronisation = _fullSynchronisation;
 
         // Construct the player info to send to the new client in the server info
         var playerInfo = new List<ServerInfo.PlayerInfo>();

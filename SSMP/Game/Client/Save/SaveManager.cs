@@ -160,9 +160,7 @@ internal class SaveManager {
     /// </summary>
     /// <param name="serverInfo">The server info received from the server.</param>
     private void OnConnect(ServerInfo serverInfo) {
-        if (serverInfo.FullSynchronisation) {
-            ResetLastPlayerData();
-        }
+        ResetLastPlayerData();
     }
 
     /// <summary>

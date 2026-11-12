@@ -229,12 +229,6 @@ internal partial class ArenaCoop {
     private readonly EntityManager _entityManager;
 
     /// <summary>
-    /// Whether the server synchronises entities. Without it, every player fights their own enemies and arenas run
-    /// separately.
-    /// </summary>
-    private readonly Func<bool> _isFullSynchronisation;
-
-    /// <summary>
     /// Whether the local player plays a checked two-player save with the players around them, whose world is one, so
     /// that an arena that one of them won is won for both.
     /// </summary>
@@ -302,7 +296,6 @@ internal partial class ArenaCoop {
         NetClient netClient,
         Dictionary<ushort, ClientPlayerData> playerData,
         EntityManager entityManager,
-        Func<bool> isFullSynchronisation,
         Func<bool> isSharedSave,
         Func<bool> isPartnerMissing,
         Action tellTeammatesWaiting
@@ -310,7 +303,6 @@ internal partial class ArenaCoop {
         _netClient = netClient;
         _playerData = playerData;
         _entityManager = entityManager;
-        _isFullSynchronisation = isFullSynchronisation;
         _isSharedSave = isSharedSave;
         _isPartnerMissing = isPartnerMissing;
         _tellTeammatesWaiting = tellTeammatesWaiting;
@@ -404,7 +396,7 @@ internal partial class ArenaCoop {
     /// </summary>
     /// <param name="update">The BattleSceneUpdate packet data.</param>
     public void OnBattleSceneUpdate(BattleSceneUpdate update) {
-        if (!_isFullSynchronisation() || SceneManager.GetActiveScene().name != update.SceneName) {
+        if (SceneManager.GetActiveScene().name != update.SceneName) {
             return;
         }
 
@@ -447,7 +439,7 @@ internal partial class ArenaCoop {
     /// Sends the state of the arenas in the scene to a player who entered it, if the local player is the scene host.
     /// </summary>
     public void OnPlayerEnterScene() {
-        if (!_isFullSynchronisation() || !_entityManager.IsSceneHost) {
+        if (!_entityManager.IsSceneHost) {
             return;
         }
 
@@ -1152,8 +1144,7 @@ internal partial class ArenaCoop {
     /// hear. This only reads and says; it never touches the battle.
     /// </summary>
     private void WatchForABattleThatStopped(BattleScene battleScene, ArenaState state) {
-        if (!_netClient.IsConnected || !_isFullSynchronisation() || !state.Started || state.Ended ||
-            IsCompleted(battleScene)) {
+        if (!_netClient.IsConnected || !state.Started || state.Ended || IsCompleted(battleScene)) {
             state.QuietSince = null;
             return;
         }
@@ -1548,7 +1539,7 @@ internal partial class ArenaCoop {
     /// Sends the state of an arena to the other players in the scene.
     /// </summary>
     private void Send(string path, BattleSceneStatus status, int wave = -1, int enemies = 0) {
-        if (!_netClient.IsConnected || !_isFullSynchronisation() || !IsOtherPlayerInScene()) {
+        if (!_netClient.IsConnected || !IsOtherPlayerInScene()) {
             return;
         }
 
@@ -1568,7 +1559,7 @@ internal partial class ArenaCoop {
     /// the enemies.
     /// </summary>
     private bool IsFollower() {
-        return _netClient.IsConnected && _isFullSynchronisation() && _entityManager.IsSceneRoleDetermined &&
+        return _netClient.IsConnected && _entityManager.IsSceneRoleDetermined &&
                !_entityManager.IsSceneHost && IsOtherPlayerInScene();
     }
 

@@ -55,7 +55,7 @@ internal class ModServerManager : ServerManager {
 
         // Register handlers for UI events
         _uiManager.RequestServerStartHostEvent += (_, port, _, transportType, _) =>
-            OnRequestServerStartHost(port, _modSettings.FullSynchronisation, transportType);
+            OnRequestServerStartHost(port, transportType);
         _uiManager.RequestServerStopHostEvent += Stop;
         PlayerConnectEvent += _ => UpdateMatchmakingRemotePlayerCount();
         PlayerDisconnectEvent += _ => UpdateMatchmakingRemotePlayerCount();
@@ -66,9 +66,8 @@ internal class ModServerManager : ServerManager {
     /// Callback method for when the UI requests the server to be started as a host.
     /// </summary>
     /// <param name="port">The port to start the server on.</param>
-    /// <param name="fullSynchronisation">Whether full synchronisation is enabled.</param>
     /// <param name="transportType">The type of transport to use.</param>
-    private void OnRequestServerStartHost(int port, bool fullSynchronisation, TransportType transportType) {
+    private void OnRequestServerStartHost(int port, TransportType transportType) {
         IEncryptedTransportServer transportServer = transportType switch {
             TransportType.Udp => new UdpEncryptedTransportServer(),
             TransportType.Steam => new SteamEncryptedTransportServer(),
@@ -77,7 +76,7 @@ internal class ModServerManager : ServerManager {
             _ => throw new ArgumentOutOfRangeException(nameof(transportType), transportType, null)
         };
 
-        Start(port, fullSynchronisation, transportServer);
+        Start(port, transportServer);
         UpdateMatchmakingRemotePlayerCount();
     }
 

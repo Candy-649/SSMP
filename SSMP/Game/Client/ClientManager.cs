@@ -310,11 +310,6 @@ internal class ClientManager : IClientManager {
     private ushort? _selfSettingVersion;
 
     /// <summary>
-    /// Whether full synchronisation is enabled for the server we are connected to.
-    /// </summary>
-    private bool _fullSynchronisation;
-
-    /// <summary>
     /// Whether we have already determined whether we are scene host or not for the entity system.
     /// </summary>
     private bool _sceneHostDetermined;
@@ -483,7 +478,6 @@ internal class ClientManager : IClientManager {
             netClient,
             _playerData,
             _entityManager,
-            () => _fullSynchronisation,
             // Made here and called later, by which time the two-player save and the boss rooms below exist
             () => _coopSave!.CheckedMemberIds.Count > 0,
             () => _coopSave!.IsPartnerMissing(),
@@ -493,7 +487,6 @@ internal class ClientManager : IClientManager {
             netClient,
             _playerData,
             _entityManager,
-            () => _fullSynchronisation,
             // Made here and called later, by which time the two-player save below exists. It cannot be made first,
             // because it asks this one for the room a player waits in.
             () => _coopSave!.IsPartnerMissing(),
@@ -622,9 +615,7 @@ internal class ClientManager : IClientManager {
         _minigameCoop.RegisterHooks();
         _fsmPatcher.RegisterHooks();
 
-        if (_fullSynchronisation) {
-            _entityManager.RegisterHooks();
-        }
+        _entityManager.RegisterHooks();
 
         // Register handlers for various things
         SceneManager.activeSceneChanged += OnSceneChange;
@@ -662,9 +653,7 @@ internal class ClientManager : IClientManager {
         _minigameCoop.DeregisterHooks();
         _fsmPatcher.DeregisterHooks();
 
-        if (_fullSynchronisation) {
-            _entityManager.DeregisterHooks();
-        }
+        _entityManager.DeregisterHooks();
 
         // Deregister handlers for various things
         SceneManager.activeSceneChanged -= OnSceneChange;
@@ -790,29 +779,27 @@ internal class ClientManager : IClientManager {
             }
         );
 
-        // Register packet handlers related to full synchronisation
-        if (_fullSynchronisation) {
-            _packetManager.RegisterClientUpdatePacketHandler<EntitySpawn>(
-                ClientUpdatePacketId.EntitySpawn,
-                OnEntitySpawn
-            );
-            _packetManager.RegisterClientUpdatePacketHandler<EntityUpdate>(
-                ClientUpdatePacketId.EntityUpdate,
-                OnEntityUpdate
-            );
-            _packetManager.RegisterClientUpdatePacketHandler<ReliableEntityUpdate>(
-                ClientUpdatePacketId.ReliableEntityUpdate,
-                OnReliableEntityUpdate
-            );
-            _packetManager.RegisterClientUpdatePacketHandler<HostTransfer>(
-                ClientUpdatePacketId.SceneHostTransfer,
-                OnSceneHostTransfer
-            );
-            _packetManager.RegisterClientUpdatePacketHandler<SaveUpdate>(
-                ClientUpdatePacketId.SaveUpdate,
-                OnSaveUpdate
-            );
-        }
+        // Register packet handlers related to entities
+        _packetManager.RegisterClientUpdatePacketHandler<EntitySpawn>(
+            ClientUpdatePacketId.EntitySpawn,
+            OnEntitySpawn
+        );
+        _packetManager.RegisterClientUpdatePacketHandler<EntityUpdate>(
+            ClientUpdatePacketId.EntityUpdate,
+            OnEntityUpdate
+        );
+        _packetManager.RegisterClientUpdatePacketHandler<ReliableEntityUpdate>(
+            ClientUpdatePacketId.ReliableEntityUpdate,
+            OnReliableEntityUpdate
+        );
+        _packetManager.RegisterClientUpdatePacketHandler<HostTransfer>(
+            ClientUpdatePacketId.SceneHostTransfer,
+            OnSceneHostTransfer
+        );
+        _packetManager.RegisterClientUpdatePacketHandler<SaveUpdate>(
+            ClientUpdatePacketId.SaveUpdate,
+            OnSaveUpdate
+        );
     }
 
     /// <summary>
@@ -840,13 +827,11 @@ internal class ClientManager : IClientManager {
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopHitUpdate);
         _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.CoopCheckUpdate);
 
-        if (_fullSynchronisation) {
-            _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);
-            _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntityUpdate);
-            _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.ReliableEntityUpdate);
-            _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SceneHostTransfer);
-            _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SaveUpdate);
-        }
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntitySpawn);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.EntityUpdate);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.ReliableEntityUpdate);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SceneHostTransfer);
+        _packetManager.DeregisterClientUpdatePacketHandler(ClientUpdatePacketId.SaveUpdate);
     }
 
     /// <summary>
@@ -1085,9 +1070,6 @@ internal class ClientManager : IClientManager {
         _serverSettings.SetAllProperties(serverInfo.ServerSettingsUpdate.ServerSettings);
         Logger.Info($"Enemy health on this server: {EnemyHealthCoop.Describe(_serverSettings)}");
 
-        // Note whether full synchronization is enabled
-        _fullSynchronisation = serverInfo.FullSynchronisation;
-
         // Register hooks and packet handlers before we load into the game
         RegisterHooks();
         RegisterPacketHandlers();
@@ -1100,14 +1082,6 @@ internal class ClientManager : IClientManager {
         _openSaveAfterReady = null;
 
         if (!_autoConnect) {
-            if (_fullSynchronisation) {
-                // Full sync currently does not serialize CurrentSave in ServerInfo.
-                // Falling back to local slot selection avoids dereferencing missing packet data.
-                Logger.Warn(
-                    "Full synchronisation is enabled, but CurrentSave was not provided. Falling back to local save slot selection."
-                );
-            }
-
             // Held back until both players say they are ready in the waiting room. Joining used to open this at
             // once, which dropped one player into the save menu while the other was still waiting for them - the
             // lopsidedness that made the whole flow so hard to follow.
@@ -1433,22 +1407,20 @@ internal class ClientManager : IClientManager {
             }
         }
 
-        if (_fullSynchronisation) {
-            if (alreadyInScene.SceneHost) {
-                // Notify the entity manager that we are scene host
-                _entityManager.InitializeSceneHost(alreadyInScene.SceneHostEpoch);
-            } else {
-                // Notify the entity manager that we are scene client (non-host)
-                _entityManager.InitializeSceneClient(alreadyInScene.SceneHostEpoch);
-            }
-
-            TakeRoomCreatures(alreadyInScene, true);
-
-            // Whether there were players in the scene or not, we have now determined whether
-            // we are the scene host
-            _sceneHostDetermined = true;
-            _sceneResyncDueAt = -1f;
+        if (alreadyInScene.SceneHost) {
+            // Notify the entity manager that we are scene host
+            _entityManager.InitializeSceneHost(alreadyInScene.SceneHostEpoch);
+        } else {
+            // Notify the entity manager that we are scene client (non-host)
+            _entityManager.InitializeSceneClient(alreadyInScene.SceneHostEpoch);
         }
+
+        TakeRoomCreatures(alreadyInScene, true);
+
+        // Whether there were players in the scene or not, we have now determined whether
+        // we are the scene host
+        _sceneHostDetermined = true;
+        _sceneResyncDueAt = -1f;
 
         return true;
     }
@@ -1600,7 +1572,7 @@ internal class ClientManager : IClientManager {
     /// again as it is now (Entity.SendStateAgain).
     /// </summary>
     private void OnRoomResendRequest() {
-        if (!_fullSynchronisation || !_sceneHostDetermined || !_entityManager.IsSceneHost) {
+        if (!_sceneHostDetermined || !_entityManager.IsSceneHost) {
             Logger.Info("The server asked for the state of this room, which this game does not run, so nothing is sent");
             return;
         }
@@ -1661,10 +1633,6 @@ internal class ClientManager : IClientManager {
                 Logger.Info($"Player {playerData.Id} left this room without that being heard here, so they are taken out");
                 OnPlayerLeaveScene(new ClientPlayerLeaveScene { Id = playerData.Id, SceneName = sceneName });
             }
-        }
-
-        if (!_fullSynchronisation) {
-            return;
         }
 
         // Every change of who runs a room counts it on by one (ServerManager.GetNextSceneHostEpoch), and this game
@@ -1975,10 +1943,6 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="entitySpawn">The EntitySpawn packet data.</param>
     private void OnEntitySpawn(EntitySpawn entitySpawn) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
         _entityManager.SpawnEntity(
             entitySpawn.Id, entitySpawn.SpawningType, entitySpawn.SpawnedType, entitySpawn.Position
         );
@@ -1989,10 +1953,6 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="entityUpdate">The EntityUpdate packet data.</param>
     private void OnEntityUpdate(EntityUpdate entityUpdate) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
         // We only propagate entity updates to the entity manager if we have determined the scene host
         if (!_sceneHostDetermined) {
             return;
@@ -2008,10 +1968,6 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="entityUpdate">The ReliableEntityUpdate packet data.</param>
     private void OnReliableEntityUpdate(ReliableEntityUpdate entityUpdate) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
         // We only propagate entity updates to the entity manager if we have determined the scene host
         if (!_sceneHostDetermined) {
             return;
@@ -2027,10 +1983,6 @@ internal class ClientManager : IClientManager {
     /// </summary>
     /// <param name="hostTransfer">The HostTransfer packet data.</param>
     private void OnSceneHostTransfer(HostTransfer hostTransfer) {
-        if (!_fullSynchronisation) {
-            return;
-        }
-
         Logger.Info(
             $"Received scene host transfer for scene: {hostTransfer.SceneName} (demote: {hostTransfer.Demote})"
         );

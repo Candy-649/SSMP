@@ -154,11 +154,11 @@ is shown to followers; a fight after dialogue starts once everyone got there.
 Common send path: `Send(kind, fsm,…)` / `Send(kind, path, fsmName, from, to, event, variable)`
 C/BossRoomCoop.cs:1192-1226 — no-op when not connected; `SceneName = active scene`. Dialogue updates use
 `_netClient.UpdateManager.SetBossRoomUpdate` directly (Dialogue.cs:333).
-Common receive: `OnBossRoomUpdate` C/BossRoomCoop.cs:381-433. Guards: `!_isFullSynchronisation()` → drop (382);
+Common receive: `OnBossRoomUpdate` C/BossRoomCoop.cs:381-433. Guards:
 `Waiting` handled in any scene (387-390); `DialogueDone` handled in any scene (395-398); every other kind dropped if
 `active scene != update.SceneName` (400-402).
-Gating predicates: `IsHoldActive()` 1232-1234 = (other players connected OR partner missing) && connected && full
-sync; `IsCoopActive()` 1239-1241 = connected && full sync && someone `IsInLocalScene`; `IsFollower()` 1246-1248 =
+Gating predicates: `IsHoldActive()` 1232-1234 = (other players connected OR partner missing) && connected;
+`IsCoopActive()` 1239-1241 = connected && someone `IsInLocalScene`; `IsFollower()` 1246-1248 =
 IsCoopActive && role determined && not scene host.
 Per-frame: `OnHeroControllerUpdate` 848-868: if IsHoldActive → `ScanScene` (5 s interval), `UpdateArrivals`; always →
 `ReleaseHeldStarts`, `UpdateDialogues`, `UpdateEventStarts`, `UpdateRoomWaits`, `CheckStartedRooms`,
@@ -340,8 +340,8 @@ first asks the host to start.
 State per arena `ArenaState` 1302-1363: `Started=false`, `LockedIn=false`, `Wave=-1`, `Ended=false`,
 `SentEnemies=-1`, `HostUpdate=null`, `HostUpdatePending=false`, `RequestTime=null`. `_arenas` (191) cleared on scene
 change (1291-1297) and DeregisterHooks (283-294).
-Send `Send(path,status,wave,enemies)` 1147-1161: requires connected, full sync, **someone IsInLocalScene**.
-`IsFollower()` 1167-1170 = connected && full sync && role determined && not host && someone in scene.
+Send `Send(path,status,wave,enemies)` 1147-1161: requires connected, **someone IsInLocalScene**.
+`IsFollower()` 1167-1170 = connected && role determined && not host && someone in scene.
 Messages
 - `StartRequest`: follower's `OnStartBattle` 426-465 → `LockIn` + send once while `HostUpdate==null &&
   RequestTime==null` (460-464), sets `RequestTime`.
@@ -352,7 +352,7 @@ Messages
 - `AlreadyWon`: host `OnStartRequest` 408-410, `OnPlayerEnterScene` 358-359.
 - `Unavailable`: host `OnStartRequest` 401-404 (arena missing/inactive).
 Handlers
-- `OnBattleSceneUpdate` 317-345: drop if not full sync or scene ≠ active (318-320). StartRequest → `OnStartRequest`
+- `OnBattleSceneUpdate` 317-345: drop if scene ≠ active (318-320). StartRequest → `OnStartRequest`
   396-419 (**drop unless receiver `IsSceneHost`** 397-399; no role-determined check). Other statuses: drop if arena
   not found or receiver is (determined) host (329-331); store `HostUpdate`, `HostUpdatePending=true`,
   `RequestTime=null`; apply now if IsFollower.

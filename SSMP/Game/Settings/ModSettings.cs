@@ -193,16 +193,6 @@ internal class ModSettings : IModSettings {
     // ReSharper disable once AutoPropertyCanBeMadeGetOnly.Global
     public HashSet<string> DisabledAddons { get; set; } = [];
 
-    /// <inheritdoc/>
-    /// <remarks>
-    /// Always on, and deliberately kept out of the settings file. Without it every player fights their own copy of
-    /// every enemy, boss and arena, so two players in one room can kill the same enemy at different times and see
-    /// different rooms - which is not multiplayer at all. It has no menu entry, so the only thing a stored value can
-    /// do is keep it switched off in a file nobody knows to edit, which is exactly what happened.
-    /// </remarks>
-    [JsonIgnore]
-    public bool FullSynchronisation => true;
-
     /// <summary>
     /// The last used server settings in a hosted server.
     /// </summary>

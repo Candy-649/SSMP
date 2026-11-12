@@ -127,9 +127,6 @@ internal partial class BossRoomCoop {
             }
 
             _heartEndRuns.Remove(fsm);
-            if (!_isFullSynchronisation()) {
-                return;
-            }
 
             // An exception here would leave PlayMaker's stack of running FSMs out of step for the rest of the frame
             try {
@@ -246,7 +243,7 @@ internal partial class BossRoomCoop {
             return false;
         }
 
-        if (IsHeroStateName(name) || !_netClient.IsConnected || !_isFullSynchronisation() ||
+        if (IsHeroStateName(name) || !_netClient.IsConnected ||
             GetOwnDataWrites(state).Any(write => write.Written == name)) {
             return true;
         }
